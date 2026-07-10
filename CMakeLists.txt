@@ -61,6 +61,61 @@ if(APPLE)
         "-framework ScreenCaptureKit"
     )
     sidescopes_target_defaults(sidescopes_platform)
+
+    # --- application ---
+    include(FetchContent)
+    set(GLFW_BUILD_DOCS OFF CACHE BOOL "" FORCE)
+    set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+    set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+    FetchContent_Declare(
+        glfw
+        GIT_REPOSITORY https://github.com/glfw/glfw.git
+        GIT_TAG 3.4
+        GIT_SHALLOW TRUE
+    )
+    FetchContent_Declare(
+        imgui
+        GIT_REPOSITORY https://github.com/ocornut/imgui.git
+        GIT_TAG v1.92.8
+        GIT_SHALLOW TRUE
+    )
+    FetchContent_MakeAvailable(glfw imgui)
+
+    add_library(imgui STATIC
+        ${imgui_SOURCE_DIR}/imgui.cpp
+        ${imgui_SOURCE_DIR}/imgui_draw.cpp
+        ${imgui_SOURCE_DIR}/imgui_tables.cpp
+        ${imgui_SOURCE_DIR}/imgui_widgets.cpp
+        ${imgui_SOURCE_DIR}/backends/imgui_impl_glfw.cpp
+        ${imgui_SOURCE_DIR}/backends/imgui_impl_metal.mm
+    )
+    target_include_directories(imgui PUBLIC ${imgui_SOURCE_DIR} ${imgui_SOURCE_DIR}/backends)
+    target_link_libraries(imgui PUBLIC glfw)
+    set_source_files_properties(${imgui_SOURCE_DIR}/backends/imgui_impl_metal.mm
+        PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
+
+    add_executable(SideScopes MACOSX_BUNDLE src/app/main.mm)
+    set_source_files_properties(src/app/main.mm PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
+    set_target_properties(SideScopes PROPERTIES
+        MACOSX_BUNDLE_INFO_PLIST ${CMAKE_SOURCE_DIR}/cmake/Info.plist.in
+        MACOSX_BUNDLE_BUNDLE_NAME "SideScopes"
+        MACOSX_BUNDLE_GUI_IDENTIFIER "org.sidescopes.app"
+        MACOSX_BUNDLE_BUNDLE_VERSION ${PROJECT_VERSION}
+        MACOSX_BUNDLE_SHORT_VERSION_STRING ${PROJECT_VERSION}
+    )
+    target_link_libraries(SideScopes PRIVATE
+        sidescopes_platform
+        imgui
+        glfw
+        "-framework Metal"
+        "-framework QuartzCore"
+    )
+    sidescopes_target_defaults(SideScopes)
+    # Screen-recording permission attaches to the bundle's code signature;
+    # an ad-hoc signature gives development builds a stable-enough identity.
+    add_custom_command(TARGET SideScopes POST_BUILD
+        COMMAND codesign --force --sign - $<TARGET_BUNDLE_DIR:SideScopes>
+    )
 endif()
 
 if(SIDESCOPES_BUILD_TESTS)

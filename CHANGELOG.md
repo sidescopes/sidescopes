@@ -8,6 +8,10 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- The SideScopes macOS application: compact always-on-top window with
+  vectorscope, waveform, and combined views, scroll-to-adjust intensity,
+  native context menu, drag region selection, cursor color markers, and
+  automatic capture recovery.
 - macOS platform layer: ScreenCaptureKit capture, native context menus,
   drag region selection with a persistent click-through border, and desktop
   services.
