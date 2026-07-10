@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <vector>
 
 namespace sidescopes {
 
@@ -19,6 +20,21 @@ struct DisplayGeometry {
     double width_points = 0.0;
     double height_points = 0.0;
 };
+
+// An on-screen window, front-to-back, in global desktop points (top-left
+// origin). Only ordinary application windows are reported - no menu bar,
+// dock, or overlay layers - and never this application's own windows.
+struct DesktopWindow {
+    double x = 0.0;
+    double y = 0.0;
+    double width = 0.0;
+    double height = 0.0;
+    std::string application;
+};
+
+// Windows currently visible on the given display, frontmost first. Window
+// geometry comes from the window server and needs no capture permission.
+std::vector<DesktopWindow> OnScreenWindows(uint32_t display_id);
 
 // Global cursor position in desktop points. Reading the position requires no
 // special permission on any supported platform.
