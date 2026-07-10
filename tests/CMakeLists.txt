@@ -11,6 +11,7 @@ FetchContent_MakeAvailable(catch2)
 add_executable(sidescopes_tests
     test_frame.cpp
     test_frame_mailbox.cpp
+    test_region_hash.cpp
     test_vectorscope.cpp
     test_waveform.cpp
 )
