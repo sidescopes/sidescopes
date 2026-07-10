@@ -46,7 +46,7 @@ private:
 
     VectorscopeSettings settings_;
     std::vector<uint32_t> bins_;
-    std::array<uint8_t, kSize * kSize * 3> tint_{};
+    std::array<uint8_t, static_cast<std::size_t>(kSize) * kSize * 3> tint_{};
     ScopeImage image_;
 };
 

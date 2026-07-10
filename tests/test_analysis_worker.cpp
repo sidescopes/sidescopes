@@ -92,13 +92,13 @@ TEST_CASE("AnalysisWorker ignores changes inside the masked window") {
     REQUIRE(WaitFor([&] { return worker.FetchOutput(seen, output); }));
 
     FrameBuffer changed_inside_mask = MakeSolidFrame(64, 64, Color{100, 100, 100}, 2);
-    changed_inside_mask.data[(24 * 64 + 24) * 4] = 250;  // inside the mask
+    changed_inside_mask.data[static_cast<std::size_t>(24 * 64 + 24) * 4] = 250;  // inside the mask
     mailbox.Publish(std::move(changed_inside_mask));
     std::this_thread::sleep_for(300ms);
     CHECK_FALSE(worker.FetchOutput(seen, output));
 
     FrameBuffer changed_outside_mask = MakeSolidFrame(64, 64, Color{100, 100, 100}, 3);
-    changed_outside_mask.data[(8 * 64 + 4) * 4] = 250;  // outside the mask
+    changed_outside_mask.data[static_cast<std::size_t>(8 * 64 + 4) * 4] = 250;  // outside the mask
     mailbox.Publish(std::move(changed_outside_mask));
     CHECK(WaitFor([&] { return worker.FetchOutput(seen, output); }));
 }

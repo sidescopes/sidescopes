@@ -24,8 +24,8 @@ TEST_CASE("Trace intensity is clamped and monotonic") {
     CHECK(TraceGainFromIntensity(150.0f) == TraceGainFromIntensity(100.0f));
 
     float previous = 0.0f;
-    for (float percent = 0.0f; percent <= 100.0f; percent += 5.0f) {
-        const float gain = TraceGainFromIntensity(percent);
+    for (int percent = 0; percent <= 100; percent += 5) {
+        const float gain = TraceGainFromIntensity(static_cast<float>(percent));
         CHECK(gain > previous);
         previous = gain;
     }

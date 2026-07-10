@@ -1,0 +1,5 @@
+# Tests inherit the repository configuration, minus the unchecked-optional
+# check: it cannot see through Catch2's REQUIRE, so every guarded *optional
+# in a test reads as unchecked.
+InheritParentConfig: true
+Checks: '-bugprone-unchecked-optional-access'

@@ -15,9 +15,9 @@ FloatColor AverageNeighborhood(const FrameView& frame, int px, int py, int radiu
             if (sample_x < 0 || sample_x >= frame.width || sample_y < 0 || sample_y >= frame.height)
                 continue;
             const Color color = frame.ColorAt(sample_x, sample_y);
-            sum_r += color.r;
-            sum_g += color.g;
-            sum_b += color.b;
+            sum_r += static_cast<float>(color.r);
+            sum_g += static_cast<float>(color.g);
+            sum_b += static_cast<float>(color.b);
             ++count;
         }
     }

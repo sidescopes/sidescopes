@@ -1,0 +1,34 @@
+# Curated for signal over noise: bug-prone patterns, performance traps, and
+# portability hazards a single-platform build cannot see (MSVC rejects the
+# narrowing conversions Clang merely warns about). Style stays the job of
+# clang-format and review, not the linter.
+# Disabled within those groups:
+# - easily-swappable-parameters: flags every (x, y) and (width, height) pair.
+# - throwing-static-initialization: fires on Catch2's TEST_CASE registration,
+#   which is static construction by design.
+# - avoid-pragma-once: pragma once is deliberate here; every target compiler
+#   supports it.
+# - enum-size: shrinking enums to uint8_t saves nothing measurable and costs
+#   readability.
+# - EnumCastOutOfRange: fires inside Catch2's own result-type flag
+#   arithmetic, and analyzer findings ignore the header filter.
+Checks: >
+  bugprone-*,
+  -clang-analyzer-optin.core.EnumCastOutOfRange,
+  -bugprone-easily-swappable-parameters,
+  -bugprone-narrowing-conversions,
+  -bugprone-throwing-static-initialization,
+  cppcoreguidelines-narrowing-conversions,
+  performance-*,
+  -performance-enum-size,
+  portability-*,
+  -portability-avoid-pragma-once,
+  modernize-use-nullptr,
+  modernize-use-override,
+  misc-unused-using-decls,
+  misc-redundant-expression
+WarningsAsErrors: '*'
+HeaderFilterRegex: 'src/(core|platform)/.*\.h$'
+CheckOptions:
+  - key: cppcoreguidelines-narrowing-conversions.IgnoreConversionFromTypes
+    value: 'size_t;ptrdiff_t;size_type;difference_type'

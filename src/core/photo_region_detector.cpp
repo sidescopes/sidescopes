@@ -71,7 +71,8 @@ struct Tolerances {
 
     explicit Tolerances(float pixels_per_point) {
         const auto scaled = [pixels_per_point](int points) {
-            return std::max(1, static_cast<int>(std::lround(points * pixels_per_point)));
+            return std::max(
+                1, static_cast<int>(std::lround(static_cast<float>(points) * pixels_per_point)));
         };
         run_length = scaled(kMinimumRunLengthPoints);
         run_gap = scaled(kRunGapTolerancePoints);

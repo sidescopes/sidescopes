@@ -27,7 +27,7 @@ void Histogram::Accumulate(const FrameView& frame, IntRect region) {
 
     uint32_t* red_bins = bins_.data();
     uint32_t* green_bins = bins_.data() + kBins;
-    uint32_t* blue_bins = bins_.data() + 2 * kBins;
+    uint32_t* blue_bins = bins_.data() + static_cast<std::ptrdiff_t>(2) * kBins;
 
     uint64_t sample_count = 0;
     if (!region.Empty()) {
@@ -60,7 +60,8 @@ void Histogram::MapBinsToImage(uint64_t sample_count) {
         return std::max(1, static_cast<int>(normalized * kHeight));
     };
 
-    const uint32_t* planes[3] = {bins_.data(), bins_.data() + kBins, bins_.data() + 2 * kBins};
+    const uint32_t* planes[3] = {bins_.data(), bins_.data() + kBins,
+                                 bins_.data() + static_cast<std::ptrdiff_t>(2) * kBins};
     std::fill(image_.rgba.begin(), image_.rgba.end(), uint8_t{0});
     for (int value = 0; value < kBins; ++value) {
         for (int channel = 0; channel < 3; ++channel) {

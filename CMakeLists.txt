@@ -12,6 +12,13 @@ endif()
 
 option(SIDESCOPES_BUILD_TESTS "Build the test suite" ON)
 option(SIDESCOPES_WERROR "Treat compiler warnings as errors" OFF)
+set(SIDESCOPES_SANITIZE "" CACHE STRING
+    "Comma-separated sanitizers to build and link with (e.g. address,undefined or thread)")
+
+if(SIDESCOPES_SANITIZE)
+    add_compile_options(-fsanitize=${SIDESCOPES_SANITIZE} -fno-omit-frame-pointer -g)
+    add_link_options(-fsanitize=${SIDESCOPES_SANITIZE})
+endif()
 
 function(sidescopes_target_defaults target)
     if(MSVC)

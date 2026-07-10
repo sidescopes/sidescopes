@@ -46,9 +46,10 @@ TEST_CASE("FrameView reads BGRA pixels as RGB colors") {
     // A 2x2 frame with one pixel per corner color, plus per-row padding to
     // exercise the stride path.
     constexpr int kStride = 2 * 4 + 8;
-    std::array<uint8_t, 2 * kStride> pixels{};
+    std::array<uint8_t, static_cast<std::size_t>(2) * kStride> pixels{};
     const auto write_bgra = [&](int px, int py, uint8_t r, uint8_t g, uint8_t b) {
-        uint8_t* p = pixels.data() + py * kStride + px * 4;
+        uint8_t* p = pixels.data() + static_cast<std::ptrdiff_t>(py) * kStride +
+                     static_cast<std::ptrdiff_t>(px) * 4;
         p[0] = b;
         p[1] = g;
         p[2] = r;

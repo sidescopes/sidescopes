@@ -26,7 +26,7 @@ constexpr double kReferenceSampleCount = 1'000'000.0;
 
 }  // namespace
 
-Vectorscope::Vectorscope() : bins_(kSize * kSize, 0) {
+Vectorscope::Vectorscope() : bins_(static_cast<std::size_t>(kSize) * kSize, 0) {
     image_.width = kSize;
     image_.height = kSize;
     image_.rgba.assign(static_cast<std::size_t>(kSize) * kSize * 4, 0);
@@ -51,7 +51,7 @@ void Vectorscope::Accumulate(const FrameView& frame, IntRect region) {
         for (int py = region.y; py < region.y + region.height; py += stride) {
             const uint8_t* pixel = frame.PixelAt(region.x, py);
             const uint8_t* row_end = frame.PixelAt(region.x + region.width, py);
-            for (; pixel < row_end; pixel += 4 * stride) {
+            for (; pixel < row_end; pixel += static_cast<std::ptrdiff_t>(4) * stride) {
                 const int b = pixel[0], g = pixel[1], r = pixel[2];
                 const int cb =
                     ((matrix.cb_from_r * r + matrix.cb_from_g * g + matrix.cb_from_b * b) >> 8) +
@@ -70,14 +70,16 @@ void Vectorscope::Accumulate(const FrameView& frame, IntRect region) {
 std::optional<NormalizedPoint> Vectorscope::Project(const FloatColor& color) const {
     // Floating point throughout: markers need sub-bin positions.
     const ChromaCoefficients& matrix = CoefficientsFor(settings_.matrix);
-    const float cb =
-        (matrix.cb_from_r * color.r + matrix.cb_from_g * color.g + matrix.cb_from_b * color.b) /
-            256.0f +
-        128.0f;
-    const float cr =
-        (matrix.cr_from_r * color.r + matrix.cr_from_g * color.g + matrix.cr_from_b * color.b) /
-            256.0f +
-        128.0f;
+    const float cb = (static_cast<float>(matrix.cb_from_r) * color.r +
+                      static_cast<float>(matrix.cb_from_g) * color.g +
+                      static_cast<float>(matrix.cb_from_b) * color.b) /
+                         256.0f +
+                     128.0f;
+    const float cr = (static_cast<float>(matrix.cr_from_r) * color.r +
+                      static_cast<float>(matrix.cr_from_g) * color.g +
+                      static_cast<float>(matrix.cr_from_b) * color.b) /
+                         256.0f +
+                     128.0f;
     return NormalizedPoint{cb / 255.0f, (255.0f - cr) / 255.0f};
 }
 
@@ -122,9 +124,9 @@ void Vectorscope::MapBinsToImage(uint64_t sample_count) {
         }
         const float brightness =
             static_cast<float>(std::log1p(static_cast<double>(count) * gain) * intensity_scale);
-        out[0] = static_cast<uint8_t>(tint[0] * brightness);
-        out[1] = static_cast<uint8_t>(tint[1] * brightness);
-        out[2] = static_cast<uint8_t>(tint[2] * brightness);
+        out[0] = static_cast<uint8_t>(static_cast<float>(tint[0]) * brightness);
+        out[1] = static_cast<uint8_t>(static_cast<float>(tint[1]) * brightness);
+        out[2] = static_cast<uint8_t>(static_cast<float>(tint[2]) * brightness);
         out[3] = 255;
     }
     ++image_.sequence;

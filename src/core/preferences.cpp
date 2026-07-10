@@ -38,7 +38,7 @@ Preferences LoadPreferences(const std::filesystem::path& file) {
     };
     const auto read_int = [&](const char* key, int& out) {
         if (const auto found = values.find(key); found != values.end())
-            out = std::atoi(found->second.c_str());
+            out = static_cast<int>(std::strtol(found->second.c_str(), nullptr, 10));
     };
     const auto read_bool = [&](const char* key, bool& out) {
         if (const auto found = values.find(key); found != values.end()) out = found->second == "1";

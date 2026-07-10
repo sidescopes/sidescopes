@@ -24,6 +24,19 @@ jobs:
           files=$(git ls-files '*.h' '*.cpp' '*.mm')
           clang-format-18 --dry-run --Werror $files
 
+  tidy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install clang-tidy
+        run: sudo apt-get update && sudo apt-get install -y clang-tidy-18
+      - name: Configure
+        run: cmake -B build
+      - name: Analyze
+        run: |
+          files=$(git ls-files 'src/core/*.cpp' 'src/core/**/*.cpp' 'tests/*.cpp')
+          clang-tidy-18 -p build --quiet $files
+
   test:
     strategy:
       fail-fast: false
@@ -38,3 +51,23 @@ jobs:
         run: cmake --build build --config Release
       - name: Test
         run: ctest --test-dir build -C Release --output-on-failure
+
+  # Address+UB and thread sanitizers exercise the test suite; the analysis
+  # worker's lock-free frame handoff is exactly what TSan exists to audit.
+  sanitize:
+    strategy:
+      fail-fast: false
+      matrix:
+        sanitizer: ["address,undefined", "thread"]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Configure
+        run: >
+          cmake -B build -DSIDESCOPES_WERROR=ON
+          -DCMAKE_BUILD_TYPE=RelWithDebInfo
+          -DSIDESCOPES_SANITIZE=${{ matrix.sanitizer }}
+      - name: Build
+        run: cmake --build build
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
