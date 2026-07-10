@@ -1,8 +1,7 @@
-#include "core/frame.h"
-
+#include <array>
 #include <catch2/catch_test_macros.hpp>
 
-#include <array>
+#include "core/frame.h"
 
 namespace sidescopes {
 

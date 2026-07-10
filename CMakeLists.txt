@@ -29,6 +29,7 @@ endfunction()
 
 add_library(sidescopes_core STATIC
     src/core/frame.cpp
+    src/core/scopes/vectorscope.cpp
 )
 target_include_directories(sidescopes_core PUBLIC src)
 sidescopes_target_defaults(sidescopes_core)
