@@ -99,6 +99,60 @@ TEST_CASE("Waveform combined mode adds a white luma trace over rgb") {
     CHECK(LitRows(scope.Image(), 2) == std::vector<int>{255 - 240, 255 - 127});
 }
 
+TEST_CASE("Waveform parade shows each channel in its own third") {
+    // Uniform (10, 150, 240): each third lights one row at its channel's
+    // level, in that channel's color only.
+    TestFrame frame(32, 16);
+    frame.Fill(Color{10, 150, 240});
+
+    Waveform scope;
+    scope.Configure(SettingsFor(WaveformMode::RgbParade));
+    scope.Accumulate(frame.View(), IntRect{0, 0, 32, 16});
+
+    constexpr int kThird = Waveform::kColumns / 3;
+    const auto value_at = [&](int column, int row, int channel) {
+        return scope.Image()
+            .rgba[(static_cast<std::size_t>(row) * Waveform::kColumns + column) * 4 + channel];
+    };
+    // Red third: lit at row 255-10 in red, dark in green and blue.
+    CHECK(value_at(kThird / 2, 255 - 10, 0) > 0);
+    CHECK(value_at(kThird / 2, 255 - 10, 1) == 0);
+    CHECK(value_at(kThird / 2, 255 - 150, 0) == 0);
+    // Green third: lit at row 255-150 in green only.
+    CHECK(value_at(kThird + kThird / 2, 255 - 150, 1) > 0);
+    CHECK(value_at(kThird + kThird / 2, 255 - 150, 0) == 0);
+    // Blue third: lit at row 255-240 in blue only.
+    CHECK(value_at(2 * kThird + kThird / 2, 255 - 240, 2) > 0);
+    CHECK(value_at(2 * kThird + kThird / 2, 255 - 240, 1) == 0);
+}
+
+TEST_CASE("Waveform parade preserves horizontal position within each third") {
+    // Left half bright red, right half dark red: within the red third the
+    // left local half sits at the bright level and the right at the dark.
+    TestFrame frame(64, 16);
+    frame.Fill(Color{50, 0, 0});
+    for (int py = 0; py < 16; ++py) {
+        for (int px = 0; px < 32; ++px) {
+            uint8_t* p = frame.pixels.data() + (static_cast<std::size_t>(py) * 64 + px) * 4;
+            p[2] = 200;
+        }
+    }
+
+    Waveform scope;
+    scope.Configure(SettingsFor(WaveformMode::RgbParade));
+    scope.Accumulate(frame.View(), IntRect{0, 0, 64, 16});
+
+    constexpr int kThird = Waveform::kColumns / 3;
+    const auto red_at = [&](int column, int row) {
+        return scope.Image()
+            .rgba[(static_cast<std::size_t>(row) * Waveform::kColumns + column) * 4];
+    };
+    CHECK(red_at(kThird / 4, 255 - 200) > 0);  // left local half: bright level
+    CHECK(red_at(kThird / 4, 255 - 50) == 0);
+    CHECK(red_at(3 * kThird / 4, 255 - 50) > 0);  // right local half: dark level
+    CHECK(red_at(3 * kThird / 4, 255 - 200) == 0);
+}
+
 TEST_CASE("Waveform projection reports the luma level") {
     Waveform scope;
     const auto point = scope.Project(FloatColor{128.0f, 128.0f, 128.0f});

@@ -55,7 +55,7 @@ Preferences LoadPreferences(const std::filesystem::path& file) {
     preferences.matrix = matrix == 1 ? ChromaMatrix::Bt709 : ChromaMatrix::Bt601;
     int waveform_mode = static_cast<int>(preferences.waveform_mode);
     read_int("waveform_mode", waveform_mode);
-    if (waveform_mode >= 0 && waveform_mode <= 2)
+    if (waveform_mode >= 0 && waveform_mode <= 3)
         preferences.waveform_mode = static_cast<WaveformMode>(waveform_mode);
     read_double("region_left", preferences.region.left_percent);
     read_double("region_top", preferences.region.top_percent);

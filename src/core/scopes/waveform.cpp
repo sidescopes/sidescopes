@@ -34,7 +34,8 @@ void Waveform::Accumulate(const FrameView& frame, IntRect region) {
     std::fill(bins_.begin(), bins_.end(), 0u);
 
     const bool wants_rgb = settings_.mode != WaveformMode::Luma;
-    const bool wants_luma = settings_.mode != WaveformMode::Rgb;
+    const bool wants_luma =
+        settings_.mode == WaveformMode::Luma || settings_.mode == WaveformMode::RgbAndLuma;
     uint32_t* red_plane = bins_.data();
     uint32_t* green_plane = bins_.data() + kPlaneSize;
     uint32_t* blue_plane = bins_.data() + 2 * kPlaneSize;
@@ -73,7 +74,8 @@ std::optional<NormalizedPoint> Waveform::Project(const FloatColor& color) const 
 
 void Waveform::MapBinsToImage(uint64_t sampled_rows) {
     const bool wants_rgb = settings_.mode != WaveformMode::Luma;
-    const bool wants_luma = settings_.mode != WaveformMode::Rgb;
+    const bool wants_luma =
+        settings_.mode == WaveformMode::Luma || settings_.mode == WaveformMode::RgbAndLuma;
 
     uint32_t densest = 0;
     if (wants_rgb) {
@@ -98,6 +100,39 @@ void Waveform::MapBinsToImage(uint64_t sampled_rows) {
     const uint32_t* green_plane = bins_.data() + kPlaneSize;
     const uint32_t* blue_plane = bins_.data() + 2 * kPlaneSize;
     const uint32_t* luma_plane = bins_.data() + 3 * kPlaneSize;
+
+    if (settings_.mode == WaveformMode::RgbParade) {
+        // Three channels side by side: each third shows one channel's full
+        // column range compressed 3:1.
+        const uint32_t* planes[3] = {red_plane, green_plane, blue_plane};
+        constexpr int kThird = kColumns / 3;
+        uint8_t* out = image_.rgba.data();
+        for (int row = 0; row < kLevels; ++row) {
+            for (int column = 0; column < kColumns; ++column, out += 4) {
+                const int channel = std::min(column / kThird, 2);
+                const int local = column - channel * kThird;
+                // Each output column covers a window of source columns; the
+                // window maximum keeps sparse traces visible (narrow regions
+                // populate only every Nth source column).
+                const int source_begin = local * kColumns / kThird;
+                const int source_end = std::min((local + 1) * kColumns / kThird, kColumns);
+                uint32_t densest_in_window = 0;
+                for (int source = source_begin; source < source_end; ++source) {
+                    densest_in_window = std::max(
+                        densest_in_window,
+                        planes[channel][static_cast<std::size_t>(row) * kColumns + source]);
+                }
+                const float value = brightness(densest_in_window);
+                out[0] = channel == 0 ? static_cast<uint8_t>(std::min(255.0f, value)) : 0;
+                out[1] = channel == 1 ? static_cast<uint8_t>(std::min(255.0f, value)) : 0;
+                out[2] = channel == 2 ? static_cast<uint8_t>(std::min(255.0f, value)) : 0;
+                out[3] = 255;
+            }
+        }
+        ++image_.sequence;
+        return;
+    }
+
     uint8_t* out = image_.rgba.data();
     for (std::size_t i = 0; i < kPlaneSize; ++i, out += 4) {
         float r = 0.0f, g = 0.0f, b = 0.0f;

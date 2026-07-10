@@ -48,6 +48,7 @@ enum MenuAction {
     kMenuWaveformLuma = 10,
     kMenuWaveformRgb,
     kMenuWaveformRgbAndLuma,
+    kMenuWaveformParade,
     kMenuMatrixBt601 = 20,
     kMenuMatrixBt709,
     kMenuSelectRegion = 30,
@@ -660,6 +661,8 @@ int main() {
                 {Kind::Action, "RGB", kMenuWaveformRgb, waveform_mode == WaveformMode::Rgb},
                 {Kind::Action, "RGB + Luma", kMenuWaveformRgbAndLuma,
                  waveform_mode == WaveformMode::RgbAndLuma},
+                {Kind::Action, "RGB Parade", kMenuWaveformParade,
+                 waveform_mode == WaveformMode::RgbParade},
                 {Kind::SubmenuEnd, "", -1, false},
                 {Kind::SubmenuBegin, "Vectorscope Matrix", -1, false},
                 {Kind::Action, "BT.601", kMenuMatrixBt601, bt601},
@@ -695,6 +698,10 @@ int main() {
                     break;
                 case kMenuWaveformRgbAndLuma:
                     analysis.waveform.mode = WaveformMode::RgbAndLuma;
+                    analysis_dirty = true;
+                    break;
+                case kMenuWaveformParade:
+                    analysis.waveform.mode = WaveformMode::RgbParade;
                     analysis_dirty = true;
                     break;
                 case kMenuMatrixBt601:

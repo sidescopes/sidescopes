@@ -10,8 +10,9 @@ namespace sidescopes {
 enum class ChromaMatrix { Bt601, Bt709 };
 
 // What the waveform plots. RGB overlay is the default: separated colored
-// traces make color casts readable at a glance.
-enum class WaveformMode { Luma, Rgb, RgbAndLuma };
+// traces make color casts readable at a glance. Parade shows the three
+// channels side by side, each compressed to a third of the width.
+enum class WaveformMode { Luma, Rgb, RgbAndLuma, RgbParade };
 
 // A point in normalized scope-image coordinates, x and y in [0, 1].
 struct NormalizedPoint {
