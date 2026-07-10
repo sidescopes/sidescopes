@@ -56,10 +56,10 @@ struct FrameAnalysis {
     }
 };
 
-FrameAnalysis AnalyzeBlocks(const FrameView& frame) {
+FrameAnalysis AnalyzeBlocks(const FrameView& frame, const IntRect& bounds) {
     FrameAnalysis analysis;
-    analysis.columns = std::max(1, frame.width / kBlockSize);
-    analysis.rows = std::max(1, frame.height / kBlockSize);
+    analysis.columns = std::max(1, bounds.width / kBlockSize);
+    analysis.rows = std::max(1, bounds.height / kBlockSize);
     const std::size_t block_count = static_cast<std::size_t>(analysis.columns) * analysis.rows;
     analysis.rich.assign(block_count, 0);
     analysis.flat.assign(block_count, 0);
@@ -75,8 +75,8 @@ FrameAnalysis AnalyzeBlocks(const FrameView& frame) {
             std::fill(color_seen.begin(), color_seen.end(), uint8_t{0});
             int distinct_colors = 0;
 
-            const int y0 = cy * kBlockSize;
-            const int x0 = cx * kBlockSize;
+            const int y0 = bounds.y + cy * kBlockSize;
+            const int x0 = bounds.x + cx * kBlockSize;
             for (int py = y0; py < y0 + kBlockSize; ++py) {
                 const uint8_t* pixel = frame.PixelAt(x0, py);
                 for (int px = 0; px < kBlockSize; ++px, pixel += 4) {
@@ -232,7 +232,8 @@ bool LineIsContent(const FrameView& frame, const FrameAnalysis& analysis, int x0
 
 // Shrinks each edge through mixed border blocks, then grows to the exact
 // content boundary.
-IntRect RefineEdges(const FrameView& frame, const FrameAnalysis& analysis, IntRect rect) {
+IntRect RefineEdges(const FrameView& frame, const FrameAnalysis& analysis, const IntRect& bounds,
+                    IntRect rect) {
     const int limit = kBlockSize;
     const auto row_is_content = [&](int py) {
         return LineIsContent(frame, analysis, rect.x, rect.x + rect.width, py, py + 1);
@@ -245,7 +246,7 @@ IntRect RefineEdges(const FrameView& frame, const FrameAnalysis& analysis, IntRe
         ++rect.y;
         --rect.height;
     }
-    for (int step = 0; step < limit && rect.y > 0 && row_is_content(rect.y - 1); ++step) {
+    for (int step = 0; step < limit && rect.y > bounds.y && row_is_content(rect.y - 1); ++step) {
         --rect.y;
         ++rect.height;
     }
@@ -253,7 +254,7 @@ IntRect RefineEdges(const FrameView& frame, const FrameAnalysis& analysis, IntRe
          step < limit && rect.height > limit && !row_is_content(rect.y + rect.height - 1); ++step) {
         --rect.height;
     }
-    for (int step = 0; step < limit && rect.y + rect.height < frame.height &&
+    for (int step = 0; step < limit && rect.y + rect.height < bounds.y + bounds.height &&
                        row_is_content(rect.y + rect.height);
          ++step) {
         ++rect.height;
@@ -262,7 +263,7 @@ IntRect RefineEdges(const FrameView& frame, const FrameAnalysis& analysis, IntRe
         ++rect.x;
         --rect.width;
     }
-    for (int step = 0; step < limit && rect.x > 0 && column_is_content(rect.x - 1); ++step) {
+    for (int step = 0; step < limit && rect.x > bounds.x && column_is_content(rect.x - 1); ++step) {
         --rect.x;
         ++rect.width;
     }
@@ -271,7 +272,7 @@ IntRect RefineEdges(const FrameView& frame, const FrameAnalysis& analysis, IntRe
          ++step) {
         --rect.width;
     }
-    for (int step = 0; step < limit && rect.x + rect.width < frame.width &&
+    for (int step = 0; step < limit && rect.x + rect.width < bounds.x + bounds.width &&
                        column_is_content(rect.x + rect.width);
          ++step) {
         ++rect.width;
@@ -279,12 +280,16 @@ IntRect RefineEdges(const FrameView& frame, const FrameAnalysis& analysis, IntRe
     return rect;
 }
 
-// Flatness of the chrome immediately outside the rectangle, 0..1.
-float BorderFlatness(const FrameView& frame, const FrameAnalysis& analysis, const IntRect& rect) {
+// Flatness of the chrome immediately outside the rectangle, 0..1. Probes
+// never leave the analysis bounds: outside a window's rectangle lies other
+// windows' content, not this window's chrome.
+float BorderFlatness(const FrameView& frame, const FrameAnalysis& analysis, const IntRect& bounds,
+                     const IntRect& rect) {
     int flat = 0;
     int total = 0;
     const auto probe = [&](int x0, int x1, int y0, int y1) {
-        if (x0 < 0 || y0 < 0 || x1 > frame.width || y1 > frame.height || x0 >= x1 || y0 >= y1)
+        if (x0 < bounds.x || y0 < bounds.y || x1 > bounds.x + bounds.width ||
+            y1 > bounds.y + bounds.height || x0 >= x1 || y0 >= y1)
             return;
         ++total;
         if (!LineIsContent(frame, analysis, x0, x1, y0, y1)) ++flat;
@@ -313,11 +318,14 @@ double OverlapFraction(const IntRect& a, const IntRect& b) {
 
 }  // namespace
 
-std::vector<RegionCandidate> DetectPhotoRegions(const FrameView& frame, int max_candidates) {
+std::vector<RegionCandidate> DetectPhotoRegions(const FrameView& frame, IntRect within,
+                                                int max_candidates) {
     std::vector<RegionCandidate> candidates;
-    if (frame.width < 2 * kBlockSize || frame.height < 2 * kBlockSize) return candidates;
+    IntRect bounds = within.Empty() ? IntRect{0, 0, frame.width, frame.height}
+                                    : within.ClampedTo(frame.width, frame.height);
+    if (bounds.width < 2 * kBlockSize || bounds.height < 2 * kBlockSize) return candidates;
 
-    const FrameAnalysis analysis = AnalyzeBlocks(frame);
+    const FrameAnalysis analysis = AnalyzeBlocks(frame, bounds);
     const int minimum_blocks =
         std::max(4, analysis.columns * analysis.rows / 100);  // ignore specks under ~1%
 
@@ -335,9 +343,10 @@ std::vector<RegionCandidate> DetectPhotoRegions(const FrameView& frame, int max_
                                static_cast<float>(component.Columns() * component.Rows());
         if (interior < 0.25f) continue;  // disconnected UI speckle, not a photo
 
-        IntRect rect{component.min_cx * kBlockSize, component.min_cy * kBlockSize,
-                     component.Columns() * kBlockSize, component.Rows() * kBlockSize};
-        rect = RefineEdges(frame, analysis, rect);
+        IntRect rect{bounds.x + component.min_cx * kBlockSize,
+                     bounds.y + component.min_cy * kBlockSize, component.Columns() * kBlockSize,
+                     component.Rows() * kBlockSize};
+        rect = RefineEdges(frame, analysis, bounds, rect);
 
         bool sliver_of_previous = false;
         for (const RegionCandidate& earlier : candidates) {
@@ -350,7 +359,7 @@ std::vector<RegionCandidate> DetectPhotoRegions(const FrameView& frame, int max_
 
         RegionCandidate candidate;
         candidate.rect = rect;
-        candidate.confidence = interior * BorderFlatness(frame, analysis, rect);
+        candidate.confidence = interior * BorderFlatness(frame, analysis, bounds, rect);
         candidates.push_back(candidate);
     }
 

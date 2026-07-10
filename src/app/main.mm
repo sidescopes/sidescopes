@@ -845,23 +845,60 @@ int main() {
         // analysis keep flowing underneath.
         if (want_region_pick && capture_display != 0) {
             HideRegionBorder();
-            // Build the offer: detected photo canvases, then windows.
+            // The offer: photo canvases detected INSIDE the visible windows,
+            // then the windows themselves. Whole-desktop detection is
+            // meaningless - a desktop full of windows is content everywhere -
+            // so each window is analyzed against its own chrome.
             std::vector<RegionCandidate> photo_candidates;
             int detect_width = 0;
             int detect_height = 0;
-            worker.WithLatestFrame([&](const FrameView& view) {
-                photo_candidates = DetectPhotoRegions(view);
-                detect_width = view.width;
-                detect_height = view.height;
-            });
             std::vector<WindowRegion> window_regions;
             if (const auto geometry = GeometryOfDisplay(capture_display)) {
-                // Only the frontmost handful of windows: deeper background
-                // windows are things the user is not looking at, and the
-                // detected photo canvas is the primary suggestion anyway.
-                constexpr int kMaxWindowSuggestions = 5;
+                // Frontmost windows only, skipping ones mostly hidden behind
+                // fronter windows: the user is not scoping what they cannot
+                // see, and invisible system windows have no business here.
+                std::vector<DesktopWindow> visible_windows;
                 for (const DesktopWindow& window : OnScreenWindows(capture_display)) {
-                    if (static_cast<int>(window_regions.size()) >= kMaxWindowSuggestions) break;
+                    constexpr int kMaxWindowSuggestions = 5;
+                    if (static_cast<int>(visible_windows.size()) >= kMaxWindowSuggestions) break;
+                    bool mostly_covered = false;
+                    for (const DesktopWindow& front : visible_windows) {
+                        const double left = std::max(window.x, front.x);
+                        const double top = std::max(window.y, front.y);
+                        const double right =
+                            std::min(window.x + window.width, front.x + front.width);
+                        const double bottom =
+                            std::min(window.y + window.height, front.y + front.height);
+                        if (right <= left || bottom <= top) continue;
+                        const double covered =
+                            (right - left) * (bottom - top) / (window.width * window.height);
+                        if (covered > 0.8) {
+                            mostly_covered = true;
+                            break;
+                        }
+                    }
+                    if (!mostly_covered) visible_windows.push_back(window);
+                }
+
+                worker.WithLatestFrame([&](const FrameView& view) {
+                    detect_width = view.width;
+                    detect_height = view.height;
+                    const double scale_x = view.width / geometry->width_points;
+                    const double scale_y = view.height / geometry->height_points;
+                    for (const DesktopWindow& window : visible_windows) {
+                        const IntRect window_rect{
+                            static_cast<int>((window.x - geometry->origin_x) * scale_x),
+                            static_cast<int>((window.y - geometry->origin_y) * scale_y),
+                            static_cast<int>(window.width * scale_x),
+                            static_cast<int>(window.height * scale_y)};
+                        for (const RegionCandidate& candidate :
+                             DetectPhotoRegions(view, window_rect, 2)) {
+                            photo_candidates.push_back(candidate);
+                        }
+                    }
+                });
+
+                for (const DesktopWindow& window : visible_windows) {
                     WindowRegion region;
                     region.region.left_percent =
                         std::clamp((window.x - geometry->origin_x) / geometry->width_points * 100.0,

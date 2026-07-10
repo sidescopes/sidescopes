@@ -25,7 +25,13 @@ struct RegionCandidate {
 // candidate; thumbnail grids merge into one large candidate; content that
 // fills the frame edge-to-edge offers no chrome border to detect against.
 //
+// Detection is scoped to `within` (a window's rectangle): a photo canvas is
+// meaningful inside an editor window, while whole-desktop analysis sees
+// content everywhere and returns screen-sized blobs. An empty rectangle
+// means the whole frame, which suits fullscreen applications.
+//
 // Returns up to `max_candidates`, strongest first. Deterministic.
-std::vector<RegionCandidate> DetectPhotoRegions(const FrameView& frame, int max_candidates = 3);
+std::vector<RegionCandidate> DetectPhotoRegions(const FrameView& frame, IntRect within = IntRect{},
+                                                int max_candidates = 3);
 
 }  // namespace sidescopes
