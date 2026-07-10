@@ -8,6 +8,9 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- Photo canvas detection: heuristic candidates for the image area inside
+  editor chrome, powering region suggestions.
+
 - RGB parade waveform style: the three channels side by side.
 - Histogram view with per-channel bars and cursor value markers.
 - Keyboard shortcuts: V/W/B/H switch views, A selects the area, F resets

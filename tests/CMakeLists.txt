@@ -17,6 +17,7 @@ add_executable(sidescopes_tests
     test_analysis_worker.cpp
     test_graticule.cpp
     test_histogram.cpp
+    test_photo_region_detector.cpp
     test_preferences.cpp
     test_vectorscope.cpp
     test_waveform.cpp
