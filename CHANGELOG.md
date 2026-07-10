@@ -8,5 +8,9 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- Trace intensity control: a perceptually even 0-100% mapping over the
+  engines' gain range.
+- Cursor marker smoothing: neighborhood averaging with exponential
+  smoothing and a snap window.
 - Region change hash that skips re-analysis of unchanged content and masks
   the application's own window out of change detection.
