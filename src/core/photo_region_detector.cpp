@@ -1,52 +1,77 @@
 #include "core/photo_region_detector.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
+#include <map>
 
 namespace sidescopes {
 namespace {
 
-// The frame is scored on a coarse grid: photo content is "rich" (varied),
-// editor chrome is "flat". Block statistics are cheap and robust; pixel
-// precision comes later from edge refinement.
+// The frame is scored on a coarse grid. Chrome is recognized by what it
+// really is: the dominant flat color family of the frame. Editors draw
+// neutral, uniform chrome so it does not bias color judgment; everything
+// that is either textured, colored, or flat-but-not-chrome-colored is
+// content. This matters because viewers downscale photographs to fit the
+// window, which averages smooth regions (skies, defocused backgrounds) down
+// to rendering-flat - flatness alone cannot separate them from chrome, but
+// their color can.
 constexpr int kBlockSize = 16;
 
-// A block is rich when its luma varies at all beyond rendering-flat, or it
-// holds a handful of distinct coarse colors. The thresholds look tiny and
-// that is the point: screen-rendered editor chrome is mathematically flat
-// (variance essentially zero), while real photographs carry sensor noise
-// and compression texture everywhere - including bokeh backgrounds and
-// clear skies. A high threshold makes the detector collapse onto the sharp
-// band of a photo and miss its smooth regions entirely.
-constexpr double kVarianceThreshold = 1.0;  // luma variance
+constexpr double kVarianceThreshold = 1.0;  // luma variance above rendering-flat
+constexpr double kChromaThreshold = 4.0;    // mean max channel spread
 constexpr int kDistinctColorThreshold = 4;  // of max 512 coarse buckets
 
-// Candidates from later rounds that mostly overlap an earlier one are
-// slivers of the same photo, not separate regions.
+// A flat block counts as chrome when its mean color is within this distance
+// (per channel) of one of the frame's dominant flat colors.
+constexpr int kChromeColorTolerance = 20;
+
+// Candidates overlapping an earlier one are slivers of the same region.
 constexpr double kMaximumOverlapFraction = 0.3;
 
-struct BlockGrid {
+struct MeanColor {
+    double r = 0.0;
+    double g = 0.0;
+    double b = 0.0;
+};
+
+struct FrameAnalysis {
     int columns = 0;
     int rows = 0;
-    std::vector<uint8_t> rich;  // 1 = photo-like
+    std::vector<uint8_t> rich;        // 1 = content
+    std::vector<MeanColor> means;     // per block
+    std::vector<uint8_t> flat;        // 1 = texture-flat (regardless of color)
+    std::array<MeanColor, 2> chrome;  // dominant flat colors
+    int chrome_count = 0;
 
-    [[nodiscard]] bool At(int cx, int cy) const {
-        return rich[static_cast<std::size_t>(cy) * columns + cx] != 0;
+    [[nodiscard]] bool MatchesChrome(const MeanColor& color) const {
+        for (int i = 0; i < chrome_count; ++i) {
+            if (std::abs(color.r - chrome[i].r) <= kChromeColorTolerance &&
+                std::abs(color.g - chrome[i].g) <= kChromeColorTolerance &&
+                std::abs(color.b - chrome[i].b) <= kChromeColorTolerance)
+                return true;
+        }
+        return false;
     }
 };
 
-BlockGrid ScoreBlocks(const FrameView& frame) {
-    BlockGrid grid;
-    grid.columns = std::max(1, frame.width / kBlockSize);
-    grid.rows = std::max(1, frame.height / kBlockSize);
-    grid.rich.assign(static_cast<std::size_t>(grid.columns) * grid.rows, 0);
+FrameAnalysis AnalyzeBlocks(const FrameView& frame) {
+    FrameAnalysis analysis;
+    analysis.columns = std::max(1, frame.width / kBlockSize);
+    analysis.rows = std::max(1, frame.height / kBlockSize);
+    const std::size_t block_count = static_cast<std::size_t>(analysis.columns) * analysis.rows;
+    analysis.rich.assign(block_count, 0);
+    analysis.flat.assign(block_count, 0);
+    analysis.means.assign(block_count, MeanColor{});
 
     std::vector<uint8_t> color_seen(512);
-    for (int cy = 0; cy < grid.rows; ++cy) {
-        for (int cx = 0; cx < grid.columns; ++cx) {
-            double sum = 0.0;
-            double sum_squared = 0.0;
+    for (int cy = 0; cy < analysis.rows; ++cy) {
+        for (int cx = 0; cx < analysis.columns; ++cx) {
+            double luma_sum = 0.0;
+            double luma_squared = 0.0;
+            double chroma_sum = 0.0;
+            double sum_r = 0.0, sum_g = 0.0, sum_b = 0.0;
             std::fill(color_seen.begin(), color_seen.end(), uint8_t{0});
             int distinct_colors = 0;
 
@@ -57,9 +82,12 @@ BlockGrid ScoreBlocks(const FrameView& frame) {
                 for (int px = 0; px < kBlockSize; ++px, pixel += 4) {
                     const int b = pixel[0], g = pixel[1], r = pixel[2];
                     const double luma = (54 * r + 183 * g + 19 * b) / 256.0;
-                    sum += luma;
-                    sum_squared += luma * luma;
-                    // 3 bits per channel: 512 coarse color buckets.
+                    luma_sum += luma;
+                    luma_squared += luma * luma;
+                    chroma_sum += std::max({r, g, b}) - std::min({r, g, b});
+                    sum_r += r;
+                    sum_g += g;
+                    sum_b += b;
                     const int bucket = ((r >> 5) << 6) | ((g >> 5) << 3) | (b >> 5);
                     if (!color_seen[bucket]) {
                         color_seen[bucket] = 1;
@@ -67,66 +95,207 @@ BlockGrid ScoreBlocks(const FrameView& frame) {
                     }
                 }
             }
+
             constexpr double kSamples = kBlockSize * kBlockSize;
-            const double mean = sum / kSamples;
-            const double variance = sum_squared / kSamples - mean * mean;
-            if (variance >= kVarianceThreshold || distinct_colors >= kDistinctColorThreshold) {
-                grid.rich[static_cast<std::size_t>(cy) * grid.columns + cx] = 1;
-            }
+            const double mean = luma_sum / kSamples;
+            const double variance = luma_squared / kSamples - mean * mean;
+            const double mean_chroma = chroma_sum / kSamples;
+            const std::size_t index = static_cast<std::size_t>(cy) * analysis.columns + cx;
+            analysis.means[index] = MeanColor{sum_r / kSamples, sum_g / kSamples, sum_b / kSamples};
+            const bool textured = variance >= kVarianceThreshold ||
+                                  mean_chroma >= kChromaThreshold ||
+                                  distinct_colors >= kDistinctColorThreshold;
+            analysis.flat[index] = textured ? 0 : 1;
+            analysis.rich[index] = textured ? 1 : 0;
         }
     }
-    return grid;
+
+    // The chrome palette: the two most common flat colors (quantized), which
+    // covers two-tone interfaces (panel gray plus canvas gray).
+    std::map<int, std::pair<int, MeanColor>> flat_colors;
+    for (std::size_t index = 0; index < block_count; ++index) {
+        if (!analysis.flat[index]) continue;
+        const MeanColor& mean = analysis.means[index];
+        const int key = (static_cast<int>(mean.r) / 16 << 8) |
+                        (static_cast<int>(mean.g) / 16 << 4) | (static_cast<int>(mean.b) / 16);
+        auto& entry = flat_colors[key];
+        ++entry.first;
+        entry.second = mean;
+    }
+    std::array<std::pair<int, MeanColor>, 2> top{};
+    for (const auto& [key, entry] : flat_colors) {
+        (void)key;
+        if (entry.first > top[0].first) {
+            top[1] = top[0];
+            top[0] = entry;
+        } else if (entry.first > top[1].first) {
+            top[1] = entry;
+        }
+    }
+    // The dominant flat color is always chrome. A second tone qualifies only
+    // when it rivals the first in coverage (panel gray next to canvas gray);
+    // otherwise it is more likely a large smooth patch of a photograph
+    // claiming the slot, which would punch that patch out of its own photo.
+    if (top[0].first > 0) analysis.chrome[analysis.chrome_count++] = top[0].second;
+    if (top[1].first * 2 >= top[0].first && top[1].first > 0)
+        analysis.chrome[analysis.chrome_count++] = top[1].second;
+
+    // Flat blocks whose color is not chrome are content: a rendered-smooth
+    // sky is flat, but it is not editor gray.
+    for (std::size_t index = 0; index < block_count; ++index) {
+        if (analysis.flat[index] && !analysis.MatchesChrome(analysis.means[index]))
+            analysis.rich[index] = 1;
+    }
+    return analysis;
 }
 
-// Largest all-rich rectangle in the grid (histogram-of-heights method).
-struct GridRect {
-    int cx = 0, cy = 0, columns = 0, rows = 0;
-    [[nodiscard]] int Area() const { return columns * rows; }
+// A connected region of content blocks. The bounding box - not a largest
+// all-rich rectangle - is the right shape for a photograph: any remaining
+// holes belong to the photo, not to the chrome around it.
+struct GridComponent {
+    int min_cx = 0, min_cy = 0, max_cx = 0, max_cy = 0;
+    int rich_blocks = 0;
+
+    [[nodiscard]] int Columns() const { return max_cx - min_cx + 1; }
+    [[nodiscard]] int Rows() const { return max_cy - min_cy + 1; }
 };
 
-GridRect LargestRichRectangle(const BlockGrid& grid) {
-    GridRect best;
-    std::vector<int> heights(static_cast<std::size_t>(grid.columns), 0);
-    std::vector<int> stack;
-    for (int cy = 0; cy < grid.rows; ++cy) {
-        for (int cx = 0; cx < grid.columns; ++cx)
-            heights[cx] = grid.At(cx, cy) ? heights[cx] + 1 : 0;
+std::vector<GridComponent> RichComponents(const FrameAnalysis& analysis) {
+    std::vector<GridComponent> components;
+    std::vector<uint8_t> visited(analysis.rich.size(), 0);
+    std::vector<std::pair<int, int>> queue;
 
-        stack.clear();
-        for (int cx = 0; cx <= grid.columns; ++cx) {
-            const int height = cx < grid.columns ? heights[cx] : 0;
-            while (!stack.empty() && heights[stack.back()] >= height) {
-                const int top_height = heights[stack.back()];
-                stack.pop_back();
-                const int left = stack.empty() ? 0 : stack.back() + 1;
-                const int width = cx - left;
-                if (top_height * width > best.Area()) {
-                    best = GridRect{left, cy - top_height + 1, width, top_height};
+    for (int seed_cy = 0; seed_cy < analysis.rows; ++seed_cy) {
+        for (int seed_cx = 0; seed_cx < analysis.columns; ++seed_cx) {
+            const std::size_t seed_index =
+                static_cast<std::size_t>(seed_cy) * analysis.columns + seed_cx;
+            if (!analysis.rich[seed_index] || visited[seed_index]) continue;
+
+            GridComponent component{seed_cx, seed_cy, seed_cx, seed_cy, 0};
+            queue.clear();
+            queue.emplace_back(seed_cx, seed_cy);
+            visited[seed_index] = 1;
+            while (!queue.empty()) {
+                const auto [cx, cy] = queue.back();
+                queue.pop_back();
+                ++component.rich_blocks;
+                component.min_cx = std::min(component.min_cx, cx);
+                component.min_cy = std::min(component.min_cy, cy);
+                component.max_cx = std::max(component.max_cx, cx);
+                component.max_cy = std::max(component.max_cy, cy);
+                // Neighbors within two blocks bridge narrow flat seams.
+                for (int dy = -2; dy <= 2; ++dy) {
+                    for (int dx = -2; dx <= 2; ++dx) {
+                        const int nx = cx + dx;
+                        const int ny = cy + dy;
+                        if (nx < 0 || nx >= analysis.columns || ny < 0 || ny >= analysis.rows)
+                            continue;
+                        const std::size_t index =
+                            static_cast<std::size_t>(ny) * analysis.columns + nx;
+                        if (!analysis.rich[index] || visited[index]) continue;
+                        visited[index] = 1;
+                        queue.emplace_back(nx, ny);
+                    }
                 }
             }
-            stack.push_back(cx);
+            components.push_back(component);
         }
     }
-    return best;
+    return components;
 }
 
-// A row or column segment is photo-like when its luma varies along the run.
-bool SegmentIsRich(const FrameView& frame, int x0, int x1, int y0, int y1) {
-    double sum = 0.0;
-    double sum_squared = 0.0;
+// A one-pixel line is content when it varies or when its color is not
+// chrome; used for pixel-exact edge refinement and border probing.
+bool LineIsContent(const FrameView& frame, const FrameAnalysis& analysis, int x0, int x1, int y0,
+                   int y1) {
+    double luma_sum = 0.0;
+    double luma_squared = 0.0;
+    double sum_r = 0.0, sum_g = 0.0, sum_b = 0.0;
     int samples = 0;
     for (int py = y0; py < y1; ++py) {
         const uint8_t* pixel = frame.PixelAt(x0, py);
         for (int px = x0; px < x1; ++px, pixel += 4) {
             const double luma = (54 * pixel[2] + 183 * pixel[1] + 19 * pixel[0]) / 256.0;
-            sum += luma;
-            sum_squared += luma * luma;
+            luma_sum += luma;
+            luma_squared += luma * luma;
+            sum_r += pixel[2];
+            sum_g += pixel[1];
+            sum_b += pixel[0];
             ++samples;
         }
     }
     if (samples == 0) return false;
-    const double mean = sum / samples;
-    return (sum_squared / samples - mean * mean) >= kVarianceThreshold;
+    const double mean = luma_sum / samples;
+    if (luma_squared / samples - mean * mean >= kVarianceThreshold) return true;
+    return !analysis.MatchesChrome(MeanColor{sum_r / samples, sum_g / samples, sum_b / samples});
+}
+
+// Shrinks each edge through mixed border blocks, then grows to the exact
+// content boundary.
+IntRect RefineEdges(const FrameView& frame, const FrameAnalysis& analysis, IntRect rect) {
+    const int limit = kBlockSize;
+    const auto row_is_content = [&](int py) {
+        return LineIsContent(frame, analysis, rect.x, rect.x + rect.width, py, py + 1);
+    };
+    const auto column_is_content = [&](int px) {
+        return LineIsContent(frame, analysis, px, px + 1, rect.y, rect.y + rect.height);
+    };
+
+    for (int step = 0; step < limit && rect.height > limit && !row_is_content(rect.y); ++step) {
+        ++rect.y;
+        --rect.height;
+    }
+    for (int step = 0; step < limit && rect.y > 0 && row_is_content(rect.y - 1); ++step) {
+        --rect.y;
+        ++rect.height;
+    }
+    for (int step = 0;
+         step < limit && rect.height > limit && !row_is_content(rect.y + rect.height - 1); ++step) {
+        --rect.height;
+    }
+    for (int step = 0; step < limit && rect.y + rect.height < frame.height &&
+                       row_is_content(rect.y + rect.height);
+         ++step) {
+        ++rect.height;
+    }
+    for (int step = 0; step < limit && rect.width > limit && !column_is_content(rect.x); ++step) {
+        ++rect.x;
+        --rect.width;
+    }
+    for (int step = 0; step < limit && rect.x > 0 && column_is_content(rect.x - 1); ++step) {
+        --rect.x;
+        ++rect.width;
+    }
+    for (int step = 0;
+         step < limit && rect.width > limit && !column_is_content(rect.x + rect.width - 1);
+         ++step) {
+        --rect.width;
+    }
+    for (int step = 0; step < limit && rect.x + rect.width < frame.width &&
+                       column_is_content(rect.x + rect.width);
+         ++step) {
+        ++rect.width;
+    }
+    return rect;
+}
+
+// Flatness of the chrome immediately outside the rectangle, 0..1.
+float BorderFlatness(const FrameView& frame, const FrameAnalysis& analysis, const IntRect& rect) {
+    int flat = 0;
+    int total = 0;
+    const auto probe = [&](int x0, int x1, int y0, int y1) {
+        if (x0 < 0 || y0 < 0 || x1 > frame.width || y1 > frame.height || x0 >= x1 || y0 >= y1)
+            return;
+        ++total;
+        if (!LineIsContent(frame, analysis, x0, x1, y0, y1)) ++flat;
+    };
+    constexpr int kProbe = 4;
+    probe(rect.x, rect.x + rect.width, rect.y - kProbe, rect.y);
+    probe(rect.x, rect.x + rect.width, rect.y + rect.height, rect.y + rect.height + kProbe);
+    probe(rect.x - kProbe, rect.x, rect.y, rect.y + rect.height);
+    probe(rect.x + rect.width, rect.x + rect.width + kProbe, rect.y, rect.y + rect.height);
+    // A rect flush with the frame edge has fewer probes; that is fine.
+    return total == 0 ? 1.0f : static_cast<float>(flat) / static_cast<float>(total);
 }
 
 double OverlapFraction(const IntRect& a, const IntRect& b) {
@@ -142,115 +311,33 @@ double OverlapFraction(const IntRect& a, const IntRect& b) {
     return smaller > 0.0 ? intersection / smaller : 0.0;
 }
 
-// Refines each rectangle edge to the exact canvas boundary, one pixel line
-// at a time. Block scoring is 16-pixel coarse and edge blocks are mixed, so
-// each side first SHRINKS while the rect's own boundary line is flat (chrome
-// captured by a partial block), then GROWS while the line just outside is
-// still photo content.
-IntRect RefineEdges(const FrameView& frame, IntRect rect) {
-    const int limit = kBlockSize;
-    const auto top_line_rich = [&] {
-        return SegmentIsRich(frame, rect.x, rect.x + rect.width, rect.y, rect.y + 1);
-    };
-    const auto bottom_line_rich = [&] {
-        return SegmentIsRich(frame, rect.x, rect.x + rect.width, rect.y + rect.height - 1,
-                             rect.y + rect.height);
-    };
-    const auto left_line_rich = [&] {
-        return SegmentIsRich(frame, rect.x, rect.x + 1, rect.y, rect.y + rect.height);
-    };
-    const auto right_line_rich = [&] {
-        return SegmentIsRich(frame, rect.x + rect.width - 1, rect.x + rect.width, rect.y,
-                             rect.y + rect.height);
-    };
-
-    for (int step = 0; step < limit && rect.height > limit && !top_line_rich(); ++step) {
-        ++rect.y;
-        --rect.height;
-    }
-    for (int step = 0; step < limit && rect.y > 0; ++step) {
-        if (!SegmentIsRich(frame, rect.x, rect.x + rect.width, rect.y - 1, rect.y)) break;
-        --rect.y;
-        ++rect.height;
-    }
-    for (int step = 0; step < limit && rect.height > limit && !bottom_line_rich(); ++step) {
-        --rect.height;
-    }
-    for (int step = 0; step < limit && rect.y + rect.height < frame.height; ++step) {
-        if (!SegmentIsRich(frame, rect.x, rect.x + rect.width, rect.y + rect.height,
-                           rect.y + rect.height + 1))
-            break;
-        ++rect.height;
-    }
-    for (int step = 0; step < limit && rect.width > limit && !left_line_rich(); ++step) {
-        ++rect.x;
-        --rect.width;
-    }
-    for (int step = 0; step < limit && rect.x > 0; ++step) {
-        if (!SegmentIsRich(frame, rect.x - 1, rect.x, rect.y, rect.y + rect.height)) break;
-        --rect.x;
-        ++rect.width;
-    }
-    for (int step = 0; step < limit && rect.width > limit && !right_line_rich(); ++step) {
-        --rect.width;
-    }
-    for (int step = 0; step < limit && rect.x + rect.width < frame.width; ++step) {
-        if (!SegmentIsRich(frame, rect.x + rect.width, rect.x + rect.width + 1, rect.y,
-                           rect.y + rect.height))
-            break;
-        ++rect.width;
-    }
-    return rect;
-}
-
-// Flatness of the chrome immediately outside the rectangle, 0..1.
-float BorderFlatness(const FrameView& frame, const IntRect& rect) {
-    int flat = 0;
-    int total = 0;
-    const auto check = [&](int x0, int x1, int y0, int y1) {
-        if (x0 < 0 || y0 < 0 || x1 > frame.width || y1 > frame.height || x0 >= x1 || y0 >= y1)
-            return;
-        ++total;
-        if (!SegmentIsRich(frame, x0, x1, y0, y1)) ++flat;
-    };
-    constexpr int kProbe = 4;
-    check(rect.x, rect.x + rect.width, rect.y - kProbe, rect.y);
-    check(rect.x, rect.x + rect.width, rect.y + rect.height, rect.y + rect.height + kProbe);
-    check(rect.x - kProbe, rect.x, rect.y, rect.y + rect.height);
-    check(rect.x + rect.width, rect.x + rect.width + kProbe, rect.y, rect.y + rect.height);
-    // A rect flush with the frame edge has fewer probes; that is fine.
-    return total == 0 ? 1.0f : static_cast<float>(flat) / static_cast<float>(total);
-}
-
 }  // namespace
 
 std::vector<RegionCandidate> DetectPhotoRegions(const FrameView& frame, int max_candidates) {
     std::vector<RegionCandidate> candidates;
     if (frame.width < 2 * kBlockSize || frame.height < 2 * kBlockSize) return candidates;
 
-    BlockGrid grid = ScoreBlocks(frame);
+    const FrameAnalysis analysis = AnalyzeBlocks(frame);
     const int minimum_blocks =
-        std::max(4, grid.columns * grid.rows / 100);  // ignore specks under ~1% of the frame
+        std::max(4, analysis.columns * analysis.rows / 100);  // ignore specks under ~1%
 
-    for (int round = 0; round < max_candidates; ++round) {
-        const GridRect core = LargestRichRectangle(grid);
-        if (core.Area() < minimum_blocks) break;
+    std::vector<GridComponent> components = RichComponents(analysis);
+    std::sort(components.begin(), components.end(),
+              [](const GridComponent& a, const GridComponent& b) {
+                  return a.rich_blocks > b.rich_blocks;
+              });
 
-        // Interior richness before this round's blocks are consumed.
-        int rich_inside = 0;
-        for (int cy = core.cy; cy < core.cy + core.rows; ++cy)
-            for (int cx = core.cx; cx < core.cx + core.columns; ++cx)
-                rich_inside += grid.At(cx, cy) ? 1 : 0;
-        const float interior = static_cast<float>(rich_inside) / static_cast<float>(core.Area());
+    for (const GridComponent& component : components) {
+        if (static_cast<int>(candidates.size()) >= max_candidates) break;
+        if (component.rich_blocks < minimum_blocks) continue;
 
-        // Consume the found blocks so the next round finds the next region.
-        for (int cy = core.cy; cy < core.cy + core.rows; ++cy)
-            for (int cx = core.cx; cx < core.cx + core.columns; ++cx)
-                grid.rich[static_cast<std::size_t>(cy) * grid.columns + cx] = 0;
+        const float interior = static_cast<float>(component.rich_blocks) /
+                               static_cast<float>(component.Columns() * component.Rows());
+        if (interior < 0.25f) continue;  // disconnected UI speckle, not a photo
 
-        IntRect rect{core.cx * kBlockSize, core.cy * kBlockSize, core.columns * kBlockSize,
-                     core.rows * kBlockSize};
-        rect = RefineEdges(frame, rect);
+        IntRect rect{component.min_cx * kBlockSize, component.min_cy * kBlockSize,
+                     component.Columns() * kBlockSize, component.Rows() * kBlockSize};
+        rect = RefineEdges(frame, analysis, rect);
 
         bool sliver_of_previous = false;
         for (const RegionCandidate& earlier : candidates) {
@@ -263,7 +350,7 @@ std::vector<RegionCandidate> DetectPhotoRegions(const FrameView& frame, int max_
 
         RegionCandidate candidate;
         candidate.rect = rect;
-        candidate.confidence = interior * BorderFlatness(frame, rect);
+        candidate.confidence = interior * BorderFlatness(frame, analysis, rect);
         candidates.push_back(candidate);
     }
 

@@ -23,6 +23,11 @@ std::vector<DesktopWindow> OnScreenWindows(uint32_t display_id) {
         // chrome (menu bar, dock, overlays - including our own).
         if ([info[(__bridge NSString*)kCGWindowLayer] intValue] != 0) continue;
         if ([info[(__bridge NSString*)kCGWindowOwnerPID] intValue] == own_pid) continue;
+        // Invisible system helper windows (accessibility warnings and the
+        // like) sit at layer zero with zero alpha; the window list reports
+        // them as if they were real.
+        NSNumber* alpha = info[(__bridge NSString*)kCGWindowAlpha];
+        if (alpha && alpha.doubleValue < 0.05) continue;
 
         CGRect bounds = CGRectZero;
         CGRectMakeWithDictionaryRepresentation(

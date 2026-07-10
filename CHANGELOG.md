@@ -8,8 +8,10 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
-- Photo detection tuned for real photographs: smooth, defocused regions
-  are recognized by their noise floor rather than requiring sharp detail.
+- Photo detection recognizes chrome by color, not just flatness: smooth
+  photo regions (skies, defocused backgrounds flattened by fit-to-window
+  scaling) stay part of their photo, and invisible system windows no
+  longer appear as suggestions.
 
 - Smart region selection: the picker outlines detected photo canvases and
   application windows; hover highlights one, a click confirms it, dragging

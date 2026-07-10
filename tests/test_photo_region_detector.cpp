@@ -115,14 +115,36 @@ TEST_CASE("Detector does not split one photo into overlapping slivers") {
     }
 }
 
-TEST_CASE("Detector treats a noiseless gradient as chrome") {
-    // Window chrome can carry gentle shading too. Without a photographic
-    // noise floor, a clean gradient must not be reported.
+TEST_CASE("Detector covers flat patches inside a photo") {
+    // Viewers downscale photographs to fit the window, which averages away
+    // the noise in smooth regions - a blown sky or defocused background
+    // renders as flat as chrome. The candidate must still cover the whole
+    // photo, not collapse onto its detailed band.
+    EditorFrame frame(640, 480);
+    const IntRect photo{96, 64, 400, 320};
+    frame.AddPhoto(photo);
+    // A completely flat band across the middle third (rendered-smooth sky).
+    for (int py = photo.y + 100; py < photo.y + 210; ++py)
+        for (int px = photo.x; px < photo.x + photo.width; ++px)
+            frame.Set(px, py, Color{140, 140, 140});
+
+    const auto candidates = DetectPhotoRegions(frame.View());
+    REQUIRE_FALSE(candidates.empty());
+    CHECK(NearlyEqual(candidates.front().rect, photo, 4));
+    CHECK(candidates.size() == 1);
+}
+
+TEST_CASE("Detector treats chrome-toned shading as chrome") {
+    // Window chrome carries gentle shading (title bars, panel separators),
+    // always in tones near the chrome color itself. Such shading must not be
+    // reported. A flat region in a clearly different color is content - that
+    // is how rendered-smooth skies are caught - so the distinction is color
+    // distance from the chrome palette, not smoothness.
     EditorFrame frame(640, 480);
     for (int py = 64; py < 384; ++py) {
         for (int px = 96; px < 496; ++px) {
-            const auto level = static_cast<uint8_t>(90 + (px - 96) * 40 / 400);
-            frame.Set(px, py, Color{level, level, level});
+            const auto level = static_cast<uint8_t>(40 + (px - 96) * 12 / 400);
+            frame.Set(px, py, Color{level, level, static_cast<uint8_t>(level + 2)});
         }
     }
     CHECK(DetectPhotoRegions(frame.View()).empty());
