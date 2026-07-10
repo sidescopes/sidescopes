@@ -11,6 +11,7 @@ FetchContent_MakeAvailable(catch2)
 add_executable(sidescopes_tests
     test_frame.cpp
     test_vectorscope.cpp
+    test_waveform.cpp
 )
 target_link_libraries(sidescopes_tests PRIVATE sidescopes_core Catch2::Catch2WithMain)
 sidescopes_target_defaults(sidescopes_tests)
