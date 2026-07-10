@@ -5,15 +5,6 @@
 
 #include "platform/region_selection.h"
 
-// Picker modes, ordered like the macOS screenshot toolbar: entire screen,
-// pick a detected rectangle (its window-selection idiom), draw by hand
-// (its portion-selection idiom).
-typedef NS_ENUM(NSInteger, SidescopesPickerMode) {
-    SidescopesPickerModeFull = 0,
-    SidescopesPickerModePick = 1,
-    SidescopesPickerModeDraw = 2,
-};
-
 // Where a mouse-down lands relative to the remembered selection: on a
 // resize handle (encoded by which edges it drags), inside (move), or
 // elsewhere (start a fresh rectangle).
@@ -41,7 +32,7 @@ typedef NS_OPTIONS(NSUInteger, SidescopesDragEdges) {
     // Suggested rectangles in view coordinates, with their labels.
     std::vector<std::pair<NSRect, std::string>> suggestions_;
 }
-@property(nonatomic, assign) SidescopesPickerMode mode;
+@property(nonatomic, assign) BOOL drawMode;
 @property(nonatomic, assign) NSPoint dragStart;
 @property(nonatomic, assign) NSPoint dragCurrent;
 @property(nonatomic, assign) BOOL dragging;
@@ -52,26 +43,19 @@ typedef NS_OPTIONS(NSUInteger, SidescopesDragEdges) {
 @property(nonatomic, assign) BOOL hasRemembered;
 @property(nonatomic, assign) NSRect rememberedRect;
 @property(nonatomic, assign) NSRect confirmedRect;
-@property(nonatomic, strong) NSView* toolbar;
 @end
 
 @implementation SidescopesPickerView
 
-- (void)setPickerMode:(SidescopesPickerMode)mode {
-    if (self.mode == mode) return;
-    self.mode = mode;
+- (void)switchToDrawMode:(BOOL)draw {
+    if (self.drawMode == draw) return;
+    if (!draw && suggestions_.empty()) return;  // nothing to pick from
+    self.drawMode = draw;
     self.hoveredSuggestion = -1;
     self.dragging = NO;
     self.adjusting = SidescopesDragEdgeNone;
     [self.window invalidateCursorRectsForView:self];
     self.needsDisplay = YES;
-}
-
-- (void)modeChanged:(NSSegmentedControl*)sender {
-    [self setPickerMode:static_cast<SidescopesPickerMode>(sender.selectedSegment)];
-    // The control keeps key focus after a click; hand it back so ESC and
-    // the mode keys keep working.
-    [self.window makeFirstResponder:self];
 }
 
 // The smallest suggestion under the cursor wins, so a photo canvas beats
@@ -137,22 +121,10 @@ typedef NS_OPTIONS(NSUInteger, SidescopesDragEdges) {
         }
 }
 
-- (void)drawLabel:(NSString*)label atPoint:(NSPoint)point size:(CGFloat)size {
-    NSDictionary* attributes = @{
-        NSForegroundColorAttributeName : [NSColor whiteColor],
-        NSFontAttributeName : [NSFont systemFontOfSize:size weight:NSFontWeightMedium],
-    };
-    [label drawAtPoint:point withAttributes:attributes];
-}
-
 - (void)drawRect:(NSRect)dirty {
     (void)dirty;
     NSString* hint = @"";
-    if (self.mode == SidescopesPickerModeFull) {
-        [[[NSColor systemBlueColor] colorWithAlphaComponent:0.18] setFill];
-        NSRectFillUsingOperation(self.bounds, NSCompositingOperationSourceOver);
-        hint = @"Click to scope the entire screen  -  Esc to cancel";
-    } else if (self.mode == SidescopesPickerModePick) {
+    if (!self.drawMode) {
         [[NSColor colorWithWhite:0 alpha:0.2] setFill];
         NSRectFillUsingOperation(self.bounds, NSCompositingOperationSourceOver);
         if (self.hoveredSuggestion >= 0 &&
@@ -168,12 +140,15 @@ typedef NS_OPTIONS(NSUInteger, SidescopesDragEdges) {
             NSBezierPath* border = [NSBezierPath bezierPathWithRect:hovered.first];
             border.lineWidth = 2.0;
             [border stroke];
-            [self drawLabel:[NSString stringWithUTF8String:hovered.second.c_str()]
-                    atPoint:NSMakePoint(hovered.first.origin.x + 6, NSMaxY(hovered.first) - 20)
-                       size:12];
+            NSString* label = [NSString stringWithUTF8String:hovered.second.c_str()];
+            NSDictionary* label_attributes = @{
+                NSForegroundColorAttributeName : [NSColor whiteColor],
+                NSFontAttributeName : [NSFont systemFontOfSize:12 weight:NSFontWeightMedium],
+            };
+            [label drawAtPoint:NSMakePoint(hovered.first.origin.x + 6, NSMaxY(hovered.first) - 20)
+                withAttributes:label_attributes];
         }
-        hint = suggestions_.empty() ? @"No areas detected  -  Esc to cancel"
-                                    : @"Click a detected area  -  Esc to cancel";
+        hint = @"Click a detected area  -  D to draw instead  -  Esc to cancel";
     } else {
         [[NSColor colorWithWhite:0 alpha:0.35] setFill];
         NSRectFillUsingOperation(self.bounds, NSCompositingOperationSourceOver);
@@ -193,10 +168,9 @@ typedef NS_OPTIONS(NSUInteger, SidescopesDragEdges) {
             [border stroke];
             [self drawHandlesAroundRect:rect];
         }
-        hint =
-            self.hasRemembered
-                ? @"Drag to select an area, or adjust and click the current one  -  Esc to cancel"
-                : @"Drag to select an area  -  Esc to cancel";
+        hint = suggestions_.empty()
+                   ? @"Drag to select an area  -  Esc to cancel"
+                   : @"Drag to select an area  -  A to pick a detected one  -  Esc to cancel";
     }
 
     if (!self.dragging && self.adjusting == SidescopesDragEdgeNone) {
@@ -212,18 +186,17 @@ typedef NS_OPTIONS(NSUInteger, SidescopesDragEdges) {
 }
 
 - (void)resetCursorRects {
-    if (self.mode == SidescopesPickerModeDraw) {
+    if (self.drawMode) {
         [self addCursorRect:self.bounds cursor:NSCursor.crosshairCursor];
         if (self.hasRemembered)
             [self addCursorRect:self.rememberedRect cursor:NSCursor.openHandCursor];
     } else {
         [self addCursorRect:self.bounds cursor:NSCursor.pointingHandCursor];
     }
-    if (self.toolbar) [self addCursorRect:self.toolbar.frame cursor:NSCursor.arrowCursor];
 }
 
 - (void)mouseMoved:(NSEvent*)event {
-    if (self.mode != SidescopesPickerModePick) return;
+    if (self.drawMode) return;
     const NSPoint point = [self convertPoint:event.locationInWindow fromView:nil];
     const NSInteger hovered = [self suggestionAtPoint:point];
     if (hovered != self.hoveredSuggestion) {
@@ -235,7 +208,7 @@ typedef NS_OPTIONS(NSUInteger, SidescopesDragEdges) {
 - (void)mouseDown:(NSEvent*)event {
     self.dragStart = [self convertPoint:event.locationInWindow fromView:nil];
     self.dragCurrent = self.dragStart;
-    if (self.mode == SidescopesPickerModeDraw) {
+    if (self.drawMode) {
         self.adjusting = [self adjustZoneAtPoint:self.dragStart];
         self.adjustAnchor = self.rememberedRect;
     }
@@ -243,7 +216,7 @@ typedef NS_OPTIONS(NSUInteger, SidescopesDragEdges) {
 }
 
 - (void)mouseDragged:(NSEvent*)event {
-    if (self.mode != SidescopesPickerModeDraw) return;
+    if (!self.drawMode) return;
     self.dragCurrent = [self convertPoint:event.locationInWindow fromView:nil];
     const CGFloat dx = self.dragCurrent.x - self.dragStart.x;
     const CGFloat dy = self.dragCurrent.y - self.dragStart.y;
@@ -278,22 +251,13 @@ typedef NS_OPTIONS(NSUInteger, SidescopesDragEdges) {
     }
     // A real drag only starts after a few points of travel, so a click on
     // the remembered rectangle never flashes a tiny manual selection.
-    if (!self.dragging && (std::abs(dx) > 4 || std::abs(dy) > 4)) {
-        self.dragging = YES;
-        self.toolbar.hidden = YES;
-    }
+    if (!self.dragging && (std::abs(dx) > 4 || std::abs(dy) > 4)) self.dragging = YES;
     self.needsDisplay = YES;
 }
 
 - (void)mouseUp:(NSEvent*)event {
     const NSPoint point = [self convertPoint:event.locationInWindow fromView:nil];
-    if (self.mode == SidescopesPickerModeFull) {
-        self.picked = YES;
-        self.confirmedRect = self.bounds;
-        [NSApp stopModalWithCode:NSModalResponseOK];
-        return;
-    }
-    if (self.mode == SidescopesPickerModePick) {
+    if (!self.drawMode) {
         const NSInteger hovered = [self suggestionAtPoint:point];
         if (hovered < 0) return;  // a miss keeps the picker open
         self.picked = YES;
@@ -305,7 +269,6 @@ typedef NS_OPTIONS(NSUInteger, SidescopesDragEdges) {
     if (self.dragging) {
         const NSRect selection = [self selectionRect];
         self.dragging = NO;
-        self.toolbar.hidden = NO;
         if (selection.size.width > 8 && selection.size.height > 8) {
             self.picked = YES;
             self.confirmedRect = selection;
@@ -338,13 +301,7 @@ typedef NS_OPTIONS(NSUInteger, SidescopesDragEdges) {
         return;
     }
     if (event.keyCode == 36 || event.keyCode == 76) {  // Return / Enter
-        if (self.mode == SidescopesPickerModeFull) {
-            self.picked = YES;
-            self.confirmedRect = self.bounds;
-            [NSApp stopModalWithCode:NSModalResponseOK];
-            return;
-        }
-        if (self.mode == SidescopesPickerModeDraw && self.hasRemembered) {
+        if (self.drawMode && self.hasRemembered) {
             self.picked = YES;
             self.confirmedRect = self.rememberedRect;
             [NSApp stopModalWithCode:NSModalResponseOK];
@@ -354,12 +311,12 @@ typedef NS_OPTIONS(NSUInteger, SidescopesDragEdges) {
     NSString* keys = event.charactersIgnoringModifiers;
     if (keys.length == 1) {
         const unichar key = [keys characterAtIndex:0];
-        if (key >= '1' && key <= '3') {
-            const auto mode = static_cast<SidescopesPickerMode>(key - '1');
-            [self setPickerMode:mode];
-            if ([self.toolbar.subviews.firstObject isKindOfClass:NSSegmentedControl.class])
-                [static_cast<NSSegmentedControl*>(self.toolbar.subviews.firstObject)
-                    setSelectedSegment:mode];
+        if (key == 'a' || key == 'A') {
+            [self switchToDrawMode:NO];
+            return;
+        }
+        if (key == 'd' || key == 'D') {
+            [self switchToDrawMode:YES];
             return;
         }
     }
@@ -406,10 +363,6 @@ constexpr double kBorderMargin = 4.0;
 
 NSWindow* g_border_window = nil;
 
-// Remembered across invocations, like the screenshot interface remembers
-// its capture mode. Negative until the picker has run once.
-NSInteger g_last_picker_mode = -1;
-
 NSScreen* ScreenForDisplay(uint32_t display_id) {
     for (NSScreen* screen in NSScreen.screens) {
         NSNumber* number = screen.deviceDescription[@"NSScreenNumber"];
@@ -426,53 +379,11 @@ NSRect RegionToViewRect(const RegionOfInterest& region, NSSize view_size) {
                       (region.bottom_percent - region.top_percent) / 100.0 * view_size.height);
 }
 
-NSImage* ToolbarSymbol(NSString* name, NSString* description) {
-    NSImage* image = [NSImage imageWithSystemSymbolName:name accessibilityDescription:description];
-    [image setTemplate:YES];
-    return image;
-}
-
-// The screenshot-style mode toolbar: a blurred pill with one segment per
-// mode, bottom-center of the overlay.
-NSView* BuildModeToolbar(SidescopesPickerView* view, NSRect overlay_bounds,
-                         SidescopesPickerMode mode) {
-    NSSegmentedControl* segments =
-        [NSSegmentedControl segmentedControlWithImages:@[
-            ToolbarSymbol(@"macwindow", @"Entire screen"),
-            ToolbarSymbol(@"rectangle.on.rectangle", @"Detected area"),
-            ToolbarSymbol(@"rectangle.dashed", @"Drawn area"),
-        ]
-                                          trackingMode:NSSegmentSwitchTrackingSelectOne
-                                                target:view
-                                                action:@selector(modeChanged:)];
-    [segments setToolTip:@"Scope the entire screen (1)" forSegment:0];
-    [segments setToolTip:@"Pick a detected area (2)" forSegment:1];
-    [segments setToolTip:@"Draw an area (3)" forSegment:2];
-    segments.segmentStyle = NSSegmentStyleSeparated;
-    segments.selectedSegment = mode;
-    [segments sizeToFit];
-
-    const CGFloat padding = 10.0;
-    const NSSize content = segments.frame.size;
-    NSVisualEffectView* pill = [[NSVisualEffectView alloc]
-        initWithFrame:NSMakeRect((overlay_bounds.size.width - content.width) / 2 - padding, 48,
-                                 content.width + 2 * padding, content.height + 2 * padding)];
-    pill.material = NSVisualEffectMaterialHUDWindow;
-    pill.blendingMode = NSVisualEffectBlendingModeBehindWindow;
-    pill.state = NSVisualEffectStateActive;
-    pill.wantsLayer = YES;
-    pill.layer.cornerRadius = (content.height + 2 * padding) / 2;
-    pill.layer.masksToBounds = YES;
-    segments.frame = NSMakeRect(padding, padding, content.width, content.height);
-    [pill addSubview:segments];
-    return pill;
-}
-
 }  // namespace
 
 std::optional<RegionOfInterest> PickRegionOnDisplay(
     uint32_t display_id, const std::vector<SuggestedRegion>& suggestions,
-    const std::optional<RegionOfInterest>& current_region) {
+    const std::optional<RegionOfInterest>& current_region, RegionPickerMode initial_mode) {
     NSScreen* screen = ScreenForDisplay(display_id);
 
     SidescopesPickerWindow* overlay =
@@ -498,15 +409,7 @@ std::optional<RegionOfInterest> PickRegionOnDisplay(
         view.hasRemembered = YES;
         view.rememberedRect = RegionToViewRect(*current_region, view_size);
     }
-
-    SidescopesPickerMode mode =
-        suggestions.empty() ? SidescopesPickerModeDraw : SidescopesPickerModePick;
-    if (g_last_picker_mode >= 0) mode = static_cast<SidescopesPickerMode>(g_last_picker_mode);
-    if (mode == SidescopesPickerModePick && suggestions.empty()) mode = SidescopesPickerModeDraw;
-    view.mode = mode;
-
-    view.toolbar = BuildModeToolbar(view, overlay.contentView.bounds, mode);
-    [view addSubview:view.toolbar];
+    view.drawMode = initial_mode == RegionPickerMode::Draw || suggestions.empty();
     overlay.contentView = view;
     overlay.acceptsMouseMovedEvents = YES;
 
@@ -516,7 +419,6 @@ std::optional<RegionOfInterest> PickRegionOnDisplay(
     [overlay makeKeyAndOrderFront:nil];
     [overlay makeFirstResponder:view];
     const NSModalResponse response = [NSApp runModalForWindow:overlay];
-    g_last_picker_mode = view.mode;
     [overlay orderOut:nil];
 
     if (response != NSModalResponseOK || !view.picked) return std::nullopt;

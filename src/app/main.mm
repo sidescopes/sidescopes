@@ -231,7 +231,11 @@ bool ScopeToggleButton(const char* id, ScopeGlyph glyph, bool enabled, const cha
     return pressed;
 }
 
-bool IconButton(const char* id, bool brackets, const char* tooltip) {
+// Region tool icons: corner brackets for picking a detected area, a dashed
+// rectangle for drawing one, an outline rectangle for full screen.
+enum class RegionIcon { Brackets, Dashed, Outline };
+
+bool IconButton(const char* id, RegionIcon icon, const char* tooltip) {
     const float height = ImGui::GetTextLineHeight() + 4.0f;
     const bool pressed = ImGui::InvisibleButton(id, ImVec2(height + 8.0f, height));
     ImDrawList* draw = ImGui::GetWindowDrawList();
@@ -243,7 +247,7 @@ bool IconButton(const char* id, bool brackets, const char* tooltip) {
     const ImVec2 b(max.x - 7, max.y - 3);
     const ImU32 color = ImGui::GetColorU32(ImGuiCol_Text);
     const float stroke = 1.5f;
-    if (brackets) {
+    if (icon == RegionIcon::Brackets) {
         const float length = std::min(b.x - a.x, b.y - a.y) * 0.4f;
         const auto corner = [&](float cx, float cy, float dx, float dy) {
             draw->AddLine(ImVec2(cx, cy), ImVec2(cx + dx * length, cy), color, stroke);
@@ -253,6 +257,19 @@ bool IconButton(const char* id, bool brackets, const char* tooltip) {
         corner(b.x, a.y, -1, 1);
         corner(a.x, b.y, 1, -1);
         corner(b.x, b.y, -1, -1);
+    } else if (icon == RegionIcon::Dashed) {
+        const auto dashes = [&](ImVec2 from, ImVec2 to) {
+            for (const float start : {0.0f, 0.6f}) {
+                const auto at = [&](float t) {
+                    return ImVec2(from.x + (to.x - from.x) * t, from.y + (to.y - from.y) * t);
+                };
+                draw->AddLine(at(start), at(start + 0.4f), color, stroke);
+            }
+        };
+        dashes(a, ImVec2(b.x, a.y));
+        dashes(ImVec2(b.x, a.y), b);
+        dashes(b, ImVec2(a.x, b.y));
+        dashes(ImVec2(a.x, b.y), a);
     } else {
         draw->AddRect(a, b, color, 1.0f, 0, stroke);
     }
@@ -575,32 +592,49 @@ int main() {
                      ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |
                          ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoSavedSettings);
 
-        // Toolbar: scope toggles, region tools, cursor readout. Each scope
-        // toggles independently and the enabled ones stack; the last one on
-        // refuses to turn off, so the window never goes empty.
+        // Toolbar: scope toggles, region tools, cursor readout. Switching
+        // is the common case, so a plain click or key shows one scope
+        // alone; Shift stacks and unstacks, and the last scope on refuses
+        // to turn off, so the window never goes empty.
         const auto toggle_scope = [&](bool& flag) {
             const int enabled =
                 (show_vectorscope ? 1 : 0) + (show_waveform ? 1 : 0) + (show_histogram ? 1 : 0);
             if (!flag || enabled > 1) flag = !flag;
         };
-        const auto scope_toggle = [&](const char* id, ScopeGlyph glyph, bool& flag,
+        const auto choose_scope = [&](ScopeGlyph kind, bool& flag, bool stack) {
+            if (stack) {
+                toggle_scope(flag);
+            } else {
+                show_vectorscope = kind == ScopeGlyph::Vectorscope;
+                show_waveform = kind == ScopeGlyph::Waveform;
+                show_histogram = kind == ScopeGlyph::Histogram;
+            }
+        };
+        const auto scope_toggle = [&](const char* id, ScopeGlyph kind, bool& flag,
                                       const char* tooltip) {
-            if (ScopeToggleButton(id, glyph, flag, tooltip)) toggle_scope(flag);
+            if (ScopeToggleButton(id, kind, flag, tooltip)) choose_scope(kind, flag, io.KeyShift);
             ImGui::SameLine(0.0f, 2.0f);
         };
         scope_toggle("##toggle-vectorscope", ScopeGlyph::Vectorscope, show_vectorscope,
-                     "Vectorscope (V)");
-        scope_toggle("##toggle-waveform", ScopeGlyph::Waveform, show_waveform, "Waveform (W)");
-        scope_toggle("##toggle-histogram", ScopeGlyph::Histogram, show_histogram, "Histogram (H)");
+                     "Vectorscope - V shows only this, Shift+V stacks");
+        scope_toggle("##toggle-waveform", ScopeGlyph::Waveform, show_waveform,
+                     "Waveform - W shows only this, Shift+W stacks");
+        scope_toggle("##toggle-histogram", ScopeGlyph::Histogram, show_histogram,
+                     "Histogram - H shows only this, Shift+H stacks");
         ImGui::SameLine(0.0f, 8.0f);
 
         // Keyboard shortcuts mirror the toolbar and region tools.
-        bool want_region_pick_hotkey = false;
+        std::optional<RegionPickerMode> want_region_pick;
         if (!io.WantTextInput) {
-            if (ImGui::IsKeyPressed(ImGuiKey_V, false)) toggle_scope(show_vectorscope);
-            if (ImGui::IsKeyPressed(ImGuiKey_W, false)) toggle_scope(show_waveform);
-            if (ImGui::IsKeyPressed(ImGuiKey_H, false)) toggle_scope(show_histogram);
-            if (ImGui::IsKeyPressed(ImGuiKey_A, false)) want_region_pick_hotkey = true;
+            if (ImGui::IsKeyPressed(ImGuiKey_V, false))
+                choose_scope(ScopeGlyph::Vectorscope, show_vectorscope, io.KeyShift);
+            if (ImGui::IsKeyPressed(ImGuiKey_W, false))
+                choose_scope(ScopeGlyph::Waveform, show_waveform, io.KeyShift);
+            if (ImGui::IsKeyPressed(ImGuiKey_H, false))
+                choose_scope(ScopeGlyph::Histogram, show_histogram, io.KeyShift);
+            if (ImGui::IsKeyPressed(ImGuiKey_A, false))
+                want_region_pick = RegionPickerMode::PickDetected;
+            if (ImGui::IsKeyPressed(ImGuiKey_D, false)) want_region_pick = RegionPickerMode::Draw;
             if (ImGui::IsKeyPressed(ImGuiKey_F, false)) {
                 analysis.region = RegionOfInterest{};
                 analysis_dirty = true;
@@ -608,12 +642,14 @@ int main() {
             if (ImGui::IsKeyPressed(ImGuiKey_G, false)) show_graticule = !show_graticule;
         }
 
-        bool want_region_pick = want_region_pick_hotkey;
-        if (IconButton("##select-region", true, "Select scoped area (drag on screen, A)"))
-            want_region_pick = true;
+        if (IconButton("##pick-region", RegionIcon::Brackets, "Pick a detected area (A)"))
+            want_region_pick = RegionPickerMode::PickDetected;
+        ImGui::SameLine(0.0f, 2.0f);
+        if (IconButton("##draw-region", RegionIcon::Dashed, "Draw an area (D)"))
+            want_region_pick = RegionPickerMode::Draw;
         ImGui::SameLine(0.0f, 2.0f);
         if (!is_full_region()) {
-            if (IconButton("##full-region", false, "Reset to full screen")) {
+            if (IconButton("##full-region", RegionIcon::Outline, "Reset to full screen (F)")) {
                 analysis.region = RegionOfInterest{};
                 analysis_dirty = true;
             }
@@ -827,7 +863,7 @@ int main() {
                     analysis_dirty = true;
                     break;
                 case kMenuSelectRegion:
-                    want_region_pick = true;
+                    want_region_pick = RegionPickerMode::PickDetected;
                     break;
                 case kMenuFullScreenRegion:
                     analysis.region = RegionOfInterest{};
@@ -969,7 +1005,8 @@ int main() {
                     const auto pixels_per_point =
                         static_cast<float>(view.width / geometry->width_points);
                     photo_candidates =
-                        DetectPhotoRegions(view, {analysis.masked_window}, pixels_per_point);
+                        DetectPhotoRegions(view, {analysis.masked_window}, pixels_per_point,
+                                           /*max_candidates=*/16);
                 });
 
                 for (const DesktopWindow& window : visible_windows) {
@@ -1036,8 +1073,8 @@ int main() {
             }
             std::optional<RegionOfInterest> current_region;
             if (!is_full_region()) current_region = analysis.region;
-            if (const auto region =
-                    PickRegionOnDisplay(capture_display, suggestions, current_region)) {
+            if (const auto region = PickRegionOnDisplay(capture_display, suggestions,
+                                                        current_region, *want_region_pick)) {
                 analysis.region = *region;
                 analysis_dirty = true;
             }
