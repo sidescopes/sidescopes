@@ -886,11 +886,18 @@ int main() {
                     const double scale_x = view.width / geometry->width_points;
                     const double scale_y = view.height / geometry->height_points;
                     for (const DesktopWindow& window : visible_windows) {
+                        // The window list reports frame rectangles, and on
+                        // modern macOS title bars are translucent with the
+                        // content blurred through them - those rows read as
+                        // photo to the detector. Shave the standard title
+                        // height so candidates start at real content.
+                        constexpr double kTitleBarPoints = 30.0;
                         const IntRect window_rect{
                             static_cast<int>((window.x - geometry->origin_x) * scale_x),
-                            static_cast<int>((window.y - geometry->origin_y) * scale_y),
+                            static_cast<int>((window.y + kTitleBarPoints - geometry->origin_y) *
+                                             scale_y),
                             static_cast<int>(window.width * scale_x),
-                            static_cast<int>(window.height * scale_y)};
+                            static_cast<int>((window.height - kTitleBarPoints) * scale_y)};
                         for (const RegionCandidate& candidate :
                              DetectPhotoRegions(view, window_rect, 2)) {
                             photo_candidates.push_back(candidate);

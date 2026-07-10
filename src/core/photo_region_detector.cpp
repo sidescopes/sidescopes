@@ -116,6 +116,11 @@ FrameAnalysis AnalyzeBlocks(const FrameView& frame, const IntRect& bounds) {
     for (std::size_t index = 0; index < block_count; ++index) {
         if (!analysis.flat[index]) continue;
         const MeanColor& mean = analysis.means[index];
+        // Chrome is neutral by design; a COLORED flat expanse (a clear sky
+        // filling half a viewer window) must never claim a chrome slot.
+        const double spread =
+            std::max({mean.r, mean.g, mean.b}) - std::min({mean.r, mean.g, mean.b});
+        if (spread > 8.0) continue;
         const int key = (static_cast<int>(mean.r) / 16 << 8) |
                         (static_cast<int>(mean.g) / 16 << 4) | (static_cast<int>(mean.b) / 16);
         auto& entry = flat_colors[key];

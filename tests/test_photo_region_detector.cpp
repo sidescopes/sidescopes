@@ -177,6 +177,24 @@ TEST_CASE("Detector covers a smooth mid-gray region of a monochrome photo") {
     CHECK(candidates.size() == 1);
 }
 
+TEST_CASE("Detector never mistakes a colored expanse for chrome") {
+    // A viewer window where a flat blue sky dominates the frame: the sky
+    // outnumbers every other flat color, but chrome is neutral by design,
+    // so a colored expanse must not claim a chrome slot and punch itself
+    // out of the photo.
+    EditorFrame frame(640, 480);
+    const IntRect photo{96, 64, 400, 320};
+    for (int py = photo.y; py < photo.y + 200; ++py)
+        for (int px = photo.x; px < photo.x + photo.width; ++px)
+            frame.Set(px, py, Color{110, 160, 220});  // flat sky
+    frame.AddPhoto(IntRect{photo.x, photo.y + 200, photo.width, photo.height - 200});
+
+    const auto candidates = DetectPhotoRegions(frame.View());
+    REQUIRE_FALSE(candidates.empty());
+    CHECK(NearlyEqual(candidates.front().rect, photo, 4));
+    CHECK(candidates.size() == 1);
+}
+
 TEST_CASE("Detector treats chrome-toned shading as chrome") {
     // Window chrome carries gentle shading (title bars, panel separators),
     // always in tones near the chrome color itself. Such shading must not be
