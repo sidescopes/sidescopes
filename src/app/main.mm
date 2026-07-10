@@ -978,7 +978,10 @@ int main() {
                     std::fclose(image);
                 });
             }
-            if (const auto region = PickRegionOnDisplay(capture_display, suggestions)) {
+            std::optional<RegionOfInterest> current_region;
+            if (!is_full_region()) current_region = analysis.region;
+            if (const auto region =
+                    PickRegionOnDisplay(capture_display, suggestions, current_region)) {
                 analysis.region = *region;
                 analysis_dirty = true;
             }
