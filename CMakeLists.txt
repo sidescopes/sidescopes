@@ -41,6 +41,28 @@ add_library(sidescopes_core STATIC
 target_include_directories(sidescopes_core PUBLIC src)
 sidescopes_target_defaults(sidescopes_core)
 
+if(APPLE)
+    enable_language(OBJCXX)
+    add_library(sidescopes_platform STATIC
+        src/platform/macos/desktop.mm
+        src/platform/macos/native_menu.mm
+        src/platform/macos/region_selection.mm
+        src/platform/macos/screen_capture.mm
+    )
+    target_include_directories(sidescopes_platform PUBLIC src)
+    target_compile_options(sidescopes_platform PRIVATE -fobjc-arc)
+    target_link_libraries(sidescopes_platform
+        PUBLIC
+        sidescopes_core
+        "-framework AppKit"
+        "-framework CoreGraphics"
+        "-framework CoreMedia"
+        "-framework CoreVideo"
+        "-framework ScreenCaptureKit"
+    )
+    sidescopes_target_defaults(sidescopes_platform)
+endif()
+
 if(SIDESCOPES_BUILD_TESTS)
     enable_testing()
     add_subdirectory(tests)

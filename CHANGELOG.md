@@ -8,6 +8,9 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- macOS platform layer: ScreenCaptureKit capture, native context menus,
+  drag region selection with a persistent click-through border, and desktop
+  services.
 - Preferences persisted between sessions: calibration, region, view,
   toggles, and window placement.
 - Graticule geometry built from the engines' own projections: vectorscope
