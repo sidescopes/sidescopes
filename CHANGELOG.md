@@ -9,6 +9,9 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Added
 
 - RGB parade waveform style: the three channels side by side.
+- Histogram view with per-channel bars and cursor value markers.
+- Keyboard shortcuts: V/W/B/H switch views, A selects the area, F resets
+  it, G toggles the graticule.
 
 - The SideScopes macOS application: compact always-on-top window with
   vectorscope, waveform, and combined views, scroll-to-adjust intensity,

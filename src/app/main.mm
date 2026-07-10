@@ -39,12 +39,13 @@ namespace {
 
 using namespace sidescopes;
 
-enum class ViewMode { Vectorscope, Waveform, Both };
+enum class ViewMode { Vectorscope, Waveform, Both, Histogram };
 
 enum MenuAction {
     kMenuShowVectorscope = 1,
     kMenuShowWaveform,
     kMenuShowBoth,
+    kMenuShowHistogram,
     kMenuWaveformLuma = 10,
     kMenuWaveformRgb,
     kMenuWaveformRgbAndLuma,
@@ -350,14 +351,17 @@ int main() {
     analysis.waveform.gain = startup.waveform_gain;
     analysis.waveform.sampling_stride = startup.waveform_stride;
     analysis.waveform.mode = startup.waveform_mode;
+    analysis.histogram.gain = startup.histogram_gain;
+    analysis.histogram.sampling_stride = startup.histogram_stride;
     analysis.region = startup.region;
     bool analysis_dirty = true;
 
     float vectorscope_intensity = IntensityFromTraceGain(analysis.vectorscope.gain);
     float waveform_intensity = IntensityFromTraceGain(analysis.waveform.gain);
+    float histogram_intensity = IntensityFromTraceGain(analysis.histogram.gain);
     float vectorscope_smoothing_ms = startup.vectorscope_smoothing_ms;
     float waveform_smoothing_ms = startup.waveform_smoothing_ms;
-    auto view_mode = static_cast<ViewMode>(std::clamp(startup.view_mode, 0, 2));
+    auto view_mode = static_cast<ViewMode>(std::clamp(startup.view_mode, 0, 3));
     bool show_graticule = startup.show_graticule;
     bool values_as_percent = startup.values_as_percent;
     bool show_settings = false;
@@ -372,6 +376,7 @@ int main() {
 
     ScopeTexture vectorscope_texture(device, Vectorscope::kSize, Vectorscope::kSize);
     ScopeTexture waveform_texture(device, Waveform::kColumns, Waveform::kLevels);
+    ScopeTexture histogram_texture(device, Histogram::kBins, Histogram::kHeight);
 
     worker.Start();
 
@@ -404,6 +409,8 @@ int main() {
         preferences.waveform_smoothing_ms = waveform_smoothing_ms;
         preferences.matrix = analysis.vectorscope.matrix;
         preferences.waveform_mode = analysis.waveform.mode;
+        preferences.histogram_gain = analysis.histogram.gain;
+        preferences.histogram_stride = analysis.histogram.sampling_stride;
         preferences.region = analysis.region;
         preferences.view_mode = static_cast<int>(view_mode);
         preferences.show_graticule = show_graticule;
@@ -443,6 +450,7 @@ int main() {
         if (worker.FetchOutput(output_version, output)) {
             vectorscope_texture.Upload(output.vectorscope_image);
             waveform_texture.Upload(output.waveform_image);
+            histogram_texture.Upload(output.histogram_image);
             last_activity = glfwGetTime();
         }
 
@@ -533,9 +541,25 @@ int main() {
         mode_button("Vector", ViewMode::Vectorscope);
         mode_button("Wave", ViewMode::Waveform);
         mode_button("Both", ViewMode::Both);
+        mode_button("Histo", ViewMode::Histogram);
 
-        bool want_region_pick = false;
-        if (IconButton("##select-region", true, "Select scoped area (drag on screen)"))
+        // Keyboard shortcuts mirror the toolbar and region tools.
+        bool want_region_pick_hotkey = false;
+        if (!io.WantTextInput) {
+            if (ImGui::IsKeyPressed(ImGuiKey_V, false)) view_mode = ViewMode::Vectorscope;
+            if (ImGui::IsKeyPressed(ImGuiKey_W, false)) view_mode = ViewMode::Waveform;
+            if (ImGui::IsKeyPressed(ImGuiKey_B, false)) view_mode = ViewMode::Both;
+            if (ImGui::IsKeyPressed(ImGuiKey_H, false)) view_mode = ViewMode::Histogram;
+            if (ImGui::IsKeyPressed(ImGuiKey_A, false)) want_region_pick_hotkey = true;
+            if (ImGui::IsKeyPressed(ImGuiKey_F, false)) {
+                analysis.region = RegionOfInterest{};
+                analysis_dirty = true;
+            }
+            if (ImGui::IsKeyPressed(ImGuiKey_G, false)) show_graticule = !show_graticule;
+        }
+
+        bool want_region_pick = want_region_pick_hotkey;
+        if (IconButton("##select-region", true, "Select scoped area (drag on screen, A)"))
             want_region_pick = true;
         ImGui::SameLine(0.0f, 2.0f);
         if (!is_full_region()) {
@@ -625,11 +649,39 @@ int main() {
             }
         };
 
+        const auto draw_histogram = [&] {
+            const DrawnScope scope = DrawScopeImage(histogram_texture, false);
+            scope_gestures(scope, histogram_intensity, analysis.histogram.gain, 1.0f);
+            if (show_graticule) {
+                ImDrawList* draw = ImGui::GetWindowDrawList();
+                for (int quarter = 0; quarter <= 4; ++quarter) {
+                    const float x = scope.origin.x + scope.size.x * quarter / 4.0f;
+                    draw->AddLine(ImVec2(x, scope.origin.y),
+                                  ImVec2(x, scope.origin.y + scope.size.y),
+                                  IM_COL32(150, 150, 150, 70));
+                }
+            }
+            if (vectorscope_color) {
+                const float channels[3] = {vectorscope_color->r, vectorscope_color->g,
+                                           vectorscope_color->b};
+                const ImU32 colors[3] = {IM_COL32(255, 90, 90, 230), IM_COL32(90, 255, 90, 230),
+                                         IM_COL32(110, 110, 255, 230)};
+                ImDrawList* draw = ImGui::GetWindowDrawList();
+                for (int channel = 0; channel < 3; ++channel) {
+                    const float x = scope.origin.x + channels[channel] / 255.0f * scope.size.x;
+                    draw->AddLine(ImVec2(x, scope.origin.y),
+                                  ImVec2(x, scope.origin.y + scope.size.y), colors[channel], 1.5f);
+                }
+            }
+        };
+
         const ImVec2 area = ImGui::GetContentRegionAvail();
         if (view_mode == ViewMode::Vectorscope) {
             draw_vectorscope();
         } else if (view_mode == ViewMode::Waveform) {
             draw_waveform();
+        } else if (view_mode == ViewMode::Histogram) {
+            draw_histogram();
         } else {
             const bool horizontal = area.x >= area.y;
             const ImVec2 half =
@@ -655,6 +707,7 @@ int main() {
                  view_mode == ViewMode::Vectorscope},
                 {Kind::Action, "Waveform", kMenuShowWaveform, view_mode == ViewMode::Waveform},
                 {Kind::Action, "Both", kMenuShowBoth, view_mode == ViewMode::Both},
+                {Kind::Action, "Histogram", kMenuShowHistogram, view_mode == ViewMode::Histogram},
                 {Kind::Separator, "", -1, false},
                 {Kind::SubmenuBegin, "Waveform Style", -1, false},
                 {Kind::Action, "Luma", kMenuWaveformLuma, waveform_mode == WaveformMode::Luma},
