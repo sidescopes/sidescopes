@@ -27,7 +27,9 @@
 #include "core/analysis_worker.h"
 #include "core/frame_mailbox.h"
 #include "core/marker_smoother.h"
+#include "core/photo_region_detector.h"
 #include "core/preferences.h"
+#include "core/region_suggestions.h"
 #include "core/scopes/graticule.h"
 #include "core/trace_intensity.h"
 #include "platform/desktop.h"
@@ -842,7 +844,40 @@ int main() {
         // analysis keep flowing underneath.
         if (want_region_pick && capture_display != 0) {
             HideRegionBorder();
-            if (const auto region = PickRegionOnDisplay(capture_display)) {
+            // Build the offer: detected photo canvases, then windows.
+            std::vector<RegionCandidate> photo_candidates;
+            int detect_width = 0;
+            int detect_height = 0;
+            worker.WithLatestFrame([&](const FrameView& view) {
+                photo_candidates = DetectPhotoRegions(view);
+                detect_width = view.width;
+                detect_height = view.height;
+            });
+            std::vector<WindowRegion> window_regions;
+            if (const auto geometry = GeometryOfDisplay(capture_display)) {
+                for (const DesktopWindow& window : OnScreenWindows(capture_display)) {
+                    WindowRegion region;
+                    region.region.left_percent =
+                        std::clamp((window.x - geometry->origin_x) / geometry->width_points * 100.0,
+                                   0.0, 100.0);
+                    region.region.top_percent = std::clamp(
+                        (window.y - geometry->origin_y) / geometry->height_points * 100.0, 0.0,
+                        100.0);
+                    region.region.right_percent =
+                        std::clamp((window.x + window.width - geometry->origin_x) /
+                                       geometry->width_points * 100.0,
+                                   0.0, 100.0);
+                    region.region.bottom_percent =
+                        std::clamp((window.y + window.height - geometry->origin_y) /
+                                       geometry->height_points * 100.0,
+                                   0.0, 100.0);
+                    region.application = window.application;
+                    window_regions.push_back(std::move(region));
+                }
+            }
+            const auto suggestions = BuildRegionSuggestions(photo_candidates, detect_width,
+                                                            detect_height, window_regions);
+            if (const auto region = PickRegionOnDisplay(capture_display, suggestions)) {
                 analysis.region = *region;
                 analysis_dirty = true;
             }

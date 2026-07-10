@@ -15,14 +15,38 @@
 }
 @end
 
-@interface SidescopesPickerView : NSView
+@interface SidescopesPickerView : NSView {
+@public
+    // Suggested rectangles in view coordinates, with their labels.
+    std::vector<std::pair<NSRect, std::string>> suggestions_;
+}
 @property(nonatomic, assign) NSPoint dragStart;
 @property(nonatomic, assign) NSPoint dragCurrent;
+@property(nonatomic, assign) NSPoint hover;
 @property(nonatomic, assign) BOOL dragging;
 @property(nonatomic, assign) BOOL picked;
+@property(nonatomic, assign) NSInteger hoveredSuggestion;
+@property(nonatomic, assign) NSRect confirmedRect;
 @end
 
 @implementation SidescopesPickerView
+
+// The smallest suggestion under the cursor wins, so a photo canvas beats
+// the window that contains it.
+- (NSInteger)suggestionAtPoint:(NSPoint)point {
+    NSInteger best = -1;
+    CGFloat best_area = CGFLOAT_MAX;
+    for (NSUInteger index = 0; index < suggestions_.size(); ++index) {
+        const NSRect rect = suggestions_[index].first;
+        if (!NSPointInRect(point, rect)) continue;
+        const CGFloat area = rect.size.width * rect.size.height;
+        if (area < best_area) {
+            best_area = area;
+            best = static_cast<NSInteger>(index);
+        }
+    }
+    return best;
+}
 
 - (NSRect)selectionRect {
     return NSMakeRect(std::min(self.dragStart.x, self.dragCurrent.x),
@@ -44,9 +68,37 @@
         NSBezierPath* border = [NSBezierPath bezierPathWithRect:selection];
         border.lineWidth = 1.5;
         [border stroke];
+    } else {
+        // Faint outlines advertise every suggestion; the hovered one punches
+        // through the dimming and carries its label.
+        [[NSColor colorWithWhite:1 alpha:0.25] setStroke];
+        for (const auto& suggestion : suggestions_) {
+            NSBezierPath* outline = [NSBezierPath bezierPathWithRect:suggestion.first];
+            outline.lineWidth = 1.0;
+            [outline stroke];
+        }
+        if (self.hoveredSuggestion >= 0 &&
+            self.hoveredSuggestion < static_cast<NSInteger>(suggestions_.size())) {
+            const auto& hovered = suggestions_[self.hoveredSuggestion];
+            [[NSColor clearColor] setFill];
+            NSRectFillUsingOperation(hovered.first, NSCompositingOperationCopy);
+            [[NSColor whiteColor] setStroke];
+            NSBezierPath* border = [NSBezierPath bezierPathWithRect:hovered.first];
+            border.lineWidth = 2.0;
+            [border stroke];
+            NSString* label = [NSString stringWithUTF8String:hovered.second.c_str()];
+            NSDictionary* label_attributes = @{
+                NSForegroundColorAttributeName : [NSColor whiteColor],
+                NSFontAttributeName : [NSFont systemFontOfSize:12 weight:NSFontWeightMedium],
+            };
+            [label drawAtPoint:NSMakePoint(hovered.first.origin.x + 6, NSMaxY(hovered.first) - 20)
+                withAttributes:label_attributes];
+        }
     }
 
-    NSString* hint = @"Drag to select the scoped area  -  ESC to cancel";
+    NSString* hint = suggestions_.empty()
+                         ? @"Drag to select the scoped area  -  ESC to cancel"
+                         : @"Click a highlighted area or drag to select  -  ESC to cancel";
     NSDictionary* attributes = @{
         NSForegroundColorAttributeName : [NSColor whiteColor],
         NSFontAttributeName : [NSFont systemFontOfSize:15 weight:NSFontWeightMedium],
@@ -57,23 +109,43 @@
         withAttributes:attributes];
 }
 
+- (void)mouseMoved:(NSEvent*)event {
+    self.hover = [self convertPoint:event.locationInWindow fromView:nil];
+    const NSInteger hovered = [self suggestionAtPoint:self.hover];
+    if (hovered != self.hoveredSuggestion) {
+        self.hoveredSuggestion = hovered;
+        self.needsDisplay = YES;
+    }
+}
+
 - (void)mouseDown:(NSEvent*)event {
     self.dragStart = [self convertPoint:event.locationInWindow fromView:nil];
     self.dragCurrent = self.dragStart;
-    self.dragging = YES;
     self.needsDisplay = YES;
 }
 
 - (void)mouseDragged:(NSEvent*)event {
     self.dragCurrent = [self convertPoint:event.locationInWindow fromView:nil];
+    // A real drag only starts after a few points of travel, so a click on a
+    // suggestion never flashes a tiny manual selection.
+    if (!self.dragging && (fabs(self.dragCurrent.x - self.dragStart.x) > 4 ||
+                           fabs(self.dragCurrent.y - self.dragStart.y) > 4))
+        self.dragging = YES;
     self.needsDisplay = YES;
 }
 
 - (void)mouseUp:(NSEvent*)event {
     self.dragCurrent = [self convertPoint:event.locationInWindow fromView:nil];
-    const NSRect selection = [self selectionRect];
-    // Tiny drags are almost always accidents, not selections.
-    self.picked = selection.size.width > 8 && selection.size.height > 8;
+    if (self.dragging) {
+        const NSRect selection = [self selectionRect];
+        self.picked = selection.size.width > 8 && selection.size.height > 8;
+        self.confirmedRect = selection;
+    } else {
+        const NSInteger hovered = [self suggestionAtPoint:[self convertPoint:event.locationInWindow
+                                                                    fromView:nil]];
+        self.picked = hovered >= 0;
+        if (self.picked) self.confirmedRect = suggestions_[hovered].first;
+    }
     [NSApp stopModalWithCode:self.picked ? NSModalResponseOK : NSModalResponseCancel];
 }
 
@@ -128,7 +200,8 @@ NSScreen* ScreenForDisplay(uint32_t display_id) {
 
 }  // namespace
 
-std::optional<RegionOfInterest> PickRegionOnDisplay(uint32_t display_id) {
+std::optional<RegionOfInterest> PickRegionOnDisplay(
+    uint32_t display_id, const std::vector<SuggestedRegion>& suggestions) {
     NSScreen* screen = ScreenForDisplay(display_id);
 
     SidescopesPickerWindow* overlay =
@@ -144,9 +217,23 @@ std::optional<RegionOfInterest> PickRegionOnDisplay(uint32_t display_id) {
 
     SidescopesPickerView* view =
         [[SidescopesPickerView alloc] initWithFrame:overlay.contentView.bounds];
+    view.hoveredSuggestion = -1;
+    // Percent (top-left origin) to view coordinates (bottom-left origin).
+    const NSSize view_size = screen.frame.size;
+    for (const SuggestedRegion& suggestion : suggestions) {
+        const RegionOfInterest& region = suggestion.region;
+        const NSRect rect =
+            NSMakeRect(region.left_percent / 100.0 * view_size.width,
+                       (100.0 - region.bottom_percent) / 100.0 * view_size.height,
+                       (region.right_percent - region.left_percent) / 100.0 * view_size.width,
+                       (region.bottom_percent - region.top_percent) / 100.0 * view_size.height);
+        view->suggestions_.emplace_back(rect, suggestion.label);
+    }
     overlay.contentView = view;
+    overlay.acceptsMouseMovedEvents = YES;
 
     [overlay makeKeyAndOrderFront:nil];
+    [overlay makeFirstResponder:view];
     [NSCursor.crosshairCursor push];
     const NSModalResponse response = [NSApp runModalForWindow:overlay];
     [NSCursor pop];
@@ -156,7 +243,7 @@ std::optional<RegionOfInterest> PickRegionOnDisplay(uint32_t display_id) {
 
     // View coordinates are bottom-left-origin; the region convention is
     // top-left-origin percentages.
-    const NSRect selection = [view selectionRect];
+    const NSRect selection = view.confirmedRect;
     const NSSize size = screen.frame.size;
     RegionOfInterest region;
     region.left_percent = selection.origin.x / size.width * 100.0;

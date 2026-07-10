@@ -58,6 +58,13 @@ std::optional<FloatColor> AnalysisWorker::SampleFrameColor(int px, int py, int r
     return AverageNeighborhood(view, px, py, radius);
 }
 
+bool AnalysisWorker::WithLatestFrame(const std::function<void(const FrameView&)>& reader) const {
+    std::lock_guard lock(frame_mutex_);
+    if (!has_frame_) return false;
+    reader(latest_frame_.View());
+    return true;
+}
+
 std::optional<AnalysisWorker::FrameSize> AnalysisWorker::LatestFrameSize() const {
     std::lock_guard lock(frame_mutex_);
     if (!has_frame_) return std::nullopt;

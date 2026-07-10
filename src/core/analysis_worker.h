@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <functional>
 #include <mutex>
 #include <optional>
 #include <thread>
@@ -73,6 +74,11 @@ public:
         int height = 0;
     };
     [[nodiscard]] std::optional<FrameSize> LatestFrameSize() const;
+
+    // Runs `reader` on the most recent frame under the frame lock; returns
+    // false when no frame has arrived yet. Intended for occasional,
+    // interactive work (the picker's photo detection), not per-frame use.
+    bool WithLatestFrame(const std::function<void(const FrameView&)>& reader) const;
 
 private:
     void Run();

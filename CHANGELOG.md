@@ -8,6 +8,9 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- Smart region selection: the picker outlines detected photo canvases and
+  application windows; hover highlights one, a click confirms it, dragging
+  still selects manually.
 - Photo canvas detection: heuristic candidates for the image area inside
   editor chrome, powering region suggestions.
 
