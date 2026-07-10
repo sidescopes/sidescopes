@@ -1,380 +1,282 @@
 #include "core/photo_region_detector.h"
 
 #include <algorithm>
-#include <array>
 #include <cmath>
 #include <cstdint>
-#include <map>
+#include <optional>
 
 namespace sidescopes {
 namespace {
 
-// The frame is scored on a coarse grid. Chrome is recognized by what it
-// really is: the dominant flat color family of the frame. Editors draw
-// neutral, uniform chrome so it does not bias color judgment; everything
-// that is either textured, colored, or flat-but-not-chrome-colored is
-// content. This matters because viewers downscale photographs to fit the
-// window, which averages smooth regions (skies, defocused backgrounds) down
-// to rendering-flat - flatness alone cannot separate them from chrome, but
-// their color can.
-constexpr int kBlockSize = 16;
+// A pixel boundary is an edge when adjacent pixels differ this much in luma
+// or in any channel. Antialiasing spreads a hard boundary over two or three
+// pixels, which still clears these thresholds comfortably; gentle gradients
+// inside photographs do not.
+constexpr int kLumaEdgeThreshold = 14;
+constexpr int kChannelEdgeThreshold = 24;
 
-constexpr double kVarianceThreshold = 1.0;  // luma variance above rendering-flat
-constexpr double kChromaThreshold = 4.0;    // mean max channel spread
-constexpr int kDistinctColorThreshold = 4;  // of max 512 coarse buckets
+// Edge runs with fewer visible edge pixels than this cannot border a
+// photo-sized rectangle; this also discards the clutter of text lines and
+// small controls.
+constexpr int kMinimumRunLength = 96;
 
-// A flat block counts as chrome when its mean color is within this distance
-// (per channel) of one of the frame's dominant flat colors.
-constexpr int kChromeColorTolerance = 20;
+// Gaps this small inside a run are bridged (antialiasing, content crossing
+// the boundary line).
+constexpr int kRunGapTolerance = 6;
 
-// Candidates overlapping an earlier one are slivers of the same region.
-constexpr double kMaximumOverlapFraction = 0.3;
+// A run is a rectangle border only when it is the extremity of an edge band:
+// the row boundary directly above or below it must be mostly quiet. Busy
+// content (a photograph's texture) is edges on every row; its runs are
+// sandwiched between other edge rows and are rejected, while a border always
+// faces the calm interior or the calm surroundings on one side.
+constexpr float kQuietNeighborFraction = 0.3f;
 
-struct MeanColor {
-    double r = 0.0;
-    double g = 0.0;
-    double b = 0.0;
+// Two runs bound the same rectangle when their ends align within this many
+// pixels.
+constexpr int kAlignmentTolerance = 10;
+
+// Run ends locate a vertical side only roughly (corner content may not
+// contrast with the surroundings), so the true side column is searched for
+// within this distance of the ends.
+constexpr int kSideSearchRadius = 20;
+
+constexpr int kMinimumRectWidth = 96;
+constexpr int kMinimumRectHeight = 72;
+
+// A rectangle qualifies when this fraction of the visible part of its left
+// and right sides lies on real vertical edges (the top and bottom are
+// covered by construction).
+constexpr float kMinimumSideCoverage = 0.6f;
+
+// Candidates whose edges coincide within this distance are the same
+// rectangle reported twice.
+constexpr int kDuplicateTolerance = 8;
+
+inline int Luma(const uint8_t* pixel) {
+    return (54 * pixel[2] + 183 * pixel[1] + 19 * pixel[0]) >> 8;
+}
+
+inline bool IsEdge(const uint8_t* a, const uint8_t* b) {
+    if (std::abs(Luma(a) - Luma(b)) >= kLumaEdgeThreshold) return true;
+    return std::abs(a[0] - b[0]) >= kChannelEdgeThreshold ||
+           std::abs(a[1] - b[1]) >= kChannelEdgeThreshold ||
+           std::abs(a[2] - b[2]) >= kChannelEdgeThreshold;
+}
+
+inline bool Contains(const IntRect& rect, int x, int y) {
+    return x >= rect.x && x < rect.x + rect.width && y >= rect.y && y < rect.y + rect.height;
+}
+
+bool Masked(const std::vector<IntRect>& masked_regions, int x, int y) {
+    for (const IntRect& region : masked_regions) {
+        if (Contains(region, x, y)) return true;
+    }
+    return false;
+}
+
+// A maximal horizontal stretch of edge pixels along one row boundary.
+struct EdgeRun {
+    int y = 0;   // the boundary sits between rows y and y+1
+    int x0 = 0;  // inclusive
+    int x1 = 0;  // exclusive
 };
 
-struct FrameAnalysis {
-    int columns = 0;
-    int rows = 0;
-    std::vector<uint8_t> rich;        // 1 = content
-    std::vector<MeanColor> means;     // per block
-    std::vector<uint8_t> flat;        // 1 = texture-flat (regardless of color)
-    std::array<MeanColor, 2> chrome;  // dominant flat colors
-    int chrome_count = 0;
+// Per-column tallies along the boundary between rows y and y+1, as prefix
+// sums: edges among visible (unmasked) pixels, and visible pixels themselves.
+struct BoundaryRow {
+    std::vector<int> edge_prefix;
+    std::vector<int> visible_prefix;
 
-    [[nodiscard]] bool MatchesChrome(const MeanColor& color) const {
-        for (int i = 0; i < chrome_count; ++i) {
-            if (std::abs(color.r - chrome[i].r) <= kChromeColorTolerance &&
-                std::abs(color.g - chrome[i].g) <= kChromeColorTolerance &&
-                std::abs(color.b - chrome[i].b) <= kChromeColorTolerance)
-                return true;
-        }
-        return false;
+    [[nodiscard]] bool Empty() const { return edge_prefix.empty(); }
+    [[nodiscard]] int EdgesIn(int x0, int x1) const {
+        return edge_prefix[static_cast<std::size_t>(x1)] -
+               edge_prefix[static_cast<std::size_t>(x0)];
+    }
+    [[nodiscard]] int VisibleIn(int x0, int x1) const {
+        return visible_prefix[static_cast<std::size_t>(x1)] -
+               visible_prefix[static_cast<std::size_t>(x0)];
     }
 };
 
-FrameAnalysis AnalyzeBlocks(const FrameView& frame, const IntRect& bounds) {
-    FrameAnalysis analysis;
-    analysis.columns = std::max(1, bounds.width / kBlockSize);
-    analysis.rows = std::max(1, bounds.height / kBlockSize);
-    const std::size_t block_count = static_cast<std::size_t>(analysis.columns) * analysis.rows;
-    analysis.rich.assign(block_count, 0);
-    analysis.flat.assign(block_count, 0);
-    analysis.means.assign(block_count, MeanColor{});
-
-    std::vector<uint8_t> color_seen(512);
-    for (int cy = 0; cy < analysis.rows; ++cy) {
-        for (int cx = 0; cx < analysis.columns; ++cx) {
-            double luma_sum = 0.0;
-            double luma_squared = 0.0;
-            double chroma_sum = 0.0;
-            double sum_r = 0.0, sum_g = 0.0, sum_b = 0.0;
-            std::fill(color_seen.begin(), color_seen.end(), uint8_t{0});
-            int distinct_colors = 0;
-
-            const int y0 = bounds.y + cy * kBlockSize;
-            const int x0 = bounds.x + cx * kBlockSize;
-            for (int py = y0; py < y0 + kBlockSize; ++py) {
-                const uint8_t* pixel = frame.PixelAt(x0, py);
-                for (int px = 0; px < kBlockSize; ++px, pixel += 4) {
-                    const int b = pixel[0], g = pixel[1], r = pixel[2];
-                    const double luma = (54 * r + 183 * g + 19 * b) / 256.0;
-                    luma_sum += luma;
-                    luma_squared += luma * luma;
-                    chroma_sum += std::max({r, g, b}) - std::min({r, g, b});
-                    sum_r += r;
-                    sum_g += g;
-                    sum_b += b;
-                    const int bucket = ((r >> 5) << 6) | ((g >> 5) << 3) | (b >> 5);
-                    if (!color_seen[bucket]) {
-                        color_seen[bucket] = 1;
-                        ++distinct_colors;
-                    }
-                }
-            }
-
-            constexpr double kSamples = kBlockSize * kBlockSize;
-            const double mean = luma_sum / kSamples;
-            const double variance = luma_squared / kSamples - mean * mean;
-            const double mean_chroma = chroma_sum / kSamples;
-            const std::size_t index = static_cast<std::size_t>(cy) * analysis.columns + cx;
-            analysis.means[index] = MeanColor{sum_r / kSamples, sum_g / kSamples, sum_b / kSamples};
-            const bool textured = variance >= kVarianceThreshold ||
-                                  mean_chroma >= kChromaThreshold ||
-                                  distinct_colors >= kDistinctColorThreshold;
-            analysis.flat[index] = textured ? 0 : 1;
-            analysis.rich[index] = textured ? 1 : 0;
-        }
+void ComputeBoundaryRow(const FrameView& frame, const std::vector<IntRect>& masked_regions, int y,
+                        BoundaryRow& row) {
+    row.edge_prefix.resize(static_cast<std::size_t>(frame.width) + 1);
+    row.visible_prefix.resize(static_cast<std::size_t>(frame.width) + 1);
+    row.edge_prefix[0] = 0;
+    row.visible_prefix[0] = 0;
+    for (int x = 0; x < frame.width; ++x) {
+        const bool masked = Masked(masked_regions, x, y) || Masked(masked_regions, x, y + 1);
+        const bool edge = !masked && IsEdge(frame.PixelAt(x, y), frame.PixelAt(x, y + 1));
+        row.edge_prefix[static_cast<std::size_t>(x) + 1] = row.edge_prefix[x] + (edge ? 1 : 0);
+        row.visible_prefix[static_cast<std::size_t>(x) + 1] =
+            row.visible_prefix[x] + (masked ? 0 : 1);
     }
-
-    // The chrome palette: the two most common flat colors (quantized), which
-    // covers two-tone interfaces (panel gray plus canvas gray).
-    std::map<int, std::pair<int, MeanColor>> flat_colors;
-    for (std::size_t index = 0; index < block_count; ++index) {
-        if (!analysis.flat[index]) continue;
-        const MeanColor& mean = analysis.means[index];
-        // Chrome is neutral by design; a COLORED flat expanse (a clear sky
-        // filling half a viewer window) must never claim a chrome slot.
-        const double spread =
-            std::max({mean.r, mean.g, mean.b}) - std::min({mean.r, mean.g, mean.b});
-        if (spread > 8.0) continue;
-        const int key = (static_cast<int>(mean.r) / 16 << 8) |
-                        (static_cast<int>(mean.g) / 16 << 4) | (static_cast<int>(mean.b) / 16);
-        auto& entry = flat_colors[key];
-        ++entry.first;
-        entry.second = mean;
-    }
-    std::array<std::pair<int, MeanColor>, 2> top{};
-    for (const auto& [key, entry] : flat_colors) {
-        (void)key;
-        if (entry.first > top[0].first) {
-            top[1] = top[0];
-            top[0] = entry;
-        } else if (entry.first > top[1].first) {
-            top[1] = entry;
-        }
-    }
-    // The dominant flat color is always chrome. A second tone qualifies only
-    // when it rivals the first in coverage (panel gray next to canvas gray);
-    // otherwise it is more likely a large smooth patch of a photograph
-    // claiming the slot, which would punch that patch out of its own photo.
-    if (top[0].first > 0) analysis.chrome[analysis.chrome_count++] = top[0].second;
-    if (top[1].first * 2 >= top[0].first && top[1].first > 0)
-        analysis.chrome[analysis.chrome_count++] = top[1].second;
-
-    // Flat blocks whose color is not chrome are content: a rendered-smooth
-    // sky is flat, but it is not editor gray.
-    for (std::size_t index = 0; index < block_count; ++index) {
-        if (analysis.flat[index] && !analysis.MatchesChrome(analysis.means[index]))
-            analysis.rich[index] = 1;
-    }
-    return analysis;
 }
 
-// A connected region of content blocks. The bounding box - not a largest
-// all-rich rectangle - is the right shape for a photograph: any remaining
-// holes belong to the photo, not to the chrome around it.
-struct GridComponent {
-    int min_cx = 0, min_cy = 0, max_cx = 0, max_cy = 0;
-    int rich_blocks = 0;
+// A span is quiet when its visible pixels are mostly not edges. A boundary
+// outside the frame or entirely masked proves nothing and counts as quiet.
+bool QuietSpan(const BoundaryRow& row, int x0, int x1) {
+    if (row.Empty()) return true;
+    const int visible = row.VisibleIn(x0, x1);
+    if (visible == 0) return true;
+    return static_cast<float>(row.EdgesIn(x0, x1)) <
+           kQuietNeighborFraction * static_cast<float>(visible);
+}
 
-    [[nodiscard]] int Columns() const { return max_cx - min_cx + 1; }
-    [[nodiscard]] int Rows() const { return max_cy - min_cy + 1; }
+// Edge runs along one boundary. Masked pixels extend a run without counting
+// toward its required visible-edge length, so a border passing beneath an
+// occluding window survives, while content wholly inside the mask does not.
+void AppendRunsFromBoundary(const BoundaryRow& row, int y, int width, std::vector<EdgeRun>& runs) {
+    int run_start = -1;
+    int visible_edges = 0;
+    int gap = 0;
+    const auto close_run = [&](int end) {
+        if (run_start >= 0 && visible_edges >= kMinimumRunLength)
+            runs.push_back(EdgeRun{y, run_start, end});
+        run_start = -1;
+        visible_edges = 0;
+        gap = 0;
+    };
+    for (int x = 0; x < width; ++x) {
+        const bool masked = row.VisibleIn(x, x + 1) == 0;
+        const bool edge = row.EdgesIn(x, x + 1) != 0;
+        if (edge) {
+            if (run_start < 0) run_start = x;
+            ++visible_edges;
+            gap = 0;
+        } else if (masked) {
+            gap = 0;  // proves nothing; bridge
+        } else if (run_start >= 0 && ++gap > kRunGapTolerance) {
+            close_run(x - gap + 1);
+        }
+    }
+    close_run(width);
+}
+
+// Border runs: edge runs with a quiet row boundary directly above or below.
+std::vector<EdgeRun> HorizontalBorderRuns(const FrameView& frame,
+                                          const std::vector<IntRect>& masked_regions) {
+    std::vector<EdgeRun> borders;
+    // Rolling window of three boundary rows: above (y-1), current (y),
+    // below (y+1). An empty row stands for a boundary outside the frame.
+    BoundaryRow above;
+    BoundaryRow current;
+    BoundaryRow below;
+    if (frame.height >= 2) ComputeBoundaryRow(frame, masked_regions, 0, current);
+    std::vector<EdgeRun> row_runs;
+    for (int y = 0; y + 1 < frame.height; ++y) {
+        if (y + 2 < frame.height) {
+            ComputeBoundaryRow(frame, masked_regions, y + 1, below);
+        } else {
+            below.edge_prefix.clear();
+            below.visible_prefix.clear();
+        }
+        row_runs.clear();
+        AppendRunsFromBoundary(current, y, frame.width, row_runs);
+        for (const EdgeRun& run : row_runs) {
+            if (QuietSpan(above, run.x0, run.x1) || QuietSpan(below, run.x0, run.x1))
+                borders.push_back(run);
+        }
+        std::swap(above, current);
+        std::swap(current, below);
+    }
+    return borders;
+}
+
+// Fraction of the visible span between two rows that lies on a vertical edge
+// at column x, or nothing when too little of the side is visible to judge.
+std::optional<float> VerticalSideCoverage(const FrameView& frame,
+                                          const std::vector<IntRect>& masked_regions, int x, int y0,
+                                          int y1) {
+    if (x <= 0 || x >= frame.width || y1 <= y0) return std::nullopt;
+    int edges = 0;
+    int visible = 0;
+    for (int y = y0; y < y1; ++y) {
+        if (Masked(masked_regions, x - 1, y) || Masked(masked_regions, x, y)) continue;
+        ++visible;
+        if (IsEdge(frame.PixelAt(x - 1, y), frame.PixelAt(x, y))) ++edges;
+    }
+    if (visible < std::max(4, (y1 - y0) / 8)) return std::nullopt;
+    return static_cast<float>(edges) / static_cast<float>(visible);
+}
+
+// The run ends only suggest where a side is; the actual side is the nearest
+// column around them whose visible span is covered by vertical edges.
+struct SideMatch {
+    int x = 0;
+    float coverage = 0.0f;
 };
 
-std::vector<GridComponent> RichComponents(const FrameAnalysis& analysis) {
-    std::vector<GridComponent> components;
-    std::vector<uint8_t> visited(analysis.rich.size(), 0);
-    std::vector<std::pair<int, int>> queue;
-
-    for (int seed_cy = 0; seed_cy < analysis.rows; ++seed_cy) {
-        for (int seed_cx = 0; seed_cx < analysis.columns; ++seed_cx) {
-            const std::size_t seed_index =
-                static_cast<std::size_t>(seed_cy) * analysis.columns + seed_cx;
-            if (!analysis.rich[seed_index] || visited[seed_index]) continue;
-
-            GridComponent component{seed_cx, seed_cy, seed_cx, seed_cy, 0};
-            queue.clear();
-            queue.emplace_back(seed_cx, seed_cy);
-            visited[seed_index] = 1;
-            while (!queue.empty()) {
-                const auto [cx, cy] = queue.back();
-                queue.pop_back();
-                ++component.rich_blocks;
-                component.min_cx = std::min(component.min_cx, cx);
-                component.min_cy = std::min(component.min_cy, cy);
-                component.max_cx = std::max(component.max_cx, cx);
-                component.max_cy = std::max(component.max_cy, cy);
-                // Neighbors within two blocks bridge narrow flat seams.
-                for (int dy = -2; dy <= 2; ++dy) {
-                    for (int dx = -2; dx <= 2; ++dx) {
-                        const int nx = cx + dx;
-                        const int ny = cy + dy;
-                        if (nx < 0 || nx >= analysis.columns || ny < 0 || ny >= analysis.rows)
-                            continue;
-                        const std::size_t index =
-                            static_cast<std::size_t>(ny) * analysis.columns + nx;
-                        if (!analysis.rich[index] || visited[index]) continue;
-                        visited[index] = 1;
-                        queue.emplace_back(nx, ny);
-                    }
-                }
-            }
-            components.push_back(component);
+std::optional<SideMatch> FindSide(const FrameView& frame,
+                                  const std::vector<IntRect>& masked_regions, int guess, int y0,
+                                  int y1) {
+    for (int distance = 0; distance <= kSideSearchRadius; ++distance) {
+        for (const int x : {guess - distance, guess + distance}) {
+            const auto coverage = VerticalSideCoverage(frame, masked_regions, x, y0, y1);
+            if (coverage && *coverage >= kMinimumSideCoverage) return SideMatch{x, *coverage};
+            if (distance == 0) break;
         }
     }
-    return components;
+    return std::nullopt;
 }
 
-// A one-pixel line is content when it varies or when its color is not
-// chrome; used for pixel-exact edge refinement and border probing.
-bool LineIsContent(const FrameView& frame, const FrameAnalysis& analysis, int x0, int x1, int y0,
-                   int y1) {
-    double luma_sum = 0.0;
-    double luma_squared = 0.0;
-    double sum_r = 0.0, sum_g = 0.0, sum_b = 0.0;
-    int samples = 0;
-    for (int py = y0; py < y1; ++py) {
-        const uint8_t* pixel = frame.PixelAt(x0, py);
-        for (int px = x0; px < x1; ++px, pixel += 4) {
-            const double luma = (54 * pixel[2] + 183 * pixel[1] + 19 * pixel[0]) / 256.0;
-            luma_sum += luma;
-            luma_squared += luma * luma;
-            sum_r += pixel[2];
-            sum_g += pixel[1];
-            sum_b += pixel[0];
-            ++samples;
-        }
-    }
-    if (samples == 0) return false;
-    const double mean = luma_sum / samples;
-    if (luma_squared / samples - mean * mean >= kVarianceThreshold) return true;
-    return !analysis.MatchesChrome(MeanColor{sum_r / samples, sum_g / samples, sum_b / samples});
-}
-
-// Shrinks each edge through mixed border blocks, then grows to the exact
-// content boundary.
-IntRect RefineEdges(const FrameView& frame, const FrameAnalysis& analysis, const IntRect& bounds,
-                    IntRect rect) {
-    const int limit = kBlockSize;
-    const auto row_is_content = [&](int py) {
-        return LineIsContent(frame, analysis, rect.x, rect.x + rect.width, py, py + 1);
-    };
-    const auto column_is_content = [&](int px) {
-        return LineIsContent(frame, analysis, px, px + 1, rect.y, rect.y + rect.height);
-    };
-
-    for (int step = 0; step < limit && rect.height > limit && !row_is_content(rect.y); ++step) {
-        ++rect.y;
-        --rect.height;
-    }
-    for (int step = 0; step < limit && rect.y > bounds.y && row_is_content(rect.y - 1); ++step) {
-        --rect.y;
-        ++rect.height;
-    }
-    for (int step = 0;
-         step < limit && rect.height > limit && !row_is_content(rect.y + rect.height - 1); ++step) {
-        --rect.height;
-    }
-    for (int step = 0; step < limit && rect.y + rect.height < bounds.y + bounds.height &&
-                       row_is_content(rect.y + rect.height);
-         ++step) {
-        ++rect.height;
-    }
-    for (int step = 0; step < limit && rect.width > limit && !column_is_content(rect.x); ++step) {
-        ++rect.x;
-        --rect.width;
-    }
-    for (int step = 0; step < limit && rect.x > bounds.x && column_is_content(rect.x - 1); ++step) {
-        --rect.x;
-        ++rect.width;
-    }
-    for (int step = 0;
-         step < limit && rect.width > limit && !column_is_content(rect.x + rect.width - 1);
-         ++step) {
-        --rect.width;
-    }
-    for (int step = 0; step < limit && rect.x + rect.width < bounds.x + bounds.width &&
-                       column_is_content(rect.x + rect.width);
-         ++step) {
-        ++rect.width;
-    }
-    return rect;
-}
-
-// Flatness of the chrome immediately outside the rectangle, 0..1. Probes
-// never leave the analysis bounds: outside a window's rectangle lies other
-// windows' content, not this window's chrome.
-float BorderFlatness(const FrameView& frame, const FrameAnalysis& analysis, const IntRect& bounds,
-                     const IntRect& rect) {
-    int flat = 0;
-    int total = 0;
-    const auto probe = [&](int x0, int x1, int y0, int y1) {
-        if (x0 < bounds.x || y0 < bounds.y || x1 > bounds.x + bounds.width ||
-            y1 > bounds.y + bounds.height || x0 >= x1 || y0 >= y1)
-            return;
-        ++total;
-        if (!LineIsContent(frame, analysis, x0, x1, y0, y1)) ++flat;
-    };
-    constexpr int kProbe = 4;
-    probe(rect.x, rect.x + rect.width, rect.y - kProbe, rect.y);
-    probe(rect.x, rect.x + rect.width, rect.y + rect.height, rect.y + rect.height + kProbe);
-    probe(rect.x - kProbe, rect.x, rect.y, rect.y + rect.height);
-    probe(rect.x + rect.width, rect.x + rect.width + kProbe, rect.y, rect.y + rect.height);
-    // A rect flush with the frame edge has fewer probes; that is fine.
-    return total == 0 ? 1.0f : static_cast<float>(flat) / static_cast<float>(total);
-}
-
-double OverlapFraction(const IntRect& a, const IntRect& b) {
-    const int left = std::max(a.x, b.x);
-    const int top = std::max(a.y, b.y);
-    const int right = std::min(a.x + a.width, b.x + b.width);
-    const int bottom = std::min(a.y + a.height, b.y + b.height);
-    if (right <= left || bottom <= top) return 0.0;
-    const double intersection =
-        static_cast<double>(right - left) * static_cast<double>(bottom - top);
-    const double smaller =
-        std::min(static_cast<double>(a.width) * a.height, static_cast<double>(b.width) * b.height);
-    return smaller > 0.0 ? intersection / smaller : 0.0;
+bool SameRectangle(const IntRect& a, const IntRect& b) {
+    return std::abs(a.x - b.x) <= kDuplicateTolerance &&
+           std::abs(a.y - b.y) <= kDuplicateTolerance &&
+           std::abs(a.x + a.width - (b.x + b.width)) <= kDuplicateTolerance &&
+           std::abs(a.y + a.height - (b.y + b.height)) <= kDuplicateTolerance;
 }
 
 }  // namespace
 
-std::vector<RegionCandidate> DetectPhotoRegions(const FrameView& frame, IntRect within,
+std::vector<RegionCandidate> DetectPhotoRegions(const FrameView& frame,
+                                                const std::vector<IntRect>& masked_regions,
                                                 int max_candidates) {
     std::vector<RegionCandidate> candidates;
-    IntRect bounds = within.Empty() ? IntRect{0, 0, frame.width, frame.height}
-                                    : within.ClampedTo(frame.width, frame.height);
-    if (bounds.width < 2 * kBlockSize || bounds.height < 2 * kBlockSize) return candidates;
+    if (frame.width < kMinimumRectWidth || frame.height < kMinimumRectHeight) return candidates;
 
-    const FrameAnalysis analysis = AnalyzeBlocks(frame, bounds);
-    const int minimum_blocks =
-        std::max(4, analysis.columns * analysis.rows / 100);  // ignore specks under ~1%
+    const std::vector<EdgeRun> borders = HorizontalBorderRuns(frame, masked_regions);
 
-    std::vector<GridComponent> components = RichComponents(analysis);
-    std::sort(components.begin(), components.end(),
-              [](const GridComponent& a, const GridComponent& b) {
-                  return a.rich_blocks > b.rich_blocks;
-              });
+    // Every pair of x-aligned border runs is a potential top and bottom of a
+    // rectangle; the sides must then be real vertical edges.
+    for (std::size_t top = 0; top < borders.size(); ++top) {
+        for (std::size_t bottom = top + 1; bottom < borders.size(); ++bottom) {
+            const EdgeRun& a = borders[top];
+            const EdgeRun& b = borders[bottom];
+            if (b.y - a.y < kMinimumRectHeight) continue;
+            if (std::abs(a.x0 - b.x0) > kAlignmentTolerance + kSideSearchRadius ||
+                std::abs(a.x1 - b.x1) > kAlignmentTolerance + kSideSearchRadius)
+                continue;
 
-    for (const GridComponent& component : components) {
-        if (static_cast<int>(candidates.size()) >= max_candidates) break;
-        if (component.rich_blocks < minimum_blocks) continue;
+            const auto left = FindSide(frame, masked_regions, std::max(a.x0, b.x0), a.y + 1, b.y);
+            if (!left) continue;
+            const auto right = FindSide(frame, masked_regions, std::min(a.x1, b.x1), a.y + 1, b.y);
+            if (!right) continue;
+            if (right->x - left->x < kMinimumRectWidth) continue;
 
-        const float interior = static_cast<float>(component.rich_blocks) /
-                               static_cast<float>(component.Columns() * component.Rows());
-        if (interior < 0.25f) continue;  // disconnected UI speckle, not a photo
-
-        IntRect rect{bounds.x + component.min_cx * kBlockSize,
-                     bounds.y + component.min_cy * kBlockSize, component.Columns() * kBlockSize,
-                     component.Rows() * kBlockSize};
-        rect = RefineEdges(frame, analysis, bounds, rect);
-
-        bool sliver_of_previous = false;
-        for (const RegionCandidate& earlier : candidates) {
-            if (OverlapFraction(rect, earlier.rect) > kMaximumOverlapFraction) {
-                sliver_of_previous = true;
-                break;
+            const IntRect rect{left->x, a.y + 1, right->x - left->x, b.y - a.y};
+            const float confidence = (left->coverage + right->coverage) / 2.0f;
+            bool duplicate = false;
+            for (RegionCandidate& existing : candidates) {
+                if (SameRectangle(existing.rect, rect)) {
+                    existing.confidence = std::max(existing.confidence, confidence);
+                    duplicate = true;
+                    break;
+                }
             }
+            if (!duplicate) candidates.push_back(RegionCandidate{rect, confidence});
         }
-        if (sliver_of_previous) continue;
-
-        RegionCandidate candidate;
-        candidate.rect = rect;
-        candidate.confidence = interior * BorderFlatness(frame, analysis, bounds, rect);
-        candidates.push_back(candidate);
     }
 
+    // Largest first: the picker resolves nesting by hover, and when the list
+    // must be cut, small panels lose before windows and photos.
     std::sort(candidates.begin(), candidates.end(),
               [](const RegionCandidate& a, const RegionCandidate& b) {
-                  return a.confidence * static_cast<float>(a.rect.width) *
-                             static_cast<float>(a.rect.height) >
-                         b.confidence * static_cast<float>(b.rect.width) *
-                             static_cast<float>(b.rect.height);
+                  return static_cast<int64_t>(a.rect.width) * a.rect.height >
+                         static_cast<int64_t>(b.rect.width) * b.rect.height;
               });
+    if (static_cast<int>(candidates.size()) > max_candidates)
+        candidates.resize(static_cast<std::size_t>(max_candidates));
     return candidates;
 }
 

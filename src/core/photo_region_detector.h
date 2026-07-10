@@ -6,32 +6,34 @@
 
 namespace sidescopes {
 
-// A candidate photo area within a captured frame.
+// A candidate rectangle for the scoped region.
 struct RegionCandidate {
     IntRect rect;
-    // 0..1: how confident the detector is that this is a photo canvas.
-    // Interior richness times border flatness — a real canvas is dense with
-    // varied content and sits inside uniform editor chrome.
+    // 0..1: how much of the rectangle's perimeter is a real contrast edge.
     float confidence = 0.0f;
 };
 
-// Finds likely photo canvases: large contiguous areas of statistically rich
-// content (high variance, many distinct colors) surrounded by the flat,
-// uniform chrome that photo editors deliberately draw around images.
+// Finds distinctive rectangles on screen: regions bounded by long, straight,
+// axis-aligned contrast edges. Photographs displayed by any application are
+// exactly that - whatever their content (smooth skies, black-and-white,
+// downscaled to flatness), their boundary against the surroundings stays a
+// sharp rectangle - and so are windows and panels.
 //
-// This is a heuristic and it is used accordingly: candidates power
-// hover-and-confirm region suggestions, never silent automation. Known
-// limits, by design: photos containing large flat areas shrink their
-// candidate; thumbnail grids merge into one large candidate; content that
-// fills the frame edge-to-edge offers no chrome border to detect against.
+// The design deliberately favors recall over precision: candidates feed
+// hover-and-confirm suggestions, where an extra rectangle costs one glance
+// but a missed photograph is a failure. Nested rectangles (a window and the
+// photo inside it) are both reported; the picker highlights the smallest one
+// under the cursor.
 //
-// Detection is scoped to `within` (a window's rectangle): a photo canvas is
-// meaningful inside an editor window, while whole-desktop analysis sees
-// content everywhere and returns screen-sized blobs. An empty rectangle
-// means the whole frame, which suits fullscreen applications.
+// `masked_regions` are areas whose pixels prove nothing about the desktop
+// underneath - chiefly this application's own always-on-top window, which
+// habitually floats over the very photo being scoped. Masked pixels count
+// neither for nor against a rectangle: borders may pass beneath them, and
+// content inside them (scope traces, graticule lines) yields no candidates.
 //
-// Returns up to `max_candidates`, strongest first. Deterministic.
-std::vector<RegionCandidate> DetectPhotoRegions(const FrameView& frame, IntRect within = IntRect{},
-                                                int max_candidates = 3);
+// Returns up to `max_candidates`, largest first. Deterministic.
+std::vector<RegionCandidate> DetectPhotoRegions(const FrameView& frame,
+                                                const std::vector<IntRect>& masked_regions = {},
+                                                int max_candidates = 8);
 
 }  // namespace sidescopes

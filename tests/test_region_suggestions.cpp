@@ -10,7 +10,7 @@ TEST_CASE("Suggestions convert detector candidates to percent") {
 
     const auto suggestions = BuildRegionSuggestions(candidates, 1000, 500, {});
     REQUIRE(suggestions.size() == 1);
-    CHECK(suggestions[0].label == "Photo");
+    CHECK(suggestions[0].label == "Area");
     CHECK(suggestions[0].region.left_percent == 10.0);
     CHECK(suggestions[0].region.top_percent == 10.0);
     CHECK(suggestions[0].region.right_percent == 40.0);
@@ -28,7 +28,7 @@ TEST_CASE("Suggestions list photos before windows") {
 
     const auto suggestions = BuildRegionSuggestions(candidates, 1000, 500, windows);
     REQUIRE(suggestions.size() == 2);
-    CHECK(suggestions[0].label == "Photo");
+    CHECK(suggestions[0].label == "Area");
     CHECK(suggestions[1].label == "Lightroom");
 }
 
@@ -40,7 +40,7 @@ TEST_CASE("Suggestions deduplicate a canvas that fills its window") {
 
     const auto suggestions = BuildRegionSuggestions(candidates, 1000, 500, windows);
     REQUIRE(suggestions.size() == 1);
-    CHECK(suggestions[0].label == "Photo");
+    CHECK(suggestions[0].label == "Area");
 }
 
 TEST_CASE("Suggestions survive a missing frame") {

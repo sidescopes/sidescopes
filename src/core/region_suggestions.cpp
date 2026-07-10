@@ -36,7 +36,7 @@ std::vector<SuggestedRegion> BuildRegionSuggestions(
             (candidate.rect.x + candidate.rect.width) * 100.0 / frame_width;
         suggestion.region.bottom_percent =
             (candidate.rect.y + candidate.rect.height) * 100.0 / frame_height;
-        suggestion.label = "Photo";
+        suggestion.label = "Area";
         suggestions.push_back(std::move(suggestion));
     }
 
