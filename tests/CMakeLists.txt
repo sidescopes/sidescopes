@@ -14,6 +14,7 @@ add_executable(sidescopes_tests
     test_region_hash.cpp
     test_trace_intensity.cpp
     test_marker_smoother.cpp
+    test_analysis_worker.cpp
     test_vectorscope.cpp
     test_waveform.cpp
 )

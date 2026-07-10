@@ -8,6 +8,8 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- Analysis worker: scope engines on a dedicated thread with change
+  detection, settings versioning, and double-buffered output.
 - Trace intensity control: a perceptually even 0-100% mapping over the
   engines' gain range.
 - Cursor marker smoothing: neighborhood averaging with exponential
