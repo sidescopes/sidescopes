@@ -73,7 +73,11 @@ asymptotic tail of the average decisively.
 - Capture uses ScreenCaptureKit with a bare display filter. The exclusion
   variants of `SCContentFilter` snapshot their lists at creation time —
   windows or applications appearing later are silently absent from the
-  capture. Self-capture feedback is handled by region hashing instead.
+  capture. Self-capture feedback is handled app-side instead: the change
+  hash masks out the app's own window, so its own redraws never re-trigger
+  analysis. This is load-bearing — without the mask, a full-screen region
+  self-sustains analysis at tens of percent of a core on an otherwise idle
+  screen.
 - Streams die when the display configuration changes (lock screen, display
   sleep). The app treats capture as a service to be restarted, retries on
   failure, and never presents stale data as live: cursor sampling is
