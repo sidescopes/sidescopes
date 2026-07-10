@@ -289,7 +289,10 @@ void ShowRegionBorder(uint32_t display_id, const RegionOfInterest& region) {
         g_border_window.opaque = NO;
         g_border_window.hasShadow = NO;
         g_border_window.ignoresMouseEvents = YES;  // click-through, always
-        g_border_window.level = NSStatusWindowLevel;
+        // One level below the scope window: both float above Quick Look,
+        // but the border must never cover the scopes. Sharing a level would
+        // leave their order to whoever ordered front last.
+        g_border_window.level = NSStatusWindowLevel - 1;
         g_border_window.collectionBehavior = NSWindowCollectionBehaviorCanJoinAllSpaces |
                                              NSWindowCollectionBehaviorFullScreenAuxiliary |
                                              NSWindowCollectionBehaviorStationary;
