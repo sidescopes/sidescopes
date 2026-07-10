@@ -22,7 +22,7 @@ TEST_CASE("Preferences round-trip through a file") {
     saved.matrix = ChromaMatrix::Bt709;
     saved.waveform_mode = WaveformMode::RgbAndLuma;
     saved.region = RegionOfInterest{10.0, 20.0, 80.0, 90.0};
-    saved.view_mode = 2;
+    saved.visible_scopes = 5;  // vectorscope + histogram
     saved.show_graticule = false;
     saved.values_as_percent = false;
     saved.window_x = 120;
@@ -40,7 +40,7 @@ TEST_CASE("Preferences round-trip through a file") {
     CHECK(loaded.waveform_mode == WaveformMode::RgbAndLuma);
     CHECK(loaded.region.left_percent == 10.0);
     CHECK(loaded.region.bottom_percent == 90.0);
-    CHECK(loaded.view_mode == 2);
+    CHECK(loaded.visible_scopes == 5);
     CHECK_FALSE(loaded.show_graticule);
     CHECK_FALSE(loaded.values_as_percent);
     CHECK(loaded.window_x == 120);
@@ -55,6 +55,28 @@ TEST_CASE("Preferences default when the file is missing") {
     CHECK(loaded.waveform_gain == 0.05f);
     CHECK(loaded.region.right_percent == 100.0);
     CHECK(loaded.show_graticule);
+}
+
+TEST_CASE("Preferences migrate the legacy single view mode") {
+    const auto file = TemporaryFile("legacy-view-mode.txt");
+    std::filesystem::create_directories(file.parent_path());
+    std::ofstream(file) << "view_mode=2\n";  // the old vectorscope-and-waveform pair
+
+    const Preferences loaded = LoadPreferences(file);
+    CHECK(loaded.visible_scopes == 3);
+
+    std::filesystem::remove(file);
+}
+
+TEST_CASE("Preferences never load an empty scope set") {
+    const auto file = TemporaryFile("empty-scopes.txt");
+    std::filesystem::create_directories(file.parent_path());
+    std::ofstream(file) << "visible_scopes=8\n";  // out of range: no scope bits
+
+    const Preferences loaded = LoadPreferences(file);
+    CHECK(loaded.visible_scopes == 1);
+
+    std::filesystem::remove(file);
 }
 
 TEST_CASE("Preferences tolerate unknown keys and malformed lines") {

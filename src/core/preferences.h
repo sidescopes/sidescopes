@@ -21,7 +21,9 @@ struct Preferences {
     ChromaMatrix matrix = ChromaMatrix::Bt601;
     WaveformMode waveform_mode = WaveformMode::Rgb;
     RegionOfInterest region;
-    int view_mode = 0;  // 0 vectorscope, 1 waveform, 2 both, 3 histogram
+    // Bit set of scopes stacked in the window: 1 vectorscope, 2 waveform,
+    // 4 histogram. At least one bit is always set.
+    int visible_scopes = 1;
     bool show_graticule = true;
     bool values_as_percent = true;
     int window_x = -1;  // negative: let the system place the window

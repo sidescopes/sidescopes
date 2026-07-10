@@ -44,12 +44,9 @@ namespace {
 
 using namespace sidescopes;
 
-enum class ViewMode { Vectorscope, Waveform, Both, Histogram };
-
 enum MenuAction {
     kMenuShowVectorscope = 1,
     kMenuShowWaveform,
-    kMenuShowBoth,
     kMenuShowHistogram,
     kMenuWaveformLuma = 10,
     kMenuWaveformRgb,
@@ -192,6 +189,48 @@ void DrawLevelMarker(const DrawnScope& scope, float normalized_y, ImU32 color) {
 
 // Toolbar icon buttons drawn with the draw list: corner brackets for region
 // selection, an outline rectangle for full screen.
+enum class ScopeGlyph { Vectorscope, Waveform, Histogram };
+
+// An icon toggle drawn with primitives so it matches the terminal look:
+// a filled background marks an enabled scope.
+bool ScopeToggleButton(const char* id, ScopeGlyph glyph, bool enabled, const char* tooltip) {
+    const float height = ImGui::GetTextLineHeight() + 4.0f;
+    const bool pressed = ImGui::InvisibleButton(id, ImVec2(height + 8.0f, height));
+    ImDrawList* draw = ImGui::GetWindowDrawList();
+    const ImVec2 min = ImGui::GetItemRectMin();
+    const ImVec2 max = ImGui::GetItemRectMax();
+    if (enabled)
+        draw->AddRectFilled(min, max, ImGui::GetColorU32(ImGuiCol_ButtonActive), 3.0f);
+    else if (ImGui::IsItemHovered())
+        draw->AddRectFilled(min, max, ImGui::GetColorU32(ImGuiCol_ButtonHovered), 3.0f);
+    const ImVec2 a(min.x + 7, min.y + 3);
+    const ImVec2 b(max.x - 7, max.y - 3);
+    const ImU32 color = ImGui::GetColorU32(enabled ? ImGuiCol_Text : ImGuiCol_TextDisabled);
+    const float stroke = 1.5f;
+    if (glyph == ScopeGlyph::Vectorscope) {
+        const ImVec2 center((a.x + b.x) / 2, (a.y + b.y) / 2);
+        const float radius = std::min(b.x - a.x, b.y - a.y) / 2;
+        draw->AddCircle(center, radius, color, 0, stroke);
+        draw->AddCircleFilled(center, 1.5f, color);
+    } else if (glyph == ScopeGlyph::Waveform) {
+        const float levels[6] = {0.7f, 0.25f, 0.55f, 0.15f, 0.6f, 0.4f};
+        ImVec2 points[6];
+        for (int i = 0; i < 6; ++i)
+            points[i] = ImVec2(a.x + (b.x - a.x) * i / 5.0f, a.y + (b.y - a.y) * levels[i]);
+        draw->AddPolyline(points, 6, color, 0, stroke);
+    } else {
+        const float heights[4] = {0.45f, 0.9f, 0.65f, 0.3f};
+        const float slot = (b.x - a.x) / 4.0f;
+        for (int i = 0; i < 4; ++i) {
+            const float x = a.x + slot * i + 1.0f;
+            draw->AddRectFilled(ImVec2(x, b.y - (b.y - a.y) * heights[i]),
+                                ImVec2(x + slot - 2.0f, b.y), color);
+        }
+    }
+    ImGui::SetItemTooltip("%s", tooltip);
+    return pressed;
+}
+
 bool IconButton(const char* id, bool brackets, const char* tooltip) {
     const float height = ImGui::GetTextLineHeight() + 4.0f;
     const bool pressed = ImGui::InvisibleButton(id, ImVec2(height + 8.0f, height));
@@ -366,7 +405,9 @@ int main() {
     float histogram_intensity = IntensityFromTraceGain(analysis.histogram.gain);
     float vectorscope_smoothing_ms = startup.vectorscope_smoothing_ms;
     float waveform_smoothing_ms = startup.waveform_smoothing_ms;
-    auto view_mode = static_cast<ViewMode>(std::clamp(startup.view_mode, 0, 3));
+    bool show_vectorscope = (startup.visible_scopes & 1) != 0;
+    bool show_waveform = (startup.visible_scopes & 2) != 0;
+    bool show_histogram = (startup.visible_scopes & 4) != 0;
     bool show_graticule = startup.show_graticule;
     bool values_as_percent = startup.values_as_percent;
     bool show_settings = false;
@@ -417,7 +458,8 @@ int main() {
         preferences.histogram_gain = analysis.histogram.gain;
         preferences.histogram_stride = analysis.histogram.sampling_stride;
         preferences.region = analysis.region;
-        preferences.view_mode = static_cast<int>(view_mode);
+        preferences.visible_scopes =
+            (show_vectorscope ? 1 : 0) | (show_waveform ? 2 : 0) | (show_histogram ? 4 : 0);
         preferences.show_graticule = show_graticule;
         preferences.values_as_percent = values_as_percent;
         glfwGetWindowPos(window, &preferences.window_x, &preferences.window_y);
@@ -533,28 +575,31 @@ int main() {
                      ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |
                          ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoSavedSettings);
 
-        // Toolbar: view switcher, region tools, cursor readout.
-        const auto mode_button = [&](const char* label, ViewMode mode) {
-            const bool active = view_mode == mode;
-            if (active)
-                ImGui::PushStyleColor(ImGuiCol_Button,
-                                      ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
-            if (ImGui::SmallButton(label)) view_mode = mode;
-            if (active) ImGui::PopStyleColor();
-            ImGui::SameLine();
+        // Toolbar: scope toggles, region tools, cursor readout. Each scope
+        // toggles independently and the enabled ones stack; the last one on
+        // refuses to turn off, so the window never goes empty.
+        const auto toggle_scope = [&](bool& flag) {
+            const int enabled =
+                (show_vectorscope ? 1 : 0) + (show_waveform ? 1 : 0) + (show_histogram ? 1 : 0);
+            if (!flag || enabled > 1) flag = !flag;
         };
-        mode_button("Vector", ViewMode::Vectorscope);
-        mode_button("Wave", ViewMode::Waveform);
-        mode_button("Both", ViewMode::Both);
-        mode_button("Histo", ViewMode::Histogram);
+        const auto scope_toggle = [&](const char* id, ScopeGlyph glyph, bool& flag,
+                                      const char* tooltip) {
+            if (ScopeToggleButton(id, glyph, flag, tooltip)) toggle_scope(flag);
+            ImGui::SameLine(0.0f, 2.0f);
+        };
+        scope_toggle("##toggle-vectorscope", ScopeGlyph::Vectorscope, show_vectorscope,
+                     "Vectorscope (V)");
+        scope_toggle("##toggle-waveform", ScopeGlyph::Waveform, show_waveform, "Waveform (W)");
+        scope_toggle("##toggle-histogram", ScopeGlyph::Histogram, show_histogram, "Histogram (H)");
+        ImGui::SameLine(0.0f, 8.0f);
 
         // Keyboard shortcuts mirror the toolbar and region tools.
         bool want_region_pick_hotkey = false;
         if (!io.WantTextInput) {
-            if (ImGui::IsKeyPressed(ImGuiKey_V, false)) view_mode = ViewMode::Vectorscope;
-            if (ImGui::IsKeyPressed(ImGuiKey_W, false)) view_mode = ViewMode::Waveform;
-            if (ImGui::IsKeyPressed(ImGuiKey_B, false)) view_mode = ViewMode::Both;
-            if (ImGui::IsKeyPressed(ImGuiKey_H, false)) view_mode = ViewMode::Histogram;
+            if (ImGui::IsKeyPressed(ImGuiKey_V, false)) toggle_scope(show_vectorscope);
+            if (ImGui::IsKeyPressed(ImGuiKey_W, false)) toggle_scope(show_waveform);
+            if (ImGui::IsKeyPressed(ImGuiKey_H, false)) toggle_scope(show_histogram);
             if (ImGui::IsKeyPressed(ImGuiKey_A, false)) want_region_pick_hotkey = true;
             if (ImGui::IsKeyPressed(ImGuiKey_F, false)) {
                 analysis.region = RegionOfInterest{};
@@ -680,24 +725,37 @@ int main() {
             }
         };
 
+        // The enabled scopes stack in a fixed order, splitting the window
+        // along its longer axis.
+        const auto draw_scope = [&](ScopeGlyph kind) {
+            if (kind == ScopeGlyph::Vectorscope)
+                draw_vectorscope();
+            else if (kind == ScopeGlyph::Waveform)
+                draw_waveform();
+            else
+                draw_histogram();
+        };
+        ScopeGlyph panes[3];
+        int pane_count = 0;
+        if (show_vectorscope) panes[pane_count++] = ScopeGlyph::Vectorscope;
+        if (show_waveform) panes[pane_count++] = ScopeGlyph::Waveform;
+        if (show_histogram) panes[pane_count++] = ScopeGlyph::Histogram;
         const ImVec2 area = ImGui::GetContentRegionAvail();
-        if (view_mode == ViewMode::Vectorscope) {
-            draw_vectorscope();
-        } else if (view_mode == ViewMode::Waveform) {
-            draw_waveform();
-        } else if (view_mode == ViewMode::Histogram) {
-            draw_histogram();
+        if (pane_count <= 1) {
+            if (pane_count == 1) draw_scope(panes[0]);
         } else {
             const bool horizontal = area.x >= area.y;
-            const ImVec2 half =
-                horizontal ? ImVec2(area.x * 0.5f - 3, area.y) : ImVec2(area.x, area.y * 0.5f - 3);
-            ImGui::BeginChild("##vectorscope", half);
-            draw_vectorscope();
-            ImGui::EndChild();
-            if (horizontal) ImGui::SameLine();
-            ImGui::BeginChild("##waveform", half);
-            draw_waveform();
-            ImGui::EndChild();
+            const ImVec2 spacing = ImGui::GetStyle().ItemSpacing;
+            const ImVec2 pane_size =
+                horizontal ? ImVec2((area.x - spacing.x * (pane_count - 1)) / pane_count, area.y)
+                           : ImVec2(area.x, (area.y - spacing.y * (pane_count - 1)) / pane_count);
+            const char* pane_ids[3] = {"##pane0", "##pane1", "##pane2"};
+            for (int pane = 0; pane < pane_count; ++pane) {
+                ImGui::BeginChild(pane_ids[pane], pane_size);
+                draw_scope(panes[pane]);
+                ImGui::EndChild();
+                if (horizontal && pane + 1 < pane_count) ImGui::SameLine();
+            }
         }
 
         // Right-click: the native menu carries the modes and toggles.
@@ -708,11 +766,9 @@ int main() {
             const auto waveform_mode = analysis.waveform.mode;
             const bool bt601 = analysis.vectorscope.matrix == ChromaMatrix::Bt601;
             std::vector<NativeMenuItem> menu{
-                {Kind::Action, "Vectorscope", kMenuShowVectorscope,
-                 view_mode == ViewMode::Vectorscope},
-                {Kind::Action, "Waveform", kMenuShowWaveform, view_mode == ViewMode::Waveform},
-                {Kind::Action, "Both", kMenuShowBoth, view_mode == ViewMode::Both},
-                {Kind::Action, "Histogram", kMenuShowHistogram, view_mode == ViewMode::Histogram},
+                {Kind::Action, "Vectorscope", kMenuShowVectorscope, show_vectorscope},
+                {Kind::Action, "Waveform", kMenuShowWaveform, show_waveform},
+                {Kind::Action, "Histogram", kMenuShowHistogram, show_histogram},
                 {Kind::Separator, "", -1, false},
                 {Kind::SubmenuBegin, "Waveform Style", -1, false},
                 {Kind::Action, "Luma", kMenuWaveformLuma, waveform_mode == WaveformMode::Luma},
@@ -738,13 +794,13 @@ int main() {
             };
             switch (ShowNativeContextMenu(menu)) {
                 case kMenuShowVectorscope:
-                    view_mode = ViewMode::Vectorscope;
+                    toggle_scope(show_vectorscope);
                     break;
                 case kMenuShowWaveform:
-                    view_mode = ViewMode::Waveform;
+                    toggle_scope(show_waveform);
                     break;
-                case kMenuShowBoth:
-                    view_mode = ViewMode::Both;
+                case kMenuShowHistogram:
+                    toggle_scope(show_histogram);
                     break;
                 case kMenuWaveformLuma:
                     analysis.waveform.mode = WaveformMode::Luma;

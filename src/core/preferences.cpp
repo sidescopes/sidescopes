@@ -63,7 +63,16 @@ Preferences LoadPreferences(const std::filesystem::path& file) {
     read_double("region_top", preferences.region.top_percent);
     read_double("region_right", preferences.region.right_percent);
     read_double("region_bottom", preferences.region.bottom_percent);
-    read_int("view_mode", preferences.view_mode);
+    // Older builds stored a single view mode; map it onto the bit set.
+    int legacy_view_mode = -1;
+    read_int("view_mode", legacy_view_mode);
+    if (legacy_view_mode >= 0 && legacy_view_mode <= 3) {
+        constexpr int kLegacyScopes[4] = {1, 2, 3, 4};
+        preferences.visible_scopes = kLegacyScopes[legacy_view_mode];
+    }
+    read_int("visible_scopes", preferences.visible_scopes);
+    preferences.visible_scopes &= 7;
+    if (preferences.visible_scopes == 0) preferences.visible_scopes = 1;
     read_bool("show_graticule", preferences.show_graticule);
     read_bool("values_as_percent", preferences.values_as_percent);
     read_int("window_x", preferences.window_x);
@@ -92,7 +101,7 @@ bool SavePreferences(const Preferences& preferences, const std::filesystem::path
         << "region_top=" << preferences.region.top_percent << '\n'
         << "region_right=" << preferences.region.right_percent << '\n'
         << "region_bottom=" << preferences.region.bottom_percent << '\n'
-        << "view_mode=" << preferences.view_mode << '\n'
+        << "visible_scopes=" << preferences.visible_scopes << '\n'
         << "show_graticule=" << (preferences.show_graticule ? 1 : 0) << '\n'
         << "values_as_percent=" << (preferences.values_as_percent ? 1 : 0) << '\n'
         << "window_x=" << preferences.window_x << '\n'
