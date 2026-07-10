@@ -69,19 +69,21 @@
         border.lineWidth = 1.5;
         [border stroke];
     } else {
-        // Faint outlines advertise every suggestion; the hovered one punches
-        // through the dimming and carries its label.
-        [[NSColor colorWithWhite:1 alpha:0.25] setStroke];
-        for (const auto& suggestion : suggestions_) {
-            NSBezierPath* outline = [NSBezierPath bezierPathWithRect:suggestion.first];
-            outline.lineWidth = 1.0;
-            [outline stroke];
-        }
+        // Only the suggestion under the cursor is shown: it punches through
+        // the dimming and carries its label. Outlining every candidate at
+        // once (including occluded background windows) was just clutter.
         if (self.hoveredSuggestion >= 0 &&
             self.hoveredSuggestion < static_cast<NSInteger>(suggestions_.size())) {
             const auto& hovered = suggestions_[self.hoveredSuggestion];
             [[NSColor clearColor] setFill];
             NSRectFillUsingOperation(hovered.first, NSCompositingOperationCopy);
+            // The window server treats fully transparent window pixels as
+            // click-through: a truly clear punch would send the confirming
+            // click to the application underneath (which is exactly where
+            // the user clicks). Five percent black is visually nothing but
+            // keeps every pixel hit-testable.
+            [[NSColor colorWithWhite:0 alpha:0.05] setFill];
+            NSRectFillUsingOperation(hovered.first, NSCompositingOperationSourceOver);
             [[NSColor whiteColor] setStroke];
             NSBezierPath* border = [NSBezierPath bezierPathWithRect:hovered.first];
             border.lineWidth = 2.0;
@@ -162,6 +164,14 @@
     return YES;
 }
 
+// Without this, the first click on the overlay is swallowed as a
+// window-activation gesture and never reaches the view - the symptom was
+// clicks falling through to the app behind while only ESC worked.
+- (BOOL)acceptsFirstMouse:(NSEvent*)event {
+    (void)event;
+    return YES;
+}
+
 @end
 
 // Double-stroked border (dark under light) so it reads on any background.
@@ -232,6 +242,9 @@ std::optional<RegionOfInterest> PickRegionOnDisplay(
     overlay.contentView = view;
     overlay.acceptsMouseMovedEvents = YES;
 
+    // Force the app frontmost so the overlay owns the mouse for the whole
+    // interaction; otherwise clicks can activate whatever is behind it.
+    [NSApp activateIgnoringOtherApps:YES];
     [overlay makeKeyAndOrderFront:nil];
     [overlay makeFirstResponder:view];
     [NSCursor.crosshairCursor push];
