@@ -31,6 +31,7 @@ add_library(sidescopes_core STATIC
     src/core/frame.cpp
     src/core/region_hash.cpp
     src/core/trace_intensity.cpp
+    src/core/marker_smoother.cpp
     src/core/scopes/vectorscope.cpp
     src/core/scopes/waveform.cpp
 )
