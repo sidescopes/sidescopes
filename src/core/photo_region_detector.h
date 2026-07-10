@@ -31,9 +31,16 @@ struct RegionCandidate {
 // neither for nor against a rectangle: borders may pass beneath them, and
 // content inside them (scope traces, graticule lines) yields no candidates.
 //
+// `pixels_per_point` is the frame's pixel density (2.0 on Retina displays).
+// Geometric tolerances are defined in points - window chrome, corner radii,
+// and photo sizes are laid out in points - and must grow with the density,
+// or a rounded corner that a search absorbs at 1x pushes a border out of
+// reach at 2x.
+//
 // Returns up to `max_candidates`, largest first. Deterministic.
 std::vector<RegionCandidate> DetectPhotoRegions(const FrameView& frame,
                                                 const std::vector<IntRect>& masked_regions = {},
+                                                float pixels_per_point = 1.0f,
                                                 int max_candidates = 8);
 
 }  // namespace sidescopes

@@ -886,7 +886,10 @@ int main() {
                     // Our own window floats over the desktop being analyzed;
                     // masked, so borders survive beneath it and scope traces
                     // spawn no candidates.
-                    photo_candidates = DetectPhotoRegions(view, {analysis.masked_window});
+                    const auto pixels_per_point =
+                        static_cast<float>(view.width / geometry->width_points);
+                    photo_candidates =
+                        DetectPhotoRegions(view, {analysis.masked_window}, pixels_per_point);
                 });
 
                 for (const DesktopWindow& window : visible_windows) {

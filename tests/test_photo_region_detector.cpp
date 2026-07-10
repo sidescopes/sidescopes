@@ -137,6 +137,38 @@ TEST_CASE("Detector finds side-by-side photos separately") {
     CHECK(AnyCandidateNear(candidates, right));
 }
 
+TEST_CASE("Detector absorbs rounded corners at Retina density") {
+    // macOS clips window content by a rounded rectangle (about a 12-point
+    // corner radius), so a photo's border runs start well after its true
+    // corner - twice as far at 2x pixel density. The side search must scale
+    // with density or the border falls out of reach.
+    constexpr float kPixelsPerPoint = 2.0f;
+    constexpr int kCornerRadius = 24;  // 12 points at 2x
+    TestScreen screen(1280, 960);
+    const IntRect photo{192, 128, 800, 640};
+    screen.AddPhoto(photo);
+    const int corner_centers_x[] = {photo.x + kCornerRadius,
+                                    photo.x + photo.width - 1 - kCornerRadius};
+    const int corner_centers_y[] = {photo.y + kCornerRadius,
+                                    photo.y + photo.height - 1 - kCornerRadius};
+    for (int py = photo.y; py < photo.y + photo.height; ++py)
+        for (int px = photo.x; px < photo.x + photo.width; ++px) {
+            const int cx = px < corner_centers_x[0]   ? corner_centers_x[0]
+                           : px > corner_centers_x[1] ? corner_centers_x[1]
+                                                      : px;
+            const int cy = py < corner_centers_y[0]   ? corner_centers_y[0]
+                           : py > corner_centers_y[1] ? corner_centers_y[1]
+                                                      : py;
+            const int dx = px - cx;
+            const int dy = py - cy;
+            if (dx * dx + dy * dy > kCornerRadius * kCornerRadius)
+                screen.Set(px, py, Color{40, 40, 42});
+        }
+
+    const auto candidates = DetectPhotoRegions(screen.View(), {}, kPixelsPerPoint);
+    CHECK(AnyCandidateNear(candidates, photo));
+}
+
 TEST_CASE("Detector tolerates a masked window occluding a photo edge") {
     // The application's own always-on-top scope window habitually floats
     // over the photo being scoped. Its pixels prove nothing about the
@@ -176,7 +208,7 @@ TEST_CASE("Detector orders candidates largest first and respects the cap") {
     screen.AddPhoto(IntRect{40, 40, 500, 400}, 0x11111111u);
     screen.AddPhoto(IntRect{600, 60, 160, 120}, 0x22222222u);
 
-    const auto candidates = DetectPhotoRegions(screen.View(), {}, 1);
+    const auto candidates = DetectPhotoRegions(screen.View(), {}, 1.0f, 1);
     REQUIRE(candidates.size() == 1);
     CHECK(NearlyEqual(candidates.front().rect, IntRect{40, 40, 500, 400}, 3));
 }
