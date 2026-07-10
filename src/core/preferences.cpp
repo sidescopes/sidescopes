@@ -48,6 +48,8 @@ Preferences LoadPreferences(const std::filesystem::path& file) {
     read_float("waveform_gain", preferences.waveform_gain);
     read_int("vectorscope_stride", preferences.vectorscope_stride);
     read_int("waveform_stride", preferences.waveform_stride);
+    read_float("histogram_gain", preferences.histogram_gain);
+    read_int("histogram_stride", preferences.histogram_stride);
     read_float("vectorscope_smoothing_ms", preferences.vectorscope_smoothing_ms);
     read_float("waveform_smoothing_ms", preferences.waveform_smoothing_ms);
     int matrix = 0;
@@ -80,6 +82,8 @@ bool SavePreferences(const Preferences& preferences, const std::filesystem::path
         << "waveform_gain=" << preferences.waveform_gain << '\n'
         << "vectorscope_stride=" << preferences.vectorscope_stride << '\n'
         << "waveform_stride=" << preferences.waveform_stride << '\n'
+        << "histogram_gain=" << preferences.histogram_gain << '\n'
+        << "histogram_stride=" << preferences.histogram_stride << '\n'
         << "vectorscope_smoothing_ms=" << preferences.vectorscope_smoothing_ms << '\n'
         << "waveform_smoothing_ms=" << preferences.waveform_smoothing_ms << '\n'
         << "matrix=" << (preferences.matrix == ChromaMatrix::Bt709 ? 1 : 0) << '\n'

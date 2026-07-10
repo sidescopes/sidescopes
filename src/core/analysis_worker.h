@@ -7,6 +7,7 @@
 #include <thread>
 
 #include "core/frame_mailbox.h"
+#include "core/scopes/histogram.h"
 #include "core/scopes/scope_types.h"
 #include "core/scopes/vectorscope.h"
 #include "core/scopes/waveform.h"
@@ -27,6 +28,7 @@ struct RegionOfInterest {
 struct AnalysisSettings {
     VectorscopeSettings vectorscope;
     WaveformSettings waveform;
+    HistogramSettings histogram;
     RegionOfInterest region;
     // The application's own window in frame pixels, masked out of change
     // detection so its own redraws never re-trigger analysis.
@@ -42,6 +44,7 @@ public:
     struct Output {
         ScopeImage vectorscope_image;
         ScopeImage waveform_image;
+        ScopeImage histogram_image;
         double accumulate_milliseconds = 0.0;
         uint64_t frames_processed = 0;
         uint64_t version = 0;

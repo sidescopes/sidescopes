@@ -67,6 +67,7 @@ std::optional<AnalysisWorker::FrameSize> AnalysisWorker::LatestFrameSize() const
 void AnalysisWorker::Run() {
     Vectorscope vectorscope;
     Waveform waveform;
+    Histogram histogram;
     AnalysisSettings settings;
     uint64_t seen_settings_version = 0;
     uint64_t last_content_hash = 0;
@@ -115,11 +116,13 @@ void AnalysisWorker::Run() {
         if (settings_changed) {
             vectorscope.Configure(settings.vectorscope);
             waveform.Configure(settings.waveform);
+            histogram.Configure(settings.histogram);
         }
 
         const auto started = std::chrono::steady_clock::now();
         vectorscope.Accumulate(view, region);
         waveform.Accumulate(view, region);
+        histogram.Accumulate(view, region);
         const double elapsed_ms =
             std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started)
                 .count();
@@ -128,6 +131,7 @@ void AnalysisWorker::Run() {
         std::lock_guard lock(output_mutex_);
         output_.vectorscope_image = vectorscope.Image();
         output_.waveform_image = waveform.Image();
+        output_.histogram_image = histogram.Image();
         output_.accumulate_milliseconds = elapsed_ms;
         output_.frames_processed = frames_processed;
         ++output_.version;

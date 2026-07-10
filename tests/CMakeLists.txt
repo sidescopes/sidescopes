@@ -16,6 +16,7 @@ add_executable(sidescopes_tests
     test_marker_smoother.cpp
     test_analysis_worker.cpp
     test_graticule.cpp
+    test_histogram.cpp
     test_preferences.cpp
     test_vectorscope.cpp
     test_waveform.cpp
