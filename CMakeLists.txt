@@ -114,10 +114,29 @@ if(APPLE)
         "-framework QuartzCore"
     )
     sidescopes_target_defaults(SideScopes)
-    # Screen-recording permission attaches to the bundle's code signature;
-    # an ad-hoc signature gives development builds a stable-enough identity.
+
+    # The screen-recording permission is bound to the bundle's code-signing
+    # identity. An ad-hoc signature's identity is the binary hash, so it
+    # changes on every build and the granted permission is lost each time.
+    # Signing with a stable identity keeps a single grant valid across
+    # rebuilds. If a self-signed "SideScopes Dev" certificate is present (see
+    # CONTRIBUTING), use it; otherwise fall back to ad-hoc. Releases override
+    # this with a Developer ID.
+    if(NOT DEFINED SIDESCOPES_CODESIGN_IDENTITY)
+        execute_process(
+            COMMAND security find-certificate -c "SideScopes Dev"
+            RESULT_VARIABLE _sidescopes_no_dev_cert
+            OUTPUT_QUIET ERROR_QUIET)
+        if(_sidescopes_no_dev_cert EQUAL 0)
+            set(SIDESCOPES_CODESIGN_IDENTITY "SideScopes Dev")
+        else()
+            set(SIDESCOPES_CODESIGN_IDENTITY "-")
+        endif()
+    endif()
+    message(STATUS "SideScopes code-signing identity: ${SIDESCOPES_CODESIGN_IDENTITY}")
     add_custom_command(TARGET SideScopes POST_BUILD
-        COMMAND codesign --force --sign - $<TARGET_BUNDLE_DIR:SideScopes>
+        COMMAND codesign --force --sign "${SIDESCOPES_CODESIGN_IDENTITY}"
+                $<TARGET_BUNDLE_DIR:SideScopes>
     )
 endif()
 

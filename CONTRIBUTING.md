@@ -14,6 +14,44 @@ CMake 3.24+, Ninja (recommended), and a C++20 compiler. macOS builds need the
 Command Line Tools; the app target builds on macOS only, while the core
 library and its tests build everywhere.
 
+## Screen-recording permission for development builds (macOS)
+
+macOS binds the screen-recording permission to an application's code-signing
+identity. An ad-hoc signature's identity is the binary hash, so it changes on
+every build and the permission you granted is silently lost — the app reports
+the permission as missing even though System Settings still shows it enabled.
+
+Create a stable self-signed identity once, and a single grant survives every
+rebuild:
+
+```sh
+cat > /tmp/sidescopes-cert.conf <<'CONF'
+[req]
+distinguished_name = dn
+x509_extensions = v3
+prompt = no
+[dn]
+CN = SideScopes Dev
+[v3]
+basicConstraints = critical, CA:false
+keyUsage = critical, digitalSignature
+extendedKeyUsage = critical, codeSigning
+CONF
+openssl req -x509 -newkey rsa:2048 -keyout /tmp/sidescopes-key.pem \
+    -out /tmp/sidescopes-cert.pem -days 3650 -nodes -config /tmp/sidescopes-cert.conf
+openssl pkcs12 -export -out /tmp/sidescopes.p12 -inkey /tmp/sidescopes-key.pem \
+    -in /tmp/sidescopes-cert.pem -passout pass:sidescopes -name "SideScopes Dev" \
+    -legacy -macalg sha1
+security import /tmp/sidescopes.p12 -k ~/Library/Keychains/login.keychain-db \
+    -P sidescopes -T /usr/bin/codesign -A
+```
+
+Reconfigure so CMake picks up the identity (`cmake -B build`); it reports
+`SideScopes code-signing identity: SideScopes Dev`. Reset any stale grant
+once with `tccutil reset ScreenCapture org.sidescopes.app`, launch, and grant
+the prompt. Without the certificate the build still works — it falls back to
+ad-hoc signing and you re-grant after each rebuild.
+
 ## Checks
 
 Run what CI runs before pushing:
