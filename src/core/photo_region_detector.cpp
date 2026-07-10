@@ -315,9 +315,52 @@ std::vector<RegionCandidate> DetectPhotoRegions(const FrameView& frame,
                   return static_cast<int64_t>(a.rect.width) * a.rect.height >
                          static_cast<int64_t>(b.rect.width) * b.rect.height;
               });
-    if (static_cast<int>(candidates.size()) > max_candidates)
-        candidates.resize(static_cast<std::size_t>(max_candidates));
-    return candidates;
+
+    // ...but distinct before redundant. Application chrome stacks several
+    // horizontal lines above one content area; every line pairs with the
+    // same bottom into a near-copy of the whole window, and the lines pair
+    // among themselves into slices of it. Under a plain largest-first cap
+    // this crowd starves the smaller photograph the user actually wants.
+    // A candidate that mostly coincides with one already kept, or that is
+    // a contained slice sharing its column or row span, waits until the
+    // distinct ones have their slots. A photograph nested in its window is
+    // neither: its sides sit well inside the window's.
+    std::vector<RegionCandidate> kept;
+    std::vector<RegionCandidate> redundant;
+    for (const RegionCandidate& candidate : candidates) {
+        const auto& c = candidate.rect;
+        bool near_copy = false;
+        for (const RegionCandidate& existing : kept) {
+            const auto& e = existing.rect;
+            const int64_t overlap_w = std::min(c.x + c.width, e.x + e.width) - std::max(c.x, e.x);
+            const int64_t overlap_h = std::min(c.y + c.height, e.y + e.height) - std::max(c.y, e.y);
+            if (overlap_w <= 0 || overlap_h <= 0) continue;
+            const int64_t intersection = overlap_w * overlap_h;
+            const int64_t area = static_cast<int64_t>(c.width) * c.height;
+            const int64_t union_area =
+                area + static_cast<int64_t>(e.width) * e.height - intersection;
+            if (intersection * 5 > union_area * 4) {  // intersection/union > 0.8
+                near_copy = true;
+                break;
+            }
+            const bool contained = intersection * 10 > area * 9;
+            const bool same_columns =
+                std::abs(c.x - e.x) <= tolerances.duplicate &&
+                std::abs(c.x + c.width - (e.x + e.width)) <= tolerances.duplicate;
+            const bool same_rows =
+                std::abs(c.y - e.y) <= tolerances.duplicate &&
+                std::abs(c.y + c.height - (e.y + e.height)) <= tolerances.duplicate;
+            if (contained && (same_columns || same_rows)) {
+                near_copy = true;
+                break;
+            }
+        }
+        (near_copy ? redundant : kept).push_back(candidate);
+    }
+    kept.insert(kept.end(), redundant.begin(), redundant.end());
+    if (static_cast<int>(kept.size()) > max_candidates)
+        kept.resize(static_cast<std::size_t>(max_candidates));
+    return kept;
 }
 
 }  // namespace sidescopes

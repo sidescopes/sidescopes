@@ -191,6 +191,23 @@ TEST_CASE("Detector tolerates a masked window occluding a photo edge") {
     }
 }
 
+TEST_CASE("Detector keeps a small photo despite stacked window variants") {
+    // Application chrome (menu line, toolbar line, content top) stacks
+    // several horizontal lines above one content area. Every line pairs
+    // with the window bottom into a near-copy of the whole window; the
+    // candidate cap must not let those copies crowd out the photograph.
+    // Modeled on Lightroom's library view, where exactly this happened.
+    TestScreen screen(1000, 800);
+    const IntRect window{10, 10, 980, 780};
+    screen.FillRect(window, Color{240, 240, 240});  // a light app on dark chrome
+    for (int line_y : {40, 80, 120, 160, 200})
+        screen.FillRect(IntRect{window.x, line_y, window.width, 2}, Color{120, 120, 120});
+    const IntRect photo{600, 300, 300, 220};
+    screen.AddPhoto(photo);
+
+    CHECK(AnyCandidateNear(DetectPhotoRegions(screen.View()), photo));
+}
+
 TEST_CASE("Detector reports nothing on a flat frame") {
     TestScreen screen(640, 480);
     CHECK(DetectPhotoRegions(screen.View()).empty());
