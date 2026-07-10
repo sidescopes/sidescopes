@@ -12,12 +12,19 @@ namespace {
 // precision comes later from edge refinement.
 constexpr int kBlockSize = 16;
 
-// A block is rich when its luma varies enough or it holds enough distinct
-// coarse colors. Both thresholds are deliberately permissive: missing part
-// of a photo hurts more than including a busy toolbar block, because the
-// rectangle step wants solid photo cores.
-constexpr double kVarianceThreshold = 40.0;  // luma variance
-constexpr int kDistinctColorThreshold = 12;  // of max 512 coarse buckets
+// A block is rich when its luma varies at all beyond rendering-flat, or it
+// holds a handful of distinct coarse colors. The thresholds look tiny and
+// that is the point: screen-rendered editor chrome is mathematically flat
+// (variance essentially zero), while real photographs carry sensor noise
+// and compression texture everywhere - including bokeh backgrounds and
+// clear skies. A high threshold makes the detector collapse onto the sharp
+// band of a photo and miss its smooth regions entirely.
+constexpr double kVarianceThreshold = 1.0;  // luma variance
+constexpr int kDistinctColorThreshold = 4;  // of max 512 coarse buckets
+
+// Candidates from later rounds that mostly overlap an earlier one are
+// slivers of the same photo, not separate regions.
+constexpr double kMaximumOverlapFraction = 0.3;
 
 struct BlockGrid {
     int columns = 0;
@@ -120,6 +127,19 @@ bool SegmentIsRich(const FrameView& frame, int x0, int x1, int y0, int y1) {
     if (samples == 0) return false;
     const double mean = sum / samples;
     return (sum_squared / samples - mean * mean) >= kVarianceThreshold;
+}
+
+double OverlapFraction(const IntRect& a, const IntRect& b) {
+    const int left = std::max(a.x, b.x);
+    const int top = std::max(a.y, b.y);
+    const int right = std::min(a.x + a.width, b.x + b.width);
+    const int bottom = std::min(a.y + a.height, b.y + b.height);
+    if (right <= left || bottom <= top) return 0.0;
+    const double intersection =
+        static_cast<double>(right - left) * static_cast<double>(bottom - top);
+    const double smaller =
+        std::min(static_cast<double>(a.width) * a.height, static_cast<double>(b.width) * b.height);
+    return smaller > 0.0 ? intersection / smaller : 0.0;
 }
 
 // Refines each rectangle edge to the exact canvas boundary, one pixel line
@@ -231,6 +251,15 @@ std::vector<RegionCandidate> DetectPhotoRegions(const FrameView& frame, int max_
         IntRect rect{core.cx * kBlockSize, core.cy * kBlockSize, core.columns * kBlockSize,
                      core.rows * kBlockSize};
         rect = RefineEdges(frame, rect);
+
+        bool sliver_of_previous = false;
+        for (const RegionCandidate& earlier : candidates) {
+            if (OverlapFraction(rect, earlier.rect) > kMaximumOverlapFraction) {
+                sliver_of_previous = true;
+                break;
+            }
+        }
+        if (sliver_of_previous) continue;
 
         RegionCandidate candidate;
         candidate.rect = rect;

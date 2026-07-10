@@ -64,6 +64,70 @@ TEST_CASE("Detector finds a photo canvas inside editor chrome") {
     CHECK(candidates.front().confidence > 0.8f);
 }
 
+TEST_CASE("Detector finds a smooth, low-contrast photo") {
+    // A defocused background or a clear sky has no sharp detail - only
+    // gentle gradients. The detector must still see the whole photo, not
+    // collapse onto its busiest band (which is what a high variance
+    // threshold does to real photographs).
+    // Gentle gradients plus the small noise floor every real photograph
+    // carries (sensor noise, compression texture). A mathematically clean
+    // gradient is indistinguishable from window-chrome shading and is
+    // rightly not detected - a later test pins that side.
+    EditorFrame frame(640, 480);
+    const IntRect photo{96, 64, 400, 320};
+    uint32_t state = 0x2468ace1u;
+    for (int py = photo.y; py < photo.y + photo.height; ++py) {
+        for (int px = photo.x; px < photo.x + photo.width; ++px) {
+            state = state * 1664525u + 1013904223u;
+            const int noise = static_cast<int>(state >> 30) - 2;
+            const auto level = static_cast<uint8_t>(90 + (px - photo.x) * 40 / photo.width +
+                                                    (py - photo.y) * 20 / photo.height + noise);
+            frame.Set(px, py, Color{level, level, static_cast<uint8_t>(level + 10)});
+        }
+    }
+
+    const auto candidates = DetectPhotoRegions(frame.View());
+    REQUIRE_FALSE(candidates.empty());
+    CHECK(NearlyEqual(candidates.front().rect, photo, 4));
+}
+
+TEST_CASE("Detector does not split one photo into overlapping slivers") {
+    // Half sharp detail, half smooth gradient - one photo, one candidate.
+    EditorFrame frame(640, 480);
+    const IntRect photo{96, 64, 400, 320};
+    frame.AddPhoto(IntRect{photo.x, photo.y, photo.width, photo.height / 2});
+    uint32_t state = 0x13579bdfu;
+    for (int py = photo.y + photo.height / 2; py < photo.y + photo.height; ++py) {
+        for (int px = photo.x; px < photo.x + photo.width; ++px) {
+            state = state * 1664525u + 1013904223u;
+            const int noise = static_cast<int>(state >> 30) - 2;
+            const auto level = static_cast<uint8_t>(90 + (px - photo.x) * 40 / photo.width + noise);
+            frame.Set(px, py, Color{level, level, level});
+        }
+    }
+
+    const auto candidates = DetectPhotoRegions(frame.View());
+    REQUIRE_FALSE(candidates.empty());
+    CHECK(NearlyEqual(candidates.front().rect, photo, 4));
+    for (std::size_t i = 1; i < candidates.size(); ++i) {
+        // No candidate may be a sliver of the first.
+        CHECK(candidates[i].rect.y >= photo.y + photo.height);
+    }
+}
+
+TEST_CASE("Detector treats a noiseless gradient as chrome") {
+    // Window chrome can carry gentle shading too. Without a photographic
+    // noise floor, a clean gradient must not be reported.
+    EditorFrame frame(640, 480);
+    for (int py = 64; py < 384; ++py) {
+        for (int px = 96; px < 496; ++px) {
+            const auto level = static_cast<uint8_t>(90 + (px - 96) * 40 / 400);
+            frame.Set(px, py, Color{level, level, level});
+        }
+    }
+    CHECK(DetectPhotoRegions(frame.View()).empty());
+}
+
 TEST_CASE("Detector reports nothing on a flat frame") {
     EditorFrame frame(640, 480);
     CHECK(DetectPhotoRegions(frame.View()).empty());

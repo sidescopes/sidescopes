@@ -855,7 +855,12 @@ int main() {
             });
             std::vector<WindowRegion> window_regions;
             if (const auto geometry = GeometryOfDisplay(capture_display)) {
+                // Only the frontmost handful of windows: deeper background
+                // windows are things the user is not looking at, and the
+                // detected photo canvas is the primary suggestion anyway.
+                constexpr int kMaxWindowSuggestions = 5;
                 for (const DesktopWindow& window : OnScreenWindows(capture_display)) {
+                    if (static_cast<int>(window_regions.size()) >= kMaxWindowSuggestions) break;
                     WindowRegion region;
                     region.region.left_percent =
                         std::clamp((window.x - geometry->origin_x) / geometry->width_points * 100.0,

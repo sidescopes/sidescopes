@@ -8,6 +8,9 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- Photo detection tuned for real photographs: smooth, defocused regions
+  are recognized by their noise floor rather than requiring sharp detail.
+
 - Smart region selection: the picker outlines detected photo canvases and
   application windows; hover highlights one, a click confirms it, dragging
   still selects manually.
