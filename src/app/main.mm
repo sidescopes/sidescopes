@@ -18,12 +18,14 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <mutex>
 #include <optional>
 #include <string>
+#include <thread>
 
 #include "core/analysis_worker.h"
 #include "core/frame_mailbox.h"
@@ -845,6 +847,28 @@ int main() {
         // analysis keep flowing underneath.
         if (want_region_pick && capture_display != 0) {
             HideRegionBorder();
+            // The previous region's border must not leak into the analyzed
+            // frame: its strokes read as rectangle edges and cut suggestions
+            // short at the old region. The latest captured frame may predate
+            // the hide, so wait briefly for one taken after the border left
+            // the screen. The 60 ms floor outlasts an in-flight pre-hide
+            // frame's capture-to-delivery; the 300 ms cap keeps the picker
+            // responsive if the capture stream has stalled.
+            if (!is_full_region()) {
+                uint64_t stale_sequence = 0;
+                worker.WithLatestFrame(
+                    [&](const FrameView& view) { stale_sequence = view.sequence; });
+                const double hidden_at = glfwGetTime();
+                for (;;) {
+                    const double elapsed = glfwGetTime() - hidden_at;
+                    if (elapsed >= 0.3) break;
+                    uint64_t sequence = stale_sequence;
+                    worker.WithLatestFrame(
+                        [&](const FrameView& view) { sequence = view.sequence; });
+                    if (sequence > stale_sequence && elapsed >= 0.06) break;
+                    std::this_thread::sleep_for(std::chrono::milliseconds(15));
+                }
+            }
             // The offer: photo canvases detected INSIDE the visible windows,
             // then the windows themselves. Whole-desktop detection is
             // meaningless - a desktop full of windows is content everywhere -
