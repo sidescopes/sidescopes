@@ -8,6 +8,8 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- Preferences persisted between sessions: calibration, region, view,
+  toggles, and window placement.
 - Graticule geometry built from the engines' own projections: vectorscope
   rings, color targets and skin-tone line, and the waveform scale.
 - Analysis worker: scope engines on a dedicated thread with change
