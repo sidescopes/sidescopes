@@ -8,11 +8,12 @@
 namespace sidescopes {
 namespace {
 
-// A pixel boundary is an edge when adjacent pixels differ this much in luma
-// or in any channel. Antialiasing spreads a hard boundary over two or three
-// pixels, which still clears these thresholds comfortably; gentle gradients
-// inside photographs do not. Contrast is per pixel pair and does not scale
-// with density.
+// A pixel boundary is an edge when the compared pixels differ this much in
+// luma or in any channel; gentle gradients inside photographs do not clear
+// it. Contrast is per pixel pair and does not scale with density.
+// Antialiasing halves adjacent differences by spreading a step across
+// pixels, which is why edges are also measured across a wide baseline (see
+// BoundaryRow).
 constexpr int kLumaEdgeThreshold = 14;
 constexpr int kChannelEdgeThreshold = 24;
 
@@ -23,9 +24,12 @@ constexpr int kChannelEdgeThreshold = 24;
 // small controls.
 constexpr int kMinimumRunLengthPoints = 96;
 
-// Gaps this small inside a run are bridged (antialiasing, content crossing
-// the boundary line).
-constexpr int kRunGapTolerancePoints = 6;
+// Gaps this small inside a run are bridged: content crossing the boundary
+// line, and stretches where the two sides genuinely match in tone - a gray
+// pavement meeting a gray canvas drops out for up to ~25 points at a time
+// while the border plainly continues. Side verification keeps bridged runs
+// honest.
+constexpr int kRunGapTolerancePoints = 28;
 
 // Two runs bound the same rectangle when their ends align within this many
 // points.
@@ -109,15 +113,27 @@ struct EdgeRun {
 };
 
 // Per-column tallies along the boundary between rows y and y+1, as prefix
-// sums: edges among visible (unmasked) pixels, and visible pixels themselves.
+// sums. Edges are counted twice, over two baselines: adjacent rows, and a
+// three-row span (y-1 against y+2). Antialiasing spreads a boundary step
+// across pixels, halving every adjacent difference - a low-contrast border
+// (a photograph on a barely different gray canvas) vanishes from the
+// adjacent baseline but keeps its full step across the wide one. Runs and
+// side coverage accept either baseline; the quiet tests use the adjacent
+// one only, because the wide baseline smears a border's own step into its
+// neighbor boundaries and would flunk every border's extremity check.
 struct BoundaryRow {
     std::vector<int> edge_prefix;
+    std::vector<int> direct_edge_prefix;
     std::vector<int> visible_prefix;
 
     [[nodiscard]] bool Empty() const { return edge_prefix.empty(); }
     [[nodiscard]] int EdgesIn(int x0, int x1) const {
         return edge_prefix[static_cast<std::size_t>(x1)] -
                edge_prefix[static_cast<std::size_t>(x0)];
+    }
+    [[nodiscard]] int DirectEdgesIn(int x0, int x1) const {
+        return direct_edge_prefix[static_cast<std::size_t>(x1)] -
+               direct_edge_prefix[static_cast<std::size_t>(x0)];
     }
     [[nodiscard]] int VisibleIn(int x0, int x1) const {
         return visible_prefix[static_cast<std::size_t>(x1)] -
@@ -128,25 +144,34 @@ struct BoundaryRow {
 void ComputeBoundaryRow(const FrameView& frame, const std::vector<IntRect>& masked_regions, int y,
                         BoundaryRow& row) {
     row.edge_prefix.resize(static_cast<std::size_t>(frame.width) + 1);
+    row.direct_edge_prefix.resize(static_cast<std::size_t>(frame.width) + 1);
     row.visible_prefix.resize(static_cast<std::size_t>(frame.width) + 1);
     row.edge_prefix[0] = 0;
+    row.direct_edge_prefix[0] = 0;
     row.visible_prefix[0] = 0;
+    const int wide_top = std::max(0, y - 1);
+    const int wide_bottom = std::min(frame.height - 1, y + 2);
     for (int x = 0; x < frame.width; ++x) {
         const bool masked = Masked(masked_regions, x, y) || Masked(masked_regions, x, y + 1);
-        const bool edge = !masked && IsEdge(frame.PixelAt(x, y), frame.PixelAt(x, y + 1));
-        row.edge_prefix[static_cast<std::size_t>(x) + 1] = row.edge_prefix[x] + (edge ? 1 : 0);
+        const bool direct = !masked && IsEdge(frame.PixelAt(x, y), frame.PixelAt(x, y + 1));
+        const bool wide = !masked && (direct || IsEdge(frame.PixelAt(x, wide_top),
+                                                       frame.PixelAt(x, wide_bottom)));
+        row.edge_prefix[static_cast<std::size_t>(x) + 1] = row.edge_prefix[x] + (wide ? 1 : 0);
+        row.direct_edge_prefix[static_cast<std::size_t>(x) + 1] =
+            row.direct_edge_prefix[x] + (direct ? 1 : 0);
         row.visible_prefix[static_cast<std::size_t>(x) + 1] =
             row.visible_prefix[x] + (masked ? 0 : 1);
     }
 }
 
-// A span is quiet when its visible pixels are mostly not edges. A boundary
-// outside the frame or entirely masked proves nothing and counts as quiet.
+// A span is quiet when its visible pixels are mostly not edges (adjacent
+// baseline). A boundary outside the frame or entirely masked proves nothing
+// and counts as quiet.
 bool QuietSpan(const BoundaryRow& row, int x0, int x1) {
     if (row.Empty()) return true;
     const int visible = row.VisibleIn(x0, x1);
     if (visible == 0) return true;
-    return static_cast<float>(row.EdgesIn(x0, x1)) <
+    return static_cast<float>(row.DirectEdgesIn(x0, x1)) <
            kQuietNeighborFraction * static_cast<float>(visible);
 }
 
@@ -214,16 +239,23 @@ std::vector<EdgeRun> HorizontalBorderRuns(const FrameView& frame,
 
 // Fraction of the visible span between two rows that lies on a vertical edge
 // at column x, or nothing when too little of the side is visible to judge.
+// The wide baseline mirrors the row logic: it sees antialiased low-contrast
+// sides at full strength. The quiet checks pass wide=false for the adjacent
+// baseline only.
 std::optional<float> VerticalSideCoverage(const FrameView& frame,
                                           const std::vector<IntRect>& masked_regions, int x, int y0,
-                                          int y1) {
+                                          int y1, bool wide) {
     if (x <= 0 || x >= frame.width || y1 <= y0) return std::nullopt;
+    const int wide_left = std::max(0, x - 2);
+    const int wide_right = std::min(frame.width - 1, x + 1);
     int edges = 0;
     int visible = 0;
     for (int y = y0; y < y1; ++y) {
         if (Masked(masked_regions, x - 1, y) || Masked(masked_regions, x, y)) continue;
         ++visible;
-        if (IsEdge(frame.PixelAt(x - 1, y), frame.PixelAt(x, y))) ++edges;
+        if (IsEdge(frame.PixelAt(x - 1, y), frame.PixelAt(x, y)) ||
+            (wide && IsEdge(frame.PixelAt(wide_left, y), frame.PixelAt(wide_right, y))))
+            ++edges;
     }
     if (visible < std::max(4, (y1 - y0) / 8)) return std::nullopt;
     return static_cast<float>(edges) / static_cast<float>(visible);
@@ -246,10 +278,13 @@ std::optional<SideMatch> FindSide(const FrameView& frame,
                                   int y1) {
     for (int distance = 0; distance <= tolerances.side_radius; ++distance) {
         for (const int x : {guess - distance, guess + distance}) {
-            const auto coverage = VerticalSideCoverage(frame, masked_regions, x, y0, y1);
+            const auto coverage =
+                VerticalSideCoverage(frame, masked_regions, x, y0, y1, /*wide=*/true);
             if (coverage && *coverage >= kMinimumSideCoverage) {
-                const auto beyond =
-                    VerticalSideCoverage(frame, masked_regions, x + outside, y0, y1);
+                // The adjacent baseline judges the outside: the wide one
+                // would smear the side's own step into its neighbor columns.
+                const auto beyond = VerticalSideCoverage(frame, masked_regions, x + outside, y0, y1,
+                                                         /*wide=*/false);
                 if (!beyond || *beyond < kQuietNeighborFraction) return SideMatch{x, *coverage};
             }
             if (distance == 0) break;
@@ -274,7 +309,25 @@ std::vector<RegionCandidate> DetectPhotoRegions(const FrameView& frame,
     if (frame.width < tolerances.rect_width || frame.height < tolerances.rect_height)
         return candidates;
 
-    const std::vector<EdgeRun> borders = HorizontalBorderRuns(frame, masked_regions, tolerances);
+    std::vector<EdgeRun> borders = HorizontalBorderRuns(frame, masked_regions, tolerances);
+
+    // The wide edge baseline reports one border on up to three consecutive
+    // boundaries; pairing cost is quadratic in runs, so the band collapses
+    // to its first row before assembly (the sides absorb the pixel or two
+    // of resulting slack).
+    std::vector<EdgeRun> distinct;
+    for (const EdgeRun& run : borders) {
+        bool banded = false;
+        for (auto it = distinct.rbegin(); it != distinct.rend() && run.y - it->y <= 2; ++it) {
+            if (std::abs(run.x0 - it->x0) <= tolerances.alignment &&
+                std::abs(run.x1 - it->x1) <= tolerances.alignment) {
+                banded = true;
+                break;
+            }
+        }
+        if (!banded) distinct.push_back(run);
+    }
+    borders = std::move(distinct);
 
     // Every pair of x-aligned border runs is a potential top and bottom of a
     // rectangle; the sides must then be real vertical edges.

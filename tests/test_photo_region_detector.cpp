@@ -191,6 +191,38 @@ TEST_CASE("Detector tolerates a masked window occluding a photo edge") {
     }
 }
 
+TEST_CASE("Detector sees antialiased low-contrast borders") {
+    // A photograph on a barely different gray canvas: the border step is
+    // small, and antialiasing splits it across two pixel pairs, leaving
+    // every adjacent difference under the edge threshold. The wide baseline
+    // must recover it. Modeled on Lightroom's gray background, where photos
+    // vanished while white and black backgrounds worked.
+    TestScreen screen(640, 480, Color{146, 146, 146});
+    const IntRect photo{96, 64, 400, 320};
+    screen.FillRect(photo, Color{122, 122, 122});
+    const auto halfway = Color{134, 134, 134};
+    screen.FillRect(IntRect{photo.x, photo.y, photo.width, 1}, halfway);
+    screen.FillRect(IntRect{photo.x, photo.y + photo.height - 1, photo.width, 1}, halfway);
+    screen.FillRect(IntRect{photo.x, photo.y, 1, photo.height}, halfway);
+    screen.FillRect(IntRect{photo.x + photo.width - 1, photo.y, 1, photo.height}, halfway);
+
+    CHECK(AnyCandidateNear(DetectPhotoRegions(screen.View()), photo, 4));
+}
+
+TEST_CASE("Detector bridges tone-matching dropouts along a border") {
+    // Where the photo's own content happens to match the canvas tone, the
+    // border is locally invisible - a gray pavement meeting a gray canvas
+    // drops out for a couple dozen points at a time. Such gaps must be
+    // bridged, not treated as the end of the border.
+    TestScreen screen(640, 480, Color{146, 146, 146});
+    const IntRect photo{96, 64, 400, 320};
+    screen.AddPhoto(photo);
+    for (const int gap_x : {150, 250, 330})
+        screen.FillRect(IntRect{gap_x, photo.y + photo.height - 4, 25, 4}, Color{146, 146, 146});
+
+    CHECK(AnyCandidateNear(DetectPhotoRegions(screen.View()), photo, 4));
+}
+
 TEST_CASE("Detector keeps a small photo despite stacked window variants") {
     // Application chrome (menu line, toolbar line, content top) stacks
     // several horizontal lines above one content area. Every line pairs
