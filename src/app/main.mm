@@ -20,6 +20,7 @@
 #include <atomic>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -882,6 +883,43 @@ int main() {
             }
             const auto suggestions = BuildRegionSuggestions(photo_candidates, detect_width,
                                                             detect_height, window_regions);
+            // Field diagnosis: dump exactly what the pipeline saw. Enable
+            // with `launchctl setenv SIDESCOPES_DEBUG_SUGGESTIONS 1`.
+            if (std::getenv("SIDESCOPES_DEBUG_SUGGESTIONS")) {
+                std::FILE* report = std::fopen("/tmp/sidescopes-suggestions.txt", "w");
+                if (report) {
+                    std::fprintf(report, "frame %dx%d\n", detect_width, detect_height);
+                    for (const auto& candidate : photo_candidates)
+                        std::fprintf(report, "photo rect=%d,%d %dx%d confidence=%.2f\n",
+                                     candidate.rect.x, candidate.rect.y, candidate.rect.width,
+                                     candidate.rect.height, candidate.confidence);
+                    for (const auto& window : window_regions)
+                        std::fprintf(report, "window '%s' %.1f,%.1f..%.1f,%.1f%%\n",
+                                     window.application.c_str(), window.region.left_percent,
+                                     window.region.top_percent, window.region.right_percent,
+                                     window.region.bottom_percent);
+                    for (const auto& suggestion : suggestions)
+                        std::fprintf(report, "suggestion '%s' %.1f,%.1f..%.1f,%.1f%%\n",
+                                     suggestion.label.c_str(), suggestion.region.left_percent,
+                                     suggestion.region.top_percent, suggestion.region.right_percent,
+                                     suggestion.region.bottom_percent);
+                    std::fclose(report);
+                }
+                worker.WithLatestFrame([&](const FrameView& view) {
+                    std::FILE* image = std::fopen("/tmp/sidescopes-frame.ppm", "wb");
+                    if (!image) return;
+                    std::fprintf(image, "P6\n%d %d\n255\n", view.width / 2, view.height / 2);
+                    for (int py = 0; py < view.height - 1; py += 2) {
+                        for (int px = 0; px < view.width - 1; px += 2) {
+                            const Color color = view.ColorAt(px, py);
+                            std::fputc(color.r, image);
+                            std::fputc(color.g, image);
+                            std::fputc(color.b, image);
+                        }
+                    }
+                    std::fclose(image);
+                });
+            }
             if (const auto region = PickRegionOnDisplay(capture_display, suggestions)) {
                 analysis.region = *region;
                 analysis_dirty = true;

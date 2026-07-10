@@ -134,6 +134,49 @@ TEST_CASE("Detector covers flat patches inside a photo") {
     CHECK(candidates.size() == 1);
 }
 
+TEST_CASE("Detector finds black-and-white photographs") {
+    // No chroma anywhere: detection must carry on luma texture and on gray
+    // tones that differ from the chrome gray.
+    EditorFrame frame(640, 480);
+    const IntRect photo{96, 64, 400, 320};
+    uint32_t state = 0x0badf00du;
+    for (int py = photo.y; py < photo.y + photo.height; ++py) {
+        for (int px = photo.x; px < photo.x + photo.width; ++px) {
+            state = state * 1664525u + 1013904223u;
+            const auto level = static_cast<uint8_t>(state >> 24);
+            frame.Set(px, py, Color{level, level, level});
+        }
+    }
+
+    const auto candidates = DetectPhotoRegions(frame.View());
+    REQUIRE_FALSE(candidates.empty());
+    CHECK(NearlyEqual(candidates.front().rect, photo, 2));
+}
+
+TEST_CASE("Detector covers a smooth mid-gray region of a monochrome photo") {
+    // A black-and-white photo with a rendered-smooth mid-gray band: the band
+    // has no chroma and no texture, but its tone is far from the chrome
+    // gray, so it stays part of the photo.
+    EditorFrame frame(640, 480);
+    const IntRect photo{96, 64, 400, 320};
+    uint32_t state = 0x0badf00du;
+    for (int py = photo.y; py < photo.y + photo.height; ++py) {
+        for (int px = photo.x; px < photo.x + photo.width; ++px) {
+            state = state * 1664525u + 1013904223u;
+            const auto level = static_cast<uint8_t>(state >> 24);
+            frame.Set(px, py, Color{level, level, level});
+        }
+    }
+    for (int py = photo.y + 100; py < photo.y + 210; ++py)
+        for (int px = photo.x; px < photo.x + photo.width; ++px)
+            frame.Set(px, py, Color{150, 150, 150});
+
+    const auto candidates = DetectPhotoRegions(frame.View());
+    REQUIRE_FALSE(candidates.empty());
+    CHECK(NearlyEqual(candidates.front().rect, photo, 4));
+    CHECK(candidates.size() == 1);
+}
+
 TEST_CASE("Detector treats chrome-toned shading as chrome") {
     // Window chrome carries gentle shading (title bars, panel separators),
     // always in tones near the chrome color itself. Such shading must not be
