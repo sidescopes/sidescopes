@@ -1,0 +1,13 @@
+# Build
+build/
+cmake-build-*/
+
+# Tooling caches
+.cache/
+compile_commands.json
+
+# Editors / OS
+.DS_Store
+.idea/
+.vscode/
+imgui.ini
