@@ -35,6 +35,7 @@ add_library(sidescopes_core STATIC
     src/core/analysis_worker.cpp
     src/core/scopes/vectorscope.cpp
     src/core/scopes/waveform.cpp
+    src/core/scopes/graticule.cpp
 )
 target_include_directories(sidescopes_core PUBLIC src)
 sidescopes_target_defaults(sidescopes_core)
