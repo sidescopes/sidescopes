@@ -18,9 +18,6 @@ typedef NS_OPTIONS(NSUInteger, SidescopesDragEdges) {
 namespace sidescopes {
 namespace {
 
-// The striped border band sits this far OUTSIDE the region so it never
-// enters the scoped pixels.
-constexpr double kBorderBandWidth = 6.0;
 // The border window extends this far beyond the region: the grab ring for
 // resizing, wide enough to hit with a cursor.
 constexpr double kBorderPad = 14.0;
@@ -308,51 +305,41 @@ RegionOfInterest g_border_edit_region;
 
 - (NSRect)tabRect {
     const NSRect region = [self regionRect];
-    return NSMakeRect(NSMidX(region) - sidescopes::kTabWidth / 2,
-                      NSMaxY(region) + sidescopes::kBorderBandWidth, sidescopes::kTabWidth,
-                      sidescopes::kTabHeight);
+    return NSMakeRect(NSMidX(region) - sidescopes::kTabWidth / 2, NSMaxY(region) + 1.0,
+                      sidescopes::kTabWidth, sidescopes::kTabHeight);
 }
 
 - (void)drawRect:(NSRect)dirty {
     (void)dirty;
     const NSRect region = [self regionRect];
 
-    // The grab ring: a whisper of alpha keeps it hit-testable (safely
-    // above the window server's threshold); the interior stays truly
-    // transparent and therefore click-through.
-    [[NSColor colorWithWhite:0 alpha:0.08] setFill];
-    NSRectFillUsingOperation(self.bounds, NSCompositingOperationCopy);
-    [[NSColor clearColor] setFill];
-    NSRectFillUsingOperation(region, NSCompositingOperationCopy);
-
-    // A striped band: thick diagonals alternating light and dark, the
-    // hazard-tape construction that stays visible on any image content.
-    const NSRect band =
-        NSInsetRect(region, -sidescopes::kBorderBandWidth, -sidescopes::kBorderBandWidth);
-    NSBezierPath* ring_clip = [NSBezierPath bezierPathWithRect:band];
+    // The whole grab ring is the hazard band, muted so it stays calm
+    // beside the photograph while its own light-dark alternation keeps it
+    // visible on any content. The interior is never painted and therefore
+    // stays click-through.
+    NSBezierPath* ring_clip = [NSBezierPath bezierPathWithRect:self.bounds];
     [ring_clip appendBezierPathWithRect:region];
     ring_clip.windingRule = NSWindingRuleEvenOdd;
     [NSGraphicsContext saveGraphicsState];
     [ring_clip addClip];
-    [[NSColor colorWithWhite:0.08 alpha:0.85] setFill];
-    NSRectFillUsingOperation(band, NSCompositingOperationSourceOver);
+    [[NSColor colorWithWhite:0.1 alpha:0.45] setFill];
+    NSRectFillUsingOperation(self.bounds, NSCompositingOperationCopy);
     NSBezierPath* stripes = [NSBezierPath bezierPath];
-    stripes.lineWidth = 3.5;
-    for (CGFloat x = NSMinX(band) - band.size.height; x < NSMaxX(band); x += 9.0) {
-        [stripes moveToPoint:NSMakePoint(x, NSMinY(band))];
-        [stripes lineToPoint:NSMakePoint(x + band.size.height, NSMaxY(band))];
+    stripes.lineWidth = 4.0;
+    const NSRect bounds = self.bounds;
+    for (CGFloat x = NSMinX(bounds) - bounds.size.height; x < NSMaxX(bounds); x += 10.0) {
+        [stripes moveToPoint:NSMakePoint(x, NSMinY(bounds))];
+        [stripes lineToPoint:NSMakePoint(x + bounds.size.height, NSMaxY(bounds))];
     }
-    [[NSColor colorWithWhite:0.95 alpha:0.9] setStroke];
+    [[NSColor colorWithWhite:0.9 alpha:0.45] setStroke];
     [stripes stroke];
     [NSGraphicsContext restoreGraphicsState];
-    // Crisp casing on both band edges.
-    [[NSColor colorWithWhite:0 alpha:0.9] setStroke];
-    NSBezierPath* casing = [NSBezierPath bezierPathWithRect:NSInsetRect(band, 0.5, 0.5)];
-    casing.lineWidth = 1.0;
-    [casing stroke];
-    [casing removeAllPoints];
-    [casing appendBezierPathWithRect:NSInsetRect(region, -0.5, -0.5)];
-    [casing stroke];
+
+    // A narrow bright line marks the exact measured edge.
+    [[NSColor colorWithWhite:0.97 alpha:0.9] setStroke];
+    NSBezierPath* edge = [NSBezierPath bezierPathWithRect:NSInsetRect(region, -0.9, -0.9)];
+    edge.lineWidth = 1.4;
+    [edge stroke];
 
     // The move tab.
     NSBezierPath* tab = [NSBezierPath bezierPathWithRoundedRect:[self tabRect]
