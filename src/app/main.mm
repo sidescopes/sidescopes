@@ -28,6 +28,7 @@
 #include <thread>
 
 #include "core/analysis_worker.h"
+#include "core/content_fence.h"
 #include "core/frame_mailbox.h"
 #include "core/marker_smoother.h"
 #include "core/photo_region_detector.h"
@@ -1247,80 +1248,27 @@ int main() {
                         rect.height = static_cast<int>(chrome.height * scale_y);
                         chrome_rects.push_back(rect);
                     }
-
-                    // Chrome that spans an edge of its application's main
-                    // window - panels, filmstrip, top bar - DELIMITS the
-                    // content rather than hiding it: nothing continues
-                    // beneath, so it must bound the analysis, not bridge
-                    // it. The fence starts from the largest visible window
-                    // (chrome is laid out against the window, not the
-                    // display - a title bar always sits above it) and
-                    // shrinks until no edge-spanning chrome remains inside;
-                    // whatever chrome still overlaps (a loupe overlay on
-                    // the photograph) genuinely floats over content and
-                    // stays an occluder.
-                    IntRect content{0, 0, view.width, view.height};
+                    // The fence: chrome bounds the analysis, floating
+                    // overlays become occluders (core/content_fence.h).
                     const DesktopWindow* main_window = nullptr;
                     for (const DesktopWindow& window : visible_windows) {
                         if (!main_window ||
                             window.width * window.height > main_window->width * main_window->height)
                             main_window = &window;
                     }
+                    IntRect window_rect{};
                     if (main_window) {
-                        const int x0 = std::max(
-                            0, static_cast<int>((main_window->x - geometry->origin_x) * scale_x));
-                        const int y0 = std::max(
-                            0, static_cast<int>((main_window->y - geometry->origin_y) * scale_y));
-                        const int x1 = std::min(
-                            view.width, static_cast<int>((main_window->x + main_window->width -
-                                                          geometry->origin_x) *
-                                                         scale_x));
-                        const int y1 = std::min(
-                            view.height, static_cast<int>((main_window->y + main_window->height -
-                                                           geometry->origin_y) *
-                                                          scale_y));
-                        if (x1 > x0 && y1 > y0) content = IntRect{x0, y0, x1 - x0, y1 - y0};
+                        window_rect.x =
+                            static_cast<int>((main_window->x - geometry->origin_x) * scale_x);
+                        window_rect.y =
+                            static_cast<int>((main_window->y - geometry->origin_y) * scale_y);
+                        window_rect.width = static_cast<int>(main_window->width * scale_x);
+                        window_rect.height = static_cast<int>(main_window->height * scale_y);
                     }
-                    for (bool trimmed = true; trimmed;) {
-                        trimmed = false;
-                        for (const IntRect& chrome : chrome_rects) {
-                            const int left = std::max(content.x, chrome.x);
-                            const int top = std::max(content.y, chrome.y);
-                            const int right =
-                                std::min(content.x + content.width, chrome.x + chrome.width);
-                            const int bottom =
-                                std::min(content.y + content.height, chrome.y + chrome.height);
-                            if (right <= left || bottom <= top) continue;
-                            const bool full_width = (right - left) * 20 >= content.width * 17;
-                            const bool full_height = (bottom - top) * 20 >= content.height * 17;
-                            // Generous slack: a title bar or a status strip
-                            // may sit between the window edge and the
-                            // docked chrome.
-                            const int slack = static_cast<int>(32 * pixels_per_point);
-                            IntRect next = content;
-                            if (full_width && chrome.y <= content.y + slack) {
-                                next.height = content.y + content.height - bottom;
-                                next.y = bottom;
-                            } else if (full_width && chrome.y + chrome.height >=
-                                                         content.y + content.height - slack) {
-                                next.height = top - content.y;
-                            } else if (full_height && chrome.x <= content.x + slack) {
-                                next.width = content.x + content.width - right;
-                                next.x = right;
-                            } else if (full_height && chrome.x + chrome.width >=
-                                                          content.x + content.width - slack) {
-                                next.width = left - content.x;
-                            } else {
-                                continue;
-                            }
-                            if (next.width > 0 && next.height > 0 &&
-                                (next.x != content.x || next.y != content.y ||
-                                 next.width != content.width || next.height != content.height)) {
-                                content = next;
-                                trimmed = true;
-                            }
-                        }
-                    }
+                    const ContentFence fence =
+                        FenceContent(IntRect{0, 0, view.width, view.height}, window_rect,
+                                     chrome_rects, static_cast<int>(32 * pixels_per_point));
+                    const IntRect content = fence.content;
 
                     // Detection runs on a half-resolution copy of the
                     // content area: exactly the corpus resolution, so live
@@ -1364,19 +1312,24 @@ int main() {
                             view.sequence};
                     }
 
-                    // Masks move into crop-relative reduced coordinates.
+                    // Masks move into fence-relative reduced coordinates:
+                    // our own window, plus the fence's floating occluders
+                    // (already fence-relative).
                     std::vector<IntRect> masks;
-                    const auto add_mask = [&](const IntRect& rect) {
-                        const int x0 = std::max(rect.x, content.x);
-                        const int y0 = std::max(rect.y, content.y);
-                        const int x1 = std::min(rect.x + rect.width, content.x + content.width);
-                        const int y1 = std::min(rect.y + rect.height, content.y + content.height);
-                        if (x1 <= x0 || y1 <= y0) return;
-                        masks.push_back(IntRect{(x0 - content.x) / step, (y0 - content.y) / step,
-                                                (x1 - x0) / step, (y1 - y0) / step});
-                    };
-                    add_mask(analysis.masked_window);
-                    for (const IntRect& chrome : chrome_rects) add_mask(chrome);
+                    {
+                        const IntRect& own = analysis.masked_window;
+                        const int x0 = std::max(own.x, content.x);
+                        const int y0 = std::max(own.y, content.y);
+                        const int x1 = std::min(own.x + own.width, content.x + content.width);
+                        const int y1 = std::min(own.y + own.height, content.y + content.height);
+                        if (x1 > x0 && y1 > y0)
+                            masks.push_back(IntRect{(x0 - content.x) / step,
+                                                    (y0 - content.y) / step, (x1 - x0) / step,
+                                                    (y1 - y0) / step});
+                    }
+                    for (const IntRect& occluder : fence.occluders)
+                        masks.push_back(IntRect{occluder.x / step, occluder.y / step,
+                                                occluder.width / step, occluder.height / step});
 
                     photo_candidates =
                         DetectPhotoRegions(detect_view, masks, pixels_per_point / step,
