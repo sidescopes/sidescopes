@@ -1233,23 +1233,132 @@ int main() {
                     detect_height = view.height;
                     // Our own window floats over the desktop being analyzed;
                     // masked, so borders survive beneath it and scope traces
-                    // spawn no candidates. The auxiliary chrome windows are
-                    // masked with it.
+                    // spawn no candidates.
                     const auto pixels_per_point =
                         static_cast<float>(view.width / geometry->width_points);
-                    std::vector<IntRect> masks{analysis.masked_window};
                     const double scale_x = view.width / geometry->width_points;
                     const double scale_y = view.height / geometry->height_points;
+                    std::vector<IntRect> chrome_rects;
                     for (const DesktopWindow& chrome : auxiliary_windows) {
                         IntRect rect;
                         rect.x = static_cast<int>((chrome.x - geometry->origin_x) * scale_x);
                         rect.y = static_cast<int>((chrome.y - geometry->origin_y) * scale_y);
                         rect.width = static_cast<int>(chrome.width * scale_x);
                         rect.height = static_cast<int>(chrome.height * scale_y);
-                        masks.push_back(rect);
+                        chrome_rects.push_back(rect);
                     }
-                    photo_candidates = DetectPhotoRegions(view, masks, pixels_per_point,
-                                                          /*max_candidates=*/24, detection_hints);
+
+                    // Chrome that spans a screen edge - panels, filmstrip,
+                    // top bar - DELIMITS the content rather than hiding it:
+                    // nothing continues beneath, so it must bound the
+                    // analysis, not bridge it. The crop shrinks until no
+                    // edge-spanning chrome remains inside; whatever chrome
+                    // still overlaps (a loupe overlay on the photograph)
+                    // genuinely floats over content and stays an occluder.
+                    IntRect content{0, 0, view.width, view.height};
+                    for (bool trimmed = true; trimmed;) {
+                        trimmed = false;
+                        for (const IntRect& chrome : chrome_rects) {
+                            const int left = std::max(content.x, chrome.x);
+                            const int top = std::max(content.y, chrome.y);
+                            const int right =
+                                std::min(content.x + content.width, chrome.x + chrome.width);
+                            const int bottom =
+                                std::min(content.y + content.height, chrome.y + chrome.height);
+                            if (right <= left || bottom <= top) continue;
+                            const bool full_width = (right - left) * 10 >= content.width * 9;
+                            const bool full_height = (bottom - top) * 10 >= content.height * 9;
+                            const int slack = 8;
+                            IntRect next = content;
+                            if (full_width && chrome.y <= content.y + slack) {
+                                next.height = content.y + content.height - bottom;
+                                next.y = bottom;
+                            } else if (full_width && chrome.y + chrome.height >=
+                                                         content.y + content.height - slack) {
+                                next.height = top - content.y;
+                            } else if (full_height && chrome.x <= content.x + slack) {
+                                next.width = content.x + content.width - right;
+                                next.x = right;
+                            } else if (full_height && chrome.x + chrome.width >=
+                                                          content.x + content.width - slack) {
+                                next.width = left - content.x;
+                            } else {
+                                continue;
+                            }
+                            if (next.width > 0 && next.height > 0 &&
+                                (next.x != content.x || next.y != content.y ||
+                                 next.width != content.width || next.height != content.height)) {
+                                content = next;
+                                trimmed = true;
+                            }
+                        }
+                    }
+
+                    // Detection runs on a half-resolution copy of the
+                    // content area: exactly the corpus resolution, so live
+                    // behavior matches what CI verifies, at a quarter of
+                    // the pixels. Below Retina density the frame is used
+                    // as captured.
+                    const bool subsample = pixels_per_point >= 1.9f;
+                    const int step = subsample ? 2 : 1;
+                    const int detect_w = content.width / step;
+                    const int detect_h = content.height / step;
+                    std::vector<uint8_t> reduced;
+                    FrameView detect_view = view;
+                    if (subsample) {
+                        reduced.resize(static_cast<std::size_t>(detect_w) * detect_h * 4);
+                        for (int y = 0; y < detect_h; ++y) {
+                            const uint8_t* row0 =
+                                view.bgra +
+                                static_cast<std::size_t>(content.y + y * 2) * view.stride_bytes +
+                                static_cast<std::size_t>(content.x) * 4;
+                            const uint8_t* row1 = row0 + view.stride_bytes;
+                            uint8_t* out =
+                                reduced.data() + static_cast<std::size_t>(y) * detect_w * 4;
+                            for (int x = 0; x < detect_w; ++x) {
+                                for (int c = 0; c < 4; ++c) {
+                                    const int sum = row0[x * 8 + c] + row0[x * 8 + 4 + c] +
+                                                    row1[x * 8 + c] + row1[x * 8 + 4 + c];
+                                    out[x * 4 + c] = static_cast<uint8_t>(sum / 4);
+                                }
+                            }
+                        }
+                        detect_view = FrameView{reduced.data(), detect_w * 4,     detect_w,
+                                                detect_h,       view.color_space, view.sequence};
+                    } else {
+                        detect_view = FrameView{
+                            view.bgra + static_cast<std::size_t>(content.y) * view.stride_bytes +
+                                static_cast<std::size_t>(content.x) * 4,
+                            view.stride_bytes,
+                            content.width,
+                            content.height,
+                            view.color_space,
+                            view.sequence};
+                    }
+
+                    // Masks move into crop-relative reduced coordinates.
+                    std::vector<IntRect> masks;
+                    const auto add_mask = [&](const IntRect& rect) {
+                        const int x0 = std::max(rect.x, content.x);
+                        const int y0 = std::max(rect.y, content.y);
+                        const int x1 = std::min(rect.x + rect.width, content.x + content.width);
+                        const int y1 = std::min(rect.y + rect.height, content.y + content.height);
+                        if (x1 <= x0 || y1 <= y0) return;
+                        masks.push_back(IntRect{(x0 - content.x) / step, (y0 - content.y) / step,
+                                                (x1 - x0) / step, (y1 - y0) / step});
+                    };
+                    add_mask(analysis.masked_window);
+                    for (const IntRect& chrome : chrome_rects) add_mask(chrome);
+
+                    photo_candidates =
+                        DetectPhotoRegions(detect_view, masks, pixels_per_point / step,
+                                           /*max_candidates=*/24, detection_hints);
+                    for (RegionCandidate& candidate : photo_candidates) {
+                        candidate.rect.x = candidate.rect.x * step + content.x;
+                        candidate.rect.y = candidate.rect.y * step + content.y;
+                        candidate.rect.width *= step;
+                        candidate.rect.height *= step;
+                    }
                     // Vision loads its face model synchronously on first
                     // use - seconds of beachball on the picker's opening.
                     // Face suggestions are deferred work (owner decision);
