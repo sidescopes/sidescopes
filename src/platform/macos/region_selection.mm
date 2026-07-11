@@ -327,24 +327,38 @@ RegionOfInterest g_border_edit_region;
 
     const NSRect outer =
         NSInsetRect(region, -sidescopes::kBorderMargin, -sidescopes::kBorderMargin);
-    [[NSColor colorWithWhite:0 alpha:0.55] setStroke];
-    NSBezierPath* dark = [NSBezierPath bezierPathWithRect:NSInsetRect(outer, 0.5, 0.5)];
-    dark.lineWidth = 1.0;
-    [dark stroke];
-    [[NSColor colorWithWhite:1 alpha:0.85] setStroke];
-    NSBezierPath* light = [NSBezierPath bezierPathWithRect:NSInsetRect(outer, 2.0, 2.0)];
-    light.lineWidth = 2.0;
+    // A dark-white-dark sandwich: the white line separates from dark
+    // content, the dark casing separates it from light content, so the
+    // border reads on any image.
+    [[NSColor colorWithWhite:0 alpha:0.9] setStroke];
+    NSBezierPath* casing_outer = [NSBezierPath bezierPathWithRect:NSInsetRect(outer, 0.5, 0.5)];
+    casing_outer.lineWidth = 1.2;
+    [casing_outer stroke];
+    NSBezierPath* casing_inner = [NSBezierPath bezierPathWithRect:NSInsetRect(outer, 3.4, 3.4)];
+    casing_inner.lineWidth = 1.2;
+    [casing_inner stroke];
+    [[NSColor colorWithWhite:1 alpha:0.95] setStroke];
+    NSBezierPath* light = [NSBezierPath bezierPathWithRect:NSInsetRect(outer, 1.9, 1.9)];
+    light.lineWidth = 1.8;
     [light stroke];
 
     // The move tab.
     NSBezierPath* tab = [NSBezierPath bezierPathWithRoundedRect:[self tabRect]
                                                         xRadius:4.0
                                                         yRadius:4.0];
-    [[NSColor colorWithWhite:0 alpha:0.55] setFill];
+    [[NSColor colorWithWhite:0 alpha:0.8] setFill];
     [tab fill];
-    [[NSColor colorWithWhite:1 alpha:0.85] setStroke];
-    tab.lineWidth = 1.0;
+    [[NSColor colorWithWhite:1 alpha:0.95] setStroke];
+    tab.lineWidth = 1.2;
     [tab stroke];
+    // Grip dots so the tab reads as a handle.
+    [[NSColor colorWithWhite:1 alpha:0.9] setFill];
+    const NSRect tab_rect = [self tabRect];
+    for (int dot = -1; dot <= 1; ++dot) {
+        const NSRect dot_rect =
+            NSMakeRect(NSMidX(tab_rect) + dot * 6.0 - 1.25, NSMidY(tab_rect) - 1.25, 2.5, 2.5);
+        [[NSBezierPath bezierPathWithOvalInRect:dot_rect] fill];
+    }
 }
 
 - (SidescopesDragEdges)zoneAtPoint:(NSPoint)point {
@@ -591,8 +605,10 @@ void ShowRegionBorder(uint32_t display_id, const RegionOfInterest& region) {
         g_border_window.opaque = NO;
         g_border_window.hasShadow = NO;
         // The interior is truly transparent and therefore click-through;
-        // only the grab ring and tab take the mouse.
-        g_border_window.ignoresMouseEvents = NO;
+        // only the grab ring and tab take the mouse. ignoresMouseEvents is
+        // deliberately never set: an explicit assignment - even to NO -
+        // switches AppKit off its per-pixel alpha hit-testing, and the
+        // whole window starts swallowing clicks.
         // One level below the scope window: both float above Quick Look,
         // but the border must never cover the scopes. Sharing a level would
         // leave their order to whoever ordered front last.
