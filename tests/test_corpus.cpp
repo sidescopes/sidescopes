@@ -123,7 +123,7 @@ TEST_CASE("Detector finds every annotated rectangle in the corpus") {
         REQUIRE(LoadPpm(item.image, bgra, width, height));
         const FrameView frame{bgra.data(), width * 4, width, height, ColorSpaceHint::Srgb, 1};
         const auto candidates =
-            DetectPhotoRegions(frame, item.masks, item.pixels_per_point, /*max_candidates=*/16);
+            DetectPhotoRegions(frame, item.masks, item.pixels_per_point, /*max_candidates=*/24);
 
         for (const CorpusExpectation& expectation : item.expectations) {
             (expectation.required ? total : goals_total) += 1;

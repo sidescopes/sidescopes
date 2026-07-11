@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <cstdio>
+#include <cstdlib>
 #include <optional>
 
 namespace sidescopes {
@@ -40,10 +42,13 @@ constexpr int kRunSplitPoints = 10;
 // points.
 constexpr int kAlignmentTolerancePoints = 10;
 
-// Run ends locate a vertical side only roughly - rounded window corners
-// (about 12 points on macOS) leave no contrast along their arc - so the
-// true side column is searched for within this distance of the ends.
-constexpr int kSideSearchRadiusPoints = 20;
+// Run ends locate a vertical side only roughly, and they only ever
+// UNDER-extend: a run starts at its first edge pixel, so wherever the
+// border tone locally matches the canvas near a corner (or a rounded
+// window corner leaves no contrast), the end falls short of the true
+// side. The search therefore reaches much farther outward than inward.
+constexpr int kSideSearchInwardPoints = 20;
+constexpr int kSideSearchOutwardPoints = 56;
 
 constexpr int kMinimumRectWidthPoints = 96;
 constexpr int kMinimumRectHeightPoints = 72;
@@ -64,13 +69,32 @@ constexpr float kQuietNeighborFraction = 0.3f;
 // covered by construction).
 constexpr float kMinimumSideCoverage = 0.6f;
 
+// Diagnostic tracing for corpus triage, gated by an environment variable.
+// MSVC deprecates getenv (C4996), so its secure variant answers there.
+bool TraceEnabled() {
+    static const bool enabled = [] {
+#ifdef _MSC_VER
+        char* value = nullptr;
+        std::size_t length = 0;
+        if (_dupenv_s(&value, &length, "SIDESCOPES_DETECTOR_TRACE") != 0 || value == nullptr)
+            return false;
+        std::free(value);
+        return true;
+#else
+        return std::getenv("SIDESCOPES_DETECTOR_TRACE") != nullptr;
+#endif
+    }();
+    return enabled;
+}
+
 // The point-based tolerances above, resolved to pixels.
 struct Tolerances {
     int run_length;
     int run_gap;
     int run_split;
     int alignment;
-    int side_radius;
+    int side_inward;
+    int side_outward;
     int rect_width;
     int rect_height;
     int duplicate;
@@ -84,7 +108,8 @@ struct Tolerances {
         run_gap = scaled(kRunGapTolerancePoints);
         run_split = scaled(kRunSplitPoints);
         alignment = scaled(kAlignmentTolerancePoints);
-        side_radius = scaled(kSideSearchRadiusPoints);
+        side_inward = scaled(kSideSearchInwardPoints);
+        side_outward = scaled(kSideSearchOutwardPoints);
         rect_width = scaled(kMinimumRectWidthPoints);
         rect_height = scaled(kMinimumRectHeightPoints);
         duplicate = scaled(kDuplicateTolerancePoints);
@@ -305,8 +330,13 @@ std::optional<SideMatch> FindSide(const FrameView& frame,
                                   const std::vector<IntRect>& masked_regions,
                                   const Tolerances& tolerances, int guess, int outside, int y0,
                                   int y1) {
-    for (int distance = 0; distance <= tolerances.side_radius; ++distance) {
-        for (const int x : {guess - distance, guess + distance}) {
+    const int limit = std::max(tolerances.side_inward, tolerances.side_outward);
+    for (int distance = 0; distance <= limit; ++distance) {
+        for (const int direction : {outside, -outside}) {
+            const int reach =
+                direction == outside ? tolerances.side_outward : tolerances.side_inward;
+            if (distance > reach) continue;
+            const int x = guess + direction * distance;
             const auto coverage =
                 VerticalSideCoverage(frame, masked_regions, x, y0, y1, /*wide=*/true);
             if (coverage && *coverage >= kMinimumSideCoverage) {
@@ -328,17 +358,20 @@ bool SameRectangle(const IntRect& a, const IntRect& b, int tolerance) {
            std::abs(a.y + a.height - (b.y + b.height)) <= tolerance;
 }
 
-}  // namespace
-
-std::vector<RegionCandidate> DetectPhotoRegions(const FrameView& frame,
-                                                const std::vector<IntRect>& masked_regions,
-                                                float pixels_per_point, int max_candidates) {
-    std::vector<RegionCandidate> candidates;
-    const Tolerances tolerances(pixels_per_point);
-    if (frame.width < tolerances.rect_width || frame.height < tolerances.rect_height)
-        return candidates;
-
+// One axis-aligned detection pass: horizontal border runs paired into
+// rectangle tops and bottoms, sides verified or - when exactly one side
+// has no vertical contrast - taken from the two runs' aligned endpoints,
+// which are corner evidence in their own right. Called twice: once on the
+// frame and once on its transpose, so rectangles whose horizontal borders
+// have vanished into the canvas are still assembled from their sides.
+void DetectAxisAligned(const FrameView& frame, const std::vector<IntRect>& masked_regions,
+                       const Tolerances& tolerances, std::vector<RegionCandidate>& candidates) {
     std::vector<EdgeRun> borders = HorizontalBorderRuns(frame, masked_regions, tolerances);
+    if (TraceEnabled()) {
+        std::printf("axis %dx%d pre-banding:\n", frame.width, frame.height);
+        for (const EdgeRun& run : borders)
+            std::printf("  raw y=%d x=[%d..%d)\n", run.y, run.x0, run.x1);
+    }
 
     // The wide edge baseline reports one border on up to three consecutive
     // boundaries; pairing cost is quadratic in runs, so the band collapses
@@ -358,6 +391,15 @@ std::vector<RegionCandidate> DetectPhotoRegions(const FrameView& frame,
     }
     borders = std::move(distinct);
 
+    // Field diagnosis: SIDESCOPES_DETECTOR_TRACE=1 prints the qualified
+    // border runs and every assembled rectangle.
+    const bool trace = TraceEnabled();
+    if (trace) {
+        std::printf("axis %dx%d: %zu border runs\n", frame.width, frame.height, borders.size());
+        for (const EdgeRun& run : borders)
+            std::printf("  run y=%d x=[%d..%d)\n", run.y, run.x0, run.x1);
+    }
+
     // Every pair of x-aligned border runs is a potential top and bottom of a
     // rectangle; the sides must then be real vertical edges.
     for (std::size_t top = 0; top < borders.size(); ++top) {
@@ -365,15 +407,22 @@ std::vector<RegionCandidate> DetectPhotoRegions(const FrameView& frame,
             const EdgeRun& a = borders[top];
             const EdgeRun& b = borders[bottom];
             if (b.y - a.y < tolerances.rect_height) continue;
-            const int end_slack = tolerances.alignment + tolerances.side_radius;
+            const int end_slack = tolerances.alignment + tolerances.side_outward;
             if (std::abs(a.x0 - b.x0) > end_slack || std::abs(a.x1 - b.x1) > end_slack) continue;
 
-            const auto left =
+            auto left =
                 FindSide(frame, masked_regions, tolerances, std::max(a.x0, b.x0), -1, a.y + 1, b.y);
-            if (!left) continue;
-            const auto right =
+            auto right =
                 FindSide(frame, masked_regions, tolerances, std::min(a.x1, b.x1), +1, a.y + 1, b.y);
-            if (!right) continue;
+            // Exactly one side without vertical contrast (a photo edge that
+            // happens to match the canvas tone): the two runs terminating
+            // at the same column is corner evidence enough. Both sides
+            // missing is too little to build on.
+            if (!left && right && std::abs(a.x0 - b.x0) <= tolerances.alignment)
+                left = SideMatch{(a.x0 + b.x0) / 2, right->coverage * 0.6f};
+            if (left && !right && std::abs(a.x1 - b.x1) <= tolerances.alignment)
+                right = SideMatch{(a.x1 + b.x1) / 2, left->coverage * 0.6f};
+            if (!left || !right) continue;
             if (right->x - left->x < tolerances.rect_width) continue;
 
             const IntRect rect{left->x, a.y + 1, right->x - left->x, b.y - a.y};
@@ -387,13 +436,331 @@ std::vector<RegionCandidate> DetectPhotoRegions(const FrameView& frame,
                 }
             }
             if (!duplicate) candidates.push_back(RegionCandidate{rect, confidence});
+            if (trace)
+                std::printf("  rect %d,%d %dx%d conf=%.2f (tops y=%d,%d)\n", rect.x, rect.y,
+                            rect.width, rect.height, confidence, a.y, b.y);
         }
     }
+}
 
-    // Largest first: the picker resolves nesting by hover, and when the list
-    // must be cut, small panels lose before windows and photos.
+// Editor canvases are perfectly uniform, and the photograph is a hole in
+// that uniformity - the one boundary signal that survives when the
+// photo's edge tone matches the canvas: near-matching content is still
+// textured, the canvas is byte-flat. Finds the dominant flat colors,
+// takes each one's largest connected region, and if that region encloses
+// a single rectangular hole, the hole is a candidate.
+void DetectCanvasHoles(const FrameView& frame, const std::vector<IntRect>& masked_regions,
+                       const Tolerances& tolerances, std::vector<RegionCandidate>& candidates) {
+    const int width = frame.width;
+    const int height = frame.height;
+    const auto pixel = [&](int x, int y) { return frame.PixelAt(x, y); };
+
+    // Dominant flat colors, from a sparse grid of flat samples.
+    struct FlatColor {
+        uint32_t key;
+        int count;
+    };
+    std::vector<FlatColor> flats;
+    for (int y = 4; y < height - 4; y += 4) {
+        for (int x = 4; x < width - 4; x += 4) {
+            const uint8_t* p = pixel(x, y);
+            const uint8_t* r = pixel(x + 2, y);
+            const uint8_t* d = pixel(x, y + 2);
+            bool flat = true;
+            for (int c = 0; c < 3 && flat; ++c)
+                flat = std::abs(p[c] - r[c]) <= 2 && std::abs(p[c] - d[c]) <= 2;
+            if (!flat) continue;
+            const uint32_t key = (static_cast<uint32_t>(p[2] >> 2) << 12) |
+                                 (static_cast<uint32_t>(p[1] >> 2) << 6) |
+                                 static_cast<uint32_t>(p[0] >> 2);
+            bool merged = false;
+            for (FlatColor& entry : flats) {
+                if (entry.key == key) {
+                    ++entry.count;
+                    merged = true;
+                    break;
+                }
+            }
+            if (!merged) flats.push_back(FlatColor{key, 1});
+        }
+    }
+    std::sort(flats.begin(), flats.end(),
+              [](const FlatColor& a, const FlatColor& b) { return a.count > b.count; });
+    const int minimum_samples = (tolerances.rect_width / 4) * (tolerances.rect_height / 4) / 4;
+
+    std::vector<uint8_t> mask(static_cast<std::size_t>(width) * height);
+    std::vector<int> stack;
+    for (std::size_t rank = 0; rank < flats.size() && rank < 3; ++rank) {
+        if (flats[rank].count < minimum_samples) break;
+        const uint8_t canvas_r = static_cast<uint8_t>(((flats[rank].key >> 12) & 63) << 2);
+        const uint8_t canvas_g = static_cast<uint8_t>(((flats[rank].key >> 6) & 63) << 2);
+        const uint8_t canvas_b = static_cast<uint8_t>((flats[rank].key & 63) << 2);
+
+        // 1 = canvas-colored, 2 = member of the chosen connected region.
+        std::size_t seed = 0;
+        const auto matches = [&](int x, int y) {
+            const uint8_t* p = pixel(x, y);
+            return std::abs(p[2] - canvas_r) <= 3 && std::abs(p[1] - canvas_g) <= 3 &&
+                   std::abs(p[0] - canvas_b) <= 3;
+        };
+        for (int y = 0; y < height; ++y) {
+            for (int x = 0; x < width; ++x) {
+                // Canvas membership needs the neighborhood, not just the
+                // pixel: photo content drifting through the canvas tone is
+                // still textured, so its neighbors give it away and the
+                // canvas region cannot erode into the photograph.
+                bool match = matches(x, y) && !Masked(masked_regions, x, y);
+                if (match) {
+                    match = (x == 0 || matches(x - 1, y)) &&
+                            (x + 1 == width || matches(x + 1, y)) &&
+                            (y == 0 || matches(x, y - 1)) && (y + 1 == height || matches(x, y + 1));
+                }
+                mask[static_cast<std::size_t>(y) * width + x] = match ? 1 : 0;
+            }
+        }
+        // Largest connected canvas region (4-connected flood fills).
+        int best_size = 0;
+        for (std::size_t start = 0; start < mask.size(); ++start) {
+            if (mask[start] != 1) continue;
+            stack.clear();
+            stack.push_back(static_cast<int>(start));
+            mask[start] = 3;
+            int size = 0;
+            while (!stack.empty()) {
+                const int at = stack.back();
+                stack.pop_back();
+                ++size;
+                const int x = at % width;
+                const int y = at / width;
+                const int neighbors[4] = {at - 1, at + 1, at - width, at + width};
+                const bool valid[4] = {x > 0, x + 1 < width, y > 0, y + 1 < height};
+                for (int n = 0; n < 4; ++n) {
+                    if (valid[n] && mask[static_cast<std::size_t>(neighbors[n])] == 1) {
+                        mask[static_cast<std::size_t>(neighbors[n])] = 3;
+                        stack.push_back(neighbors[n]);
+                    }
+                }
+            }
+            if (size > best_size) {
+                best_size = size;
+                seed = start;
+            }
+        }
+        if (best_size < minimum_samples * 16) continue;
+        // Re-flood the winner with label 2 (everything is 3 now).
+        stack.clear();
+        stack.push_back(static_cast<int>(seed));
+        mask[seed] = 2;
+        while (!stack.empty()) {
+            const int at = stack.back();
+            stack.pop_back();
+            const int x = at % width;
+            const int y = at / width;
+            const int neighbors[4] = {at - 1, at + 1, at - width, at + width};
+            const bool valid[4] = {x > 0, x + 1 < width, y > 0, y + 1 < height};
+            for (int n = 0; n < 4; ++n) {
+                if (valid[n] && mask[static_cast<std::size_t>(neighbors[n])] == 3) {
+                    mask[static_cast<std::size_t>(neighbors[n])] = 2;
+                    stack.push_back(neighbors[n]);
+                }
+            }
+        }
+
+        // The canvas region's bounding box, then the hole: the bounding box
+        // of everything inside that is not canvas.
+        int cx0 = width, cy0 = height, cx1 = 0, cy1 = 0;
+        for (int y = 0; y < height; ++y) {
+            for (int x = 0; x < width; ++x) {
+                if (mask[static_cast<std::size_t>(y) * width + x] != 2) continue;
+                cx0 = std::min(cx0, x);
+                cy0 = std::min(cy0, y);
+                cx1 = std::max(cx1, x + 1);
+                cy1 = std::max(cy1, y + 1);
+            }
+        }
+        if (TraceEnabled())
+            std::printf("canvas %d,%d,%d region %d px bbox %d,%d..%d,%d\n", canvas_r, canvas_g,
+                        canvas_b, best_size, cx0, cy0, cx1, cy1);
+        if (cx1 - cx0 < tolerances.rect_width || cy1 - cy0 < tolerances.rect_height) continue;
+        // The hole is the LARGEST connected non-canvas component inside the
+        // canvas bounding box - a faint canvas gradient or stray dust forms
+        // its own slivers and must not stretch the photograph's bounds.
+        // The photograph is a solid rectangle, so its bounds come from the
+        // component's ROBUST row extents: a canvas-toned flat sky patch or
+        // a thin connector to some toolbar leaks the flood, but leak rows
+        // are a minority and the medians ignore them.
+        int hx0 = cx1, hy0 = cy1, hx1 = cx0, hy1 = cy0;
+        int hole_best = 0;
+        std::vector<int> row_min(static_cast<std::size_t>(height));
+        std::vector<int> row_max(static_cast<std::size_t>(height));
+        std::vector<int> best_row_min;
+        std::vector<int> best_row_max;
+        int best_y0 = 0;
+        for (int sy = cy0; sy < cy1; ++sy) {
+            for (int sx = cx0; sx < cx1; ++sx) {
+                const std::size_t at = static_cast<std::size_t>(sy) * width + sx;
+                if (mask[at] == 2 || mask[at] == 4) continue;
+                stack.clear();
+                stack.push_back(static_cast<int>(at));
+                mask[at] = 4;
+                int size = 0;
+                int by0 = sy, by1 = sy + 1;
+                std::fill(row_min.begin(), row_min.end(), width);
+                std::fill(row_max.begin(), row_max.end(), -1);
+                while (!stack.empty()) {
+                    const int cell = stack.back();
+                    stack.pop_back();
+                    ++size;
+                    const int x = cell % width;
+                    const int y = cell / width;
+                    by0 = std::min(by0, y);
+                    by1 = std::max(by1, y + 1);
+                    row_min[static_cast<std::size_t>(y)] =
+                        std::min(row_min[static_cast<std::size_t>(y)], x);
+                    row_max[static_cast<std::size_t>(y)] =
+                        std::max(row_max[static_cast<std::size_t>(y)], x + 1);
+                    const int neighbors[4] = {cell - 1, cell + 1, cell - width, cell + width};
+                    const bool valid[4] = {x > cx0, x + 1 < cx1, y > cy0, y + 1 < cy1};
+                    for (int n = 0; n < 4; ++n) {
+                        const std::size_t next = static_cast<std::size_t>(neighbors[n]);
+                        if (valid[n] && mask[next] != 2 && mask[next] != 4) {
+                            mask[next] = 4;
+                            stack.push_back(neighbors[n]);
+                        }
+                    }
+                }
+                if (size > hole_best) {
+                    hole_best = size;
+                    best_y0 = by0;
+                    best_row_min.assign(row_min.begin() + by0, row_min.begin() + by1);
+                    best_row_max.assign(row_max.begin() + by0, row_max.begin() + by1);
+                }
+            }
+        }
+        if (hole_best > 0) {
+            // Rows carrying at least half the widest span vote; the median
+            // of their extents is the rectangle.
+            int widest = 0;
+            for (std::size_t i = 0; i < best_row_min.size(); ++i)
+                widest = std::max(widest, best_row_max[i] - best_row_min[i]);
+            std::vector<int> lefts;
+            std::vector<int> rights;
+            int first_full = -1;
+            int last_full = -1;
+            for (std::size_t i = 0; i < best_row_min.size(); ++i) {
+                if (best_row_max[i] - best_row_min[i] < widest / 2) continue;
+                lefts.push_back(best_row_min[i]);
+                rights.push_back(best_row_max[i]);
+                if (first_full < 0) first_full = static_cast<int>(i);
+                last_full = static_cast<int>(i);
+            }
+            if (!lefts.empty()) {
+                std::sort(lefts.begin(), lefts.end());
+                std::sort(rights.begin(), rights.end());
+                hx0 = lefts[lefts.size() / 2];
+                hx1 = rights[rights.size() / 2];
+                // Where the photograph itself drifts through the canvas
+                // tone (a black sky on a black canvas), the melted side
+                // drops those rows below the voting width even though the
+                // visible remainder still marks the true edge. Extend
+                // through contiguous rows whose extent stays inside the
+                // voted span and keeps substantial width - a leak row
+                // reaching outside the span still ends the walk.
+                const auto edge_row = [&](int i) {
+                    const std::size_t at = static_cast<std::size_t>(i);
+                    return best_row_min[at] >= hx0 - tolerances.duplicate &&
+                           best_row_max[at] <= hx1 + tolerances.duplicate &&
+                           best_row_max[at] - best_row_min[at] >= (hx1 - hx0) / 4;
+                };
+                while (first_full > 0 && edge_row(first_full - 1)) --first_full;
+                while (last_full + 1 < static_cast<int>(best_row_min.size()) &&
+                       edge_row(last_full + 1))
+                    ++last_full;
+                hy0 = best_y0 + first_full;
+                hy1 = best_y0 + last_full + 1;
+            }
+        }
+        if (TraceEnabled()) std::printf("  hole %d,%d..%d,%d\n", hx0, hy0, hx1, hy1);
+        if (hx1 - hx0 < tolerances.rect_width || hy1 - hy0 < tolerances.rect_height) continue;
+        // Enclosure: the hole must sit strictly inside the canvas region,
+        // not lean on its bounding box (which would mean the "hole" is
+        // just whatever lies beyond the canvas).
+        if (hx0 <= cx0 || hy0 <= cy0 || hx1 >= cx1 || hy1 >= cy1) continue;
+
+        const IntRect rect{hx0, hy0, hx1 - hx0, hy1 - hy0};
+        bool duplicate = false;
+        for (RegionCandidate& existing : candidates) {
+            if (SameRectangle(existing.rect, rect, tolerances.duplicate)) {
+                existing.confidence = std::max(existing.confidence, 1.0f);
+                duplicate = true;
+                break;
+            }
+        }
+        if (!duplicate) candidates.push_back(RegionCandidate{rect, 1.0f});
+        if (TraceEnabled())
+            std::printf("canvas hole %d,%d %dx%d (canvas %d,%d,%d)\n", rect.x, rect.y, rect.width,
+                        rect.height, canvas_r, canvas_g, canvas_b);
+    }
+}
+
+}  // namespace
+
+std::vector<RegionCandidate> DetectPhotoRegions(const FrameView& frame,
+                                                const std::vector<IntRect>& masked_regions,
+                                                float pixels_per_point, int max_candidates) {
+    std::vector<RegionCandidate> candidates;
+    const Tolerances tolerances(pixels_per_point);
+    if (frame.width < tolerances.rect_width || frame.height < tolerances.rect_height)
+        return candidates;
+
+    DetectAxisAligned(frame, masked_regions, tolerances, candidates);
+    DetectCanvasHoles(frame, masked_regions, tolerances, candidates);
+
+    // Second pass on the transposed frame: a rectangle whose top or bottom
+    // has melted into the canvas still has sides, and in the transpose
+    // those sides become the horizontal borders the assembly knows how to
+    // pair. The copy costs a few milliseconds once per picker opening.
+    std::vector<uint8_t> transposed(static_cast<std::size_t>(frame.width) * frame.height * 4);
+    for (int y = 0; y < frame.height; ++y) {
+        const uint8_t* row = frame.bgra + static_cast<std::size_t>(y) * frame.stride_bytes;
+        for (int x = 0; x < frame.width; ++x) {
+            uint8_t* out = transposed.data() + (static_cast<std::size_t>(x) * frame.height + y) * 4;
+            const uint8_t* in = row + static_cast<std::size_t>(x) * 4;
+            out[0] = in[0];
+            out[1] = in[1];
+            out[2] = in[2];
+            out[3] = in[3];
+        }
+    }
+    const FrameView transposed_frame{transposed.data(), frame.height * 4,  frame.height,
+                                     frame.width,       frame.color_space, frame.sequence};
+    std::vector<IntRect> transposed_masks;
+    transposed_masks.reserve(masked_regions.size());
+    for (const IntRect& mask : masked_regions)
+        transposed_masks.push_back(IntRect{mask.y, mask.x, mask.height, mask.width});
+    std::vector<RegionCandidate> sideways;
+    DetectAxisAligned(transposed_frame, transposed_masks, tolerances, sideways);
+    for (const RegionCandidate& candidate : sideways) {
+        const IntRect rect{candidate.rect.y, candidate.rect.x, candidate.rect.height,
+                           candidate.rect.width};
+        bool duplicate = false;
+        for (RegionCandidate& existing : candidates) {
+            if (SameRectangle(existing.rect, rect, tolerances.duplicate)) {
+                existing.confidence = std::max(existing.confidence, candidate.confidence);
+                duplicate = true;
+                break;
+            }
+        }
+        if (!duplicate) candidates.push_back(RegionCandidate{rect, candidate.confidence});
+    }
+
+    // Strongest first, size as the tiebreak: the diversity pass keeps the
+    // first member of every near-copy cluster, and that seat belongs to
+    // the most confident geometry (a canvas hole is measured, an
+    // endpoint-fallback rectangle is inferred), not merely the biggest.
     std::sort(candidates.begin(), candidates.end(),
               [](const RegionCandidate& a, const RegionCandidate& b) {
+                  if (a.confidence != b.confidence) return a.confidence > b.confidence;
                   return static_cast<int64_t>(a.rect.width) * a.rect.height >
                          static_cast<int64_t>(b.rect.width) * b.rect.height;
               });

@@ -1147,7 +1147,7 @@ int main() {
                         static_cast<float>(view.width / geometry->width_points);
                     photo_candidates =
                         DetectPhotoRegions(view, {analysis.masked_window}, pixels_per_point,
-                                           /*max_candidates=*/16);
+                                           /*max_candidates=*/24);
                     face_rects = DetectFaces(view, pixels_per_point);
                 });
 
