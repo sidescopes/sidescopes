@@ -508,7 +508,7 @@ struct CanvasHole {
 };
 
 void DetectCanvasHoles(const FrameView& frame, const std::vector<IntRect>& masked_regions,
-                       const Tolerances& tolerances,
+                       const Tolerances& tolerances, const DetectionHints& hints,
                        const std::vector<RegionCandidate>& edge_candidates,
                        std::vector<CanvasHole>& holes) {
     const int width = frame.width;
@@ -559,15 +559,9 @@ void DetectCanvasHoles(const FrameView& frame, const std::vector<IntRect>& maske
 
     std::vector<uint8_t> mask(static_cast<std::size_t>(width) * height);
     std::vector<int> stack;
-    // Editors surround the canvas with several panel grays that can each
-    // out-sample the canvas itself, so the canvas tone is not always among
-    // the very top flats; five attempts cost one cheap flood each.
-    for (std::size_t rank = 0; rank < flats.size() && rank < 5; ++rank) {
-        if (flats[rank].count < minimum_samples) break;
-        const uint8_t canvas_r = static_cast<uint8_t>(flats[rank].sum[2] / flats[rank].count);
-        const uint8_t canvas_g = static_cast<uint8_t>(flats[rank].sum[1] / flats[rank].count);
-        const uint8_t canvas_b = static_cast<uint8_t>(flats[rank].sum[0] / flats[rank].count);
-
+    // One canvas-hole attempt for a specific canvas tone; used for the
+    // dominant flat colors and for any hinted tones.
+    const auto attempt = [&](uint8_t canvas_r, uint8_t canvas_g, uint8_t canvas_b) {
         // 1 = canvas-colored, 2 = member of the chosen connected region.
         std::size_t seed = 0;
         const auto matches = [&](int x, int y) {
@@ -630,7 +624,7 @@ void DetectCanvasHoles(const FrameView& frame, const std::vector<IntRect>& maske
                 seed = start;
             }
         }
-        if (best_size < minimum_samples * 16) continue;
+        if (best_size < minimum_samples * 16) return;
         // Re-flood the winner with label 2 (everything is 3 now).
         stack.clear();
         stack.push_back(static_cast<int>(seed));
@@ -665,7 +659,7 @@ void DetectCanvasHoles(const FrameView& frame, const std::vector<IntRect>& maske
         if (TraceEnabled())
             std::printf("canvas %d,%d,%d region %d px bbox %d,%d..%d,%d\n", canvas_r, canvas_g,
                         canvas_b, best_size, cx0, cy0, cx1, cy1);
-        if (cx1 - cx0 < tolerances.rect_width || cy1 - cy0 < tolerances.rect_height) continue;
+        if (cx1 - cx0 < tolerances.rect_width || cy1 - cy0 < tolerances.rect_height) return;
         // The hole is the LARGEST connected non-canvas component inside the
         // canvas bounding box - a faint canvas gradient or stray dust forms
         // its own slivers and must not stretch the photograph's bounds.
@@ -795,11 +789,11 @@ void DetectCanvasHoles(const FrameView& frame, const std::vector<IntRect>& maske
             }
         }
         if (TraceEnabled()) std::printf("  hole %d,%d..%d,%d\n", hx0, hy0, hx1, hy1);
-        if (hx1 - hx0 < tolerances.rect_width || hy1 - hy0 < tolerances.rect_height) continue;
+        if (hx1 - hx0 < tolerances.rect_width || hy1 - hy0 < tolerances.rect_height) return;
         // Enclosure: the hole must sit strictly inside the canvas region,
         // not lean on its bounding box (which would mean the "hole" is
         // just whatever lies beyond the canvas).
-        if (hx0 <= cx0 || hy0 <= cy0 || hx1 >= cx1 || hy1 >= cy1) continue;
+        if (hx0 <= cx0 || hy0 <= cy0 || hx1 >= cx1 || hy1 >= cy1) return;
 
         const IntRect rect{hx0, hy0, hx1 - hx0, hy1 - hy0};
         bool duplicate = false;
@@ -809,7 +803,7 @@ void DetectCanvasHoles(const FrameView& frame, const std::vector<IntRect>& maske
                 break;
             }
         }
-        if (duplicate) continue;
+        if (duplicate) return;
         CanvasHole entry{RegionCandidate{rect, 1.0f}, {}};
         const int agreement = tolerances.duplicate * 2;
         for (const RegionCandidate& candidate : edge_candidates) {
@@ -845,6 +839,20 @@ void DetectCanvasHoles(const FrameView& frame, const std::vector<IntRect>& maske
         if (TraceEnabled())
             std::printf("canvas hole %d,%d %dx%d (canvas %d,%d,%d)\n", rect.x, rect.y, rect.width,
                         rect.height, canvas_r, canvas_g, canvas_b);
+    };
+
+    // Hinted tones first: application adapters know their canvas palettes,
+    // and a known tone must not depend on out-sampling the panel grays.
+    for (const Color& tone : hints.canvas_colors) attempt(tone.r, tone.g, tone.b);
+
+    // Editors surround the canvas with several panel grays that can each
+    // out-sample the canvas itself, so the canvas tone is not always among
+    // the very top flats; five attempts cost one cheap flood each.
+    for (std::size_t rank = 0; rank < flats.size() && rank < 5; ++rank) {
+        if (flats[rank].count < minimum_samples) break;
+        attempt(static_cast<uint8_t>(flats[rank].sum[2] / flats[rank].count),
+                static_cast<uint8_t>(flats[rank].sum[1] / flats[rank].count),
+                static_cast<uint8_t>(flats[rank].sum[0] / flats[rank].count));
     }
 }
 
@@ -852,7 +860,8 @@ void DetectCanvasHoles(const FrameView& frame, const std::vector<IntRect>& maske
 
 std::vector<RegionCandidate> DetectPhotoRegions(const FrameView& frame,
                                                 const std::vector<IntRect>& masked_regions,
-                                                float pixels_per_point, int max_candidates) {
+                                                float pixels_per_point, int max_candidates,
+                                                const DetectionHints& hints) {
     std::vector<RegionCandidate> candidates;
     const Tolerances tolerances(pixels_per_point);
     if (frame.width < tolerances.rect_width || frame.height < tolerances.rect_height)
@@ -903,7 +912,7 @@ std::vector<RegionCandidate> DetectPhotoRegions(const FrameView& frame,
     // confidence. An edge rectangle that coincides with a hole is the same
     // find twice and yields to it.
     std::vector<CanvasHole> holes;
-    DetectCanvasHoles(frame, masked_regions, tolerances, candidates, holes);
+    DetectCanvasHoles(frame, masked_regions, tolerances, hints, candidates, holes);
     struct Ranked {
         RegionCandidate candidate;
         bool hole;

@@ -424,6 +424,36 @@ TEST_CASE("Detector recovers a photo whose sky melts into the canvas") {
     CHECK_FALSE(AnyCandidateNear(candidates, half, 12));
 }
 
+TEST_CASE("Detector honors a hinted canvas tone crowded out of the top flats") {
+    // Six flat blocks out-sample the small canvas, so the generic attempts
+    // never try its tone, and the photograph - edge-blind noise on that
+    // canvas - is invisible without the application adapter's hint.
+    TestScreen screen(960, 720, Color{40, 40, 42});
+    screen.FillRect(IntRect{0, 0, 960, 120}, Color{0, 0, 0});
+    screen.FillRect(IntRect{0, 120, 480, 300}, Color{80, 80, 80});
+    screen.FillRect(IntRect{480, 120, 480, 300}, Color{120, 120, 120});
+    screen.FillRect(IntRect{0, 420, 480, 300}, Color{200, 200, 200});
+    screen.FillRect(IntRect{480, 420, 480, 300}, Color{233, 233, 233});
+    const IntRect canvas{300, 180, 360, 300};
+    screen.FillRect(canvas, Color{51, 51, 51});
+    const IntRect photo{330, 210, 300, 240};
+    uint32_t state = 0x13579BDFu;
+    for (int py = photo.y; py < photo.y + photo.height; ++py)
+        for (int px = photo.x; px < photo.x + photo.width; ++px) {
+            state = state * 1664525u + 1013904223u;
+            const auto tone = static_cast<uint8_t>(55 + (state >> 24) % 8);  // edge-blind
+            screen.Set(px, py, Color{tone, tone, tone});
+        }
+
+    DetectionHints hints;
+    hints.canvas_colors.push_back(Color{51, 51, 51});
+    CHECK(AnyCandidateNear(DetectPhotoRegions(screen.View(), {}, 1.0f, 8, hints), photo, 4));
+    // The premise: without the hint the crowd wins and the photo is
+    // missed. If the generic ranking ever starts finding it, this case
+    // stops proving the hint path and should be rebuilt harder.
+    CHECK_FALSE(AnyCandidateNear(DetectPhotoRegions(screen.View()), photo, 4));
+}
+
 TEST_CASE("Detector orders candidates largest first and respects the cap") {
     TestScreen screen(800, 600);
     screen.AddPhoto(IntRect{40, 40, 500, 400}, 0x11111111u);

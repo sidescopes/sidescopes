@@ -1180,13 +1180,18 @@ int main() {
                     return (right - left) * (bottom - top) / (inner.width * inner.height);
                 };
                 std::vector<DesktopWindow> visible_windows;
+                std::vector<DesktopWindow> auxiliary_windows;
                 for (const DesktopWindow& window : on_screen) {
                     constexpr int kMaxWindowSuggestions = 5;
                     if (static_cast<int>(visible_windows.size()) >= kMaxWindowSuggestions) break;
                     // A window living mostly inside a bigger window of the
                     // same application is an auxiliary surface - Lightroom
-                    // draws its loupe info overlay as a borderless window
-                    // over the photograph - and picking it is never meant.
+                    // draws its panels and its loupe info overlay as
+                    // borderless windows over the main one - and picking it
+                    // is never meant. It is remembered as chrome: the
+                    // detector masks it out, so panels and overlays neither
+                    // spawn candidates nor interrupt the photograph's
+                    // borders.
                     bool auxiliary = false;
                     for (const DesktopWindow& other : on_screen) {
                         if (&other == &window || other.application != window.application) continue;
@@ -1196,7 +1201,10 @@ int main() {
                             break;
                         }
                     }
-                    if (auxiliary) continue;
+                    if (auxiliary) {
+                        auxiliary_windows.push_back(window);
+                        continue;
+                    }
                     bool mostly_covered = false;
                     for (const DesktopWindow& front : visible_windows) {
                         if (contained_fraction(window, front) > 0.8) {
@@ -1207,17 +1215,41 @@ int main() {
                     if (!mostly_covered) visible_windows.push_back(window);
                 }
 
+                // Application adapters, as data: applications whose canvas
+                // palette is fixed get their tones hinted to the detector.
+                // Lightroom's background options as measured in the corpus
+                // screenshots: black, the develop module's dark gray, the
+                // medium gray, and white.
+                DetectionHints detection_hints;
+                for (const DesktopWindow& window : on_screen) {
+                    if (window.application.find("Lightroom") == std::string::npos) continue;
+                    detection_hints.canvas_colors = {Color{0, 0, 0}, Color{51, 51, 51},
+                                                     Color{144, 144, 144}, Color{255, 255, 255}};
+                    break;
+                }
+
                 worker.WithLatestFrame([&](const FrameView& view) {
                     detect_width = view.width;
                     detect_height = view.height;
                     // Our own window floats over the desktop being analyzed;
                     // masked, so borders survive beneath it and scope traces
-                    // spawn no candidates.
+                    // spawn no candidates. The auxiliary chrome windows are
+                    // masked with it.
                     const auto pixels_per_point =
                         static_cast<float>(view.width / geometry->width_points);
-                    photo_candidates =
-                        DetectPhotoRegions(view, {analysis.masked_window}, pixels_per_point,
-                                           /*max_candidates=*/24);
+                    std::vector<IntRect> masks{analysis.masked_window};
+                    const double scale_x = view.width / geometry->width_points;
+                    const double scale_y = view.height / geometry->height_points;
+                    for (const DesktopWindow& chrome : auxiliary_windows) {
+                        IntRect rect;
+                        rect.x = static_cast<int>((chrome.x - geometry->origin_x) * scale_x);
+                        rect.y = static_cast<int>((chrome.y - geometry->origin_y) * scale_y);
+                        rect.width = static_cast<int>(chrome.width * scale_x);
+                        rect.height = static_cast<int>(chrome.height * scale_y);
+                        masks.push_back(rect);
+                    }
+                    photo_candidates = DetectPhotoRegions(view, masks, pixels_per_point,
+                                                          /*max_candidates=*/24, detection_hints);
                     // Vision loads its face model synchronously on first
                     // use - seconds of beachball on the picker's opening.
                     // Face suggestions are deferred work (owner decision);

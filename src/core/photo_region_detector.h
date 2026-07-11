@@ -37,10 +37,20 @@ struct RegionCandidate {
 // or a rounded corner that a search absorbs at 1x pushes a border out of
 // reach at 2x.
 //
+// Application-specific knowledge, supplied as data by whoever knows which
+// applications are on screen. Known canvas tones (Lightroom offers a fixed
+// palette of background colors) get a guaranteed canvas-hole attempt, so a
+// crowd of panel grays cannot push the real canvas out of the tried colors;
+// a hinted tone that is not actually present costs one cheap scan.
+struct DetectionHints {
+    std::vector<Color> canvas_colors;
+};
+
 // Returns up to `max_candidates`, largest first. Deterministic.
 std::vector<RegionCandidate> DetectPhotoRegions(const FrameView& frame,
                                                 const std::vector<IntRect>& masked_regions = {},
                                                 float pixels_per_point = 1.0f,
-                                                int max_candidates = 8);
+                                                int max_candidates = 8,
+                                                const DetectionHints& hints = {});
 
 }  // namespace sidescopes

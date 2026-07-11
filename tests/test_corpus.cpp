@@ -28,6 +28,7 @@ struct CorpusCase {
     std::filesystem::path image;
     float pixels_per_point = 1.0f;
     std::vector<IntRect> masks;
+    DetectionHints hints;
     std::vector<CorpusExpectation> expectations;
 };
 
@@ -54,6 +55,13 @@ std::vector<CorpusCase> LoadCases(const std::filesystem::path& directory) {
                 IntRect rect;
                 if (tokens >> rect.x >> rect.y >> rect.width >> rect.height)
                     item.masks.push_back(rect);
+            } else if (keyword == "hint") {
+                int r = 0;
+                int g = 0;
+                int b = 0;
+                if (tokens >> r >> g >> b)
+                    item.hints.canvas_colors.push_back(Color{
+                        static_cast<uint8_t>(r), static_cast<uint8_t>(g), static_cast<uint8_t>(b)});
             } else if (keyword == "expect" || keyword == "goal") {
                 CorpusExpectation expectation;
                 expectation.required = keyword == "expect";
@@ -122,8 +130,8 @@ TEST_CASE("Detector finds every annotated rectangle in the corpus") {
         INFO("case " << item.name);
         REQUIRE(LoadPpm(item.image, bgra, width, height));
         const FrameView frame{bgra.data(), width * 4, width, height, ColorSpaceHint::Srgb, 1};
-        const auto candidates =
-            DetectPhotoRegions(frame, item.masks, item.pixels_per_point, /*max_candidates=*/24);
+        const auto candidates = DetectPhotoRegions(frame, item.masks, item.pixels_per_point,
+                                                   /*max_candidates=*/24, item.hints);
 
         for (const CorpusExpectation& expectation : item.expectations) {
             (expectation.required ? total : goals_total) += 1;
