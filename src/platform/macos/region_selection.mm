@@ -265,12 +265,6 @@ RegionOfInterest g_border_edit_region;
             [self drawBanner:@"Drag to select an area" secondary:secondary preferCenter:NO];
         }
     }
-
-    // Last, so nothing re-adds alpha over them: this application's own
-    // windows stay usable while the picker is up.
-    [[NSColor clearColor] setFill];
-    for (const NSRect& exclusion : exclusions_)
-        NSRectFillUsingOperation(exclusion, NSCompositingOperationCopy);
 }
 
 - (void)resetCursorRects {
@@ -565,6 +559,11 @@ NSWindow* g_border_window = nil;
 SidescopesPickerWindow* g_picker_window = nil;
 SidescopesPickerView* g_picker_view = nil;
 NSSize g_picker_size = {0, 0};
+// This application's own windows are raised above the overlay for the
+// pick, with their previous levels remembered for the teardown: real
+// window compositing keeps their rounded corners and click handling,
+// where punching rectangular holes in the dimming could not.
+std::vector<std::pair<NSWindow*, NSInteger>> g_raised_windows;
 
 std::vector<NSRect> OwnWindowExclusions(NSWindow* overlay, NSPoint screen_origin) {
     std::vector<NSRect> exclusions;
@@ -615,10 +614,16 @@ bool BeginRegionPick(uint32_t display_id, const std::vector<SuggestedRegion>& wi
     for (const SuggestedRegion& suggestion : faces) {
         view->faces_.emplace_back(RegionToViewRect(suggestion.region, view_size), suggestion.label);
     }
-    // This application's own visible windows stay reachable through the
-    // overlay: the toolbar keeps working while picking. The list refreshes
-    // every poll, because the user can move the scope window mid-pick and
-    // a stale hole would leave an undimmed ghost where it used to be.
+    // This application's own visible windows float above the overlay for
+    // the duration: they stay undimmed and clickable by ordinary window
+    // compositing, corners and all, and follow their own movement with no
+    // repainting on our side. The rectangles still feed the banner
+    // placement, which avoids sitting beneath them.
+    for (NSWindow* window in NSApp.windows) {
+        if (window == overlay || window == g_border_window || !window.isVisible) continue;
+        g_raised_windows.emplace_back(window, window.level);
+        window.level = overlay.level + 1;
+    }
     view->exclusions_ = OwnWindowExclusions(overlay, screen.frame.origin);
     if (initial_mode == RegionPickerMode::Draw ||
         (initial_mode == RegionPickerMode::PickWindows && windows.empty())) {
@@ -649,16 +654,21 @@ RegionPickPoll PollRegionPick() {
     if (!g_picker_view) return poll;
     poll.active = true;
 
-    // Track this application's own windows as they move: the punched
-    // holes and the dimming must follow, or the old position stays
-    // undimmed and the new one goes dark.
-    std::vector<NSRect> exclusions =
-        OwnWindowExclusions(g_picker_window, g_picker_window.frame.origin);
-    if (exclusions.size() != g_picker_view->exclusions_.size() ||
-        !std::equal(exclusions.begin(), exclusions.end(), g_picker_view->exclusions_.begin(),
-                    [](const NSRect& a, const NSRect& b) { return NSEqualRects(a, b); })) {
-        g_picker_view->exclusions_ = std::move(exclusions);
-        g_picker_view.needsDisplay = YES;
+    // The banner dodges this application's own windows; their rectangles
+    // refresh on a gentle cadence - nothing visual tracks them anymore,
+    // so per-frame repaints would be waste.
+    static double last_exclusion_refresh = 0.0;
+    const double now = CFAbsoluteTimeGetCurrent();
+    if (now - last_exclusion_refresh > 0.2) {
+        last_exclusion_refresh = now;
+        std::vector<NSRect> exclusions =
+            OwnWindowExclusions(g_picker_window, g_picker_window.frame.origin);
+        if (exclusions.size() != g_picker_view->exclusions_.size() ||
+            !std::equal(exclusions.begin(), exclusions.end(), g_picker_view->exclusions_.begin(),
+                        [](const NSRect& a, const NSRect& b) { return NSEqualRects(a, b); })) {
+            g_picker_view->exclusions_ = std::move(exclusions);
+            g_picker_view.needsDisplay = YES;
+        }
     }
 
     const auto region_from_view = [](NSRect rect, NSSize size) {
@@ -675,6 +685,8 @@ RegionPickPoll PollRegionPick() {
         poll.finished = true;
         if (g_picker_view.picked)
             poll.confirmed = region_from_view(g_picker_view.confirmedRect, g_picker_size);
+        for (const auto& [window, level] : g_raised_windows) window.level = level;
+        g_raised_windows.clear();
         [g_picker_window orderOut:nil];
         g_picker_window = nil;
         g_picker_view = nil;
