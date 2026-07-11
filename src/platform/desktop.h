@@ -49,4 +49,16 @@ std::string PreferencesFilePath();
 // as the platform allows. A no-op where capture needs no permission.
 void OpenScreenRecordingSettings();
 
+// The keyboard modifiers as the operating system sees them right now.
+// System overlays (the macOS screenshot interface, for one) swallow
+// key-up events, leaving event-driven modifier tracking stuck; polling
+// the ground truth lets the application heal itself.
+struct ModifierState {
+    bool shift = false;
+    bool control = false;
+    bool option = false;
+    bool command = false;
+};
+ModifierState CurrentModifiers();
+
 }  // namespace sidescopes

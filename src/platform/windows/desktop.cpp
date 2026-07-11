@@ -160,6 +160,16 @@ std::string PreferencesFilePath() {
     return ApplicationDataDirectory() + "\\SideScopes\\preferences.txt";
 }
 
+ModifierState CurrentModifiers() {
+    ModifierState state;
+    state.shift = (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
+    state.control = (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0;
+    state.option = (GetAsyncKeyState(VK_MENU) & 0x8000) != 0;
+    state.command =
+        (GetAsyncKeyState(VK_LWIN) & 0x8000) != 0 || (GetAsyncKeyState(VK_RWIN) & 0x8000) != 0;
+    return state;
+}
+
 void OpenScreenRecordingSettings() {
     // Reading the desktop needs no permission on Windows.
 }

@@ -836,10 +836,16 @@ int main() {
                 analysis_dirty = true;
             }
         };
+        // The stacking modifier reads the OS's live key state, not the
+        // event-tracked one: ImGui's backend re-injects GLFW's cached
+        // modifiers on every key press and click, so a Shift key-up
+        // swallowed by a system overlay (the screenshot interface) leaves
+        // the cache stuck exactly when the user next switches a scope.
+        const bool stack_modifier = CurrentModifiers().shift;
         const auto scope_toggle = [&](const char* id, ScopeGlyph kind, const char* tooltip) {
             const char letter[2] = {ScopeLetter(kind), '\0'};
             if (ScopeToggleButton(id, letter, scope_shown(kind), tooltip))
-                choose_scope(kind, io.KeyShift);
+                choose_scope(kind, stack_modifier);
             ImGui::SameLine(0.0f, 2.0f);
         };
         scope_toggle("##toggle-vectorscope", ScopeGlyph::Vectorscope,
@@ -856,13 +862,13 @@ int main() {
         std::optional<RegionPickerMode> want_region_pick;
         if (!io.WantTextInput) {
             if (ImGui::IsKeyPressed(ImGuiKey_V, false))
-                choose_scope(ScopeGlyph::Vectorscope, io.KeyShift);
+                choose_scope(ScopeGlyph::Vectorscope, stack_modifier);
             if (ImGui::IsKeyPressed(ImGuiKey_W, false))
-                choose_scope(ScopeGlyph::Waveform, io.KeyShift);
+                choose_scope(ScopeGlyph::Waveform, stack_modifier);
             if (ImGui::IsKeyPressed(ImGuiKey_R, false))
-                choose_scope(ScopeGlyph::WaveformParade, io.KeyShift);
+                choose_scope(ScopeGlyph::WaveformParade, stack_modifier);
             if (ImGui::IsKeyPressed(ImGuiKey_H, false))
-                choose_scope(ScopeGlyph::Histogram, io.KeyShift);
+                choose_scope(ScopeGlyph::Histogram, stack_modifier);
             if (ImGui::IsKeyPressed(ImGuiKey_A, false))
                 want_region_pick = RegionPickerMode::PickWindows;
             if (ImGui::IsKeyPressed(ImGuiKey_D, false)) want_region_pick = RegionPickerMode::Draw;

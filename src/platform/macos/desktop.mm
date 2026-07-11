@@ -68,6 +68,21 @@ std::string PreferencesFilePath() {
            "/Library/Application Support/SideScopes/preferences.txt";
 }
 
+ModifierState CurrentModifiers() {
+    // NSEvent.modifierFlags mirrors the application's own event stream,
+    // which is precisely what a system overlay starves - it reads stuck
+    // in the very situation this exists to heal. The Quartz event source
+    // reports the session's real key state regardless of who received
+    // the events.
+    const CGEventFlags flags = CGEventSourceFlagsState(kCGEventSourceStateCombinedSessionState);
+    ModifierState state;
+    state.shift = (flags & kCGEventFlagMaskShift) != 0;
+    state.control = (flags & kCGEventFlagMaskControl) != 0;
+    state.option = (flags & kCGEventFlagMaskAlternate) != 0;
+    state.command = (flags & kCGEventFlagMaskCommand) != 0;
+    return state;
+}
+
 void OpenScreenRecordingSettings() {
     NSURL* url = [NSURL
         URLWithString:
