@@ -107,7 +107,12 @@ if(APPLE)
     set_source_files_properties(${imgui_SOURCE_DIR}/backends/imgui_impl_metal.mm
         PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
 
-    add_executable(SideScopes MACOSX_BUNDLE src/app/main.mm)
+    add_executable(SideScopes MACOSX_BUNDLE
+        src/app/main.mm
+        assets/icon/sidescopes.icns
+    )
+    set_source_files_properties(assets/icon/sidescopes.icns
+        PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
     set_source_files_properties(src/app/main.mm PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
     set_target_properties(SideScopes PROPERTIES
         MACOSX_BUNDLE_INFO_PLIST ${CMAKE_SOURCE_DIR}/cmake/Info.plist.in
