@@ -249,14 +249,23 @@ void AppendRunsFromBoundary(const BoundaryRow& row, const Tolerances& tolerances
     int visible_edges = 0;
     int gap = 0;
     bool split = false;
+    // Gap bridging must not manufacture borders out of periodic content:
+    // rows of list text sit closer together than the gap tolerance, so
+    // their glyph fragments would bridge into arbitrarily long runs. A
+    // real border keeps most of its span on edges even across dropouts;
+    // bridged text is mostly gap.
+    const auto dense = [&](int start, int end) {
+        return row.EdgesIn(start, end) * 2 >= row.VisibleIn(start, end);
+    };
     const auto close_segment = [&](int end) {
-        if (split && segment_start >= 0 && row.EdgesIn(segment_start, end) >= tolerances.run_length)
+        if (split && segment_start >= 0 &&
+            row.EdgesIn(segment_start, end) >= tolerances.run_length && dense(segment_start, end))
             runs.push_back(EdgeRun{y, segment_start, end});
         segment_start = -1;
     };
     const auto close_run = [&](int end) {
         close_segment(end);
-        if (run_start >= 0 && visible_edges >= tolerances.run_length)
+        if (run_start >= 0 && visible_edges >= tolerances.run_length && dense(run_start, end))
             runs.push_back(EdgeRun{y, run_start, end});
         run_start = -1;
         visible_edges = 0;
@@ -331,14 +340,24 @@ std::optional<float> VerticalSideCoverage(const FrameView& frame,
     const int wide_right = std::min(frame.width - 1, x + 1);
     int edges = 0;
     int visible = 0;
+    int streak = 0;
+    int longest_streak = 0;
     for (int y = y0; y < y1; ++y) {
         if (Masked(masked_regions, x - 1, y) || Masked(masked_regions, x, y)) continue;
         ++visible;
         if (IsEdge(frame.PixelAt(x - 1, y), frame.PixelAt(x, y)) ||
-            (wide && IsEdge(frame.PixelAt(wide_left, y), frame.PixelAt(wide_right, y))))
+            (wide && IsEdge(frame.PixelAt(wide_left, y), frame.PixelAt(wide_right, y)))) {
             ++edges;
+            ++streak;
+            longest_streak = std::max(longest_streak, streak);
+        } else {
+            streak = 0;
+        }
     }
     if (visible < std::max(4, (y1 - y0) / 8)) return std::nullopt;
+    // A real side is a line; a column through a list of text accumulates
+    // the same edge fraction from glyph fragments, but never contiguously.
+    if (wide && longest_streak * 3 < visible) return 0.0f;
     return static_cast<float>(edges) / static_cast<float>(visible);
 }
 
@@ -483,13 +502,15 @@ void DetectCanvasHoles(const FrameView& frame, const std::vector<IntRect>& maske
     const auto pixel = [&](int x, int y) { return frame.PixelAt(x, y); };
 
     // Dominant flat colors, from a sparse grid of flat samples. Each
-    // bucket keeps a real sample: the key's 4-wide quantization would
-    // otherwise re-center the color on the bucket floor and clip the
-    // canvas's own +-1 noise out of the matching window.
+    // bucket carries the average of its samples: quantization alone would
+    // re-center the color on the bucket floor, and one stored pixel
+    // misrepresents a bucket where two real tones meet (a 48-gray panel
+    // and a 51-gray canvas share a 4-wide bucket; the window around
+    // either one clips the other's noise out of membership).
     struct FlatColor {
         uint32_t key;
         int count;
-        uint8_t sample[3];
+        int64_t sum[3];
     };
     std::vector<FlatColor> flats;
     for (int y = 4; y < height - 4; y += 4) {
@@ -508,6 +529,9 @@ void DetectCanvasHoles(const FrameView& frame, const std::vector<IntRect>& maske
             for (FlatColor& entry : flats) {
                 if (entry.key == key) {
                     ++entry.count;
+                    entry.sum[0] += p[0];
+                    entry.sum[1] += p[1];
+                    entry.sum[2] += p[2];
                     merged = true;
                     break;
                 }
@@ -526,9 +550,9 @@ void DetectCanvasHoles(const FrameView& frame, const std::vector<IntRect>& maske
     // the very top flats; five attempts cost one cheap flood each.
     for (std::size_t rank = 0; rank < flats.size() && rank < 5; ++rank) {
         if (flats[rank].count < minimum_samples) break;
-        const uint8_t canvas_r = flats[rank].sample[2];
-        const uint8_t canvas_g = flats[rank].sample[1];
-        const uint8_t canvas_b = flats[rank].sample[0];
+        const uint8_t canvas_r = static_cast<uint8_t>(flats[rank].sum[2] / flats[rank].count);
+        const uint8_t canvas_g = static_cast<uint8_t>(flats[rank].sum[1] / flats[rank].count);
+        const uint8_t canvas_b = static_cast<uint8_t>(flats[rank].sum[0] / flats[rank].count);
 
         // 1 = canvas-colored, 2 = member of the chosen connected region.
         std::size_t seed = 0;
@@ -869,6 +893,22 @@ std::vector<RegionCandidate> DetectPhotoRegions(const FrameView& frame,
             const bool cols_inside = overlap_w * 10 >= static_cast<int64_t>(c.width) * 9;
             const bool spans_rows = c.y <= h.y && c.y + c.height >= h.y + h.height;
             if ((rows_inside && spans_columns) || (cols_inside && spans_rows)) return true;
+            // A border running through the photograph's interior was paired
+            // off photo content (a long contour inside the picture); the
+            // real windows a screen offers come from the platform's window
+            // list, never from borders found inside a photograph.
+            const int margin = tolerances.duplicate;
+            const auto row_through = [&](int y) {
+                return y > h.y + margin && y < h.y + h.height - margin &&
+                       overlap_w * 2 >= static_cast<int64_t>(h.width);
+            };
+            const auto column_through = [&](int x) {
+                return x > h.x + margin && x < h.x + h.width - margin &&
+                       overlap_h * 2 >= static_cast<int64_t>(h.height);
+            };
+            if (!entry.hole && (row_through(c.y) || row_through(c.y + c.height) ||
+                                column_through(c.x) || column_through(c.x + c.width)))
+                return true;
         }
         return false;
     });

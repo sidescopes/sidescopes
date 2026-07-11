@@ -279,6 +279,64 @@ TEST_CASE("Detector ignores rectangles below photo size") {
     CHECK(DetectPhotoRegions(screen.View()).empty());
 }
 
+TEST_CASE("Detector finds a noisy canvas sharing a color bucket with a panel") {
+    // A 48-gray panel and a noisy 50..52-gray canvas meet in one
+    // quantized color bucket. A single stored sample forms the matching
+    // window around the panel tone, the canvas's own noise falls outside
+    // it, and the shredded canvas loses to the panel - so the photograph,
+    // whose borders are too soft for the edge passes, is never found.
+    // The averaged bucket color covers both tones. Seen live on
+    // Lightroom's develop module at 2x. The unrelated flat blocks crowd
+    // the neighboring bucket (the pure-52 samples) out of the attempts,
+    // as a real screen full of panels does.
+    TestScreen screen(800, 720, Color{48, 48, 48});
+    const IntRect canvas{120, 20, 640, 520};
+    uint32_t state = 0x51515151u;
+    for (int py = canvas.y; py < canvas.y + canvas.height; ++py)
+        for (int px = canvas.x; px < canvas.x + canvas.width; ++px) {
+            state = state * 1664525u + 1013904223u;
+            const auto tone = static_cast<uint8_t>(50 + (state >> 24) % 3);  // 50..52
+            screen.Set(px, py, Color{tone, tone, tone});
+        }
+    screen.FillRect(IntRect{0, 560, 200, 160}, Color{0, 0, 0});
+    screen.FillRect(IntRect{200, 560, 200, 160}, Color{80, 80, 80});
+    screen.FillRect(IntRect{400, 560, 200, 160}, Color{233, 233, 233});
+    screen.FillRect(IntRect{600, 560, 200, 160}, Color{120, 120, 120});
+    // The photo: noise straddling the canvas tone, every adjacent
+    // difference below the edge thresholds - only the canvas hole can
+    // find it.
+    const IntRect photo{200, 100, 480, 360};
+    state = 0x87654321u;
+    for (int py = photo.y; py < photo.y + photo.height; ++py)
+        for (int px = photo.x; px < photo.x + photo.width; ++px) {
+            state = state * 1664525u + 1013904223u;
+            const auto tone = static_cast<uint8_t>(45 + (state >> 24) % 12);  // 45..56
+            screen.Set(px, py, Color{tone, tone, tone});
+        }
+
+    CHECK(AnyCandidateNear(DetectPhotoRegions(screen.View()), photo, 6));
+}
+
+TEST_CASE("Detector does not bridge rows of list text into borders") {
+    // Rows of text sit closer together than the run gap tolerance, so
+    // their glyph fragments would bridge into arbitrarily long phantom
+    // runs; the density requirement rejects them. Seen live as boxes
+    // slicing through Lightroom's preset list.
+    TestScreen screen(640, 480);
+    // A list: full-width row bars every 24 points, 10 points tall - their
+    // shared left and right ends line up into perfect phantom sides, and
+    // the 14-point gaps between rows sit inside the bridging tolerance.
+    for (int row = 0; row < 14; ++row)
+        screen.FillRect(IntRect{40, 60 + row * 24, 400, 10}, Color{200, 200, 200});
+
+    for (const RegionCandidate& candidate : DetectPhotoRegions(screen.View())) {
+        INFO("candidate " << candidate.rect.x << "," << candidate.rect.y << " "
+                          << candidate.rect.width << "x" << candidate.rect.height);
+        // Nothing photo-sized may assemble out of the text block.
+        CHECK(candidate.rect.height < 72);
+    }
+}
+
 TEST_CASE("Detector orders candidates largest first and respects the cap") {
     TestScreen screen(800, 600);
     screen.AddPhoto(IntRect{40, 40, 500, 400}, 0x11111111u);
