@@ -569,7 +569,8 @@ int main() {
         startup.histogram_per_channel ? HistogramStyle::PerChannel : HistogramStyle::Combined;
     bool analysis_dirty = true;
 
-    float vectorscope_intensity = IntensityFromTraceGain(analysis.vectorscope.gain);
+    float vectorscope_intensity =
+        IntensityFromTraceGain(analysis.vectorscope.gain, kVectorscopeIntensityShift);
     float waveform_intensity = IntensityFromTraceGain(analysis.waveform.gain);
     float vectorscope_smoothing_ms = startup.vectorscope_smoothing_ms;
     float waveform_smoothing_ms = startup.waveform_smoothing_ms;
@@ -927,18 +928,18 @@ int main() {
         // Scroll over a scope adjusts its intensity; double-click resets.
         static float* flash_intensity = nullptr;
         const auto scope_gestures = [&](const DrawnScope& scope, float& intensity, float& gain,
-                                        float default_gain) {
+                                        float default_gain, float intensity_shift = 0.0f) {
             if (!ImGui::IsItemHovered()) return;
             if (io.MouseWheel != 0.0f) {
                 intensity = std::clamp(intensity + 2.0f * io.MouseWheel, 0.0f, 100.0f);
-                gain = TraceGainFromIntensity(intensity);
+                gain = TraceGainFromIntensity(intensity, intensity_shift);
                 analysis_dirty = true;
                 intensity_flash_until = glfwGetTime() + 1.2;
                 flash_intensity = &intensity;
             }
             if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
                 gain = default_gain;
-                intensity = IntensityFromTraceGain(gain);
+                intensity = IntensityFromTraceGain(gain, intensity_shift);
                 analysis_dirty = true;
                 intensity_flash_until = glfwGetTime() + 1.2;
                 flash_intensity = &intensity;
@@ -953,7 +954,8 @@ int main() {
 
         const auto draw_vectorscope = [&] {
             const DrawnScope scope = DrawScopeImage(vectorscope_texture, true);
-            scope_gestures(scope, vectorscope_intensity, analysis.vectorscope.gain, 3.0f);
+            scope_gestures(scope, vectorscope_intensity, analysis.vectorscope.gain, 3.0f,
+                           kVectorscopeIntensityShift);
             if (show_graticule)
                 DrawVectorscopeOverlay(scope, BuildVectorscopeGraticule(projection_vectorscope));
             for (const FloatColor& pinned : pinned_colors) {
@@ -1250,7 +1252,8 @@ int main() {
             ImGui::TextDisabled("vectorscope");
             if (ImGui::SliderFloat("intensity##v", &vectorscope_intensity, 0.0f, 100.0f,
                                    "%.0f%%")) {
-                analysis.vectorscope.gain = TraceGainFromIntensity(vectorscope_intensity);
+                analysis.vectorscope.gain =
+                    TraceGainFromIntensity(vectorscope_intensity, kVectorscopeIntensityShift);
                 analysis_dirty = true;
             }
             analysis_dirty |=
