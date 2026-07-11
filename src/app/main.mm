@@ -242,15 +242,18 @@ bool IconButton(const char* id, RegionIcon icon, const char* tooltip) {
         // A simplified pointing hand: index finger up, palm with knuckle
         // notches, the shape of the pick-mode cursor.
         (void)a;
-        draw->AddRectFilled(ImVec2(center.x - 4.5f, center.y - 7.0f),
-                            ImVec2(center.x - 2.0f, center.y + 1.0f), color, 1.2f);
-        draw->AddRectFilled(ImVec2(center.x - 4.5f, center.y - 1.0f),
-                            ImVec2(center.x + 4.5f, center.y + 7.0f), color, 2.5f);
-        // Folded knuckles as scalloped bumps along the palm's top edge.
-        for (const float bump_x : {-1.0f, 1.75f, 4.5f - 2.0f + 1.0f}) {
-            draw->AddRectFilled(ImVec2(center.x + bump_x, center.y - 2.75f),
-                                ImVec2(center.x + bump_x + 2.0f, center.y + 1.0f), color, 1.0f);
-        }
+        // One silhouette: up the finger's left edge, over its rounded tip,
+        // down to the scalloped knuckles, down the fist's right side.
+        const ImVec2 outline[] = {
+            {-3.6f, 7.0f},  {-4.5f, 6.2f},  {-4.5f, -6.3f}, {-4.0f, -7.3f}, {-3.1f, -7.5f},
+            {-2.4f, -7.0f}, {-2.2f, -6.2f}, {-2.2f, -2.4f}, {-1.4f, -2.9f}, {-0.4f, -2.4f},
+            {0.2f, -1.8f},  {1.0f, -2.5f},  {2.0f, -2.4f},  {2.6f, -1.7f},  {3.4f, -2.2f},
+            {4.2f, -1.7f},  {4.5f, -0.8f},  {4.5f, 6.2f},   {3.6f, 7.0f},
+        };
+        ImVec2 points[std::size(outline)];
+        for (std::size_t i = 0; i < std::size(outline); ++i)
+            points[i] = ImVec2(center.x + outline[i].x, center.y + outline[i].y);
+        draw->AddConcavePolyFilled(points, static_cast<int>(std::size(outline)), color);
     } else if (icon == RegionIcon::Crosshair) {
         // The draw-mode crosshair: long thin beams, small center gap.
         const auto beam = [&](float dx, float dy) {
