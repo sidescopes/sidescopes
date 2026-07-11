@@ -1248,14 +1248,39 @@ int main() {
                         chrome_rects.push_back(rect);
                     }
 
-                    // Chrome that spans a screen edge - panels, filmstrip,
-                    // top bar - DELIMITS the content rather than hiding it:
-                    // nothing continues beneath, so it must bound the
-                    // analysis, not bridge it. The crop shrinks until no
-                    // edge-spanning chrome remains inside; whatever chrome
-                    // still overlaps (a loupe overlay on the photograph)
-                    // genuinely floats over content and stays an occluder.
+                    // Chrome that spans an edge of its application's main
+                    // window - panels, filmstrip, top bar - DELIMITS the
+                    // content rather than hiding it: nothing continues
+                    // beneath, so it must bound the analysis, not bridge
+                    // it. The fence starts from the largest visible window
+                    // (chrome is laid out against the window, not the
+                    // display - a title bar always sits above it) and
+                    // shrinks until no edge-spanning chrome remains inside;
+                    // whatever chrome still overlaps (a loupe overlay on
+                    // the photograph) genuinely floats over content and
+                    // stays an occluder.
                     IntRect content{0, 0, view.width, view.height};
+                    const DesktopWindow* main_window = nullptr;
+                    for (const DesktopWindow& window : visible_windows) {
+                        if (!main_window ||
+                            window.width * window.height > main_window->width * main_window->height)
+                            main_window = &window;
+                    }
+                    if (main_window) {
+                        const int x0 = std::max(
+                            0, static_cast<int>((main_window->x - geometry->origin_x) * scale_x));
+                        const int y0 = std::max(
+                            0, static_cast<int>((main_window->y - geometry->origin_y) * scale_y));
+                        const int x1 = std::min(
+                            view.width, static_cast<int>((main_window->x + main_window->width -
+                                                          geometry->origin_x) *
+                                                         scale_x));
+                        const int y1 = std::min(
+                            view.height, static_cast<int>((main_window->y + main_window->height -
+                                                           geometry->origin_y) *
+                                                          scale_y));
+                        if (x1 > x0 && y1 > y0) content = IntRect{x0, y0, x1 - x0, y1 - y0};
+                    }
                     for (bool trimmed = true; trimmed;) {
                         trimmed = false;
                         for (const IntRect& chrome : chrome_rects) {
@@ -1266,9 +1291,12 @@ int main() {
                             const int bottom =
                                 std::min(content.y + content.height, chrome.y + chrome.height);
                             if (right <= left || bottom <= top) continue;
-                            const bool full_width = (right - left) * 10 >= content.width * 9;
-                            const bool full_height = (bottom - top) * 10 >= content.height * 9;
-                            const int slack = 8;
+                            const bool full_width = (right - left) * 20 >= content.width * 17;
+                            const bool full_height = (bottom - top) * 20 >= content.height * 17;
+                            // Generous slack: a title bar or a status strip
+                            // may sit between the window edge and the
+                            // docked chrome.
+                            const int slack = static_cast<int>(32 * pixels_per_point);
                             IntRect next = content;
                             if (full_width && chrome.y <= content.y + slack) {
                                 next.height = content.y + content.height - bottom;
