@@ -31,20 +31,27 @@ struct TestFrame {
     int height;
 };
 
-// Height of the bar for `value` in one channel (0=r, 1=g, 2=b).
+// Plot height for a bin in one channel (0=r, 1=g, 2=b): the tallest of
+// the image columns that render that bin.
 int BarHeight(const ScopeImage& image, int value, int channel) {
+    const int columns_per_bin = image.width / Histogram::kBins;
     int height = 0;
-    for (int row = 0; row < image.height; ++row) {
-        if (image.rgba[(static_cast<std::size_t>(row) * image.width + value) * 4 + channel] > 0)
-            ++height;
+    for (int column = value * columns_per_bin; column < (value + 1) * columns_per_bin; ++column) {
+        int column_height = 0;
+        for (int row = 0; row < image.height; ++row) {
+            if (image.rgba[(static_cast<std::size_t>(row) * image.width + column) * 4 + channel] >
+                0)
+                ++column_height;
+        }
+        height = std::max(height, column_height);
     }
     return height;
 }
 
-// Values with a nonzero bar in one channel.
+// Bins with a nonzero plot in one channel.
 std::vector<int> LitValues(const ScopeImage& image, int channel) {
     std::vector<int> values;
-    for (int value = 0; value < image.width; ++value) {
+    for (int value = 0; value < Histogram::kBins; ++value) {
         if (BarHeight(image, value, channel) > 0) values.push_back(value);
     }
     return values;
@@ -59,11 +66,16 @@ TEST_CASE("Histogram places uniform color at its channel values") {
     Histogram scope;
     scope.Accumulate(frame.View(), IntRect{0, 0, 32, 32});
 
-    CHECK(LitValues(scope.Image(), 0) == std::vector<int>{10});
-    CHECK(LitValues(scope.Image(), 1) == std::vector<int>{150});
-    CHECK(LitValues(scope.Image(), 2) == std::vector<int>{240});
-    // The only bar is the densest bar: full height.
-    CHECK(BarHeight(scope.Image(), 10, 0) == Histogram::kHeight);
+    // Smoothing spreads one bin's population to its neighbors; the true
+    // value stays the tallest.
+    // Smoothing and interpolation spread one bin's population to its
+    // neighborhood; the true value stays the tallest.
+    CHECK(LitValues(scope.Image(), 0).front() >= 7);
+    CHECK(LitValues(scope.Image(), 0).back() <= 13);
+    CHECK(BarHeight(scope.Image(), 10, 0) >= Histogram::kHeight - 20);
+    CHECK(BarHeight(scope.Image(), 9, 0) < BarHeight(scope.Image(), 10, 0));
+    CHECK(BarHeight(scope.Image(), 8, 0) < BarHeight(scope.Image(), 9, 0));
+    CHECK(BarHeight(scope.Image(), 150, 0) == 0);
 }
 
 TEST_CASE("Histogram bar heights order by pixel population") {
@@ -77,9 +89,13 @@ TEST_CASE("Histogram bar heights order by pixel population") {
 
     const int dominant = BarHeight(scope.Image(), 64, 1);
     const int minority = BarHeight(scope.Image(), 200, 1);
-    CHECK(dominant == Histogram::kHeight);
+    CHECK(dominant >= Histogram::kHeight - 20);
     CHECK(minority > 0);
     CHECK(minority < dominant);
+    // Square-root heights: a third of the pixels draws at sqrt(1/3) of
+    // the height - spikes stay distinct, tails stay visible.
+    CHECK(minority > Histogram::kHeight / 2);
+    CHECK(minority < Histogram::kHeight * 3 / 4);
 }
 
 TEST_CASE("Histogram is invariant to sampling stride and region size") {
@@ -99,6 +115,29 @@ TEST_CASE("Histogram is invariant to sampling stride and region size") {
     strided.Accumulate(frame.View(), IntRect{0, 0, 64, 64});
 
     CHECK(reference.Image().rgba == strided.Image().rgba);
+}
+
+TEST_CASE("Histogram keeps sparse tones readable under a dominant one") {
+    // A broad tonal ramp two rows deep under a flat-sky tone sixty-four
+    // times as populated per bin. Linear heights would draw the ramp as a
+    // few pixels at the floor - the per-image-zoom complaint - while the
+    // square root keeps it plainly visible.
+    TestFrame frame(256, 10);
+    for (int value = 0; value < 240; ++value) {
+        const auto tone = static_cast<uint8_t>(value);
+        frame.FillColumns(value, value + 1, Color{tone, tone, tone});
+    }
+    for (int py = 2; py < 10; ++py)
+        for (int px = 0; px < 256; ++px) {
+            uint8_t* p = frame.pixels.data() + (static_cast<std::size_t>(py) * 256 + px) * 4;
+            p[0] = p[1] = p[2] = 200;
+        }
+
+    Histogram scope;
+    scope.Accumulate(frame.View(), IntRect{0, 0, 256, 10});
+
+    CHECK(BarHeight(scope.Image(), 200, 1) >= Histogram::kHeight - 20);
+    CHECK(BarHeight(scope.Image(), 120, 1) > Histogram::kHeight / 20);
 }
 
 TEST_CASE("Histogram produces an empty plot for an empty region") {

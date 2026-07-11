@@ -502,13 +502,11 @@ int main() {
     analysis.vectorscope.matrix = startup.matrix;
     analysis.waveform.gain = startup.waveform_gain;
     analysis.waveform.sampling_stride = startup.waveform_stride;
-    analysis.histogram.gain = startup.histogram_gain;
     analysis.histogram.sampling_stride = startup.histogram_stride;
     bool analysis_dirty = true;
 
     float vectorscope_intensity = IntensityFromTraceGain(analysis.vectorscope.gain);
     float waveform_intensity = IntensityFromTraceGain(analysis.waveform.gain);
-    float histogram_intensity = IntensityFromTraceGain(analysis.histogram.gain);
     float vectorscope_smoothing_ms = startup.vectorscope_smoothing_ms;
     float waveform_smoothing_ms = startup.waveform_smoothing_ms;
     // The scopes on screen, in activation order: the pane you turned on
@@ -562,7 +560,7 @@ int main() {
     ScopeTexture waveform_texture(device, Waveform::kColumns, Waveform::kLevels);
     ScopeTexture waveform_luma_texture(device, Waveform::kColumns, Waveform::kLevels);
     ScopeTexture waveform_parade_texture(device, Waveform::kColumns, Waveform::kLevels);
-    ScopeTexture histogram_texture(device, Histogram::kBins, Histogram::kHeight);
+    ScopeTexture histogram_texture(device, Histogram::kImageWidth, Histogram::kHeight);
 
     worker.Start();
     WarmFaceDetection();
@@ -621,7 +619,6 @@ int main() {
         preferences.vectorscope_smoothing_ms = vectorscope_smoothing_ms;
         preferences.waveform_smoothing_ms = waveform_smoothing_ms;
         preferences.matrix = analysis.vectorscope.matrix;
-        preferences.histogram_gain = analysis.histogram.gain;
         preferences.histogram_stride = analysis.histogram.sampling_stride;
         preferences.scope_stack.clear();
         for (const ScopeGlyph kind : scope_stack) preferences.scope_stack += ScopeLetter(kind);
@@ -941,8 +938,9 @@ int main() {
         };
 
         const auto draw_histogram = [&] {
+            // No intensity gesture here: the histogram's scale adjusts
+            // itself, the way every editor draws it.
             const DrawnScope scope = DrawScopeImage(histogram_texture, false);
-            scope_gestures(scope, histogram_intensity, analysis.histogram.gain, 1.0f);
             if (show_graticule) {
                 ImDrawList* draw = ImGui::GetWindowDrawList();
                 for (int quarter = 0; quarter <= 4; ++quarter) {

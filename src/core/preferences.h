@@ -15,7 +15,6 @@ struct Preferences {
     float waveform_gain = 0.05f;
     int vectorscope_stride = 1;
     int waveform_stride = 1;
-    float histogram_gain = 1.0f;
     int histogram_stride = 1;
     float vectorscope_smoothing_ms = 75.0f;
     float waveform_smoothing_ms = 100.0f;
