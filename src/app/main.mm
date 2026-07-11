@@ -82,6 +82,10 @@ struct ScopeTexture {
     }
 
     void Upload(const ScopeImage& image) {
+        // A scope just toggled on can race one worker pass: the fetched
+        // output predates the toggle and carries an empty image for it.
+        // Uploading that null buffer is a GPU-side crash; skip the frame.
+        if (image.rgba.size() < static_cast<std::size_t>(width_) * height_ * 4) return;
         [texture_ replaceRegion:MTLRegionMake2D(0, 0, width_, height_)
                     mipmapLevel:0
                       withBytes:image.rgba.data()

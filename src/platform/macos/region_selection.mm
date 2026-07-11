@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 
+#include "platform/face_detection.h"
 #include "platform/region_selection.h"
 
 // Which edges a border drag adjusts; Move relocates the whole region.
@@ -146,9 +147,55 @@ RegionOfInterest g_border_edit_region;
     NSRectFillUsingOperation(rect, NSCompositingOperationSourceOver);
 }
 
+// The mode instruction: a primary line and a bracketed-keys line on a
+// dark pill, placed where this application's own windows do not cover
+// it - they float above the overlay, and a message half-hidden behind
+// the scope window reads as a glitch.
+- (void)drawBanner:(NSString*)primary secondary:(NSString*)secondary preferCenter:(BOOL)center {
+    NSDictionary* primary_attributes = @{
+        NSForegroundColorAttributeName : [NSColor whiteColor],
+        NSFontAttributeName : [NSFont systemFontOfSize:22 weight:NSFontWeightSemibold],
+    };
+    NSDictionary* secondary_attributes = @{
+        NSForegroundColorAttributeName : [NSColor colorWithWhite:1 alpha:0.75],
+        NSFontAttributeName : [NSFont systemFontOfSize:14 weight:NSFontWeightRegular],
+    };
+    const NSSize primary_size = [primary sizeWithAttributes:primary_attributes];
+    const NSSize secondary_size = [secondary sizeWithAttributes:secondary_attributes];
+    const CGFloat width = std::max(primary_size.width, secondary_size.width) + 48;
+    const CGFloat height = primary_size.height + secondary_size.height + 30;
+    const CGFloat x = (self.bounds.size.width - width) / 2;
+    const CGFloat top_y = self.bounds.size.height - height - 80;
+    const CGFloat center_y = (self.bounds.size.height - height) / 2;
+    const CGFloat low_y = self.bounds.size.height * 0.22;
+    const CGFloat candidates[3] = {center ? center_y : top_y, center ? top_y : center_y, low_y};
+    NSRect banner = NSMakeRect(x, candidates[0], width, height);
+    for (const CGFloat candidate : candidates) {
+        const NSRect probe = NSMakeRect(x, candidate, width, height);
+        BOOL covered = NO;
+        for (const NSRect& exclusion : exclusions_) {
+            if (NSIntersectsRect(NSInsetRect(probe, -12, -12), exclusion)) {
+                covered = YES;
+                break;
+            }
+        }
+        if (!covered) {
+            banner = probe;
+            break;
+        }
+    }
+    [[NSColor colorWithWhite:0 alpha:0.55] setFill];
+    [[NSBezierPath bezierPathWithRoundedRect:banner xRadius:12 yRadius:12] fill];
+    [primary drawAtPoint:NSMakePoint(banner.origin.x + (width - primary_size.width) / 2,
+                                     NSMaxY(banner) - primary_size.height - 10)
+          withAttributes:primary_attributes];
+    [secondary drawAtPoint:NSMakePoint(banner.origin.x + (width - secondary_size.width) / 2,
+                                       banner.origin.y + 10)
+            withAttributes:secondary_attributes];
+}
+
 - (void)drawRect:(NSRect)dirty {
     (void)dirty;
-    NSString* hint = @"";
     if (!self.drawMode) {
         [[NSColor colorWithWhite:0 alpha:0.2] setFill];
         NSRectFillUsingOperation(self.bounds, NSCompositingOperationSourceOver);
@@ -163,29 +210,6 @@ RegionOfInterest g_border_edit_region;
                 NSBezierPath* outline = [NSBezierPath bezierPathWithRect:suggestions_[i].first];
                 outline.lineWidth = 1.5;
                 [outline stroke];
-            }
-            if (suggestions_.empty()) {
-                // The honest empty state, centered where it cannot be
-                // missed - the hint line at the top is easy to overlook.
-                NSString* message = @"No faces found on this screen";
-                NSDictionary* attributes = @{
-                    NSForegroundColorAttributeName : [NSColor whiteColor],
-                    NSFontAttributeName : [NSFont systemFontOfSize:22 weight:NSFontWeightSemibold],
-                };
-                const NSSize size = [message sizeWithAttributes:attributes];
-                [message drawAtPoint:NSMakePoint((self.bounds.size.width - size.width) / 2,
-                                                 self.bounds.size.height / 2 + 8)
-                      withAttributes:attributes];
-                NSString* secondary = @"A picks a window  -  D draws an area  -  Esc resets";
-                NSDictionary* secondary_attributes = @{
-                    NSForegroundColorAttributeName : [NSColor colorWithWhite:1 alpha:0.7],
-                    NSFontAttributeName : [NSFont systemFontOfSize:14 weight:NSFontWeightRegular],
-                };
-                const NSSize secondary_size = [secondary sizeWithAttributes:secondary_attributes];
-                [secondary
-                       drawAtPoint:NSMakePoint((self.bounds.size.width - secondary_size.width) / 2,
-                                               self.bounds.size.height / 2 - 20)
-                    withAttributes:secondary_attributes];
             }
         }
         if (self.hoveredSuggestion >= 0 &&
@@ -210,13 +234,16 @@ RegionOfInterest g_border_edit_region;
                 withAttributes:label_attributes];
         }
         if (self.facesMode) {
-            hint = suggestions_.empty()
-                       ? @"No faces found  -  A picks a window, D draws  -  Esc resets"
-                       : @"Click a face  -  A picks a window, D draws  -  Esc resets";
+            [self drawBanner:suggestions_.empty() ? @"No faces found on this screen"
+                                                  : @"Click a face"
+                   secondary:@"[A] pick a window    [D] draw    [Esc] full screen"
+                preferCenter:suggestions_.empty()];
         } else {
-            hint = faces_.empty()
-                       ? @"Click a window  -  D to draw instead  -  Esc resets to full screen"
-                       : @"Click a window  -  F picks a face, D draws  -  Esc resets";
+            [self drawBanner:@"Click a window"
+                   secondary:sidescopes::SupportsFaceDetection()
+                                 ? @"[F] pick a face    [D] draw    [Esc] full screen"
+                                 : @"[D] draw    [Esc] full screen"
+                preferCenter:NO];
         }
     } else {
         [[NSColor colorWithWhite:0 alpha:0.35] setFill];
@@ -229,20 +256,14 @@ RegionOfInterest g_border_edit_region;
             border.lineWidth = 1.5;
             [border stroke];
         }
-        hint = windows_.empty() ? @"Drag to select an area  -  Esc resets to full screen"
-                                : @"Drag to select an area  -  A picks a window  -  "
-                                  @"Esc resets to full screen";
-    }
-
-    if (!self.dragging) {
-        NSDictionary* attributes = @{
-            NSForegroundColorAttributeName : [NSColor whiteColor],
-            NSFontAttributeName : [NSFont systemFontOfSize:15 weight:NSFontWeightMedium],
-        };
-        const NSSize size = [hint sizeWithAttributes:attributes];
-        [hint drawAtPoint:NSMakePoint((self.bounds.size.width - size.width) / 2,
-                                      self.bounds.size.height - 60)
-            withAttributes:attributes];
+        if (!self.dragging) {
+            NSString* secondary = @"[Esc] full screen";
+            if (!windows_.empty() && sidescopes::SupportsFaceDetection())
+                secondary = @"[A] pick a window    [F] pick a face    [Esc] full screen";
+            else if (!windows_.empty())
+                secondary = @"[A] pick a window    [Esc] full screen";
+            [self drawBanner:@"Drag to select an area" secondary:secondary preferCenter:NO];
+        }
     }
 
     // Last, so nothing re-adds alpha over them: this application's own
