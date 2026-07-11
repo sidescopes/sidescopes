@@ -18,6 +18,9 @@ namespace {
 struct CorpusExpectation {
     IntRect rect;
     int tolerance = 8;
+    // Goals are known limitations being worked toward: tracked and
+    // reported, but not failing. Promote to expect when they hold.
+    bool required = true;
 };
 
 struct CorpusCase {
@@ -51,8 +54,9 @@ std::vector<CorpusCase> LoadCases(const std::filesystem::path& directory) {
                 IntRect rect;
                 if (tokens >> rect.x >> rect.y >> rect.width >> rect.height)
                     item.masks.push_back(rect);
-            } else if (keyword == "expect") {
+            } else if (keyword == "expect" || keyword == "goal") {
                 CorpusExpectation expectation;
+                expectation.required = keyword == "expect";
                 if (tokens >> expectation.rect.x >> expectation.rect.y >> expectation.rect.width >>
                     expectation.rect.height) {
                     tokens >> expectation.tolerance;
@@ -109,6 +113,8 @@ TEST_CASE("Detector finds every annotated rectangle in the corpus") {
 
     int met = 0;
     int total = 0;
+    int goals_met = 0;
+    int goals_total = 0;
     for (const CorpusCase& item : cases) {
         std::vector<uint8_t> bgra;
         int width = 0;
@@ -120,7 +126,7 @@ TEST_CASE("Detector finds every annotated rectangle in the corpus") {
             DetectPhotoRegions(frame, item.masks, item.pixels_per_point, /*max_candidates=*/16);
 
         for (const CorpusExpectation& expectation : item.expectations) {
-            ++total;
+            (expectation.required ? total : goals_total) += 1;
             bool found = false;
             for (const RegionCandidate& candidate : candidates) {
                 if (Matches(candidate, expectation)) {
@@ -135,11 +141,16 @@ TEST_CASE("Detector finds every annotated rectangle in the corpus") {
             INFO("expected " << expectation.rect.x << "," << expectation.rect.y << " "
                              << expectation.rect.width << "x" << expectation.rect.height << " +-"
                              << expectation.tolerance << "; candidates:" << got.str());
-            CHECK(found);
-            if (found) ++met;
+            if (expectation.required) {
+                CHECK(found);
+                if (found) ++met;
+            } else if (found) {
+                ++goals_met;
+            }
         }
     }
-    std::printf("corpus: %d/%d expectations met across %zu cases\n", met, total, cases.size());
+    std::printf("corpus: %d/%d expectations met, %d/%d goals met, %zu cases\n", met, total,
+                goals_met, goals_total, cases.size());
 }
 
 }  // namespace sidescopes
