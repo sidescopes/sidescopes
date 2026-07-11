@@ -446,9 +446,9 @@ int main() {
     };
 
     // Live region picking: while the overlay is up, the frame loop polls it
-    // and previews the indicated region on the scopes; Esc restores this.
+    // and previews the indicated region on the scopes; cancelling resets
+    // to the full screen.
     bool region_picking = false;
-    RegionOfInterest region_before_pick;
     std::vector<WindowRegion> pick_window_regions;
 
     // Projection-only engine instances kept in sync with the analysis
@@ -690,11 +690,20 @@ int main() {
                 want_region_pick = RegionPickerMode::PickDetected;
             if (ImGui::IsKeyPressed(ImGuiKey_D, false)) want_region_pick = RegionPickerMode::Draw;
             if (ImGui::IsKeyPressed(ImGuiKey_F, false)) {
+                CancelRegionPick();
                 analysis.region = RegionOfInterest{};
                 analysis_dirty = true;
             }
             if (ImGui::IsKeyPressed(ImGuiKey_G, false)) show_graticule = !show_graticule;
             if (ImGui::IsKeyPressed(ImGuiKey_P, false)) pin_cursor_color(vectorscope_color);
+            if (ImGui::IsKeyPressed(ImGuiKey_Escape, false)) {
+                // Esc resets all selection: a pending pick and the drawn
+                // region alike.
+                CancelRegionPick();
+                analysis.region = RegionOfInterest{};
+                analysis_dirty = true;
+                sync_region_border();
+            }
         }
 
         if (IconButton("##pick-region", RegionIcon::PickHand, "Pick a detected area (A)"))
@@ -705,6 +714,7 @@ int main() {
         ImGui::SameLine(0.0f, 2.0f);
         if (!is_full_region()) {
             if (IconButton("##full-region", RegionIcon::Expand, "Reset to full screen (F)")) {
+                CancelRegionPick();
                 analysis.region = RegionOfInterest{};
                 analysis_dirty = true;
             }
@@ -1061,7 +1071,12 @@ int main() {
 
         // The blocking overlay runs after the frame is submitted; capture and
         // analysis keep flowing underneath.
-        if (region_picking) want_region_pick.reset();
+        if (region_picking && want_region_pick) {
+            // The toolbar keeps working mid-pick: choosing a selection tool
+            // switches the active picker's mode instead of stacking one.
+            SetRegionPickMode(*want_region_pick);
+            want_region_pick.reset();
+        }
         if (want_region_pick && capture_display != 0) {
             HideRegionBorder();
             // The previous region's border must not leak into the analyzed
@@ -1201,10 +1216,21 @@ int main() {
             }
             if (BeginRegionPick(capture_display, suggestions, *want_region_pick)) {
                 region_picking = true;
-                region_before_pick = analysis.region;
                 pick_window_regions = window_regions;
             }
             last_activity = glfwGetTime();
+        }
+
+        // The region border is live: dragging its edges, corners, or move
+        // tab adjusts the region with the scopes following along.
+        if (!region_picking) {
+            const RegionBorderEdit edit = PollRegionBorderEdit();
+            if (edit.region) {
+                analysis.region = *edit.region;
+                analysis_dirty = true;
+                sync_region_border();
+                last_activity = glfwGetTime();
+            }
         }
 
         // While the picker is up, whatever the user indicates previews on
@@ -1258,7 +1284,8 @@ int main() {
                         }
                     }
                 } else {
-                    apply_region(region_before_pick);
+                    // Cancelled: reset all drawing, pending and confirmed.
+                    apply_region(RegionOfInterest{});
                 }
                 pick_window_regions.clear();
                 sync_region_border();

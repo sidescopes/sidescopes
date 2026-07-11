@@ -164,7 +164,7 @@ RegionOfInterest g_border_edit_region;
             [label drawAtPoint:NSMakePoint(hovered.first.origin.x + 6, NSMaxY(hovered.first) - 20)
                 withAttributes:label_attributes];
         }
-        hint = @"Click a detected area  -  D to draw instead  -  Esc to cancel";
+        hint = @"Click a detected area  -  D to draw instead  -  Esc resets to full screen";
     } else {
         [[NSColor colorWithWhite:0 alpha:0.35] setFill];
         NSRectFillUsingOperation(self.bounds, NSCompositingOperationSourceOver);
@@ -176,9 +176,9 @@ RegionOfInterest g_border_edit_region;
             border.lineWidth = 1.5;
             [border stroke];
         }
-        hint = suggestions_.empty()
-                   ? @"Drag to select an area  -  Esc to cancel"
-                   : @"Drag to select an area  -  A to pick a detected one  -  Esc to cancel";
+        hint = suggestions_.empty() ? @"Drag to select an area  -  Esc resets to full screen"
+                                    : @"Drag to select an area  -  A to pick a detected one  -  "
+                                      @"Esc resets to full screen";
     }
 
     if (!self.dragging) {
@@ -317,9 +317,10 @@ RegionOfInterest g_border_edit_region;
     (void)dirty;
     const NSRect region = [self regionRect];
 
-    // The grab ring: a whisper of alpha keeps it hit-testable; the
-    // interior stays truly transparent and therefore click-through.
-    [[NSColor colorWithWhite:0 alpha:0.05] setFill];
+    // The grab ring: a whisper of alpha keeps it hit-testable (safely
+    // above the window server's threshold); the interior stays truly
+    // transparent and therefore click-through.
+    [[NSColor colorWithWhite:0 alpha:0.08] setFill];
     NSRectFillUsingOperation(self.bounds, NSCompositingOperationCopy);
     [[NSColor clearColor] setFill];
     NSRectFillUsingOperation(region, NSCompositingOperationCopy);
@@ -443,6 +444,13 @@ RegionOfInterest g_border_edit_region;
     sidescopes::g_border_editing = false;
 }
 
+// The scoped editor is usually the active application; without this, the
+// first grab of the border is swallowed as an activation gesture.
+- (BOOL)acceptsFirstMouse:(NSEvent*)event {
+    (void)event;
+    return YES;
+}
+
 @end
 
 namespace sidescopes {
@@ -554,6 +562,11 @@ void CancelRegionPick() {
     if (!g_picker_view) return;
     g_picker_view.picked = NO;
     g_picker_view.finished = YES;
+}
+
+void SetRegionPickMode(RegionPickerMode mode) {
+    if (!g_picker_view) return;
+    [g_picker_view switchToDrawMode:(mode == RegionPickerMode::Draw)];
 }
 
 void ShowRegionBorder(uint32_t display_id, const RegionOfInterest& region) {

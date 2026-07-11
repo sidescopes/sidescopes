@@ -45,6 +45,9 @@ RegionPickPoll PollRegionPick();
 // Cancels an active pick as if ESC had been pressed on the overlay.
 void CancelRegionPick();
 
+// Switches an active pick between its modes; no-op when none is active.
+void SetRegionPickMode(RegionPickerMode mode);
+
 // Persistent border around the monitored region so users can see what the
 // scopes are reading. Drawn OUTSIDE the region so the border itself never
 // enters the scoped pixels, and its interior stays click-through - the
