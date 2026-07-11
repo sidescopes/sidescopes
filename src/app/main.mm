@@ -22,6 +22,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -252,7 +253,7 @@ bool ScopeToggleButton(const char* id, const char* letter, bool enabled, const c
 // screen.
 enum class RegionIcon { PickHand, Crosshair, Face, Expand };
 
-bool IconButton(const char* id, RegionIcon icon, const char* tooltip) {
+bool IconButton(const char* id, RegionIcon icon, const char* tooltip, bool dimmed = false) {
     const float height = ImGui::GetTextLineHeight() + 4.0f;
     const bool pressed = ImGui::InvisibleButton(id, ImVec2(height + 8.0f, height));
     ImDrawList* draw = ImGui::GetWindowDrawList();
@@ -265,7 +266,7 @@ bool IconButton(const char* id, RegionIcon icon, const char* tooltip) {
     const float half = 7.0f;
     const ImVec2 a(center.x - half, center.y - half + 1.0f);
     const ImVec2 b(center.x + half, center.y + half - 1.0f);
-    const ImU32 color = ImGui::GetColorU32(ImGuiCol_Text);
+    const ImU32 color = ImGui::GetColorU32(ImGuiCol_Text, dimmed ? 0.4f : 1.0f);
     const float stroke = 1.5f;
     if (icon == RegionIcon::PickHand) {
         // A simplified pointing hand: index finger up, palm with knuckle
@@ -305,7 +306,7 @@ bool IconButton(const char* id, RegionIcon icon, const char* tooltip) {
         ImVec2 smile[5];
         for (int i = 0; i < 5; ++i) {
             const float angle = (0.30f + 0.10f * i) * 3.14159265f;
-            smile[i] = ImVec2(center.x + 4.2f * std::cos(angle), center.y + 4.2f * std::sin(angle));
+            smile[i] = ImVec2(center.x + 3.3f * std::cos(angle), center.y + 3.3f * std::sin(angle));
         }
         draw->AddPolyline(smile, 5, color, ImDrawFlags_None, 1.4f);
     } else {
@@ -320,6 +321,44 @@ bool IconButton(const char* id, RegionIcon icon, const char* tooltip) {
     }
     ImGui::SetItemTooltip("%s", tooltip);
     return pressed;
+}
+
+// How many faces the platform detector saw on the captured screen at the
+// last check: -1 before any check. Refreshed in the background when the
+// application gains focus, so the face button can present itself honestly
+// - dimmed when there is currently nothing to pick. The state can go
+// stale while the user works elsewhere, so the button only dims, never
+// disables: pressing F always detects freshly.
+std::atomic<int> g_faces_on_screen{-1};
+std::atomic<bool> g_face_check_requested{false};
+std::atomic<bool> g_face_check_running{false};
+
+void RefreshFacePresence(AnalysisWorker& worker, uint32_t capture_display) {
+    if (!SupportsFaceDetection()) return;
+    if (g_face_check_running.exchange(true)) return;
+    // Detection takes long enough to hitch a frame, so it runs on a copy
+    // of the latest frame in a background thread.
+    auto pixels = std::make_shared<std::vector<uint8_t>>();
+    int width = 0;
+    int height = 0;
+    worker.WithLatestFrame([&](const FrameView& view) {
+        width = view.width;
+        height = view.height;
+        pixels->resize(static_cast<std::size_t>(view.height) * view.stride_bytes);
+        std::memcpy(pixels->data(), view.bgra, pixels->size());
+    });
+    if (width == 0 || height == 0) {
+        g_face_check_running.store(false);
+        return;
+    }
+    float pixels_per_point = 1.0f;
+    if (const auto geometry = GeometryOfDisplay(capture_display))
+        pixels_per_point = static_cast<float>(width / geometry->width_points);
+    std::thread([pixels, width, height, pixels_per_point] {
+        const FrameView view{pixels->data(), width * 4, width, height, ColorSpaceHint::Srgb, 0};
+        g_faces_on_screen.store(static_cast<int>(DetectFaces(view, pixels_per_point).size()));
+        g_face_check_running.store(false);
+    }).detach();
 }
 
 void ApplyTheme() {
@@ -385,6 +424,9 @@ int main() {
         return 1;
     }
     if (startup.window_x >= 0) glfwSetWindowPos(window, startup.window_x, startup.window_y);
+    glfwSetWindowFocusCallback(window, [](GLFWwindow*, int focused) {
+        if (focused) g_face_check_requested.store(true);
+    });
 
     id<MTLDevice> device = MTLCreateSystemDefaultDevice();
     id<MTLCommandQueue> command_queue = [device newCommandQueue];
@@ -597,6 +639,8 @@ int main() {
 
         // Capture is a service that dies (lock screen, display sleep);
         // restarting it is our job.
+        if (g_face_check_requested.exchange(false)) RefreshFacePresence(worker, capture_display);
+
         if (capture_stale.exchange(false)) {
             std::fprintf(stderr, "sidescopes: restarting capture after wake or unlock\n");
             capture_dead.store(true);
@@ -784,7 +828,11 @@ int main() {
             want_region_pick = RegionPickerMode::Draw;
         ImGui::SameLine(0.0f, 2.0f);
         if (SupportsFaceDetection()) {
-            if (IconButton("##pick-face", RegionIcon::Face, "Pick a face (F)"))
+            const bool none_found = g_faces_on_screen.load() == 0;
+            if (IconButton(
+                    "##pick-face", RegionIcon::Face,
+                    none_found ? "Pick a face (F) - none on screen right now" : "Pick a face (F)",
+                    none_found))
                 want_region_pick = RegionPickerMode::PickFaces;
             ImGui::SameLine(0.0f, 2.0f);
         }
@@ -1251,6 +1299,7 @@ int main() {
                         geometry ? static_cast<float>(view.width / geometry->width_points) : 1.0f;
                     face_suggestions = BuildFaceSuggestions(DetectFaces(view, pixels_per_point),
                                                             view.width, view.height);
+                    g_faces_on_screen.store(static_cast<int>(face_suggestions.size()));
                 });
             }
             const auto suggestions = BuildRegionSuggestions(window_regions);

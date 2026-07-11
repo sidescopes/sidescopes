@@ -152,6 +152,42 @@ RegionOfInterest g_border_edit_region;
     if (!self.drawMode) {
         [[NSColor colorWithWhite:0 alpha:0.2] setFill];
         NSRectFillUsingOperation(self.bounds, NSCompositingOperationSourceOver);
+        if (self.facesMode) {
+            // Faces are few and easy to miss: every found face is outlined
+            // up front, so the answer is visible before any hovering. The
+            // hovered one still gets the full accent treatment below.
+            [[NSColor colorWithWhite:1 alpha:0.85] setStroke];
+            for (NSInteger i = 0; i < static_cast<NSInteger>(suggestions_.size()); ++i) {
+                if (i == self.hoveredSuggestion) continue;
+                [self punchRect:suggestions_[i].first];
+                NSBezierPath* outline = [NSBezierPath bezierPathWithRect:suggestions_[i].first];
+                outline.lineWidth = 1.5;
+                [outline stroke];
+            }
+            if (suggestions_.empty()) {
+                // The honest empty state, centered where it cannot be
+                // missed - the hint line at the top is easy to overlook.
+                NSString* message = @"No faces found on this screen";
+                NSDictionary* attributes = @{
+                    NSForegroundColorAttributeName : [NSColor whiteColor],
+                    NSFontAttributeName : [NSFont systemFontOfSize:22 weight:NSFontWeightSemibold],
+                };
+                const NSSize size = [message sizeWithAttributes:attributes];
+                [message drawAtPoint:NSMakePoint((self.bounds.size.width - size.width) / 2,
+                                                 self.bounds.size.height / 2 + 8)
+                      withAttributes:attributes];
+                NSString* secondary = @"A picks a window  -  D draws an area  -  Esc resets";
+                NSDictionary* secondary_attributes = @{
+                    NSForegroundColorAttributeName : [NSColor colorWithWhite:1 alpha:0.7],
+                    NSFontAttributeName : [NSFont systemFontOfSize:14 weight:NSFontWeightRegular],
+                };
+                const NSSize secondary_size = [secondary sizeWithAttributes:secondary_attributes];
+                [secondary
+                       drawAtPoint:NSMakePoint((self.bounds.size.width - secondary_size.width) / 2,
+                                               self.bounds.size.height / 2 - 20)
+                    withAttributes:secondary_attributes];
+            }
+        }
         if (self.hoveredSuggestion >= 0 &&
             self.hoveredSuggestion < static_cast<NSInteger>(suggestions_.size())) {
             // Only the rectangle under the cursor is shown, washed with the
