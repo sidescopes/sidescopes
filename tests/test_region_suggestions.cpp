@@ -5,60 +5,32 @@
 
 namespace sidescopes {
 
-TEST_CASE("Suggestions convert detector candidates to percent") {
-    std::vector<RegionCandidate> candidates{{IntRect{100, 50, 300, 200}, 0.9f}};
+TEST_CASE("Suggestions list windows frontmost first") {
+    std::vector<WindowRegion> windows{
+        {RegionOfInterest{5.0, 5.0, 60.0, 90.0}, "Lightroom"},
+        {RegionOfInterest{40.0, 10.0, 95.0, 80.0}, "Preview"},
+    };
 
-    const auto suggestions = BuildRegionSuggestions(candidates, 1000, 500, {});
-    REQUIRE(suggestions.size() == 1);
-    CHECK(suggestions[0].label == "Area");
-    CHECK(suggestions[0].region.left_percent == 10.0);
-    CHECK(suggestions[0].region.top_percent == 10.0);
-    CHECK(suggestions[0].region.right_percent == 40.0);
-    CHECK(suggestions[0].region.bottom_percent == 50.0);
-}
-
-TEST_CASE("Suggestions drop low-confidence candidates") {
-    std::vector<RegionCandidate> candidates{{IntRect{0, 0, 100, 100}, 0.2f}};
-    CHECK(BuildRegionSuggestions(candidates, 1000, 500, {}).empty());
-}
-
-TEST_CASE("Suggestions list photos before windows") {
-    std::vector<RegionCandidate> candidates{{IntRect{100, 50, 300, 200}, 0.9f}};
-    std::vector<WindowRegion> windows{{RegionOfInterest{5.0, 5.0, 60.0, 90.0}, "Lightroom"}};
-
-    const auto suggestions = BuildRegionSuggestions(candidates, 1000, 500, windows);
+    const auto suggestions = BuildRegionSuggestions(windows);
     REQUIRE(suggestions.size() == 2);
-    CHECK(suggestions[0].label == "Area");
-    CHECK(suggestions[1].label == "Lightroom");
+    CHECK(suggestions[0].label == "Lightroom");
+    CHECK(suggestions[1].label == "Preview");
+    CHECK(suggestions[0].region.left_percent == 5.0);
 }
 
-TEST_CASE("Suggestions deduplicate a canvas that fills its window") {
-    // Detector found 10..40 x 10..50 percent; the window is within the
-    // duplicate tolerance of the same rectangle.
-    std::vector<RegionCandidate> candidates{{IntRect{100, 50, 300, 200}, 0.9f}};
-    std::vector<WindowRegion> windows{{RegionOfInterest{10.5, 9.0, 40.9, 50.4}, "Preview"}};
+TEST_CASE("Suggestions deduplicate practically identical windows") {
+    std::vector<WindowRegion> windows{
+        {RegionOfInterest{5.0, 5.0, 60.0, 90.0}, "Lightroom"},
+        {RegionOfInterest{5.5, 4.6, 60.9, 89.2}, "Lightroom helper"},
+    };
 
-    const auto suggestions = BuildRegionSuggestions(candidates, 1000, 500, windows);
+    const auto suggestions = BuildRegionSuggestions(windows);
     REQUIRE(suggestions.size() == 1);
-    CHECK(suggestions[0].label == "Area");
+    CHECK(suggestions[0].label == "Lightroom");
 }
 
-TEST_CASE("Suggestions place faces before areas") {
-    std::vector<RegionCandidate> candidates{{IntRect{100, 50, 300, 200}, 0.9f}};
-    std::vector<WindowRegion> windows{{RegionOfInterest{5.0, 5.0, 60.0, 90.0}, "Lightroom"}};
-    std::vector<IntRect> faces{{150, 80, 120, 120}};
-
-    const auto suggestions = BuildRegionSuggestions(candidates, 1000, 500, windows, faces);
-    REQUIRE(suggestions.size() == 3);
-    CHECK(suggestions[0].label == "Face");
-    CHECK(suggestions[0].region.left_percent == 15.0);
-    CHECK(suggestions[1].label == "Area");
-    CHECK(suggestions[2].label == "Lightroom");
-}
-
-TEST_CASE("Suggestions survive a missing frame") {
-    std::vector<RegionCandidate> candidates{{IntRect{0, 0, 100, 100}, 0.9f}};
-    CHECK(BuildRegionSuggestions(candidates, 0, 0, {}).empty());
+TEST_CASE("Suggestions survive an empty desktop") {
+    CHECK(BuildRegionSuggestions({}).empty());
 }
 
 }  // namespace sidescopes

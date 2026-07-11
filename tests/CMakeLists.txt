@@ -15,19 +15,14 @@ add_executable(sidescopes_tests
     test_trace_intensity.cpp
     test_marker_smoother.cpp
     test_analysis_worker.cpp
-    test_content_fence.cpp
-    test_corpus.cpp
     test_graticule.cpp
     test_histogram.cpp
-    test_photo_region_detector.cpp
     test_preferences.cpp
     test_region_suggestions.cpp
     test_vectorscope.cpp
     test_waveform.cpp
 )
 target_link_libraries(sidescopes_tests PRIVATE sidescopes_core Catch2::Catch2WithMain)
-target_compile_definitions(sidescopes_tests
-    PRIVATE SIDESCOPES_CORPUS_DIR="${CMAKE_SOURCE_DIR}/corpus")
 sidescopes_target_defaults(sidescopes_tests)
 
 list(APPEND CMAKE_MODULE_PATH ${catch2_SOURCE_DIR}/extras)

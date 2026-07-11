@@ -28,16 +28,13 @@
 #include <thread>
 
 #include "core/analysis_worker.h"
-#include "core/content_fence.h"
 #include "core/frame_mailbox.h"
 #include "core/marker_smoother.h"
-#include "core/photo_region_detector.h"
 #include "core/preferences.h"
 #include "core/region_suggestions.h"
 #include "core/scopes/graticule.h"
 #include "core/trace_intensity.h"
 #include "platform/desktop.h"
-#include "platform/face_detection.h"
 #include "platform/native_menu.h"
 #include "platform/region_selection.h"
 #include "platform/screen_capture.h"
@@ -249,7 +246,7 @@ bool ScopeToggleButton(const char* id, const char* letter, bool enabled, const c
 }
 
 // Region tool icons mirror the cursors of their modes: a pointing hand
-// for picking a detected area (the pick-mode hover cursor), a crosshair
+// for picking a window (the pick-mode hover cursor), a crosshair
 // for drawing one (the draw-mode cursor), expanding arrows for full
 // screen.
 enum class RegionIcon { PickHand, Crosshair, Expand };
@@ -771,7 +768,7 @@ int main() {
             }
         }
 
-        if (IconButton("##pick-region", RegionIcon::PickHand, "Pick a detected area (A)"))
+        if (IconButton("##pick-region", RegionIcon::PickHand, "Pick a window (A)"))
             want_region_pick = RegionPickerMode::PickDetected;
         ImGui::SameLine(0.0f, 2.0f);
         if (IconButton("##draw-region", RegionIcon::Crosshair, "Draw an area (D)"))
@@ -1157,15 +1154,10 @@ int main() {
                     std::this_thread::sleep_for(std::chrono::milliseconds(15));
                 }
             }
-            // The offer: photo canvases detected INSIDE the visible windows,
-            // then the windows themselves. Whole-desktop detection is
-            // meaningless - a desktop full of windows is content everywhere -
-            // so each window is analyzed against its own chrome.
-            std::vector<RegionCandidate> photo_candidates;
-            int detect_width = 0;
-            int detect_height = 0;
+            // The offer: the visible application windows, frontmost first.
+            // Window rectangles come from the operating system and are
+            // exact - the picker offers nothing it could be wrong about.
             std::vector<WindowRegion> window_regions;
-            std::vector<IntRect> face_rects;
             if (const auto geometry = GeometryOfDisplay(capture_display)) {
                 // Frontmost windows only, skipping ones mostly hidden behind
                 // fronter windows: the user is not scoping what they cannot
@@ -1216,136 +1208,6 @@ int main() {
                     if (!mostly_covered) visible_windows.push_back(window);
                 }
 
-                // Application adapters, as data: applications whose canvas
-                // palette is fixed get their tones hinted to the detector.
-                // Lightroom's background options as measured in the corpus
-                // screenshots: black, the develop module's dark gray, the
-                // medium gray, and white.
-                DetectionHints detection_hints;
-                for (const DesktopWindow& window : on_screen) {
-                    if (window.application.find("Lightroom") == std::string::npos) continue;
-                    detection_hints.canvas_colors = {Color{0, 0, 0}, Color{51, 51, 51},
-                                                     Color{144, 144, 144}, Color{255, 255, 255}};
-                    break;
-                }
-
-                worker.WithLatestFrame([&](const FrameView& view) {
-                    detect_width = view.width;
-                    detect_height = view.height;
-                    // Our own window floats over the desktop being analyzed;
-                    // masked, so borders survive beneath it and scope traces
-                    // spawn no candidates.
-                    const auto pixels_per_point =
-                        static_cast<float>(view.width / geometry->width_points);
-                    const double scale_x = view.width / geometry->width_points;
-                    const double scale_y = view.height / geometry->height_points;
-                    std::vector<IntRect> chrome_rects;
-                    for (const DesktopWindow& chrome : auxiliary_windows) {
-                        IntRect rect;
-                        rect.x = static_cast<int>((chrome.x - geometry->origin_x) * scale_x);
-                        rect.y = static_cast<int>((chrome.y - geometry->origin_y) * scale_y);
-                        rect.width = static_cast<int>(chrome.width * scale_x);
-                        rect.height = static_cast<int>(chrome.height * scale_y);
-                        chrome_rects.push_back(rect);
-                    }
-                    // The fence: chrome bounds the analysis, floating
-                    // overlays become occluders (core/content_fence.h).
-                    const DesktopWindow* main_window = nullptr;
-                    for (const DesktopWindow& window : visible_windows) {
-                        if (!main_window ||
-                            window.width * window.height > main_window->width * main_window->height)
-                            main_window = &window;
-                    }
-                    IntRect window_rect{};
-                    if (main_window) {
-                        window_rect.x =
-                            static_cast<int>((main_window->x - geometry->origin_x) * scale_x);
-                        window_rect.y =
-                            static_cast<int>((main_window->y - geometry->origin_y) * scale_y);
-                        window_rect.width = static_cast<int>(main_window->width * scale_x);
-                        window_rect.height = static_cast<int>(main_window->height * scale_y);
-                    }
-                    const ContentFence fence =
-                        FenceContent(IntRect{0, 0, view.width, view.height}, window_rect,
-                                     chrome_rects, static_cast<int>(32 * pixels_per_point));
-                    const IntRect content = fence.content;
-
-                    // Detection runs on a half-resolution copy of the
-                    // content area: exactly the corpus resolution, so live
-                    // behavior matches what CI verifies, at a quarter of
-                    // the pixels. Below Retina density the frame is used
-                    // as captured.
-                    const bool subsample = pixels_per_point >= 1.9f;
-                    const int step = subsample ? 2 : 1;
-                    const int detect_w = content.width / step;
-                    const int detect_h = content.height / step;
-                    std::vector<uint8_t> reduced;
-                    FrameView detect_view = view;
-                    if (subsample) {
-                        reduced.resize(static_cast<std::size_t>(detect_w) * detect_h * 4);
-                        for (int y = 0; y < detect_h; ++y) {
-                            const uint8_t* row0 =
-                                view.bgra +
-                                static_cast<std::size_t>(content.y + y * 2) * view.stride_bytes +
-                                static_cast<std::size_t>(content.x) * 4;
-                            const uint8_t* row1 = row0 + view.stride_bytes;
-                            uint8_t* out =
-                                reduced.data() + static_cast<std::size_t>(y) * detect_w * 4;
-                            for (int x = 0; x < detect_w; ++x) {
-                                for (int c = 0; c < 4; ++c) {
-                                    const int sum = row0[x * 8 + c] + row0[x * 8 + 4 + c] +
-                                                    row1[x * 8 + c] + row1[x * 8 + 4 + c];
-                                    out[x * 4 + c] = static_cast<uint8_t>(sum / 4);
-                                }
-                            }
-                        }
-                        detect_view = FrameView{reduced.data(), detect_w * 4,     detect_w,
-                                                detect_h,       view.color_space, view.sequence};
-                    } else {
-                        detect_view = FrameView{
-                            view.bgra + static_cast<std::size_t>(content.y) * view.stride_bytes +
-                                static_cast<std::size_t>(content.x) * 4,
-                            view.stride_bytes,
-                            content.width,
-                            content.height,
-                            view.color_space,
-                            view.sequence};
-                    }
-
-                    // Masks move into fence-relative reduced coordinates:
-                    // our own window, plus the fence's floating occluders
-                    // (already fence-relative).
-                    std::vector<IntRect> masks;
-                    {
-                        const IntRect& own = analysis.masked_window;
-                        const int x0 = std::max(own.x, content.x);
-                        const int y0 = std::max(own.y, content.y);
-                        const int x1 = std::min(own.x + own.width, content.x + content.width);
-                        const int y1 = std::min(own.y + own.height, content.y + content.height);
-                        if (x1 > x0 && y1 > y0)
-                            masks.push_back(IntRect{(x0 - content.x) / step,
-                                                    (y0 - content.y) / step, (x1 - x0) / step,
-                                                    (y1 - y0) / step});
-                    }
-                    for (const IntRect& occluder : fence.occluders)
-                        masks.push_back(IntRect{occluder.x / step, occluder.y / step,
-                                                occluder.width / step, occluder.height / step});
-
-                    photo_candidates =
-                        DetectPhotoRegions(detect_view, masks, pixels_per_point / step,
-                                           /*max_candidates=*/24, detection_hints);
-                    for (RegionCandidate& candidate : photo_candidates) {
-                        candidate.rect.x = candidate.rect.x * step + content.x;
-                        candidate.rect.y = candidate.rect.y * step + content.y;
-                        candidate.rect.width *= step;
-                        candidate.rect.height *= step;
-                    }
-                    // Vision loads its face model synchronously on first
-                    // use - seconds of beachball on the picker's opening.
-                    // Face suggestions are deferred work (owner decision);
-                    // the seam stays for when they return asynchronously.
-                });
-
                 for (const DesktopWindow& window : visible_windows) {
                     WindowRegion region;
                     region.region.left_percent =
@@ -1366,21 +1228,12 @@ int main() {
                     window_regions.push_back(std::move(region));
                 }
             }
-            const auto suggestions = BuildRegionSuggestions(
-                photo_candidates, detect_width, detect_height, window_regions, face_rects);
+            const auto suggestions = BuildRegionSuggestions(window_regions);
             // Field diagnosis: dump exactly what the pipeline saw. Enable
             // with `launchctl setenv SIDESCOPES_DEBUG_SUGGESTIONS 1`.
             if (std::getenv("SIDESCOPES_DEBUG_SUGGESTIONS")) {
                 std::FILE* report = std::fopen("/tmp/sidescopes-suggestions.txt", "w");
                 if (report) {
-                    std::fprintf(report, "frame %dx%d\n", detect_width, detect_height);
-                    std::fprintf(report, "mask rect=%d,%d %dx%d\n", analysis.masked_window.x,
-                                 analysis.masked_window.y, analysis.masked_window.width,
-                                 analysis.masked_window.height);
-                    for (const auto& candidate : photo_candidates)
-                        std::fprintf(report, "photo rect=%d,%d %dx%d confidence=%.2f\n",
-                                     candidate.rect.x, candidate.rect.y, candidate.rect.width,
-                                     candidate.rect.height, candidate.confidence);
                     for (const auto& window : window_regions)
                         std::fprintf(report, "window '%s' %.1f,%.1f..%.1f,%.1f%%\n",
                                      window.application.c_str(), window.region.left_percent,

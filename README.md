@@ -31,7 +31,7 @@ screen itself, so it works with every editor and needs no plugins.
 | --- | ------ |
 | V / W / H | show the vectorscope / waveform / histogram alone |
 | Shift+V / W / H | stack or unstack a scope |
-| A | pick a detected area |
+| A | pick a window |
 | D | draw an area |
 | F | scope the full screen |
 | P | pin the color under the cursor |

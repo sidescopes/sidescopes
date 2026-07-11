@@ -26,9 +26,9 @@ struct RegionPickPoll {
 };
 
 // Screenshot-style selection over the captured display. Pick mode
-// highlights the detected rectangle (photo canvases and windows) under the
-// cursor with the system accent for one-click confirmation, the way the
-// macOS screenshot interface selects windows; draw mode dims the screen
+// highlights the application window under the cursor with the system
+// accent for one-click confirmation, the way the macOS screenshot
+// interface selects windows; draw mode dims the screen
 // for dragging a fresh area by hand - adjusting an existing region happens
 // on the region border itself, not in here. ESC cancels. This
 // application's own windows stay undimmed and clickable through the

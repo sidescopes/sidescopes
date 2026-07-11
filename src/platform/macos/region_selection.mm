@@ -161,7 +161,7 @@ RegionOfInterest g_border_edit_region;
             [label drawAtPoint:NSMakePoint(hovered.first.origin.x + 6, NSMaxY(hovered.first) - 20)
                 withAttributes:label_attributes];
         }
-        hint = @"Click a detected area  -  D to draw instead  -  Esc resets to full screen";
+        hint = @"Click a window  -  D to draw instead  -  Esc resets to full screen";
     } else {
         [[NSColor colorWithWhite:0 alpha:0.35] setFill];
         NSRectFillUsingOperation(self.bounds, NSCompositingOperationSourceOver);

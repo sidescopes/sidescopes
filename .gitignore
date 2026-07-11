@@ -14,3 +14,4 @@ imgui.ini
 
 # Python tooling
 __pycache__/
+corpus/
