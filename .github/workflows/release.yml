@@ -1,0 +1,73 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Configure
+        run: cmake -B build -DSIDESCOPES_WERROR=ON -DSIDESCOPES_CODESIGN_IDENTITY=-
+
+      - name: Build
+        run: cmake --build build --config Release
+
+      - name: Test
+        run: ctest --test-dir build -C Release --output-on-failure
+
+      # With a Developer ID certificate in the secrets, the bundle is
+      # signed with the hardened runtime, notarized, and stapled. Without
+      # one, the ad-hoc build ships as-is and Gatekeeper asks users to
+      # right-click and open; see docs/RELEASING.md.
+      - name: Sign with Developer ID
+        if: ${{ secrets.MACOS_CERTIFICATE_P12 != '' }}
+        env:
+          CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE_P12 }}
+          CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          IDENTITY: ${{ secrets.MACOS_SIGNING_IDENTITY }}
+        run: |
+          echo "$CERTIFICATE" | base64 --decode > certificate.p12
+          security create-keychain -p ci build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p ci build.keychain
+          security import certificate.p12 -k build.keychain \
+            -P "$CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k ci build.keychain
+          codesign --force --options runtime --timestamp \
+            --sign "$IDENTITY" build/SideScopes.app
+          rm certificate.p12
+
+      - name: Notarize
+        if: ${{ secrets.APPLE_NOTARIZATION_ID != '' }}
+        env:
+          APPLE_ID: ${{ secrets.APPLE_NOTARIZATION_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_NOTARIZATION_PASSWORD }}
+          APPLE_TEAM: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          ditto -c -k --keepParent build/SideScopes.app notarize.zip
+          xcrun notarytool submit notarize.zip --wait \
+            --apple-id "$APPLE_ID" --password "$APPLE_PASSWORD" --team-id "$APPLE_TEAM"
+          xcrun stapler staple build/SideScopes.app
+
+      - name: Package
+        run: |
+          ditto -c -k --keepParent build/SideScopes.app SideScopes-${GITHUB_REF_NAME}-macos.zip
+          shasum -a 256 SideScopes-${GITHUB_REF_NAME}-macos.zip > \
+            SideScopes-${GITHUB_REF_NAME}-macos.zip.sha256
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            SideScopes-${GITHUB_REF_NAME}-macos.zip \
+            SideScopes-${GITHUB_REF_NAME}-macos.zip.sha256 \
+            --title "SideScopes $GITHUB_REF_NAME" \
+            --generate-notes

@@ -14,11 +14,28 @@ screen itself, so it works with every editor and needs no plugins.
 ## Features
 
 - Vectorscope (BT.601/BT.709) with classic graticule and skin-tone line
-- Waveform with luma, RGB overlay, and combined modes
-- Drag-to-select the scoped screen region, with a persistent border marker
-- Live marker showing the color under your cursor on every scope
+- Waveform with luma, RGB overlay, combined, and RGB parade modes
+- Histogram with per-channel bars
+- Smart region selection: click a detected photo, face, or window, or draw
+  the area yourself — the screenshot-tool idiom you already know
+- Per-application memory: the region you scoped in an editor is offered
+  again when you come back to it
+- Live marker showing the color under your cursor on every scope, with
+  pinnable reference colors for matching skin tones across photos
 - Compact, always-on-top window designed for small laptop screens
 - Native context menus and direct manipulation; scroll to adjust trace intensity
+
+## Keyboard
+
+| Key | Action |
+| --- | ------ |
+| V / W / H | show the vectorscope / waveform / histogram alone |
+| Shift+V / W / H | stack or unstack a scope |
+| A | pick a detected area |
+| D | draw an area |
+| F | scope the full screen |
+| P | pin the color under the cursor |
+| G | toggle the graticule |
 
 ## Status
 

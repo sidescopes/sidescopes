@@ -8,31 +8,38 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
-- Photo detection recognizes chrome by color, not just flatness: smooth
-  photo regions (skies, defocused backgrounds flattened by fit-to-window
-  scaling) stay part of their photo, and invisible system windows no
-  longer appear as suggestions.
-
-- Smart region selection: the picker outlines detected photo canvases and
-  application windows; hover highlights one, a click confirms it, dragging
-  still selects manually.
-- Photo canvas detection: heuristic candidates for the image area inside
-  editor chrome, powering region suggestions.
-
+- Screenshot-style region selection: toolbar icons (and keys) open the
+  picker to click a detected rectangle (A), draw an area over the dimmed
+  screen (D), or reset to the full screen (F). Drawing shows the current
+  region with handles for moving and resizing; picking highlights the
+  rectangle under the cursor with the system accent.
+- Rectangle detection that finds photographs displayed by any application:
+  boundary-based, so it works for black-and-white and smooth images, sees
+  low-contrast borders through antialiasing, survives occlusion by the
+  scope window itself, and offers both a window and the photo inside it.
+- Detected faces as picker suggestions, padded so the surrounding skin
+  joins the sample. Detection runs locally via the platform's built-in
+  detector.
+- Per-application region memory: the confirmed region is remembered for
+  the application it belongs to and leads the picker's suggestions when
+  that application is back on screen.
+- Pinned reference colors on the vectorscope (P or the context menu), for
+  matching skin tones across photos; the context menu clears them.
+- Scope toggles that stack: V, W and H show one scope alone, Shift stacks
+  and unstacks it, and enabled scopes split the window.
 - RGB parade waveform style: the three channels side by side.
 - Histogram view with per-channel bars and cursor value markers.
-- Keyboard shortcuts: V/W/B/H switch views, A selects the area, F resets
-  it, G toggles the graticule.
+- An application icon, generated from source.
 
 - The SideScopes macOS application: compact always-on-top window with
-  vectorscope, waveform, and combined views, scroll-to-adjust intensity,
-  native context menu, drag region selection, cursor color markers, and
-  automatic capture recovery.
+  vectorscope, waveform, and histogram, scroll-to-adjust intensity,
+  native context menu, cursor color markers, and automatic capture
+  recovery.
 - macOS platform layer: ScreenCaptureKit capture, native context menus,
-  drag region selection with a persistent click-through border, and desktop
+  the region picker with a persistent click-through border, and desktop
   services.
-- Preferences persisted between sessions: calibration, region, view,
-  toggles, and window placement.
+- Preferences persisted between sessions: calibration, region, visible
+  scopes, toggles, and window placement.
 - Graticule geometry built from the engines' own projections: vectorscope
   rings, color targets and skin-tone line, and the waveform scale.
 - Analysis worker: scope engines on a dedicated thread with change
@@ -43,3 +50,8 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   smoothing and a snap window.
 - Region change hash that skips re-analysis of unchanged content and masks
   the application's own window out of change detection.
+
+### Fixed
+
+- The region border always stays beneath the scope window, and never
+  leaks into the frame the picker analyzes when re-selecting a region.
