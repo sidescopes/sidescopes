@@ -417,9 +417,12 @@ RegionOfInterest g_border_edit_region;
     edge.lineWidth = 1.4;
     [edge stroke];
 
-    // Eight resize handles on the line - corners and edge midpoints - the
-    // universal selection idiom, so the affordance explains itself. A dark
-    // outline keeps them visible over bright content.
+    // Eight resize handles - corners and edge midpoints - the universal
+    // selection idiom, so the affordance explains itself. They live in the
+    // middle of the hazard band, entirely outside the region: the scoped
+    // pixels stay untouched, and bright squares on the muted stripes read
+    // like fittings on a frame.
+    const CGFloat out = sidescopes::kBorderPad / 2;
     const auto handle = [&](CGFloat x, CGFloat y) {
         const NSRect square =
             NSMakeRect(x - sidescopes::kHandleSize / 2, y - sidescopes::kHandleSize / 2,
@@ -431,14 +434,14 @@ RegionOfInterest g_border_edit_region;
         fill.lineWidth = 1.0;
         [fill stroke];
     };
-    handle(NSMinX(region), NSMinY(region));
-    handle(NSMidX(region), NSMinY(region));
-    handle(NSMaxX(region), NSMinY(region));
-    handle(NSMinX(region), NSMidY(region));
-    handle(NSMaxX(region), NSMidY(region));
-    handle(NSMinX(region), NSMaxY(region));
-    handle(NSMidX(region), NSMaxY(region));
-    handle(NSMaxX(region), NSMaxY(region));
+    handle(NSMinX(region) - out, NSMinY(region) - out);
+    handle(NSMidX(region), NSMinY(region) - out);
+    handle(NSMaxX(region) + out, NSMinY(region) - out);
+    handle(NSMinX(region) - out, NSMidY(region));
+    handle(NSMaxX(region) + out, NSMidY(region));
+    handle(NSMinX(region) - out, NSMaxY(region) + out);
+    handle(NSMidX(region), NSMaxY(region) + out);
+    handle(NSMaxX(region) + out, NSMaxY(region) + out);
 }
 
 // Eight handles, no modifier: the corners resize both axes, the edge
