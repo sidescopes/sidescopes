@@ -24,7 +24,12 @@ namespace {
 constexpr double kBorderPad = 12.0;
 // The macOS-screenshot-style handle dots protrude past the band's outer
 // edge; the window carries a transparent margin so they are not clipped.
-constexpr double kHandleRadius = 5.5;
+constexpr double kHandleRadius = 3.5;
+// Thickness of the measured-edge ring between the region and the hazard
+// stripes. The stripes' cutoff and the ring share this one constant, so
+// they abut exactly at every display scale - two independently tuned
+// numbers once left a hairline of bare transparency between them.
+constexpr double kEdgeRing = 1.0;
 constexpr double kHandleMargin = kHandleRadius + 2.0;
 constexpr double kWindowPad = kBorderPad + kHandleMargin;
 // Within this distance of a region corner, a grab resizes; the rest of
@@ -397,8 +402,11 @@ RegionOfInterest g_border_edit_region;
     // visible on any content. The interior is never painted and therefore
     // stays click-through.
     const NSRect band = NSInsetRect(region, -sidescopes::kBorderPad, -sidescopes::kBorderPad);
+    // The stripes stop short of the measured-edge ring: crossing it
+    // would read as the band bleeding into the measured area.
+    const NSRect stripe_hole = NSInsetRect(region, -sidescopes::kEdgeRing, -sidescopes::kEdgeRing);
     NSBezierPath* ring_clip = [NSBezierPath bezierPathWithRect:band];
-    [ring_clip appendBezierPathWithRect:region];
+    [ring_clip appendBezierPathWithRect:stripe_hole];
     ring_clip.windingRule = NSWindingRuleEvenOdd;
     [NSGraphicsContext saveGraphicsState];
     [ring_clip addClip];
@@ -415,35 +423,55 @@ RegionOfInterest g_border_edit_region;
     [stripes stroke];
     [NSGraphicsContext restoreGraphicsState];
 
-    // A narrow bright line marks the exact measured edge.
-    [[NSColor colorWithWhite:0.97 alpha:0.9] setStroke];
-    NSBezierPath* edge = [NSBezierPath bezierPathWithRect:NSInsetRect(region, -0.9, -0.9)];
-    edge.lineWidth = 1.4;
-    [edge stroke];
+    // The measured edge is a filled ring, not a stroked line: it spans
+    // exactly from the region to the stripes with no geometry of its own
+    // to disagree. White dashes ride over the dark ring, so one of the
+    // two tones survives any background - the screenshot tools'
+    // marching-ants idea, standing still.
+    NSBezierPath* edge_ring = [NSBezierPath bezierPathWithRect:stripe_hole];
+    [edge_ring appendBezierPathWithRect:region];
+    edge_ring.windingRule = NSWindingRuleEvenOdd;
+    [[NSColor colorWithWhite:0.1 alpha:0.85] setFill];
+    [edge_ring fill];
+    NSBezierPath* dashes =
+        [NSBezierPath bezierPathWithRect:NSInsetRect(region, -sidescopes::kEdgeRing / 2,
+                                                     -sidescopes::kEdgeRing / 2)];
+    dashes.lineWidth = sidescopes::kEdgeRing;
+    const CGFloat dash[2] = {4.0, 4.0};
+    [dashes setLineDash:dash count:2 phase:0];
+    [[NSColor colorWithWhite:0.97 alpha:0.95] setStroke];
+    [dashes stroke];
 
     // Eight handle dots - corners and edge midpoints - centered on the
-    // band's outer edge and protruding outward, the way the macOS
-    // screenshot selection wears them. Round dots have no orientation, so
-    // nothing can read as misaligned; the scoped pixels stay untouched.
+    // measurement line, the way the macOS screenshot selection wears
+    // them: small gray circles straddling the selection edge. Round and
+    // muted, they cost only a few pixels of the sample's rim.
+    const NSRect lane = region;
     const auto handle = [&](CGFloat x, CGFloat y) {
         const NSRect circle =
             NSMakeRect(x - sidescopes::kHandleRadius, y - sidescopes::kHandleRadius,
                        sidescopes::kHandleRadius * 2, sidescopes::kHandleRadius * 2);
         NSBezierPath* dot = [NSBezierPath bezierPathWithOvalInRect:circle];
-        [[NSColor whiteColor] setFill];
+        [[NSColor colorWithWhite:0.78 alpha:1.0] setFill];
         [dot fill];
-        [[NSColor colorWithWhite:0.4 alpha:0.8] setStroke];
+        // A dark rim beneath the near-white ring keeps the dot visible on
+        // a bright sky; the ring matches the measurement line, so the
+        // dots and the line read as one instrument.
+        [[NSColor colorWithWhite:0.1 alpha:0.7] setStroke];
+        dot.lineWidth = 2.0;
+        [dot stroke];
+        [[NSColor colorWithWhite:0.97 alpha:0.95] setStroke];
         dot.lineWidth = 1.0;
         [dot stroke];
     };
-    handle(NSMinX(band), NSMinY(band));
-    handle(NSMidX(band), NSMinY(band));
-    handle(NSMaxX(band), NSMinY(band));
-    handle(NSMinX(band), NSMidY(band));
-    handle(NSMaxX(band), NSMidY(band));
-    handle(NSMinX(band), NSMaxY(band));
-    handle(NSMidX(band), NSMaxY(band));
-    handle(NSMaxX(band), NSMaxY(band));
+    handle(NSMinX(lane), NSMinY(lane));
+    handle(NSMidX(lane), NSMinY(lane));
+    handle(NSMaxX(lane), NSMinY(lane));
+    handle(NSMinX(lane), NSMidY(lane));
+    handle(NSMaxX(lane), NSMidY(lane));
+    handle(NSMinX(lane), NSMaxY(lane));
+    handle(NSMidX(lane), NSMaxY(lane));
+    handle(NSMaxX(lane), NSMaxY(lane));
 }
 
 // Eight handles, no modifier: the corners resize both axes, the edge
