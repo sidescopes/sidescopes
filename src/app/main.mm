@@ -212,16 +212,25 @@ bool ScopeToggleButton(const char* id, ScopeGlyph glyph, bool enabled, const cha
     const ImU32 color = ImGui::GetColorU32(enabled ? ImGuiCol_Text : ImGuiCol_TextDisabled);
     const float stroke = 1.5f;
     if (glyph == ScopeGlyph::Vectorscope) {
+        // A graticule in miniature: ring, compass ticks, center dot.
         const ImVec2 center((a.x + b.x) / 2, (a.y + b.y) / 2);
-        const float radius = std::min(b.x - a.x, b.y - a.y) / 2;
+        const float radius = std::min(b.x - a.x, b.y - a.y) / 2 - 1.0f;
         draw->AddCircle(center, radius, color, 0, stroke);
-        draw->AddCircleFilled(center, 1.5f, color);
+        draw->AddCircleFilled(center, 1.4f, color);
+        for (const auto [dx, dy] : {std::pair{0.0f, -1.0f}, std::pair{0.0f, 1.0f},
+                                    std::pair{-1.0f, 0.0f}, std::pair{1.0f, 0.0f}}) {
+            draw->AddLine(ImVec2(center.x + dx * radius, center.y + dy * radius),
+                          ImVec2(center.x + dx * (radius + 2.0f), center.y + dy * (radius + 2.0f)),
+                          color, stroke);
+        }
     } else if (glyph == ScopeGlyph::Waveform) {
-        const float levels[6] = {0.7f, 0.25f, 0.55f, 0.15f, 0.6f, 0.4f};
-        ImVec2 points[6];
-        for (int i = 0; i < 6; ++i)
-            points[i] = ImVec2(a.x + (b.x - a.x) * i / 5.0f, a.y + (b.y - a.y) * levels[i]);
-        draw->AddPolyline(points, 6, color, 0, stroke);
+        // A trace over its baseline, calm rather than jagged.
+        const float levels[7] = {0.55f, 0.2f, 0.45f, 0.1f, 0.35f, 0.6f, 0.3f};
+        ImVec2 points[7];
+        for (int i = 0; i < 7; ++i)
+            points[i] = ImVec2(a.x + (b.x - a.x) * i / 6.0f, a.y + (b.y - a.y) * levels[i]);
+        draw->AddPolyline(points, 7, color, 0, stroke);
+        draw->AddLine(ImVec2(a.x, b.y), ImVec2(b.x, b.y), (color & 0x00FFFFFF) | 0x60000000, 1.0f);
     } else {
         const float heights[4] = {0.45f, 0.9f, 0.65f, 0.3f};
         const float slot = (b.x - a.x) / 4.0f;
@@ -235,9 +244,11 @@ bool ScopeToggleButton(const char* id, ScopeGlyph glyph, bool enabled, const cha
     return pressed;
 }
 
-// Region tool icons: corner brackets for picking a detected area, a dashed
-// rectangle for drawing one, an outline rectangle for full screen.
-enum class RegionIcon { Brackets, Dashed, Outline };
+// Region tool icons: viewfinder brackets with a target dot for picking a
+// detected area, a pencil for drawing one, expanding arrows for full
+// screen. Each tool gets its own silhouette - three flavors of rectangle
+// were indistinguishable at icon size.
+enum class RegionIcon { PickTarget, Pencil, Expand };
 
 bool IconButton(const char* id, RegionIcon icon, const char* tooltip) {
     const float height = ImGui::GetTextLineHeight() + 4.0f;
@@ -251,7 +262,8 @@ bool IconButton(const char* id, RegionIcon icon, const char* tooltip) {
     const ImVec2 b(max.x - 7, max.y - 3);
     const ImU32 color = ImGui::GetColorU32(ImGuiCol_Text);
     const float stroke = 1.5f;
-    if (icon == RegionIcon::Brackets) {
+    const ImVec2 center((a.x + b.x) / 2, (a.y + b.y) / 2);
+    if (icon == RegionIcon::PickTarget) {
         const float length = std::min(b.x - a.x, b.y - a.y) * 0.4f;
         const auto corner = [&](float cx, float cy, float dx, float dy) {
             draw->AddLine(ImVec2(cx, cy), ImVec2(cx + dx * length, cy), color, stroke);
@@ -261,21 +273,34 @@ bool IconButton(const char* id, RegionIcon icon, const char* tooltip) {
         corner(b.x, a.y, -1, 1);
         corner(a.x, b.y, 1, -1);
         corner(b.x, b.y, -1, -1);
-    } else if (icon == RegionIcon::Dashed) {
-        const auto dashes = [&](ImVec2 from, ImVec2 to) {
-            for (const float start : {0.0f, 0.6f}) {
-                const auto at = [&](float t) {
-                    return ImVec2(from.x + (to.x - from.x) * t, from.y + (to.y - from.y) * t);
-                };
-                draw->AddLine(at(start), at(start + 0.4f), color, stroke);
-            }
-        };
-        dashes(a, ImVec2(b.x, a.y));
-        dashes(ImVec2(b.x, a.y), b);
-        dashes(b, ImVec2(a.x, b.y));
-        dashes(ImVec2(a.x, b.y), a);
+        draw->AddCircleFilled(center, 1.6f, color);
+    } else if (icon == RegionIcon::Pencil) {
+        // Diagonal pencil: flat end top-right, tip bottom-left.
+        const ImVec2 tip(a.x + 1.0f, b.y - 1.0f);
+        const ImVec2 end(b.x - 1.0f, a.y + 1.0f);
+        const ImVec2 direction(end.x - tip.x, end.y - tip.y);
+        const float length = std::sqrt(direction.x * direction.x + direction.y * direction.y);
+        const ImVec2 unit(direction.x / length, direction.y / length);
+        const ImVec2 side(-unit.y, unit.x);
+        const ImVec2 shoulder(tip.x + unit.x * 4.0f, tip.y + unit.y * 4.0f);
+        // The gap between tip and body is what makes it a pencil rather
+        // than an arrow at this size.
+        const ImVec2 body_start(shoulder.x + unit.x * 1.5f, shoulder.y + unit.y * 1.5f);
+        draw->AddLine(body_start, end, color, stroke + 0.7f);
+        draw->AddTriangleFilled(tip, ImVec2(shoulder.x + side.x * 2.0f, shoulder.y + side.y * 2.0f),
+                                ImVec2(shoulder.x - side.x * 2.0f, shoulder.y - side.y * 2.0f),
+                                color);
+        draw->AddLine(ImVec2(end.x + side.x * 1.6f, end.y + side.y * 1.6f),
+                      ImVec2(end.x - side.x * 1.6f, end.y - side.y * 1.6f), color, stroke);
     } else {
-        draw->AddRect(a, b, color, 1.0f, 0, stroke);
+        // Two arrows expanding to opposite corners, the fullscreen idiom.
+        const auto arrow = [&](ImVec2 from, ImVec2 to, float head_x, float head_y) {
+            draw->AddLine(from, to, color, stroke);
+            draw->AddLine(to, ImVec2(to.x + head_x * 3.5f, to.y), color, stroke);
+            draw->AddLine(to, ImVec2(to.x, to.y + head_y * 3.5f), color, stroke);
+        };
+        arrow(ImVec2(center.x - 1.5f, center.y + 1.5f), ImVec2(a.x + 0.5f, b.y - 0.5f), 1, -1);
+        arrow(ImVec2(center.x + 1.5f, center.y - 1.5f), ImVec2(b.x - 0.5f, a.y + 0.5f), -1, 1);
     }
     ImGui::SetItemTooltip("%s", tooltip);
     return pressed;
@@ -690,14 +715,14 @@ int main() {
             if (ImGui::IsKeyPressed(ImGuiKey_P, false)) pin_cursor_color(vectorscope_color);
         }
 
-        if (IconButton("##pick-region", RegionIcon::Brackets, "Pick a detected area (A)"))
+        if (IconButton("##pick-region", RegionIcon::PickTarget, "Pick a detected area (A)"))
             want_region_pick = RegionPickerMode::PickDetected;
         ImGui::SameLine(0.0f, 2.0f);
-        if (IconButton("##draw-region", RegionIcon::Dashed, "Draw an area (D)"))
+        if (IconButton("##draw-region", RegionIcon::Pencil, "Draw an area (D)"))
             want_region_pick = RegionPickerMode::Draw;
         ImGui::SameLine(0.0f, 2.0f);
         if (!is_full_region()) {
-            if (IconButton("##full-region", RegionIcon::Outline, "Reset to full screen (F)")) {
+            if (IconButton("##full-region", RegionIcon::Expand, "Reset to full screen (F)")) {
                 analysis.region = RegionOfInterest{};
                 analysis_dirty = true;
             }
