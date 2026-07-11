@@ -129,6 +129,22 @@ private:
             ReportStatus("could not duplicate the display");
             return;
         }
+        DXGI_OUTDUPL_DESC duplication_description{};
+        duplication->GetDesc(&duplication_description);
+        // The engines assume upright 8-bit BGRA. HDR displays can deliver
+        // half-float scRGB and rotated outputs deliver rotated rows; both
+        // would be read as garbage, so they fail loudly until the port
+        // handles them (DuplicateOutput1 with an explicit SDR format list,
+        // and row rotation).
+        if (duplication_description.ModeDesc.Format != DXGI_FORMAT_B8G8R8A8_UNORM) {
+            ReportStatus("unsupported capture format (HDR display?)");
+            return;
+        }
+        if (duplication_description.Rotation != DXGI_MODE_ROTATION_IDENTITY &&
+            duplication_description.Rotation != DXGI_MODE_ROTATION_UNSPECIFIED) {
+            ReportStatus("rotated displays are not supported yet");
+            return;
+        }
 
         ComPtr<ID3D11Texture2D> staging;
         FrameBuffer buffer;
