@@ -164,4 +164,8 @@ std::string AppRegionsFilePath() {
     return ApplicationDataDirectory() + "\\SideScopes\\app_regions.txt";
 }
 
+void OpenScreenRecordingSettings() {
+    // Reading the desktop needs no permission on Windows.
+}
+
 }  // namespace sidescopes

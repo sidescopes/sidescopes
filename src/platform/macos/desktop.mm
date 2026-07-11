@@ -74,4 +74,11 @@ std::string AppRegionsFilePath() {
            "/Library/Application Support/SideScopes/app_regions.txt";
 }
 
+void OpenScreenRecordingSettings() {
+    NSURL* url = [NSURL
+        URLWithString:
+            @"x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture"];
+    [[NSWorkspace sharedWorkspace] openURL:url];
+}
+
 }  // namespace sidescopes

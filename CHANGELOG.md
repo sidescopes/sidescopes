@@ -30,6 +30,9 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - RGB parade waveform style: the three channels side by side.
 - Histogram view with per-channel bars and cursor value markers.
 - An application icon, generated from source.
+- A guidance pane in place of empty scopes when the screen cannot be
+  captured: missing-permission instructions with a button straight to the
+  System Settings pane, or the reconnect status when capture drops.
 
 - The SideScopes macOS application: compact always-on-top window with
   vectorscope, waveform, and histogram, scroll-to-adjust intensity,

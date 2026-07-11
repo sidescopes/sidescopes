@@ -838,6 +838,39 @@ int main() {
             }
         };
 
+        // When nothing can be captured, the scope area explains why and how
+        // to fix it instead of drawing empty instruments; a non-technical
+        // user should never face a blank vectorscope.
+        const auto draw_capture_help = [&](const char* headline,
+                                           const std::vector<std::string>& lines,
+                                           bool offer_settings) {
+            const ImVec2 area = ImGui::GetContentRegionAvail();
+            const float line_height = ImGui::GetTextLineHeightWithSpacing();
+            const float block_height = line_height * (2.0f + static_cast<float>(lines.size())) +
+                                       (offer_settings ? line_height * 2.0f : 0.0f);
+            ImGui::Dummy(ImVec2(0.0f, std::max(0.0f, (area.y - block_height) / 2.0f)));
+            const auto centered_text = [&](const char* text) {
+                const float width = ImGui::CalcTextSize(text).x;
+                ImGui::SetCursorPosX(
+                    std::max(0.0f, (ImGui::GetWindowContentRegionMax().x - width) / 2.0f));
+                ImGui::TextUnformatted(text);
+            };
+            centered_text(headline);
+            ImGui::Dummy(ImVec2(0.0f, line_height * 0.4f));
+            ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+            for (const std::string& line : lines) centered_text(line.c_str());
+            ImGui::PopStyleColor();
+            if (offer_settings) {
+                ImGui::Dummy(ImVec2(0.0f, line_height * 0.6f));
+                const char* label = "Open System Settings";
+                const float width =
+                    ImGui::CalcTextSize(label).x + ImGui::GetStyle().FramePadding.x * 2.0f;
+                ImGui::SetCursorPosX(
+                    std::max(0.0f, (ImGui::GetWindowContentRegionMax().x - width) / 2.0f));
+                if (ImGui::Button(label)) OpenScreenRecordingSettings();
+            }
+        };
+
         // The enabled scopes stack in a fixed order, splitting the window
         // along its longer axis.
         const auto draw_scope = [&](ScopeGlyph kind) {
@@ -854,7 +887,25 @@ int main() {
         if (show_waveform) panes[pane_count++] = ScopeGlyph::Waveform;
         if (show_histogram) panes[pane_count++] = ScopeGlyph::Histogram;
         const ImVec2 area = ImGui::GetContentRegionAvail();
-        if (pane_count <= 1) {
+        if (!permission_granted) {
+            draw_capture_help("SideScopes cannot see the screen",
+                              {
+                                  "macOS requires the Screen Recording permission.",
+                                  "",
+                                  "1. Click the button below",
+                                  "2. Turn on SideScopes in the list",
+                                  "3. Quit and reopen SideScopes",
+                              },
+                              true);
+        } else if (capture_dead.load()) {
+            std::string status;
+            {
+                std::lock_guard lock(status_mutex);
+                status = capture_status;
+            }
+            draw_capture_help("Screen capture was interrupted",
+                              {status, "Reconnecting automatically..."}, false);
+        } else if (pane_count <= 1) {
             if (pane_count == 1) draw_scope(panes[0]);
         } else {
             const bool horizontal = area.x >= area.y;
