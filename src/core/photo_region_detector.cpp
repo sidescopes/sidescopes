@@ -841,6 +841,38 @@ std::vector<RegionCandidate> DetectPhotoRegions(const FrameView& frame,
     }
     for (const RegionCandidate& hole : holes) ranked.push_back(Ranked{hole, true});
 
+    // A rectangle mostly inside a measured photograph is photograph
+    // content - texture that paired into a phantom border, or a flat
+    // patch that read as its own canvas - and stealing the hover from the
+    // photograph is all it would do. A hole spanning most of the frame is
+    // ambient (a dark application theme reads as one big canvas around
+    // everything) and vouches for nothing.
+    const int64_t frame_area = static_cast<int64_t>(frame.width) * frame.height;
+    std::erase_if(ranked, [&](const Ranked& entry) {
+        const IntRect& c = entry.candidate.rect;
+        const int64_t area = static_cast<int64_t>(c.width) * c.height;
+        for (const RegionCandidate& hole : holes) {
+            const IntRect& h = hole.rect;
+            const int64_t hole_area = static_cast<int64_t>(h.width) * h.height;
+            if (hole_area * 5 >= frame_area * 3) continue;  // ambient
+            if (entry.hole && area >= hole_area) continue;  // itself, or a peer
+            const int64_t overlap_w = std::min(c.x + c.width, h.x + h.width) - std::max(c.x, h.x);
+            const int64_t overlap_h = std::min(c.y + c.height, h.y + h.height) - std::max(c.y, h.y);
+            if (overlap_w <= 0 || overlap_h <= 0) continue;
+            if (overlap_w * overlap_h * 20 >= area * 13) return true;  // >= 65% inside
+            // A band crossing clean through the photograph - vertically
+            // inside it while spanning past both its sides, or the
+            // transpose - is a phantom pairing between a photo border and
+            // a content line whose ends drifted into the panels.
+            const bool rows_inside = overlap_h * 10 >= static_cast<int64_t>(c.height) * 9;
+            const bool spans_columns = c.x <= h.x && c.x + c.width >= h.x + h.width;
+            const bool cols_inside = overlap_w * 10 >= static_cast<int64_t>(c.width) * 9;
+            const bool spans_rows = c.y <= h.y && c.y + c.height >= h.y + h.height;
+            if ((rows_inside && spans_columns) || (cols_inside && spans_rows)) return true;
+        }
+        return false;
+    });
+
     // Strongest first - confidence, then measurement, then size: the
     // diversity pass keeps the first member of every near-copy cluster,
     // and that seat belongs to the best-established geometry, not merely

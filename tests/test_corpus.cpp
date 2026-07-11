@@ -147,6 +147,24 @@ TEST_CASE("Detector finds every annotated rectangle in the corpus") {
             } else if (found) {
                 ++goals_met;
             }
+
+            // The picker hands the hover to the smallest suggestion under
+            // the cursor, so any smaller candidate centered inside the
+            // photograph steals picks from it. None may survive.
+            for (const RegionCandidate& candidate : candidates) {
+                const IntRect& c = candidate.rect;
+                const IntRect& e = expectation.rect;
+                const bool centered =
+                    c.x + c.width / 2 > e.x && c.x + c.width / 2 < e.x + e.width &&
+                    c.y + c.height / 2 > e.y && c.y + c.height / 2 < e.y + e.height;
+                const bool smaller = static_cast<int64_t>(c.width) * c.height <
+                                     static_cast<int64_t>(e.width) * e.height;
+                if (!centered || !smaller || Matches(candidate, expectation)) continue;
+                INFO("hover thief " << c.x << "," << c.y << " " << c.width << "x" << c.height
+                                    << " inside expected " << e.x << "," << e.y << " " << e.width
+                                    << "x" << e.height);
+                CHECK(false);
+            }
         }
     }
     std::printf("corpus: %d/%d expectations met, %d/%d goals met, %zu cases\n", met, total,
