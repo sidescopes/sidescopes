@@ -155,6 +155,25 @@ if(APPLE)
     )
 endif()
 
+if(WIN32)
+    # The Windows platform layer builds on every push so the port meets a
+    # compiler continuously; the application target follows with the port
+    # itself.
+    add_library(sidescopes_platform STATIC
+        src/platform/windows/desktop.cpp
+        src/platform/windows/screen_capture.cpp
+    )
+    target_include_directories(sidescopes_platform PUBLIC src)
+    target_link_libraries(sidescopes_platform
+        PUBLIC
+        sidescopes_core
+        d3d11
+        dxgi
+        dwmapi
+    )
+    sidescopes_target_defaults(sidescopes_platform)
+endif()
+
 if(SIDESCOPES_BUILD_TESTS)
     enable_testing()
     add_subdirectory(tests)
