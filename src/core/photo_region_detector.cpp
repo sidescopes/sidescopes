@@ -495,8 +495,22 @@ void DetectAxisAligned(const FrameView& frame, const std::vector<IntRect>& maske
 // textured, the canvas is byte-flat. Finds the dominant flat colors,
 // takes each one's largest connected region, and if that region encloses
 // a single rectangular hole, the hole is a candidate.
+// A measured hole carries the edge-built rectangles it confirms: ones
+// that contain it, agree with it on columns or rows, and whose extension
+// beyond it runs through the hole's own connected canvas region - the
+// signature of a photograph area melted into the canvas. Tone alone
+// cannot decide this (an editor's panels can match the canvas tone
+// exactly); membership in the connected region can, and it is only
+// known here while the region labels are alive.
+struct CanvasHole {
+    RegionCandidate candidate;
+    std::vector<IntRect> confirmed;
+};
+
 void DetectCanvasHoles(const FrameView& frame, const std::vector<IntRect>& masked_regions,
-                       const Tolerances& tolerances, std::vector<RegionCandidate>& holes) {
+                       const Tolerances& tolerances,
+                       const std::vector<RegionCandidate>& edge_candidates,
+                       std::vector<CanvasHole>& holes) {
     const int width = frame.width;
     const int height = frame.height;
     const auto pixel = [&](int x, int y) { return frame.PixelAt(x, y); };
@@ -789,13 +803,45 @@ void DetectCanvasHoles(const FrameView& frame, const std::vector<IntRect>& maske
 
         const IntRect rect{hx0, hy0, hx1 - hx0, hy1 - hy0};
         bool duplicate = false;
-        for (const RegionCandidate& existing : holes) {
-            if (SameRectangle(existing.rect, rect, tolerances.duplicate)) {
+        for (const CanvasHole& existing : holes) {
+            if (SameRectangle(existing.candidate.rect, rect, tolerances.duplicate)) {
                 duplicate = true;
                 break;
             }
         }
-        if (!duplicate) holes.push_back(RegionCandidate{rect, 1.0f});
+        if (duplicate) continue;
+        CanvasHole entry{RegionCandidate{rect, 1.0f}, {}};
+        const int agreement = tolerances.duplicate * 2;
+        for (const RegionCandidate& candidate : edge_candidates) {
+            const IntRect& c = candidate.rect;
+            const bool contains = c.x <= rect.x + tolerances.duplicate &&
+                                  c.y <= rect.y + tolerances.duplicate &&
+                                  c.x + c.width >= rect.x + rect.width - tolerances.duplicate &&
+                                  c.y + c.height >= rect.y + rect.height - tolerances.duplicate;
+            if (!contains || SameRectangle(c, rect, tolerances.duplicate)) continue;
+            const bool same_columns = std::abs(c.x - rect.x) <= agreement &&
+                                      std::abs(c.x + c.width - (rect.x + rect.width)) <= agreement;
+            const bool same_rows = std::abs(c.y - rect.y) <= agreement &&
+                                   std::abs(c.y + c.height - (rect.y + rect.height)) <= agreement;
+            if (!same_columns && !same_rows) continue;
+            // The extension band along the agreement axis must be mostly
+            // the winning canvas region itself.
+            const int bx0 = std::max(0, same_columns ? rect.x : c.x);
+            const int bx1 = std::min(width, same_columns ? rect.x + rect.width : c.x + c.width);
+            const int by0 = std::max(0, same_columns ? c.y : rect.y);
+            const int by1 = std::min(height, same_columns ? c.y + c.height : rect.y + rect.height);
+            int samples = 0;
+            int in_region = 0;
+            for (int y = by0 + 2; y < by1; y += 4) {
+                for (int x = bx0 + 2; x < bx1; x += 4) {
+                    if (Contains(rect, x, y)) continue;
+                    ++samples;
+                    if (mask[static_cast<std::size_t>(y) * width + x] == 2) ++in_region;
+                }
+            }
+            if (samples > 0 && in_region * 2 >= samples) entry.confirmed.push_back(c);
+        }
+        holes.push_back(std::move(entry));
         if (TraceEnabled())
             std::printf("canvas hole %d,%d %dx%d (canvas %d,%d,%d)\n", rect.x, rect.y, rect.width,
                         rect.height, canvas_r, canvas_g, canvas_b);
@@ -856,8 +902,8 @@ std::vector<RegionCandidate> DetectPhotoRegions(const FrameView& frame,
     // carries endpoint slack, so a hole outranks edge geometry of equal
     // confidence. An edge rectangle that coincides with a hole is the same
     // find twice and yields to it.
-    std::vector<RegionCandidate> holes;
-    DetectCanvasHoles(frame, masked_regions, tolerances, holes);
+    std::vector<CanvasHole> holes;
+    DetectCanvasHoles(frame, masked_regions, tolerances, candidates, holes);
     struct Ranked {
         RegionCandidate candidate;
         bool hole;
@@ -866,15 +912,15 @@ std::vector<RegionCandidate> DetectPhotoRegions(const FrameView& frame,
     ranked.reserve(candidates.size() + holes.size());
     for (const RegionCandidate& candidate : candidates) {
         bool duplicate = false;
-        for (const RegionCandidate& hole : holes) {
-            if (SameRectangle(candidate.rect, hole.rect, tolerances.duplicate)) {
+        for (const CanvasHole& hole : holes) {
+            if (SameRectangle(candidate.rect, hole.candidate.rect, tolerances.duplicate)) {
                 duplicate = true;
                 break;
             }
         }
         if (!duplicate) ranked.push_back(Ranked{candidate, false});
     }
-    for (const RegionCandidate& hole : holes) ranked.push_back(Ranked{hole, true});
+    for (const CanvasHole& hole : holes) ranked.push_back(Ranked{hole.candidate, true});
 
     // A rectangle mostly inside a measured photograph is photograph
     // content - texture that paired into a phantom border, or a flat
@@ -883,46 +929,92 @@ std::vector<RegionCandidate> DetectPhotoRegions(const FrameView& frame,
     // ambient (a dark application theme reads as one big canvas around
     // everything) and vouches for nothing.
     const int64_t frame_area = static_cast<int64_t>(frame.width) * frame.height;
-    std::erase_if(ranked, [&](const Ranked& entry) {
-        const IntRect& c = entry.candidate.rect;
-        const int64_t area = static_cast<int64_t>(c.width) * c.height;
-        for (const RegionCandidate& hole : holes) {
-            const IntRect& h = hole.rect;
-            const int64_t hole_area = static_cast<int64_t>(h.width) * h.height;
-            if (hole_area * 5 >= frame_area * 3) continue;  // ambient
-            if (entry.hole && area >= hole_area) continue;  // itself, or a peer
-            const int64_t overlap_w = std::min(c.x + c.width, h.x + h.width) - std::max(c.x, h.x);
-            const int64_t overlap_h = std::min(c.y + c.height, h.y + h.height) - std::max(c.y, h.y);
-            if (overlap_w <= 0 || overlap_h <= 0) continue;
-            if (overlap_w * overlap_h * 20 >= area * 13) return true;  // >= 65% inside
-            // A band crossing clean through the photograph - vertically
-            // inside it while spanning past both its sides, or the
-            // transpose - is a phantom pairing between a photo border and
-            // a content line whose ends drifted into the panels.
-            const bool rows_inside = overlap_h * 10 >= static_cast<int64_t>(c.height) * 9;
-            const bool spans_columns = c.x <= h.x && c.x + c.width >= h.x + h.width;
-            const bool cols_inside = overlap_w * 10 >= static_cast<int64_t>(c.width) * 9;
-            const bool spans_rows = c.y <= h.y && c.y + c.height >= h.y + h.height;
-            if ((rows_inside && spans_columns) || (cols_inside && spans_rows)) return true;
-            // A border running through the photograph's interior was paired
-            // off photo content (a long contour inside the picture); the
-            // real windows a screen offers come from the platform's window
-            // list, never from borders found inside a photograph.
-            const int margin = tolerances.duplicate;
-            const auto row_through = [&](int y) {
-                return y > h.y + margin && y < h.y + h.height - margin &&
-                       overlap_w * 2 >= static_cast<int64_t>(h.width);
-            };
-            const auto column_through = [&](int x) {
-                return x > h.x + margin && x < h.x + h.width - margin &&
-                       overlap_h * 2 >= static_cast<int64_t>(h.height);
-            };
-            if (!entry.hole && (row_through(c.y) || row_through(c.y + c.height) ||
-                                column_through(c.x) || column_through(c.x + c.width)))
-                return true;
+    const auto cleanse = [&](const std::vector<IntRect>& anchors) {
+        std::erase_if(ranked, [&](const Ranked& entry) {
+            const IntRect& c = entry.candidate.rect;
+            const int64_t area = static_cast<int64_t>(c.width) * c.height;
+            for (const IntRect& h : anchors) {
+                const int64_t hole_area = static_cast<int64_t>(h.width) * h.height;
+                if (entry.hole && area >= hole_area) continue;  // itself, or a peer
+                const int64_t overlap_w =
+                    std::min(c.x + c.width, h.x + h.width) - std::max(c.x, h.x);
+                const int64_t overlap_h =
+                    std::min(c.y + c.height, h.y + h.height) - std::max(c.y, h.y);
+                if (overlap_w <= 0 || overlap_h <= 0) continue;
+                if (overlap_w * overlap_h * 20 >= area * 13) return true;  // >= 65% inside
+                // A band crossing clean through the photograph - vertically
+                // inside it while spanning past both its sides, or the
+                // transpose - is a phantom pairing between a photo border and
+                // a content line whose ends drifted into the panels.
+                const bool rows_inside = overlap_h * 10 >= static_cast<int64_t>(c.height) * 9;
+                const bool spans_columns = c.x <= h.x && c.x + c.width >= h.x + h.width;
+                const bool cols_inside = overlap_w * 10 >= static_cast<int64_t>(c.width) * 9;
+                const bool spans_rows = c.y <= h.y && c.y + c.height >= h.y + h.height;
+                if ((rows_inside && spans_columns) || (cols_inside && spans_rows)) return true;
+                // A border running through the photograph's interior was paired
+                // off photo content (a long contour inside the picture); the
+                // real windows a screen offers come from the platform's window
+                // list, never from borders found inside a photograph.
+                const int margin = tolerances.duplicate;
+                const auto row_through = [&](int y) {
+                    return y > h.y + margin && y < h.y + h.height - margin &&
+                           overlap_w * 2 >= static_cast<int64_t>(h.width);
+                };
+                const auto column_through = [&](int x) {
+                    return x > h.x + margin && x < h.x + h.width - margin &&
+                           overlap_h * 2 >= static_cast<int64_t>(h.height);
+                };
+                if (!entry.hole && (row_through(c.y) || row_through(c.y + c.height) ||
+                                    column_through(c.x) || column_through(c.x + c.width)))
+                    return true;
+            }
+            return false;
+        });
+    };
+    std::vector<const CanvasHole*> hole_anchors;
+    std::vector<IntRect> anchors;
+    for (const CanvasHole& hole : holes) {
+        const IntRect& rect = hole.candidate.rect;
+        if (static_cast<int64_t>(rect.width) * rect.height * 5 < frame_area * 3) {
+            hole_anchors.push_back(&hole);
+            anchors.push_back(rect);
         }
-        return false;
-    });
+    }
+    cleanse(anchors);
+
+    // A hole truncates when part of the photograph melts into the canvas
+    // - a hazy sky over a light canvas dissolves into disconnected debris
+    // the flood cannot claim - but its surviving span still fingerprints
+    // the photograph. An edge-built rectangle that survived cleansing,
+    // contains such a hole, and agrees with it on columns or rows is the
+    // same photograph measured the other way; it inherits the hole's
+    // standing and anchors a second cleansing pass, which also retires
+    // the truncated hole it absorbs. Running after the first pass
+    // matters: a loose variant merely draped around a complete hole has
+    // already been cleansed away and can no longer be promoted.
+    std::vector<IntRect> promoted;
+    for (Ranked& entry : ranked) {
+        if (entry.hole) continue;
+        const IntRect& c = entry.candidate.rect;
+        for (const CanvasHole* hole : hole_anchors) {
+            bool confirmed = false;
+            for (const IntRect& r : hole->confirmed) {
+                if (SameRectangle(c, r, 0)) {
+                    confirmed = true;
+                    break;
+                }
+            }
+            if (!confirmed) continue;
+            if (TraceEnabled())
+                std::printf("promoted %d,%d %dx%d by hole %d,%d %dx%d\n", c.x, c.y, c.width,
+                            c.height, hole->candidate.rect.x, hole->candidate.rect.y,
+                            hole->candidate.rect.width, hole->candidate.rect.height);
+            entry.hole = true;
+            promoted.push_back(c);
+            break;
+        }
+    }
+    if (!promoted.empty()) cleanse(promoted);
 
     // Strongest first - confidence, then measurement, then size: the
     // diversity pass keeps the first member of every near-copy cluster,

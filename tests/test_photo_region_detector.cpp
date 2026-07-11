@@ -383,6 +383,47 @@ TEST_CASE("Detector offers the visible part of a photo fully occluded on one sid
     CHECK(found);
 }
 
+TEST_CASE("Detector recovers a photo whose sky melts into the canvas") {
+    // A hazy sky over a matching canvas dissolves into the canvas: only
+    // the photo's solid lower half is unambiguously not-canvas. The full
+    // rectangle must still come out - through the hole around the frame
+    // outline, or through an edge rectangle confirmed by the truncated
+    // hole - and the lower half alone must not be offered beside it.
+    // Seen live on Lightroom's library loupe with a fog photograph.
+    TestScreen screen(760, 640, Color{51, 51, 51});
+    const IntRect photo{120, 80, 480, 440};
+    // A matted frame: the outline sits a wide canvas-toned gap away from
+    // the photo, so it stays a thin component of its own and the gap
+    // keeps the canvas flood flowing in to claim the sky.
+    for (int x = photo.x - 10; x < photo.x + photo.width + 10; ++x) {
+        screen.Set(x, photo.y - 10, Color{120, 120, 120});
+        screen.Set(x, photo.y - 9, Color{120, 120, 120});
+        screen.Set(x, photo.y + photo.height + 8, Color{120, 120, 120});
+        screen.Set(x, photo.y + photo.height + 9, Color{120, 120, 120});
+    }
+    for (int y = photo.y - 10; y < photo.y + photo.height + 10; ++y) {
+        screen.Set(photo.x - 10, y, Color{120, 120, 120});
+        screen.Set(photo.x - 9, y, Color{120, 120, 120});
+        screen.Set(photo.x + photo.width + 8, y, Color{120, 120, 120});
+        screen.Set(photo.x + photo.width + 9, y, Color{120, 120, 120});
+    }
+    // Sky: the canvas tone itself, with sparse disconnected debris.
+    for (int y = photo.y; y < photo.y + 220; ++y)
+        for (int x = photo.x; x < photo.x + photo.width; ++x) screen.Set(x, y, Color{51, 51, 51});
+    for (int speck = 0; speck < 40; ++speck)
+        screen.FillRect(IntRect{130 + (speck * 37) % 460, 90 + (speck * 53) % 190, 3, 3},
+                        Color{30, 30, 30});
+    // Forest: solid dark noise.
+    screen.AddPhoto(IntRect{photo.x, photo.y + 220, photo.width, photo.height - 220}, 0xABCDEFu);
+
+    const auto candidates = DetectPhotoRegions(screen.View());
+    CHECK(AnyCandidateNear(candidates, photo, 12));
+    // The truncated lower-half hole must have been retired by the
+    // confirmed full rectangle.
+    const IntRect half{photo.x, photo.y + 220, photo.width, photo.height - 220};
+    CHECK_FALSE(AnyCandidateNear(candidates, half, 12));
+}
+
 TEST_CASE("Detector orders candidates largest first and respects the cap") {
     TestScreen screen(800, 600);
     screen.AddPhoto(IntRect{40, 40, 500, 400}, 0x11111111u);
