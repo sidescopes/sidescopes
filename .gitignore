@@ -11,3 +11,6 @@ compile_commands.json
 .idea/
 .vscode/
 imgui.ini
+
+# Python tooling
+__pycache__/
