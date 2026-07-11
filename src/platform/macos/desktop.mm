@@ -68,4 +68,10 @@ std::string PreferencesFilePath() {
            "/Library/Application Support/SideScopes/preferences.txt";
 }
 
+std::string AppRegionsFilePath() {
+    const char* home = std::getenv("HOME");
+    return std::string(home ? home : ".") +
+           "/Library/Application Support/SideScopes/app_regions.txt";
+}
+
 }  // namespace sidescopes

@@ -28,6 +28,7 @@
 #include <thread>
 
 #include "core/analysis_worker.h"
+#include "core/app_region_memory.h"
 #include "core/frame_mailbox.h"
 #include "core/marker_smoother.h"
 #include "core/photo_region_detector.h"
@@ -330,6 +331,7 @@ int main() {
     if (!glfwInit()) return 1;
 
     const Preferences startup = LoadPreferences(PreferencesFilePath());
+    AppRegionMemory app_regions = AppRegionMemory::Load(AppRegionsFilePath());
 
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
     glfwWindowHint(GLFW_FLOATING, GLFW_TRUE);
@@ -1029,8 +1031,8 @@ int main() {
                     window_regions.push_back(std::move(region));
                 }
             }
-            const auto suggestions = BuildRegionSuggestions(photo_candidates, detect_width,
-                                                            detect_height, window_regions);
+            const auto suggestions = BuildRegionSuggestions(
+                photo_candidates, detect_width, detect_height, window_regions, app_regions.All());
             // Field diagnosis: dump exactly what the pipeline saw. Enable
             // with `launchctl setenv SIDESCOPES_DEBUG_SUGGESTIONS 1`.
             if (std::getenv("SIDESCOPES_DEBUG_SUGGESTIONS")) {
@@ -1077,6 +1079,35 @@ int main() {
                                                         current_region, *want_region_pick)) {
                 analysis.region = *region;
                 analysis_dirty = true;
+                // Remember the region for the application it most belongs
+                // to: the frontmost window covering most of it. Returning to
+                // that editor re-offers the region as a suggestion.
+                const double region_width = region->right_percent - region->left_percent;
+                const double region_height = region->bottom_percent - region->top_percent;
+                const bool practically_full = region_width >= 99.0 && region_height >= 99.0;
+                const WindowRegion* owner = nullptr;
+                double best_coverage = 0.5;  // less than half inside is nobody's
+                for (const WindowRegion& window : window_regions) {
+                    const double left = std::max(region->left_percent, window.region.left_percent);
+                    const double top = std::max(region->top_percent, window.region.top_percent);
+                    const double right =
+                        std::min(region->right_percent, window.region.right_percent);
+                    const double bottom =
+                        std::min(region->bottom_percent, window.region.bottom_percent);
+                    if (right <= left || bottom <= top) continue;
+                    const double coverage =
+                        (right - left) * (bottom - top) / (region_width * region_height);
+                    if (coverage > best_coverage) {
+                        best_coverage = coverage;
+                        owner = &window;
+                    }
+                }
+                if (owner && !practically_full) {
+                    app_regions.Remember(owner->application, *region);
+                    if (!app_regions.Save(AppRegionsFilePath())) {
+                        std::fprintf(stderr, "sidescopes: could not save app regions\n");
+                    }
+                }
             }
             last_activity = glfwGetTime();
         }

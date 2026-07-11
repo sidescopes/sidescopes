@@ -45,4 +45,7 @@ std::optional<DisplayGeometry> GeometryOfDisplay(uint32_t display_id);
 // Preferences file location in the platform's convention.
 std::string PreferencesFilePath();
 
+// Per-application remembered regions, next to the preferences.
+std::string AppRegionsFilePath();
+
 }  // namespace sidescopes
