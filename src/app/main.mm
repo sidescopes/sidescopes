@@ -37,6 +37,7 @@
 #include "core/scopes/graticule.h"
 #include "core/trace_intensity.h"
 #include "platform/desktop.h"
+#include "platform/face_detection.h"
 #include "platform/native_menu.h"
 #include "platform/region_selection.h"
 #include "platform/screen_capture.h"
@@ -1002,6 +1003,7 @@ int main() {
             int detect_width = 0;
             int detect_height = 0;
             std::vector<WindowRegion> window_regions;
+            std::vector<IntRect> face_rects;
             if (const auto geometry = GeometryOfDisplay(capture_display)) {
                 // Frontmost windows only, skipping ones mostly hidden behind
                 // fronter windows: the user is not scoping what they cannot
@@ -1040,6 +1042,7 @@ int main() {
                     photo_candidates =
                         DetectPhotoRegions(view, {analysis.masked_window}, pixels_per_point,
                                            /*max_candidates=*/16);
+                    face_rects = DetectFaces(view, pixels_per_point);
                 });
 
                 for (const DesktopWindow& window : visible_windows) {
@@ -1062,8 +1065,9 @@ int main() {
                     window_regions.push_back(std::move(region));
                 }
             }
-            const auto suggestions = BuildRegionSuggestions(
-                photo_candidates, detect_width, detect_height, window_regions, app_regions.All());
+            const auto suggestions =
+                BuildRegionSuggestions(photo_candidates, detect_width, detect_height,
+                                       window_regions, app_regions.All(), face_rects);
             // Field diagnosis: dump exactly what the pipeline saw. Enable
             // with `launchctl setenv SIDESCOPES_DEBUG_SUGGESTIONS 1`.
             if (std::getenv("SIDESCOPES_DEBUG_SUGGESTIONS")) {

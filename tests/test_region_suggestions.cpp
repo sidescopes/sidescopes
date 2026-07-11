@@ -74,6 +74,24 @@ TEST_CASE("Suggestions deduplicate a canvas against a remembered region") {
     CHECK(suggestions[1].label == "Lightroom");
 }
 
+TEST_CASE("Suggestions place faces between memory and areas") {
+    std::vector<RegionCandidate> candidates{{IntRect{100, 50, 300, 200}, 0.9f}};
+    std::vector<WindowRegion> windows{{RegionOfInterest{5.0, 5.0, 60.0, 90.0}, "Lightroom"}};
+    std::vector<RememberedRegion> remembered{
+        {"Lightroom", RegionOfInterest{20.0, 20.0, 55.0, 80.0}},
+    };
+    std::vector<IntRect> faces{{150, 80, 120, 120}};
+
+    const auto suggestions =
+        BuildRegionSuggestions(candidates, 1000, 500, windows, remembered, faces);
+    REQUIRE(suggestions.size() == 4);
+    CHECK(suggestions[0].label == "Lightroom (remembered)");
+    CHECK(suggestions[1].label == "Face");
+    CHECK(suggestions[1].region.left_percent == 15.0);
+    CHECK(suggestions[2].label == "Area");
+    CHECK(suggestions[3].label == "Lightroom");
+}
+
 TEST_CASE("Suggestions survive a missing frame") {
     std::vector<RegionCandidate> candidates{{IntRect{0, 0, 100, 100}, 0.9f}};
     CHECK(BuildRegionSuggestions(candidates, 0, 0, {}).empty());

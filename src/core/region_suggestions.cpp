@@ -24,7 +24,8 @@ bool PracticallyEqual(const RegionOfInterest& a, const RegionOfInterest& b) {
 
 std::vector<SuggestedRegion> BuildRegionSuggestions(
     const std::vector<RegionCandidate>& photo_candidates, int frame_width, int frame_height,
-    const std::vector<WindowRegion>& windows, const std::vector<RememberedRegion>& remembered) {
+    const std::vector<WindowRegion>& windows, const std::vector<RememberedRegion>& remembered,
+    const std::vector<IntRect>& faces) {
     std::vector<SuggestedRegion> suggestions;
     if (frame_width <= 0 || frame_height <= 0) return suggestions;
 
@@ -42,24 +43,24 @@ std::vector<SuggestedRegion> BuildRegionSuggestions(
         suggestions.push_back(std::move(suggestion));
     }
 
+    const auto push_pixel_rect = [&](const IntRect& rect, const char* label) {
+        SuggestedRegion suggestion;
+        suggestion.region.left_percent = rect.x * 100.0 / frame_width;
+        suggestion.region.top_percent = rect.y * 100.0 / frame_height;
+        suggestion.region.right_percent = (rect.x + rect.width) * 100.0 / frame_width;
+        suggestion.region.bottom_percent = (rect.y + rect.height) * 100.0 / frame_height;
+        suggestion.label = label;
+        for (const SuggestedRegion& existing : suggestions) {
+            if (PracticallyEqual(existing.region, suggestion.region)) return;
+        }
+        suggestions.push_back(std::move(suggestion));
+    };
+
+    for (const IntRect& face : faces) push_pixel_rect(face, "Face");
+
     for (const RegionCandidate& candidate : photo_candidates) {
         if (candidate.confidence < kMinimumConfidence) continue;
-        SuggestedRegion suggestion;
-        suggestion.region.left_percent = candidate.rect.x * 100.0 / frame_width;
-        suggestion.region.top_percent = candidate.rect.y * 100.0 / frame_height;
-        suggestion.region.right_percent =
-            (candidate.rect.x + candidate.rect.width) * 100.0 / frame_width;
-        suggestion.region.bottom_percent =
-            (candidate.rect.y + candidate.rect.height) * 100.0 / frame_height;
-        suggestion.label = "Area";
-        bool duplicate = false;
-        for (const SuggestedRegion& existing : suggestions) {
-            if (PracticallyEqual(existing.region, suggestion.region)) {
-                duplicate = true;
-                break;
-            }
-        }
-        if (!duplicate) suggestions.push_back(std::move(suggestion));
+        push_pixel_rect(candidate.rect, "Area");
     }
 
     for (const WindowRegion& window : windows) {

@@ -56,6 +56,7 @@ if(APPLE)
     enable_language(OBJCXX)
     add_library(sidescopes_platform STATIC
         src/platform/macos/desktop.mm
+        src/platform/macos/face_detection.mm
         src/platform/macos/native_menu.mm
         src/platform/macos/region_selection.mm
         src/platform/macos/screen_capture.mm
@@ -70,6 +71,7 @@ if(APPLE)
         "-framework CoreMedia"
         "-framework CoreVideo"
         "-framework ScreenCaptureKit"
+        "-framework Vision"
     )
     sidescopes_target_defaults(sidescopes_platform)
 
