@@ -18,12 +18,12 @@ typedef NS_OPTIONS(NSUInteger, SidescopesDragEdges) {
 namespace sidescopes {
 namespace {
 
-// The border window extends this far beyond the region: the grab ring for
-// resizing, wide enough to hit with a cursor.
-constexpr double kBorderPad = 14.0;
-// The move tab above the top edge.
-constexpr double kTabWidth = 40.0;
-constexpr double kTabHeight = 12.0;
+// The border window extends this far beyond the region: the grab band,
+// wide enough to hit with a cursor, slim enough to stay unobtrusive.
+constexpr double kBorderPad = 12.0;
+// Within this distance of a region corner, a grab resizes; the rest of
+// the band moves the region (Shift-drag resizes a single edge).
+constexpr double kCornerZone = 22.0;
 // Regions cannot shrink beyond this many points per side.
 constexpr double kMinimumRegionSize = 24.0;
 
@@ -287,10 +287,13 @@ RegionOfInterest g_border_edit_region;
 
 @end
 
-// The interactive region border: double-stroked so it reads on any
-// background, with a grab ring outside the region for resizing and a tab
-// above the top edge for moving. The interior is truly transparent, so
-// the editor underneath keeps receiving clicks.
+// The interactive region border. The band outside the region is muted
+// hazard tape; grabbing it MOVES the region - moving is the frequent
+// operation, so it owns the long edges - while the corners resize, and
+// Shift-dragging an edge resizes just that edge. The interior is truly
+// transparent, so the editor underneath keeps receiving clicks. Cursors
+// come from an always-active tracking area: cursor rects only work in
+// the key window, and this window never takes key.
 @interface SidescopesBorderView : NSView
 @property(nonatomic, assign) SidescopesDragEdges dragZone;
 @property(nonatomic, assign) NSPoint dragStartMouse;  // global screen coords
@@ -303,17 +306,11 @@ RegionOfInterest g_border_edit_region;
     return NSInsetRect(self.bounds, sidescopes::kBorderPad, sidescopes::kBorderPad);
 }
 
-- (NSRect)tabRect {
-    const NSRect region = [self regionRect];
-    return NSMakeRect(NSMidX(region) - sidescopes::kTabWidth / 2, NSMaxY(region) + 1.0,
-                      sidescopes::kTabWidth, sidescopes::kTabHeight);
-}
-
 - (void)drawRect:(NSRect)dirty {
     (void)dirty;
     const NSRect region = [self regionRect];
 
-    // The whole grab ring is the hazard band, muted so it stays calm
+    // The whole grab band is the hazard tape, muted so it stays calm
     // beside the photograph while its own light-dark alternation keeps it
     // visible on any content. The interior is never painted and therefore
     // stays click-through.
@@ -340,76 +337,86 @@ RegionOfInterest g_border_edit_region;
     NSBezierPath* edge = [NSBezierPath bezierPathWithRect:NSInsetRect(region, -0.9, -0.9)];
     edge.lineWidth = 1.4;
     [edge stroke];
-
-    // The move tab.
-    NSBezierPath* tab = [NSBezierPath bezierPathWithRoundedRect:[self tabRect]
-                                                        xRadius:4.0
-                                                        yRadius:4.0];
-    [[NSColor colorWithWhite:0 alpha:0.8] setFill];
-    [tab fill];
-    [[NSColor colorWithWhite:1 alpha:0.95] setStroke];
-    tab.lineWidth = 1.2;
-    [tab stroke];
-    // Grip dots so the tab reads as a handle.
-    [[NSColor colorWithWhite:1 alpha:0.9] setFill];
-    const NSRect tab_rect = [self tabRect];
-    for (int dot = -1; dot <= 1; ++dot) {
-        const NSRect dot_rect =
-            NSMakeRect(NSMidX(tab_rect) + dot * 6.0 - 1.25, NSMidY(tab_rect) - 1.25, 2.5, 2.5);
-        [[NSBezierPath bezierPathWithOvalInRect:dot_rect] fill];
-    }
 }
 
-- (SidescopesDragEdges)zoneAtPoint:(NSPoint)point {
-    if (NSPointInRect(point, [self tabRect])) return SidescopesDragMove;
+- (SidescopesDragEdges)zoneAtPoint:(NSPoint)point withShift:(BOOL)shift {
     const NSRect region = [self regionRect];
     if (NSPointInRect(point, region)) return SidescopesDragEdgeNone;  // click-through anyway
-    SidescopesDragEdges edges = SidescopesDragEdgeNone;
-    if (point.x < NSMinX(region)) edges |= SidescopesDragEdgeLeft;
-    if (point.x > NSMaxX(region)) edges |= SidescopesDragEdgeRight;
-    if (point.y < NSMinY(region)) edges |= SidescopesDragEdgeBottom;
-    if (point.y > NSMaxY(region)) edges |= SidescopesDragEdgeTop;
-    // Near a corner, an edge grab also takes the perpendicular edge, so
-    // corners resize diagonally.
-    const CGFloat corner = 18.0;
-    const bool horizontal = edges & (SidescopesDragEdgeLeft | SidescopesDragEdgeRight);
-    const bool vertical = edges & (SidescopesDragEdgeTop | SidescopesDragEdgeBottom);
-    if (horizontal && !vertical) {
-        if (point.y > NSMaxY(region) - corner)
-            edges |= SidescopesDragEdgeTop;
-        else if (point.y < NSMinY(region) + corner)
-            edges |= SidescopesDragEdgeBottom;
-    } else if (vertical && !horizontal) {
-        if (point.x > NSMaxX(region) - corner)
-            edges |= SidescopesDragEdgeRight;
-        else if (point.x < NSMinX(region) + corner)
-            edges |= SidescopesDragEdgeLeft;
+    const BOOL near_left = point.x < NSMinX(region) + sidescopes::kCornerZone;
+    const BOOL near_right = point.x > NSMaxX(region) - sidescopes::kCornerZone;
+    const BOOL near_bottom = point.y < NSMinY(region) + sidescopes::kCornerZone;
+    const BOOL near_top = point.y > NSMaxY(region) - sidescopes::kCornerZone;
+    if ((near_left || near_right) && (near_top || near_bottom)) {
+        SidescopesDragEdges edges = SidescopesDragEdgeNone;
+        edges |= near_left ? SidescopesDragEdgeLeft : SidescopesDragEdgeRight;
+        edges |= near_bottom ? SidescopesDragEdgeBottom : SidescopesDragEdgeTop;
+        return edges;
     }
-    return edges;
+    if (shift) {
+        if (point.x < NSMinX(region)) return SidescopesDragEdgeLeft;
+        if (point.x > NSMaxX(region)) return SidescopesDragEdgeRight;
+        if (point.y < NSMinY(region)) return SidescopesDragEdgeBottom;
+        return SidescopesDragEdgeTop;
+    }
+    return SidescopesDragMove;
 }
 
-- (void)resetCursorRects {
-    const NSRect region = [self regionRect];
-    const NSRect bounds = self.bounds;
-    [self addCursorRect:[self tabRect] cursor:NSCursor.openHandCursor];
-    [self addCursorRect:NSMakeRect(bounds.origin.x, region.origin.y, sidescopes::kBorderPad,
-                                   region.size.height)
-                 cursor:NSCursor.resizeLeftRightCursor];
-    [self addCursorRect:NSMakeRect(NSMaxX(region), region.origin.y, sidescopes::kBorderPad,
-                                   region.size.height)
-                 cursor:NSCursor.resizeLeftRightCursor];
-    [self addCursorRect:NSMakeRect(region.origin.x, bounds.origin.y, region.size.width,
-                                   sidescopes::kBorderPad)
-                 cursor:NSCursor.resizeUpDownCursor];
-    [self addCursorRect:NSMakeRect(region.origin.x, NSMaxY(region), region.size.width,
-                                   sidescopes::kBorderPad)
-                 cursor:NSCursor.resizeUpDownCursor];
+- (void)updateTrackingAreas {
+    [super updateTrackingAreas];
+    for (NSTrackingArea* area in self.trackingAreas) [self removeTrackingArea:area];
+    NSTrackingArea* tracking = [[NSTrackingArea alloc]
+        initWithRect:NSZeroRect
+             options:NSTrackingMouseMoved | NSTrackingMouseEnteredAndExited |
+                     NSTrackingActiveAlways | NSTrackingInVisibleRect
+               owner:self
+            userInfo:nil];
+    [self addTrackingArea:tracking];
+}
+
+- (void)applyCursorForZone:(SidescopesDragEdges)zone {
+    if (zone == SidescopesDragEdgeNone) {
+        [NSCursor.arrowCursor set];
+        return;
+    }
+    if (zone & SidescopesDragMove) {
+        [NSCursor.openHandCursor set];
+        return;
+    }
+    const BOOL horizontal = (zone & (SidescopesDragEdgeLeft | SidescopesDragEdgeRight)) != 0;
+    const BOOL vertical = (zone & (SidescopesDragEdgeTop | SidescopesDragEdgeBottom)) != 0;
+    if (horizontal && vertical) {
+        if (@available(macOS 15.0, *)) {
+            const BOOL rising =
+                ((zone & SidescopesDragEdgeLeft) != 0) == ((zone & SidescopesDragEdgeBottom) != 0);
+            [[NSCursor frameResizeCursorFromPosition:rising ? NSCursorFrameResizePositionBottomLeft
+                                                            : NSCursorFrameResizePositionBottomRight
+                                        inDirections:NSCursorFrameResizeDirectionsAll] set];
+        } else {
+            [NSCursor.crosshairCursor set];
+        }
+        return;
+    }
+    [horizontal ? NSCursor.resizeLeftRightCursor : NSCursor.resizeUpDownCursor set];
+}
+
+- (void)mouseMoved:(NSEvent*)event {
+    if (self.dragZone != SidescopesDragEdgeNone) return;  // drag owns the cursor
+    const NSPoint local = [self convertPoint:event.locationInWindow fromView:nil];
+    const BOOL shift = (event.modifierFlags & NSEventModifierFlagShift) != 0;
+    [self applyCursorForZone:[self zoneAtPoint:local withShift:shift]];
+}
+
+- (void)mouseExited:(NSEvent*)event {
+    (void)event;
+    if (self.dragZone == SidescopesDragEdgeNone) [NSCursor.arrowCursor set];
 }
 
 - (void)mouseDown:(NSEvent*)event {
     const NSPoint local = [self convertPoint:event.locationInWindow fromView:nil];
-    self.dragZone = [self zoneAtPoint:local];
+    const BOOL shift = (event.modifierFlags & NSEventModifierFlagShift) != 0;
+    self.dragZone = [self zoneAtPoint:local withShift:shift];
     if (self.dragZone == SidescopesDragEdgeNone) return;
+    if (self.dragZone & SidescopesDragMove) [NSCursor.closedHandCursor set];
     self.dragStartMouse = NSEvent.mouseLocation;
     self.dragStartRegion =
         NSInsetRect(self.window.frame, sidescopes::kBorderPad, sidescopes::kBorderPad);
@@ -419,6 +426,7 @@ RegionOfInterest g_border_edit_region;
 - (void)mouseDragged:(NSEvent*)event {
     (void)event;
     if (self.dragZone == SidescopesDragEdgeNone) return;
+    if (self.dragZone & SidescopesDragMove) [NSCursor.closedHandCursor set];
     const NSPoint mouse = NSEvent.mouseLocation;
     const CGFloat dx = mouse.x - self.dragStartMouse.x;
     const CGFloat dy = mouse.y - self.dragStartMouse.y;
@@ -452,9 +460,12 @@ RegionOfInterest g_border_edit_region;
 }
 
 - (void)mouseUp:(NSEvent*)event {
-    (void)event;
+    if (self.dragZone & SidescopesDragMove) [NSCursor.openHandCursor set];
     self.dragZone = SidescopesDragEdgeNone;
     sidescopes::g_border_editing = false;
+    const NSPoint local = [self convertPoint:event.locationInWindow fromView:nil];
+    const BOOL shift = (event.modifierFlags & NSEventModifierFlagShift) != 0;
+    [self applyCursorForZone:[self zoneAtPoint:local withShift:shift]];
 }
 
 // The scoped editor is usually the active application; without this, the

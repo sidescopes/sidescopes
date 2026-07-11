@@ -37,6 +37,9 @@ screen itself, so it works with every editor and needs no plugins.
 | P | pin the color under the cursor |
 | G | toggle the graticule |
 
+The region border is live on the desktop: drag it to move the region,
+drag a corner to resize, and Shift-drag an edge to resize that edge alone.
+
 ## Status
 
 Early development. macOS support lands first; Windows follows; Linux is
