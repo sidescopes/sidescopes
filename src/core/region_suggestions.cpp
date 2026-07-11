@@ -24,24 +24,9 @@ bool PracticallyEqual(const RegionOfInterest& a, const RegionOfInterest& b) {
 
 std::vector<SuggestedRegion> BuildRegionSuggestions(
     const std::vector<RegionCandidate>& photo_candidates, int frame_width, int frame_height,
-    const std::vector<WindowRegion>& windows, const std::vector<RememberedRegion>& remembered,
-    const std::vector<IntRect>& faces) {
+    const std::vector<WindowRegion>& windows, const std::vector<IntRect>& faces) {
     std::vector<SuggestedRegion> suggestions;
     if (frame_width <= 0 || frame_height <= 0) return suggestions;
-
-    // Remembered regions surface only while their application has a window
-    // on screen: a suggestion for an editor that is not even running is
-    // noise.
-    for (const RememberedRegion& entry : remembered) {
-        const bool application_visible = std::any_of(
-            windows.begin(), windows.end(),
-            [&](const WindowRegion& window) { return window.application == entry.application; });
-        if (!application_visible) continue;
-        SuggestedRegion suggestion;
-        suggestion.region = entry.region;
-        suggestion.label = entry.application + " (remembered)";
-        suggestions.push_back(std::move(suggestion));
-    }
 
     const auto push_pixel_rect = [&](const IntRect& rect, const char* label) {
         SuggestedRegion suggestion;

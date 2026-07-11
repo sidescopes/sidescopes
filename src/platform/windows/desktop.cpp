@@ -160,10 +160,6 @@ std::string PreferencesFilePath() {
     return ApplicationDataDirectory() + "\\SideScopes\\preferences.txt";
 }
 
-std::string AppRegionsFilePath() {
-    return ApplicationDataDirectory() + "\\SideScopes\\app_regions.txt";
-}
-
 void OpenScreenRecordingSettings() {
     // Reading the desktop needs no permission on Windows.
 }

@@ -43,53 +43,17 @@ TEST_CASE("Suggestions deduplicate a canvas that fills its window") {
     CHECK(suggestions[0].label == "Area");
 }
 
-TEST_CASE("Suggestions offer remembered regions of visible applications first") {
+TEST_CASE("Suggestions place faces before areas") {
     std::vector<RegionCandidate> candidates{{IntRect{100, 50, 300, 200}, 0.9f}};
     std::vector<WindowRegion> windows{{RegionOfInterest{5.0, 5.0, 60.0, 90.0}, "Lightroom"}};
-    std::vector<RememberedRegion> remembered{
-        {"Lightroom", RegionOfInterest{20.0, 20.0, 55.0, 80.0}},
-        {"Capture One", RegionOfInterest{1.0, 1.0, 40.0, 40.0}},  // not on screen
-    };
-
-    const auto suggestions = BuildRegionSuggestions(candidates, 1000, 500, windows, remembered);
-    REQUIRE(suggestions.size() == 3);
-    CHECK(suggestions[0].label == "Lightroom (remembered)");
-    CHECK(suggestions[0].region.left_percent == 20.0);
-    CHECK(suggestions[1].label == "Area");
-    CHECK(suggestions[2].label == "Lightroom");
-}
-
-TEST_CASE("Suggestions deduplicate a canvas against a remembered region") {
-    // The remembered region is the same photo canvas the detector found;
-    // one suggestion carries the information.
-    std::vector<RegionCandidate> candidates{{IntRect{100, 50, 300, 200}, 0.9f}};
-    std::vector<WindowRegion> windows{{RegionOfInterest{5.0, 5.0, 60.0, 90.0}, "Lightroom"}};
-    std::vector<RememberedRegion> remembered{
-        {"Lightroom", RegionOfInterest{10.2, 9.8, 40.3, 50.1}},
-    };
-
-    const auto suggestions = BuildRegionSuggestions(candidates, 1000, 500, windows, remembered);
-    REQUIRE(suggestions.size() == 2);
-    CHECK(suggestions[0].label == "Lightroom (remembered)");
-    CHECK(suggestions[1].label == "Lightroom");
-}
-
-TEST_CASE("Suggestions place faces between memory and areas") {
-    std::vector<RegionCandidate> candidates{{IntRect{100, 50, 300, 200}, 0.9f}};
-    std::vector<WindowRegion> windows{{RegionOfInterest{5.0, 5.0, 60.0, 90.0}, "Lightroom"}};
-    std::vector<RememberedRegion> remembered{
-        {"Lightroom", RegionOfInterest{20.0, 20.0, 55.0, 80.0}},
-    };
     std::vector<IntRect> faces{{150, 80, 120, 120}};
 
-    const auto suggestions =
-        BuildRegionSuggestions(candidates, 1000, 500, windows, remembered, faces);
-    REQUIRE(suggestions.size() == 4);
-    CHECK(suggestions[0].label == "Lightroom (remembered)");
-    CHECK(suggestions[1].label == "Face");
-    CHECK(suggestions[1].region.left_percent == 15.0);
-    CHECK(suggestions[2].label == "Area");
-    CHECK(suggestions[3].label == "Lightroom");
+    const auto suggestions = BuildRegionSuggestions(candidates, 1000, 500, windows, faces);
+    REQUIRE(suggestions.size() == 3);
+    CHECK(suggestions[0].label == "Face");
+    CHECK(suggestions[0].region.left_percent == 15.0);
+    CHECK(suggestions[1].label == "Area");
+    CHECK(suggestions[2].label == "Lightroom");
 }
 
 TEST_CASE("Suggestions survive a missing frame") {

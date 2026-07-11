@@ -20,7 +20,6 @@ struct Preferences {
     float waveform_smoothing_ms = 100.0f;
     ChromaMatrix matrix = ChromaMatrix::Bt601;
     WaveformMode waveform_mode = WaveformMode::Rgb;
-    RegionOfInterest region;
     // Bit set of scopes stacked in the window: 1 vectorscope, 2 waveform,
     // 4 histogram. At least one bit is always set.
     int visible_scopes = 1;

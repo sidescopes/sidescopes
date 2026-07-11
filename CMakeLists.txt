@@ -42,7 +42,6 @@ add_library(sidescopes_core STATIC
     src/core/analysis_worker.cpp
     src/core/photo_region_detector.cpp
     src/core/preferences.cpp
-    src/core/app_region_memory.cpp
     src/core/region_suggestions.cpp
     src/core/scopes/vectorscope.cpp
     src/core/scopes/waveform.cpp

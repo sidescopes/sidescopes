@@ -45,9 +45,6 @@ std::optional<DisplayGeometry> GeometryOfDisplay(uint32_t display_id);
 // Preferences file location in the platform's convention.
 std::string PreferencesFilePath();
 
-// Per-application remembered regions, next to the preferences.
-std::string AppRegionsFilePath();
-
 // Opens the operating system's screen-recording permission pane, as deep
 // as the platform allows. A no-op where capture needs no permission.
 void OpenScreenRecordingSettings();

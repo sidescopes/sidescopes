@@ -21,7 +21,6 @@ TEST_CASE("Preferences round-trip through a file") {
     saved.vectorscope_smoothing_ms = 60.0f;
     saved.matrix = ChromaMatrix::Bt709;
     saved.waveform_mode = WaveformMode::RgbAndLuma;
-    saved.region = RegionOfInterest{10.0, 20.0, 80.0, 90.0};
     saved.visible_scopes = 5;  // vectorscope + histogram
     saved.show_graticule = false;
     saved.values_as_percent = false;
@@ -38,8 +37,6 @@ TEST_CASE("Preferences round-trip through a file") {
     CHECK(loaded.vectorscope_smoothing_ms == saved.vectorscope_smoothing_ms);
     CHECK(loaded.matrix == ChromaMatrix::Bt709);
     CHECK(loaded.waveform_mode == WaveformMode::RgbAndLuma);
-    CHECK(loaded.region.left_percent == 10.0);
-    CHECK(loaded.region.bottom_percent == 90.0);
     CHECK(loaded.visible_scopes == 5);
     CHECK_FALSE(loaded.show_graticule);
     CHECK_FALSE(loaded.values_as_percent);
@@ -53,7 +50,6 @@ TEST_CASE("Preferences default when the file is missing") {
     const Preferences loaded = LoadPreferences(TemporaryFile("does-not-exist.txt"));
     CHECK(loaded.vectorscope_gain == 3.0f);
     CHECK(loaded.waveform_gain == 0.05f);
-    CHECK(loaded.region.right_percent == 100.0);
     CHECK(loaded.show_graticule);
 }
 

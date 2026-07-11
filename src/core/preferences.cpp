@@ -32,10 +32,6 @@ Preferences LoadPreferences(const std::filesystem::path& file) {
         if (const auto found = values.find(key); found != values.end())
             out = std::strtof(found->second.c_str(), nullptr);
     };
-    const auto read_double = [&](const char* key, double& out) {
-        if (const auto found = values.find(key); found != values.end())
-            out = std::strtod(found->second.c_str(), nullptr);
-    };
     const auto read_int = [&](const char* key, int& out) {
         if (const auto found = values.find(key); found != values.end())
             out = static_cast<int>(std::strtol(found->second.c_str(), nullptr, 10));
@@ -59,10 +55,6 @@ Preferences LoadPreferences(const std::filesystem::path& file) {
     read_int("waveform_mode", waveform_mode);
     if (waveform_mode >= 0 && waveform_mode <= 3)
         preferences.waveform_mode = static_cast<WaveformMode>(waveform_mode);
-    read_double("region_left", preferences.region.left_percent);
-    read_double("region_top", preferences.region.top_percent);
-    read_double("region_right", preferences.region.right_percent);
-    read_double("region_bottom", preferences.region.bottom_percent);
     // Older builds stored a single view mode; map it onto the bit set.
     int legacy_view_mode = -1;
     read_int("view_mode", legacy_view_mode);
@@ -97,10 +89,6 @@ bool SavePreferences(const Preferences& preferences, const std::filesystem::path
         << "waveform_smoothing_ms=" << preferences.waveform_smoothing_ms << '\n'
         << "matrix=" << (preferences.matrix == ChromaMatrix::Bt709 ? 1 : 0) << '\n'
         << "waveform_mode=" << static_cast<int>(preferences.waveform_mode) << '\n'
-        << "region_left=" << preferences.region.left_percent << '\n'
-        << "region_top=" << preferences.region.top_percent << '\n'
-        << "region_right=" << preferences.region.right_percent << '\n'
-        << "region_bottom=" << preferences.region.bottom_percent << '\n'
         << "visible_scopes=" << preferences.visible_scopes << '\n'
         << "show_graticule=" << (preferences.show_graticule ? 1 : 0) << '\n'
         << "values_as_percent=" << (preferences.values_as_percent ? 1 : 0) << '\n'

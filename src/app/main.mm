@@ -28,7 +28,6 @@
 #include <thread>
 
 #include "core/analysis_worker.h"
-#include "core/app_region_memory.h"
 #include "core/frame_mailbox.h"
 #include "core/marker_smoother.h"
 #include "core/photo_region_detector.h"
@@ -335,7 +334,6 @@ int main() {
     if (!glfwInit()) return 1;
 
     const Preferences startup = LoadPreferences(PreferencesFilePath());
-    AppRegionMemory app_regions = AppRegionMemory::Load(AppRegionsFilePath());
 
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
     glfwWindowHint(GLFW_FLOATING, GLFW_TRUE);
@@ -420,7 +418,6 @@ int main() {
     analysis.waveform.mode = startup.waveform_mode;
     analysis.histogram.gain = startup.histogram_gain;
     analysis.histogram.sampling_stride = startup.histogram_stride;
-    analysis.region = startup.region;
     bool analysis_dirty = true;
 
     float vectorscope_intensity = IntensityFromTraceGain(analysis.vectorscope.gain);
@@ -449,7 +446,6 @@ int main() {
     // and previews the indicated region on the scopes; cancelling resets
     // to the full screen.
     bool region_picking = false;
-    std::vector<WindowRegion> pick_window_regions;
 
     // Projection-only engine instances kept in sync with the analysis
     // settings; they never accumulate, they only place overlays and markers.
@@ -522,7 +518,6 @@ int main() {
         preferences.waveform_mode = analysis.waveform.mode;
         preferences.histogram_gain = analysis.histogram.gain;
         preferences.histogram_stride = analysis.histogram.sampling_stride;
-        preferences.region = analysis.region;
         preferences.visible_scopes =
             (show_vectorscope ? 1 : 0) | (show_waveform ? 2 : 0) | (show_histogram ? 4 : 0);
         preferences.show_graticule = show_graticule;
@@ -1171,9 +1166,8 @@ int main() {
                     window_regions.push_back(std::move(region));
                 }
             }
-            const auto suggestions =
-                BuildRegionSuggestions(photo_candidates, detect_width, detect_height,
-                                       window_regions, app_regions.All(), face_rects);
+            const auto suggestions = BuildRegionSuggestions(
+                photo_candidates, detect_width, detect_height, window_regions, face_rects);
             // Field diagnosis: dump exactly what the pipeline saw. Enable
             // with `launchctl setenv SIDESCOPES_DEBUG_SUGGESTIONS 1`.
             if (std::getenv("SIDESCOPES_DEBUG_SUGGESTIONS")) {
@@ -1214,10 +1208,8 @@ int main() {
                     std::fclose(image);
                 });
             }
-            if (BeginRegionPick(capture_display, suggestions, *want_region_pick)) {
+            if (BeginRegionPick(capture_display, suggestions, *want_region_pick))
                 region_picking = true;
-                pick_window_regions = window_regions;
-            }
             last_activity = glfwGetTime();
         }
 
@@ -1252,42 +1244,10 @@ int main() {
                 region_picking = false;
                 if (poll.confirmed) {
                     apply_region(*poll.confirmed);
-                    // Remember the region for the application it most
-                    // belongs to: the frontmost window covering most of it.
-                    // Returning to that editor re-offers it.
-                    const RegionOfInterest& region = *poll.confirmed;
-                    const double region_width = region.right_percent - region.left_percent;
-                    const double region_height = region.bottom_percent - region.top_percent;
-                    const bool practically_full = region_width >= 99.0 && region_height >= 99.0;
-                    const WindowRegion* owner = nullptr;
-                    double best_coverage = 0.5;  // less than half inside is nobody's
-                    for (const WindowRegion& window : pick_window_regions) {
-                        const double left =
-                            std::max(region.left_percent, window.region.left_percent);
-                        const double top = std::max(region.top_percent, window.region.top_percent);
-                        const double right =
-                            std::min(region.right_percent, window.region.right_percent);
-                        const double bottom =
-                            std::min(region.bottom_percent, window.region.bottom_percent);
-                        if (right <= left || bottom <= top) continue;
-                        const double coverage =
-                            (right - left) * (bottom - top) / (region_width * region_height);
-                        if (coverage > best_coverage) {
-                            best_coverage = coverage;
-                            owner = &window;
-                        }
-                    }
-                    if (owner && !practically_full) {
-                        app_regions.Remember(owner->application, region);
-                        if (!app_regions.Save(AppRegionsFilePath())) {
-                            std::fprintf(stderr, "sidescopes: could not save app regions\n");
-                        }
-                    }
                 } else {
                     // Cancelled: reset all drawing, pending and confirmed.
                     apply_region(RegionOfInterest{});
                 }
-                pick_window_regions.clear();
                 sync_region_border();
                 last_activity = glfwGetTime();
             }
