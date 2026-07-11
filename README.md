@@ -29,13 +29,13 @@ screen itself, so it works with every editor and needs no plugins.
 
 | Key | Action |
 | --- | ------ |
-| V / W / H | show the vectorscope / waveform / histogram alone |
-| Shift+V / W / H | stack or unstack a scope |
+| V / W / L / R / H | show one scope alone: vectorscope, RGB waveform, luma waveform, RGB parade, histogram |
+| Shift+V / W / L / R / H | stack or unstack a scope; panes follow the order they were turned on |
 | A | pick a window |
+| F | pick a face (macOS) |
 | D | draw an area |
-| F | scope the full screen |
+| Esc | reset to the full screen |
 | P | pin the color under the cursor |
-| G | toggle the graticule |
 
 The region border is live on the desktop: drag it to move the region,
 drag a corner to resize, and Shift-drag an edge to resize that edge alone.

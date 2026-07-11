@@ -35,6 +35,7 @@
 #include "core/scopes/graticule.h"
 #include "core/trace_intensity.h"
 #include "platform/desktop.h"
+#include "platform/face_detection.h"
 #include "platform/native_menu.h"
 #include "platform/region_selection.h"
 #include "platform/screen_capture.h"
@@ -249,7 +250,7 @@ bool ScopeToggleButton(const char* id, const char* letter, bool enabled, const c
 // for picking a window (the pick-mode hover cursor), a crosshair
 // for drawing one (the draw-mode cursor), expanding arrows for full
 // screen.
-enum class RegionIcon { PickHand, Crosshair, Expand };
+enum class RegionIcon { PickHand, Crosshair, Face, Expand };
 
 bool IconButton(const char* id, RegionIcon icon, const char* tooltip) {
     const float height = ImGui::GetTextLineHeight() + 4.0f;
@@ -296,6 +297,17 @@ bool IconButton(const char* id, RegionIcon icon, const char* tooltip) {
         beam(0.0f, 1.0f);
         beam(-1.0f, 0.0f);
         beam(1.0f, 0.0f);
+    } else if (icon == RegionIcon::Face) {
+        // A face: head outline, two eyes, a smile arc.
+        draw->AddCircle(center, 7.5f, color, 0, 1.4f);
+        draw->AddCircleFilled(ImVec2(center.x - 2.8f, center.y - 2.0f), 1.1f, color);
+        draw->AddCircleFilled(ImVec2(center.x + 2.8f, center.y - 2.0f), 1.1f, color);
+        ImVec2 smile[5];
+        for (int i = 0; i < 5; ++i) {
+            const float angle = (0.30f + 0.10f * i) * 3.14159265f;
+            smile[i] = ImVec2(center.x + 4.2f * std::cos(angle), center.y + 4.2f * std::sin(angle));
+        }
+        draw->AddPolyline(smile, 5, color, ImDrawFlags_None, 1.4f);
     } else {
         // Two arrows expanding to opposite corners, the fullscreen idiom.
         const auto arrow = [&](ImVec2 from, ImVec2 to, float head_x, float head_y) {
@@ -507,6 +519,7 @@ int main() {
     ScopeTexture histogram_texture(device, Histogram::kBins, Histogram::kHeight);
 
     worker.Start();
+    WarmFaceDetection();
 
     uint64_t output_version = 0;
     AnalysisWorker::Output output;
@@ -749,14 +762,10 @@ int main() {
             if (ImGui::IsKeyPressed(ImGuiKey_H, false))
                 choose_scope(ScopeGlyph::Histogram, io.KeyShift);
             if (ImGui::IsKeyPressed(ImGuiKey_A, false))
-                want_region_pick = RegionPickerMode::PickDetected;
+                want_region_pick = RegionPickerMode::PickWindows;
             if (ImGui::IsKeyPressed(ImGuiKey_D, false)) want_region_pick = RegionPickerMode::Draw;
-            if (ImGui::IsKeyPressed(ImGuiKey_F, false)) {
-                CancelRegionPick();
-                analysis.region = RegionOfInterest{};
-                analysis_dirty = true;
-            }
-            if (ImGui::IsKeyPressed(ImGuiKey_G, false)) show_graticule = !show_graticule;
+            if (SupportsFaceDetection() && ImGui::IsKeyPressed(ImGuiKey_F, false))
+                want_region_pick = RegionPickerMode::PickFaces;
             if (ImGui::IsKeyPressed(ImGuiKey_P, false)) pin_cursor_color(vectorscope_color);
             if (ImGui::IsKeyPressed(ImGuiKey_Escape, false)) {
                 // Esc resets all selection: a pending pick and the drawn
@@ -769,13 +778,18 @@ int main() {
         }
 
         if (IconButton("##pick-region", RegionIcon::PickHand, "Pick a window (A)"))
-            want_region_pick = RegionPickerMode::PickDetected;
+            want_region_pick = RegionPickerMode::PickWindows;
         ImGui::SameLine(0.0f, 2.0f);
         if (IconButton("##draw-region", RegionIcon::Crosshair, "Draw an area (D)"))
             want_region_pick = RegionPickerMode::Draw;
         ImGui::SameLine(0.0f, 2.0f);
+        if (SupportsFaceDetection()) {
+            if (IconButton("##pick-face", RegionIcon::Face, "Pick a face (F)"))
+                want_region_pick = RegionPickerMode::PickFaces;
+            ImGui::SameLine(0.0f, 2.0f);
+        }
         if (!is_full_region()) {
-            if (IconButton("##full-region", RegionIcon::Expand, "Reset to full screen (F)")) {
+            if (IconButton("##full-region", RegionIcon::Expand, "Reset to full screen (Esc)")) {
                 CancelRegionPick();
                 analysis.region = RegionOfInterest{};
                 analysis_dirty = true;
@@ -1044,7 +1058,7 @@ int main() {
                     analysis_dirty = true;
                     break;
                 case kMenuSelectRegion:
-                    want_region_pick = RegionPickerMode::PickDetected;
+                    want_region_pick = RegionPickerMode::PickWindows;
                     break;
                 case kMenuFullScreenRegion:
                     analysis.region = RegionOfInterest{};
@@ -1154,10 +1168,12 @@ int main() {
                     std::this_thread::sleep_for(std::chrono::milliseconds(15));
                 }
             }
-            // The offer: the visible application windows, frontmost first.
-            // Window rectangles come from the operating system and are
-            // exact - the picker offers nothing it could be wrong about.
+            // The offer: the visible application windows, frontmost first
+            // - window rectangles come from the operating system and are
+            // exact - plus, behind their own key, the faces the platform
+            // detector finds in the current frame.
             std::vector<WindowRegion> window_regions;
+            std::vector<SuggestedRegion> face_suggestions;
             if (const auto geometry = GeometryOfDisplay(capture_display)) {
                 // Frontmost windows only, skipping ones mostly hidden behind
                 // fronter windows: the user is not scoping what they cannot
@@ -1228,6 +1244,15 @@ int main() {
                     window_regions.push_back(std::move(region));
                 }
             }
+            if (SupportsFaceDetection()) {
+                worker.WithLatestFrame([&](const FrameView& view) {
+                    const auto geometry = GeometryOfDisplay(capture_display);
+                    const float pixels_per_point =
+                        geometry ? static_cast<float>(view.width / geometry->width_points) : 1.0f;
+                    face_suggestions = BuildFaceSuggestions(DetectFaces(view, pixels_per_point),
+                                                            view.width, view.height);
+                });
+            }
             const auto suggestions = BuildRegionSuggestions(window_regions);
             // Field diagnosis: dump exactly what the pipeline saw. Enable
             // with `launchctl setenv SIDESCOPES_DEBUG_SUGGESTIONS 1`.
@@ -1261,7 +1286,7 @@ int main() {
                     std::fclose(image);
                 });
             }
-            if (BeginRegionPick(capture_display, suggestions, *want_region_pick))
+            if (BeginRegionPick(capture_display, suggestions, face_suggestions, *want_region_pick))
                 region_picking = true;
             last_activity = glfwGetTime();
         }

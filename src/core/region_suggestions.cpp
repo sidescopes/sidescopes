@@ -37,4 +37,33 @@ std::vector<SuggestedRegion> BuildRegionSuggestions(const std::vector<WindowRegi
     return suggestions;
 }
 
+std::vector<SuggestedRegion> BuildFaceSuggestions(const std::vector<IntRect>& faces,
+                                                  int frame_width, int frame_height) {
+    // The inward shrink per side: enough to shed hair and background at
+    // the box edges without losing the cheeks.
+    constexpr double kInsetFraction = 0.1;
+
+    std::vector<SuggestedRegion> suggestions;
+    if (frame_width <= 0 || frame_height <= 0) return suggestions;
+    for (const IntRect& face : faces) {
+        const double inset_x = face.width * kInsetFraction;
+        const double inset_y = face.height * kInsetFraction;
+        SuggestedRegion suggestion;
+        suggestion.region.left_percent = (face.x + inset_x) * 100.0 / frame_width;
+        suggestion.region.top_percent = (face.y + inset_y) * 100.0 / frame_height;
+        suggestion.region.right_percent = (face.x + face.width - inset_x) * 100.0 / frame_width;
+        suggestion.region.bottom_percent = (face.y + face.height - inset_y) * 100.0 / frame_height;
+        suggestion.label = "Face";
+        bool duplicate = false;
+        for (const SuggestedRegion& existing : suggestions) {
+            if (PracticallyEqual(existing.region, suggestion.region)) {
+                duplicate = true;
+                break;
+            }
+        }
+        if (!duplicate) suggestions.push_back(std::move(suggestion));
+    }
+    return suggestions;
+}
+
 }  // namespace sidescopes

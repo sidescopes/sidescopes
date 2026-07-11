@@ -9,9 +9,9 @@
 namespace sidescopes {
 
 // How the region picker starts out. The mode is chosen up front by the
-// toolbar button (or key) that opened the picker; inside it, A and D
-// switch between picking and drawing.
-enum class RegionPickerMode { PickDetected, Draw };
+// toolbar button (or key) that opened the picker; inside it, A, D, and F
+// switch between window picking, drawing, and face picking.
+enum class RegionPickerMode { PickWindows, Draw, PickFaces };
 
 // One poll of the asynchronous picker. `preview` is whatever the user is
 // currently indicating - the hovered suggestion, the drag in progress, or
@@ -38,8 +38,8 @@ struct RegionPickPoll {
 // application keeps running its frame loop (which also pumps the
 // overlay's events), and PollRegionPick is read once per frame so the
 // scopes can preview the selection before it is confirmed.
-bool BeginRegionPick(uint32_t display_id, const std::vector<SuggestedRegion>& suggestions,
-                     RegionPickerMode initial_mode);
+bool BeginRegionPick(uint32_t display_id, const std::vector<SuggestedRegion>& windows,
+                     const std::vector<SuggestedRegion>& faces, RegionPickerMode initial_mode);
 RegionPickPoll PollRegionPick();
 
 // Cancels an active pick as if ESC had been pressed on the overlay.

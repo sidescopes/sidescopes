@@ -25,4 +25,10 @@ struct WindowRegion {
 // could be wrong about.
 std::vector<SuggestedRegion> BuildRegionSuggestions(const std::vector<WindowRegion>& windows);
 
+// Face rectangles (frame pixels) as picker suggestions. The detector's box
+// is shrunk inward: scoping a face means judging skin, and edge pixels are
+// hair and background that skew the vectorscope's skin cluster.
+std::vector<SuggestedRegion> BuildFaceSuggestions(const std::vector<IntRect>& faces,
+                                                  int frame_width, int frame_height);
+
 }  // namespace sidescopes

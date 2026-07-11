@@ -33,4 +33,22 @@ TEST_CASE("Suggestions survive an empty desktop") {
     CHECK(BuildRegionSuggestions({}).empty());
 }
 
+TEST_CASE("Face suggestions shrink the detector box inward") {
+    // A 200x200 face at 100,100 in a 1000x500 frame, 10 percent inset per
+    // side: skin, not hair and background.
+    const auto suggestions = BuildFaceSuggestions({IntRect{100, 100, 200, 200}}, 1000, 500);
+    REQUIRE(suggestions.size() == 1);
+    CHECK(suggestions[0].label == "Face");
+    CHECK(suggestions[0].region.left_percent == 12.0);
+    CHECK(suggestions[0].region.right_percent == 28.0);
+    CHECK(suggestions[0].region.top_percent == 24.0);
+    CHECK(suggestions[0].region.bottom_percent == 56.0);
+}
+
+TEST_CASE("Face suggestions deduplicate overlapping detections") {
+    const auto suggestions =
+        BuildFaceSuggestions({IntRect{100, 100, 200, 200}, IntRect{102, 99, 201, 202}}, 1000, 500);
+    CHECK(suggestions.size() == 1);
+}
+
 }  // namespace sidescopes

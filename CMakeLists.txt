@@ -54,6 +54,7 @@ if(APPLE)
     enable_language(OBJCXX)
     add_library(sidescopes_platform STATIC
         src/platform/macos/desktop.mm
+        src/platform/macos/face_detection.mm
         src/platform/macos/native_menu.mm
         src/platform/macos/region_selection.mm
         src/platform/macos/screen_capture.mm
@@ -158,6 +159,7 @@ if(WIN32)
     # itself.
     add_library(sidescopes_platform STATIC
         src/platform/windows/desktop.cpp
+        src/platform/windows/face_detection.cpp
         src/platform/windows/screen_capture.cpp
     )
     target_include_directories(sidescopes_platform PUBLIC src)

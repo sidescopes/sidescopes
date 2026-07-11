@@ -70,13 +70,19 @@ RegionOfInterest g_border_edit_region;
 
 @interface SidescopesPickerView : NSView {
 @public
-    // Suggested rectangles in view coordinates, with their labels.
+    // The active suggestion list in view coordinates, with labels - the
+    // windows or the faces, depending on the mode.
     std::vector<std::pair<NSRect, std::string>> suggestions_;
+    std::vector<std::pair<NSRect, std::string>> windows_;
+    std::vector<std::pair<NSRect, std::string>> faces_;
     // This application's own windows, in view coordinates: undimmed and
     // truly transparent, so clicks fall through to them.
     std::vector<NSRect> exclusions_;
 }
+// NO = suggestion picking (windows or faces), YES = drag to draw.
 @property(nonatomic, assign) BOOL drawMode;
+// In picking mode: whether the face list is active instead of windows.
+@property(nonatomic, assign) BOOL facesMode;
 @property(nonatomic, assign) NSPoint dragStart;
 @property(nonatomic, assign) NSPoint dragCurrent;
 @property(nonatomic, assign) BOOL dragging;
@@ -88,10 +94,16 @@ RegionOfInterest g_border_edit_region;
 
 @implementation SidescopesPickerView
 
-- (void)switchToDrawMode:(BOOL)draw {
-    if (self.drawMode == draw) return;
-    if (!draw && suggestions_.empty()) return;  // nothing to pick from
+// 0 = pick a window, 1 = draw, 2 = pick a face. Face mode is offered
+// even when no face was found: the honest answer is the empty overlay
+// saying so, not a key that silently does nothing.
+- (void)switchToMode:(int)mode {
+    const BOOL draw = mode == 1;
+    const BOOL faces = mode == 2;
+    if (self.drawMode == draw && self.facesMode == faces) return;
     self.drawMode = draw;
+    self.facesMode = faces;
+    suggestions_ = faces ? faces_ : windows_;
     self.hoveredSuggestion = -1;
     self.dragging = NO;
     [self.window invalidateCursorRectsForView:self];
@@ -161,7 +173,15 @@ RegionOfInterest g_border_edit_region;
             [label drawAtPoint:NSMakePoint(hovered.first.origin.x + 6, NSMaxY(hovered.first) - 20)
                 withAttributes:label_attributes];
         }
-        hint = @"Click a window  -  D to draw instead  -  Esc resets to full screen";
+        if (self.facesMode) {
+            hint = suggestions_.empty()
+                       ? @"No faces found  -  A picks a window, D draws  -  Esc resets"
+                       : @"Click a face  -  A picks a window, D draws  -  Esc resets";
+        } else {
+            hint = faces_.empty()
+                       ? @"Click a window  -  D to draw instead  -  Esc resets to full screen"
+                       : @"Click a window  -  F picks a face, D draws  -  Esc resets";
+        }
     } else {
         [[NSColor colorWithWhite:0 alpha:0.35] setFill];
         NSRectFillUsingOperation(self.bounds, NSCompositingOperationSourceOver);
@@ -173,9 +193,9 @@ RegionOfInterest g_border_edit_region;
             border.lineWidth = 1.5;
             [border stroke];
         }
-        hint = suggestions_.empty() ? @"Drag to select an area  -  Esc resets to full screen"
-                                    : @"Drag to select an area  -  A to pick a detected one  -  "
-                                      @"Esc resets to full screen";
+        hint = windows_.empty() ? @"Drag to select an area  -  Esc resets to full screen"
+                                : @"Drag to select an area  -  A picks a window  -  "
+                                  @"Esc resets to full screen";
     }
 
     if (!self.dragging) {
@@ -262,11 +282,15 @@ RegionOfInterest g_border_edit_region;
     if (keys.length == 1) {
         const unichar key = [keys characterAtIndex:0];
         if (key == 'a' || key == 'A') {
-            [self switchToDrawMode:NO];
+            [self switchToMode:0];
             return;
         }
         if (key == 'd' || key == 'D') {
-            [self switchToDrawMode:YES];
+            [self switchToMode:1];
+            return;
+        }
+        if (key == 'f' || key == 'F') {
+            [self switchToMode:2];
             return;
         }
     }
@@ -495,8 +519,8 @@ NSRect RegionToViewRect(const RegionOfInterest& region, NSSize view_size) {
 
 }  // namespace
 
-bool BeginRegionPick(uint32_t display_id, const std::vector<SuggestedRegion>& suggestions,
-                     RegionPickerMode initial_mode) {
+bool BeginRegionPick(uint32_t display_id, const std::vector<SuggestedRegion>& windows,
+                     const std::vector<SuggestedRegion>& faces, RegionPickerMode initial_mode) {
     if (g_picker_view) return false;  // one picker at a time
     NSScreen* screen = ScreenForDisplay(display_id);
 
@@ -515,9 +539,12 @@ bool BeginRegionPick(uint32_t display_id, const std::vector<SuggestedRegion>& su
         [[SidescopesPickerView alloc] initWithFrame:overlay.contentView.bounds];
     view.hoveredSuggestion = -1;
     const NSSize view_size = screen.frame.size;
-    for (const SuggestedRegion& suggestion : suggestions) {
-        view->suggestions_.emplace_back(RegionToViewRect(suggestion.region, view_size),
-                                        suggestion.label);
+    for (const SuggestedRegion& suggestion : windows) {
+        view->windows_.emplace_back(RegionToViewRect(suggestion.region, view_size),
+                                    suggestion.label);
+    }
+    for (const SuggestedRegion& suggestion : faces) {
+        view->faces_.emplace_back(RegionToViewRect(suggestion.region, view_size), suggestion.label);
     }
     // This application's own visible windows stay reachable through the
     // overlay: the toolbar keeps working while picking.
@@ -528,7 +555,15 @@ bool BeginRegionPick(uint32_t display_id, const std::vector<SuggestedRegion>& su
                                                frame.origin.y - screen.frame.origin.y,
                                                frame.size.width, frame.size.height));
     }
-    view.drawMode = initial_mode == RegionPickerMode::Draw || suggestions.empty();
+    if (initial_mode == RegionPickerMode::Draw ||
+        (initial_mode == RegionPickerMode::PickWindows && windows.empty())) {
+        view.drawMode = YES;
+    } else if (initial_mode == RegionPickerMode::PickFaces) {
+        view.facesMode = YES;
+        view->suggestions_ = view->faces_;
+    } else {
+        view->suggestions_ = view->windows_;
+    }
     overlay.contentView = view;
     overlay.acceptsMouseMovedEvents = YES;
 
@@ -590,7 +625,9 @@ void CancelRegionPick() {
 
 void SetRegionPickMode(RegionPickerMode mode) {
     if (!g_picker_view) return;
-    [g_picker_view switchToDrawMode:(mode == RegionPickerMode::Draw)];
+    [g_picker_view switchToMode:(mode == RegionPickerMode::Draw        ? 1
+                                 : mode == RegionPickerMode::PickFaces ? 2
+                                                                       : 0)];
 }
 
 void ShowRegionBorder(uint32_t display_id, const RegionOfInterest& region) {
