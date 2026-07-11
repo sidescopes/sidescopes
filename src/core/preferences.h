@@ -1,6 +1,7 @@
 #pragma once
 
 #include <filesystem>
+#include <string>
 
 #include "core/analysis_worker.h"
 
@@ -19,10 +20,10 @@ struct Preferences {
     float vectorscope_smoothing_ms = 75.0f;
     float waveform_smoothing_ms = 100.0f;
     ChromaMatrix matrix = ChromaMatrix::Bt601;
-    WaveformMode waveform_mode = WaveformMode::Rgb;
-    // Bit set of scopes stacked in the window: 1 vectorscope, 2 waveform,
-    // 4 histogram. At least one bit is always set.
-    int visible_scopes = 1;
+    // The scopes on screen, one letter each in stacking order: V
+    // vectorscope, W RGB waveform, L luma waveform, R RGB parade, H
+    // histogram. Never empty.
+    std::string scope_stack = "V";
     bool show_graticule = true;
     bool values_as_percent = true;
     int window_x = -1;  // negative: let the system place the window

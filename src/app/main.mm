@@ -48,11 +48,9 @@ using namespace sidescopes;
 enum MenuAction {
     kMenuShowVectorscope = 1,
     kMenuShowWaveform,
+    kMenuShowWaveformLuma,
+    kMenuShowWaveformParade,
     kMenuShowHistogram,
-    kMenuWaveformLuma = 10,
-    kMenuWaveformRgb,
-    kMenuWaveformRgbAndLuma,
-    kMenuWaveformParade,
     kMenuMatrixBt601 = 20,
     kMenuMatrixBt709,
     kMenuSelectRegion = 30,
@@ -192,7 +190,40 @@ void DrawLevelMarker(const DrawnScope& scope, float normalized_y, ImU32 color) {
 
 // Toolbar icon buttons drawn with the draw list: corner brackets for region
 // selection, an outline rectangle for full screen.
-enum class ScopeGlyph { Vectorscope, Waveform, Histogram };
+enum class ScopeGlyph { Vectorscope, WaveformRgb, WaveformLuma, WaveformParade, Histogram };
+
+// Letter chips and preference letters share one alphabet.
+constexpr char ScopeLetter(ScopeGlyph kind) {
+    switch (kind) {
+        case ScopeGlyph::Vectorscope:
+            return 'V';
+        case ScopeGlyph::WaveformRgb:
+            return 'W';
+        case ScopeGlyph::WaveformLuma:
+            return 'L';
+        case ScopeGlyph::WaveformParade:
+            return 'R';
+        case ScopeGlyph::Histogram:
+            return 'H';
+    }
+    return 'V';
+}
+
+constexpr uint32_t ScopeEnableBit(ScopeGlyph kind) {
+    switch (kind) {
+        case ScopeGlyph::Vectorscope:
+            return kScopeVectorscope;
+        case ScopeGlyph::WaveformRgb:
+            return kScopeWaveformRgb;
+        case ScopeGlyph::WaveformLuma:
+            return kScopeWaveformLuma;
+        case ScopeGlyph::WaveformParade:
+            return kScopeWaveformParade;
+        case ScopeGlyph::Histogram:
+            return kScopeHistogram;
+    }
+    return kScopeVectorscope;
+}
 
 // Scope toggles are letter chips: professional tools label scopes with
 // text because no icon language exists for them, and the letters double
@@ -415,7 +446,6 @@ int main() {
     analysis.vectorscope.matrix = startup.matrix;
     analysis.waveform.gain = startup.waveform_gain;
     analysis.waveform.sampling_stride = startup.waveform_stride;
-    analysis.waveform.mode = startup.waveform_mode;
     analysis.histogram.gain = startup.histogram_gain;
     analysis.histogram.sampling_stride = startup.histogram_stride;
     bool analysis_dirty = true;
@@ -425,9 +455,25 @@ int main() {
     float histogram_intensity = IntensityFromTraceGain(analysis.histogram.gain);
     float vectorscope_smoothing_ms = startup.vectorscope_smoothing_ms;
     float waveform_smoothing_ms = startup.waveform_smoothing_ms;
-    bool show_vectorscope = (startup.visible_scopes & 1) != 0;
-    bool show_waveform = (startup.visible_scopes & 2) != 0;
-    bool show_histogram = (startup.visible_scopes & 4) != 0;
+    // The scopes on screen, in activation order: the pane you turned on
+    // last stacks after the ones already up.
+    std::vector<ScopeGlyph> scope_stack;
+    for (const char letter : startup.scope_stack) {
+        for (const ScopeGlyph kind :
+             {ScopeGlyph::Vectorscope, ScopeGlyph::WaveformRgb, ScopeGlyph::WaveformLuma,
+              ScopeGlyph::WaveformParade, ScopeGlyph::Histogram}) {
+            if (ScopeLetter(kind) == letter) scope_stack.push_back(kind);
+        }
+    }
+    if (scope_stack.empty()) scope_stack.push_back(ScopeGlyph::Vectorscope);
+    const auto scope_shown = [&](ScopeGlyph kind) {
+        return std::find(scope_stack.begin(), scope_stack.end(), kind) != scope_stack.end();
+    };
+    const auto sync_enabled_scopes = [&] {
+        analysis.enabled_scopes = 0;
+        for (const ScopeGlyph kind : scope_stack) analysis.enabled_scopes |= ScopeEnableBit(kind);
+    };
+    sync_enabled_scopes();
     bool show_graticule = startup.show_graticule;
     bool values_as_percent = startup.values_as_percent;
     bool show_settings = false;
@@ -451,12 +497,15 @@ int main() {
     // settings; they never accumulate, they only place overlays and markers.
     Vectorscope projection_vectorscope;
     Waveform projection_waveform;
+    Waveform projection_waveform_luma;
 
     MarkerSmoother vectorscope_marker;
     MarkerSmoother waveform_marker;
 
     ScopeTexture vectorscope_texture(device, Vectorscope::kSize, Vectorscope::kSize);
     ScopeTexture waveform_texture(device, Waveform::kColumns, Waveform::kLevels);
+    ScopeTexture waveform_luma_texture(device, Waveform::kColumns, Waveform::kLevels);
+    ScopeTexture waveform_parade_texture(device, Waveform::kColumns, Waveform::kLevels);
     ScopeTexture histogram_texture(device, Histogram::kBins, Histogram::kHeight);
 
     worker.Start();
@@ -515,11 +564,10 @@ int main() {
         preferences.vectorscope_smoothing_ms = vectorscope_smoothing_ms;
         preferences.waveform_smoothing_ms = waveform_smoothing_ms;
         preferences.matrix = analysis.vectorscope.matrix;
-        preferences.waveform_mode = analysis.waveform.mode;
         preferences.histogram_gain = analysis.histogram.gain;
         preferences.histogram_stride = analysis.histogram.sampling_stride;
-        preferences.visible_scopes =
-            (show_vectorscope ? 1 : 0) | (show_waveform ? 2 : 0) | (show_histogram ? 4 : 0);
+        preferences.scope_stack.clear();
+        for (const ScopeGlyph kind : scope_stack) preferences.scope_stack += ScopeLetter(kind);
         preferences.show_graticule = show_graticule;
         preferences.values_as_percent = values_as_percent;
         glfwGetWindowPos(window, &preferences.window_x, &preferences.window_y);
@@ -561,9 +609,16 @@ int main() {
         if (!drawable) continue;
 
         if (worker.FetchOutput(output_version, output)) {
-            vectorscope_texture.Upload(output.vectorscope_image);
-            waveform_texture.Upload(output.waveform_image);
-            histogram_texture.Upload(output.histogram_image);
+            if (scope_shown(ScopeGlyph::Vectorscope))
+                vectorscope_texture.Upload(output.vectorscope_image);
+            if (scope_shown(ScopeGlyph::WaveformRgb))
+                waveform_texture.Upload(output.waveform_image);
+            if (scope_shown(ScopeGlyph::WaveformLuma))
+                waveform_luma_texture.Upload(output.waveform_luma_image);
+            if (scope_shown(ScopeGlyph::WaveformParade))
+                waveform_parade_texture.Upload(output.waveform_parade_image);
+            if (scope_shown(ScopeGlyph::Histogram))
+                histogram_texture.Upload(output.histogram_image);
             last_activity = glfwGetTime();
         }
 
@@ -645,30 +700,40 @@ int main() {
         // is the common case, so a plain click or key shows one scope
         // alone; Shift stacks and unstacks, and the last scope on refuses
         // to turn off, so the window never goes empty.
-        const auto toggle_scope = [&](bool& flag) {
-            const int enabled =
-                (show_vectorscope ? 1 : 0) + (show_waveform ? 1 : 0) + (show_histogram ? 1 : 0);
-            if (!flag || enabled > 1) flag = !flag;
-        };
-        const auto choose_scope = [&](ScopeGlyph kind, bool& flag, bool stack) {
-            if (stack) {
-                toggle_scope(flag);
+        const auto toggle_scope = [&](ScopeGlyph kind) {
+            const auto at = std::find(scope_stack.begin(), scope_stack.end(), kind);
+            if (at != scope_stack.end()) {
+                if (scope_stack.size() > 1) scope_stack.erase(at);
             } else {
-                show_vectorscope = kind == ScopeGlyph::Vectorscope;
-                show_waveform = kind == ScopeGlyph::Waveform;
-                show_histogram = kind == ScopeGlyph::Histogram;
+                scope_stack.push_back(kind);
+            }
+            sync_enabled_scopes();
+            analysis_dirty = true;
+        };
+        const auto choose_scope = [&](ScopeGlyph kind, bool stack) {
+            if (stack) {
+                toggle_scope(kind);
+            } else {
+                scope_stack.assign(1, kind);
+                sync_enabled_scopes();
+                analysis_dirty = true;
             }
         };
-        const auto scope_toggle = [&](const char* id, const char* letter, ScopeGlyph kind,
-                                      bool& flag, const char* tooltip) {
-            if (ScopeToggleButton(id, letter, flag, tooltip)) choose_scope(kind, flag, io.KeyShift);
+        const auto scope_toggle = [&](const char* id, ScopeGlyph kind, const char* tooltip) {
+            const char letter[2] = {ScopeLetter(kind), '\0'};
+            if (ScopeToggleButton(id, letter, scope_shown(kind), tooltip))
+                choose_scope(kind, io.KeyShift);
             ImGui::SameLine(0.0f, 2.0f);
         };
-        scope_toggle("##toggle-vectorscope", "V", ScopeGlyph::Vectorscope, show_vectorscope,
+        scope_toggle("##toggle-vectorscope", ScopeGlyph::Vectorscope,
                      "Vectorscope - V shows only this, Shift+V stacks");
-        scope_toggle("##toggle-waveform", "W", ScopeGlyph::Waveform, show_waveform,
-                     "Waveform - W shows only this, Shift+W stacks");
-        scope_toggle("##toggle-histogram", "H", ScopeGlyph::Histogram, show_histogram,
+        scope_toggle("##toggle-waveform", ScopeGlyph::WaveformRgb,
+                     "RGB waveform - W shows only this, Shift+W stacks");
+        scope_toggle("##toggle-waveform-luma", ScopeGlyph::WaveformLuma,
+                     "Luma waveform - L shows only this, Shift+L stacks");
+        scope_toggle("##toggle-waveform-parade", ScopeGlyph::WaveformParade,
+                     "RGB parade - R shows only this, Shift+R stacks");
+        scope_toggle("##toggle-histogram", ScopeGlyph::Histogram,
                      "Histogram - H shows only this, Shift+H stacks");
         ImGui::SameLine(0.0f, 8.0f);
 
@@ -676,11 +741,15 @@ int main() {
         std::optional<RegionPickerMode> want_region_pick;
         if (!io.WantTextInput) {
             if (ImGui::IsKeyPressed(ImGuiKey_V, false))
-                choose_scope(ScopeGlyph::Vectorscope, show_vectorscope, io.KeyShift);
+                choose_scope(ScopeGlyph::Vectorscope, io.KeyShift);
             if (ImGui::IsKeyPressed(ImGuiKey_W, false))
-                choose_scope(ScopeGlyph::Waveform, show_waveform, io.KeyShift);
+                choose_scope(ScopeGlyph::WaveformRgb, io.KeyShift);
+            if (ImGui::IsKeyPressed(ImGuiKey_L, false))
+                choose_scope(ScopeGlyph::WaveformLuma, io.KeyShift);
+            if (ImGui::IsKeyPressed(ImGuiKey_R, false))
+                choose_scope(ScopeGlyph::WaveformParade, io.KeyShift);
             if (ImGui::IsKeyPressed(ImGuiKey_H, false))
-                choose_scope(ScopeGlyph::Histogram, show_histogram, io.KeyShift);
+                choose_scope(ScopeGlyph::Histogram, io.KeyShift);
             if (ImGui::IsKeyPressed(ImGuiKey_A, false))
                 want_region_pick = RegionPickerMode::PickDetected;
             if (ImGui::IsKeyPressed(ImGuiKey_D, false)) want_region_pick = RegionPickerMode::Draw;
@@ -779,23 +848,31 @@ int main() {
                     DrawPointMarker(scope, *point, IM_COL32(255, 255, 255, 255));
             }
         };
-        const auto draw_waveform = [&] {
-            const DrawnScope scope = DrawScopeImage(waveform_texture, false);
+        // The waveform flavors share gain and graticule; the cursor
+        // markers differ - channel levels on RGB and parade, one luma
+        // level on luma.
+        const auto draw_channel_markers = [&](const DrawnScope& scope) {
+            if (!waveform_color) return;
+            const float channels[3] = {waveform_color->r, waveform_color->g, waveform_color->b};
+            const ImU32 colors[3] = {IM_COL32(255, 90, 90, 230), IM_COL32(90, 255, 90, 230),
+                                     IM_COL32(110, 110, 255, 230)};
+            for (int channel = 0; channel < 3; ++channel)
+                DrawLevelMarker(scope, (255.0f - channels[channel]) / 255.0f, colors[channel]);
+        };
+        const auto draw_waveform = [&](ScopeGlyph kind) {
+            ScopeTexture& texture = kind == ScopeGlyph::WaveformRgb    ? waveform_texture
+                                    : kind == ScopeGlyph::WaveformLuma ? waveform_luma_texture
+                                                                       : waveform_parade_texture;
+            const DrawnScope scope = DrawScopeImage(texture, false);
             scope_gestures(scope, waveform_intensity, analysis.waveform.gain, 0.05f);
             if (show_graticule) DrawWaveformOverlay(scope);
-            if (waveform_color) {
-                if (analysis.waveform.mode == WaveformMode::Luma) {
-                    if (const auto point = projection_waveform.Project(*waveform_color))
+            if (kind == ScopeGlyph::WaveformLuma) {
+                if (waveform_color) {
+                    if (const auto point = projection_waveform_luma.Project(*waveform_color))
                         DrawLevelMarker(scope, point->y, IM_COL32(255, 220, 80, 220));
-                } else {
-                    const float channels[3] = {waveform_color->r, waveform_color->g,
-                                               waveform_color->b};
-                    const ImU32 colors[3] = {IM_COL32(255, 90, 90, 230), IM_COL32(90, 255, 90, 230),
-                                             IM_COL32(110, 110, 255, 230)};
-                    for (int channel = 0; channel < 3; ++channel)
-                        DrawLevelMarker(scope, (255.0f - channels[channel]) / 255.0f,
-                                        colors[channel]);
                 }
+            } else {
+                draw_channel_markers(scope);
             }
         };
 
@@ -863,16 +940,12 @@ int main() {
         const auto draw_scope = [&](ScopeGlyph kind) {
             if (kind == ScopeGlyph::Vectorscope)
                 draw_vectorscope();
-            else if (kind == ScopeGlyph::Waveform)
-                draw_waveform();
-            else
+            else if (kind == ScopeGlyph::Histogram)
                 draw_histogram();
+            else
+                draw_waveform(kind);
         };
-        ScopeGlyph panes[3];
-        int pane_count = 0;
-        if (show_vectorscope) panes[pane_count++] = ScopeGlyph::Vectorscope;
-        if (show_waveform) panes[pane_count++] = ScopeGlyph::Waveform;
-        if (show_histogram) panes[pane_count++] = ScopeGlyph::Histogram;
+        const int pane_count = static_cast<int>(scope_stack.size());
         const ImVec2 area = ImGui::GetContentRegionAvail();
         if (!permission_granted) {
             draw_capture_help("SideScopes cannot see the screen",
@@ -893,17 +966,17 @@ int main() {
             draw_capture_help("Screen capture was interrupted",
                               {status, "Reconnecting automatically..."}, false);
         } else if (pane_count <= 1) {
-            if (pane_count == 1) draw_scope(panes[0]);
+            if (pane_count == 1) draw_scope(scope_stack.front());
         } else {
             const bool horizontal = area.x >= area.y;
             const ImVec2 spacing = ImGui::GetStyle().ItemSpacing;
             const ImVec2 pane_size =
                 horizontal ? ImVec2((area.x - spacing.x * (pane_count - 1)) / pane_count, area.y)
                            : ImVec2(area.x, (area.y - spacing.y * (pane_count - 1)) / pane_count);
-            const char* pane_ids[3] = {"##pane0", "##pane1", "##pane2"};
+            const char* pane_ids[5] = {"##pane0", "##pane1", "##pane2", "##pane3", "##pane4"};
             for (int pane = 0; pane < pane_count; ++pane) {
                 ImGui::BeginChild(pane_ids[pane], pane_size);
-                draw_scope(panes[pane]);
+                draw_scope(scope_stack[static_cast<std::size_t>(pane)]);
                 ImGui::EndChild();
                 if (horizontal && pane + 1 < pane_count) ImGui::SameLine();
             }
@@ -914,21 +987,18 @@ int main() {
             ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows |
                                    ImGuiHoveredFlags_AllowWhenBlockedByActiveItem)) {
             using Kind = NativeMenuItem::Kind;
-            const auto waveform_mode = analysis.waveform.mode;
             const bool bt601 = analysis.vectorscope.matrix == ChromaMatrix::Bt601;
             std::vector<NativeMenuItem> menu{
-                {Kind::Action, "Vectorscope", kMenuShowVectorscope, show_vectorscope},
-                {Kind::Action, "Waveform", kMenuShowWaveform, show_waveform},
-                {Kind::Action, "Histogram", kMenuShowHistogram, show_histogram},
+                {Kind::Action, "Vectorscope", kMenuShowVectorscope,
+                 scope_shown(ScopeGlyph::Vectorscope)},
+                {Kind::Action, "RGB Waveform", kMenuShowWaveform,
+                 scope_shown(ScopeGlyph::WaveformRgb)},
+                {Kind::Action, "Luma Waveform", kMenuShowWaveformLuma,
+                 scope_shown(ScopeGlyph::WaveformLuma)},
+                {Kind::Action, "RGB Parade", kMenuShowWaveformParade,
+                 scope_shown(ScopeGlyph::WaveformParade)},
+                {Kind::Action, "Histogram", kMenuShowHistogram, scope_shown(ScopeGlyph::Histogram)},
                 {Kind::Separator, "", -1, false},
-                {Kind::SubmenuBegin, "Waveform Style", -1, false},
-                {Kind::Action, "Luma", kMenuWaveformLuma, waveform_mode == WaveformMode::Luma},
-                {Kind::Action, "RGB", kMenuWaveformRgb, waveform_mode == WaveformMode::Rgb},
-                {Kind::Action, "RGB + Luma", kMenuWaveformRgbAndLuma,
-                 waveform_mode == WaveformMode::RgbAndLuma},
-                {Kind::Action, "RGB Parade", kMenuWaveformParade,
-                 waveform_mode == WaveformMode::RgbParade},
-                {Kind::SubmenuEnd, "", -1, false},
                 {Kind::SubmenuBegin, "Vectorscope Matrix", -1, false},
                 {Kind::Action, "BT.601", kMenuMatrixBt601, bt601},
                 {Kind::Action, "BT.709", kMenuMatrixBt709, !bt601},
@@ -953,29 +1023,19 @@ int main() {
                 menu.push_back(std::move(item));
             switch (ShowNativeContextMenu(menu)) {
                 case kMenuShowVectorscope:
-                    toggle_scope(show_vectorscope);
+                    toggle_scope(ScopeGlyph::Vectorscope);
                     break;
                 case kMenuShowWaveform:
-                    toggle_scope(show_waveform);
+                    toggle_scope(ScopeGlyph::WaveformRgb);
+                    break;
+                case kMenuShowWaveformLuma:
+                    toggle_scope(ScopeGlyph::WaveformLuma);
+                    break;
+                case kMenuShowWaveformParade:
+                    toggle_scope(ScopeGlyph::WaveformParade);
                     break;
                 case kMenuShowHistogram:
-                    toggle_scope(show_histogram);
-                    break;
-                case kMenuWaveformLuma:
-                    analysis.waveform.mode = WaveformMode::Luma;
-                    analysis_dirty = true;
-                    break;
-                case kMenuWaveformRgb:
-                    analysis.waveform.mode = WaveformMode::Rgb;
-                    analysis_dirty = true;
-                    break;
-                case kMenuWaveformRgbAndLuma:
-                    analysis.waveform.mode = WaveformMode::RgbAndLuma;
-                    analysis_dirty = true;
-                    break;
-                case kMenuWaveformParade:
-                    analysis.waveform.mode = WaveformMode::RgbParade;
-                    analysis_dirty = true;
+                    toggle_scope(ScopeGlyph::Histogram);
                     break;
                 case kMenuMatrixBt601:
                     analysis.vectorscope.matrix = ChromaMatrix::Bt601;
@@ -1256,7 +1316,11 @@ int main() {
         if (analysis_dirty) {
             worker.UpdateSettings(analysis);
             projection_vectorscope.Configure(analysis.vectorscope);
-            projection_waveform.Configure(analysis.waveform);
+            WaveformSettings projection_settings = analysis.waveform;
+            projection_settings.mode = WaveformMode::Rgb;
+            projection_waveform.Configure(projection_settings);
+            projection_settings.mode = WaveformMode::Luma;
+            projection_waveform_luma.Configure(projection_settings);
             sync_region_border();
             analysis_dirty = false;
             last_activity = glfwGetTime();

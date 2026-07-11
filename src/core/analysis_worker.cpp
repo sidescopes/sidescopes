@@ -73,7 +73,9 @@ std::optional<AnalysisWorker::FrameSize> AnalysisWorker::LatestFrameSize() const
 
 void AnalysisWorker::Run() {
     Vectorscope vectorscope;
-    Waveform waveform;
+    Waveform waveform_rgb;
+    Waveform waveform_luma;
+    Waveform waveform_parade;
     Histogram histogram;
     AnalysisSettings settings;
     uint64_t seen_settings_version = 0;
@@ -122,23 +124,36 @@ void AnalysisWorker::Run() {
 
         if (settings_changed) {
             vectorscope.Configure(settings.vectorscope);
-            waveform.Configure(settings.waveform);
+            WaveformSettings flavor = settings.waveform;
+            flavor.mode = WaveformMode::Rgb;
+            waveform_rgb.Configure(flavor);
+            flavor.mode = WaveformMode::Luma;
+            waveform_luma.Configure(flavor);
+            flavor.mode = WaveformMode::RgbParade;
+            waveform_parade.Configure(flavor);
             histogram.Configure(settings.histogram);
         }
 
+        // Only the scopes on screen cost anything; a disabled scope's
+        // image simply goes stale and the UI never draws it.
+        const uint32_t enabled = settings.enabled_scopes;
         const auto started = std::chrono::steady_clock::now();
-        vectorscope.Accumulate(view, region);
-        waveform.Accumulate(view, region);
-        histogram.Accumulate(view, region);
+        if (enabled & kScopeVectorscope) vectorscope.Accumulate(view, region);
+        if (enabled & kScopeWaveformRgb) waveform_rgb.Accumulate(view, region);
+        if (enabled & kScopeWaveformLuma) waveform_luma.Accumulate(view, region);
+        if (enabled & kScopeWaveformParade) waveform_parade.Accumulate(view, region);
+        if (enabled & kScopeHistogram) histogram.Accumulate(view, region);
         const double elapsed_ms =
             std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started)
                 .count();
         if (new_frame) ++frames_processed;
 
         std::lock_guard lock(output_mutex_);
-        output_.vectorscope_image = vectorscope.Image();
-        output_.waveform_image = waveform.Image();
-        output_.histogram_image = histogram.Image();
+        if (enabled & kScopeVectorscope) output_.vectorscope_image = vectorscope.Image();
+        if (enabled & kScopeWaveformRgb) output_.waveform_image = waveform_rgb.Image();
+        if (enabled & kScopeWaveformLuma) output_.waveform_luma_image = waveform_luma.Image();
+        if (enabled & kScopeWaveformParade) output_.waveform_parade_image = waveform_parade.Image();
+        if (enabled & kScopeHistogram) output_.histogram_image = histogram.Image();
         output_.accumulate_milliseconds = elapsed_ms;
         output_.frames_processed = frames_processed;
         ++output_.version;

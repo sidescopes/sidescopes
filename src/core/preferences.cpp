@@ -5,6 +5,7 @@
 #include <map>
 #include <sstream>
 #include <string>
+#include <string_view>
 
 namespace sidescopes {
 namespace {
@@ -51,20 +52,50 @@ Preferences LoadPreferences(const std::filesystem::path& file) {
     int matrix = 0;
     read_int("matrix", matrix);
     preferences.matrix = matrix == 1 ? ChromaMatrix::Bt709 : ChromaMatrix::Bt601;
-    int waveform_mode = static_cast<int>(preferences.waveform_mode);
-    read_int("waveform_mode", waveform_mode);
-    if (waveform_mode >= 0 && waveform_mode <= 3)
-        preferences.waveform_mode = static_cast<WaveformMode>(waveform_mode);
-    // Older builds stored a single view mode; map it onto the bit set.
+    // Two generations of legacy scope keys fold into the stack: the
+    // single view_mode became the visible_scopes bit set, and the bit set
+    // plus the waveform style became the ordered letter stack.
     int legacy_view_mode = -1;
     read_int("view_mode", legacy_view_mode);
+    int visible_scopes = 1;
     if (legacy_view_mode >= 0 && legacy_view_mode <= 3) {
         constexpr int kLegacyScopes[4] = {1, 2, 3, 4};
-        preferences.visible_scopes = kLegacyScopes[legacy_view_mode];
+        visible_scopes = kLegacyScopes[legacy_view_mode];
     }
-    read_int("visible_scopes", preferences.visible_scopes);
-    preferences.visible_scopes &= 7;
-    if (preferences.visible_scopes == 0) preferences.visible_scopes = 1;
+    read_int("visible_scopes", visible_scopes);
+    int waveform_mode = static_cast<int>(WaveformMode::Rgb);
+    read_int("waveform_mode", waveform_mode);
+    std::string stack;
+    if (visible_scopes & 1) stack += 'V';
+    if (visible_scopes & 2) {
+        switch (static_cast<WaveformMode>(waveform_mode)) {
+            case WaveformMode::Luma:
+                stack += 'L';
+                break;
+            case WaveformMode::RgbAndLuma:
+                stack += "WL";
+                break;
+            case WaveformMode::RgbParade:
+                stack += 'R';
+                break;
+            case WaveformMode::Rgb:
+            default:
+                stack += 'W';
+                break;
+        }
+    }
+    if (visible_scopes & 4) stack += 'H';
+    if (!stack.empty()) preferences.scope_stack = stack;
+    if (const auto found = values.find("scope_stack"); found != values.end())
+        preferences.scope_stack = found->second;
+    // Whatever the source, keep only known letters, each once, in order;
+    // an empty result falls back to the vectorscope.
+    std::string cleaned;
+    for (const char letter : preferences.scope_stack) {
+        if (std::string_view("VWLRH").find(letter) == std::string_view::npos) continue;
+        if (cleaned.find(letter) == std::string::npos) cleaned += letter;
+    }
+    preferences.scope_stack = cleaned.empty() ? "V" : cleaned;
     read_bool("show_graticule", preferences.show_graticule);
     read_bool("values_as_percent", preferences.values_as_percent);
     read_int("window_x", preferences.window_x);
@@ -88,8 +119,7 @@ bool SavePreferences(const Preferences& preferences, const std::filesystem::path
         << "vectorscope_smoothing_ms=" << preferences.vectorscope_smoothing_ms << '\n'
         << "waveform_smoothing_ms=" << preferences.waveform_smoothing_ms << '\n'
         << "matrix=" << (preferences.matrix == ChromaMatrix::Bt709 ? 1 : 0) << '\n'
-        << "waveform_mode=" << static_cast<int>(preferences.waveform_mode) << '\n'
-        << "visible_scopes=" << preferences.visible_scopes << '\n'
+        << "scope_stack=" << preferences.scope_stack << '\n'
         << "show_graticule=" << (preferences.show_graticule ? 1 : 0) << '\n'
         << "values_as_percent=" << (preferences.values_as_percent ? 1 : 0) << '\n'
         << "window_x=" << preferences.window_x << '\n'
