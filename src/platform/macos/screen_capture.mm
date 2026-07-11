@@ -1,11 +1,13 @@
 // ScreenCaptureKit backend.
 //
 // Hard-won specifics encoded here:
-//  - The content filter excludes NOTHING. Every SCContentFilter exclusion
-//    variant snapshots its list at creation time, so windows or applications
-//    appearing later are silently absent from the capture (Quick Look
-//    previews are hosted by an on-demand service process, for example).
-//    Self-capture feedback is handled by the analysis-side window mask.
+//  - The content filter excludes exactly one thing: this application.
+//    Application-level exclusion tracks the app's windows dynamically, so
+//    the scope window, the region border, and the picker overlay can
+//    never leak into the sampled pixels. Window-list exclusion variants
+//    snapshot at creation time and must not be used for anything that can
+//    appear later (Quick Look previews are hosted by an on-demand service
+//    process, for example) - so nothing else is excluded.
 //  - Streams die when the display configuration blinks (lock screen,
 //    display sleep). Death is reported through the status callback and the
 //    application restarts capture; this backend never retries on its own.
@@ -88,8 +90,19 @@ public:
         }
         if (!display) return Fail("capture target no longer present");
 
-        SCContentFilter* filter = [[SCContentFilter alloc] initWithDisplay:display
-                                                          excludingWindows:@[]];
+        SCRunningApplication* self_application = nil;
+        for (SCRunningApplication* application in content.applications) {
+            if (application.processID == NSProcessInfo.processInfo.processIdentifier) {
+                self_application = application;
+                break;
+            }
+        }
+        SCContentFilter* filter =
+            self_application
+                ? [[SCContentFilter alloc] initWithDisplay:display
+                                     excludingApplications:@[ self_application ]
+                                          exceptingWindows:@[]]
+                : [[SCContentFilter alloc] initWithDisplay:display excludingWindows:@[]];
 
         SCStreamConfiguration* configuration = [[SCStreamConfiguration alloc] init];
         const CGFloat scale = filter.pointPixelScale > 0 ? filter.pointPixelScale : 2.0;

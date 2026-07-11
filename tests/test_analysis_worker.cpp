@@ -48,6 +48,23 @@ bool PixelLit(const ScopeImage& image, int px, int py) {
 
 }  // namespace
 
+TEST_CASE("Region edges round inward, never grabbing outside pixels") {
+    // At fractional positions truncation used to include the pixel row
+    // just above the region - where the region border's bright ring is
+    // drawn - and a phantom line flickered into the waveform.
+    RegionOfInterest region;
+    region.left_percent = 10.03;
+    region.top_percent = 10.03;
+    region.right_percent = 89.97;
+    region.bottom_percent = 89.97;
+
+    const IntRect rect = region.ToPixels(1000, 1000);
+    CHECK(rect.x == 101);
+    CHECK(rect.y == 101);
+    CHECK(rect.x + rect.width == 899);
+    CHECK(rect.y + rect.height == 899);
+}
+
 TEST_CASE("AnalysisWorker produces scope images from published frames") {
     FrameMailbox mailbox;
     AnalysisWorker worker(mailbox);

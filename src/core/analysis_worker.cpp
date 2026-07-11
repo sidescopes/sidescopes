@@ -1,6 +1,7 @@
 #include "core/analysis_worker.h"
 
 #include <chrono>
+#include <cmath>
 
 #include "core/marker_smoother.h"
 #include "core/region_hash.h"
@@ -8,14 +9,22 @@
 namespace sidescopes {
 
 IntRect RegionOfInterest::ToPixels(int frame_width, int frame_height) const {
-    const auto scale_x = [&](double percent) {
-        return static_cast<int>(percent * frame_width / 100.0);
+    // Edges round INWARD: truncation used to include the pixel row just
+    // outside the region at some fractional positions, and the region
+    // border's own bright ring lives exactly there - it flickered into
+    // the waveform as a phantom line near the top. A boundary pixel
+    // belongs to the sample only when it is entirely inside.
+    const auto floor_edge = [](double percent, int extent) {
+        return static_cast<int>(std::floor(percent * extent / 100.0));
     };
-    const auto scale_y = [&](double percent) {
-        return static_cast<int>(percent * frame_height / 100.0);
+    const auto ceil_edge = [](double percent, int extent) {
+        return static_cast<int>(std::ceil(percent * extent / 100.0));
     };
-    return IntRect{scale_x(left_percent), scale_y(top_percent),
-                   scale_x(right_percent - left_percent), scale_y(bottom_percent - top_percent)};
+    const int left = ceil_edge(left_percent, frame_width);
+    const int top = ceil_edge(top_percent, frame_height);
+    const int right = std::max(left, floor_edge(right_percent, frame_width));
+    const int bottom = std::max(top, floor_edge(bottom_percent, frame_height));
+    return IntRect{left, top, right - left, bottom - top};
 }
 
 AnalysisWorker::AnalysisWorker(FrameMailbox& mailbox) : mailbox_(mailbox) {}
