@@ -462,6 +462,32 @@ int main() {
     AnalysisWorker::Output output;
     double last_activity = glfwGetTime();
     double next_capture_retry = 0.0;
+
+    // Waking the display or unlocking the session can leave the stream a
+    // zombie: it either stops delivering without an error, or a retry that
+    // ran while the screen was locked started a stream bound to the wrong
+    // session. Both look alive, so these events force a restart - cheap on
+    // a screen that was just black.
+    std::atomic<bool> capture_stale{false};
+    std::atomic<bool>* const capture_stale_flag = &capture_stale;  // blocks copy captures
+    const auto observe = ^(NSNotification*) {
+      capture_stale_flag->store(true);
+    };
+    [[[NSWorkspace sharedWorkspace] notificationCenter]
+        addObserverForName:NSWorkspaceScreensDidWakeNotification
+                    object:nil
+                     queue:[NSOperationQueue mainQueue]
+                usingBlock:observe];
+    [[[NSWorkspace sharedWorkspace] notificationCenter]
+        addObserverForName:NSWorkspaceSessionDidBecomeActiveNotification
+                    object:nil
+                     queue:[NSOperationQueue mainQueue]
+                usingBlock:observe];
+    [[NSDistributedNotificationCenter defaultCenter]
+        addObserverForName:@"com.apple.screenIsUnlocked"
+                    object:nil
+                     queue:[NSOperationQueue mainQueue]
+                usingBlock:observe];
     double intensity_flash_until = 0.0;
     double next_preferences_save = -1.0;
     DesktopPoint last_cursor{-1.0, -1.0};
@@ -510,6 +536,12 @@ int main() {
 
         // Capture is a service that dies (lock screen, display sleep);
         // restarting it is our job.
+        if (capture_stale.exchange(false)) {
+            std::fprintf(stderr, "sidescopes: restarting capture after wake or unlock\n");
+            capture_dead.store(true);
+            // Give the session a moment to finish coming back.
+            next_capture_retry = glfwGetTime() + 1.0;
+        }
         if (permission_granted && capture_dead.load() && glfwGetTime() > next_capture_retry) {
             capture->Stop();
             if (start_capture())
