@@ -77,6 +77,10 @@ void Histogram::MapBinsToImage() {
             heights[static_cast<std::size_t>(channel) * kBins + value] =
                 bar_height(smoothed[static_cast<std::size_t>(channel) * kBins + value]);
 
+    // Combined: three channels overlaid over the full height. Per
+    // channel: three stacked bands, each holding one channel's plot.
+    const bool split = settings_.style == HistogramStyle::PerChannel;
+    const int band_height = split ? kHeight / 3 : kHeight;
     std::fill(image_.rgba.begin(), image_.rgba.end(), uint8_t{0});
     for (int x = 0; x < kImageWidth; ++x) {
         const double bin_position =
@@ -100,14 +104,18 @@ void Histogram::MapBinsToImage() {
             // stay empty.
             if (p1 <= 0.0 && p2 <= 0.0) height = 0.0;
             height = std::clamp(height, 0.0, static_cast<double>(kHeight));
+            if (split) height /= 3.0;
             if (height <= 0.0) continue;
+            // Red on top, then green, then blue, when split.
+            const int band_bottom = split ? (channel + 1) * band_height : kHeight;
             // The top edge fades over a few rows rather than one: the
             // pane can magnify the plot, and a single-pixel edge would
             // come back as a ladder on the slopes.
             constexpr double kFeather = 2.5;
-            const double top = kHeight - height;
-            const int first_touched = std::max(0, static_cast<int>(std::floor(top - kFeather)));
-            for (int row = first_touched; row < kHeight; ++row) {
+            const double top = band_bottom - height;
+            const int first_touched =
+                std::max(band_bottom - band_height, static_cast<int>(std::floor(top - kFeather)));
+            for (int row = first_touched; row < band_bottom; ++row) {
                 const double coverage = std::clamp((row + 1.0 - top) / kFeather, 0.0, 1.0);
                 if (coverage <= 0.0) continue;
                 image_.rgba[(static_cast<std::size_t>(row) * kImageWidth + x) * 4 + channel] =

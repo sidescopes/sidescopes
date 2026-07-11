@@ -26,21 +26,20 @@ struct RegionOfInterest {
     [[nodiscard]] IntRect ToPixels(int frame_width, int frame_height) const;
 };
 
-// Which scopes the worker computes; the waveform flavors are separate
-// scopes that can be shown side by side (an RGB waveform above a luma
-// waveform is how a red channel is judged against luminosity).
+// Which scopes the worker computes. The waveform's RGB/Luma style is a
+// setting on the one waveform scope; the parade is its own scope, since
+// stacking a luma waveform over the parade is a working combination.
 enum ScopeBit : uint32_t {
     kScopeVectorscope = 1u << 0,
-    kScopeWaveformRgb = 1u << 1,
-    kScopeWaveformLuma = 1u << 2,
-    kScopeWaveformParade = 1u << 3,
-    kScopeHistogram = 1u << 4,
+    kScopeWaveform = 1u << 1,
+    kScopeWaveformParade = 1u << 2,
+    kScopeHistogram = 1u << 3,
 };
 
 struct AnalysisSettings {
     VectorscopeSettings vectorscope;
-    // Gain and stride for every waveform flavor; the mode field is
-    // ignored here, since each enabled flavor runs with its own mode.
+    // The waveform's mode selects its style (RGB or Luma); the parade
+    // shares its gain and stride.
     WaveformSettings waveform;
     HistogramSettings histogram;
     uint32_t enabled_scopes = ~0u;
@@ -59,7 +58,6 @@ public:
     struct Output {
         ScopeImage vectorscope_image;
         ScopeImage waveform_image;
-        ScopeImage waveform_luma_image;
         ScopeImage waveform_parade_image;
         ScopeImage histogram_image;
         double accumulate_milliseconds = 0.0;

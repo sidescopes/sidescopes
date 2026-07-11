@@ -140,6 +140,35 @@ TEST_CASE("Histogram keeps sparse tones readable under a dominant one") {
     CHECK(BarHeight(scope.Image(), 120, 1) > Histogram::kHeight / 20);
 }
 
+TEST_CASE("Histogram per-channel style separates the channels into bands") {
+    TestFrame frame(32, 32);
+    frame.FillColumns(0, 32, Color{10, 150, 240});
+
+    Histogram scope;
+    HistogramSettings settings;
+    settings.style = HistogramStyle::PerChannel;
+    scope.Configure(settings);
+    scope.Accumulate(frame.View(), IntRect{0, 0, 32, 32});
+
+    // Red in the top band only, green in the middle, blue in the bottom:
+    // each channel's plot stays within its own third.
+    const ScopeImage& image = scope.Image();
+    const int band = Histogram::kHeight / 3;
+    const auto band_of_peak = [&](int value, int channel) {
+        const int columns_per_bin = image.width / Histogram::kBins;
+        for (int row = 0; row < image.height; ++row)
+            for (int column = value * columns_per_bin; column < (value + 1) * columns_per_bin;
+                 ++column)
+                if (image.rgba[(static_cast<std::size_t>(row) * image.width + column) * 4 +
+                               channel] > 0)
+                    return row / band;
+        return -1;
+    };
+    CHECK(band_of_peak(10, 0) == 0);
+    CHECK(band_of_peak(150, 1) == 1);
+    CHECK(band_of_peak(240, 2) == 2);
+}
+
 TEST_CASE("Histogram produces an empty plot for an empty region") {
     TestFrame frame(32, 32);
     frame.FillColumns(0, 32, Color{80, 80, 80});

@@ -51,6 +51,12 @@ Preferences LoadPreferences(const std::filesystem::path& file) {
     int matrix = 0;
     read_int("matrix", matrix);
     preferences.matrix = matrix == 1 ? ChromaMatrix::Bt709 : ChromaMatrix::Bt601;
+    int waveform_style = static_cast<int>(preferences.waveform_mode);
+    read_int("waveform_mode", waveform_style);
+    preferences.waveform_mode = waveform_style == static_cast<int>(WaveformMode::Luma)
+                                    ? WaveformMode::Luma
+                                    : WaveformMode::Rgb;
+    read_bool("histogram_per_channel", preferences.histogram_per_channel);
     // Two generations of legacy scope keys fold into the stack: the
     // single view_mode became the visible_scopes bit set, and the bit set
     // plus the waveform style became the ordered letter stack.
@@ -88,10 +94,19 @@ Preferences LoadPreferences(const std::filesystem::path& file) {
     if (const auto found = values.find("scope_stack"); found != values.end())
         preferences.scope_stack = found->second;
     // Whatever the source, keep only known letters, each once, in order;
-    // an empty result falls back to the vectorscope.
+    // an empty result falls back to the vectorscope. The retired L (a
+    // separate luma waveform scope) becomes the waveform in its Luma
+    // style - unless an RGB waveform was stacked alongside, which wins
+    // the letter.
+    const bool had_waveform = preferences.scope_stack.find('W') != std::string::npos;
     std::string cleaned;
-    for (const char letter : preferences.scope_stack) {
-        if (std::string_view("VWLRH").find(letter) == std::string_view::npos) continue;
+    for (char letter : preferences.scope_stack) {
+        if (letter == 'L') {
+            if (had_waveform) continue;
+            letter = 'W';
+            preferences.waveform_mode = WaveformMode::Luma;
+        }
+        if (std::string_view("VWRH").find(letter) == std::string_view::npos) continue;
         if (cleaned.find(letter) == std::string::npos) cleaned += letter;
     }
     preferences.scope_stack = cleaned.empty() ? "V" : cleaned;
@@ -118,6 +133,8 @@ bool SavePreferences(const Preferences& preferences, const std::filesystem::path
         << "waveform_smoothing_ms=" << preferences.waveform_smoothing_ms << '\n'
         << "matrix=" << (preferences.matrix == ChromaMatrix::Bt709 ? 1 : 0) << '\n'
         << "scope_stack=" << preferences.scope_stack << '\n'
+        << "waveform_mode=" << static_cast<int>(preferences.waveform_mode) << '\n'
+        << "histogram_per_channel=" << (preferences.histogram_per_channel ? 1 : 0) << '\n'
         << "show_graticule=" << (preferences.show_graticule ? 1 : 0) << '\n'
         << "values_as_percent=" << (preferences.values_as_percent ? 1 : 0) << '\n'
         << "window_x=" << preferences.window_x << '\n'

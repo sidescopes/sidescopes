@@ -48,9 +48,12 @@ using namespace sidescopes;
 enum MenuAction {
     kMenuShowVectorscope = 1,
     kMenuShowWaveform,
-    kMenuShowWaveformLuma,
     kMenuShowWaveformParade,
     kMenuShowHistogram,
+    kMenuWaveformStyleRgb = 10,
+    kMenuWaveformStyleLuma,
+    kMenuHistogramCombined,
+    kMenuHistogramPerChannel,
     kMenuMatrixBt601 = 20,
     kMenuMatrixBt709,
     kMenuSelectRegion = 30,
@@ -194,17 +197,15 @@ void DrawLevelMarker(const DrawnScope& scope, float normalized_y, ImU32 color) {
 
 // Toolbar icon buttons drawn with the draw list: corner brackets for region
 // selection, an outline rectangle for full screen.
-enum class ScopeGlyph { Vectorscope, WaveformRgb, WaveformLuma, WaveformParade, Histogram };
+enum class ScopeGlyph { Vectorscope, Waveform, WaveformParade, Histogram };
 
 // Letter chips and preference letters share one alphabet.
 constexpr char ScopeLetter(ScopeGlyph kind) {
     switch (kind) {
         case ScopeGlyph::Vectorscope:
             return 'V';
-        case ScopeGlyph::WaveformRgb:
+        case ScopeGlyph::Waveform:
             return 'W';
-        case ScopeGlyph::WaveformLuma:
-            return 'L';
         case ScopeGlyph::WaveformParade:
             return 'R';
         case ScopeGlyph::Histogram:
@@ -217,10 +218,8 @@ constexpr uint32_t ScopeEnableBit(ScopeGlyph kind) {
     switch (kind) {
         case ScopeGlyph::Vectorscope:
             return kScopeVectorscope;
-        case ScopeGlyph::WaveformRgb:
-            return kScopeWaveformRgb;
-        case ScopeGlyph::WaveformLuma:
-            return kScopeWaveformLuma;
+        case ScopeGlyph::Waveform:
+            return kScopeWaveform;
         case ScopeGlyph::WaveformParade:
             return kScopeWaveformParade;
         case ScopeGlyph::Histogram:
@@ -503,6 +502,9 @@ int main() {
     analysis.waveform.gain = startup.waveform_gain;
     analysis.waveform.sampling_stride = startup.waveform_stride;
     analysis.histogram.sampling_stride = startup.histogram_stride;
+    analysis.waveform.mode = startup.waveform_mode;
+    analysis.histogram.style =
+        startup.histogram_per_channel ? HistogramStyle::PerChannel : HistogramStyle::Combined;
     bool analysis_dirty = true;
 
     float vectorscope_intensity = IntensityFromTraceGain(analysis.vectorscope.gain);
@@ -513,9 +515,8 @@ int main() {
     // last stacks after the ones already up.
     std::vector<ScopeGlyph> scope_stack;
     for (const char letter : startup.scope_stack) {
-        for (const ScopeGlyph kind :
-             {ScopeGlyph::Vectorscope, ScopeGlyph::WaveformRgb, ScopeGlyph::WaveformLuma,
-              ScopeGlyph::WaveformParade, ScopeGlyph::Histogram}) {
+        for (const ScopeGlyph kind : {ScopeGlyph::Vectorscope, ScopeGlyph::Waveform,
+                                      ScopeGlyph::WaveformParade, ScopeGlyph::Histogram}) {
             if (ScopeLetter(kind) == letter) scope_stack.push_back(kind);
         }
     }
@@ -551,14 +552,12 @@ int main() {
     // settings; they never accumulate, they only place overlays and markers.
     Vectorscope projection_vectorscope;
     Waveform projection_waveform;
-    Waveform projection_waveform_luma;
 
     MarkerSmoother vectorscope_marker;
     MarkerSmoother waveform_marker;
 
     ScopeTexture vectorscope_texture(device, Vectorscope::kSize, Vectorscope::kSize);
     ScopeTexture waveform_texture(device, Waveform::kColumns, Waveform::kLevels);
-    ScopeTexture waveform_luma_texture(device, Waveform::kColumns, Waveform::kLevels);
     ScopeTexture waveform_parade_texture(device, Waveform::kColumns, Waveform::kLevels);
     ScopeTexture histogram_texture(device, Histogram::kImageWidth, Histogram::kHeight);
 
@@ -620,6 +619,8 @@ int main() {
         preferences.waveform_smoothing_ms = waveform_smoothing_ms;
         preferences.matrix = analysis.vectorscope.matrix;
         preferences.histogram_stride = analysis.histogram.sampling_stride;
+        preferences.waveform_mode = analysis.waveform.mode;
+        preferences.histogram_per_channel = analysis.histogram.style == HistogramStyle::PerChannel;
         preferences.scope_stack.clear();
         for (const ScopeGlyph kind : scope_stack) preferences.scope_stack += ScopeLetter(kind);
         preferences.show_graticule = show_graticule;
@@ -667,10 +668,7 @@ int main() {
         if (worker.FetchOutput(output_version, output)) {
             if (scope_shown(ScopeGlyph::Vectorscope))
                 vectorscope_texture.Upload(output.vectorscope_image);
-            if (scope_shown(ScopeGlyph::WaveformRgb))
-                waveform_texture.Upload(output.waveform_image);
-            if (scope_shown(ScopeGlyph::WaveformLuma))
-                waveform_luma_texture.Upload(output.waveform_luma_image);
+            if (scope_shown(ScopeGlyph::Waveform)) waveform_texture.Upload(output.waveform_image);
             if (scope_shown(ScopeGlyph::WaveformParade))
                 waveform_parade_texture.Upload(output.waveform_parade_image);
             if (scope_shown(ScopeGlyph::Histogram))
@@ -783,10 +781,8 @@ int main() {
         };
         scope_toggle("##toggle-vectorscope", ScopeGlyph::Vectorscope,
                      "Vectorscope - V shows only this, Shift+V stacks");
-        scope_toggle("##toggle-waveform", ScopeGlyph::WaveformRgb,
-                     "RGB waveform - W shows only this, Shift+W stacks");
-        scope_toggle("##toggle-waveform-luma", ScopeGlyph::WaveformLuma,
-                     "Luma waveform - L shows only this, Shift+L stacks");
+        scope_toggle("##toggle-waveform", ScopeGlyph::Waveform,
+                     "Waveform - W shows only this, Shift+W stacks; style in right-click menu");
         scope_toggle("##toggle-waveform-parade", ScopeGlyph::WaveformParade,
                      "RGB parade - R shows only this, Shift+R stacks");
         scope_toggle("##toggle-histogram", ScopeGlyph::Histogram,
@@ -799,9 +795,7 @@ int main() {
             if (ImGui::IsKeyPressed(ImGuiKey_V, false))
                 choose_scope(ScopeGlyph::Vectorscope, io.KeyShift);
             if (ImGui::IsKeyPressed(ImGuiKey_W, false))
-                choose_scope(ScopeGlyph::WaveformRgb, io.KeyShift);
-            if (ImGui::IsKeyPressed(ImGuiKey_L, false))
-                choose_scope(ScopeGlyph::WaveformLuma, io.KeyShift);
+                choose_scope(ScopeGlyph::Waveform, io.KeyShift);
             if (ImGui::IsKeyPressed(ImGuiKey_R, false))
                 choose_scope(ScopeGlyph::WaveformParade, io.KeyShift);
             if (ImGui::IsKeyPressed(ImGuiKey_H, false))
@@ -921,15 +915,14 @@ int main() {
                 DrawLevelMarker(scope, (255.0f - channels[channel]) / 255.0f, colors[channel]);
         };
         const auto draw_waveform = [&](ScopeGlyph kind) {
-            ScopeTexture& texture = kind == ScopeGlyph::WaveformRgb    ? waveform_texture
-                                    : kind == ScopeGlyph::WaveformLuma ? waveform_luma_texture
-                                                                       : waveform_parade_texture;
+            ScopeTexture& texture =
+                kind == ScopeGlyph::Waveform ? waveform_texture : waveform_parade_texture;
             const DrawnScope scope = DrawScopeImage(texture, false);
             scope_gestures(scope, waveform_intensity, analysis.waveform.gain, 0.05f);
             if (show_graticule) DrawWaveformOverlay(scope);
-            if (kind == ScopeGlyph::WaveformLuma) {
+            if (kind == ScopeGlyph::Waveform && analysis.waveform.mode == WaveformMode::Luma) {
                 if (waveform_color) {
-                    if (const auto point = projection_waveform_luma.Project(*waveform_color))
+                    if (const auto point = projection_waveform.Project(*waveform_color))
                         DrawLevelMarker(scope, point->y, IM_COL32(255, 220, 80, 220));
                 }
             } else {
@@ -1053,14 +1046,23 @@ int main() {
             std::vector<NativeMenuItem> menu{
                 {Kind::Action, "Vectorscope", kMenuShowVectorscope,
                  scope_shown(ScopeGlyph::Vectorscope)},
-                {Kind::Action, "RGB Waveform", kMenuShowWaveform,
-                 scope_shown(ScopeGlyph::WaveformRgb)},
-                {Kind::Action, "Luma Waveform", kMenuShowWaveformLuma,
-                 scope_shown(ScopeGlyph::WaveformLuma)},
+                {Kind::Action, "Waveform", kMenuShowWaveform, scope_shown(ScopeGlyph::Waveform)},
                 {Kind::Action, "RGB Parade", kMenuShowWaveformParade,
                  scope_shown(ScopeGlyph::WaveformParade)},
                 {Kind::Action, "Histogram", kMenuShowHistogram, scope_shown(ScopeGlyph::Histogram)},
                 {Kind::Separator, "", -1, false},
+                {Kind::SubmenuBegin, "Waveform Style", -1, false},
+                {Kind::Action, "RGB", kMenuWaveformStyleRgb,
+                 analysis.waveform.mode == WaveformMode::Rgb},
+                {Kind::Action, "Luma", kMenuWaveformStyleLuma,
+                 analysis.waveform.mode == WaveformMode::Luma},
+                {Kind::SubmenuEnd, "", -1, false},
+                {Kind::SubmenuBegin, "Histogram Style", -1, false},
+                {Kind::Action, "Combined", kMenuHistogramCombined,
+                 analysis.histogram.style == HistogramStyle::Combined},
+                {Kind::Action, "Per Channel", kMenuHistogramPerChannel,
+                 analysis.histogram.style == HistogramStyle::PerChannel},
+                {Kind::SubmenuEnd, "", -1, false},
                 {Kind::SubmenuBegin, "Vectorscope Matrix", -1, false},
                 {Kind::Action, "BT.601", kMenuMatrixBt601, bt601},
                 {Kind::Action, "BT.709", kMenuMatrixBt709, !bt601},
@@ -1088,13 +1090,26 @@ int main() {
                     toggle_scope(ScopeGlyph::Vectorscope);
                     break;
                 case kMenuShowWaveform:
-                    toggle_scope(ScopeGlyph::WaveformRgb);
-                    break;
-                case kMenuShowWaveformLuma:
-                    toggle_scope(ScopeGlyph::WaveformLuma);
+                    toggle_scope(ScopeGlyph::Waveform);
                     break;
                 case kMenuShowWaveformParade:
                     toggle_scope(ScopeGlyph::WaveformParade);
+                    break;
+                case kMenuWaveformStyleRgb:
+                    analysis.waveform.mode = WaveformMode::Rgb;
+                    analysis_dirty = true;
+                    break;
+                case kMenuWaveformStyleLuma:
+                    analysis.waveform.mode = WaveformMode::Luma;
+                    analysis_dirty = true;
+                    break;
+                case kMenuHistogramCombined:
+                    analysis.histogram.style = HistogramStyle::Combined;
+                    analysis_dirty = true;
+                    break;
+                case kMenuHistogramPerChannel:
+                    analysis.histogram.style = HistogramStyle::PerChannel;
+                    analysis_dirty = true;
                     break;
                 case kMenuShowHistogram:
                     toggle_scope(ScopeGlyph::Histogram);
@@ -1385,11 +1400,7 @@ int main() {
         if (analysis_dirty) {
             worker.UpdateSettings(analysis);
             projection_vectorscope.Configure(analysis.vectorscope);
-            WaveformSettings projection_settings = analysis.waveform;
-            projection_settings.mode = WaveformMode::Rgb;
-            projection_waveform.Configure(projection_settings);
-            projection_settings.mode = WaveformMode::Luma;
-            projection_waveform_luma.Configure(projection_settings);
+            projection_waveform.Configure(analysis.waveform);
             sync_region_border();
             analysis_dirty = false;
             last_activity = glfwGetTime();

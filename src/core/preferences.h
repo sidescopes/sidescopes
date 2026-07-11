@@ -19,6 +19,9 @@ struct Preferences {
     float vectorscope_smoothing_ms = 75.0f;
     float waveform_smoothing_ms = 100.0f;
     ChromaMatrix matrix = ChromaMatrix::Bt601;
+    // The waveform scope's style; the parade is its own scope.
+    WaveformMode waveform_mode = WaveformMode::Rgb;
+    bool histogram_per_channel = false;
     // The scopes on screen, one letter each in stacking order: V
     // vectorscope, W RGB waveform, L luma waveform, R RGB parade, H
     // histogram. Never empty.

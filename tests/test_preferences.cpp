@@ -63,13 +63,28 @@ TEST_CASE("Preferences migrate the legacy single view mode") {
 }
 
 TEST_CASE("Preferences migrate the scope bit set and waveform style") {
-    // The RGB+Luma composite becomes the two waveform scopes stacked.
+    // The RGB+Luma composite folds into the one waveform scope, whose
+    // style now lives in the context menu.
     const auto file = TemporaryFile("legacy-bit-set.txt");
     std::filesystem::create_directories(file.parent_path());
     std::ofstream(file) << "visible_scopes=6\nwaveform_mode=2\n";
 
     const Preferences loaded = LoadPreferences(file);
-    CHECK(loaded.scope_stack == "WLH");
+    CHECK(loaded.scope_stack == "WH");
+
+    std::filesystem::remove(file);
+}
+
+TEST_CASE("Preferences fold the retired luma scope into the waveform style") {
+    // A stack saved with the short-lived separate luma waveform: the
+    // letter becomes W, the style becomes Luma, the parade stays.
+    const auto file = TemporaryFile("legacy-luma-letter.txt");
+    std::filesystem::create_directories(file.parent_path());
+    std::ofstream(file) << "scope_stack=LR\n";
+
+    const Preferences loaded = LoadPreferences(file);
+    CHECK(loaded.scope_stack == "WR");
+    CHECK(loaded.waveform_mode == WaveformMode::Luma);
 
     std::filesystem::remove(file);
 }
@@ -88,10 +103,10 @@ TEST_CASE("Preferences never load an empty scope set") {
 TEST_CASE("Preferences deduplicate scope letters") {
     const auto file = TemporaryFile("dup-scopes.txt");
     std::filesystem::create_directories(file.parent_path());
-    std::ofstream(file) << "scope_stack=LWLxL\n";
+    std::ofstream(file) << "scope_stack=RWRxW\n";
 
     const Preferences loaded = LoadPreferences(file);
-    CHECK(loaded.scope_stack == "LW");
+    CHECK(loaded.scope_stack == "RW");
 
     std::filesystem::remove(file);
 }

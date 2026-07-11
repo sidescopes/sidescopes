@@ -73,8 +73,7 @@ std::optional<AnalysisWorker::FrameSize> AnalysisWorker::LatestFrameSize() const
 
 void AnalysisWorker::Run() {
     Vectorscope vectorscope;
-    Waveform waveform_rgb;
-    Waveform waveform_luma;
+    Waveform waveform;
     Waveform waveform_parade;
     Histogram histogram;
     AnalysisSettings settings;
@@ -124,13 +123,10 @@ void AnalysisWorker::Run() {
 
         if (settings_changed) {
             vectorscope.Configure(settings.vectorscope);
-            WaveformSettings flavor = settings.waveform;
-            flavor.mode = WaveformMode::Rgb;
-            waveform_rgb.Configure(flavor);
-            flavor.mode = WaveformMode::Luma;
-            waveform_luma.Configure(flavor);
-            flavor.mode = WaveformMode::RgbParade;
-            waveform_parade.Configure(flavor);
+            waveform.Configure(settings.waveform);
+            WaveformSettings parade = settings.waveform;
+            parade.mode = WaveformMode::RgbParade;
+            waveform_parade.Configure(parade);
             histogram.Configure(settings.histogram);
         }
 
@@ -139,8 +135,7 @@ void AnalysisWorker::Run() {
         const uint32_t enabled = settings.enabled_scopes;
         const auto started = std::chrono::steady_clock::now();
         if (enabled & kScopeVectorscope) vectorscope.Accumulate(view, region);
-        if (enabled & kScopeWaveformRgb) waveform_rgb.Accumulate(view, region);
-        if (enabled & kScopeWaveformLuma) waveform_luma.Accumulate(view, region);
+        if (enabled & kScopeWaveform) waveform.Accumulate(view, region);
         if (enabled & kScopeWaveformParade) waveform_parade.Accumulate(view, region);
         if (enabled & kScopeHistogram) histogram.Accumulate(view, region);
         const double elapsed_ms =
@@ -150,8 +145,7 @@ void AnalysisWorker::Run() {
 
         std::lock_guard lock(output_mutex_);
         if (enabled & kScopeVectorscope) output_.vectorscope_image = vectorscope.Image();
-        if (enabled & kScopeWaveformRgb) output_.waveform_image = waveform_rgb.Image();
-        if (enabled & kScopeWaveformLuma) output_.waveform_luma_image = waveform_luma.Image();
+        if (enabled & kScopeWaveform) output_.waveform_image = waveform.Image();
         if (enabled & kScopeWaveformParade) output_.waveform_parade_image = waveform_parade.Image();
         if (enabled & kScopeHistogram) output_.histogram_image = histogram.Image();
         output_.accumulate_milliseconds = elapsed_ms;

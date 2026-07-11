@@ -29,8 +29,8 @@ screen itself, so it works with every editor and needs no plugins.
 
 | Key | Action |
 | --- | ------ |
-| V / W / L / R / H | show one scope alone: vectorscope, RGB waveform, luma waveform, RGB parade, histogram |
-| Shift+V / W / L / R / H | stack or unstack a scope; panes follow the order they were turned on |
+| V / W / R / H | show one scope alone: vectorscope, waveform, RGB parade, histogram |
+| Shift+V / W / R / H | stack or unstack a scope; panes follow the order they were turned on |
 | A | pick a window |
 | F | pick a face (macOS) |
 | D | draw an area |
