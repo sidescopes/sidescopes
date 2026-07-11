@@ -1169,22 +1169,37 @@ int main() {
                 // Frontmost windows only, skipping ones mostly hidden behind
                 // fronter windows: the user is not scoping what they cannot
                 // see, and invisible system windows have no business here.
+                const std::vector<DesktopWindow> on_screen = OnScreenWindows(capture_display);
+                const auto contained_fraction = [](const DesktopWindow& inner,
+                                                   const DesktopWindow& outer) {
+                    const double left = std::max(inner.x, outer.x);
+                    const double top = std::max(inner.y, outer.y);
+                    const double right = std::min(inner.x + inner.width, outer.x + outer.width);
+                    const double bottom = std::min(inner.y + inner.height, outer.y + outer.height);
+                    if (right <= left || bottom <= top) return 0.0;
+                    return (right - left) * (bottom - top) / (inner.width * inner.height);
+                };
                 std::vector<DesktopWindow> visible_windows;
-                for (const DesktopWindow& window : OnScreenWindows(capture_display)) {
+                for (const DesktopWindow& window : on_screen) {
                     constexpr int kMaxWindowSuggestions = 5;
                     if (static_cast<int>(visible_windows.size()) >= kMaxWindowSuggestions) break;
+                    // A window living mostly inside a bigger window of the
+                    // same application is an auxiliary surface - Lightroom
+                    // draws its loupe info overlay as a borderless window
+                    // over the photograph - and picking it is never meant.
+                    bool auxiliary = false;
+                    for (const DesktopWindow& other : on_screen) {
+                        if (&other == &window || other.application != window.application) continue;
+                        if (other.width * other.height <= window.width * window.height) continue;
+                        if (contained_fraction(window, other) > 0.9) {
+                            auxiliary = true;
+                            break;
+                        }
+                    }
+                    if (auxiliary) continue;
                     bool mostly_covered = false;
                     for (const DesktopWindow& front : visible_windows) {
-                        const double left = std::max(window.x, front.x);
-                        const double top = std::max(window.y, front.y);
-                        const double right =
-                            std::min(window.x + window.width, front.x + front.width);
-                        const double bottom =
-                            std::min(window.y + window.height, front.y + front.height);
-                        if (right <= left || bottom <= top) continue;
-                        const double covered =
-                            (right - left) * (bottom - top) / (window.width * window.height);
-                        if (covered > 0.8) {
+                        if (contained_fraction(window, front) > 0.8) {
                             mostly_covered = true;
                             break;
                         }
