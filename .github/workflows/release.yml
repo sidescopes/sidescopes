@@ -10,6 +10,11 @@ permissions:
 jobs:
   macos:
     runs-on: macos-latest
+    # The secrets context is not allowed in step conditions; these flags
+    # carry the presence checks somewhere it is.
+    env:
+      HAS_SIGNING_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE_P12 != '' }}
+      HAS_NOTARIZATION_ID: ${{ secrets.APPLE_NOTARIZATION_ID != '' }}
     steps:
       - uses: actions/checkout@v7
 
@@ -27,7 +32,7 @@ jobs:
       # one, the ad-hoc build ships as-is and Gatekeeper asks users to
       # right-click and open; see docs/RELEASING.md.
       - name: Sign with Developer ID
-        if: ${{ secrets.MACOS_CERTIFICATE_P12 != '' }}
+        if: ${{ env.HAS_SIGNING_CERTIFICATE == 'true' }}
         env:
           CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE_P12 }}
           CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
@@ -45,7 +50,7 @@ jobs:
           rm certificate.p12
 
       - name: Notarize
-        if: ${{ secrets.APPLE_NOTARIZATION_ID != '' }}
+        if: ${{ env.HAS_NOTARIZATION_ID == 'true' }}
         env:
           APPLE_ID: ${{ secrets.APPLE_NOTARIZATION_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_NOTARIZATION_PASSWORD }}
