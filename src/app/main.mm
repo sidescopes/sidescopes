@@ -189,10 +189,72 @@ void DrawPointMarker(const DrawnScope& scope, const NormalizedPoint& point, ImU3
     draw->AddCircle(center, 6.5f, IM_COL32(0, 0, 0, 200), 0, 1.0f);
 }
 
-void DrawLevelMarker(const DrawnScope& scope, float normalized_y, ImU32 color) {
+void DrawLevelMarker(const DrawnScope& scope, float normalized_y, ImU32 color, float from_x = 0.0f,
+                     float to_x = 1.0f) {
     ImDrawList* draw = ImGui::GetWindowDrawList();
     const float y = scope.origin.y + normalized_y * scope.size.y;
-    draw->AddLine(ImVec2(scope.origin.x, y), ImVec2(scope.origin.x + scope.size.x, y), color, 1.5f);
+    draw->AddLine(ImVec2(scope.origin.x + from_x * scope.size.x, y),
+                  ImVec2(scope.origin.x + to_x * scope.size.x, y), color, 1.5f);
+}
+
+void DrawValueMarker(const DrawnScope& scope, float normalized_x, ImU32 color, float from_y = 0.0f,
+                     float to_y = 1.0f) {
+    ImDrawList* draw = ImGui::GetWindowDrawList();
+    const float x = scope.origin.x + normalized_x * scope.size.x;
+    draw->AddLine(ImVec2(x, scope.origin.y + from_y * scope.size.y),
+                  ImVec2(x, scope.origin.y + to_y * scope.size.y), color, 1.5f);
+}
+
+// Cursor markers for the three channels, merged where the values
+// coincide: lines folding into one must read as the mix - gray for all
+// three, yellow, magenta, or cyan for a pair - not as whichever channel
+// happened to draw last.
+struct ChannelMarker {
+    float value = 0.0f;  // 0..255
+    ImU32 color = 0;
+};
+
+ImU32 ChannelMaskColor(int mask) {
+    switch (mask) {
+        case 0b001:
+            return IM_COL32(255, 90, 90, 230);  // red
+        case 0b010:
+            return IM_COL32(90, 255, 90, 230);  // green
+        case 0b100:
+            return IM_COL32(110, 110, 255, 230);  // blue
+        case 0b011:
+            return IM_COL32(255, 235, 90, 230);  // red+green: yellow
+        case 0b101:
+            return IM_COL32(255, 90, 255, 230);  // red+blue: magenta
+        case 0b110:
+            return IM_COL32(90, 235, 255, 230);  // green+blue: cyan
+        default:
+            return IM_COL32(235, 235, 235, 230);  // all three: gray
+    }
+}
+
+int GroupChannelMarkers(const FloatColor& color, ChannelMarker out[3]) {
+    const float channels[3] = {color.r, color.g, color.b};
+    constexpr float kMergeEpsilon = 2.0f;
+    bool grouped[3] = {false, false, false};
+    int count = 0;
+    for (int channel = 0; channel < 3; ++channel) {
+        if (grouped[channel]) continue;
+        int mask = 1 << channel;
+        float sum = channels[channel];
+        int members = 1;
+        for (int other = channel + 1; other < 3; ++other) {
+            if (grouped[other]) continue;
+            if (std::abs(channels[other] - channels[channel]) <= kMergeEpsilon) {
+                grouped[other] = true;
+                mask |= 1 << other;
+                sum += channels[other];
+                ++members;
+            }
+        }
+        out[count++] = ChannelMarker{sum / static_cast<float>(members), ChannelMaskColor(mask)};
+    }
+    return count;
 }
 
 // Toolbar icon buttons drawn with the draw list: corner brackets for region
@@ -908,11 +970,20 @@ int main() {
         // level on luma.
         const auto draw_channel_markers = [&](const DrawnScope& scope) {
             if (!waveform_color) return;
+            ChannelMarker markers[3];
+            const int count = GroupChannelMarkers(*waveform_color, markers);
+            for (int i = 0; i < count; ++i)
+                DrawLevelMarker(scope, (255.0f - markers[i].value) / 255.0f, markers[i].color);
+        };
+        // The parade separates the channels into thirds, so each marker
+        // stays a single color inside its own channel's column.
+        const auto draw_parade_markers = [&](const DrawnScope& scope) {
+            if (!waveform_color) return;
             const float channels[3] = {waveform_color->r, waveform_color->g, waveform_color->b};
-            const ImU32 colors[3] = {IM_COL32(255, 90, 90, 230), IM_COL32(90, 255, 90, 230),
-                                     IM_COL32(110, 110, 255, 230)};
             for (int channel = 0; channel < 3; ++channel)
-                DrawLevelMarker(scope, (255.0f - channels[channel]) / 255.0f, colors[channel]);
+                DrawLevelMarker(scope, (255.0f - channels[channel]) / 255.0f,
+                                ChannelMaskColor(1 << channel), channel / 3.0f,
+                                (channel + 1) / 3.0f);
         };
         const auto draw_waveform = [&](ScopeGlyph kind) {
             ScopeTexture& texture =
@@ -925,8 +996,10 @@ int main() {
                     if (const auto point = projection_waveform.Project(*waveform_color))
                         DrawLevelMarker(scope, point->y, IM_COL32(255, 220, 80, 220));
                 }
-            } else {
+            } else if (kind == ScopeGlyph::Waveform) {
                 draw_channel_markers(scope);
+            } else {
+                draw_parade_markers(scope);
             }
         };
 
@@ -944,15 +1017,20 @@ int main() {
                 }
             }
             if (vectorscope_color) {
-                const float channels[3] = {vectorscope_color->r, vectorscope_color->g,
-                                           vectorscope_color->b};
-                const ImU32 colors[3] = {IM_COL32(255, 90, 90, 230), IM_COL32(90, 255, 90, 230),
-                                         IM_COL32(110, 110, 255, 230)};
-                ImDrawList* draw = ImGui::GetWindowDrawList();
-                for (int channel = 0; channel < 3; ++channel) {
-                    const float x = scope.origin.x + channels[channel] / 255.0f * scope.size.x;
-                    draw->AddLine(ImVec2(x, scope.origin.y),
-                                  ImVec2(x, scope.origin.y + scope.size.y), colors[channel], 1.5f);
+                if (analysis.histogram.style == HistogramStyle::PerChannel) {
+                    // Each channel's marker stays a single color inside
+                    // its own band.
+                    const float channels[3] = {vectorscope_color->r, vectorscope_color->g,
+                                               vectorscope_color->b};
+                    for (int channel = 0; channel < 3; ++channel)
+                        DrawValueMarker(scope, channels[channel] / 255.0f,
+                                        ChannelMaskColor(1 << channel), channel / 3.0f,
+                                        (channel + 1) / 3.0f);
+                } else {
+                    ChannelMarker markers[3];
+                    const int count = GroupChannelMarkers(*vectorscope_color, markers);
+                    for (int i = 0; i < count; ++i)
+                        DrawValueMarker(scope, markers[i].value / 255.0f, markers[i].color);
                 }
             }
         };
