@@ -566,6 +566,18 @@ SidescopesPickerWindow* g_picker_window = nil;
 SidescopesPickerView* g_picker_view = nil;
 NSSize g_picker_size = {0, 0};
 
+std::vector<NSRect> OwnWindowExclusions(NSWindow* overlay, NSPoint screen_origin) {
+    std::vector<NSRect> exclusions;
+    for (NSWindow* window in NSApp.windows) {
+        if (window == overlay || window == g_border_window || !window.isVisible) continue;
+        const NSRect frame = window.frame;
+        exclusions.push_back(NSMakeRect(frame.origin.x - screen_origin.x,
+                                        frame.origin.y - screen_origin.y, frame.size.width,
+                                        frame.size.height));
+    }
+    return exclusions;
+}
+
 NSRect RegionToViewRect(const RegionOfInterest& region, NSSize view_size) {
     // Percent (top-left origin) to view coordinates (bottom-left origin).
     return NSMakeRect(region.left_percent / 100.0 * view_size.width,
@@ -604,14 +616,10 @@ bool BeginRegionPick(uint32_t display_id, const std::vector<SuggestedRegion>& wi
         view->faces_.emplace_back(RegionToViewRect(suggestion.region, view_size), suggestion.label);
     }
     // This application's own visible windows stay reachable through the
-    // overlay: the toolbar keeps working while picking.
-    for (NSWindow* window in NSApp.windows) {
-        if (window == overlay || window == g_border_window || !window.isVisible) continue;
-        const NSRect frame = window.frame;
-        view->exclusions_.push_back(NSMakeRect(frame.origin.x - screen.frame.origin.x,
-                                               frame.origin.y - screen.frame.origin.y,
-                                               frame.size.width, frame.size.height));
-    }
+    // overlay: the toolbar keeps working while picking. The list refreshes
+    // every poll, because the user can move the scope window mid-pick and
+    // a stale hole would leave an undimmed ghost where it used to be.
+    view->exclusions_ = OwnWindowExclusions(overlay, screen.frame.origin);
     if (initial_mode == RegionPickerMode::Draw ||
         (initial_mode == RegionPickerMode::PickWindows && windows.empty())) {
         view.drawMode = YES;
@@ -640,6 +648,18 @@ RegionPickPoll PollRegionPick() {
     RegionPickPoll poll;
     if (!g_picker_view) return poll;
     poll.active = true;
+
+    // Track this application's own windows as they move: the punched
+    // holes and the dimming must follow, or the old position stays
+    // undimmed and the new one goes dark.
+    std::vector<NSRect> exclusions =
+        OwnWindowExclusions(g_picker_window, g_picker_window.frame.origin);
+    if (exclusions.size() != g_picker_view->exclusions_.size() ||
+        !std::equal(exclusions.begin(), exclusions.end(), g_picker_view->exclusions_.begin(),
+                    [](const NSRect& a, const NSRect& b) { return NSEqualRects(a, b); })) {
+        g_picker_view->exclusions_ = std::move(exclusions);
+        g_picker_view.needsDisplay = YES;
+    }
 
     const auto region_from_view = [](NSRect rect, NSSize size) {
         RegionOfInterest region;
