@@ -38,7 +38,8 @@ screen itself, so it works with every editor and needs no plugins.
 | P | pin the color under the cursor |
 
 The region border is live on the desktop: drag it to move the region,
-drag a corner to resize, and Shift-drag an edge to resize that edge alone.
+drag a corner handle to resize, and drag an edge's midpoint handle to
+resize that edge alone.
 
 ## Status
 

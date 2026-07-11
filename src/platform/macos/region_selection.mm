@@ -25,6 +25,10 @@ constexpr double kBorderPad = 12.0;
 // Within this distance of a region corner, a grab resizes; the rest of
 // the band moves the region (Shift-drag resizes a single edge).
 constexpr double kCornerZone = 22.0;
+// Half-length of the edge-midpoint handle's grab zone along its edge.
+constexpr double kMidpointZone = 22.0;
+// Visible size of the square resize handles on the measurement line.
+constexpr double kHandleSize = 9.0;
 // Regions cannot shrink beyond this many points per side.
 constexpr double kMinimumRegionSize = 24.0;
 
@@ -412,9 +416,35 @@ RegionOfInterest g_border_edit_region;
     NSBezierPath* edge = [NSBezierPath bezierPathWithRect:NSInsetRect(region, -0.9, -0.9)];
     edge.lineWidth = 1.4;
     [edge stroke];
+
+    // Eight resize handles on the line - corners and edge midpoints - the
+    // universal selection idiom, so the affordance explains itself. A dark
+    // outline keeps them visible over bright content.
+    const auto handle = [&](CGFloat x, CGFloat y) {
+        const NSRect square =
+            NSMakeRect(x - sidescopes::kHandleSize / 2, y - sidescopes::kHandleSize / 2,
+                       sidescopes::kHandleSize, sidescopes::kHandleSize);
+        [[NSColor colorWithWhite:0.97 alpha:0.95] setFill];
+        NSBezierPath* fill = [NSBezierPath bezierPathWithRoundedRect:square xRadius:2 yRadius:2];
+        [fill fill];
+        [[NSColor colorWithWhite:0.1 alpha:0.7] setStroke];
+        fill.lineWidth = 1.0;
+        [fill stroke];
+    };
+    handle(NSMinX(region), NSMinY(region));
+    handle(NSMidX(region), NSMinY(region));
+    handle(NSMaxX(region), NSMinY(region));
+    handle(NSMinX(region), NSMidY(region));
+    handle(NSMaxX(region), NSMidY(region));
+    handle(NSMinX(region), NSMaxY(region));
+    handle(NSMidX(region), NSMaxY(region));
+    handle(NSMaxX(region), NSMaxY(region));
 }
 
-- (SidescopesDragEdges)zoneAtPoint:(NSPoint)point withShift:(BOOL)shift {
+// Eight handles, no modifier: the corners resize both axes, the edge
+// midpoints resize their edge, and the rest of the band moves. The
+// visible handles say which is which - a modifier key never could.
+- (SidescopesDragEdges)zoneAtPoint:(NSPoint)point {
     const NSRect region = [self regionRect];
     if (NSPointInRect(point, region)) return SidescopesDragEdgeNone;  // click-through anyway
     const BOOL near_left = point.x < NSMinX(region) + sidescopes::kCornerZone;
@@ -427,12 +457,12 @@ RegionOfInterest g_border_edit_region;
         edges |= near_bottom ? SidescopesDragEdgeBottom : SidescopesDragEdgeTop;
         return edges;
     }
-    if (shift) {
-        if (point.x < NSMinX(region)) return SidescopesDragEdgeLeft;
-        if (point.x > NSMaxX(region)) return SidescopesDragEdgeRight;
-        if (point.y < NSMinY(region)) return SidescopesDragEdgeBottom;
-        return SidescopesDragEdgeTop;
-    }
+    const BOOL mid_x = std::abs(point.x - NSMidX(region)) <= sidescopes::kMidpointZone;
+    const BOOL mid_y = std::abs(point.y - NSMidY(region)) <= sidescopes::kMidpointZone;
+    if (mid_x && point.y > NSMaxY(region)) return SidescopesDragEdgeTop;
+    if (mid_x && point.y < NSMinY(region)) return SidescopesDragEdgeBottom;
+    if (mid_y && point.x < NSMinX(region)) return SidescopesDragEdgeLeft;
+    if (mid_y && point.x > NSMaxX(region)) return SidescopesDragEdgeRight;
     return SidescopesDragMove;
 }
 
@@ -477,8 +507,7 @@ RegionOfInterest g_border_edit_region;
 - (void)mouseMoved:(NSEvent*)event {
     if (self.dragZone != SidescopesDragEdgeNone) return;  // drag owns the cursor
     const NSPoint local = [self convertPoint:event.locationInWindow fromView:nil];
-    const BOOL shift = (event.modifierFlags & NSEventModifierFlagShift) != 0;
-    [self applyCursorForZone:[self zoneAtPoint:local withShift:shift]];
+    [self applyCursorForZone:[self zoneAtPoint:local]];
 }
 
 - (void)mouseExited:(NSEvent*)event {
@@ -488,8 +517,7 @@ RegionOfInterest g_border_edit_region;
 
 - (void)mouseDown:(NSEvent*)event {
     const NSPoint local = [self convertPoint:event.locationInWindow fromView:nil];
-    const BOOL shift = (event.modifierFlags & NSEventModifierFlagShift) != 0;
-    self.dragZone = [self zoneAtPoint:local withShift:shift];
+    self.dragZone = [self zoneAtPoint:local];
     if (self.dragZone == SidescopesDragEdgeNone) return;
     if (self.dragZone & SidescopesDragMove) [NSCursor.closedHandCursor set];
     self.dragStartMouse = NSEvent.mouseLocation;
@@ -539,8 +567,7 @@ RegionOfInterest g_border_edit_region;
     self.dragZone = SidescopesDragEdgeNone;
     sidescopes::g_border_editing = false;
     const NSPoint local = [self convertPoint:event.locationInWindow fromView:nil];
-    const BOOL shift = (event.modifierFlags & NSEventModifierFlagShift) != 0;
-    [self applyCursorForZone:[self zoneAtPoint:local withShift:shift]];
+    [self applyCursorForZone:[self zoneAtPoint:local]];
 }
 
 // The scoped editor is usually the active application; without this, the
