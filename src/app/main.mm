@@ -195,9 +195,10 @@ void DrawLevelMarker(const DrawnScope& scope, float normalized_y, ImU32 color) {
 // selection, an outline rectangle for full screen.
 enum class ScopeGlyph { Vectorscope, Waveform, Histogram };
 
-// An icon toggle drawn with primitives so it matches the terminal look:
-// a filled background marks an enabled scope.
-bool ScopeToggleButton(const char* id, ScopeGlyph glyph, bool enabled, const char* tooltip) {
+// Scope toggles are letter chips: professional tools label scopes with
+// text because no icon language exists for them, and the letters double
+// as the keyboard shortcuts.
+bool ScopeToggleButton(const char* id, const char* letter, bool enabled, const char* tooltip) {
     const float height = ImGui::GetTextLineHeight() + 4.0f;
     const bool pressed = ImGui::InvisibleButton(id, ImVec2(height + 8.0f, height));
     ImDrawList* draw = ImGui::GetWindowDrawList();
@@ -207,53 +208,20 @@ bool ScopeToggleButton(const char* id, ScopeGlyph glyph, bool enabled, const cha
         draw->AddRectFilled(min, max, ImGui::GetColorU32(ImGuiCol_ButtonActive), 3.0f);
     else if (ImGui::IsItemHovered())
         draw->AddRectFilled(min, max, ImGui::GetColorU32(ImGuiCol_ButtonHovered), 3.0f);
-    // Glyphs draw around a pixel-snapped center with fixed point sizes:
-    // deriving geometry from the font-sized button box lands strokes and
-    // dots on fractional pixels, which reads as misalignment at a glance.
-    const ImVec2 center(std::floor((min.x + max.x) / 2) + 0.5f,
-                        std::floor((min.y + max.y) / 2) + 0.5f);
-    const float half = 7.0f;
-    const ImVec2 a(center.x - half, center.y - half + 1.0f);
-    const ImVec2 b(center.x + half, center.y + half - 1.0f);
     const ImU32 color = ImGui::GetColorU32(enabled ? ImGuiCol_Text : ImGuiCol_TextDisabled);
-    const float stroke = 1.5f;
-    if (glyph == ScopeGlyph::Vectorscope) {
-        // A graticule in miniature: ring, compass ticks crossing it, and
-        // the center dot.
-        const float radius = 5.0f;
-        draw->AddCircle(center, radius, color, 24, stroke);
-        draw->AddCircleFilled(center, 1.5f, color, 12);
-        for (const auto [dx, dy] : {std::pair{0.0f, -1.0f}, std::pair{0.0f, 1.0f},
-                                    std::pair{-1.0f, 0.0f}, std::pair{1.0f, 0.0f}}) {
-            draw->AddLine(ImVec2(center.x + dx * (radius - 1.0f), center.y + dy * (radius - 1.0f)),
-                          ImVec2(center.x + dx * (radius + 2.0f), center.y + dy * (radius + 2.0f)),
-                          color, stroke);
-        }
-    } else if (glyph == ScopeGlyph::Waveform) {
-        // A trace over its baseline, calm rather than jagged.
-        const float levels[7] = {0.55f, 0.2f, 0.45f, 0.1f, 0.35f, 0.6f, 0.3f};
-        ImVec2 points[7];
-        for (int i = 0; i < 7; ++i)
-            points[i] = ImVec2(a.x + (b.x - a.x) * i / 6.0f, a.y + (b.y - a.y) * levels[i]);
-        draw->AddPolyline(points, 7, color, 0, stroke);
-        draw->AddLine(ImVec2(a.x, b.y), ImVec2(b.x, b.y), (color & 0x00FFFFFF) | 0x60000000, 1.0f);
-    } else {
-        // Four bars on even 3.5-point slots, symmetric about the center.
-        const float heights[4] = {5.5f, 11.0f, 8.0f, 3.5f};
-        for (int i = 0; i < 4; ++i) {
-            const float x = center.x - 6.5f + 3.5f * static_cast<float>(i);
-            draw->AddRectFilled(ImVec2(x, b.y - heights[i]), ImVec2(x + 2.5f, b.y), color);
-        }
-    }
+    const ImVec2 size = ImGui::CalcTextSize(letter);
+    const ImVec2 at(std::floor(min.x + (max.x - min.x - size.x) / 2),
+                    std::floor(min.y + (max.y - min.y - size.y) / 2));
+    draw->AddText(at, color, letter);
     ImGui::SetItemTooltip("%s", tooltip);
     return pressed;
 }
 
-// Region tool icons: viewfinder brackets with a target dot for picking a
-// detected area, a pencil for drawing one, expanding arrows for full
-// screen. Each tool gets its own silhouette - three flavors of rectangle
-// were indistinguishable at icon size.
-enum class RegionIcon { PickTarget, Pencil, Expand };
+// Region tool icons mirror the cursors of their modes: a pointing hand
+// for picking a detected area (the pick-mode hover cursor), a crosshair
+// for drawing one (the draw-mode cursor), expanding arrows for full
+// screen.
+enum class RegionIcon { PickHand, Crosshair, Expand };
 
 bool IconButton(const char* id, RegionIcon icon, const char* tooltip) {
     const float height = ImGui::GetTextLineHeight() + 4.0f;
@@ -270,35 +238,29 @@ bool IconButton(const char* id, RegionIcon icon, const char* tooltip) {
     const ImVec2 b(center.x + half, center.y + half - 1.0f);
     const ImU32 color = ImGui::GetColorU32(ImGuiCol_Text);
     const float stroke = 1.5f;
-    if (icon == RegionIcon::PickTarget) {
-        const float length = 5.0f;
-        const auto corner = [&](float cx, float cy, float dx, float dy) {
-            draw->AddLine(ImVec2(cx, cy), ImVec2(cx + dx * length, cy), color, stroke);
-            draw->AddLine(ImVec2(cx, cy), ImVec2(cx, cy + dy * length), color, stroke);
+    if (icon == RegionIcon::PickHand) {
+        // A simplified pointing hand: index finger up, palm with knuckle
+        // notches, the shape of the pick-mode cursor.
+        (void)a;
+        draw->AddRectFilled(ImVec2(center.x - 4.5f, center.y - 7.0f),
+                            ImVec2(center.x - 2.0f, center.y + 1.0f), color, 1.2f);
+        draw->AddRectFilled(ImVec2(center.x - 4.5f, center.y - 1.0f),
+                            ImVec2(center.x + 4.5f, center.y + 7.0f), color, 2.5f);
+        // Folded knuckles as scalloped bumps along the palm's top edge.
+        for (const float bump_x : {-1.0f, 1.75f, 4.5f - 2.0f + 1.0f}) {
+            draw->AddRectFilled(ImVec2(center.x + bump_x, center.y - 2.75f),
+                                ImVec2(center.x + bump_x + 2.0f, center.y + 1.0f), color, 1.0f);
+        }
+    } else if (icon == RegionIcon::Crosshair) {
+        // The draw-mode crosshair: long thin beams, small center gap.
+        const auto beam = [&](float dx, float dy) {
+            draw->AddLine(ImVec2(center.x + dx * 1.25f, center.y + dy * 1.25f),
+                          ImVec2(center.x + dx * 7.5f, center.y + dy * 7.5f), color, 1.4f);
         };
-        corner(a.x, a.y, 1, 1);
-        corner(b.x, a.y, -1, 1);
-        corner(a.x, b.y, 1, -1);
-        corner(b.x, b.y, -1, -1);
-        draw->AddCircleFilled(center, 1.6f, color, 12);
-    } else if (icon == RegionIcon::Pencil) {
-        // Diagonal pencil: flat end top-right, tip bottom-left.
-        const ImVec2 tip(a.x + 1.0f, b.y - 1.0f);
-        const ImVec2 end(b.x - 1.0f, a.y + 1.0f);
-        const ImVec2 direction(end.x - tip.x, end.y - tip.y);
-        const float length = std::sqrt(direction.x * direction.x + direction.y * direction.y);
-        const ImVec2 unit(direction.x / length, direction.y / length);
-        const ImVec2 side(-unit.y, unit.x);
-        const ImVec2 shoulder(tip.x + unit.x * 4.0f, tip.y + unit.y * 4.0f);
-        // The gap between tip and body is what makes it a pencil rather
-        // than an arrow at this size.
-        const ImVec2 body_start(shoulder.x + unit.x * 1.5f, shoulder.y + unit.y * 1.5f);
-        draw->AddLine(body_start, end, color, stroke + 0.7f);
-        draw->AddTriangleFilled(tip, ImVec2(shoulder.x + side.x * 2.0f, shoulder.y + side.y * 2.0f),
-                                ImVec2(shoulder.x - side.x * 2.0f, shoulder.y - side.y * 2.0f),
-                                color);
-        draw->AddLine(ImVec2(end.x + side.x * 1.6f, end.y + side.y * 1.6f),
-                      ImVec2(end.x - side.x * 1.6f, end.y - side.y * 1.6f), color, stroke);
+        beam(0.0f, -1.0f);
+        beam(0.0f, 1.0f);
+        beam(-1.0f, 0.0f);
+        beam(1.0f, 0.0f);
     } else {
         // Two arrows expanding to opposite corners, the fullscreen idiom.
         const auto arrow = [&](ImVec2 from, ImVec2 to, float head_x, float head_y) {
@@ -689,16 +651,16 @@ int main() {
                 show_histogram = kind == ScopeGlyph::Histogram;
             }
         };
-        const auto scope_toggle = [&](const char* id, ScopeGlyph kind, bool& flag,
-                                      const char* tooltip) {
-            if (ScopeToggleButton(id, kind, flag, tooltip)) choose_scope(kind, flag, io.KeyShift);
+        const auto scope_toggle = [&](const char* id, const char* letter, ScopeGlyph kind,
+                                      bool& flag, const char* tooltip) {
+            if (ScopeToggleButton(id, letter, flag, tooltip)) choose_scope(kind, flag, io.KeyShift);
             ImGui::SameLine(0.0f, 2.0f);
         };
-        scope_toggle("##toggle-vectorscope", ScopeGlyph::Vectorscope, show_vectorscope,
+        scope_toggle("##toggle-vectorscope", "V", ScopeGlyph::Vectorscope, show_vectorscope,
                      "Vectorscope - V shows only this, Shift+V stacks");
-        scope_toggle("##toggle-waveform", ScopeGlyph::Waveform, show_waveform,
+        scope_toggle("##toggle-waveform", "W", ScopeGlyph::Waveform, show_waveform,
                      "Waveform - W shows only this, Shift+W stacks");
-        scope_toggle("##toggle-histogram", ScopeGlyph::Histogram, show_histogram,
+        scope_toggle("##toggle-histogram", "H", ScopeGlyph::Histogram, show_histogram,
                      "Histogram - H shows only this, Shift+H stacks");
         ImGui::SameLine(0.0f, 8.0f);
 
@@ -722,10 +684,10 @@ int main() {
             if (ImGui::IsKeyPressed(ImGuiKey_P, false)) pin_cursor_color(vectorscope_color);
         }
 
-        if (IconButton("##pick-region", RegionIcon::PickTarget, "Pick a detected area (A)"))
+        if (IconButton("##pick-region", RegionIcon::PickHand, "Pick a detected area (A)"))
             want_region_pick = RegionPickerMode::PickDetected;
         ImGui::SameLine(0.0f, 2.0f);
-        if (IconButton("##draw-region", RegionIcon::Pencil, "Draw an area (D)"))
+        if (IconButton("##draw-region", RegionIcon::Crosshair, "Draw an area (D)"))
             want_region_pick = RegionPickerMode::Draw;
         ImGui::SameLine(0.0f, 2.0f);
         if (!is_full_region()) {
