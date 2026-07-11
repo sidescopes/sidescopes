@@ -31,6 +31,11 @@ constexpr int kMinimumRunLengthPoints = 96;
 // honest.
 constexpr int kRunGapTolerancePoints = 28;
 
+// A bridged gap at least this wide may also be a real gutter between two
+// separate rectangles (side-by-side photos in a compare view), so the
+// segments around it are offered for pairing alongside the bridged whole.
+constexpr int kRunSplitPoints = 10;
+
 // Two runs bound the same rectangle when their ends align within this many
 // points.
 constexpr int kAlignmentTolerancePoints = 10;
@@ -63,6 +68,7 @@ constexpr float kMinimumSideCoverage = 0.6f;
 struct Tolerances {
     int run_length;
     int run_gap;
+    int run_split;
     int alignment;
     int side_radius;
     int rect_width;
@@ -76,6 +82,7 @@ struct Tolerances {
         };
         run_length = scaled(kMinimumRunLengthPoints);
         run_gap = scaled(kRunGapTolerancePoints);
+        run_split = scaled(kRunSplitPoints);
         alignment = scaled(kAlignmentTolerancePoints);
         side_radius = scaled(kSideSearchRadiusPoints);
         rect_width = scaled(kMinimumRectWidthPoints);
@@ -179,23 +186,44 @@ bool QuietSpan(const BoundaryRow& row, int x0, int x1) {
 // Edge runs along one boundary. Masked pixels extend a run without counting
 // toward its required visible-edge length, so a border passing beneath an
 // occluding window survives, while content wholly inside the mask does not.
+// A gap wide enough to be a gutter splits the run as well as bridging it:
+// the whole and its segments all reach pairing, so side-by-side photos are
+// found individually and as their union, and the picker's hover resolves
+// the ambiguity.
 void AppendRunsFromBoundary(const BoundaryRow& row, const Tolerances& tolerances, int y, int width,
                             std::vector<EdgeRun>& runs) {
     int run_start = -1;
+    int segment_start = -1;
     int visible_edges = 0;
     int gap = 0;
+    bool split = false;
+    const auto close_segment = [&](int end) {
+        if (split && segment_start >= 0 && row.EdgesIn(segment_start, end) >= tolerances.run_length)
+            runs.push_back(EdgeRun{y, segment_start, end});
+        segment_start = -1;
+    };
     const auto close_run = [&](int end) {
+        close_segment(end);
         if (run_start >= 0 && visible_edges >= tolerances.run_length)
             runs.push_back(EdgeRun{y, run_start, end});
         run_start = -1;
         visible_edges = 0;
         gap = 0;
+        split = false;
     };
     for (int x = 0; x < width; ++x) {
         const bool masked = row.VisibleIn(x, x + 1) == 0;
         const bool edge = row.EdgesIn(x, x + 1) != 0;
         if (edge) {
             if (run_start < 0) run_start = x;
+            if (segment_start < 0) segment_start = x;
+            if (gap > tolerances.run_split && segment_start >= 0 && segment_start < x - gap) {
+                // The gap behind us was gutter-sized: emit the segment
+                // before it and start a fresh one here.
+                split = true;
+                close_segment(x - gap + 1);
+                segment_start = x;
+            }
             ++visible_edges;
             gap = 0;
         } else if (masked) {

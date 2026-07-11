@@ -240,6 +240,33 @@ TEST_CASE("Detector keeps a small photo despite stacked window variants") {
     CHECK(AnyCandidateNear(DetectPhotoRegions(screen.View()), photo));
 }
 
+TEST_CASE("Detector separates photos across a narrow gutter") {
+    // Compare views put two photos a dozen points apart. Gap bridging
+    // (needed for tone-matching dropouts) would merge their border runs
+    // into one; gutter-sized gaps therefore emit the segments as well,
+    // so the photos are found individually - the union may also appear,
+    // and hover resolves it.
+    TestScreen screen(800, 480);
+    const IntRect left{48, 96, 320, 300};
+    const IntRect right{384, 96, 320, 300};  // 16-point gutter
+    screen.AddPhoto(left, 0x11111111u);
+    screen.AddPhoto(right, 0x22222222u);
+
+    const auto candidates = DetectPhotoRegions(screen.View());
+    CHECK(AnyCandidateNear(candidates, left));
+    CHECK(AnyCandidateNear(candidates, right));
+}
+
+TEST_CASE("Detector handles fractional pixel density") {
+    // Windows scales at 125 and 150 percent; nothing may assume integer
+    // density.
+    TestScreen screen(960, 720);
+    const IntRect photo{144, 96, 600, 480};
+    screen.AddPhoto(photo);
+
+    CHECK(AnyCandidateNear(DetectPhotoRegions(screen.View(), {}, 1.5f), photo));
+}
+
 TEST_CASE("Detector reports nothing on a flat frame") {
     TestScreen screen(640, 480);
     CHECK(DetectPhotoRegions(screen.View()).empty());
