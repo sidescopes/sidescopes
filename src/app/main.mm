@@ -1199,9 +1199,7 @@ int main() {
                     std::fclose(image);
                 });
             }
-            std::optional<RegionOfInterest> current_region;
-            if (!is_full_region()) current_region = analysis.region;
-            if (BeginRegionPick(capture_display, suggestions, current_region, *want_region_pick)) {
+            if (BeginRegionPick(capture_display, suggestions, *want_region_pick)) {
                 region_picking = true;
                 region_before_pick = analysis.region;
                 pick_window_regions = window_regions;

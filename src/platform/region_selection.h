@@ -29,25 +29,37 @@ struct RegionPickPoll {
 // highlights the detected rectangle (photo canvases and windows) under the
 // cursor with the system accent for one-click confirmation, the way the
 // macOS screenshot interface selects windows; draw mode dims the screen
-// for dragging an area by hand. `current_region` seeds draw mode with the
-// present selection so it can be moved, resized by its handles, or
-// confirmed as-is; pass nothing when the whole screen is scoped. ESC
-// cancels.
+// for dragging a fresh area by hand - adjusting an existing region happens
+// on the region border itself, not in here. ESC cancels. This
+// application's own windows stay undimmed and clickable through the
+// overlay, so the toolbar keeps working while picking.
 //
 // The picker is asynchronous: Begin shows the overlay and returns, the
 // application keeps running its frame loop (which also pumps the
 // overlay's events), and PollRegionPick is read once per frame so the
 // scopes can preview the selection before it is confirmed.
 bool BeginRegionPick(uint32_t display_id, const std::vector<SuggestedRegion>& suggestions,
-                     const std::optional<RegionOfInterest>& current_region,
                      RegionPickerMode initial_mode);
 RegionPickPoll PollRegionPick();
 
-// Persistent, click-through border around the monitored region so users can
-// see what the scopes are reading. Drawn OUTSIDE the region so the border
-// itself never enters the scoped pixels. Idempotent: call Show again to
-// move it.
+// Cancels an active pick as if ESC had been pressed on the overlay.
+void CancelRegionPick();
+
+// Persistent border around the monitored region so users can see what the
+// scopes are reading. Drawn OUTSIDE the region so the border itself never
+// enters the scoped pixels, and its interior stays click-through - the
+// editor underneath keeps working. The border itself is live: edges and
+// corners resize the region, the tab above the top edge moves it, and the
+// application polls the edit each frame so the scopes follow. Idempotent:
+// call Show again to move it.
 void ShowRegionBorder(uint32_t display_id, const RegionOfInterest& region);
 void HideRegionBorder();
+
+// The border's in-progress or just-finished adjustment, if any.
+struct RegionBorderEdit {
+    bool editing = false;
+    std::optional<RegionOfInterest> region;
+};
+RegionBorderEdit PollRegionBorderEdit();
 
 }  // namespace sidescopes

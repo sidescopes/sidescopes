@@ -5,9 +5,7 @@
 
 #include "platform/region_selection.h"
 
-// Where a mouse-down lands relative to the remembered selection: on a
-// resize handle (encoded by which edges it drags), inside (move), or
-// elsewhere (start a fresh rectangle).
+// Which edges a border drag adjusts; Move relocates the whole region.
 typedef NS_OPTIONS(NSUInteger, SidescopesDragEdges) {
     SidescopesDragEdgeNone = 0,
     SidescopesDragEdgeLeft = 1 << 0,
@@ -16,6 +14,52 @@ typedef NS_OPTIONS(NSUInteger, SidescopesDragEdges) {
     SidescopesDragEdgeTop = 1 << 3,
     SidescopesDragMove = 1 << 4,
 };
+
+namespace sidescopes {
+namespace {
+
+// The border strokes sit this far OUTSIDE the region so they never enter
+// the scoped pixels.
+constexpr double kBorderMargin = 4.0;
+// The border window extends this far beyond the region: the grab ring for
+// resizing, wide enough to hit with a cursor.
+constexpr double kBorderPad = 14.0;
+// The move tab above the top edge.
+constexpr double kTabWidth = 40.0;
+constexpr double kTabHeight = 12.0;
+// Regions cannot shrink beyond this many points per side.
+constexpr double kMinimumRegionSize = 24.0;
+
+NSScreen* ScreenForDisplay(uint32_t display_id) {
+    for (NSScreen* screen in NSScreen.screens) {
+        NSNumber* number = screen.deviceDescription[@"NSScreenNumber"];
+        if (number && number.unsignedIntValue == display_id) return screen;
+    }
+    return NSScreen.mainScreen;
+}
+
+RegionOfInterest RegionFromScreenRect(NSRect rect, NSRect screen_frame) {
+    // Screen coordinates are bottom-left-origin; the region convention is
+    // top-left-origin percentages.
+    RegionOfInterest region;
+    region.left_percent = (rect.origin.x - screen_frame.origin.x) / screen_frame.size.width * 100.0;
+    region.right_percent =
+        (rect.origin.x + rect.size.width - screen_frame.origin.x) / screen_frame.size.width * 100.0;
+    region.top_percent =
+        (screen_frame.origin.y + screen_frame.size.height - (rect.origin.y + rect.size.height)) /
+        screen_frame.size.height * 100.0;
+    region.bottom_percent = (screen_frame.origin.y + screen_frame.size.height - rect.origin.y) /
+                            screen_frame.size.height * 100.0;
+    return region;
+}
+
+// Shared edit state the application polls once per frame.
+bool g_border_editing = false;
+bool g_border_edit_changed = false;
+RegionOfInterest g_border_edit_region;
+
+}  // namespace
+}  // namespace sidescopes
 
 // Borderless windows refuse key status unless overridden; the picker needs
 // keyDown for ESC-to-cancel.
@@ -31,18 +75,17 @@ typedef NS_OPTIONS(NSUInteger, SidescopesDragEdges) {
 @public
     // Suggested rectangles in view coordinates, with their labels.
     std::vector<std::pair<NSRect, std::string>> suggestions_;
+    // This application's own windows, in view coordinates: undimmed and
+    // truly transparent, so clicks fall through to them.
+    std::vector<NSRect> exclusions_;
 }
 @property(nonatomic, assign) BOOL drawMode;
 @property(nonatomic, assign) NSPoint dragStart;
 @property(nonatomic, assign) NSPoint dragCurrent;
 @property(nonatomic, assign) BOOL dragging;
-@property(nonatomic, assign) SidescopesDragEdges adjusting;
-@property(nonatomic, assign) NSRect adjustAnchor;
 @property(nonatomic, assign) BOOL picked;
 @property(nonatomic, assign) BOOL finished;
 @property(nonatomic, assign) NSInteger hoveredSuggestion;
-@property(nonatomic, assign) BOOL hasRemembered;
-@property(nonatomic, assign) NSRect rememberedRect;
 @property(nonatomic, assign) NSRect confirmedRect;
 @end
 
@@ -54,7 +97,6 @@ typedef NS_OPTIONS(NSUInteger, SidescopesDragEdges) {
     self.drawMode = draw;
     self.hoveredSuggestion = -1;
     self.dragging = NO;
-    self.adjusting = SidescopesDragEdgeNone;
     [self.window invalidateCursorRectsForView:self];
     self.needsDisplay = YES;
 }
@@ -83,43 +125,16 @@ typedef NS_OPTIONS(NSUInteger, SidescopesDragEdges) {
                       std::abs(self.dragCurrent.y - self.dragStart.y));
 }
 
-- (SidescopesDragEdges)adjustZoneAtPoint:(NSPoint)point {
-    if (!self.hasRemembered) return SidescopesDragEdgeNone;
-    const CGFloat grip = 8.0;
-    const NSRect rect = self.rememberedRect;
-    if (!NSPointInRect(point, NSInsetRect(rect, -grip, -grip))) return SidescopesDragEdgeNone;
-    SidescopesDragEdges edges = SidescopesDragEdgeNone;
-    if (std::abs(point.x - NSMinX(rect)) <= grip) edges |= SidescopesDragEdgeLeft;
-    if (std::abs(point.x - NSMaxX(rect)) <= grip) edges |= SidescopesDragEdgeRight;
-    if (std::abs(point.y - NSMinY(rect)) <= grip) edges |= SidescopesDragEdgeBottom;
-    if (std::abs(point.y - NSMaxY(rect)) <= grip) edges |= SidescopesDragEdgeTop;
-    if (edges == SidescopesDragEdgeNone && NSPointInRect(point, rect)) edges = SidescopesDragMove;
-    return edges;
-}
-
-// A punched hole must keep a whisper of alpha: the window server treats
-// fully transparent window pixels as click-through, and the confirming
-// click would land on the application underneath.
+// A punched hole must keep a whisper of alpha when it should stay
+// clickable: the window server treats fully transparent window pixels as
+// click-through. The picker uses both behaviors deliberately - 5% black
+// for its own click targets, true zero alpha over this application's
+// windows so clicks reach them.
 - (void)punchRect:(NSRect)rect {
     [[NSColor clearColor] setFill];
     NSRectFillUsingOperation(rect, NSCompositingOperationCopy);
     [[NSColor colorWithWhite:0 alpha:0.05] setFill];
     NSRectFillUsingOperation(rect, NSCompositingOperationSourceOver);
-}
-
-- (void)drawHandlesAroundRect:(NSRect)rect {
-    const CGFloat half = 3.5;
-    const CGFloat xs[3] = {NSMinX(rect), NSMidX(rect), NSMaxX(rect)};
-    const CGFloat ys[3] = {NSMinY(rect), NSMidY(rect), NSMaxY(rect)};
-    for (int ix = 0; ix < 3; ++ix)
-        for (int iy = 0; iy < 3; ++iy) {
-            if (ix == 1 && iy == 1) continue;
-            const NSRect handle = NSMakeRect(xs[ix] - half, ys[iy] - half, 2 * half, 2 * half);
-            [[NSColor whiteColor] setFill];
-            NSRectFill(handle);
-            [[NSColor colorWithWhite:0 alpha:0.6] setStroke];
-            [[NSBezierPath bezierPathWithRect:handle] stroke];
-        }
 }
 
 - (void)drawRect:(NSRect)dirty {
@@ -160,21 +175,13 @@ typedef NS_OPTIONS(NSUInteger, SidescopesDragEdges) {
             NSBezierPath* border = [NSBezierPath bezierPathWithRect:selection];
             border.lineWidth = 1.5;
             [border stroke];
-        } else if (self.hasRemembered) {
-            const NSRect rect = self.rememberedRect;
-            [self punchRect:rect];
-            [[NSColor whiteColor] setStroke];
-            NSBezierPath* border = [NSBezierPath bezierPathWithRect:rect];
-            border.lineWidth = 1.5;
-            [border stroke];
-            [self drawHandlesAroundRect:rect];
         }
         hint = suggestions_.empty()
                    ? @"Drag to select an area  -  Esc to cancel"
                    : @"Drag to select an area  -  A to pick a detected one  -  Esc to cancel";
     }
 
-    if (!self.dragging && self.adjusting == SidescopesDragEdgeNone) {
+    if (!self.dragging) {
         NSDictionary* attributes = @{
             NSForegroundColorAttributeName : [NSColor whiteColor],
             NSFontAttributeName : [NSFont systemFontOfSize:15 weight:NSFontWeightMedium],
@@ -184,16 +191,17 @@ typedef NS_OPTIONS(NSUInteger, SidescopesDragEdges) {
                                       self.bounds.size.height - 60)
             withAttributes:attributes];
     }
+
+    // Last, so nothing re-adds alpha over them: this application's own
+    // windows stay usable while the picker is up.
+    [[NSColor clearColor] setFill];
+    for (const NSRect& exclusion : exclusions_)
+        NSRectFillUsingOperation(exclusion, NSCompositingOperationCopy);
 }
 
 - (void)resetCursorRects {
-    if (self.drawMode) {
-        [self addCursorRect:self.bounds cursor:NSCursor.crosshairCursor];
-        if (self.hasRemembered)
-            [self addCursorRect:self.rememberedRect cursor:NSCursor.openHandCursor];
-    } else {
-        [self addCursorRect:self.bounds cursor:NSCursor.pointingHandCursor];
-    }
+    [self addCursorRect:self.bounds
+                 cursor:self.drawMode ? NSCursor.crosshairCursor : NSCursor.pointingHandCursor];
 }
 
 - (void)mouseMoved:(NSEvent*)event {
@@ -209,50 +217,17 @@ typedef NS_OPTIONS(NSUInteger, SidescopesDragEdges) {
 - (void)mouseDown:(NSEvent*)event {
     self.dragStart = [self convertPoint:event.locationInWindow fromView:nil];
     self.dragCurrent = self.dragStart;
-    if (self.drawMode) {
-        self.adjusting = [self adjustZoneAtPoint:self.dragStart];
-        self.adjustAnchor = self.rememberedRect;
-    }
     self.needsDisplay = YES;
 }
 
 - (void)mouseDragged:(NSEvent*)event {
     if (!self.drawMode) return;
     self.dragCurrent = [self convertPoint:event.locationInWindow fromView:nil];
-    const CGFloat dx = self.dragCurrent.x - self.dragStart.x;
-    const CGFloat dy = self.dragCurrent.y - self.dragStart.y;
-    if (self.adjusting != SidescopesDragEdgeNone) {
-        NSRect rect = self.adjustAnchor;
-        if (self.adjusting & SidescopesDragMove) {
-            rect.origin.x += dx;
-            rect.origin.y += dy;
-        } else {
-            const CGFloat minimum = 16.0;
-            if (self.adjusting & SidescopesDragEdgeLeft) {
-                const CGFloat limit = NSMaxX(self.adjustAnchor) - minimum;
-                const CGFloat left = std::min(NSMinX(self.adjustAnchor) + dx, limit);
-                rect.size.width = NSMaxX(self.adjustAnchor) - left;
-                rect.origin.x = left;
-            }
-            if (self.adjusting & SidescopesDragEdgeRight)
-                rect.size.width = std::max(minimum, self.adjustAnchor.size.width + dx);
-            if (self.adjusting & SidescopesDragEdgeBottom) {
-                const CGFloat limit = NSMaxY(self.adjustAnchor) - minimum;
-                const CGFloat bottom = std::min(NSMinY(self.adjustAnchor) + dy, limit);
-                rect.size.height = NSMaxY(self.adjustAnchor) - bottom;
-                rect.origin.y = bottom;
-            }
-            if (self.adjusting & SidescopesDragEdgeTop)
-                rect.size.height = std::max(minimum, self.adjustAnchor.size.height + dy);
-        }
-        self.rememberedRect = rect;
-        [self.window invalidateCursorRectsForView:self];
-        self.needsDisplay = YES;
-        return;
-    }
-    // A real drag only starts after a few points of travel, so a click on
-    // the remembered rectangle never flashes a tiny manual selection.
-    if (!self.dragging && (std::abs(dx) > 4 || std::abs(dy) > 4)) self.dragging = YES;
+    // A real drag only starts after a few points of travel, so a stray
+    // click never flashes a tiny manual selection.
+    if (!self.dragging && (std::abs(self.dragCurrent.x - self.dragStart.x) > 4 ||
+                           std::abs(self.dragCurrent.y - self.dragStart.y) > 4))
+        self.dragging = YES;
     self.needsDisplay = YES;
 }
 
@@ -277,21 +252,6 @@ typedef NS_OPTIONS(NSUInteger, SidescopesDragEdges) {
         } else {
             self.needsDisplay = YES;
         }
-        return;
-    }
-    if (self.adjusting != SidescopesDragEdgeNone) {
-        const BOOL moved = !NSEqualRects(self.rememberedRect, self.adjustAnchor);
-        const BOOL inside = (self.adjusting & SidescopesDragMove) != 0;
-        self.adjusting = SidescopesDragEdgeNone;
-        // A plain click inside confirms; releasing an adjustment keeps the
-        // picker open for further tuning (Return also confirms).
-        if (!moved && inside) {
-            self.picked = YES;
-            self.confirmedRect = self.rememberedRect;
-            self.finished = YES;
-            return;
-        }
-        self.needsDisplay = YES;
     }
 }
 
@@ -300,14 +260,6 @@ typedef NS_OPTIONS(NSUInteger, SidescopesDragEdges) {
         self.picked = NO;
         self.finished = YES;
         return;
-    }
-    if (event.keyCode == 36 || event.keyCode == 76) {  // Return / Enter
-        if (self.drawMode && self.hasRemembered) {
-            self.picked = YES;
-            self.confirmedRect = self.rememberedRect;
-            self.finished = YES;
-            return;
-        }
     }
     NSString* keys = event.charactersIgnoringModifiers;
     if (keys.length == 1) {
@@ -324,31 +276,6 @@ typedef NS_OPTIONS(NSUInteger, SidescopesDragEdges) {
     [super keyDown:event];
 }
 
-// Whatever the user is currently indicating, for the live scope preview.
-- (BOOL)previewRect:(NSRect*)rect {
-    if (!self.drawMode) {
-        if (self.hoveredSuggestion >= 0 &&
-            self.hoveredSuggestion < static_cast<NSInteger>(suggestions_.size())) {
-            *rect = suggestions_[self.hoveredSuggestion].first;
-            return YES;
-        }
-        return NO;
-    }
-    if (self.dragging) {
-        const NSRect selection = [self selectionRect];
-        if (selection.size.width > 8 && selection.size.height > 8) {
-            *rect = selection;
-            return YES;
-        }
-        return NO;
-    }
-    if (self.hasRemembered) {
-        *rect = self.rememberedRect;
-        return YES;
-    }
-    return NO;
-}
-
 - (BOOL)acceptsFirstResponder {
     return YES;
 }
@@ -363,39 +290,168 @@ typedef NS_OPTIONS(NSUInteger, SidescopesDragEdges) {
 
 @end
 
-// Double-stroked border (dark under light) so it reads on any background.
+// The interactive region border: double-stroked so it reads on any
+// background, with a grab ring outside the region for resizing and a tab
+// above the top edge for moving. The interior is truly transparent, so
+// the editor underneath keeps receiving clicks.
 @interface SidescopesBorderView : NSView
+@property(nonatomic, assign) SidescopesDragEdges dragZone;
+@property(nonatomic, assign) NSPoint dragStartMouse;  // global screen coords
+@property(nonatomic, assign) NSRect dragStartRegion;  // global screen coords
 @end
 @implementation SidescopesBorderView
+
+// The region rectangle in view coordinates.
+- (NSRect)regionRect {
+    return NSInsetRect(self.bounds, sidescopes::kBorderPad, sidescopes::kBorderPad);
+}
+
+- (NSRect)tabRect {
+    const NSRect region = [self regionRect];
+    return NSMakeRect(NSMidX(region) - sidescopes::kTabWidth / 2,
+                      NSMaxY(region) + sidescopes::kBorderMargin, sidescopes::kTabWidth,
+                      sidescopes::kTabHeight);
+}
+
 - (void)drawRect:(NSRect)dirty {
     (void)dirty;
-    const NSRect bounds = self.bounds;
+    const NSRect region = [self regionRect];
+
+    // The grab ring: a whisper of alpha keeps it hit-testable; the
+    // interior stays truly transparent and therefore click-through.
+    [[NSColor colorWithWhite:0 alpha:0.05] setFill];
+    NSRectFillUsingOperation(self.bounds, NSCompositingOperationCopy);
+    [[NSColor clearColor] setFill];
+    NSRectFillUsingOperation(region, NSCompositingOperationCopy);
+
+    const NSRect outer =
+        NSInsetRect(region, -sidescopes::kBorderMargin, -sidescopes::kBorderMargin);
     [[NSColor colorWithWhite:0 alpha:0.55] setStroke];
-    NSBezierPath* outer = [NSBezierPath bezierPathWithRect:NSInsetRect(bounds, 0.5, 0.5)];
-    outer.lineWidth = 1.0;
-    [outer stroke];
+    NSBezierPath* dark = [NSBezierPath bezierPathWithRect:NSInsetRect(outer, 0.5, 0.5)];
+    dark.lineWidth = 1.0;
+    [dark stroke];
     [[NSColor colorWithWhite:1 alpha:0.85] setStroke];
-    NSBezierPath* inner = [NSBezierPath bezierPathWithRect:NSInsetRect(bounds, 2.0, 2.0)];
-    inner.lineWidth = 2.0;
-    [inner stroke];
+    NSBezierPath* light = [NSBezierPath bezierPathWithRect:NSInsetRect(outer, 2.0, 2.0)];
+    light.lineWidth = 2.0;
+    [light stroke];
+
+    // The move tab.
+    NSBezierPath* tab = [NSBezierPath bezierPathWithRoundedRect:[self tabRect]
+                                                        xRadius:4.0
+                                                        yRadius:4.0];
+    [[NSColor colorWithWhite:0 alpha:0.55] setFill];
+    [tab fill];
+    [[NSColor colorWithWhite:1 alpha:0.85] setStroke];
+    tab.lineWidth = 1.0;
+    [tab stroke];
 }
+
+- (SidescopesDragEdges)zoneAtPoint:(NSPoint)point {
+    if (NSPointInRect(point, [self tabRect])) return SidescopesDragMove;
+    const NSRect region = [self regionRect];
+    if (NSPointInRect(point, region)) return SidescopesDragEdgeNone;  // click-through anyway
+    SidescopesDragEdges edges = SidescopesDragEdgeNone;
+    if (point.x < NSMinX(region)) edges |= SidescopesDragEdgeLeft;
+    if (point.x > NSMaxX(region)) edges |= SidescopesDragEdgeRight;
+    if (point.y < NSMinY(region)) edges |= SidescopesDragEdgeBottom;
+    if (point.y > NSMaxY(region)) edges |= SidescopesDragEdgeTop;
+    // Near a corner, an edge grab also takes the perpendicular edge, so
+    // corners resize diagonally.
+    const CGFloat corner = 18.0;
+    const bool horizontal = edges & (SidescopesDragEdgeLeft | SidescopesDragEdgeRight);
+    const bool vertical = edges & (SidescopesDragEdgeTop | SidescopesDragEdgeBottom);
+    if (horizontal && !vertical) {
+        if (point.y > NSMaxY(region) - corner)
+            edges |= SidescopesDragEdgeTop;
+        else if (point.y < NSMinY(region) + corner)
+            edges |= SidescopesDragEdgeBottom;
+    } else if (vertical && !horizontal) {
+        if (point.x > NSMaxX(region) - corner)
+            edges |= SidescopesDragEdgeRight;
+        else if (point.x < NSMinX(region) + corner)
+            edges |= SidescopesDragEdgeLeft;
+    }
+    return edges;
+}
+
+- (void)resetCursorRects {
+    const NSRect region = [self regionRect];
+    const NSRect bounds = self.bounds;
+    [self addCursorRect:[self tabRect] cursor:NSCursor.openHandCursor];
+    [self addCursorRect:NSMakeRect(bounds.origin.x, region.origin.y, sidescopes::kBorderPad,
+                                   region.size.height)
+                 cursor:NSCursor.resizeLeftRightCursor];
+    [self addCursorRect:NSMakeRect(NSMaxX(region), region.origin.y, sidescopes::kBorderPad,
+                                   region.size.height)
+                 cursor:NSCursor.resizeLeftRightCursor];
+    [self addCursorRect:NSMakeRect(region.origin.x, bounds.origin.y, region.size.width,
+                                   sidescopes::kBorderPad)
+                 cursor:NSCursor.resizeUpDownCursor];
+    [self addCursorRect:NSMakeRect(region.origin.x, NSMaxY(region), region.size.width,
+                                   sidescopes::kBorderPad)
+                 cursor:NSCursor.resizeUpDownCursor];
+}
+
+- (void)mouseDown:(NSEvent*)event {
+    const NSPoint local = [self convertPoint:event.locationInWindow fromView:nil];
+    self.dragZone = [self zoneAtPoint:local];
+    if (self.dragZone == SidescopesDragEdgeNone) return;
+    self.dragStartMouse = NSEvent.mouseLocation;
+    self.dragStartRegion =
+        NSInsetRect(self.window.frame, sidescopes::kBorderPad, sidescopes::kBorderPad);
+    sidescopes::g_border_editing = true;
+}
+
+- (void)mouseDragged:(NSEvent*)event {
+    (void)event;
+    if (self.dragZone == SidescopesDragEdgeNone) return;
+    const NSPoint mouse = NSEvent.mouseLocation;
+    const CGFloat dx = mouse.x - self.dragStartMouse.x;
+    const CGFloat dy = mouse.y - self.dragStartMouse.y;
+    NSRect rect = self.dragStartRegion;
+    if (self.dragZone & SidescopesDragMove) {
+        rect.origin.x += dx;
+        rect.origin.y += dy;
+    } else {
+        if (self.dragZone & SidescopesDragEdgeLeft) {
+            const CGFloat limit = NSMaxX(self.dragStartRegion) - sidescopes::kMinimumRegionSize;
+            const CGFloat left = std::min(NSMinX(self.dragStartRegion) + dx, limit);
+            rect.size.width = NSMaxX(self.dragStartRegion) - left;
+            rect.origin.x = left;
+        }
+        if (self.dragZone & SidescopesDragEdgeRight)
+            rect.size.width =
+                std::max(sidescopes::kMinimumRegionSize, self.dragStartRegion.size.width + dx);
+        if (self.dragZone & SidescopesDragEdgeBottom) {
+            const CGFloat limit = NSMaxY(self.dragStartRegion) - sidescopes::kMinimumRegionSize;
+            const CGFloat bottom = std::min(NSMinY(self.dragStartRegion) + dy, limit);
+            rect.size.height = NSMaxY(self.dragStartRegion) - bottom;
+            rect.origin.y = bottom;
+        }
+        if (self.dragZone & SidescopesDragEdgeTop)
+            rect.size.height =
+                std::max(sidescopes::kMinimumRegionSize, self.dragStartRegion.size.height + dy);
+    }
+    NSScreen* screen = self.window.screen ? self.window.screen : NSScreen.mainScreen;
+    sidescopes::g_border_edit_region = sidescopes::RegionFromScreenRect(rect, screen.frame);
+    sidescopes::g_border_edit_changed = true;
+}
+
+- (void)mouseUp:(NSEvent*)event {
+    (void)event;
+    self.dragZone = SidescopesDragEdgeNone;
+    sidescopes::g_border_editing = false;
+}
+
 @end
 
 namespace sidescopes {
 namespace {
 
-// The border sits OUTSIDE the region so it never enters the scoped pixels.
-constexpr double kBorderMargin = 4.0;
-
 NSWindow* g_border_window = nil;
-
-NSScreen* ScreenForDisplay(uint32_t display_id) {
-    for (NSScreen* screen in NSScreen.screens) {
-        NSNumber* number = screen.deviceDescription[@"NSScreenNumber"];
-        if (number && number.unsignedIntValue == display_id) return screen;
-    }
-    return NSScreen.mainScreen;
-}
+SidescopesPickerWindow* g_picker_window = nil;
+SidescopesPickerView* g_picker_view = nil;
+NSSize g_picker_size = {0, 0};
 
 NSRect RegionToViewRect(const RegionOfInterest& region, NSSize view_size) {
     // Percent (top-left origin) to view coordinates (bottom-left origin).
@@ -407,27 +463,7 @@ NSRect RegionToViewRect(const RegionOfInterest& region, NSSize view_size) {
 
 }  // namespace
 
-namespace {
-
-SidescopesPickerWindow* g_picker_window = nil;
-SidescopesPickerView* g_picker_view = nil;
-NSSize g_picker_size = {0, 0};
-
-RegionOfInterest RegionFromViewRect(NSRect rect, NSSize size) {
-    // View coordinates are bottom-left-origin; the region convention is
-    // top-left-origin percentages.
-    RegionOfInterest region;
-    region.left_percent = rect.origin.x / size.width * 100.0;
-    region.right_percent = (rect.origin.x + rect.size.width) / size.width * 100.0;
-    region.top_percent = (size.height - (rect.origin.y + rect.size.height)) / size.height * 100.0;
-    region.bottom_percent = (size.height - rect.origin.y) / size.height * 100.0;
-    return region;
-}
-
-}  // namespace
-
 bool BeginRegionPick(uint32_t display_id, const std::vector<SuggestedRegion>& suggestions,
-                     const std::optional<RegionOfInterest>& current_region,
                      RegionPickerMode initial_mode) {
     if (g_picker_view) return false;  // one picker at a time
     NSScreen* screen = ScreenForDisplay(display_id);
@@ -451,9 +487,14 @@ bool BeginRegionPick(uint32_t display_id, const std::vector<SuggestedRegion>& su
         view->suggestions_.emplace_back(RegionToViewRect(suggestion.region, view_size),
                                         suggestion.label);
     }
-    if (current_region) {
-        view.hasRemembered = YES;
-        view.rememberedRect = RegionToViewRect(*current_region, view_size);
+    // This application's own visible windows stay reachable through the
+    // overlay: the toolbar keeps working while picking.
+    for (NSWindow* window in NSApp.windows) {
+        if (window == overlay || window == g_border_window || !window.isVisible) continue;
+        const NSRect frame = window.frame;
+        view->exclusions_.push_back(NSMakeRect(frame.origin.x - screen.frame.origin.x,
+                                               frame.origin.y - screen.frame.origin.y,
+                                               frame.size.width, frame.size.height));
     }
     view.drawMode = initial_mode == RegionPickerMode::Draw || suggestions.empty();
     overlay.contentView = view;
@@ -476,20 +517,43 @@ RegionPickPoll PollRegionPick() {
     if (!g_picker_view) return poll;
     poll.active = true;
 
+    const auto region_from_view = [](NSRect rect, NSSize size) {
+        RegionOfInterest region;
+        region.left_percent = rect.origin.x / size.width * 100.0;
+        region.right_percent = (rect.origin.x + rect.size.width) / size.width * 100.0;
+        region.top_percent =
+            (size.height - (rect.origin.y + rect.size.height)) / size.height * 100.0;
+        region.bottom_percent = (size.height - rect.origin.y) / size.height * 100.0;
+        return region;
+    };
+
     if (g_picker_view.finished) {
         poll.finished = true;
         if (g_picker_view.picked)
-            poll.confirmed = RegionFromViewRect(g_picker_view.confirmedRect, g_picker_size);
+            poll.confirmed = region_from_view(g_picker_view.confirmedRect, g_picker_size);
         [g_picker_window orderOut:nil];
         g_picker_window = nil;
         g_picker_view = nil;
         return poll;
     }
 
-    NSRect preview;
-    if ([g_picker_view previewRect:&preview])
-        poll.preview = RegionFromViewRect(preview, g_picker_size);
+    if (!g_picker_view.drawMode) {
+        const NSInteger hovered = g_picker_view.hoveredSuggestion;
+        if (hovered >= 0 && hovered < static_cast<NSInteger>(g_picker_view->suggestions_.size()))
+            poll.preview =
+                region_from_view(g_picker_view->suggestions_[hovered].first, g_picker_size);
+    } else if (g_picker_view.dragging) {
+        const NSRect selection = [g_picker_view selectionRect];
+        if (selection.size.width > 8 && selection.size.height > 8)
+            poll.preview = region_from_view(selection, g_picker_size);
+    }
     return poll;
+}
+
+void CancelRegionPick() {
+    if (!g_picker_view) return;
+    g_picker_view.picked = NO;
+    g_picker_view.finished = YES;
 }
 
 void ShowRegionBorder(uint32_t display_id, const RegionOfInterest& region) {
@@ -502,8 +566,8 @@ void ShowRegionBorder(uint32_t display_id, const RegionOfInterest& region) {
         frame.origin.y + (100.0 - region.bottom_percent) / 100.0 * frame.size.height;
     const double top = frame.origin.y + (100.0 - region.top_percent) / 100.0 * frame.size.height;
     const NSRect rect =
-        NSMakeRect(left - kBorderMargin, bottom - kBorderMargin, (right - left) + 2 * kBorderMargin,
-                   (top - bottom) + 2 * kBorderMargin);
+        NSMakeRect(left - kBorderPad, bottom - kBorderPad, (right - left) + 2 * kBorderPad,
+                   (top - bottom) + 2 * kBorderPad);
 
     if (!g_border_window) {
         g_border_window = [[NSWindow alloc] initWithContentRect:rect
@@ -513,7 +577,9 @@ void ShowRegionBorder(uint32_t display_id, const RegionOfInterest& region) {
         g_border_window.backgroundColor = NSColor.clearColor;
         g_border_window.opaque = NO;
         g_border_window.hasShadow = NO;
-        g_border_window.ignoresMouseEvents = YES;  // click-through, always
+        // The interior is truly transparent and therefore click-through;
+        // only the grab ring and tab take the mouse.
+        g_border_window.ignoresMouseEvents = NO;
         // One level below the scope window: both float above Quick Look,
         // but the border must never cover the scopes. Sharing a level would
         // leave their order to whoever ordered front last.
@@ -524,11 +590,22 @@ void ShowRegionBorder(uint32_t display_id, const RegionOfInterest& region) {
         g_border_window.contentView = [[SidescopesBorderView alloc] initWithFrame:NSZeroRect];
     }
     [g_border_window setFrame:rect display:YES];
+    [g_border_window invalidateCursorRectsForView:g_border_window.contentView];
     [g_border_window orderFrontRegardless];
 }
 
 void HideRegionBorder() {
     [g_border_window orderOut:nil];
+}
+
+RegionBorderEdit PollRegionBorderEdit() {
+    RegionBorderEdit edit;
+    edit.editing = g_border_editing;
+    if (g_border_edit_changed) {
+        edit.region = g_border_edit_region;
+        g_border_edit_changed = false;
+    }
+    return edit;
 }
 
 }  // namespace sidescopes
