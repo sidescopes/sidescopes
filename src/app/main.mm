@@ -1218,7 +1218,10 @@ int main() {
                     photo_candidates =
                         DetectPhotoRegions(view, {analysis.masked_window}, pixels_per_point,
                                            /*max_candidates=*/24);
-                    face_rects = DetectFaces(view, pixels_per_point);
+                    // Vision loads its face model synchronously on first
+                    // use - seconds of beachball on the picker's opening.
+                    // Face suggestions are deferred work (owner decision);
+                    // the seam stays for when they return asynchronously.
                 });
 
                 for (const DesktopWindow& window : visible_windows) {
