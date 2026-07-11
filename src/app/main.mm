@@ -445,6 +445,12 @@ int main() {
         pinned_colors.push_back(*color);
     };
 
+    // Live region picking: while the overlay is up, the frame loop polls it
+    // and previews the indicated region on the scopes; Esc restores this.
+    bool region_picking = false;
+    RegionOfInterest region_before_pick;
+    std::vector<WindowRegion> pick_window_regions;
+
     // Projection-only engine instances kept in sync with the analysis
     // settings; they never accumulate, they only place overlays and markers.
     Vectorscope projection_vectorscope;
@@ -1055,6 +1061,7 @@ int main() {
 
         // The blocking overlay runs after the frame is submitted; capture and
         // analysis keep flowing underneath.
+        if (region_picking) want_region_pick.reset();
         if (want_region_pick && capture_display != 0) {
             HideRegionBorder();
             // The previous region's border must not leak into the analyzed
@@ -1194,41 +1201,71 @@ int main() {
             }
             std::optional<RegionOfInterest> current_region;
             if (!is_full_region()) current_region = analysis.region;
-            if (const auto region = PickRegionOnDisplay(capture_display, suggestions,
-                                                        current_region, *want_region_pick)) {
-                analysis.region = *region;
-                analysis_dirty = true;
-                // Remember the region for the application it most belongs
-                // to: the frontmost window covering most of it. Returning to
-                // that editor re-offers the region as a suggestion.
-                const double region_width = region->right_percent - region->left_percent;
-                const double region_height = region->bottom_percent - region->top_percent;
-                const bool practically_full = region_width >= 99.0 && region_height >= 99.0;
-                const WindowRegion* owner = nullptr;
-                double best_coverage = 0.5;  // less than half inside is nobody's
-                for (const WindowRegion& window : window_regions) {
-                    const double left = std::max(region->left_percent, window.region.left_percent);
-                    const double top = std::max(region->top_percent, window.region.top_percent);
-                    const double right =
-                        std::min(region->right_percent, window.region.right_percent);
-                    const double bottom =
-                        std::min(region->bottom_percent, window.region.bottom_percent);
-                    if (right <= left || bottom <= top) continue;
-                    const double coverage =
-                        (right - left) * (bottom - top) / (region_width * region_height);
-                    if (coverage > best_coverage) {
-                        best_coverage = coverage;
-                        owner = &window;
-                    }
-                }
-                if (owner && !practically_full) {
-                    app_regions.Remember(owner->application, *region);
-                    if (!app_regions.Save(AppRegionsFilePath())) {
-                        std::fprintf(stderr, "sidescopes: could not save app regions\n");
-                    }
-                }
+            if (BeginRegionPick(capture_display, suggestions, current_region, *want_region_pick)) {
+                region_picking = true;
+                region_before_pick = analysis.region;
+                pick_window_regions = window_regions;
             }
             last_activity = glfwGetTime();
+        }
+
+        // While the picker is up, whatever the user indicates previews on
+        // the scopes immediately; confirmation keeps it, Esc restores.
+        if (region_picking) {
+            const RegionPickPoll poll = PollRegionPick();
+            const auto apply_region = [&](const RegionOfInterest& region) {
+                if (region.left_percent == analysis.region.left_percent &&
+                    region.top_percent == analysis.region.top_percent &&
+                    region.right_percent == analysis.region.right_percent &&
+                    region.bottom_percent == analysis.region.bottom_percent)
+                    return;
+                analysis.region = region;
+                analysis_dirty = true;
+                last_activity = glfwGetTime();
+            };
+            if (poll.preview) apply_region(*poll.preview);
+            if (poll.finished || !poll.active) {
+                region_picking = false;
+                if (poll.confirmed) {
+                    apply_region(*poll.confirmed);
+                    // Remember the region for the application it most
+                    // belongs to: the frontmost window covering most of it.
+                    // Returning to that editor re-offers it.
+                    const RegionOfInterest& region = *poll.confirmed;
+                    const double region_width = region.right_percent - region.left_percent;
+                    const double region_height = region.bottom_percent - region.top_percent;
+                    const bool practically_full = region_width >= 99.0 && region_height >= 99.0;
+                    const WindowRegion* owner = nullptr;
+                    double best_coverage = 0.5;  // less than half inside is nobody's
+                    for (const WindowRegion& window : pick_window_regions) {
+                        const double left =
+                            std::max(region.left_percent, window.region.left_percent);
+                        const double top = std::max(region.top_percent, window.region.top_percent);
+                        const double right =
+                            std::min(region.right_percent, window.region.right_percent);
+                        const double bottom =
+                            std::min(region.bottom_percent, window.region.bottom_percent);
+                        if (right <= left || bottom <= top) continue;
+                        const double coverage =
+                            (right - left) * (bottom - top) / (region_width * region_height);
+                        if (coverage > best_coverage) {
+                            best_coverage = coverage;
+                            owner = &window;
+                        }
+                    }
+                    if (owner && !practically_full) {
+                        app_regions.Remember(owner->application, region);
+                        if (!app_regions.Save(AppRegionsFilePath())) {
+                            std::fprintf(stderr, "sidescopes: could not save app regions\n");
+                        }
+                    }
+                } else {
+                    apply_region(region_before_pick);
+                }
+                pick_window_regions.clear();
+                sync_region_border();
+                last_activity = glfwGetTime();
+            }
         }
 
         if (analysis_dirty) {

@@ -13,6 +13,18 @@ namespace sidescopes {
 // switch between picking and drawing.
 enum class RegionPickerMode { PickDetected, Draw };
 
+// One poll of the asynchronous picker. `preview` is whatever the user is
+// currently indicating - the hovered suggestion, the drag in progress, or
+// the adjusted rectangle - so the application can feed it to the scopes
+// live. On the poll that delivers `finished`, `confirmed` carries the
+// chosen region, or nothing on cancel, and the overlay is gone.
+struct RegionPickPoll {
+    bool active = false;
+    bool finished = false;
+    std::optional<RegionOfInterest> preview;
+    std::optional<RegionOfInterest> confirmed;
+};
+
 // Screenshot-style selection over the captured display. Pick mode
 // highlights the detected rectangle (photo canvases and windows) under the
 // cursor with the system accent for one-click confirmation, the way the
@@ -20,12 +32,16 @@ enum class RegionPickerMode { PickDetected, Draw };
 // for dragging an area by hand. `current_region` seeds draw mode with the
 // present selection so it can be moved, resized by its handles, or
 // confirmed as-is; pass nothing when the whole screen is scoped. ESC
-// cancels. Blocking; the capture and analysis threads keep running
-// underneath. Returns the region as percentages of the display, or
-// nothing on cancel.
-std::optional<RegionOfInterest> PickRegionOnDisplay(
-    uint32_t display_id, const std::vector<SuggestedRegion>& suggestions,
-    const std::optional<RegionOfInterest>& current_region, RegionPickerMode initial_mode);
+// cancels.
+//
+// The picker is asynchronous: Begin shows the overlay and returns, the
+// application keeps running its frame loop (which also pumps the
+// overlay's events), and PollRegionPick is read once per frame so the
+// scopes can preview the selection before it is confirmed.
+bool BeginRegionPick(uint32_t display_id, const std::vector<SuggestedRegion>& suggestions,
+                     const std::optional<RegionOfInterest>& current_region,
+                     RegionPickerMode initial_mode);
+RegionPickPoll PollRegionPick();
 
 // Persistent, click-through border around the monitored region so users can
 // see what the scopes are reading. Drawn OUTSIDE the region so the border

@@ -39,6 +39,7 @@ typedef NS_OPTIONS(NSUInteger, SidescopesDragEdges) {
 @property(nonatomic, assign) SidescopesDragEdges adjusting;
 @property(nonatomic, assign) NSRect adjustAnchor;
 @property(nonatomic, assign) BOOL picked;
+@property(nonatomic, assign) BOOL finished;
 @property(nonatomic, assign) NSInteger hoveredSuggestion;
 @property(nonatomic, assign) BOOL hasRemembered;
 @property(nonatomic, assign) NSRect rememberedRect;
@@ -262,7 +263,7 @@ typedef NS_OPTIONS(NSUInteger, SidescopesDragEdges) {
         if (hovered < 0) return;  // a miss keeps the picker open
         self.picked = YES;
         self.confirmedRect = suggestions_[hovered].first;
-        [NSApp stopModalWithCode:NSModalResponseOK];
+        self.finished = YES;
         return;
     }
     self.dragCurrent = point;
@@ -272,7 +273,7 @@ typedef NS_OPTIONS(NSUInteger, SidescopesDragEdges) {
         if (selection.size.width > 8 && selection.size.height > 8) {
             self.picked = YES;
             self.confirmedRect = selection;
-            [NSApp stopModalWithCode:NSModalResponseOK];
+            self.finished = YES;
         } else {
             self.needsDisplay = YES;
         }
@@ -287,7 +288,7 @@ typedef NS_OPTIONS(NSUInteger, SidescopesDragEdges) {
         if (!moved && inside) {
             self.picked = YES;
             self.confirmedRect = self.rememberedRect;
-            [NSApp stopModalWithCode:NSModalResponseOK];
+            self.finished = YES;
             return;
         }
         self.needsDisplay = YES;
@@ -297,14 +298,14 @@ typedef NS_OPTIONS(NSUInteger, SidescopesDragEdges) {
 - (void)keyDown:(NSEvent*)event {
     if (event.keyCode == 53) {  // ESC
         self.picked = NO;
-        [NSApp stopModalWithCode:NSModalResponseCancel];
+        self.finished = YES;
         return;
     }
     if (event.keyCode == 36 || event.keyCode == 76) {  // Return / Enter
         if (self.drawMode && self.hasRemembered) {
             self.picked = YES;
             self.confirmedRect = self.rememberedRect;
-            [NSApp stopModalWithCode:NSModalResponseOK];
+            self.finished = YES;
             return;
         }
     }
@@ -321,6 +322,31 @@ typedef NS_OPTIONS(NSUInteger, SidescopesDragEdges) {
         }
     }
     [super keyDown:event];
+}
+
+// Whatever the user is currently indicating, for the live scope preview.
+- (BOOL)previewRect:(NSRect*)rect {
+    if (!self.drawMode) {
+        if (self.hoveredSuggestion >= 0 &&
+            self.hoveredSuggestion < static_cast<NSInteger>(suggestions_.size())) {
+            *rect = suggestions_[self.hoveredSuggestion].first;
+            return YES;
+        }
+        return NO;
+    }
+    if (self.dragging) {
+        const NSRect selection = [self selectionRect];
+        if (selection.size.width > 8 && selection.size.height > 8) {
+            *rect = selection;
+            return YES;
+        }
+        return NO;
+    }
+    if (self.hasRemembered) {
+        *rect = self.rememberedRect;
+        return YES;
+    }
+    return NO;
 }
 
 - (BOOL)acceptsFirstResponder {
@@ -381,9 +407,29 @@ NSRect RegionToViewRect(const RegionOfInterest& region, NSSize view_size) {
 
 }  // namespace
 
-std::optional<RegionOfInterest> PickRegionOnDisplay(
-    uint32_t display_id, const std::vector<SuggestedRegion>& suggestions,
-    const std::optional<RegionOfInterest>& current_region, RegionPickerMode initial_mode) {
+namespace {
+
+SidescopesPickerWindow* g_picker_window = nil;
+SidescopesPickerView* g_picker_view = nil;
+NSSize g_picker_size = {0, 0};
+
+RegionOfInterest RegionFromViewRect(NSRect rect, NSSize size) {
+    // View coordinates are bottom-left-origin; the region convention is
+    // top-left-origin percentages.
+    RegionOfInterest region;
+    region.left_percent = rect.origin.x / size.width * 100.0;
+    region.right_percent = (rect.origin.x + rect.size.width) / size.width * 100.0;
+    region.top_percent = (size.height - (rect.origin.y + rect.size.height)) / size.height * 100.0;
+    region.bottom_percent = (size.height - rect.origin.y) / size.height * 100.0;
+    return region;
+}
+
+}  // namespace
+
+bool BeginRegionPick(uint32_t display_id, const std::vector<SuggestedRegion>& suggestions,
+                     const std::optional<RegionOfInterest>& current_region,
+                     RegionPickerMode initial_mode) {
+    if (g_picker_view) return false;  // one picker at a time
     NSScreen* screen = ScreenForDisplay(display_id);
 
     SidescopesPickerWindow* overlay =
@@ -418,22 +464,32 @@ std::optional<RegionOfInterest> PickRegionOnDisplay(
     [NSApp activateIgnoringOtherApps:YES];
     [overlay makeKeyAndOrderFront:nil];
     [overlay makeFirstResponder:view];
-    const NSModalResponse response = [NSApp runModalForWindow:overlay];
-    [overlay orderOut:nil];
 
-    if (response != NSModalResponseOK || !view.picked) return std::nullopt;
+    g_picker_window = overlay;
+    g_picker_view = view;
+    g_picker_size = view_size;
+    return true;
+}
 
-    // View coordinates are bottom-left-origin; the region convention is
-    // top-left-origin percentages.
-    const NSRect selection = view.confirmedRect;
-    const NSSize size = screen.frame.size;
-    RegionOfInterest region;
-    region.left_percent = selection.origin.x / size.width * 100.0;
-    region.right_percent = (selection.origin.x + selection.size.width) / size.width * 100.0;
-    region.top_percent =
-        (size.height - (selection.origin.y + selection.size.height)) / size.height * 100.0;
-    region.bottom_percent = (size.height - selection.origin.y) / size.height * 100.0;
-    return region;
+RegionPickPoll PollRegionPick() {
+    RegionPickPoll poll;
+    if (!g_picker_view) return poll;
+    poll.active = true;
+
+    if (g_picker_view.finished) {
+        poll.finished = true;
+        if (g_picker_view.picked)
+            poll.confirmed = RegionFromViewRect(g_picker_view.confirmedRect, g_picker_size);
+        [g_picker_window orderOut:nil];
+        g_picker_window = nil;
+        g_picker_view = nil;
+        return poll;
+    }
+
+    NSRect preview;
+    if ([g_picker_view previewRect:&preview])
+        poll.preview = RegionFromViewRect(preview, g_picker_size);
+    return poll;
 }
 
 void ShowRegionBorder(uint32_t display_id, const RegionOfInterest& region) {
