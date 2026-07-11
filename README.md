@@ -53,6 +53,20 @@ ctest --test-dir build
 Requires CMake 3.24+ and a C++20 compiler. Dependencies are fetched during
 configuration.
 
+## Troubleshooting
+
+**The permission loop.** macOS ties the Screen Recording permission to the
+app's code signature. If SideScopes keeps asking for permission although
+System Settings shows it granted - typical after replacing the app with a
+differently signed build - clear the stale grant and approve once more:
+
+```sh
+tccutil reset ScreenCapture org.sidescopes.app
+```
+
+Then relaunch SideScopes and grant the permission when prompted. Toggling
+the switch in System Settings only takes effect after the app restarts.
+
 ## License
 
 SideScopes is free software, licensed under the
