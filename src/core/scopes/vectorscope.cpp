@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <vector>
 
 namespace sidescopes {
 namespace {
@@ -88,10 +89,14 @@ void Vectorscope::RebuildTintTable() {
     // transform at a fixed mid luma. BT.601 inverse coefficients are close
     // enough for display tinting in both matrix modes.
     constexpr float kDisplayLuma = 160.0f;
+    // Chroma is exaggerated for display: the trace paints the hue a bin
+    // represents, not a colorimetric reproduction, and at true saturation
+    // the cloud reads as washed-out pastel.
+    constexpr float kSaturationBoost = 1.7f;
     for (int py = 0; py < kSize; ++py) {
         for (int px = 0; px < kSize; ++px) {
-            const float cb = static_cast<float>(px) - 128.0f;
-            const float cr = static_cast<float>(255 - py) - 128.0f;
+            const float cb = (static_cast<float>(px) - 128.0f) * kSaturationBoost;
+            const float cr = (static_cast<float>(255 - py) - 128.0f) * kSaturationBoost;
             const auto to_byte = [](float value) {
                 return static_cast<uint8_t>(std::clamp(value, 0.0f, 255.0f));
             };
@@ -104,26 +109,49 @@ void Vectorscope::RebuildTintTable() {
 }
 
 void Vectorscope::MapBinsToImage(uint64_t sample_count) {
-    uint32_t densest = 0;
-    for (const uint32_t count : bins_) densest = std::max(densest, count);
+    // A 3x3 binomial blur takes the speckle out of the cloud: chroma
+    // coordinates quantize to integers, and raw bins render as grainy
+    // single-pixel noise where the photograph's colors actually vary
+    // smoothly.
+    std::vector<float> smoothed(bins_.size(), 0.0f);
+    for (int py = 0; py < kSize; ++py) {
+        for (int px = 0; px < kSize; ++px) {
+            const auto at = [&](int y, int x) -> float {
+                if (y < 0 || y >= kSize || x < 0 || x >= kSize) return 0.0f;
+                return static_cast<float>(bins_[static_cast<std::size_t>(y) * kSize + x]);
+            };
+            const auto row = [&](int y) {
+                return at(y, px - 1) + 2.0f * at(y, px) + at(y, px + 1);
+            };
+            smoothed[static_cast<std::size_t>(py) * kSize + px] =
+                (row(py - 1) + 2.0f * row(py) + row(py + 1)) / 16.0f;
+        }
+    }
+
+    float densest = 0.0f;
+    for (const float count : smoothed) densest = std::max(densest, count);
 
     const double per_sample_scale =
         sample_count > 0 ? kReferenceSampleCount / static_cast<double>(sample_count) : 0.0;
     const double gain = static_cast<double>(settings_.gain) * per_sample_scale;
-    const double log_ceiling = densest > 0 ? std::log1p(static_cast<double>(densest) * gain) : 0.0;
+    const double log_ceiling = densest > 0.0f ? std::log1p(densest * gain) : 0.0;
     const double intensity_scale = log_ceiling > 0.0 ? 1.0 / log_ceiling : 0.0;
 
     uint8_t* out = image_.rgba.data();
     const uint8_t* tint = tint_.data();
-    for (std::size_t i = 0; i < bins_.size(); ++i, out += 4, tint += 3) {
-        const uint32_t count = bins_[i];
-        if (count == 0) {
+    for (std::size_t i = 0; i < smoothed.size(); ++i, out += 4, tint += 3) {
+        const float count = smoothed[i];
+        if (count <= 0.0f) {
             out[0] = out[1] = out[2] = 0;
             out[3] = 255;
             continue;
         }
-        const float brightness =
+        // The gamma lifts the mid-density body of the cloud: normalizing
+        // to the densest bin pushes everything else down, and a linear
+        // ramp leaves the trace dim at any gain.
+        const float normalized =
             static_cast<float>(std::log1p(static_cast<double>(count) * gain) * intensity_scale);
+        const float brightness = std::pow(normalized, 0.65f);
         out[0] = static_cast<uint8_t>(static_cast<float>(tint[0]) * brightness);
         out[1] = static_cast<uint8_t>(static_cast<float>(tint[1]) * brightness);
         out[2] = static_cast<uint8_t>(static_cast<float>(tint[2]) * brightness);

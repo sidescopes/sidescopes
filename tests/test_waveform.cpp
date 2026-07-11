@@ -34,19 +34,30 @@ struct TestFrame {
 };
 
 // Collects the set of lit rows for one output channel (0=r, 1=g, 2=b).
-std::vector<int> LitRows(const ScopeImage& image, int channel) {
-    std::vector<int> rows;
+// Rows that are local brightness peaks in one channel: smoothing spreads
+// a flat color's trace one row up and down, and what must stay exact is
+// where the peaks sit.
+std::vector<int> PeakRows(const ScopeImage& image, int channel) {
+    std::vector<int> brightness(static_cast<std::size_t>(image.height), 0);
     for (int py = 0; py < image.height; ++py) {
+        int row_max = 0;
         for (int px = 0; px < image.width; ++px) {
             const uint8_t* rgba =
                 image.rgba.data() + (static_cast<std::size_t>(py) * image.width + px) * 4;
-            if (rgba[channel] > 0) {
-                rows.push_back(py);
-                break;
-            }
+            row_max = std::max(row_max, static_cast<int>(rgba[channel]));
         }
+        brightness[static_cast<std::size_t>(py)] = row_max;
     }
-    return rows;
+    std::vector<int> peaks;
+    for (int py = 0; py < image.height; ++py) {
+        const int value = brightness[static_cast<std::size_t>(py)];
+        if (value == 0) continue;
+        const int above = py > 0 ? brightness[static_cast<std::size_t>(py) - 1] : 0;
+        const int below = py + 1 < image.height ? brightness[static_cast<std::size_t>(py) + 1] : 0;
+        if ((value >= above && value > below) || (value > above && value >= below))
+            peaks.push_back(py);
+    }
+    return peaks;
 }
 
 WaveformSettings SettingsFor(WaveformMode mode) {
@@ -67,7 +78,7 @@ TEST_CASE("Waveform in luma mode plots mid gray on one level") {
     scope.Accumulate(frame.View(), IntRect{0, 0, 32, 16});
 
     for (int channel = 0; channel < 3; ++channel) {
-        CHECK(LitRows(scope.Image(), channel) == std::vector<int>{127});
+        CHECK(PeakRows(scope.Image(), channel) == std::vector<int>{127});
     }
 }
 
@@ -78,9 +89,9 @@ TEST_CASE("Waveform in rgb mode plots each channel at its own level") {
     Waveform scope;
     scope.Accumulate(frame.View(), IntRect{0, 0, 32, 16});  // RGB is the default
 
-    CHECK(LitRows(scope.Image(), 0) == std::vector<int>{255 - 10});
-    CHECK(LitRows(scope.Image(), 1) == std::vector<int>{255 - 150});
-    CHECK(LitRows(scope.Image(), 2) == std::vector<int>{255 - 240});
+    CHECK(PeakRows(scope.Image(), 0) == std::vector<int>{255 - 10});
+    CHECK(PeakRows(scope.Image(), 1) == std::vector<int>{255 - 150});
+    CHECK(PeakRows(scope.Image(), 2) == std::vector<int>{255 - 240});
 }
 
 TEST_CASE("Waveform combined mode adds a white luma trace over rgb") {
@@ -94,9 +105,9 @@ TEST_CASE("Waveform combined mode adds a white luma trace over rgb") {
 
     // Rows are reported top-down: the luma trace (row 128) precedes deeper
     // channel levels and follows shallower ones.
-    CHECK(LitRows(scope.Image(), 0) == std::vector<int>{255 - 127, 255 - 10});
-    CHECK(LitRows(scope.Image(), 1) == std::vector<int>{255 - 150, 255 - 127});
-    CHECK(LitRows(scope.Image(), 2) == std::vector<int>{255 - 240, 255 - 127});
+    CHECK(PeakRows(scope.Image(), 0) == std::vector<int>{255 - 127, 255 - 10});
+    CHECK(PeakRows(scope.Image(), 1) == std::vector<int>{255 - 150, 255 - 127});
+    CHECK(PeakRows(scope.Image(), 2) == std::vector<int>{255 - 240, 255 - 127});
 }
 
 TEST_CASE("Waveform parade shows each channel in its own third") {

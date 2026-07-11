@@ -26,7 +26,7 @@ struct WaveformSettings {
 // Not thread-safe; a single analysis thread owns each instance.
 class Waveform {
 public:
-    static constexpr int kColumns = 512;
+    static constexpr int kColumns = 1024;
     static constexpr int kLevels = 256;
 
     Waveform();
@@ -51,6 +51,7 @@ private:
     // Planes: red, green, blue, luma — each kColumns x kLevels, a row per
     // level with level 255 in row zero.
     std::vector<uint32_t> bins_;
+    std::vector<uint32_t> smoothed_;
     ScopeImage image_;
 };
 

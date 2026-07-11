@@ -73,17 +73,52 @@ std::optional<NormalizedPoint> Waveform::Project(const FloatColor& color) const 
 }
 
 void Waveform::MapBinsToImage(uint64_t sampled_rows) {
+    // A 3x3 binomial blur takes the speckle and the column striping out
+    // of the traces: levels quantize to integers and each display column
+    // aggregates several image columns, so raw bins render as grain with
+    // vertical streaks. One column of blur is spatially negligible at
+    // this width.
+    smoothed_.resize(bins_.size());
+    for (int plane = 0; plane < 4; ++plane) {
+        const uint32_t* in = bins_.data() + static_cast<std::size_t>(plane) * kPlaneSize;
+        uint32_t* out = smoothed_.data() + static_cast<std::size_t>(plane) * kPlaneSize;
+        // Vertical 1-4-1 within each column: light, so a sharp level
+        // stays crisp while single-bin grain still fills in.
+        for (int column = 0; column < kColumns; ++column) {
+            for (int row = 0; row < kLevels; ++row) {
+                const auto at = [&](int level) -> uint32_t {
+                    if (level < 0 || level >= kLevels) return 0;
+                    return in[static_cast<std::size_t>(level) * kColumns + column];
+                };
+                out[static_cast<std::size_t>(row) * kColumns + column] =
+                    (at(row - 1) + 4 * at(row) + at(row + 1) + 3) / 6;
+            }
+        }
+        // Horizontal 1-2-1 within each row, in place.
+        for (int row = 0; row < kLevels; ++row) {
+            uint32_t* line = out + static_cast<std::size_t>(row) * kColumns;
+            uint32_t previous = 0;
+            for (int column = 0; column < kColumns; ++column) {
+                const uint32_t current = line[column];
+                const uint32_t next = column + 1 < kColumns ? line[column + 1] : 0;
+                line[column] = (previous + 2 * current + next + 2) / 4;
+                previous = current;
+            }
+        }
+    }
+    const std::vector<uint32_t>& traces = smoothed_;
+
     const bool wants_rgb = settings_.mode != WaveformMode::Luma;
     const bool wants_luma =
         settings_.mode == WaveformMode::Luma || settings_.mode == WaveformMode::RgbAndLuma;
 
     uint32_t densest = 0;
     if (wants_rgb) {
-        for (std::size_t i = 0; i < 3 * kPlaneSize; ++i) densest = std::max(densest, bins_[i]);
+        for (std::size_t i = 0; i < 3 * kPlaneSize; ++i) densest = std::max(densest, traces[i]);
     }
     if (wants_luma) {
         for (std::size_t i = 3 * kPlaneSize; i < 4 * kPlaneSize; ++i)
-            densest = std::max(densest, bins_[i]);
+            densest = std::max(densest, traces[i]);
     }
 
     const double per_row_scale =
@@ -93,13 +128,18 @@ void Waveform::MapBinsToImage(uint64_t sampled_rows) {
     const double intensity_scale = log_ceiling > 0.0 ? 255.0 / log_ceiling : 0.0;
     const auto brightness = [&](uint32_t count) -> float {
         if (count == 0) return 0.0f;
-        return static_cast<float>(std::log1p(static_cast<double>(count) * gain) * intensity_scale);
+        // The gamma lifts the mid-density body of the trace, exactly as
+        // on the vectorscope: normalizing to the densest bin pushes
+        // everything else down, and a linear ramp reads dim at any gain.
+        const double normalized =
+            std::log1p(static_cast<double>(count) * gain) * intensity_scale / 255.0;
+        return static_cast<float>(255.0 * std::pow(normalized, 0.65));
     };
 
-    const uint32_t* red_plane = bins_.data();
-    const uint32_t* green_plane = bins_.data() + kPlaneSize;
-    const uint32_t* blue_plane = bins_.data() + 2 * kPlaneSize;
-    const uint32_t* luma_plane = bins_.data() + 3 * kPlaneSize;
+    const uint32_t* red_plane = traces.data();
+    const uint32_t* green_plane = traces.data() + kPlaneSize;
+    const uint32_t* blue_plane = traces.data() + 2 * kPlaneSize;
+    const uint32_t* luma_plane = traces.data() + 3 * kPlaneSize;
 
     if (settings_.mode == WaveformMode::RgbParade) {
         // Three channels side by side: each third shows one channel's full

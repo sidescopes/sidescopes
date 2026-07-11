@@ -33,21 +33,24 @@ struct TestFrame {
     int height;
 };
 
-// The one lit pixel of a single-color accumulation, or (-1, -1).
-std::pair<int, int> SingleLitPixel(const ScopeImage& image) {
-    std::pair<int, int> lit{-1, -1};
-    int lit_count = 0;
+// The brightest pixel of an accumulation: smoothing spreads a
+// single-color trace over a small neighborhood, and the peak must stay
+// on the exact chroma coordinate.
+std::pair<int, int> BrightestPixel(const ScopeImage& image) {
+    std::pair<int, int> brightest{-1, -1};
+    int best = 0;
     for (int py = 0; py < image.height; ++py) {
         for (int px = 0; px < image.width; ++px) {
             const uint8_t* rgba =
                 image.rgba.data() + (static_cast<std::size_t>(py) * image.width + px) * 4;
-            if (rgba[0] + rgba[1] + rgba[2] > 0) {
-                lit = {px, py};
-                ++lit_count;
+            const int sum = rgba[0] + rgba[1] + rgba[2];
+            if (sum > best) {
+                best = sum;
+                brightest = {px, py};
             }
         }
     }
-    return lit_count == 1 ? lit : std::pair<int, int>{-1, -1};
+    return brightest;
 }
 
 }  // namespace
@@ -62,7 +65,7 @@ TEST_CASE("Vectorscope places 75% red on the classic BT.601 target") {
     Vectorscope scope;
     scope.Accumulate(frame.View(), IntRect{0, 0, 8, 8});
 
-    CHECK(SingleLitPixel(scope.Image()) == std::pair<int, int>{99, 44});
+    CHECK(BrightestPixel(scope.Image()) == std::pair<int, int>{99, 44});
 }
 
 TEST_CASE("Vectorscope maps neutral gray to the center") {
@@ -72,7 +75,7 @@ TEST_CASE("Vectorscope maps neutral gray to the center") {
     Vectorscope scope;
     scope.Accumulate(frame.View(), IntRect{0, 0, 8, 8});
 
-    CHECK(SingleLitPixel(scope.Image()) == std::pair<int, int>{128, 127});
+    CHECK(BrightestPixel(scope.Image()) == std::pair<int, int>{128, 127});
 }
 
 TEST_CASE("Vectorscope projection agrees with accumulation") {
@@ -96,7 +99,7 @@ TEST_CASE("Vectorscope matrix selection moves chroma targets") {
 
     // BT.709: Cb = ((-26 * 191) >> 8) + 128 = 108 (arithmetic shift floors
     // toward negative infinity), Cr unchanged from BT.601 (both use 112).
-    CHECK(SingleLitPixel(scope.Image()) == std::pair<int, int>{108, 44});
+    CHECK(BrightestPixel(scope.Image()) == std::pair<int, int>{108, 44});
 }
 
 TEST_CASE("Vectorscope trace is invariant to the sampling stride") {
