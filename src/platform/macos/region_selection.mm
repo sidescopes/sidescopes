@@ -22,13 +22,16 @@ namespace {
 // The border window extends this far beyond the region: the grab band,
 // wide enough to hit with a cursor, slim enough to stay unobtrusive.
 constexpr double kBorderPad = 12.0;
+// The macOS-screenshot-style handle dots protrude past the band's outer
+// edge; the window carries a transparent margin so they are not clipped.
+constexpr double kHandleRadius = 5.5;
+constexpr double kHandleMargin = kHandleRadius + 2.0;
+constexpr double kWindowPad = kBorderPad + kHandleMargin;
 // Within this distance of a region corner, a grab resizes; the rest of
 // the band moves the region (Shift-drag resizes a single edge).
 constexpr double kCornerZone = 22.0;
 // Half-length of the edge-midpoint handle's grab zone along its edge.
 constexpr double kMidpointZone = 22.0;
-// Visible size of the square resize handles on the measurement line.
-constexpr double kHandleSize = 9.0;
 // Regions cannot shrink beyond this many points per side.
 constexpr double kMinimumRegionSize = 24.0;
 
@@ -382,7 +385,7 @@ RegionOfInterest g_border_edit_region;
 
 // The region rectangle in view coordinates.
 - (NSRect)regionRect {
-    return NSInsetRect(self.bounds, sidescopes::kBorderPad, sidescopes::kBorderPad);
+    return NSInsetRect(self.bounds, sidescopes::kWindowPad, sidescopes::kWindowPad);
 }
 
 - (void)drawRect:(NSRect)dirty {
@@ -393,13 +396,14 @@ RegionOfInterest g_border_edit_region;
     // beside the photograph while its own light-dark alternation keeps it
     // visible on any content. The interior is never painted and therefore
     // stays click-through.
-    NSBezierPath* ring_clip = [NSBezierPath bezierPathWithRect:self.bounds];
+    const NSRect band = NSInsetRect(region, -sidescopes::kBorderPad, -sidescopes::kBorderPad);
+    NSBezierPath* ring_clip = [NSBezierPath bezierPathWithRect:band];
     [ring_clip appendBezierPathWithRect:region];
     ring_clip.windingRule = NSWindingRuleEvenOdd;
     [NSGraphicsContext saveGraphicsState];
     [ring_clip addClip];
     [[NSColor colorWithWhite:0.1 alpha:0.45] setFill];
-    NSRectFillUsingOperation(self.bounds, NSCompositingOperationCopy);
+    NSRectFillUsingOperation(band, NSCompositingOperationCopy);
     NSBezierPath* stripes = [NSBezierPath bezierPath];
     stripes.lineWidth = 4.0;
     const NSRect bounds = self.bounds;
@@ -417,31 +421,29 @@ RegionOfInterest g_border_edit_region;
     edge.lineWidth = 1.4;
     [edge stroke];
 
-    // Eight resize handles - corners and edge midpoints - the universal
-    // selection idiom, so the affordance explains itself. They live in the
-    // middle of the hazard band, entirely outside the region: the scoped
-    // pixels stay untouched, and bright squares on the muted stripes read
-    // like fittings on a frame.
-    const CGFloat out = sidescopes::kBorderPad / 2;
+    // Eight handle dots - corners and edge midpoints - centered on the
+    // band's outer edge and protruding outward, the way the macOS
+    // screenshot selection wears them. Round dots have no orientation, so
+    // nothing can read as misaligned; the scoped pixels stay untouched.
     const auto handle = [&](CGFloat x, CGFloat y) {
-        const NSRect square =
-            NSMakeRect(x - sidescopes::kHandleSize / 2, y - sidescopes::kHandleSize / 2,
-                       sidescopes::kHandleSize, sidescopes::kHandleSize);
-        [[NSColor colorWithWhite:0.97 alpha:0.95] setFill];
-        NSBezierPath* fill = [NSBezierPath bezierPathWithRoundedRect:square xRadius:2 yRadius:2];
-        [fill fill];
-        [[NSColor colorWithWhite:0.1 alpha:0.7] setStroke];
-        fill.lineWidth = 1.0;
-        [fill stroke];
+        const NSRect circle =
+            NSMakeRect(x - sidescopes::kHandleRadius, y - sidescopes::kHandleRadius,
+                       sidescopes::kHandleRadius * 2, sidescopes::kHandleRadius * 2);
+        NSBezierPath* dot = [NSBezierPath bezierPathWithOvalInRect:circle];
+        [[NSColor whiteColor] setFill];
+        [dot fill];
+        [[NSColor colorWithWhite:0.4 alpha:0.8] setStroke];
+        dot.lineWidth = 1.0;
+        [dot stroke];
     };
-    handle(NSMinX(region) - out, NSMinY(region) - out);
-    handle(NSMidX(region), NSMinY(region) - out);
-    handle(NSMaxX(region) + out, NSMinY(region) - out);
-    handle(NSMinX(region) - out, NSMidY(region));
-    handle(NSMaxX(region) + out, NSMidY(region));
-    handle(NSMinX(region) - out, NSMaxY(region) + out);
-    handle(NSMidX(region), NSMaxY(region) + out);
-    handle(NSMaxX(region) + out, NSMaxY(region) + out);
+    handle(NSMinX(band), NSMinY(band));
+    handle(NSMidX(band), NSMinY(band));
+    handle(NSMaxX(band), NSMinY(band));
+    handle(NSMinX(band), NSMidY(band));
+    handle(NSMaxX(band), NSMidY(band));
+    handle(NSMinX(band), NSMaxY(band));
+    handle(NSMidX(band), NSMaxY(band));
+    handle(NSMaxX(band), NSMaxY(band));
 }
 
 // Eight handles, no modifier: the corners resize both axes, the edge
@@ -525,7 +527,7 @@ RegionOfInterest g_border_edit_region;
     if (self.dragZone & SidescopesDragMove) [NSCursor.closedHandCursor set];
     self.dragStartMouse = NSEvent.mouseLocation;
     self.dragStartRegion =
-        NSInsetRect(self.window.frame, sidescopes::kBorderPad, sidescopes::kBorderPad);
+        NSInsetRect(self.window.frame, sidescopes::kWindowPad, sidescopes::kWindowPad);
     sidescopes::g_border_editing = true;
 }
 
@@ -759,8 +761,8 @@ void ShowRegionBorder(uint32_t display_id, const RegionOfInterest& region) {
         frame.origin.y + (100.0 - region.bottom_percent) / 100.0 * frame.size.height;
     const double top = frame.origin.y + (100.0 - region.top_percent) / 100.0 * frame.size.height;
     const NSRect rect =
-        NSMakeRect(left - kBorderPad, bottom - kBorderPad, (right - left) + 2 * kBorderPad,
-                   (top - bottom) + 2 * kBorderPad);
+        NSMakeRect(left - kWindowPad, bottom - kWindowPad, (right - left) + 2 * kWindowPad,
+                   (top - bottom) + 2 * kWindowPad);
 
     if (!g_border_window) {
         g_border_window = [[NSWindow alloc] initWithContentRect:rect
