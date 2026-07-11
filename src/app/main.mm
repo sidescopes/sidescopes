@@ -59,6 +59,8 @@ enum MenuAction {
     kMenuFullScreenRegion,
     kMenuToggleGraticule = 40,
     kMenuTogglePercentValues,
+    kMenuPinCursorColor,
+    kMenuClearPinnedMarkers,
     kMenuOpenSettings = 50,
     kMenuQuit,
 };
@@ -430,6 +432,16 @@ int main() {
     bool show_graticule = startup.show_graticule;
     bool values_as_percent = startup.values_as_percent;
     bool show_settings = false;
+    // Reference colors pinned on the vectorscope (session-scoped): pin a
+    // corrected skin tone, then match the next photo against it.
+    std::vector<FloatColor> pinned_colors;
+    constexpr std::size_t kMaximumPinnedColors = 8;
+    const auto pin_cursor_color = [&](const std::optional<FloatColor>& color) {
+        if (!color) return;
+        if (pinned_colors.size() >= kMaximumPinnedColors)
+            pinned_colors.erase(pinned_colors.begin());
+        pinned_colors.push_back(*color);
+    };
 
     // Projection-only engine instances kept in sync with the analysis
     // settings; they never accumulate, they only place overlays and markers.
@@ -642,6 +654,7 @@ int main() {
                 analysis_dirty = true;
             }
             if (ImGui::IsKeyPressed(ImGuiKey_G, false)) show_graticule = !show_graticule;
+            if (ImGui::IsKeyPressed(ImGuiKey_P, false)) pin_cursor_color(vectorscope_color);
         }
 
         if (IconButton("##pick-region", RegionIcon::Brackets, "Pick a detected area (A)"))
@@ -712,6 +725,10 @@ int main() {
             scope_gestures(scope, vectorscope_intensity, analysis.vectorscope.gain, 3.0f);
             if (show_graticule)
                 DrawVectorscopeOverlay(scope, BuildVectorscopeGraticule(projection_vectorscope));
+            for (const FloatColor& pinned : pinned_colors) {
+                if (const auto point = projection_vectorscope.Project(pinned))
+                    DrawPointMarker(scope, *point, IM_COL32(230, 170, 90, 230));
+            }
             if (vectorscope_color) {
                 if (const auto point = projection_vectorscope.Project(*vectorscope_color))
                     DrawPointMarker(scope, *point, IM_COL32(255, 255, 255, 255));
@@ -826,10 +843,18 @@ int main() {
                 {Kind::Separator, "", -1, false},
                 {Kind::Action, "Graticule", kMenuToggleGraticule, show_graticule},
                 {Kind::Action, "Cursor Values as %", kMenuTogglePercentValues, values_as_percent},
-                {Kind::Separator, "", -1, false},
-                {Kind::Action, "Settings...", kMenuOpenSettings, false},
-                {Kind::Action, "Quit", kMenuQuit, false},
             };
+            if (vectorscope_color)
+                menu.push_back({Kind::Action, "Pin Cursor Color", kMenuPinCursorColor, false});
+            if (!pinned_colors.empty())
+                menu.push_back(
+                    {Kind::Action, "Clear Pinned Markers", kMenuClearPinnedMarkers, false});
+            for (NativeMenuItem item : std::initializer_list<NativeMenuItem>{
+                     {Kind::Separator, "", -1, false},
+                     {Kind::Action, "Settings...", kMenuOpenSettings, false},
+                     {Kind::Action, "Quit", kMenuQuit, false},
+                 })
+                menu.push_back(std::move(item));
             switch (ShowNativeContextMenu(menu)) {
                 case kMenuShowVectorscope:
                     toggle_scope(show_vectorscope);
@@ -876,6 +901,12 @@ int main() {
                     break;
                 case kMenuTogglePercentValues:
                     values_as_percent = !values_as_percent;
+                    break;
+                case kMenuPinCursorColor:
+                    pin_cursor_color(vectorscope_color);
+                    break;
+                case kMenuClearPinnedMarkers:
+                    pinned_colors.clear();
                     break;
                 case kMenuOpenSettings:
                     show_settings = true;
