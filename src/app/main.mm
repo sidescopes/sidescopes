@@ -207,19 +207,25 @@ bool ScopeToggleButton(const char* id, ScopeGlyph glyph, bool enabled, const cha
         draw->AddRectFilled(min, max, ImGui::GetColorU32(ImGuiCol_ButtonActive), 3.0f);
     else if (ImGui::IsItemHovered())
         draw->AddRectFilled(min, max, ImGui::GetColorU32(ImGuiCol_ButtonHovered), 3.0f);
-    const ImVec2 a(min.x + 7, min.y + 3);
-    const ImVec2 b(max.x - 7, max.y - 3);
+    // Glyphs draw around a pixel-snapped center with fixed point sizes:
+    // deriving geometry from the font-sized button box lands strokes and
+    // dots on fractional pixels, which reads as misalignment at a glance.
+    const ImVec2 center(std::floor((min.x + max.x) / 2) + 0.5f,
+                        std::floor((min.y + max.y) / 2) + 0.5f);
+    const float half = 7.0f;
+    const ImVec2 a(center.x - half, center.y - half + 1.0f);
+    const ImVec2 b(center.x + half, center.y + half - 1.0f);
     const ImU32 color = ImGui::GetColorU32(enabled ? ImGuiCol_Text : ImGuiCol_TextDisabled);
     const float stroke = 1.5f;
     if (glyph == ScopeGlyph::Vectorscope) {
-        // A graticule in miniature: ring, compass ticks, center dot.
-        const ImVec2 center((a.x + b.x) / 2, (a.y + b.y) / 2);
-        const float radius = std::min(b.x - a.x, b.y - a.y) / 2 - 1.0f;
-        draw->AddCircle(center, radius, color, 0, stroke);
-        draw->AddCircleFilled(center, 1.4f, color);
+        // A graticule in miniature: ring, compass ticks crossing it, and
+        // the center dot.
+        const float radius = 5.0f;
+        draw->AddCircle(center, radius, color, 24, stroke);
+        draw->AddCircleFilled(center, 1.5f, color, 12);
         for (const auto [dx, dy] : {std::pair{0.0f, -1.0f}, std::pair{0.0f, 1.0f},
                                     std::pair{-1.0f, 0.0f}, std::pair{1.0f, 0.0f}}) {
-            draw->AddLine(ImVec2(center.x + dx * radius, center.y + dy * radius),
+            draw->AddLine(ImVec2(center.x + dx * (radius - 1.0f), center.y + dy * (radius - 1.0f)),
                           ImVec2(center.x + dx * (radius + 2.0f), center.y + dy * (radius + 2.0f)),
                           color, stroke);
         }
@@ -232,12 +238,11 @@ bool ScopeToggleButton(const char* id, ScopeGlyph glyph, bool enabled, const cha
         draw->AddPolyline(points, 7, color, 0, stroke);
         draw->AddLine(ImVec2(a.x, b.y), ImVec2(b.x, b.y), (color & 0x00FFFFFF) | 0x60000000, 1.0f);
     } else {
-        const float heights[4] = {0.45f, 0.9f, 0.65f, 0.3f};
-        const float slot = (b.x - a.x) / 4.0f;
+        // Four bars on even 3.5-point slots, symmetric about the center.
+        const float heights[4] = {5.5f, 11.0f, 8.0f, 3.5f};
         for (int i = 0; i < 4; ++i) {
-            const float x = a.x + slot * i + 1.0f;
-            draw->AddRectFilled(ImVec2(x, b.y - (b.y - a.y) * heights[i]),
-                                ImVec2(x + slot - 2.0f, b.y), color);
+            const float x = center.x - 6.5f + 3.5f * static_cast<float>(i);
+            draw->AddRectFilled(ImVec2(x, b.y - heights[i]), ImVec2(x + 2.5f, b.y), color);
         }
     }
     ImGui::SetItemTooltip("%s", tooltip);
@@ -258,13 +263,15 @@ bool IconButton(const char* id, RegionIcon icon, const char* tooltip) {
     const ImVec2 max = ImGui::GetItemRectMax();
     if (ImGui::IsItemHovered())
         draw->AddRectFilled(min, max, ImGui::GetColorU32(ImGuiCol_ButtonHovered), 3.0f);
-    const ImVec2 a(min.x + 7, min.y + 3);
-    const ImVec2 b(max.x - 7, max.y - 3);
+    const ImVec2 center(std::floor((min.x + max.x) / 2) + 0.5f,
+                        std::floor((min.y + max.y) / 2) + 0.5f);
+    const float half = 7.0f;
+    const ImVec2 a(center.x - half, center.y - half + 1.0f);
+    const ImVec2 b(center.x + half, center.y + half - 1.0f);
     const ImU32 color = ImGui::GetColorU32(ImGuiCol_Text);
     const float stroke = 1.5f;
-    const ImVec2 center((a.x + b.x) / 2, (a.y + b.y) / 2);
     if (icon == RegionIcon::PickTarget) {
-        const float length = std::min(b.x - a.x, b.y - a.y) * 0.4f;
+        const float length = 5.0f;
         const auto corner = [&](float cx, float cy, float dx, float dy) {
             draw->AddLine(ImVec2(cx, cy), ImVec2(cx + dx * length, cy), color, stroke);
             draw->AddLine(ImVec2(cx, cy), ImVec2(cx, cy + dy * length), color, stroke);
@@ -273,7 +280,7 @@ bool IconButton(const char* id, RegionIcon icon, const char* tooltip) {
         corner(b.x, a.y, -1, 1);
         corner(a.x, b.y, 1, -1);
         corner(b.x, b.y, -1, -1);
-        draw->AddCircleFilled(center, 1.6f, color);
+        draw->AddCircleFilled(center, 1.6f, color, 12);
     } else if (icon == RegionIcon::Pencil) {
         // Diagonal pencil: flat end top-right, tip bottom-left.
         const ImVec2 tip(a.x + 1.0f, b.y - 1.0f);
