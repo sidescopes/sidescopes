@@ -242,18 +242,22 @@ bool IconButton(const char* id, RegionIcon icon, const char* tooltip) {
         // A simplified pointing hand: index finger up, palm with knuckle
         // notches, the shape of the pick-mode cursor.
         (void)a;
-        // One silhouette: up the finger's left edge, over its rounded tip,
-        // down to the scalloped knuckles, down the fist's right side.
+        // Traced from the classic cursor-hand outline: tall index left of
+        // center, three knuckle stubs descending to the right, the thumb
+        // web sweeping diagonally down-left, and a flat cuff. Outlined,
+        // like the rest of the icon row.
         const ImVec2 outline[] = {
-            {-3.6f, 7.0f},  {-4.5f, 6.2f},  {-4.5f, -6.3f}, {-4.0f, -7.3f}, {-3.1f, -7.5f},
-            {-2.4f, -7.0f}, {-2.2f, -6.2f}, {-2.2f, -2.4f}, {-1.4f, -2.9f}, {-0.4f, -2.4f},
-            {0.2f, -1.8f},  {1.0f, -2.5f},  {2.0f, -2.4f},  {2.6f, -1.7f},  {3.4f, -2.2f},
-            {4.2f, -1.7f},  {4.5f, -0.8f},  {4.5f, 6.2f},   {3.6f, 7.0f},
+            {-2.8f, 7.5f},  {-5.6f, 1.8f},  {-6.0f, 0.4f},  {-5.6f, -0.4f}, {-4.6f, -0.6f},
+            {-2.7f, 0.6f},  {-2.7f, -6.6f}, {-2.2f, -7.5f}, {-1.1f, -7.5f}, {-0.6f, -6.6f},
+            {-0.6f, -2.8f}, {0.1f, -3.3f},  {1.1f, -3.3f},  {1.5f, -2.6f},  {1.7f, -2.4f},
+            {2.4f, -2.5f},  {2.9f, -1.8f},  {3.2f, -1.6f},  {4.0f, -1.5f},  {4.5f, -0.8f},
+            {4.5f, 6.3f},   {3.9f, 7.5f},
         };
         ImVec2 points[std::size(outline)];
         for (std::size_t i = 0; i < std::size(outline); ++i)
             points[i] = ImVec2(center.x + outline[i].x, center.y + outline[i].y);
-        draw->AddConcavePolyFilled(points, static_cast<int>(std::size(outline)), color);
+        draw->AddPolyline(points, static_cast<int>(std::size(outline)), color, ImDrawFlags_Closed,
+                          1.4f);
     } else if (icon == RegionIcon::Crosshair) {
         // The draw-mode crosshair: long thin beams, small center gap.
         const auto beam = [&](float dx, float dy) {
