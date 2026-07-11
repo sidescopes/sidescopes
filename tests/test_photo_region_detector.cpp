@@ -337,6 +337,52 @@ TEST_CASE("Detector does not bridge rows of list text into borders") {
     }
 }
 
+TEST_CASE("Detector offers the visible part of a photo fully occluded on one side") {
+    // The application's own window covers the photo's right edge for its
+    // whole height, shadow halo included, so no hole row ends against
+    // clean canvas on that side. The truncated rows still prove content
+    // up to the occluder, and a text overlay near the top - whose rows DO
+    // end against clean canvas - must not pull the side in to the text's
+    // edge. Seen live with a large scope window over Lightroom.
+    TestScreen screen(800, 600, Color{51, 51, 51});
+    // The photo: noise straddling the canvas tone, every adjacent
+    // difference below the edge thresholds, so only the canvas hole can
+    // see it - as on Lightroom's low-contrast canvas.
+    // Noise wholly outside the canvas matching window but under the edge
+    // thresholds: a solid hole with no borders, running flush into the
+    // occluder's halo.
+    const IntRect photo{96, 96, 480, 400};
+    uint32_t state = 0x87654321u;
+    for (int py = photo.y; py < photo.y + photo.height; ++py)
+        for (int px = photo.x; px < photo.x + photo.width; ++px) {
+            state = state * 1664525u + 1013904223u;
+            const auto tone = static_cast<uint8_t>(55 + (state >> 24) % 8);  // 55..62
+            screen.Set(px, py, Color{tone, tone, tone});
+        }
+    // Overlay text bar on the canvas just above the photo, ending mid-way;
+    // soft-toned so it forms no border of its own, only hole rows.
+    screen.FillRect(IntRect{96, 76, 200, 20}, Color{57, 58, 57});
+    // The occluder: flush over the photo's right side, taller than the
+    // photo so no visible strip escapes its halo.
+    const IntRect occluder{400, 0, 240, 600};
+    screen.FillRect(occluder, Color{12, 12, 12});
+
+    const auto candidates = DetectPhotoRegions(screen.View(), {occluder});
+    // The honest offering ends at the occluder's shadow halo, not at the
+    // overlay text's right edge and not beyond the occluder.
+    bool found = false;
+    for (const RegionCandidate& candidate : candidates) {
+        const IntRect& r = candidate.rect;
+        // The touching overlay bar may merge into the hole and lift its
+        // top a little; the sides and bottom are what this test pins.
+        if (std::abs(r.x - photo.x) <= 4 && r.y >= photo.y - 24 && r.y <= photo.y + 4 &&
+            std::abs(r.y + r.height - (photo.y + photo.height)) <= 4 && r.x + r.width > 340 &&
+            r.x + r.width <= occluder.x)
+            found = true;
+    }
+    CHECK(found);
+}
+
 TEST_CASE("Detector orders candidates largest first and respects the cap") {
     TestScreen screen(800, 600);
     screen.AddPhoto(IntRect{40, 40, 500, 400}, 0x11111111u);

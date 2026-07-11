@@ -564,9 +564,12 @@ void DetectCanvasHoles(const FrameView& frame, const std::vector<IntRect>& maske
         // An occluded pixel (this application's own window) hides canvas
         // as likely as photograph; counting it as canvas keeps the
         // occluder out of the hole, and the extent vote below discards
-        // hole rows that merely lean against it.
+        // hole rows that merely lean against it. The occluder's shadow
+        // halo joins it: the shadow darkens the surrounding canvas into a
+        // non-canvas ring that would otherwise bridge the photograph to
+        // whatever lies past the window and leak the hole across it.
         const auto member = [&](int x, int y) {
-            return Masked(masked_regions, x, y) || matches(x, y);
+            return NearMasked(masked_regions, tolerances, x, y) || matches(x, y);
         };
         for (int y = 0; y < height; ++y) {
             for (int x = 0; x < width; ++x) {
@@ -710,44 +713,52 @@ void DetectCanvasHoles(const FrameView& frame, const std::vector<IntRect>& maske
             int widest = 0;
             for (std::size_t i = 0; i < best_row_min.size(); ++i)
                 widest = std::max(widest, best_row_max[i] - best_row_min[i]);
+            // Rows ending against clean canvas read the side exactly;
+            // rows cut short by an occluder or its shadow halo read a
+            // lower bound - the photograph provably reaches the occluder
+            // there. Each population gets its own median and the side
+            // takes the farther of the two, so a handful of clean-ending
+            // sub-features (an info overlay's text rows) cannot pull the
+            // side in from where truncated rows prove content to be.
             std::vector<int> lefts;
             std::vector<int> rights;
+            std::vector<int> lefts_truncated;
+            std::vector<int> rights_truncated;
             int first_full = -1;
             int last_full = -1;
             for (std::size_t i = 0; i < best_row_min.size(); ++i) {
                 if (best_row_max[i] - best_row_min[i] < widest / 2) continue;
-                // A row cut short by an occluder - or ending in its
-                // shadow, which darkens the canvas into a false hole ring
-                // around the window - marks the occluder, not the
-                // photograph; it votes only with the sides that end
-                // against clean canvas.
                 const int y = best_y0 + static_cast<int>(i);
                 if (best_row_min[i] == 0 ||
                     !NearMasked(masked_regions, tolerances, best_row_min[i] - 1, y))
                     lefts.push_back(best_row_min[i]);
+                else
+                    lefts_truncated.push_back(best_row_min[i]);
                 if (best_row_max[i] == width ||
                     !NearMasked(masked_regions, tolerances, best_row_max[i], y))
                     rights.push_back(best_row_max[i]);
+                else
+                    rights_truncated.push_back(best_row_max[i]);
                 if (first_full < 0) first_full = static_cast<int>(i);
                 last_full = static_cast<int>(i);
             }
-            // A side occluded for the hole's whole height leaves no
-            // testimony; the visible extent against the occluder is then
-            // the honest answer.
-            const bool all_left_occluded = lefts.empty();
-            const bool all_right_occluded = rights.empty();
-            if (all_left_occluded || all_right_occluded) {
-                for (std::size_t i = 0; i < best_row_min.size(); ++i) {
-                    if (best_row_max[i] - best_row_min[i] < widest / 2) continue;
-                    if (all_left_occluded) lefts.push_back(best_row_min[i]);
-                    if (all_right_occluded) rights.push_back(best_row_max[i]);
-                }
+            const auto median_of = [](std::vector<int>& values) {
+                std::sort(values.begin(), values.end());
+                return values[values.size() / 2];
+            };
+            if (!lefts.empty() || !lefts_truncated.empty()) {
+                hx0 = lefts.empty() ? median_of(lefts_truncated)
+                      : lefts_truncated.empty()
+                          ? median_of(lefts)
+                          : std::min(median_of(lefts), median_of(lefts_truncated));
             }
-            if (!lefts.empty() && !rights.empty()) {
-                std::sort(lefts.begin(), lefts.end());
-                std::sort(rights.begin(), rights.end());
-                hx0 = lefts[lefts.size() / 2];
-                hx1 = rights[rights.size() / 2];
+            if (!rights.empty() || !rights_truncated.empty()) {
+                hx1 = rights.empty() ? median_of(rights_truncated)
+                      : rights_truncated.empty()
+                          ? median_of(rights)
+                          : std::max(median_of(rights), median_of(rights_truncated));
+            }
+            if (first_full >= 0) {
                 // Where the photograph itself drifts through the canvas
                 // tone (a black sky on a black canvas), the melted side
                 // drops those rows below the voting width even though the
