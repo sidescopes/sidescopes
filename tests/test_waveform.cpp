@@ -266,6 +266,49 @@ TEST_CASE("Waveform keeps a real clipping line bright") {
     CHECK(clip > body);
 }
 
+TEST_CASE("Waveform renders taller images through the level spline") {
+    // Level data always has 256 codes; a taller image samples them
+    // through a spline, and a single-level trace must peak at the scaled
+    // position.
+    TestFrame frame(64, 64);
+    frame.Fill(Color{127, 127, 127});
+
+    Waveform scope;
+    WaveformSettings settings;
+    settings.image_height = 512;
+    scope.Configure(settings);
+    scope.Accumulate(frame.View(), IntRect{0, 0, 64, 64});
+
+    const ScopeImage& image = scope.Image();
+    REQUIRE(image.height == 512);
+    int peak_row = -1;
+    int peak_value = 0;
+    for (int row = 0; row < image.height; ++row) {
+        const int value = GreenValueAt(image, 0, row);
+        if (value > peak_value) {
+            peak_value = value;
+            peak_row = row;
+        }
+    }
+    REQUIRE(peak_value > 0);
+    CHECK(peak_row >= (255 - 127) * 2 - 2);
+    CHECK(peak_row <= (255 - 127) * 2 + 3);
+}
+
+TEST_CASE("Waveform respects a narrower column budget") {
+    TestFrame frame(64, 64);
+    frame.Fill(Color{127, 127, 127});
+
+    Waveform scope;
+    WaveformSettings settings;
+    settings.columns = 512;
+    scope.Configure(settings);
+    scope.Accumulate(frame.View(), IntRect{0, 0, 64, 64});
+
+    CHECK(scope.Image().width == 512);
+    CHECK(PeakRows(scope.Image(), 1) == std::vector<int>{255 - 127});
+}
+
 TEST_CASE("Waveform column brightness is invariant to stride and region size") {
     // Two gray levels stacked 3:1 vertically, so every sampled column sees
     // the same 3:1 level mix at stride 1, stride 2, and in a half-size

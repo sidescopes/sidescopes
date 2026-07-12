@@ -677,14 +677,33 @@ int main() {
     MarkerSmoother vectorscope_marker;
     MarkerSmoother waveform_marker;
 
-    const std::unique_ptr<ScopeTexture> vectorscope_texture =
+    std::unique_ptr<ScopeTexture> vectorscope_texture =
         graphics->CreateScopeTexture(Vectorscope::kSize, Vectorscope::kSize);
-    const std::unique_ptr<ScopeTexture> waveform_texture =
+    std::unique_ptr<ScopeTexture> waveform_texture =
         graphics->CreateScopeTexture(Waveform::kColumns, Waveform::kLevels);
-    const std::unique_ptr<ScopeTexture> waveform_parade_texture =
+    std::unique_ptr<ScopeTexture> waveform_parade_texture =
         graphics->CreateScopeTexture(Waveform::kColumns, Waveform::kLevels);
-    const std::unique_ptr<ScopeTexture> histogram_texture =
+    std::unique_ptr<ScopeTexture> histogram_texture =
         graphics->CreateScopeTexture(Histogram::kImageWidth, Histogram::kHeight);
+    // Adaptive scope detail: panes are measured at draw time (stacking
+    // splits the window, so the pane is what matters, not the window),
+    // and desired resolutions are debounced so a live resize does not
+    // thrash engine reallocation. The upload path recreates a texture
+    // whenever its image changes dimensions.
+    ImVec2 pane_points[5] = {};
+    int pending_columns = 0;
+    int pending_image_height = 0;
+    int pending_vectorscope = 0;
+    double detail_pending_since = 0.0;
+    const auto upload_scope = [&](std::unique_ptr<ScopeTexture>& texture, const ScopeImage& image) {
+        if (image.width <= 0 || image.height <= 0) return;
+        if (image.rgba.size() <
+            static_cast<std::size_t>(image.width) * static_cast<std::size_t>(image.height) * 4)
+            return;
+        if (texture->Width() != image.width || texture->Height() != image.height)
+            texture = graphics->CreateScopeTexture(image.width, image.height);
+        texture->Upload(image);
+    };
 
     worker.Start();
     WarmFaceDetection();
@@ -822,12 +841,13 @@ int main() {
 
         if (worker.FetchOutput(output_version, output)) {
             if (scope_shown(ScopeGlyph::Vectorscope))
-                vectorscope_texture->Upload(output.vectorscope_image);
-            if (scope_shown(ScopeGlyph::Waveform)) waveform_texture->Upload(output.waveform_image);
+                upload_scope(vectorscope_texture, output.vectorscope_image);
+            if (scope_shown(ScopeGlyph::Waveform))
+                upload_scope(waveform_texture, output.waveform_image);
             if (scope_shown(ScopeGlyph::WaveformParade))
-                waveform_parade_texture->Upload(output.waveform_parade_image);
+                upload_scope(waveform_parade_texture, output.waveform_parade_image);
             if (scope_shown(ScopeGlyph::Histogram))
-                histogram_texture->Upload(output.histogram_image);
+                upload_scope(histogram_texture, output.histogram_image);
             last_activity = glfwGetTime();
         }
 
@@ -904,6 +924,72 @@ int main() {
                     vectorscope_color = vectorscope_marker.Update(*sampled, io.DeltaTime);
                     waveform_color = waveform_marker.Update(*sampled, io.DeltaTime);
                 }
+            }
+        }
+
+        // --- adaptive scope detail ---
+        // Resolution follows the pane a scope actually gets, and never
+        // exceeds what the region can populate: more columns than the
+        // region has pixels only spreads samples thin, and a finer
+        // chroma grid than the sample count can fill reads as noise.
+        {
+            int window_w = 0;
+            int window_h = 0;
+            glfwGetWindowSize(window, &window_w, &window_h);
+            const float density =
+                window_w > 0 ? static_cast<float>(framebuffer_width) / window_w : 1.0f;
+            const auto pane = [&](ScopeGlyph kind) {
+                const ImVec2& points = pane_points[static_cast<int>(kind)];
+                return ImVec2(points.x * density, points.y * density);
+            };
+            int region_width = 0;
+            int region_height = 0;
+            if (frame_size) {
+                const IntRect region_pixels =
+                    analysis.region.ToPixels(frame_size->width, frame_size->height);
+                region_width = region_pixels.width;
+                region_height = region_pixels.height;
+            }
+
+            int want_columns = analysis.waveform.columns;
+            int want_height = analysis.waveform.image_height;
+            if (scope_shown(ScopeGlyph::Waveform) || scope_shown(ScopeGlyph::WaveformParade)) {
+                const float wf_width =
+                    std::max(pane(ScopeGlyph::Waveform).x, pane(ScopeGlyph::WaveformParade).x);
+                const float wf_height =
+                    std::max(pane(ScopeGlyph::Waveform).y, pane(ScopeGlyph::WaveformParade).y);
+                want_columns = wf_width >= 1400.0f ? 2048 : wf_width >= 500.0f ? 1024 : 512;
+                if (region_width > 0)
+                    want_columns = std::min(want_columns, region_width >= 2048   ? 2048
+                                                          : region_width >= 1024 ? 1024
+                                                                                 : 512);
+                want_height = wf_height >= 560.0f ? 512 : kWaveformLevels;
+            }
+            int want_vectorscope = analysis.vectorscope.size;
+            if (scope_shown(ScopeGlyph::Vectorscope)) {
+                const ImVec2 scope_pane = pane(ScopeGlyph::Vectorscope);
+                const float extent = std::min(scope_pane.x, scope_pane.y);
+                const uint64_t samples =
+                    static_cast<uint64_t>(region_width) * static_cast<uint64_t>(region_height);
+                want_vectorscope = (extent >= 480.0f && samples >= 1'000'000) ? 512 : 256;
+            }
+
+            const bool differs = want_columns != analysis.waveform.columns ||
+                                 want_height != analysis.waveform.image_height ||
+                                 want_vectorscope != analysis.vectorscope.size;
+            if (!differs) {
+                pending_columns = 0;
+            } else if (pending_columns != want_columns || pending_image_height != want_height ||
+                       pending_vectorscope != want_vectorscope) {
+                pending_columns = want_columns;
+                pending_image_height = want_height;
+                pending_vectorscope = want_vectorscope;
+                detail_pending_since = glfwGetTime();
+            } else if (glfwGetTime() - detail_pending_since > 0.4) {
+                analysis.waveform.columns = want_columns;
+                analysis.waveform.image_height = want_height;
+                analysis.vectorscope.size = want_vectorscope;
+                analysis_dirty = true;
             }
         }
 
@@ -1282,6 +1368,7 @@ int main() {
         // The enabled scopes stack in a fixed order, splitting the window
         // along its longer axis.
         const auto draw_scope = [&](ScopeGlyph kind) {
+            pane_points[static_cast<int>(kind)] = ImGui::GetContentRegionAvail();
             if (kind == ScopeGlyph::Vectorscope)
                 draw_vectorscope();
             else if (kind == ScopeGlyph::Histogram)

@@ -9,12 +9,19 @@
 
 namespace sidescopes {
 
+inline constexpr int kDefaultVectorscopeSize = 256;
+
 struct VectorscopeSettings {
     // Trace gain applied to normalized bin densities before log mapping.
     float gain = 3.0f;
     // Sample every Nth pixel horizontally and vertically (1..8).
     int sampling_stride = 1;
     ChromaMatrix matrix = ChromaMatrix::Bt601;
+    // Chroma grid resolution per axis. The fixed-point transform holds
+    // more precision than 256 bins use, so a finer grid carries real
+    // sub-detail on panes large enough to show it - when the region
+    // supplies enough samples to fill it.
+    int size = kDefaultVectorscopeSize;
 };
 
 // Classic vectorscope: a 256x256 chroma density plot. Bins are accumulated
@@ -27,7 +34,7 @@ struct VectorscopeSettings {
 // Not thread-safe; a single analysis thread owns each instance.
 class Vectorscope {
 public:
-    static constexpr int kSize = 256;
+    static constexpr int kSize = kDefaultVectorscopeSize;
 
     Vectorscope();
 
@@ -41,12 +48,14 @@ public:
     [[nodiscard]] std::optional<NormalizedPoint> Project(const FloatColor& color) const;
 
 private:
+    void Resize(int size);
     void RebuildTintTable();
     void MapBinsToImage(uint64_t sample_count);
 
     VectorscopeSettings settings_;
+    int size_ = kDefaultVectorscopeSize;
     std::vector<uint32_t> bins_;
-    std::array<uint8_t, static_cast<std::size_t>(kSize) * kSize * 3> tint_{};
+    std::vector<uint8_t> tint_;
     ScopeImage image_;
 };
 

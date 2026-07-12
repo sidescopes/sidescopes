@@ -18,15 +18,26 @@ constexpr double kReferenceRowCount = 1'000.0;
 
 }  // namespace
 
-Waveform::Waveform() : bins_(kPlaneSize * 4, 0) {
-    image_.width = kColumns;
-    image_.height = kLevels;
-    image_.rgba.assign(kPlaneSize * 4, 0);
+Waveform::Waveform() {
+    Resize(kDefaultWaveformColumns, kWaveformLevels);
 }
 
 void Waveform::Configure(const WaveformSettings& settings) {
     settings_ = settings;
     settings_.sampling_stride = std::clamp(settings_.sampling_stride, 1, 8);
+    settings_.columns = std::clamp(settings_.columns, 256, 2048);
+    settings_.image_height = std::clamp(settings_.image_height, kWaveformLevels, 768);
+    if (settings_.columns != columns_ || settings_.image_height != image_height_)
+        Resize(settings_.columns, settings_.image_height);
+}
+
+void Waveform::Resize(int columns, int image_height) {
+    columns_ = columns;
+    image_height_ = image_height;
+    bins_.assign(PlaneSize() * 4, 0);
+    image_.width = columns_;
+    image_.height = image_height_;
+    image_.rgba.assign(static_cast<std::size_t>(columns_) * image_height_ * 4, 0);
 }
 
 void Waveform::Accumulate(const FrameView& frame, IntRect region) {
@@ -36,10 +47,11 @@ void Waveform::Accumulate(const FrameView& frame, IntRect region) {
     const bool wants_rgb = settings_.mode != WaveformMode::Luma;
     const bool wants_luma =
         settings_.mode == WaveformMode::Luma || settings_.mode == WaveformMode::RgbAndLuma;
+    const std::size_t plane_size = PlaneSize();
     uint32_t* red_plane = bins_.data();
-    uint32_t* green_plane = bins_.data() + kPlaneSize;
-    uint32_t* blue_plane = bins_.data() + 2 * kPlaneSize;
-    uint32_t* luma_plane = bins_.data() + 3 * kPlaneSize;
+    uint32_t* green_plane = bins_.data() + plane_size;
+    uint32_t* blue_plane = bins_.data() + 2 * plane_size;
+    uint32_t* luma_plane = bins_.data() + 3 * plane_size;
 
     uint64_t sampled_rows = 0;
     if (!region.Empty()) {
@@ -55,15 +67,15 @@ void Waveform::Accumulate(const FrameView& frame, IntRect region) {
                 // aggregate alternately two and three image columns at
                 // typical region widths - a density comb that rendered as
                 // fine vertical striping on large panes.
-                const auto position = static_cast<std::size_t>(static_cast<int64_t>(px) * kColumns *
+                const auto position = static_cast<std::size_t>(static_cast<int64_t>(px) * columns_ *
                                                                16 / region.width);
                 const std::size_t column = position >> 4;
                 const uint32_t right_weight = position & 15u;
                 const uint32_t left_weight = 16u - right_weight;
                 const std::size_t next =
-                    column + 1 < static_cast<std::size_t>(kColumns) ? column + 1 : column;
+                    column + 1 < static_cast<std::size_t>(columns_) ? column + 1 : column;
                 const auto splat = [&](uint32_t* plane, int value) {
-                    uint32_t* line = plane + static_cast<std::size_t>(255 - value) * kColumns;
+                    uint32_t* line = plane + static_cast<std::size_t>(255 - value) * columns_;
                     line[column] += left_weight;
                     line[next] += right_weight;
                 };
@@ -96,23 +108,17 @@ void Waveform::MapBinsToImage(uint64_t sampled_rows) {
     // structure is column-local and passes through untouched; genuinely
     // dominant flat tones exceed the clamp and survive, compressed
     // further by the log display.
+    const std::size_t plane_size = PlaneSize();
     smoothed_.resize(bins_.size());
     for (int plane = 0; plane < 4; ++plane) {
-        const uint32_t* in = bins_.data() + static_cast<std::size_t>(plane) * kPlaneSize;
-        uint32_t* out = smoothed_.data() + static_cast<std::size_t>(plane) * kPlaneSize;
+        const uint32_t* in = bins_.data() + static_cast<std::size_t>(plane) * plane_size;
+        uint32_t* out = smoothed_.data() + static_cast<std::size_t>(plane) * plane_size;
 
         uint64_t global[kLevels] = {};
         for (int row = 0; row < kLevels; ++row) {
-            const uint32_t* line = in + static_cast<std::size_t>(row) * kColumns;
-            for (int column = 0; column < kColumns; ++column) global[row] += line[column];
+            const uint32_t* line = in + static_cast<std::size_t>(row) * columns_;
+            for (int column = 0; column < columns_; ++column) global[row] += line[column];
         }
-        // Flat-field weights in 1/256ths: the neighborhood MEDIAN over
-        // +-6 levels against the level's own population, clamped to 3x.
-        // The median matters: a genuinely dominant flat tone is a huge
-        // real spike, and a mean would inflate its neighbors' expected
-        // density and over-lift them - manufacturing the very banding
-        // this removes. The median ignores isolated spikes, so real
-        // lines keep their real neighbors.
         // The populated range: spikes at its edges are real clipping
         // lines - crushed blacks, blown whites - and stay protected.
         int lowest = kLevels;
@@ -123,6 +129,11 @@ void Waveform::MapBinsToImage(uint64_t sampled_rows) {
             highest = row;
         }
 
+        // Flat-field weights in 1/256ths: the neighborhood MEDIAN over
+        // +-6 levels against the level's own population. The median
+        // matters: a genuinely dominant flat tone is a huge real spike,
+        // and a mean would inflate its neighbors' expected density and
+        // over-lift them - manufacturing the very banding this removes.
         uint32_t flatten[kLevels];
         double expected_of[kLevels];
         for (int row = 0; row < kLevels; ++row) {
@@ -207,15 +218,15 @@ void Waveform::MapBinsToImage(uint64_t sampled_rows) {
             }
         }
 
-        corrected_.resize(kPlaneSize);
+        corrected_.resize(plane_size);
         for (int row = 0; row < kLevels; ++row) {
-            uint32_t* line = corrected_.data() + static_cast<std::size_t>(row) * kColumns;
+            uint32_t* line = corrected_.data() + static_cast<std::size_t>(row) * columns_;
             const auto weighted = [&](int level, int column) -> uint32_t {
-                const uint64_t count = in[static_cast<std::size_t>(level) * kColumns + column];
+                const uint64_t count = in[static_cast<std::size_t>(level) * columns_ + column];
                 return static_cast<uint32_t>(count * flatten[level] >> 8);
             };
             if (mix_above[row] == row) {
-                for (int column = 0; column < kColumns; ++column)
+                for (int column = 0; column < columns_; ++column)
                     line[column] = weighted(row, column);
             } else {
                 const int above = mix_above[row];
@@ -223,20 +234,20 @@ void Waveform::MapBinsToImage(uint64_t sampled_rows) {
                 const uint32_t gap = static_cast<uint32_t>(below - above);
                 const uint32_t below_share = static_cast<uint32_t>(row - above);
                 const uint32_t above_share = static_cast<uint32_t>(below - row);
-                for (int column = 0; column < kColumns; ++column)
+                for (int column = 0; column < columns_; ++column)
                     line[column] = (weighted(above, column) * above_share +
                                     weighted(below, column) * below_share) /
                                    gap;
             }
         }
 
-        for (int column = 0; column < kColumns; ++column) {
+        for (int column = 0; column < columns_; ++column) {
             for (int row = 0; row < kLevels; ++row) {
                 const auto at = [&](int level) -> uint32_t {
                     if (level < 0 || level >= kLevels) return 0;
-                    return corrected_[static_cast<std::size_t>(level) * kColumns + column];
+                    return corrected_[static_cast<std::size_t>(level) * columns_ + column];
                 };
-                out[static_cast<std::size_t>(row) * kColumns + column] =
+                out[static_cast<std::size_t>(row) * columns_ + column] =
                     (at(row - 2) + 4 * at(row - 1) + 6 * at(row) + 4 * at(row + 1) + at(row + 2) +
                      8) /
                     16;
@@ -244,11 +255,11 @@ void Waveform::MapBinsToImage(uint64_t sampled_rows) {
         }
         // Horizontal 1-2-1 within each row, in place.
         for (int row = 0; row < kLevels; ++row) {
-            uint32_t* line = out + static_cast<std::size_t>(row) * kColumns;
+            uint32_t* line = out + static_cast<std::size_t>(row) * columns_;
             uint32_t previous = 0;
-            for (int column = 0; column < kColumns; ++column) {
+            for (int column = 0; column < columns_; ++column) {
                 const uint32_t current = line[column];
-                const uint32_t next = column + 1 < kColumns ? line[column + 1] : 0;
+                const uint32_t next = column + 1 < columns_ ? line[column + 1] : 0;
                 line[column] = (previous + 2 * current + next + 2) / 4;
                 previous = current;
             }
@@ -262,10 +273,10 @@ void Waveform::MapBinsToImage(uint64_t sampled_rows) {
 
     uint32_t densest = 0;
     if (wants_rgb) {
-        for (std::size_t i = 0; i < 3 * kPlaneSize; ++i) densest = std::max(densest, traces[i]);
+        for (std::size_t i = 0; i < 3 * plane_size; ++i) densest = std::max(densest, traces[i]);
     }
     if (wants_luma) {
-        for (std::size_t i = 3 * kPlaneSize; i < 4 * kPlaneSize; ++i)
+        for (std::size_t i = 3 * plane_size; i < 4 * plane_size; ++i)
             densest = std::max(densest, traces[i]);
     }
 
@@ -277,8 +288,8 @@ void Waveform::MapBinsToImage(uint64_t sampled_rows) {
     const double gain = static_cast<double>(settings_.gain) * per_row_scale;
     const double log_ceiling = densest > 0 ? std::log1p(static_cast<double>(densest) * gain) : 0.0;
     const double intensity_scale = log_ceiling > 0.0 ? 255.0 / log_ceiling : 0.0;
-    const auto brightness = [&](uint32_t count) -> float {
-        if (count == 0) return 0.0f;
+    const auto brightness = [&](float count) -> float {
+        if (count <= 0.0f) return 0.0f;
         // The gamma lifts the mid-density body of the trace, exactly as
         // on the vectorscope: normalizing to the densest bin pushes
         // everything else down, and a linear ramp reads dim at any gain.
@@ -288,61 +299,100 @@ void Waveform::MapBinsToImage(uint64_t sampled_rows) {
     };
 
     const uint32_t* red_plane = traces.data();
-    const uint32_t* green_plane = traces.data() + kPlaneSize;
-    const uint32_t* blue_plane = traces.data() + 2 * kPlaneSize;
-    const uint32_t* luma_plane = traces.data() + 3 * kPlaneSize;
+    const uint32_t* green_plane = traces.data() + plane_size;
+    const uint32_t* blue_plane = traces.data() + 2 * plane_size;
+    const uint32_t* luma_plane = traces.data() + 3 * plane_size;
 
     if (settings_.mode == WaveformMode::RgbParade) {
-        // Three channels side by side: each third shows one channel's full
-        // column range compressed 3:1.
+        // Three channels side by side: each third shows one channel's
+        // full column range compressed 3:1, window-maxed so sparse
+        // traces stay visible. The result feeds the same composer as
+        // the overlaid modes.
+        parade_.assign(3 * plane_size, 0);
+        const int third = columns_ / 3;
         const uint32_t* planes[3] = {red_plane, green_plane, blue_plane};
-        constexpr int kThird = kColumns / 3;
-        uint8_t* out = image_.rgba.data();
-        for (int row = 0; row < kLevels; ++row) {
-            for (int column = 0; column < kColumns; ++column, out += 4) {
-                const int channel = std::min(column / kThird, 2);
-                const int local = column - channel * kThird;
-                // Each output column covers a window of source columns; the
-                // window maximum keeps sparse traces visible (narrow regions
-                // populate only every Nth source column).
-                const int source_begin = local * kColumns / kThird;
-                const int source_end = std::min((local + 1) * kColumns / kThird, kColumns);
-                uint32_t densest_in_window = 0;
-                for (int source = source_begin; source < source_end; ++source) {
-                    densest_in_window = std::max(
-                        densest_in_window,
-                        planes[channel][static_cast<std::size_t>(row) * kColumns + source]);
+        for (int channel = 0; channel < 3; ++channel) {
+            uint32_t* out_plane = parade_.data() + static_cast<std::size_t>(channel) * plane_size;
+            const int first = channel * third;
+            const int last = channel == 2 ? columns_ : (channel + 1) * third;
+            for (int row = 0; row < kLevels; ++row) {
+                const uint32_t* source_row =
+                    planes[channel] + static_cast<std::size_t>(row) * columns_;
+                uint32_t* out_row = out_plane + static_cast<std::size_t>(row) * columns_;
+                for (int column = first; column < last; ++column) {
+                    const int local = column - first;
+                    const int begin = local * columns_ / third;
+                    const int end = std::min((local + 1) * columns_ / third, columns_);
+                    uint32_t densest_in_window = 0;
+                    for (int source = begin; source < end; ++source)
+                        densest_in_window = std::max(densest_in_window, source_row[source]);
+                    out_row[column] = densest_in_window;
                 }
-                const float value = brightness(densest_in_window);
-                out[0] = channel == 0 ? static_cast<uint8_t>(std::min(255.0f, value)) : 0;
-                out[1] = channel == 1 ? static_cast<uint8_t>(std::min(255.0f, value)) : 0;
-                out[2] = channel == 2 ? static_cast<uint8_t>(std::min(255.0f, value)) : 0;
-                out[3] = 255;
             }
         }
-        ++image_.sequence;
-        return;
+        red_plane = parade_.data();
+        green_plane = parade_.data() + plane_size;
+        blue_plane = parade_.data() + 2 * plane_size;
     }
 
+    // The composer. At native height rows map one-to-one onto levels; a
+    // taller image samples the level axis through a Catmull-Rom spline -
+    // the histogram's technique - so a magnified trace draws as a curve
+    // instead of stretched texels.
+    const bool native_height = image_height_ == kLevels;
     uint8_t* out = image_.rgba.data();
-    for (std::size_t i = 0; i < kPlaneSize; ++i, out += 4) {
-        float r = 0.0f, g = 0.0f, b = 0.0f;
-        if (wants_rgb) {
-            r = brightness(red_plane[i]);
-            g = brightness(green_plane[i]);
-            b = brightness(blue_plane[i]);
+    for (int y = 0; y < image_height_; ++y) {
+        int base = y;
+        float weight0 = 0.0f;
+        float weight1 = 1.0f;
+        float weight2 = 0.0f;
+        float weight3 = 0.0f;
+        if (!native_height) {
+            const float position =
+                (static_cast<float>(y) + 0.5f) * kLevels / static_cast<float>(image_height_) - 0.5f;
+            const float floored = std::floor(position);
+            base = static_cast<int>(floored);
+            const float t = position - floored;
+            const float t2 = t * t;
+            const float t3 = t2 * t;
+            weight0 = -0.5f * t3 + t2 - 0.5f * t;
+            weight1 = 1.5f * t3 - 2.5f * t2 + 1.0f;
+            weight2 = -1.5f * t3 + 2.0f * t2 + 0.5f * t;
+            weight3 = 0.5f * t3 - 0.5f * t2;
         }
-        if (wants_luma) {
-            // In the combined mode luma rides on top as a dimmer white trace.
-            const float luma = brightness(luma_plane[i]) * (wants_rgb ? 0.7f : 1.0f);
-            r += luma;
-            g += luma;
-            b += luma;
+        const auto sample = [&](const uint32_t* plane, int column) -> float {
+            const auto row_at = [&](int level) -> float {
+                if (level < 0 || level >= kLevels) return 0.0f;
+                return static_cast<float>(
+                    plane[static_cast<std::size_t>(level) * columns_ + column]);
+            };
+            if (native_height) return row_at(base);
+            return std::max(0.0f, weight0 * row_at(base - 1) + weight1 * row_at(base) +
+                                      weight2 * row_at(base + 1) + weight3 * row_at(base + 2));
+        };
+        for (int column = 0; column < columns_; ++column, out += 4) {
+            float r = 0.0f;
+            float g = 0.0f;
+            float b = 0.0f;
+            if (wants_rgb) {
+                r = brightness(sample(red_plane, column));
+                g = brightness(sample(green_plane, column));
+                b = brightness(sample(blue_plane, column));
+            }
+            if (wants_luma) {
+                // In the combined mode luma rides on top as a dimmer
+                // white trace.
+                const float luma =
+                    brightness(sample(luma_plane, column)) * (wants_rgb ? 0.7f : 1.0f);
+                r += luma;
+                g += luma;
+                b += luma;
+            }
+            out[0] = static_cast<uint8_t>(std::min(255.0f, r));
+            out[1] = static_cast<uint8_t>(std::min(255.0f, g));
+            out[2] = static_cast<uint8_t>(std::min(255.0f, b));
+            out[3] = 255;
         }
-        out[0] = static_cast<uint8_t>(std::min(255.0f, r));
-        out[1] = static_cast<uint8_t>(std::min(255.0f, g));
-        out[2] = static_cast<uint8_t>(std::min(255.0f, b));
-        out[3] = 255;
     }
     ++image_.sequence;
 }

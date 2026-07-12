@@ -27,18 +27,29 @@ constexpr double kReferenceSampleCount = 1'000'000.0;
 
 }  // namespace
 
-Vectorscope::Vectorscope() : bins_(static_cast<std::size_t>(kSize) * kSize, 0) {
-    image_.width = kSize;
-    image_.height = kSize;
-    image_.rgba.assign(static_cast<std::size_t>(kSize) * kSize * 4, 0);
-    RebuildTintTable();
+Vectorscope::Vectorscope() {
+    Resize(kDefaultVectorscopeSize);
 }
 
 void Vectorscope::Configure(const VectorscopeSettings& settings) {
     const bool matrix_changed = settings.matrix != settings_.matrix;
     settings_ = settings;
     settings_.sampling_stride = std::clamp(settings_.sampling_stride, 1, 8);
-    if (matrix_changed) RebuildTintTable();
+    settings_.size = std::clamp(settings_.size, 128, 512);
+    if (settings_.size != size_)
+        Resize(settings_.size);
+    else if (matrix_changed)
+        RebuildTintTable();
+}
+
+void Vectorscope::Resize(int size) {
+    size_ = size;
+    bins_.assign(static_cast<std::size_t>(size_) * size_, 0);
+    tint_.assign(static_cast<std::size_t>(size_) * size_ * 3, 0);
+    image_.width = size_;
+    image_.height = size_;
+    image_.rgba.assign(static_cast<std::size_t>(size_) * size_ * 4, 0);
+    RebuildTintTable();
 }
 
 void Vectorscope::Accumulate(const FrameView& frame, IntRect region) {
@@ -52,15 +63,19 @@ void Vectorscope::Accumulate(const FrameView& frame, IntRect region) {
         for (int py = region.y; py < region.y + region.height; py += stride) {
             const uint8_t* pixel = frame.PixelAt(region.x, py);
             const uint8_t* row_end = frame.PixelAt(region.x + region.width, py);
+            // The raw transform carries eight bits below the classic 256
+            // grid; scaling it to the configured grid instead of always
+            // shifting by eight is what makes a finer grid real detail.
+            const int size = size_;
             for (; pixel < row_end; pixel += static_cast<std::ptrdiff_t>(4) * stride) {
                 const int b = pixel[0], g = pixel[1], r = pixel[2];
-                const int cb =
-                    ((matrix.cb_from_r * r + matrix.cb_from_g * g + matrix.cb_from_b * b) >> 8) +
-                    128;
-                const int cr =
-                    ((matrix.cr_from_r * r + matrix.cr_from_g * g + matrix.cr_from_b * b) >> 8) +
-                    128;
-                ++bins_[static_cast<std::size_t>(255 - cr) * kSize + cb];
+                const int cb_raw =
+                    matrix.cb_from_r * r + matrix.cb_from_g * g + matrix.cb_from_b * b;
+                const int cr_raw =
+                    matrix.cr_from_r * r + matrix.cr_from_g * g + matrix.cr_from_b * b;
+                const int cb = std::clamp((cb_raw * size >> 16) + size / 2, 0, size - 1);
+                const int cr = std::clamp((cr_raw * size >> 16) + size / 2, 0, size - 1);
+                ++bins_[static_cast<std::size_t>(size - 1 - cr) * size + cb];
                 ++sample_count;
             }
         }
@@ -93,14 +108,16 @@ void Vectorscope::RebuildTintTable() {
     // represents, not a colorimetric reproduction, and at true saturation
     // the cloud reads as washed-out pastel.
     constexpr float kSaturationBoost = 1.7f;
-    for (int py = 0; py < kSize; ++py) {
-        for (int px = 0; px < kSize; ++px) {
-            const float cb = (static_cast<float>(px) - 128.0f) * kSaturationBoost;
-            const float cr = (static_cast<float>(255 - py) - 128.0f) * kSaturationBoost;
+    const float to_chroma = 256.0f / static_cast<float>(size_);
+    for (int py = 0; py < size_; ++py) {
+        for (int px = 0; px < size_; ++px) {
+            const float cb = (static_cast<float>(px) * to_chroma - 128.0f) * kSaturationBoost;
+            const float cr =
+                (static_cast<float>(size_ - 1 - py) * to_chroma - 128.0f) * kSaturationBoost;
             const auto to_byte = [](float value) {
                 return static_cast<uint8_t>(std::clamp(value, 0.0f, 255.0f));
             };
-            uint8_t* tint = tint_.data() + (static_cast<std::size_t>(py) * kSize + px) * 3;
+            uint8_t* tint = tint_.data() + (static_cast<std::size_t>(py) * size_ + px) * 3;
             tint[0] = to_byte(kDisplayLuma + 1.402f * cr);
             tint[1] = to_byte(kDisplayLuma - 0.344f * cb - 0.714f * cr);
             tint[2] = to_byte(kDisplayLuma + 1.772f * cb);
@@ -114,16 +131,16 @@ void Vectorscope::MapBinsToImage(uint64_t sample_count) {
     // single-pixel noise where the photograph's colors actually vary
     // smoothly.
     std::vector<float> smoothed(bins_.size(), 0.0f);
-    for (int py = 0; py < kSize; ++py) {
-        for (int px = 0; px < kSize; ++px) {
+    for (int py = 0; py < size_; ++py) {
+        for (int px = 0; px < size_; ++px) {
             const auto at = [&](int y, int x) -> float {
-                if (y < 0 || y >= kSize || x < 0 || x >= kSize) return 0.0f;
-                return static_cast<float>(bins_[static_cast<std::size_t>(y) * kSize + x]);
+                if (y < 0 || y >= size_ || x < 0 || x >= size_) return 0.0f;
+                return static_cast<float>(bins_[static_cast<std::size_t>(y) * size_ + x]);
             };
             const auto row = [&](int y) {
                 return at(y, px - 1) + 2.0f * at(y, px) + at(y, px + 1);
             };
-            smoothed[static_cast<std::size_t>(py) * kSize + px] =
+            smoothed[static_cast<std::size_t>(py) * size_ + px] =
                 (row(py - 1) + 2.0f * row(py) + row(py + 1)) / 16.0f;
         }
     }

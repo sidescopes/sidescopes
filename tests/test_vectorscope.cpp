@@ -102,6 +102,27 @@ TEST_CASE("Vectorscope matrix selection moves chroma targets") {
     CHECK(BrightestPixel(scope.Image()) == std::pair<int, int>{108, 44});
 }
 
+TEST_CASE("Vectorscope carries real detail on a finer grid") {
+    // The fixed-point chroma transform holds more precision than the
+    // classic 256 grid uses; the finer grid must place the same color on
+    // the scaled coordinate rather than upscale the coarse one.
+    TestFrame frame(32, 32);
+    frame.Fill(0, 32, Color{191, 0, 0});
+
+    Vectorscope scope;
+    VectorscopeSettings settings;
+    settings.size = 512;
+    scope.Configure(settings);
+    scope.Accumulate(frame.View(), IntRect{0, 0, 32, 32});
+
+    CHECK(scope.Image().width == 512);
+    const auto [px, py] = BrightestPixel(scope.Image());
+    CHECK(px >= 197);
+    CHECK(px <= 201);
+    CHECK(py >= 86);
+    CHECK(py <= 90);
+}
+
 TEST_CASE("Vectorscope trace is invariant to the sampling stride") {
     // Two colors in a 3:1 area ratio, chosen so the ratio is preserved under
     // stride-2 sampling. Per-sample density normalization must then produce
