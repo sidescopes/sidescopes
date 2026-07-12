@@ -96,3 +96,7 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Windows: the interface paces itself off the desktop compositor;
   animation no longer burns a full processor core on some graphics
   drivers.
+- Windows: the window restores its saved position and size instead of
+  growing by the monitor scale on every launch, and always starts
+  fully on screen - a window that began beyond the desktop edge used
+  to drag a white, never-drawn strip into view.

@@ -512,6 +512,87 @@ float UiScale(GLFWwindow* window) {
     return density > 0 ? scale_x / density : scale_x;
 }
 
+// Applies the saved window placement and keeps the window on screen.
+//
+// Saved sizes are in the platform's own window units (physical pixels on
+// Windows, points on macOS), so they are restored with an explicit set
+// after creation: passing them through glfwCreateWindow instead would
+// run them through GLFW_SCALE_TO_MONITOR's creation-time scaling on
+// Windows, growing the window by the monitor scale on every launch.
+// Position first, size second - crossing into a differently scaled
+// monitor triggers the hint's automatic resize, and the explicit size
+// must land after it.
+//
+// The rectangle is then clamped into the work area of the monitor it
+// mostly lies on. A window that starts beyond the desktop edge shows
+// its never-composited strip as white while a drag holds the frame
+// loop; a window that never starts off screen has no such strip.
+void RestoreWindowPlacement(GLFWwindow* window, const Preferences& startup) {
+    if (startup.window_x >= 0) {
+        glfwSetWindowPos(window, startup.window_x, startup.window_y);
+        glfwSetWindowSize(window, startup.window_width, startup.window_height);
+    }
+
+    int monitor_count = 0;
+    GLFWmonitor** monitors = glfwGetMonitors(&monitor_count);
+    if (!monitors || monitor_count == 0) return;
+
+    int x = 0;
+    int y = 0;
+    int width = 0;
+    int height = 0;
+    glfwGetWindowPos(window, &x, &y);
+    glfwGetWindowSize(window, &width, &height);
+    int frame_left = 0;
+    int frame_top = 0;
+    int frame_right = 0;
+    int frame_bottom = 0;
+    glfwGetWindowFrameSize(window, &frame_left, &frame_top, &frame_right, &frame_bottom);
+
+    // The monitor carrying most of the window; the primary when none is.
+    int work_x = 0;
+    int work_y = 0;
+    int work_width = 0;
+    int work_height = 0;
+    glfwGetMonitorWorkarea(monitors[0], &work_x, &work_y, &work_width, &work_height);
+    long long best_overlap = 0;
+    for (int index = 0; index < monitor_count; ++index) {
+        int monitor_x = 0;
+        int monitor_y = 0;
+        int monitor_width = 0;
+        int monitor_height = 0;
+        glfwGetMonitorWorkarea(monitors[index], &monitor_x, &monitor_y, &monitor_width,
+                               &monitor_height);
+        const long long overlap_width =
+            std::min<long long>(x + width, monitor_x + monitor_width) - std::max(x, monitor_x);
+        const long long overlap_height =
+            std::min<long long>(y + height, monitor_y + monitor_height) - std::max(y, monitor_y);
+        const long long overlap =
+            std::max<long long>(overlap_width, 0) * std::max<long long>(overlap_height, 0);
+        if (overlap > best_overlap) {
+            best_overlap = overlap;
+            work_x = monitor_x;
+            work_y = monitor_y;
+            work_width = monitor_width;
+            work_height = monitor_height;
+        }
+    }
+
+    const int available_width = std::max(1, work_width - frame_left - frame_right);
+    const int available_height = std::max(1, work_height - frame_top - frame_bottom);
+    const int clamped_width = std::min(width, available_width);
+    const int clamped_height = std::min(height, available_height);
+    const int min_x = work_x + frame_left;
+    const int max_x = work_x + work_width - frame_right - clamped_width;
+    const int min_y = work_y + frame_top;
+    const int max_y = work_y + work_height - frame_bottom - clamped_height;
+    const int clamped_x = std::max(min_x, std::min(x, max_x));
+    const int clamped_y = std::max(min_y, std::min(y, max_y));
+    if (clamped_width != width || clamped_height != height)
+        glfwSetWindowSize(window, clamped_width, clamped_height);
+    if (clamped_x != x || clamped_y != y) glfwSetWindowPos(window, clamped_x, clamped_y);
+}
+
 }  // namespace
 
 int main() {
@@ -526,13 +607,17 @@ int main() {
     // physical size when dragged between differently scaled monitors;
     // macOS ignores the hint (scaling lives in the framebuffer there).
     glfwWindowHint(GLFW_SCALE_TO_MONITOR, GLFW_TRUE);
+    // Hidden until the saved placement is applied: geometry settles
+    // before the first paint, and no intermediate rectangle flashes.
+    glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
     GLFWwindow* window = glfwCreateWindow(startup.window_width, startup.window_height, "SideScopes",
                                           nullptr, nullptr);
     if (!window) {
         glfwTerminate();
         return 1;
     }
-    if (startup.window_x >= 0) glfwSetWindowPos(window, startup.window_x, startup.window_y);
+    RestoreWindowPlacement(window, startup);
+    glfwShowWindow(window);
     // Installed before the ImGui backend so it chains this callback
     // instead of being replaced by it.
     glfwSetWindowFocusCallback(window, [](GLFWwindow*, int focused) {
