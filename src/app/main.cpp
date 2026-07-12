@@ -1664,10 +1664,13 @@ int main() {
                                    ImGuiHoveredFlags_AllowWhenBlockedByActiveItem) &&
             !ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel)) {
             using Kind = NativeMenuItem::Kind;
-            // The menu shows every scope but only the options of the pane
-            // under the cursor: right-clicking the waveform offers its
-            // styles, the vectorscope its matrix, response, and zoom.
-            // Clicking the toolbar or background offers everything.
+            // One rule shapes the menu: ownership shows through position
+            // and grouping, never through label prefixes. A right-click
+            // on a pane puts that scope's options first, unprefixed - the
+            // click itself is the context - while a click on the toolbar
+            // or background wraps each visible scope's options in a
+            // submenu named after it. Every other section keeps the same
+            // order in both: scopes, region, pins, view, application.
             const ImVec2 mouse = ImGui::GetMousePos();
             int clicked_pane = -1;
             for (int pane = 0; pane < 5; ++pane) {
@@ -1676,8 +1679,11 @@ int main() {
                 if (mouse.x >= rect.x && mouse.x < rect.z && mouse.y >= rect.y && mouse.y < rect.w)
                     clicked_pane = pane;
             }
-            const auto over = [&](ScopeGlyph kind) {
-                return clicked_pane < 0 || clicked_pane == static_cast<int>(kind);
+            const auto clicked = [&](ScopeGlyph kind) {
+                return clicked_pane == static_cast<int>(kind);
+            };
+            const auto shown_or_global = [&](ScopeGlyph kind) {
+                return clicked_pane < 0 && scope_shown(kind);
             };
 
             std::vector<NativeMenuItem> menu;
@@ -1691,36 +1697,9 @@ int main() {
             };
             const auto end_submenu = [&] { menu.push_back({Kind::SubmenuEnd, "", -1, false, ""}); };
 
-            action("Vectorscope", kMenuShowVectorscope, scope_shown(ScopeGlyph::Vectorscope),
-                   shortcut_label(shortcuts.vectorscope));
-            action("Waveform", kMenuShowWaveform, scope_shown(ScopeGlyph::Waveform),
-                   shortcut_label(shortcuts.waveform));
-            action("RGB Parade", kMenuShowWaveformParade, scope_shown(ScopeGlyph::WaveformParade),
-                   shortcut_label(shortcuts.parade));
-            action("Histogram", kMenuShowHistogram, scope_shown(ScopeGlyph::Histogram),
-                   shortcut_label(shortcuts.histogram));
-            action("Color Picker", kMenuShowColorPicker, scope_shown(ScopeGlyph::ColorPicker),
-                   shortcut_label(shortcuts.color_picker));
-
-            bool options_shown = false;
-            const auto options_separator = [&] {
-                if (!options_shown) separator();
-                options_shown = true;
-            };
-            if (over(ScopeGlyph::Waveform)) {
-                options_separator();
-                submenu("Waveform Style");
-                action("RGB", kMenuWaveformStyleRgb, analysis.waveform.mode == WaveformMode::Rgb);
-                action("Luma", kMenuWaveformStyleLuma,
-                       analysis.waveform.mode == WaveformMode::Luma);
-                action("Luma (Colored)", kMenuWaveformStyleColoredLuma,
-                       analysis.waveform.mode == WaveformMode::ColoredLuma);
-                end_submenu();
-            }
-            if (over(ScopeGlyph::Vectorscope)) {
-                options_separator();
+            const auto vectorscope_options = [&] {
+                submenu("Matrix");
                 const bool bt601 = analysis.vectorscope.matrix == ChromaMatrix::Bt601;
-                submenu("Vectorscope Matrix");
                 action("BT.601", kMenuMatrixBt601, bt601);
                 action("BT.709", kMenuMatrixBt709, !bt601);
                 end_submenu();
@@ -1738,14 +1717,65 @@ int main() {
                 action("4x", kMenuZoom4, vectorscope_zoom == 4,
                        shortcut_label(shortcuts.vectorscope_zoom));
                 end_submenu();
-            }
-            if (over(ScopeGlyph::Histogram)) {
-                options_separator();
-                submenu("Histogram Style");
+            };
+            const auto waveform_options = [&] {
+                action("RGB", kMenuWaveformStyleRgb, analysis.waveform.mode == WaveformMode::Rgb);
+                action("Luma", kMenuWaveformStyleLuma,
+                       analysis.waveform.mode == WaveformMode::Luma);
+                action("Luma (Colored)", kMenuWaveformStyleColoredLuma,
+                       analysis.waveform.mode == WaveformMode::ColoredLuma);
+            };
+            const auto histogram_options = [&] {
                 action("Combined", kMenuHistogramCombined,
                        analysis.histogram.style == HistogramStyle::Combined);
                 action("Per Channel", kMenuHistogramPerChannel,
                        analysis.histogram.style == HistogramStyle::PerChannel);
+            };
+
+            // The clicked pane's options, first and unprefixed.
+            if (clicked(ScopeGlyph::Vectorscope)) {
+                vectorscope_options();
+                separator();
+            } else if (clicked(ScopeGlyph::Waveform)) {
+                submenu("Style");
+                waveform_options();
+                end_submenu();
+                separator();
+            } else if (clicked(ScopeGlyph::Histogram)) {
+                submenu("Style");
+                histogram_options();
+                end_submenu();
+                separator();
+            }
+
+            submenu("Scopes");
+            action("Vectorscope", kMenuShowVectorscope, scope_shown(ScopeGlyph::Vectorscope),
+                   shortcut_label(shortcuts.vectorscope));
+            action("Waveform", kMenuShowWaveform, scope_shown(ScopeGlyph::Waveform),
+                   shortcut_label(shortcuts.waveform));
+            action("RGB Parade", kMenuShowWaveformParade, scope_shown(ScopeGlyph::WaveformParade),
+                   shortcut_label(shortcuts.parade));
+            action("Histogram", kMenuShowHistogram, scope_shown(ScopeGlyph::Histogram),
+                   shortcut_label(shortcuts.histogram));
+            action("Color Picker", kMenuShowColorPicker, scope_shown(ScopeGlyph::ColorPicker),
+                   shortcut_label(shortcuts.color_picker));
+            end_submenu();
+
+            // On a global click, each visible scope's options ride under
+            // the scope's own name.
+            if (shown_or_global(ScopeGlyph::Vectorscope)) {
+                submenu("Vectorscope");
+                vectorscope_options();
+                end_submenu();
+            }
+            if (shown_or_global(ScopeGlyph::Waveform)) {
+                submenu("Waveform");
+                waveform_options();
+                end_submenu();
+            }
+            if (shown_or_global(ScopeGlyph::Histogram)) {
+                submenu("Histogram");
+                histogram_options();
                 end_submenu();
             }
 
@@ -1759,15 +1789,13 @@ int main() {
             action("Watch Full Screen", kMenuFullScreenRegion, is_full_region(),
                    shortcut_label(shortcuts.full_region));
 
-            separator();
-            action("Graticule", kMenuToggleGraticule, show_graticule);
-
             // Pins mark the vectorscope and the color picker; on the other
             // panes the actions would only puzzle.
-            const bool pins_apply = over(ScopeGlyph::Vectorscope) || over(ScopeGlyph::ColorPicker);
-            if (pins_apply) {
-                if (vectorscope_color || output.region_average_valid || !pinned_colors.empty())
-                    separator();
+            const bool pins_apply = clicked_pane < 0 || clicked(ScopeGlyph::Vectorscope) ||
+                                    clicked(ScopeGlyph::ColorPicker);
+            if (pins_apply &&
+                (vectorscope_color || output.region_average_valid || !pinned_colors.empty())) {
+                separator();
                 if (vectorscope_color)
                     action("Pin Cursor Color", kMenuPinCursorColor, false,
                            shortcut_label(shortcuts.pin_color));
@@ -1777,6 +1805,9 @@ int main() {
                 if (!pinned_colors.empty())
                     action("Clear Pinned Markers", kMenuClearPinnedMarkers, false);
             }
+
+            separator();
+            action("Graticule", kMenuToggleGraticule, show_graticule);
 
             separator();
             action("Settings...", kMenuOpenSettings, false);
