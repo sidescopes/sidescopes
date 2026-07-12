@@ -192,7 +192,10 @@ void AnalysisWorker::Run() {
         if (enabled & kScopeVectorscope) output_.vectorscope_image = vectorscope.Image();
         if (enabled & kScopeWaveform) output_.waveform_image = waveform.Image();
         if (enabled & kScopeWaveformParade) output_.waveform_parade_image = waveform_parade.Image();
-        if (enabled & kScopeHistogram) output_.histogram_image = histogram.Image();
+        if (enabled & kScopeHistogram) {
+            output_.histogram_image = histogram.Image();
+            output_.histogram_outline = histogram.OutlineHeights();
+        }
         output_.region_average = region_average;
         output_.region_average_valid = region_average_valid;
         output_.accumulate_milliseconds = elapsed_ms;

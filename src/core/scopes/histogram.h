@@ -55,6 +55,14 @@ public:
     void Accumulate(const FrameView& frame, IntRect region);
     [[nodiscard]] const ScopeImage& Image() const { return image_; }
 
+    // The curve itself, three channels of kBins normalized heights in
+    // [0, 1] (full scale regardless of style). The interface draws it as
+    // a display-resolution line over the image: a stroke baked into the
+    // texture changes apparent thickness with the pane's stretch, which
+    // is anisotropic - thick on flats, thin on slopes, at any texture
+    // size.
+    [[nodiscard]] const std::vector<float>& OutlineHeights() const { return outline_; }
+
 private:
     void MapBinsToImage();
 
@@ -65,6 +73,7 @@ private:
     int height_ = kHeight;
     // Three planes of kBins counts: red, green, blue.
     std::vector<uint32_t> bins_;
+    std::vector<float> outline_;
     ScopeImage image_;
 };
 

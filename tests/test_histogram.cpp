@@ -1,4 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
+#include <cstdlib>
 #include <vector>
 
 #include "core/scopes/histogram.h"
@@ -186,6 +187,30 @@ TEST_CASE("Histogram produces an empty plot for an empty region") {
     scope.Accumulate(frame.View(), IntRect{100, 100, 4, 4});
 
     for (int channel = 0; channel < 3; ++channel) CHECK(LitValues(scope.Image(), channel).empty());
+}
+
+TEST_CASE("Histogram exports its curve for display-resolution stroking") {
+    TestFrame frame(32, 32);
+    frame.FillColumns(0, 32, Color{10, 150, 240});
+
+    Histogram scope;
+    scope.Accumulate(frame.View(), IntRect{0, 0, 32, 32});
+
+    const std::vector<float>& outline = scope.OutlineHeights();
+    REQUIRE(outline.size() == 3 * Histogram::kBins);
+    // Each channel's curve peaks at its value, at full normalized scale
+    // regardless of the style.
+    const auto peak_bin = [&](int channel) {
+        const std::size_t plane = static_cast<std::size_t>(channel) * Histogram::kBins;
+        int best = 0;
+        for (int value = 0; value < Histogram::kBins; ++value)
+            if (outline[plane + value] > outline[plane + best]) best = value;
+        return best;
+    };
+    CHECK(std::abs(peak_bin(0) - 10) <= 1);
+    CHECK(std::abs(peak_bin(1) - 150) <= 1);
+    CHECK(std::abs(peak_bin(2) - 240) <= 1);
+    CHECK(outline[static_cast<std::size_t>(peak_bin(0))] > 0.9f);
 }
 
 }  // namespace sidescopes

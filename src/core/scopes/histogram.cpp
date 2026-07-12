@@ -87,23 +87,27 @@ void Histogram::MapBinsToImage() {
             heights[static_cast<std::size_t>(channel) * kBins + value] =
                 bar_height(smoothed[static_cast<std::size_t>(channel) * kBins + value]);
 
+    // The curve, exported for the interface to stroke at display
+    // resolution; full scale in both styles, the drawing side handles
+    // the bands.
+    outline_.assign(static_cast<std::size_t>(kBins) * 3, 0.0f);
+    for (int channel = 0; channel < 3; ++channel)
+        for (int value = 0; value < kBins; ++value)
+            outline_[static_cast<std::size_t>(channel) * kBins + value] = static_cast<float>(
+                heights[static_cast<std::size_t>(channel) * kBins + value] / height_);
+
     // Combined: three channels overlaid over the full height. Per
     // channel: three stacked bands, each holding one channel's plot.
-    // Each plot is a dim solid fill under a bright solid outline riding
-    // the curve - the fill shows the area at a glance, the outline
-    // carries the shape and stays traceable through every overlap.
-    // Overlaps sum per component, so two dim fills make a dim secondary
-    // and all three make a quiet neutral gray. Gradients were tried and
-    // retired: they read as texture and drifted on varied photos.
+    // The texture carries only the dim solid fill - overlaps sum per
+    // component, so two fills make a dim secondary and all three a
+    // quiet neutral gray. The bright outline is NOT baked here: the
+    // pane stretches this texture anisotropically, which would render
+    // any baked stroke thick on flats and thin on slopes; the interface
+    // strokes the exported curve at display resolution instead.
     const bool split = settings_.style == HistogramStyle::PerChannel;
     const int band_height = split ? height_ / 3 : height_;
     constexpr double kFillValue = 118.0;
-    constexpr double kOutlineValue = 235.0;
-    // Curve tops for every column first: the outline stroke must span
-    // the gap between neighboring tops, or steep slopes and sharp peaks
-    // break it into dashes.
-    static thread_local std::vector<double> tops;
-    tops.assign(static_cast<std::size_t>(width_) * 3, static_cast<double>(height_));
+    std::fill(image_.rgba.begin(), image_.rgba.end(), uint8_t{0});
     for (int x = 0; x < width_; ++x) {
         const double bin_position = std::clamp((x + 0.5) * kBins / width_ - 0.5, 0.0, kBins - 1.0);
         const int center = static_cast<int>(bin_position);
@@ -127,64 +131,21 @@ void Histogram::MapBinsToImage() {
             height = std::clamp(height, 0.0, static_cast<double>(height_));
             if (split) height /= 3.0;
             if (height <= 0.0) continue;
-            const int band_bottom = split ? (channel + 1) * band_height : height_;
-            tops[static_cast<std::size_t>(channel) * width_ + x] = band_bottom - height;
-        }
-    }
-    // Squared distance from a point to a segment, for the outline's
-    // anti-aliasing: the stroke is a true line, equally thick on flats,
-    // slopes, and vertical spikes.
-    const auto segment_distance = [](double px, double py, double ax, double ay, double bx,
-                                     double by) {
-        const double abx = bx - ax;
-        const double aby = by - ay;
-        const double t = std::clamp(
-            ((px - ax) * abx + (py - ay) * aby) / std::max(1e-9, abx * abx + aby * aby), 0.0, 1.0);
-        const double dx = px - (ax + t * abx);
-        const double dy = py - (ay + t * aby);
-        return std::sqrt(dx * dx + dy * dy);
-    };
-    std::fill(image_.rgba.begin(), image_.rgba.end(), uint8_t{0});
-    for (int x = 0; x < width_; ++x) {
-        for (int channel = 0; channel < 3; ++channel) {
-            const double* channel_tops = tops.data() + static_cast<std::size_t>(channel) * width_;
             // Red on top, then green, then blue, when split.
             const int band_bottom = split ? (channel + 1) * band_height : height_;
-            const double top = channel_tops[x];
-            if (top >= band_bottom) continue;
-            const double left = channel_tops[std::max(0, x - 1)];
-            const double right = channel_tops[std::min(width_ - 1, x + 1)];
-            const double lowest = std::min({top, left, right});
-            const double highest = std::max({top, left, right});
             // The fill's top edge fades over a few rows rather than one:
             // the pane can magnify the plot, and a single-pixel edge
             // would come back as a ladder on the slopes.
             constexpr double kFeather = 2.5;
-            // The stroke: a line of this half-width traced along the
-            // curve through the neighboring columns' tops, rendered by
-            // perpendicular distance so steep segments stay as smooth
-            // and as thick as flat ones.
-            constexpr double kStrokeHalfWidth = 1.1;
+            const double top = band_bottom - height;
             const int first_touched =
-                std::max(band_bottom - band_height,
-                         static_cast<int>(std::floor(lowest - kStrokeHalfWidth - 1.5)));
-            const int stroke_last = static_cast<int>(std::ceil(highest + kStrokeHalfWidth + 1.5));
+                std::max(band_bottom - band_height, static_cast<int>(std::floor(top - kFeather)));
             for (int row = first_touched; row < band_bottom; ++row) {
                 const double coverage = std::clamp((row + 1.0 - top) / kFeather, 0.0, 1.0);
-                double stroke = 0.0;
-                if (row <= stroke_last) {
-                    const double px = x + 0.5;
-                    const double py = row + 0.5;
-                    const double distance =
-                        std::min(segment_distance(px, py, x - 0.5, left, x + 0.5, top),
-                                 segment_distance(px, py, x + 0.5, top, x + 1.5, right));
-                    stroke = std::clamp(kStrokeHalfWidth + 0.75 - distance, 0.0, 1.0);
-                }
-                const double value = std::max(kFillValue * coverage, kOutlineValue * stroke);
-                if (value <= 0.0) continue;
+                if (coverage <= 0.0) continue;
                 uint8_t* pixel =
                     &image_.rgba[(static_cast<std::size_t>(row) * width_ + x) * 4 + channel];
-                *pixel = static_cast<uint8_t>(std::max<double>(*pixel, value));
+                *pixel = static_cast<uint8_t>(std::max<double>(*pixel, kFillValue * coverage));
             }
         }
         for (int row = 0; row < height_; ++row)

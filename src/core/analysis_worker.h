@@ -60,6 +60,9 @@ public:
         ScopeImage waveform_image;
         ScopeImage waveform_parade_image;
         ScopeImage histogram_image;
+        // The histogram's curve, stroked by the interface at display
+        // resolution (three channels of normalized heights).
+        std::vector<float> histogram_outline;
         // The region's average color, riding along with every pass: the
         // reference-pinning workflow wants it (pin the average of a face
         // region), and it is cheap next to the engines.

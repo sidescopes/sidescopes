@@ -1475,6 +1475,67 @@ int main() {
             // No intensity gesture here: the histogram's scale adjusts
             // itself, the way every editor draws it.
             const DrawnScope scope = DrawScopeImage(*histogram_texture, false);
+            // The curve outline strokes at display resolution over the
+            // filled texture: baked into the texture it would stretch
+            // anisotropically with the pane - thick on flats, thin on
+            // slopes. Sampled through the same spline the fill uses, so
+            // line and fill edge agree.
+            if (output.histogram_outline.size() == 3 * Histogram::kBins) {
+                ImDrawList* draw = ImGui::GetWindowDrawList();
+                draw->PushClipRect(
+                    scope.origin,
+                    ImVec2(scope.origin.x + scope.size.x, scope.origin.y + scope.size.y), true);
+                const bool bands = analysis.histogram.style == HistogramStyle::PerChannel;
+                const int samples =
+                    std::clamp(static_cast<int>(scope.size.x), 128, 2 * Histogram::kBins);
+                static std::vector<ImVec2> points;
+                for (int channel = 0; channel < 3; ++channel) {
+                    const float* plane =
+                        output.histogram_outline.data() + channel * Histogram::kBins;
+                    const float band_top =
+                        scope.origin.y + (bands ? channel * scope.size.y / 3.0f : 0.0f);
+                    const float band_height = bands ? scope.size.y / 3.0f : scope.size.y;
+                    points.clear();
+                    const auto flush = [&] {
+                        if (points.size() >= 2)
+                            draw->AddPolyline(points.data(), static_cast<int>(points.size()),
+                                              ChannelMaskColor(1 << channel), ImDrawFlags_None,
+                                              1.6f);
+                        points.clear();
+                    };
+                    for (int sample = 0; sample < samples; ++sample) {
+                        const float bin_position =
+                            std::clamp((sample + 0.5f) * Histogram::kBins / samples - 0.5f, 0.0f,
+                                       Histogram::kBins - 1.0f);
+                        const int center = static_cast<int>(bin_position);
+                        const float t = bin_position - center;
+                        const auto at = [&](int index) {
+                            return plane[std::clamp(index, 0, Histogram::kBins - 1)];
+                        };
+                        const float p0 = at(center - 1);
+                        const float p1 = at(center);
+                        const float p2 = at(center + 1);
+                        const float p3 = at(center + 2);
+                        float height = p1 + 0.5f * t *
+                                                (p2 - p0 +
+                                                 t * (2.0f * p0 - 5.0f * p1 + 4.0f * p2 - p3 +
+                                                      t * (3.0f * (p1 - p2) + p3 - p0)));
+                        if (p1 <= 0.0f && p2 <= 0.0f) height = 0.0f;
+                        height = std::clamp(height, 0.0f, 1.0f);
+                        if (height <= 0.002f) {
+                            // Empty stretches stay unstroked; a colored
+                            // baseline over nothing reads as data.
+                            flush();
+                            continue;
+                        }
+                        points.push_back(
+                            ImVec2(scope.origin.x + (sample + 0.5f) * scope.size.x / samples,
+                                   band_top + (1.0f - height) * band_height));
+                    }
+                    flush();
+                }
+                draw->PopClipRect();
+            }
             if (show_graticule) {
                 ImDrawList* draw = ImGui::GetWindowDrawList();
                 for (int quarter = 0; quarter <= 4; ++quarter) {
