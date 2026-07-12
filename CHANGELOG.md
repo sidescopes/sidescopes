@@ -66,3 +66,6 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Windows: cursor-only desktop updates no longer cost a full-screen
   copy, and the paced capture stream always publishes the newest frame
   instead of dropping the last one before the screen goes quiet.
+- Windows: the interface paces itself off the desktop compositor;
+  animation no longer burns a full processor core on some graphics
+  drivers.

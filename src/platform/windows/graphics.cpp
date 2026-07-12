@@ -10,6 +10,9 @@
 #endif
 #include <windows.h>
 
+// After windows.h: dwmapi.h leans on the base types it defines.
+#include <dwmapi.h>
+
 // After windows.h: gl.h leans on the calling-convention macros it defines.
 #include <GL/gl.h>
 
@@ -74,7 +77,13 @@ public:
     bool Init(GLFWwindow* window) override {
         window_ = window;
         glfwMakeContextCurrent(window);
-        glfwSwapInterval(1);
+        // Frame pacing comes from DwmFlush in EndFrame, not the swap
+        // interval: measured on this pipeline (NVIDIA, DWM-composited
+        // window), SwapBuffers with interval 1 never blocks, the frame
+        // loop runs uncapped, and a whole core burns whenever anything
+        // animates. The compositor tick is the honest windowed-mode
+        // vblank, and waiting on it costs no CPU.
+        glfwSwapInterval(0);
         // The scope window must never reach its own scopes: duplication
         // has no application-level capture exclusion, so the window
         // excludes itself. Best effort: unsupported before Windows 10
@@ -111,6 +120,10 @@ public:
         glClear(GL_COLOR_BUFFER_BIT);
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
         glfwSwapBuffers(window_);
+        // Composition-tick pacing; see Init. Failure means the compositor
+        // is gone (a remote session, say) - render unpaced rather than
+        // not at all.
+        DwmFlush();
     }
 
 private:
