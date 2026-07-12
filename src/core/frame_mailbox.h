@@ -46,12 +46,23 @@ public:
     }
 
     // Takes the newest frame if one arrived since the last take, waiting up
-    // to `timeout` for it.
+    // to `timeout` for it. A nudge ends the wait early without a frame.
     std::optional<FrameBuffer> TakeLatest(std::chrono::milliseconds timeout) {
         std::unique_lock lock(mutex_);
-        if (!available_.wait_for(lock, timeout, [&] { return has_pending_; })) return std::nullopt;
+        available_.wait_for(lock, timeout, [&] { return has_pending_ || nudged_; });
+        nudged_ = false;
+        if (!has_pending_) return std::nullopt;
         has_pending_ = false;
         return std::move(pending_);
+    }
+
+    // Wakes a consumer blocked in TakeLatest without publishing a frame,
+    // so a settings change can recompute the frame the consumer already
+    // holds instead of waiting out the take's timeout.
+    void Nudge() {
+        std::lock_guard lock(mutex_);
+        nudged_ = true;
+        available_.notify_one();
     }
 
     // Hands storage back for the producer to reuse.
@@ -66,6 +77,7 @@ private:
     FrameBuffer pending_;
     FrameBuffer returned_;
     bool has_pending_ = false;
+    bool nudged_ = false;
 };
 
 }  // namespace sidescopes

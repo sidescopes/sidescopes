@@ -47,9 +47,15 @@ void AnalysisWorker::Stop() {
 }
 
 void AnalysisWorker::UpdateSettings(const AnalysisSettings& settings) {
-    std::lock_guard lock(settings_mutex_);
-    settings_ = settings;
-    ++settings_version_;
+    {
+        std::lock_guard lock(settings_mutex_);
+        settings_ = settings;
+        ++settings_version_;
+    }
+    // Without the nudge a settings change waits out the frame take's
+    // timeout on a static screen - up to 100 ms of stale scope images
+    // after a settings or visibility change.
+    mailbox_.Nudge();
 }
 
 bool AnalysisWorker::FetchOutput(uint64_t& last_seen_version, Output& output) const {

@@ -92,4 +92,16 @@ TEST_CASE("FrameMailbox delivers across threads") {
     CHECK(last_seen == kFrames);
 }
 
+TEST_CASE("FrameMailbox nudge ends a take without a frame") {
+    // A settings change must not wait out the take's timeout: the nudge
+    // wakes the consumer immediately, empty-handed.
+    FrameMailbox mailbox;
+    mailbox.Nudge();
+    const auto started = std::chrono::steady_clock::now();
+    const auto taken = mailbox.TakeLatest(std::chrono::milliseconds(500));
+    const auto elapsed = std::chrono::steady_clock::now() - started;
+    CHECK_FALSE(taken.has_value());
+    CHECK(elapsed < std::chrono::milliseconds(200));
+}
+
 }  // namespace sidescopes

@@ -1045,38 +1045,60 @@ int main() {
         // alone; Shift stacks and unstacks, and the last scope on refuses
         // to turn off, so the window never goes empty.
         // A scope draws the same frame it turns on, but the worker only
-        // computes what is enabled, so a newly shown scope's texture can
-        // be a frame or two behind - or never uploaded at all. Seeding it
-        // with the last output the worker did produce keeps the first
-        // frame plausible; the recompute the settings change triggers
-        // replaces it almost immediately.
-        const auto seed_scope_texture = [&](ScopeGlyph kind) {
+        // computes what is enabled, so a newly shown scope's image is
+        // stale - from whenever the scope was last on, of whatever was on
+        // screen then. Turning a scope on therefore pushes the settings
+        // immediately (the update nudges the worker awake) and waits
+        // briefly for the recompute, so the scope's first drawn frame is
+        // already current. The wait is bounded; on timeout the stale
+        // image stands in until the recompute lands a frame later.
+        const auto image_for = [&](ScopeGlyph kind) -> const ScopeImage& {
             switch (kind) {
                 case ScopeGlyph::Vectorscope:
-                    upload_scope(vectorscope_texture, output.vectorscope_image);
-                    break;
+                    return output.vectorscope_image;
                 case ScopeGlyph::Waveform:
-                    upload_scope(waveform_texture, output.waveform_image);
-                    break;
+                    return output.waveform_image;
                 case ScopeGlyph::WaveformParade:
-                    upload_scope(waveform_parade_texture, output.waveform_parade_image);
-                    break;
-                case ScopeGlyph::Histogram:
-                    upload_scope(histogram_texture, output.histogram_image);
-                    break;
+                    return output.waveform_parade_image;
                 default:
-                    break;
+                    return output.histogram_image;
             }
+        };
+        const auto upload_visible_scopes = [&] {
+            if (scope_shown(ScopeGlyph::Vectorscope))
+                upload_scope(vectorscope_texture, output.vectorscope_image);
+            if (scope_shown(ScopeGlyph::Waveform))
+                upload_scope(waveform_texture, output.waveform_image);
+            if (scope_shown(ScopeGlyph::WaveformParade))
+                upload_scope(waveform_parade_texture, output.waveform_parade_image);
+            if (scope_shown(ScopeGlyph::Histogram))
+                upload_scope(histogram_texture, output.histogram_image);
+        };
+        const auto refresh_activated_scope = [&](ScopeGlyph kind) {
+            if (kind == ScopeGlyph::ColorPicker) return;
+            const uint64_t stale_sequence = image_for(kind).sequence;
+            worker.UpdateSettings(analysis);
+            const double deadline = glfwGetTime() + 0.08;
+            while (glfwGetTime() < deadline) {
+                if (worker.FetchOutput(output_version, output) &&
+                    image_for(kind).sequence != stale_sequence && image_for(kind).width > 0) {
+                    upload_visible_scopes();
+                    return;
+                }
+                std::this_thread::sleep_for(std::chrono::milliseconds(2));
+            }
+            upload_visible_scopes();  // timeout: a stale image beats none
         };
         const auto toggle_scope = [&](ScopeGlyph kind) {
             const auto at = std::find(scope_stack.begin(), scope_stack.end(), kind);
             if (at != scope_stack.end()) {
                 if (scope_stack.size() > 1) scope_stack.erase(at);
+                sync_enabled_scopes();
             } else {
                 scope_stack.push_back(kind);
-                seed_scope_texture(kind);
+                sync_enabled_scopes();
+                refresh_activated_scope(kind);
             }
-            sync_enabled_scopes();
             analysis_dirty = true;
         };
         const auto choose_scope = [&](ScopeGlyph kind, bool stack) {
@@ -1085,8 +1107,8 @@ int main() {
             } else {
                 const bool was_shown = scope_shown(kind);
                 scope_stack.assign(1, kind);
-                if (!was_shown) seed_scope_texture(kind);
                 sync_enabled_scopes();
+                if (!was_shown) refresh_activated_scope(kind);
                 analysis_dirty = true;
             }
         };
