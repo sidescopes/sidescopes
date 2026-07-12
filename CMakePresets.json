@@ -27,17 +27,20 @@
         {
             "name": "debug",
             "configurePreset": "vs",
-            "configuration": "Debug"
+            "configuration": "Debug",
+            "nativeToolOptions": ["-m"]
         },
         {
             "name": "release",
             "configurePreset": "vs",
-            "configuration": "Release"
+            "configuration": "Release",
+            "nativeToolOptions": ["-m"]
         },
         {
             "name": "werror",
             "configurePreset": "vs-werror",
-            "configuration": "Release"
+            "configuration": "Release",
+            "nativeToolOptions": ["-m"]
         }
     ],
     "testPresets": [

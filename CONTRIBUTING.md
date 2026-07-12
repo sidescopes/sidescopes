@@ -40,13 +40,16 @@ its own, so any shell works; build multi-config trees with `--config`:
 
 ```powershell
 cmake -B build
-cmake --build build --config Release
+cmake --build build --config Release -- -m
 ctest --test-dir build -C Release
 ```
 
+The trailing `-- -m` lets MSBuild build projects in parallel; source
+files within each project already compile in parallel (`/MP`).
+
 `CMakePresets.json` describes the same tree, so the presets workflow is
-equivalent: `cmake --preset vs`, `cmake --build --preset release`,
-`ctest --preset release`. The `werror` presets mirror CI's
+equivalent and passes `-m` for you: `cmake --preset vs`,
+`cmake --build --preset release`, `ctest --preset release`. The `werror` presets mirror CI's
 warnings-as-errors build in a separate `build-werror/` tree.
 
 To work in the Visual Studio IDE, use File > Open > Folder on the

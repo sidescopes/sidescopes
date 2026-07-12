@@ -6,6 +6,13 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+if(MSVC)
+    # Compile each target's sources in parallel; MSBuild alone only
+    # parallelizes across targets, and most sources here live in a few.
+    # Directory-scoped so the fetched dependencies build the same way.
+    add_compile_options(/MP)
+endif()
+
 if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Release)
 endif()
