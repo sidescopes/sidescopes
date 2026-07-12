@@ -779,6 +779,18 @@ NSCursor* BuildPinCursor(const std::optional<FloatColor>& color) {
     const NSPoint local = [self convertPoint:event.locationInWindow fromView:nil];
     const SidescopesDragEdges zone = [self zoneAtPoint:local];
     if (zone == SidescopesDragEdgeNone) return;
+    // The band is mouse-only: its borderless window can never become
+    // key, so a click here would otherwise strand the keyboard with no
+    // key window at all - every application shortcut dead until the
+    // scope window is clicked. Hand the keyboard to the application
+    // window instead.
+    for (NSWindow* candidate in NSApp.orderedWindows) {
+        if (candidate == self.window) continue;
+        if (candidate.canBecomeKeyWindow && candidate.visible) {
+            [candidate makeKeyWindow];
+            break;
+        }
+    }
     // Double-clicking anywhere on the band dismisses the region - the
     // fast path once the close button has taught the gesture's home.
     if (event.clickCount == 2) {
