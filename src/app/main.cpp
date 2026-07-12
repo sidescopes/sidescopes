@@ -1572,13 +1572,6 @@ int main() {
                         scope.origin.y + (bands ? channel * scope.size.y / 3.0f : 0.0f);
                     const float band_height = bands ? scope.size.y / 3.0f : scope.size.y;
                     points.clear();
-                    const auto flush = [&] {
-                        if (points.size() >= 2)
-                            draw->AddPolyline(points.data(), static_cast<int>(points.size()),
-                                              ChannelMaskColor(1 << channel), ImDrawFlags_None,
-                                              1.6f);
-                        points.clear();
-                    };
                     for (int sample = 0; sample < samples; ++sample) {
                         const float bin_position =
                             std::clamp((sample + 0.5f) * Histogram::kBins / samples - 0.5f, 0.0f,
@@ -1598,17 +1591,19 @@ int main() {
                                                       t * (3.0f * (p1 - p2) + p3 - p0)));
                         if (p1 <= 0.0f && p2 <= 0.0f) height = 0.0f;
                         height = std::clamp(height, 0.0f, 1.0f);
-                        if (height <= 0.002f) {
-                            // Empty stretches stay unstroked; a colored
-                            // baseline over nothing reads as data.
-                            flush();
-                            continue;
-                        }
+                        // Empty stretches ride the baseline: the outline
+                        // stays one continuous reading of the channel,
+                        // rather than blinking away wherever the plot
+                        // touches zero. Kept just inside the band so the
+                        // stroke survives the clip.
+                        const float y = std::min(band_top + (1.0f - height) * band_height,
+                                                 band_top + band_height - 1.0f);
                         points.push_back(
-                            ImVec2(scope.origin.x + (sample + 0.5f) * scope.size.x / samples,
-                                   band_top + (1.0f - height) * band_height));
+                            ImVec2(scope.origin.x + (sample + 0.5f) * scope.size.x / samples, y));
                     }
-                    flush();
+                    if (points.size() >= 2)
+                        draw->AddPolyline(points.data(), static_cast<int>(points.size()),
+                                          ChannelMaskColor(1 << channel), ImDrawFlags_None, 1.6f);
                 }
                 draw->PopClipRect();
             }
