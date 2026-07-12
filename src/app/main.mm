@@ -555,7 +555,7 @@ int main() {
         const auto targets = capture->ListTargets();
         if (targets.empty()) return false;
         if (!capture->Start(targets.front(), 30, mailbox)) return false;
-        capture_display = static_cast<uint32_t>(std::stoul(targets.front().identifier));
+        capture_display = targets.front().display_id;
         {
             std::lock_guard lock(status_mutex);
             capture_status = "capturing " + targets.front().description;

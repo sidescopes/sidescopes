@@ -12,30 +12,33 @@
 #include <string>
 #include <vector>
 
+#include "platform/windows/display_identity.h"
+
 namespace sidescopes {
 namespace {
 
 struct MonitorLookup {
-    uint32_t wanted_index = 0;
-    uint32_t current_index = 0;
+    uint32_t wanted_id = 0;
     HMONITOR monitor = nullptr;
     RECT rect{};
 };
 
 BOOL CALLBACK CollectMonitor(HMONITOR monitor, HDC, LPRECT rect, LPARAM context) {
     auto* lookup = reinterpret_cast<MonitorLookup*>(context);
-    if (lookup->current_index == lookup->wanted_index) {
+    MONITORINFOEXW info{};
+    info.cbSize = sizeof(info);
+    if (GetMonitorInfoW(monitor, &info) &&
+        DisplayIdFromDeviceName(info.szDevice) == lookup->wanted_id) {
         lookup->monitor = monitor;
         lookup->rect = *rect;
         return FALSE;
     }
-    ++lookup->current_index;
     return TRUE;
 }
 
 std::optional<MonitorLookup> FindMonitor(uint32_t display_id) {
     MonitorLookup lookup;
-    lookup.wanted_index = display_id;
+    lookup.wanted_id = display_id;
     EnumDisplayMonitors(nullptr, nullptr, CollectMonitor, reinterpret_cast<LPARAM>(&lookup));
     if (!lookup.monitor) return std::nullopt;
     return lookup;

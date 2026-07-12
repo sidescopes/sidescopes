@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <string>
@@ -19,6 +20,11 @@ enum class CapturePermission { Granted, Denied };
 struct CaptureTarget {
     std::string identifier;   // backend-specific, stable while connected
     std::string description;  // human-readable
+    // The same display identity the desktop services speak
+    // (GeometryOfDisplay, OnScreenWindows, the region overlays). Capture
+    // backends and desktop services enumerate displays through different
+    // APIs; this field is the bridge, resolved by the backend.
+    uint32_t display_id = 0;
     int width_points = 0;
     int height_points = 0;
 };

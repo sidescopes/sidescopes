@@ -22,6 +22,8 @@
 #include <thread>
 #include <utility>
 
+#include "platform/windows/display_identity.h"
+
 namespace sidescopes {
 namespace {
 
@@ -59,6 +61,7 @@ public:
                 const int written = WideCharToMultiByte(CP_UTF8, 0, description.DeviceName, -1,
                                                         name, sizeof(name), nullptr, nullptr);
                 target.description = written > 0 ? name : "Display";
+                target.display_id = DisplayIdFromDeviceName(description.DeviceName);
                 const RECT& rect = description.DesktopCoordinates;
                 target.width_points = static_cast<int>(rect.right - rect.left);
                 target.height_points = static_cast<int>(rect.bottom - rect.top);

@@ -67,6 +67,8 @@ public:
         for (SCDisplay* display in content.displays) {
             CaptureTarget target;
             target.identifier = std::to_string(display.displayID);
+            // CGDirectDisplayID is the identity the desktop services use.
+            target.display_id = display.displayID;
             target.width_points = static_cast<int>(display.width);
             target.height_points = static_cast<int>(display.height);
             target.description = "Display " + target.identifier + " (" +
