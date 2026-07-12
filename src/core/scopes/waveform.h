@@ -51,6 +51,9 @@ private:
     // Planes: red, green, blue, luma — each kColumns x kLevels, a row per
     // level with level 255 in row zero.
     std::vector<uint32_t> bins_;
+    // Per-plane scratch for the code-density correction: dead-code
+    // reconstruction happens here before smoothing.
+    std::vector<uint32_t> corrected_;
     std::vector<uint32_t> smoothed_;
     ScopeImage image_;
 };

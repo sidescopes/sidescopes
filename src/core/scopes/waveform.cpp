@@ -124,6 +124,7 @@ void Waveform::MapBinsToImage(uint64_t sampled_rows) {
         }
 
         uint32_t flatten[kLevels];
+        double expected_of[kLevels];
         for (int row = 0; row < kLevels; ++row) {
             uint64_t neighborhood[12];
             int counted = 0;
@@ -144,6 +145,7 @@ void Waveform::MapBinsToImage(uint64_t sampled_rows) {
             }
             const int middle = counted / 2;
             const double expected = counted > 0 ? static_cast<double>(neighborhood[middle]) : 0.0;
+            expected_of[row] = expected;
 
             // A pipeline pileup steals its mass from nearby codes, so it
             // always travels with starved neighbors inside the populated
@@ -167,12 +169,72 @@ void Waveform::MapBinsToImage(uint64_t sampled_rows) {
             flatten[row] = static_cast<uint32_t>(weight * 256.0);
         }
 
+        // Codes the pipeline never emits cannot be lifted by weighting -
+        // their counts are zero. They are reconstructed instead: a
+        // starved interior code takes the distance-weighted mix of its
+        // nearest healthy neighbors, per column, so the trace reads as
+        // the continuous signal the display quantized away. Only short
+        // gaps qualify; wider ones are honest emptiness relative to
+        // their neighborhood and stay dark.
+        const auto healthy = [&](int row) {
+            return expected_of[row] <= 0.0 ||
+                   static_cast<double>(global[row]) >= expected_of[row] * 0.25;
+        };
+        int mix_above[kLevels];
+        int mix_below[kLevels];
+        for (int row = 0; row < kLevels; ++row) {
+            mix_above[row] = row;
+            mix_below[row] = row;
+            const bool interior = row > lowest + 2 && row < highest - 2;
+            if (!interior || healthy(row)) continue;
+            int above = -1;
+            for (int near = row - 1; near >= row - 3 && near >= 0; --near) {
+                if (healthy(near)) {
+                    above = near;
+                    break;
+                }
+            }
+            int below = -1;
+            for (int near = row + 1; near <= row + 3 && near < kLevels; ++near) {
+                if (healthy(near)) {
+                    below = near;
+                    break;
+                }
+            }
+            if (above >= 0 && below >= 0) {
+                mix_above[row] = above;
+                mix_below[row] = below;
+            }
+        }
+
+        corrected_.resize(kPlaneSize);
+        for (int row = 0; row < kLevels; ++row) {
+            uint32_t* line = corrected_.data() + static_cast<std::size_t>(row) * kColumns;
+            const auto weighted = [&](int level, int column) -> uint32_t {
+                const uint64_t count = in[static_cast<std::size_t>(level) * kColumns + column];
+                return static_cast<uint32_t>(count * flatten[level] >> 8);
+            };
+            if (mix_above[row] == row) {
+                for (int column = 0; column < kColumns; ++column)
+                    line[column] = weighted(row, column);
+            } else {
+                const int above = mix_above[row];
+                const int below = mix_below[row];
+                const uint32_t gap = static_cast<uint32_t>(below - above);
+                const uint32_t below_share = static_cast<uint32_t>(row - above);
+                const uint32_t above_share = static_cast<uint32_t>(below - row);
+                for (int column = 0; column < kColumns; ++column)
+                    line[column] = (weighted(above, column) * above_share +
+                                    weighted(below, column) * below_share) /
+                                   gap;
+            }
+        }
+
         for (int column = 0; column < kColumns; ++column) {
             for (int row = 0; row < kLevels; ++row) {
                 const auto at = [&](int level) -> uint32_t {
                     if (level < 0 || level >= kLevels) return 0;
-                    const uint64_t count = in[static_cast<std::size_t>(level) * kColumns + column];
-                    return static_cast<uint32_t>(count * flatten[level] >> 8);
+                    return corrected_[static_cast<std::size_t>(level) * kColumns + column];
                 };
                 out[static_cast<std::size_t>(row) * kColumns + column] =
                     (at(row - 2) + 4 * at(row - 1) + 6 * at(row) + 4 * at(row + 1) + at(row + 2) +
