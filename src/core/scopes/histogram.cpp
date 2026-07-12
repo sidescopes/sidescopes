@@ -114,6 +114,7 @@ void Histogram::MapBinsToImage() {
         // instead of a mixture that drifts off-neutral as each channel's
         // own fade diverges.
         const double tallest = std::max({column_heights[0], column_heights[1], column_heights[2]});
+        const double lowest = std::min({column_heights[0], column_heights[1], column_heights[2]});
         for (int channel = 0; channel < 3; ++channel) {
             const double height = column_heights[channel];
             if (height <= 0.0) continue;
@@ -137,8 +138,12 @@ void Histogram::MapBinsToImage() {
                 // curve edge stays, because a histogram draws a function,
                 // not a density cloud.
                 const double depth = std::max(0.0, row + 0.5 - fade_top);
-                const double fade =
-                    1.0 - 0.72 * std::min(1.0, depth / std::max(1.0, fade_reference));
+                double fade = 1.0 - 0.72 * std::min(1.0, depth / std::max(1.0, fade_reference));
+                // Where all three channels overlap, the fill goes flat:
+                // the colored zones above are the information, and a base
+                // that carries its own gradient reads as texture in a
+                // region that should be quiet context.
+                if (!split && lowest > 0.0 && row + 0.5 > band_bottom - lowest) fade = 0.47;
                 image_.rgba[(static_cast<std::size_t>(row) * kImageWidth + x) * 4 + channel] =
                     static_cast<uint8_t>(210 * fade * coverage);
             }
