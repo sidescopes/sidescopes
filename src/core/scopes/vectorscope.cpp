@@ -66,16 +66,36 @@ void Vectorscope::Accumulate(const FrameView& frame, IntRect region) {
             // The raw transform carries eight bits below the classic 256
             // grid; scaling it to the configured grid instead of always
             // shifting by eight is what makes a finer grid real detail.
+            // Samples splat bilinearly across the four bins they
+            // straddle, in sixteenths per axis: truncation used to alias
+            // the chroma lattice into gridded texture, and parked the
+            // whole cloud half a bin off the positions the projection -
+            // and with it every marker and graticule target - reports.
             const int size = size_;
+            const int span = size * 16;
             for (; pixel < row_end; pixel += static_cast<std::ptrdiff_t>(4) * stride) {
                 const int b = pixel[0], g = pixel[1], r = pixel[2];
-                const int cb_raw =
+                const int64_t cb_raw =
                     matrix.cb_from_r * r + matrix.cb_from_g * g + matrix.cb_from_b * b;
-                const int cr_raw =
+                const int64_t cr_raw =
                     matrix.cr_from_r * r + matrix.cr_from_g * g + matrix.cr_from_b * b;
-                const int cb = std::clamp((cb_raw * size >> 16) + size / 2, 0, size - 1);
-                const int cr = std::clamp((cr_raw * size >> 16) + size / 2, 0, size - 1);
-                ++bins_[static_cast<std::size_t>(size - 1 - cr) * size + cb];
+                const int cb_position =
+                    std::clamp(static_cast<int>(cb_raw * span >> 16) + span / 2, 0, span - 17);
+                const int cr_position =
+                    std::clamp(static_cast<int>(cr_raw * span >> 16) + span / 2, 0, span - 17);
+                const int cb_bin = cb_position >> 4;
+                const int cr_bin = cr_position >> 4;
+                const uint32_t cb_high = static_cast<uint32_t>(cb_position & 15);
+                const uint32_t cr_high = static_cast<uint32_t>(cr_position & 15);
+                const uint32_t cb_low = 16 - cb_high;
+                const uint32_t cr_low = 16 - cr_high;
+                uint32_t* upper =
+                    bins_.data() + static_cast<std::size_t>(size - 1 - cr_bin) * size + cb_bin;
+                uint32_t* above = upper - size;  // cr_bin + 1 is one row up
+                upper[0] += cb_low * cr_low;
+                upper[1] += cb_high * cr_low;
+                above[0] += cb_low * cr_high;
+                above[1] += cb_high * cr_high;
                 ++sample_count;
             }
         }
@@ -126,10 +146,12 @@ void Vectorscope::RebuildTintTable() {
 }
 
 void Vectorscope::MapBinsToImage(uint64_t sample_count) {
-    // A 3x3 binomial blur takes the speckle out of the cloud: chroma
-    // coordinates quantize to integers, and raw bins render as grainy
-    // single-pixel noise where the photograph's colors actually vary
-    // smoothly.
+    // A half-strength 3x3 binomial takes the worst speckle out of the
+    // cloud without softening it: the fractional splat already spreads
+    // each sample as a tent, so a full binomial on top reads as gaussian
+    // blur at large pane sizes. Averaging the raw bin with its binomial
+    // neighborhood keeps single-pixel grain and the quantization lattice
+    // damped while the cloud's fine streaks stay crisp.
     std::vector<float> smoothed(bins_.size(), 0.0f);
     for (int py = 0; py < size_; ++py) {
         for (int px = 0; px < size_; ++px) {
@@ -141,15 +163,19 @@ void Vectorscope::MapBinsToImage(uint64_t sample_count) {
                 return at(y, px - 1) + 2.0f * at(y, px) + at(y, px + 1);
             };
             smoothed[static_cast<std::size_t>(py) * size_ + px] =
-                (row(py - 1) + 2.0f * row(py) + row(py + 1)) / 16.0f;
+                0.5f * at(py, px) + 0.5f * (row(py - 1) + 2.0f * row(py) + row(py + 1)) / 16.0f;
         }
     }
 
     float densest = 0.0f;
     for (const float count : smoothed) densest = std::max(densest, count);
 
+    // Each sample contributes 256 weight units (the splat's sixteenths
+    // squared); the normalization divides them back out so the gain
+    // keeps its calibrated feel.
     const double per_sample_scale =
-        sample_count > 0 ? kReferenceSampleCount / static_cast<double>(sample_count) : 0.0;
+        sample_count > 0 ? kReferenceSampleCount / (static_cast<double>(sample_count) * 256.0)
+                         : 0.0;
     const double gain = static_cast<double>(settings_.gain) * per_sample_scale;
     const double log_ceiling = densest > 0.0f ? std::log1p(densest * gain) : 0.0;
     const double intensity_scale = log_ceiling > 0.0 ? 1.0 / log_ceiling : 0.0;

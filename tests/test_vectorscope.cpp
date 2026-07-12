@@ -56,16 +56,17 @@ std::pair<int, int> BrightestPixel(const ScopeImage& image) {
 }  // namespace
 
 TEST_CASE("Vectorscope places 75% red on the classic BT.601 target") {
-    // 75% red (191, 0, 0) in BT.601 fixed-point arithmetic:
-    //   Cb = ((-38 * 191) >> 8) + 128 = 99, Cr = ((112 * 191) >> 8) + 128 = 211
-    // which is bin column 99, row 255 - 211 = 44.
+    // 75% red (191, 0, 0) sits at Cb = 99.65, Cr = 211.56. The bilinear
+    // splat peaks on the ROUNDED position - bin (100, 255 - 212 = 43) -
+    // where integer truncation used to floor it to (99, 44), half a bin
+    // away from where the projection puts the markers.
     TestFrame frame(8, 8);
     frame.Fill(0, 8, Color{191, 0, 0});
 
     Vectorscope scope;
     scope.Accumulate(frame.View(), IntRect{0, 0, 8, 8});
 
-    CHECK(BrightestPixel(scope.Image()) == std::pair<int, int>{99, 44});
+    CHECK(BrightestPixel(scope.Image()) == std::pair<int, int>{100, 43});
 }
 
 TEST_CASE("Vectorscope maps neutral gray to the center") {
@@ -97,9 +98,9 @@ TEST_CASE("Vectorscope matrix selection moves chroma targets") {
     scope.Configure(settings);
     scope.Accumulate(frame.View(), IntRect{0, 0, 8, 8});
 
-    // BT.709: Cb = ((-26 * 191) >> 8) + 128 = 108 (arithmetic shift floors
-    // toward negative infinity), Cr unchanged from BT.601 (both use 112).
-    CHECK(BrightestPixel(scope.Image()) == std::pair<int, int>{108, 44});
+    // BT.709: Cb = -26 * 191 / 256 + 128 = 108.6, rounding to bin 109;
+    // Cr unchanged from BT.601 (both use 112), peaking at row 43.
+    CHECK(BrightestPixel(scope.Image()) == std::pair<int, int>{109, 43});
 }
 
 TEST_CASE("Vectorscope carries real detail on a finer grid") {
