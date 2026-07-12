@@ -87,6 +87,7 @@ void Histogram::MapBinsToImage() {
             std::clamp((x + 0.5) * kBins / kImageWidth - 0.5, 0.0, kBins - 1.0);
         const int center = static_cast<int>(bin_position);
         const double t = bin_position - center;
+        double column_heights[3];
         for (int channel = 0; channel < 3; ++channel) {
             const double* plane = heights.data() + static_cast<std::ptrdiff_t>(channel) * kBins;
             const auto at = [&](int index) { return plane[std::clamp(index, 0, kBins - 1)]; };
@@ -105,6 +106,16 @@ void Histogram::MapBinsToImage() {
             if (p1 <= 0.0 && p2 <= 0.0) height = 0.0;
             height = std::clamp(height, 0.0, static_cast<double>(kHeight));
             if (split) height /= 3.0;
+            column_heights[channel] = height;
+        }
+        // Overlaid channels share one gradient field, referenced to the
+        // column's tallest curve: equal coverage then means equal
+        // components, so the deep overlap fades as clean neutral gray
+        // instead of a mixture that drifts off-neutral as each channel's
+        // own fade diverges.
+        const double tallest = std::max({column_heights[0], column_heights[1], column_heights[2]});
+        for (int channel = 0; channel < 3; ++channel) {
+            const double height = column_heights[channel];
             if (height <= 0.0) continue;
             // Red on top, then green, then blue, when split.
             const int band_bottom = split ? (channel + 1) * band_height : kHeight;
@@ -113,6 +124,8 @@ void Histogram::MapBinsToImage() {
             // come back as a ladder on the slopes.
             constexpr double kFeather = 2.5;
             const double top = band_bottom - height;
+            const double fade_reference = split ? height : tallest;
+            const double fade_top = band_bottom - fade_reference;
             const int first_touched =
                 std::max(band_bottom - band_height, static_cast<int>(std::floor(top - kFeather)));
             for (int row = first_touched; row < band_bottom; ++row) {
@@ -123,8 +136,9 @@ void Histogram::MapBinsToImage() {
                 // other scope - proximity to the plot - while the crisp
                 // curve edge stays, because a histogram draws a function,
                 // not a density cloud.
-                const double depth = std::max(0.0, row + 0.5 - top);
-                const double fade = 1.0 - 0.72 * std::min(1.0, depth / std::max(1.0, height));
+                const double depth = std::max(0.0, row + 0.5 - fade_top);
+                const double fade =
+                    1.0 - 0.72 * std::min(1.0, depth / std::max(1.0, fade_reference));
                 image_.rgba[(static_cast<std::size_t>(row) * kImageWidth + x) * 4 + channel] =
                     static_cast<uint8_t>(210 * fade * coverage);
             }
