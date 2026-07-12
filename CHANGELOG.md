@@ -58,3 +58,6 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - The region border always stays beneath the scope window, and never
   leaks into the frame the picker analyzes when re-selecting a region.
+- Windows: region overlays repaint incrementally, so drawing a selection
+  and moving or resizing the region border track the cursor instead of
+  trailing it on high-resolution displays.
