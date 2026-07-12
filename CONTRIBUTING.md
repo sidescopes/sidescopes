@@ -35,15 +35,25 @@ winget install Kitware.CMake Ninja-build.Ninja LLVM.LLVM
 ```
 
 `LLVM.LLVM` supplies `clang-format`; add `C:\Program Files\LLVM\bin` to
-`PATH` if the installer did not. Configure and build from a "Developer
-PowerShell for VS" so the MSVC toolchain is on the environment, or pass
-`-G "Visual Studio 17 2022"` and build with `--config Release`:
+`PATH` if the installer did not. The Visual Studio generator finds MSVC on
+its own, so any shell works; build multi-config trees with `--config`:
 
 ```powershell
 cmake -B build
 cmake --build build --config Release
 ctest --test-dir build -C Release
 ```
+
+`CMakePresets.json` describes the same tree, so the presets workflow is
+equivalent: `cmake --preset vs`, `cmake --build --preset release`,
+`ctest --preset release`. The `werror` presets mirror CI's
+warnings-as-errors build in a separate `build-werror/` tree.
+
+To work in the Visual Studio IDE, use File > Open > Folder on the
+repository: it picks the presets up automatically, builds into the same
+`build/` directory as the command line, and offers the Debug and Release
+configurations. Pick `SideScopes.exe` as the startup item to run or
+debug.
 
 ## Screen-recording permission for development builds (macOS)
 

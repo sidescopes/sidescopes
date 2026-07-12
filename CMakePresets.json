@@ -1,0 +1,61 @@
+{
+    "version": 6,
+    "configurePresets": [
+        {
+            "name": "vs",
+            "displayName": "Visual Studio",
+            "description": "The same build tree plain `cmake -B build` produces on Windows",
+            "generator": "Visual Studio 18 2026",
+            "binaryDir": "${sourceDir}/build",
+            "condition": {
+                "type": "equals",
+                "lhs": "${hostSystemName}",
+                "rhs": "Windows"
+            }
+        },
+        {
+            "name": "vs-werror",
+            "displayName": "Visual Studio (warnings as errors)",
+            "inherits": "vs",
+            "binaryDir": "${sourceDir}/build-werror",
+            "cacheVariables": {
+                "SIDESCOPES_WERROR": "ON"
+            }
+        }
+    ],
+    "buildPresets": [
+        {
+            "name": "debug",
+            "configurePreset": "vs",
+            "configuration": "Debug"
+        },
+        {
+            "name": "release",
+            "configurePreset": "vs",
+            "configuration": "Release"
+        },
+        {
+            "name": "werror",
+            "configurePreset": "vs-werror",
+            "configuration": "Release"
+        }
+    ],
+    "testPresets": [
+        {
+            "name": "debug",
+            "configurePreset": "vs",
+            "configuration": "Debug",
+            "output": {
+                "outputOnFailure": true
+            }
+        },
+        {
+            "name": "release",
+            "configurePreset": "vs",
+            "configuration": "Release",
+            "output": {
+                "outputOnFailure": true
+            }
+        }
+    ]
+}
