@@ -43,6 +43,7 @@ enum MenuAction {
     kMenuShowWaveform,
     kMenuShowWaveformParade,
     kMenuShowHistogram,
+    kMenuShowColorPicker,
     kMenuWaveformStyleRgb = 10,
     kMenuWaveformStyleLuma,
     kMenuHistogramCombined,
@@ -218,7 +219,12 @@ int GroupChannelMarkers(const FloatColor& color, ChannelMarker out[3]) {
 
 // Toolbar icon buttons drawn with the draw list: corner brackets for region
 // selection, an outline rectangle for full screen.
-enum class ScopeGlyph { Vectorscope, Waveform, WaveformParade, Histogram };
+enum class ScopeGlyph { Vectorscope, Waveform, WaveformParade, Histogram, ColorPicker };
+
+// Everything stackable, in the fixed toolbar order.
+constexpr ScopeGlyph kAllScopes[] = {ScopeGlyph::Vectorscope, ScopeGlyph::Waveform,
+                                     ScopeGlyph::WaveformParade, ScopeGlyph::Histogram,
+                                     ScopeGlyph::ColorPicker};
 
 // Letter chips and preference letters share one alphabet.
 constexpr char ScopeLetter(ScopeGlyph kind) {
@@ -231,6 +237,8 @@ constexpr char ScopeLetter(ScopeGlyph kind) {
             return 'R';
         case ScopeGlyph::Histogram:
             return 'H';
+        case ScopeGlyph::ColorPicker:
+            return 'C';
     }
     return 'V';
 }
@@ -245,6 +253,9 @@ constexpr uint32_t ScopeEnableBit(ScopeGlyph kind) {
             return kScopeWaveformParade;
         case ScopeGlyph::Histogram:
             return kScopeHistogram;
+        case ScopeGlyph::ColorPicker:
+            // Reads the sampled cursor color; asks nothing of the worker.
+            return 0;
     }
     return kScopeVectorscope;
 }
@@ -608,8 +619,7 @@ int main() {
     // last stacks after the ones already up.
     std::vector<ScopeGlyph> scope_stack;
     for (const char letter : startup.scope_stack) {
-        for (const ScopeGlyph kind : {ScopeGlyph::Vectorscope, ScopeGlyph::Waveform,
-                                      ScopeGlyph::WaveformParade, ScopeGlyph::Histogram}) {
+        for (const ScopeGlyph kind : kAllScopes) {
             if (ScopeLetter(kind) == letter) scope_stack.push_back(kind);
         }
     }
@@ -868,6 +878,8 @@ int main() {
                      "RGB parade - R shows only this, Shift+R stacks");
         scope_toggle("##toggle-histogram", ScopeGlyph::Histogram,
                      "Histogram - H shows only this, Shift+H stacks");
+        scope_toggle("##toggle-color-picker", ScopeGlyph::ColorPicker,
+                     "Color picker - C shows only this, Shift+C stacks");
         ImGui::SameLine(0.0f, 8.0f);
 
         // Keyboard shortcuts mirror the toolbar and region tools.
@@ -881,6 +893,8 @@ int main() {
                 choose_scope(ScopeGlyph::WaveformParade, stack_modifier);
             if (ImGui::IsKeyPressed(ImGuiKey_H, false))
                 choose_scope(ScopeGlyph::Histogram, stack_modifier);
+            if (ImGui::IsKeyPressed(ImGuiKey_C, false))
+                choose_scope(ScopeGlyph::ColorPicker, stack_modifier);
             if (ImGui::IsKeyPressed(ImGuiKey_A, false))
                 want_region_pick = RegionPickerMode::PickWindows;
             if (ImGui::IsKeyPressed(ImGuiKey_D, false)) want_region_pick = RegionPickerMode::Draw;
@@ -1100,6 +1114,69 @@ int main() {
             }
         };
 
+        // The color picker pane: the sampled cursor color as a large
+        // swatch with its values spelled out three ways at once - 0-255,
+        // percent, and hex - because matching a reference means never
+        // converting in your head. Clicking the swatch or the hex line
+        // copies the hex; the session's pinned colors (P) ride along as
+        // small swatches with the same click.
+        const auto draw_color_picker = [&] {
+            const ImVec2 area = ImGui::GetContentRegionAvail();
+            const float line_height = ImGui::GetTextLineHeightWithSpacing();
+            if (!vectorscope_color) {
+                ImGui::Dummy(ImVec2(0.0f, std::max(0.0f, (area.y - line_height) / 2.0f)));
+                const char* hint = "move the cursor over the captured display";
+                const float width = ImGui::CalcTextSize(hint).x;
+                ImGui::SetCursorPosX(
+                    std::max(0.0f, (ImGui::GetWindowContentRegionMax().x - width) / 2.0f));
+                ImGui::TextDisabled("%s", hint);
+                return;
+            }
+            const FloatColor& color = *vectorscope_color;
+            const int red = static_cast<int>(std::lround(std::clamp(color.r, 0.0f, 255.0f)));
+            const int green = static_cast<int>(std::lround(std::clamp(color.g, 0.0f, 255.0f)));
+            const int blue = static_cast<int>(std::lround(std::clamp(color.b, 0.0f, 255.0f)));
+            char hex[8];
+            std::snprintf(hex, sizeof(hex), "#%02X%02X%02X", red, green, blue);
+            const float values_height = line_height * (pinned_colors.empty() ? 4.0f : 5.0f) +
+                                        ImGui::GetStyle().ItemSpacing.y;
+            const float swatch_height =
+                std::max(ImGui::GetTextLineHeight() * 2.0f, area.y - values_height);
+            const ImVec4 swatch(color.r / 255.0f, color.g / 255.0f, color.b / 255.0f, 1.0f);
+            if (ImGui::ColorButton("##picker-swatch", swatch,
+                                   ImGuiColorEditFlags_NoTooltip | ImGuiColorEditFlags_NoDragDrop,
+                                   ImVec2(area.x, swatch_height)))
+                ImGui::SetClipboardText(hex);
+            ImGui::SetItemTooltip("%s - click to copy", hex);
+            ImGui::Text("R %3d  %5.1f%%", red, color.r / 2.55f);
+            ImGui::Text("G %3d  %5.1f%%", green, color.g / 2.55f);
+            ImGui::Text("B %3d  %5.1f%%", blue, color.b / 2.55f);
+            ImGui::TextUnformatted(hex);
+            if (ImGui::IsItemClicked()) ImGui::SetClipboardText(hex);
+            ImGui::SetItemTooltip("click to copy");
+            if (!pinned_colors.empty()) {
+                const float small = ImGui::GetTextLineHeight();
+                for (std::size_t index = 0; index < pinned_colors.size(); ++index) {
+                    const FloatColor& pinned = pinned_colors[index];
+                    char pin_id[24];
+                    std::snprintf(pin_id, sizeof(pin_id), "##pinned-%d", static_cast<int>(index));
+                    char pin_hex[8];
+                    std::snprintf(pin_hex, sizeof(pin_hex), "#%02X%02X%02X",
+                                  static_cast<int>(std::lround(pinned.r)),
+                                  static_cast<int>(std::lround(pinned.g)),
+                                  static_cast<int>(std::lround(pinned.b)));
+                    if (index > 0) ImGui::SameLine(0.0f, 4.0f);
+                    if (ImGui::ColorButton(
+                            pin_id,
+                            ImVec4(pinned.r / 255.0f, pinned.g / 255.0f, pinned.b / 255.0f, 1.0f),
+                            ImGuiColorEditFlags_NoTooltip | ImGuiColorEditFlags_NoDragDrop,
+                            ImVec2(small, small)))
+                        ImGui::SetClipboardText(pin_hex);
+                    ImGui::SetItemTooltip("%s - click to copy", pin_hex);
+                }
+            }
+        };
+
         // The enabled scopes stack in a fixed order, splitting the window
         // along its longer axis.
         const auto draw_scope = [&](ScopeGlyph kind) {
@@ -1107,6 +1184,8 @@ int main() {
                 draw_vectorscope();
             else if (kind == ScopeGlyph::Histogram)
                 draw_histogram();
+            else if (kind == ScopeGlyph::ColorPicker)
+                draw_color_picker();
             else
                 draw_waveform(kind);
         };
@@ -1160,6 +1239,8 @@ int main() {
                 {Kind::Action, "RGB Parade", kMenuShowWaveformParade,
                  scope_shown(ScopeGlyph::WaveformParade)},
                 {Kind::Action, "Histogram", kMenuShowHistogram, scope_shown(ScopeGlyph::Histogram)},
+                {Kind::Action, "Color Picker", kMenuShowColorPicker,
+                 scope_shown(ScopeGlyph::ColorPicker)},
                 {Kind::Separator, "", -1, false},
                 {Kind::SubmenuBegin, "Waveform Style", -1, false},
                 {Kind::Action, "RGB", kMenuWaveformStyleRgb,
@@ -1223,6 +1304,9 @@ int main() {
                     break;
                 case kMenuShowHistogram:
                     toggle_scope(ScopeGlyph::Histogram);
+                    break;
+                case kMenuShowColorPicker:
+                    toggle_scope(ScopeGlyph::ColorPicker);
                     break;
                 case kMenuMatrixBt601:
                     analysis.vectorscope.matrix = ChromaMatrix::Bt601;

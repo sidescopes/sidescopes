@@ -111,6 +111,17 @@ TEST_CASE("Preferences deduplicate scope letters") {
     std::filesystem::remove(file);
 }
 
+TEST_CASE("Preferences keep the color picker in the stack") {
+    const auto file = TemporaryFile("picker-scope.txt");
+    std::filesystem::create_directories(file.parent_path());
+    std::ofstream(file) << "scope_stack=CV\n";
+
+    const Preferences loaded = LoadPreferences(file);
+    CHECK(loaded.scope_stack == "CV");
+
+    std::filesystem::remove(file);
+}
+
 TEST_CASE("Preferences tolerate unknown keys and malformed lines") {
     const auto file = TemporaryFile("forward-compat.txt");
     std::filesystem::create_directories(file.parent_path());

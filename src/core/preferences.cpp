@@ -106,7 +106,7 @@ Preferences LoadPreferences(const std::filesystem::path& file) {
             letter = 'W';
             preferences.waveform_mode = WaveformMode::Luma;
         }
-        if (std::string_view("VWRH").find(letter) == std::string_view::npos) continue;
+        if (std::string_view("VWRHC").find(letter) == std::string_view::npos) continue;
         if (cleaned.find(letter) == std::string::npos) cleaned += letter;
     }
     preferences.scope_stack = cleaned.empty() ? "V" : cleaned;
