@@ -202,6 +202,27 @@ TEST_CASE("Waveform fills a missing level between populated neighbors") {
     CHECK(gap >= populated * 3 / 4);
 }
 
+TEST_CASE("Waveform flattens the pipeline's code-density comb") {
+    // Display pipelines populate 8-bit codes unevenly: here every column
+    // holds value 100 twice as often as 102, frame-wide - the doubled
+    // code used to render as a brighter line across the whole trace.
+    // The flat-field correction must bring the two rows together.
+    TestFrame frame(64, 66);
+    for (int py = 0; py < 66; ++py) {
+        const uint8_t value = py % 3 == 2 ? 102 : 100;
+        frame.FillRows(py, py + 1, Color{value, value, value});
+    }
+
+    Waveform scope;
+    scope.Accumulate(frame.View(), IntRect{0, 0, 64, 66});
+
+    const int doubled = GreenValueAt(scope.Image(), 0, 255 - 100);
+    const int single = GreenValueAt(scope.Image(), 0, 255 - 102);
+    REQUIRE(single > 0);
+    CHECK(doubled <= single * 5 / 4);
+    CHECK(doubled >= single * 3 / 4);
+}
+
 TEST_CASE("Waveform column brightness is invariant to stride and region size") {
     // Two gray levels stacked 3:1 vertically, so every sampled column sees
     // the same 3:1 level mix at stride 1, stride 2, and in a half-size

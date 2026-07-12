@@ -85,22 +85,67 @@ std::optional<NormalizedPoint> Waveform::Project(const FloatColor& color) const 
 }
 
 void Waveform::MapBinsToImage(uint64_t sampled_rows) {
-    // Smoothing takes the speckle and the quantization combs out of the
-    // traces. The vertical kernel is the histogram's 1-4-6-4-1: the
-    // capture pipeline's 8-bit color conversion leaves "missing codes" -
-    // level values that almost never occur - and each of them used to
-    // render as a dark line across the full width once the pane grew
-    // large. The wide binomial fills a single missing level almost
-    // completely; the narrower 1-4-1 left a visible residue.
+    // The display pipeline uses the 256 codes unevenly: tone edits and
+    // 8-bit rendering leave some values doubly populated and others
+    // nearly empty, frame-wide. Rendered faithfully, that quantization
+    // signature is horizontal banding across the whole trace - real in
+    // the data, meaningless to a photographer. The banding is exactly
+    // row-global, so it is measured globally and divided back out:
+    // each level's density is compared against its smoothed
+    // neighborhood, and the trace is corrected by that ratio. Spatial
+    // structure is column-local and passes through untouched; genuinely
+    // dominant flat tones exceed the clamp and survive, compressed
+    // further by the log display.
     smoothed_.resize(bins_.size());
     for (int plane = 0; plane < 4; ++plane) {
         const uint32_t* in = bins_.data() + static_cast<std::size_t>(plane) * kPlaneSize;
         uint32_t* out = smoothed_.data() + static_cast<std::size_t>(plane) * kPlaneSize;
+
+        uint64_t global[kLevels] = {};
+        for (int row = 0; row < kLevels; ++row) {
+            const uint32_t* line = in + static_cast<std::size_t>(row) * kColumns;
+            for (int column = 0; column < kColumns; ++column) global[row] += line[column];
+        }
+        // Flat-field weights in 1/256ths: the neighborhood MEDIAN over
+        // +-6 levels against the level's own population, clamped to 3x.
+        // The median matters: a genuinely dominant flat tone is a huge
+        // real spike, and a mean would inflate its neighbors' expected
+        // density and over-lift them - manufacturing the very banding
+        // this removes. The median ignores isolated spikes, so real
+        // lines keep their real neighbors.
+        uint32_t flatten[kLevels];
+        for (int row = 0; row < kLevels; ++row) {
+            uint64_t neighborhood[12];
+            int counted = 0;
+            for (int near = row - 6; near <= row + 6; ++near) {
+                if (near == row || near < 0 || near >= kLevels) continue;
+                neighborhood[counted++] = global[near];
+            }
+            // Insertion sort with explicit bounds: the array is tiny, and
+            // std::sort here trips GCC's array-bounds analysis.
+            for (int i = 1; i < counted; ++i) {
+                const uint64_t value = neighborhood[i];
+                int j = i - 1;
+                while (j >= 0 && neighborhood[j] > value) {
+                    neighborhood[j + 1] = neighborhood[j];
+                    --j;
+                }
+                neighborhood[j + 1] = value;
+            }
+            const int middle = counted / 2;
+            const double expected = counted > 0 ? static_cast<double>(neighborhood[middle]) : 0.0;
+            double weight = 1.0;
+            if (global[row] > 0 && expected > 0.0)
+                weight = std::clamp(expected / static_cast<double>(global[row]), 1.0 / 3.0, 3.0);
+            flatten[row] = static_cast<uint32_t>(weight * 256.0);
+        }
+
         for (int column = 0; column < kColumns; ++column) {
             for (int row = 0; row < kLevels; ++row) {
                 const auto at = [&](int level) -> uint32_t {
                     if (level < 0 || level >= kLevels) return 0;
-                    return in[static_cast<std::size_t>(level) * kColumns + column];
+                    const uint64_t count = in[static_cast<std::size_t>(level) * kColumns + column];
+                    return static_cast<uint32_t>(count * flatten[level] >> 8);
                 };
                 out[static_cast<std::size_t>(row) * kColumns + column] =
                     (at(row - 2) + 4 * at(row - 1) + 6 * at(row) + 4 * at(row + 1) + at(row + 2) +
