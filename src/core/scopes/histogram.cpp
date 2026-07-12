@@ -87,9 +87,13 @@ void Histogram::MapBinsToImage() {
     // retired: they read as texture and drifted on varied photos.
     const bool split = settings_.style == HistogramStyle::PerChannel;
     const int band_height = split ? kHeight / 3 : kHeight;
-    constexpr double kFillValue = 88.0;
-    constexpr double kOutlineValue = 232.0;
-    std::fill(image_.rgba.begin(), image_.rgba.end(), uint8_t{0});
+    constexpr double kFillValue = 118.0;
+    constexpr double kOutlineValue = 235.0;
+    // Curve tops for every column first: the outline stroke must span
+    // the gap between neighboring tops, or steep slopes and sharp peaks
+    // break it into dashes.
+    static thread_local std::vector<double> tops;
+    tops.assign(static_cast<std::size_t>(kImageWidth) * 3, static_cast<double>(kHeight));
     for (int x = 0; x < kImageWidth; ++x) {
         const double bin_position =
             std::clamp((x + 0.5) * kBins / kImageWidth - 0.5, 0.0, kBins - 1.0);
@@ -114,21 +118,39 @@ void Histogram::MapBinsToImage() {
             height = std::clamp(height, 0.0, static_cast<double>(kHeight));
             if (split) height /= 3.0;
             if (height <= 0.0) continue;
+            const int band_bottom = split ? (channel + 1) * band_height : kHeight;
+            tops[static_cast<std::size_t>(channel) * kImageWidth + x] = band_bottom - height;
+        }
+    }
+    std::fill(image_.rgba.begin(), image_.rgba.end(), uint8_t{0});
+    for (int x = 0; x < kImageWidth; ++x) {
+        for (int channel = 0; channel < 3; ++channel) {
+            const double* channel_tops =
+                tops.data() + static_cast<std::size_t>(channel) * kImageWidth;
             // Red on top, then green, then blue, when split.
             const int band_bottom = split ? (channel + 1) * band_height : kHeight;
+            const double top = channel_tops[x];
+            if (top >= band_bottom) continue;
+            const double left = channel_tops[std::max(0, x - 1)];
+            const double right = channel_tops[std::min(kImageWidth - 1, x + 1)];
+            const double stroke_low = std::min({top, (top + left) / 2.0, (top + right) / 2.0});
+            const double stroke_high = std::max({top, (top + left) / 2.0, (top + right) / 2.0});
             // The fill's top edge fades over a few rows rather than one:
             // the pane can magnify the plot, and a single-pixel edge
             // would come back as a ladder on the slopes.
             constexpr double kFeather = 2.5;
-            const double top = band_bottom - height;
             const int first_touched =
-                std::max(band_bottom - band_height, static_cast<int>(std::floor(top - kFeather)));
+                std::max(band_bottom - band_height, static_cast<int>(std::floor(stroke_low - 2.0)));
             for (int row = first_touched; row < band_bottom; ++row) {
                 const double coverage = std::clamp((row + 1.0 - top) / kFeather, 0.0, 1.0);
-                const double distance = row + 0.5 - top;
-                // A soft-edged stroke about two rows thick, centered just
-                // below the curve.
-                const double stroke = std::clamp(1.6 - std::abs(distance - 0.8) * 0.9, 0.0, 1.0);
+                // The stroke follows the curve as a connected line: it
+                // spans from the midpoint toward the lower neighbor to
+                // the midpoint toward the higher one, plus its own
+                // thickness, with soft ends.
+                const double position = row + 0.5;
+                const double into = (position - (stroke_low - 1.4)) / 1.4;
+                const double out = ((stroke_high + 2.6) - position) / 1.4;
+                const double stroke = std::clamp(std::min(into, out), 0.0, 1.0);
                 const double value = std::max(kFillValue * coverage, kOutlineValue * stroke);
                 if (value <= 0.0) continue;
                 uint8_t* pixel =
