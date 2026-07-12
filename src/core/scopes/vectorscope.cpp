@@ -245,9 +245,19 @@ void Vectorscope::MapBinsToImage(uint64_t sample_count) {
                         row_value += wx[i] * at(base_y - 1 + j, base_x - 1 + i);
                     value += wy[j] * row_value;
                 }
-                // Catmull-Rom undershoots next to sharp peaks; densities
-                // cannot be negative.
-                upsampled_[static_cast<std::size_t>(py) * size_ + px] = std::max(value, 0.0f);
+                // The spline's negative lobes ring hard at density
+                // cliffs - the display pipeline piles sky gradients four
+                // orders of magnitude above their neighbors, and the
+                // undershoot renders as black pits inside a bright
+                // cloud. Clamping to the hull of the four surrounding
+                // cells keeps the interpolation from inventing extrema.
+                const float c00 = at(base_y, base_x);
+                const float c01 = at(base_y, base_x + 1);
+                const float c10 = at(base_y + 1, base_x);
+                const float c11 = at(base_y + 1, base_x + 1);
+                const float lo = std::min(std::min(c00, c01), std::min(c10, c11));
+                const float hi = std::max(std::max(c00, c01), std::max(c10, c11));
+                upsampled_[static_cast<std::size_t>(py) * size_ + px] = std::clamp(value, lo, hi);
             }
         }
         densities = upsampled_.data();
