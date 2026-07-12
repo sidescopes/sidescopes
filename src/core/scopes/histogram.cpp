@@ -79,15 +79,22 @@ void Histogram::MapBinsToImage() {
 
     // Combined: three channels overlaid over the full height. Per
     // channel: three stacked bands, each holding one channel's plot.
+    // Each plot is a dim solid fill under a bright solid outline riding
+    // the curve - the fill shows the area at a glance, the outline
+    // carries the shape and stays traceable through every overlap.
+    // Overlaps sum per component, so two dim fills make a dim secondary
+    // and all three make a quiet neutral gray. Gradients were tried and
+    // retired: they read as texture and drifted on varied photos.
     const bool split = settings_.style == HistogramStyle::PerChannel;
     const int band_height = split ? kHeight / 3 : kHeight;
+    constexpr double kFillValue = 88.0;
+    constexpr double kOutlineValue = 232.0;
     std::fill(image_.rgba.begin(), image_.rgba.end(), uint8_t{0});
     for (int x = 0; x < kImageWidth; ++x) {
         const double bin_position =
             std::clamp((x + 0.5) * kBins / kImageWidth - 0.5, 0.0, kBins - 1.0);
         const int center = static_cast<int>(bin_position);
         const double t = bin_position - center;
-        double column_heights[3];
         for (int channel = 0; channel < 3; ++channel) {
             const double* plane = heights.data() + static_cast<std::ptrdiff_t>(channel) * kBins;
             const auto at = [&](int index) { return plane[std::clamp(index, 0, kBins - 1)]; };
@@ -106,46 +113,27 @@ void Histogram::MapBinsToImage() {
             if (p1 <= 0.0 && p2 <= 0.0) height = 0.0;
             height = std::clamp(height, 0.0, static_cast<double>(kHeight));
             if (split) height /= 3.0;
-            column_heights[channel] = height;
-        }
-        // Overlaid channels share one gradient field, referenced to the
-        // column's tallest curve: equal coverage then means equal
-        // components, so the deep overlap fades as clean neutral gray
-        // instead of a mixture that drifts off-neutral as each channel's
-        // own fade diverges.
-        const double tallest = std::max({column_heights[0], column_heights[1], column_heights[2]});
-        const double lowest = std::min({column_heights[0], column_heights[1], column_heights[2]});
-        for (int channel = 0; channel < 3; ++channel) {
-            const double height = column_heights[channel];
             if (height <= 0.0) continue;
             // Red on top, then green, then blue, when split.
             const int band_bottom = split ? (channel + 1) * band_height : kHeight;
-            // The top edge fades over a few rows rather than one: the
-            // pane can magnify the plot, and a single-pixel edge would
-            // come back as a ladder on the slopes.
+            // The fill's top edge fades over a few rows rather than one:
+            // the pane can magnify the plot, and a single-pixel edge
+            // would come back as a ladder on the slopes.
             constexpr double kFeather = 2.5;
             const double top = band_bottom - height;
-            const double fade_reference = split ? height : tallest;
-            const double fade_top = band_bottom - fade_reference;
             const int first_touched =
                 std::max(band_bottom - band_height, static_cast<int>(std::floor(top - kFeather)));
             for (int row = first_touched; row < band_bottom; ++row) {
                 const double coverage = std::clamp((row + 1.0 - top) / kFeather, 0.0, 1.0);
-                if (coverage <= 0.0) continue;
-                // The fill fades from the curve toward the baseline, so
-                // brightness carries meaning the way it does on every
-                // other scope - proximity to the plot - while the crisp
-                // curve edge stays, because a histogram draws a function,
-                // not a density cloud.
-                const double depth = std::max(0.0, row + 0.5 - fade_top);
-                double fade = 1.0 - 0.72 * std::min(1.0, depth / std::max(1.0, fade_reference));
-                // Where all three channels overlap, the fill goes flat:
-                // the colored zones above are the information, and a base
-                // that carries its own gradient reads as texture in a
-                // region that should be quiet context.
-                if (!split && lowest > 0.0 && row + 0.5 > band_bottom - lowest) fade = 0.47;
-                image_.rgba[(static_cast<std::size_t>(row) * kImageWidth + x) * 4 + channel] =
-                    static_cast<uint8_t>(210 * fade * coverage);
+                const double distance = row + 0.5 - top;
+                // A soft-edged stroke about two rows thick, centered just
+                // below the curve.
+                const double stroke = std::clamp(1.6 - std::abs(distance - 0.8) * 0.9, 0.0, 1.0);
+                const double value = std::max(kFillValue * coverage, kOutlineValue * stroke);
+                if (value <= 0.0) continue;
+                uint8_t* pixel =
+                    &image_.rgba[(static_cast<std::size_t>(row) * kImageWidth + x) * 4 + channel];
+                *pixel = static_cast<uint8_t>(std::max<double>(*pixel, value));
             }
         }
         for (int row = 0; row < kHeight; ++row)
