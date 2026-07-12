@@ -28,6 +28,8 @@ struct Preferences {
     // histogram. Never empty.
     std::string scope_stack = "V";
     bool show_graticule = true;
+    // Magnify-view factor for the vectorscope: 1, 2, or 4.
+    int vectorscope_zoom = 1;
     bool values_as_percent = true;
     int window_x = -1;  // negative: let the system place the window
     int window_y = -1;

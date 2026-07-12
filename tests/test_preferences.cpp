@@ -21,6 +21,7 @@ TEST_CASE("Preferences round-trip through a file") {
     saved.vectorscope_smoothing_ms = 60.0f;
     saved.matrix = ChromaMatrix::Bt709;
     saved.trace_response = TraceResponse::Linear;
+    saved.vectorscope_zoom = 2;
     saved.scope_stack = "HWV";  // stacking order is part of the setting
     saved.show_graticule = false;
     saved.values_as_percent = false;
@@ -37,6 +38,7 @@ TEST_CASE("Preferences round-trip through a file") {
     CHECK(loaded.vectorscope_smoothing_ms == saved.vectorscope_smoothing_ms);
     CHECK(loaded.matrix == ChromaMatrix::Bt709);
     CHECK(loaded.trace_response == TraceResponse::Linear);
+    CHECK(loaded.vectorscope_zoom == 2);
     CHECK(loaded.scope_stack == "HWV");
     CHECK_FALSE(loaded.show_graticule);
     CHECK_FALSE(loaded.values_as_percent);

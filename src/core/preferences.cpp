@@ -115,6 +115,9 @@ Preferences LoadPreferences(const std::filesystem::path& file) {
     }
     preferences.scope_stack = cleaned.empty() ? "V" : cleaned;
     read_bool("show_graticule", preferences.show_graticule);
+    read_int("vectorscope_zoom", preferences.vectorscope_zoom);
+    if (preferences.vectorscope_zoom != 2 && preferences.vectorscope_zoom != 4)
+        preferences.vectorscope_zoom = 1;
     read_bool("values_as_percent", preferences.values_as_percent);
     read_int("window_x", preferences.window_x);
     read_int("window_y", preferences.window_y);
@@ -142,6 +145,7 @@ bool SavePreferences(const Preferences& preferences, const std::filesystem::path
         << "waveform_mode=" << static_cast<int>(preferences.waveform_mode) << '\n'
         << "histogram_per_channel=" << (preferences.histogram_per_channel ? 1 : 0) << '\n'
         << "show_graticule=" << (preferences.show_graticule ? 1 : 0) << '\n'
+        << "vectorscope_zoom=" << preferences.vectorscope_zoom << '\n'
         << "values_as_percent=" << (preferences.values_as_percent ? 1 : 0) << '\n'
         << "window_x=" << preferences.window_x << '\n'
         << "window_y=" << preferences.window_y << '\n'

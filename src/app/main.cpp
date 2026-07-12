@@ -71,12 +71,16 @@ enum MenuAction {
 struct DrawnScope {
     ImVec2 origin;
     ImVec2 size;
+    float zoom = 1.0f;
 };
 
 // Draws a scope image into the available space. The vectorscope keeps its
 // square aspect (it is a polar plot); the waveform stretches, because its
-// horizontal axis is arbitrary image columns.
-DrawnScope DrawScopeImage(const ScopeTexture& texture, bool keep_aspect) {
+// horizontal axis is arbitrary image columns. A zoom magnifies the view
+// around the center - trace, graticule, and markers together, which is
+// what keeps every overlay glued to the cloud - by cropping the
+// texture's center and scaling overlay coordinates through At().
+DrawnScope DrawScopeImage(const ScopeTexture& texture, bool keep_aspect, float zoom = 1.0f) {
     const ImVec2 available = ImGui::GetContentRegionAvail();
     ImVec2 size = available;
     if (keep_aspect) {
@@ -90,12 +94,16 @@ DrawnScope DrawScopeImage(const ScopeTexture& texture, bool keep_aspect) {
     cursor.y += std::max(0.0f, (available.y - size.y) * 0.5f);
     ImGui::SetCursorPos(cursor);
     const ImVec2 origin = ImGui::GetCursorScreenPos();
-    ImGui::Image(texture.Id(), size);
-    return DrawnScope{origin, size};
+    const float crop = 0.5f / zoom;
+    ImGui::Image(texture.Id(), size, ImVec2(0.5f - crop, 0.5f - crop),
+                 ImVec2(0.5f + crop, 0.5f + crop));
+    return DrawnScope{origin, size, zoom};
 }
 
 ImVec2 At(const DrawnScope& scope, const NormalizedPoint& point) {
-    return ImVec2(scope.origin.x + point.x * scope.size.x, scope.origin.y + point.y * scope.size.y);
+    const float x = (point.x - 0.5f) * scope.zoom + 0.5f;
+    const float y = (point.y - 0.5f) * scope.zoom + 0.5f;
+    return ImVec2(scope.origin.x + x * scope.size.x, scope.origin.y + y * scope.size.y);
 }
 
 // Every scope speaks with one graticule voice: the same champagne gold
@@ -128,7 +136,7 @@ void DrawVectorscopeOverlay(const DrawnScope& scope, const VectorscopeGraticule&
                       line.stroke == GraticuleStroke::GridMajor ? 1.5f : 1.0f);
     }
     for (const GraticuleCircle& circle : graticule.circles) {
-        draw->AddCircle(At(scope, circle.center), circle.radius * scope.size.x,
+        draw->AddCircle(At(scope, circle.center), circle.radius * scope.size.x * scope.zoom,
                         stroke_color(circle.stroke), 64);
     }
     for (const GraticuleTarget& target : graticule.targets) {
@@ -660,6 +668,7 @@ int main() {
     sync_enabled_scopes();
     bool show_graticule = startup.show_graticule;
     bool values_as_percent = startup.values_as_percent;
+    int vectorscope_zoom = startup.vectorscope_zoom;
     bool show_settings = false;
     // Reference colors pinned on the vectorscope (session-scoped): pin a
     // corrected skin tone, then match the next photo against it.
@@ -783,6 +792,7 @@ int main() {
         preferences.scope_stack.clear();
         for (const ScopeGlyph kind : scope_stack) preferences.scope_stack += ScopeLetter(kind);
         preferences.show_graticule = show_graticule;
+        preferences.vectorscope_zoom = vectorscope_zoom;
         preferences.values_as_percent = values_as_percent;
         glfwGetWindowPos(window, &preferences.window_x, &preferences.window_y);
         glfwGetWindowSize(window, &preferences.window_width, &preferences.window_height);
@@ -1087,6 +1097,8 @@ int main() {
                     pin_reference_color(vectorscope_color);
                 }
             }
+            if (ImGui::IsKeyPressed(ImGuiKey_Z, false))
+                vectorscope_zoom = vectorscope_zoom >= 4 ? 1 : vectorscope_zoom * 2;
             if (ImGui::IsKeyPressed(ImGuiKey_Escape, false)) reset_region_to_full();
         }
 
@@ -1173,9 +1185,15 @@ int main() {
         };
 
         const auto draw_vectorscope = [&] {
-            const DrawnScope scope = DrawScopeImage(*vectorscope_texture, true);
+            const DrawnScope scope =
+                DrawScopeImage(*vectorscope_texture, true, static_cast<float>(vectorscope_zoom));
             scope_gestures(scope, vectorscope_intensity, analysis.vectorscope.gain, 3.0f,
                            kVectorscopeIntensityShift);
+            // Zoomed overlays run past the pane; clip them to it.
+            ImDrawList* draw = ImGui::GetWindowDrawList();
+            draw->PushClipRect(scope.origin,
+                               ImVec2(scope.origin.x + scope.size.x, scope.origin.y + scope.size.y),
+                               true);
             if (show_graticule)
                 DrawVectorscopeOverlay(scope, BuildVectorscopeGraticule(projection_vectorscope));
             for (const FloatColor& pinned : pinned_colors) {
@@ -1185,6 +1203,12 @@ int main() {
             if (vectorscope_color) {
                 if (const auto point = projection_vectorscope.Project(*vectorscope_color))
                     DrawPointMarker(scope, *point, IM_COL32(255, 255, 255, 255));
+            }
+            draw->PopClipRect();
+            if (vectorscope_zoom > 1) {
+                char badge[4] = {static_cast<char>('0' + vectorscope_zoom), 'x', '\0'};
+                draw->AddText(ImVec2(scope.origin.x + scope.size.x - 26, scope.origin.y + 6),
+                              kGraticuleLabel, badge);
             }
         };
         // The waveform flavors share gain and graticule; the cursor
