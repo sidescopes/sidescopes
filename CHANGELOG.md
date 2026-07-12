@@ -88,7 +88,8 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   overlap and the plot sits quietly next to the other scopes. It sizes
   itself to its pane like the other scopes, and the per-channel style
   is the default - it reads like the parade and keeps the family
-  consistent.
+  consistent. Its curve outline strokes at display resolution, so the
+  line keeps one width however the pane is sized.
 - The region border hides while the window is minimized and returns on
   restore: minimized scopes measure nothing, and the border's grab band
   should not sit interactive over the editor meanwhile.
