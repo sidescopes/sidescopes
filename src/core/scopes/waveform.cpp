@@ -241,6 +241,11 @@ void Waveform::MapBinsToImage(uint64_t sampled_rows) {
             }
         }
 
+        // Vertical 1-4-1: light, so a sharp level stays crisp while
+        // single-bin grain still fills in. The banding work lives in the
+        // flat-field and the dead-code reconstruction above - a wider
+        // kernel here only blurred what they had already repaired, and
+        // big panes magnified that blur.
         for (int column = 0; column < columns_; ++column) {
             for (int row = 0; row < kLevels; ++row) {
                 const auto at = [&](int level) -> uint32_t {
@@ -248,9 +253,7 @@ void Waveform::MapBinsToImage(uint64_t sampled_rows) {
                     return corrected_[static_cast<std::size_t>(level) * columns_ + column];
                 };
                 out[static_cast<std::size_t>(row) * columns_ + column] =
-                    (at(row - 2) + 4 * at(row - 1) + 6 * at(row) + 4 * at(row + 1) + at(row + 2) +
-                     8) /
-                    16;
+                    (at(row - 1) + 4 * at(row) + at(row + 1) + 3) / 6;
             }
         }
         // Horizontal 1-2-1 within each row, in place.
