@@ -65,6 +65,7 @@ enum MenuAction {
     kMenuTogglePercentValues,
     kMenuClearPinnedMarkers,
     kMenuPickPinColor,
+    kMenuPickPinColors,
     kMenuOpenSettings = 50,
     kMenuQuit,
 };
@@ -1345,6 +1346,13 @@ int main() {
 
         // Keyboard shortcuts mirror the toolbar and region tools.
         std::optional<RegionPickerMode> want_region_pick;
+        // Pins mark the vectorscope and the color picker; without either
+        // on screen, the tool's button, menu entries, and shortcuts all
+        // stand down together.
+        const bool pins_available = std::find(scope_stack.begin(), scope_stack.end(),
+                                              ScopeGlyph::Vectorscope) != scope_stack.end() ||
+                                    std::find(scope_stack.begin(), scope_stack.end(),
+                                              ScopeGlyph::ColorPicker) != scope_stack.end();
         const auto pressed = [&](const std::string& binding) {
             const ImGuiKey key = key_for(binding);
             return key != ImGuiKey_None && ImGui::IsKeyPressed(key, false);
@@ -1370,10 +1378,9 @@ int main() {
             if (pressed(shortcuts.draw_region)) want_region_pick = RegionPickerMode::Draw;
             if (SupportsFaceDetection() && pressed(shortcuts.pick_faces))
                 want_region_pick = RegionPickerMode::PickFaces;
-            if (pressed(shortcuts.pin_color)) {
+            if (pins_available && pressed(shortcuts.pin_color)) {
                 // The pin tool: plain opens pin-one-and-close, Shift the
-                // repeating flavor. Pinning the cursor color directly and
-                // the region average live in the context menu.
+                // repeating flavor.
                 want_region_pick =
                     stack_modifier ? RegionPickerMode::PinColors : RegionPickerMode::PinColor;
             }
@@ -1391,6 +1398,18 @@ int main() {
         if (IconButton("##pick-region", RegionIcon::PickHand, tooltip))
             want_region_pick = RegionPickerMode::PickWindows;
         ImGui::SameLine(0.0f, 2.0f);
+        if (pins_available) {
+            std::snprintf(tooltip, sizeof(tooltip),
+                          "Pin a color (%s) - Shift+click to pin multiple colors",
+                          shortcuts.pin_color.c_str());
+            if (IconButton("##pin-color", RegionIcon::Dropper, tooltip))
+                want_region_pick = ImGui::GetIO().KeyShift ? RegionPickerMode::PinColors
+                                                           : RegionPickerMode::PinColor;
+            ImGui::SameLine(0.0f, 2.0f);
+        }
+        // The face button sits last among the pickers: it is the one
+        // most often dimmed, and a disabled button reads best at the
+        // row's edge.
         if (SupportsFaceDetection()) {
             const bool none_found = g_faces_on_screen.load() == 0;
             std::snprintf(tooltip, sizeof(tooltip), "Pick a face (%s)%s",
@@ -1398,21 +1417,6 @@ int main() {
                           none_found ? " - none on screen right now" : "");
             if (IconButton("##pick-face", RegionIcon::Face, tooltip, none_found))
                 want_region_pick = RegionPickerMode::PickFaces;
-            ImGui::SameLine(0.0f, 2.0f);
-        }
-        // Pins mark the vectorscope and the color picker; on the other
-        // scopes the tool would only puzzle, so it steps aside the way
-        // the full-screen button does when the region is already full.
-        const bool pins_shown = std::find(scope_stack.begin(), scope_stack.end(),
-                                          ScopeGlyph::Vectorscope) != scope_stack.end() ||
-                                std::find(scope_stack.begin(), scope_stack.end(),
-                                          ScopeGlyph::ColorPicker) != scope_stack.end();
-        if (pins_shown) {
-            std::snprintf(tooltip, sizeof(tooltip), "Pin a color (%s) - Shift+click keeps picking",
-                          shortcuts.pin_color.c_str());
-            if (IconButton("##pin-color", RegionIcon::Dropper, tooltip))
-                want_region_pick = ImGui::GetIO().KeyShift ? RegionPickerMode::PinColors
-                                                           : RegionPickerMode::PinColor;
             ImGui::SameLine(0.0f, 2.0f);
         }
         if (!is_full_region()) {
@@ -1869,6 +1873,8 @@ int main() {
                 submenu("Pins");
                 action("Pin a Color...", kMenuPickPinColor, false,
                        shortcut_label(shortcuts.pin_color));
+                action("Pin Multiple Colors...", kMenuPickPinColors, false,
+                       "Shift+" + shortcut_label(shortcuts.pin_color));
                 if (!pinned_colors.empty())
                     action("Clear Pinned Markers", kMenuClearPinnedMarkers, false);
                 end_submenu();
@@ -2061,6 +2067,9 @@ int main() {
                     break;
                 case kMenuPickPinColor:
                     want_region_pick = RegionPickerMode::PinColor;
+                    break;
+                case kMenuPickPinColors:
+                    want_region_pick = RegionPickerMode::PinColors;
                     break;
                 case kMenuClearPinnedMarkers:
                     pinned_colors.clear();
