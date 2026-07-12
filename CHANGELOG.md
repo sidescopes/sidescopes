@@ -25,6 +25,13 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   that application is back on screen.
 - Pinned reference colors on the vectorscope (P or the context menu), for
   matching skin tones across photos; the context menu clears them.
+- A pin tool in the toolbar, shown while the vectorscope or the color
+  picker is on: the screen stays undimmed, a chip beside the crosshair
+  previews the sample, a click pins a cursor-sized patch, and a drag
+  pins the average of the dragged area - photographs are textured, so
+  pins come from areas, never single pixels. Click pins one color;
+  Shift+click (or Shift+P) keeps picking until Esc, which never touches
+  the capture region.
 - Vectorscope view magnification: Z cycles 1x/2x/4x, scaling the trace,
   graticule, and markers together, with a badge naming the factor.
 - A linear trace response option beside the default boosted curve: density
@@ -85,6 +92,10 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The region border hides while the window is minimized and returns on
   restore: minimized scopes measure nothing, and the border's grab band
   should not sit interactive over the editor meanwhile.
+- Shift+P opens the repeating pin picker instead of pinning the region
+  average; the region average remains in the context menu, and the pin
+  tool's drag-to-average covers the same need without giving up the
+  monitored region.
 
 ### Fixed
 

@@ -207,6 +207,17 @@ struct PickerState {
     int height = 0;
     bool draw_mode = false;
     bool faces_mode = false;
+    // Color pinning: clicks and drags report areas to average, the
+    // region is never touched, and a cursor chip previews the sample.
+    bool pin_mode = false;
+    bool pin_many = false;
+    POINT chip_point{};
+    bool chip_valid = false;
+    Gdiplus::RectF painted_chip{};
+    // An area the application should average and pin, in overlay-local
+    // pixels, left here until the next poll collects it.
+    Gdiplus::RectF pinned_area{};
+    bool pinned_ready = false;
     // The active suggestion list in overlay-local pixels, with labels -
     // the windows or the faces, depending on the mode.
     std::vector<std::pair<Gdiplus::RectF, std::wstring>> windows;
@@ -233,6 +244,29 @@ struct PickerState {
 // live per overlay and are switched in lockstep, the way the shared
 // keyboard expects.
 std::vector<PickerState*> g_pickers;
+
+// The pin chip's live color, pushed by the application once per frame;
+// sampled from the capture stream so the chip previews exactly what a
+// click would pin.
+std::optional<FloatColor> g_pin_chip_color;
+
+// The sample patch a pin-mode click averages, in interface points.
+constexpr double kPinSamplePoints = 14.0;
+// The chip swatch beside the crosshair: size and cursor offset, points.
+constexpr double kChipSize = 18.0;
+constexpr double kChipOffset = 16.0;
+
+Gdiplus::RectF ChipBounds(const PickerState& picker, double scale) {
+    const auto size = static_cast<Gdiplus::REAL>(kChipSize * scale);
+    const auto offset = static_cast<Gdiplus::REAL>(kChipOffset * scale);
+    auto x = static_cast<Gdiplus::REAL>(picker.chip_point.x) + offset;
+    auto y = static_cast<Gdiplus::REAL>(picker.chip_point.y) + offset;
+    // Near the display's far edges the chip flips to the cursor's other
+    // side instead of running off screen.
+    if (x + size > static_cast<Gdiplus::REAL>(picker.width)) x -= 2 * offset + size;
+    if (y + size > static_cast<Gdiplus::REAL>(picker.height)) y -= 2 * offset + size;
+    return {x, y, size, size};
+}
 
 PickerState* PickerForWindow(HWND window) {
     for (PickerState* picker : g_pickers) {
@@ -425,6 +459,52 @@ void PunchRect(Gdiplus::Graphics& canvas, const Gdiplus::RectF& rect) {
 void PaintPickerScene(PickerState& picker, Gdiplus::Graphics& canvas, double scale) {
     const Gdiplus::RectF bounds(0, 0, static_cast<Gdiplus::REAL>(picker.width),
                                 static_cast<Gdiplus::REAL>(picker.height));
+    if (picker.pin_mode) {
+        // No dim: judging a color through a wash misleads. The whisper
+        // of alpha is load-bearing - fully transparent layered pixels
+        // are click-through, and pin clicks belong to the overlay.
+        canvas.SetCompositingMode(Gdiplus::CompositingModeSourceCopy);
+        Gdiplus::SolidBrush whisper(Gdiplus::Color(13, 0, 0, 0));
+        canvas.FillRectangle(&whisper, bounds);
+        canvas.SetCompositingMode(Gdiplus::CompositingModeSourceOver);
+        if (picker.dragging) {
+            // A two-tone frame: the white line rides a dark halo so one
+            // of the tones survives any undimmed background.
+            const Gdiplus::RectF selection = SelectionRect(picker);
+            Gdiplus::Pen halo(Gdiplus::Color(179, 26, 26, 26),
+                              static_cast<Gdiplus::REAL>(3.0 * scale));
+            canvas.DrawRectangle(&halo, selection);
+            Gdiplus::Pen line(Gdiplus::Color(255, 255, 255, 255),
+                              static_cast<Gdiplus::REAL>(1.0 * scale));
+            canvas.DrawRectangle(&line, selection);
+        }
+        if (picker.chip_valid && g_pin_chip_color) {
+            // The swatch chip beside the crosshair, in the handle dots'
+            // visual language: dark rim under a white ring.
+            const Gdiplus::RectF chip = ChipBounds(picker, scale);
+            Gdiplus::SolidBrush fill(Gdiplus::Color(255, static_cast<BYTE>(g_pin_chip_color->r),
+                                                    static_cast<BYTE>(g_pin_chip_color->g),
+                                                    static_cast<BYTE>(g_pin_chip_color->b)));
+            canvas.FillRectangle(&fill, chip);
+            Gdiplus::Pen rim(Gdiplus::Color(179, 26, 26, 26),
+                             static_cast<Gdiplus::REAL>(2.0 * scale));
+            canvas.DrawRectangle(&rim, chip);
+            Gdiplus::Pen ring(Gdiplus::Color(242, 247, 247, 247),
+                              static_cast<Gdiplus::REAL>(1.0 * scale));
+            canvas.DrawRectangle(&ring, chip);
+        }
+        if (!picker.dragging) {
+            const wchar_t* secondary = SupportsFaceDetection()
+                                           ? L"[A] pick a window    [D] draw    [F] pick a face  "
+                                             L"  [Esc] done"
+                                           : L"[A] pick a window    [D] draw    [Esc] done";
+            DrawBanner(
+                canvas, picker,
+                picker.pin_many ? L"Click or drag to pin colors" : L"Click or drag to pin a color",
+                secondary, false, scale);
+        }
+        return;
+    }
     if (!picker.draw_mode) {
         Gdiplus::SolidBrush dim(Gdiplus::Color(51, 0, 0, 0));
         canvas.FillRectangle(&dim, bounds);
@@ -579,20 +659,28 @@ void PaintPickerSelectionDelta(PickerState& picker, const Gdiplus::RectF& previo
     }
 }
 
-// 0 = pick a window, 1 = draw, 2 = pick a face. Face mode is offered even
-// when no face was found: the honest answer is the empty overlay saying
-// so, not a key that silently does nothing.
+// 0 = pick a window, 1 = draw, 2 = pick a face, 3 = pin one color,
+// 4 = pin colors until ESC. Face mode is offered even when no face was
+// found: the honest answer is the empty overlay saying so, not a key
+// that silently does nothing.
 void SwitchPickerMode(int mode) {
     const bool draw = mode == 1;
     const bool faces = mode == 2;
+    const bool pin = mode >= 3;
+    const bool pin_many = mode == 4;
     for (PickerState* picker : g_pickers) {
-        if (picker->draw_mode == draw && picker->faces_mode == faces) continue;
+        if (picker->draw_mode == draw && picker->faces_mode == faces && picker->pin_mode == pin &&
+            picker->pin_many == pin_many)
+            continue;
         picker->draw_mode = draw;
         picker->faces_mode = faces;
+        picker->pin_mode = pin;
+        picker->pin_many = pin_many;
         picker->suggestions = faces ? picker->faces : picker->windows;
         picker->hovered = -1;
         picker->dragging = false;
         picker->selection_painted = false;
+        picker->chip_valid = false;
         PaintPicker(*picker);
     }
 }
@@ -603,11 +691,44 @@ LRESULT CALLBACK PickerProc(HWND window, UINT message, WPARAM w_param, LPARAM l_
     PickerState& picker = *state;
     switch (message) {
         case WM_SETCURSOR:
-            SetCursor(LoadCursorW(nullptr, picker.draw_mode ? IDC_CROSS : IDC_HAND));
+            SetCursor(
+                LoadCursorW(nullptr, picker.draw_mode || picker.pin_mode ? IDC_CROSS : IDC_HAND));
             return TRUE;
         case WM_MOUSEMOVE: {
             const POINT point{static_cast<int>(static_cast<short>(LOWORD(l_param))),
                               static_cast<int>(static_cast<short>(HIWORD(l_param)))};
+            if (picker.pin_mode) {
+                const double scale = UiScale(window);
+                // The chip follows at mouse rate; its color refreshes at
+                // frame rate through SetRegionPickChipColor.
+                const bool had_chip = picker.chip_valid;
+                picker.chip_point = point;
+                picker.chip_valid = true;
+                const Gdiplus::RectF chip = ChipBounds(picker, scale);
+                Gdiplus::RectF changed = chip;
+                if (had_chip) Gdiplus::RectF::Union(changed, changed, picker.painted_chip);
+                picker.painted_chip = chip;
+                if ((w_param & MK_LBUTTON) != 0) {
+                    const Gdiplus::RectF previous = SelectionRect(picker);
+                    picker.drag_current = point;
+                    const double threshold = 4 * scale;
+                    if (!picker.dragging &&
+                        (std::abs(picker.drag_current.x - picker.drag_start.x) > threshold ||
+                         std::abs(picker.drag_current.y - picker.drag_start.y) > threshold)) {
+                        picker.dragging = true;
+                        PaintPicker(picker);  // full: the banner leaves
+                        return 0;
+                    }
+                    if (picker.dragging) {
+                        Gdiplus::RectF::Union(changed, changed, previous);
+                        Gdiplus::RectF::Union(changed, changed, SelectionRect(picker));
+                    }
+                }
+                const auto margin = static_cast<Gdiplus::REAL>(4 * scale);
+                changed.Inflate(margin, margin);
+                PaintPicker(picker, &changed);
+                return 0;
+            }
             if (picker.draw_mode) {
                 if ((w_param & MK_LBUTTON) != 0) {
                     picker.drag_current = point;
@@ -653,6 +774,29 @@ LRESULT CALLBACK PickerProc(HWND window, UINT message, WPARAM w_param, LPARAM l_
             ReleaseCapture();
             const POINT point{static_cast<int>(static_cast<short>(LOWORD(l_param))),
                               static_cast<int>(static_cast<short>(HIWORD(l_param)))};
+            if (picker.pin_mode) {
+                const double scale = UiScale(window);
+                picker.drag_current = point;
+                const Gdiplus::RectF selection = SelectionRect(picker);
+                const double minimum = 8 * scale;
+                if (picker.dragging && selection.Width > minimum && selection.Height > minimum) {
+                    picker.pinned_area = selection;
+                } else {
+                    // A click pins a cursor-sized patch, not a pixel:
+                    // photographs are textured, and a point sample is a
+                    // lottery across the vectorscope cloud.
+                    const auto span = static_cast<Gdiplus::REAL>(kPinSamplePoints * scale);
+                    picker.pinned_area =
+                        Gdiplus::RectF(static_cast<Gdiplus::REAL>(point.x) - span / 2,
+                                       static_cast<Gdiplus::REAL>(point.y) - span / 2, span, span);
+                }
+                picker.pinned_ready = true;
+                if (picker.dragging) {
+                    picker.dragging = false;
+                    PaintPicker(picker);  // full: the frame leaves, the banner returns
+                }
+                return 0;
+            }
             if (!picker.draw_mode) {
                 const int hovered = SuggestionAtPoint(picker, point);
                 if (hovered < 0) return 0;  // a miss keeps the picker open
@@ -687,6 +831,7 @@ LRESULT CALLBACK PickerProc(HWND window, UINT message, WPARAM w_param, LPARAM l_
             if (key == 'A') SwitchPickerMode(0);
             if (key == 'D') SwitchPickerMode(1);
             if (key == 'F' && SupportsFaceDetection()) SwitchPickerMode(2);
+            if (key == 'P') SwitchPickerMode((GetKeyState(VK_SHIFT) & 0x8000) != 0 ? 4 : 3);
             return 0;
         }
         default:
@@ -1085,8 +1230,10 @@ bool BeginRegionPick(const std::vector<PickerDisplay>& displays, RegionPickerMod
     // mode.
     bool any_windows = false;
     for (const PickerDisplay& entry : displays) any_windows |= !entry.windows.empty();
-    const bool draw = initial_mode == RegionPickerMode::Draw ||
-                      (initial_mode == RegionPickerMode::PickWindows && !any_windows);
+    const bool pin =
+        initial_mode == RegionPickerMode::PinColor || initial_mode == RegionPickerMode::PinColors;
+    const bool draw = !pin && (initial_mode == RegionPickerMode::Draw ||
+                               (initial_mode == RegionPickerMode::PickWindows && !any_windows));
     const bool faces = initial_mode == RegionPickerMode::PickFaces;
 
     for (const PickerDisplay& entry : displays) {
@@ -1109,7 +1256,9 @@ bool BeginRegionPick(const std::vector<PickerDisplay>& displays, RegionPickerMod
                 WideFromUtf8(suggestion.label));
         picker->draw_mode = draw;
         picker->faces_mode = faces;
-        if (!draw) picker->suggestions = faces ? picker->faces : picker->windows;
+        picker->pin_mode = pin;
+        picker->pin_many = initial_mode == RegionPickerMode::PinColors;
+        if (!draw && !pin) picker->suggestions = faces ? picker->faces : picker->windows;
 
         picker->window = CreateOverlayWindow(L"SidescopesPickerOverlay", PickerProc,
                                              WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TOOLWINDOW, 0);
@@ -1148,6 +1297,19 @@ RegionPickPoll PollRegionPick() {
     RegionPickPoll poll;
     if (g_pickers.empty()) return poll;
     poll.active = true;
+    // Mode flags come first: the finishing poll returns early below, and
+    // the caller needs them to know a pin-mode finish never means a
+    // region change. The pickers switch modes in lockstep; the front one
+    // speaks for all.
+    poll.pin_mode = g_pickers.front()->pin_mode;
+    poll.pin_single = poll.pin_mode && !g_pickers.front()->pin_many;
+    for (PickerState* picker : g_pickers) {
+        if (!picker->pinned_ready) continue;
+        picker->pinned_ready = false;
+        poll.pinned_area = RegionFromLocalRect(picker->pinned_area, picker->width, picker->height);
+        poll.display_id = picker->display_id;
+        break;
+    }
 
     // The banner dodges this application's own windows; their rectangles
     // refresh on a gentle cadence - nothing visual tracks them, so
@@ -1188,6 +1350,7 @@ RegionPickPoll PollRegionPick() {
     // The cursor is only ever on one display, so at most one overlay has
     // something to preview.
     for (PickerState* picker : g_pickers) {
+        if (picker->pin_mode) break;  // pin modes never preview a region
         if (!picker->draw_mode) {
             if (picker->hovered >= 0 &&
                 picker->hovered < static_cast<int>(picker->suggestions.size())) {
@@ -1219,7 +1382,52 @@ void CancelRegionPick() {
 void SetRegionPickMode(RegionPickerMode mode) {
     SwitchPickerMode(mode == RegionPickerMode::Draw        ? 1
                      : mode == RegionPickerMode::PickFaces ? 2
+                     : mode == RegionPickerMode::PinColor  ? 3
+                     : mode == RegionPickerMode::PinColors ? 4
                                                            : 0);
+}
+
+void SetRegionPickChipColor(const std::optional<FloatColor>& color) {
+    const bool color_changed = color.has_value() != g_pin_chip_color.has_value() ||
+                               (color && g_pin_chip_color &&
+                                (std::lround(color->r) != std::lround(g_pin_chip_color->r) ||
+                                 std::lround(color->g) != std::lround(g_pin_chip_color->g) ||
+                                 std::lround(color->b) != std::lround(g_pin_chip_color->b)));
+    g_pin_chip_color = color;
+    if (g_pickers.empty()) return;
+    POINT cursor{};
+    GetCursorPos(&cursor);
+    for (PickerState* picker : g_pickers) {
+        if (!picker->pin_mode) continue;
+        const double scale = UiScale(picker->window);
+        const bool inside = cursor.x >= picker->origin_x && cursor.y >= picker->origin_y &&
+                            cursor.x < picker->origin_x + picker->width &&
+                            cursor.y < picker->origin_y + picker->height;
+        if (!inside) {
+            // The cursor crossed to another display; the chip left with
+            // it.
+            if (picker->chip_valid) {
+                picker->chip_valid = false;
+                Gdiplus::RectF stale = picker->painted_chip;
+                const auto margin = static_cast<Gdiplus::REAL>(4 * scale);
+                stale.Inflate(margin, margin);
+                PaintPicker(*picker, &stale);
+            }
+            continue;
+        }
+        if (!picker->chip_valid || color_changed) {
+            const bool had_chip = picker->chip_valid;
+            picker->chip_point = {cursor.x - picker->origin_x, cursor.y - picker->origin_y};
+            picker->chip_valid = true;
+            const Gdiplus::RectF chip = ChipBounds(*picker, scale);
+            Gdiplus::RectF changed = chip;
+            if (had_chip) Gdiplus::RectF::Union(changed, changed, picker->painted_chip);
+            picker->painted_chip = chip;
+            const auto margin = static_cast<Gdiplus::REAL>(4 * scale);
+            changed.Inflate(margin, margin);
+            PaintPicker(*picker, &changed);
+        }
+    }
 }
 
 void ShowRegionBorder(uint32_t display_id, const RegionOfInterest& region) {

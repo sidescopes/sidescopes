@@ -66,6 +66,7 @@ enum MenuAction {
     kMenuPinCursorColor,
     kMenuPinRegionAverage,
     kMenuClearPinnedMarkers,
+    kMenuPickPinColor,
     kMenuOpenSettings = 50,
     kMenuQuit,
 };
@@ -310,9 +311,9 @@ bool ScopeToggleButton(const char* id, const char* letter, bool enabled, const c
 
 // Region tool icons mirror the cursors of their modes: a pointing hand
 // for picking a window (the pick-mode hover cursor), a crosshair
-// for drawing one (the draw-mode cursor), expanding arrows for full
-// screen.
-enum class RegionIcon { PickHand, Crosshair, Face, Expand };
+// for drawing one (the draw-mode cursor), an eyedropper for pinning
+// colors, expanding arrows for full screen.
+enum class RegionIcon { PickHand, Crosshair, Face, Dropper, Expand };
 
 bool IconButton(const char* id, RegionIcon icon, const char* tooltip, bool dimmed = false) {
     const float height = ImGui::GetTextLineHeight() + 4.0f;
@@ -370,6 +371,20 @@ bool IconButton(const char* id, RegionIcon icon, const char* tooltip, bool dimme
             smile[i] = ImVec2(center.x + 3.3f * std::cos(angle), center.y + 3.3f * std::sin(angle));
         }
         draw->AddPolyline(smile, 5, color, ImDrawFlags_None, 1.4f);
+    } else if (icon == RegionIcon::Dropper) {
+        // An eyedropper: the tip toward lower-left, the bulb end upper
+        // right, a ferrule tick across the barrel.
+        const ImVec2 outline[] = {
+            {-6.4f, 6.4f}, {-2.9f, 5.1f}, {5.7f, -3.5f},
+            {6.4f, -6.4f}, {3.5f, -5.7f}, {-5.1f, 2.9f},
+        };
+        ImVec2 points[std::size(outline)];
+        for (std::size_t i = 0; i < std::size(outline); ++i)
+            points[i] = ImVec2(center.x + outline[i].x, center.y + outline[i].y);
+        draw->AddPolyline(points, static_cast<int>(std::size(outline)), color, ImDrawFlags_Closed,
+                          1.4f);
+        draw->AddLine(ImVec2(center.x - 2.0f, center.y + 5.8f),
+                      ImVec2(center.x - 5.8f, center.y + 2.0f), color, 1.4f);
     } else {
         // Two arrows expanding to opposite corners, the fullscreen idiom.
         const auto arrow = [&](ImVec2 from, ImVec2 to, float head_x, float head_y) {
@@ -889,6 +904,48 @@ int main() {
         else
             ShowRegionBorder(capture_display, analysis.region);
     };
+    // The patch a pin-mode click samples, in interface points; the pin
+    // picker uses the same span, so the chip previews what a click pins.
+    constexpr double kPinSamplePoints = 14.0;
+    // Averages a display-percent area of the latest frame: the pin
+    // modes' sample. Photographs are textured, so pins come from areas,
+    // never single pixels.
+    const auto average_frame_area = [&](const RegionOfInterest& area) -> std::optional<FloatColor> {
+        std::optional<FloatColor> color;
+        worker.WithLatestFrame([&](const FrameView& view) {
+            const int left =
+                std::clamp(static_cast<int>(area.left_percent / 100.0 * view.width), 0, view.width);
+            const int right = std::clamp(static_cast<int>(area.right_percent / 100.0 * view.width),
+                                         0, view.width);
+            const int top = std::clamp(static_cast<int>(area.top_percent / 100.0 * view.height), 0,
+                                       view.height);
+            const int bottom = std::clamp(
+                static_cast<int>(area.bottom_percent / 100.0 * view.height), 0, view.height);
+            if (right <= left || bottom <= top) return;
+            // A stride caps the work on huge drags; the average barely
+            // moves past a hundred thousand samples.
+            const long long pixels = static_cast<long long>(right - left) * (bottom - top);
+            const int stride =
+                std::max(1, static_cast<int>(std::sqrt(static_cast<double>(pixels) / 100000.0)));
+            double sum_r = 0;
+            double sum_g = 0;
+            double sum_b = 0;
+            long long count = 0;
+            for (int y = top; y < bottom; y += stride) {
+                for (int x = left; x < right; x += stride) {
+                    const uint8_t* pixel = view.PixelAt(x, y);
+                    sum_b += pixel[0];
+                    sum_g += pixel[1];
+                    sum_r += pixel[2];
+                    ++count;
+                }
+            }
+            if (count == 0) return;
+            color = FloatColor{static_cast<float>(sum_r / count), static_cast<float>(sum_g / count),
+                               static_cast<float>(sum_b / count)};
+        });
+        return color;
+    };
     // Resets all selection: a pending pick and the drawn region alike.
     // The border sync rides the analysis-dirty path.
     const auto reset_region_to_full = [&] {
@@ -1299,7 +1356,10 @@ int main() {
                 want_region_pick = RegionPickerMode::PickFaces;
             if (pressed(shortcuts.pin_color)) {
                 if (stack_modifier) {
-                    if (output.region_average_valid) pin_reference_color(output.region_average);
+                    // The repeating pin picker; the region average lives
+                    // in the context menu, replaced here by the picker's
+                    // drag-to-average.
+                    want_region_pick = RegionPickerMode::PinColors;
                 } else {
                     pin_reference_color(vectorscope_color);
                 }
@@ -1309,14 +1369,14 @@ int main() {
             if (pressed(shortcuts.full_region)) reset_region_to_full();
         }
 
+        std::snprintf(tooltip, sizeof(tooltip), "Draw an area (%s)", shortcuts.draw_region.c_str());
+        if (IconButton("##draw-region", RegionIcon::Crosshair, tooltip))
+            want_region_pick = RegionPickerMode::Draw;
+        ImGui::SameLine(0.0f, 2.0f);
         std::snprintf(tooltip, sizeof(tooltip), "Pick a window (%s)",
                       shortcuts.pick_window.c_str());
         if (IconButton("##pick-region", RegionIcon::PickHand, tooltip))
             want_region_pick = RegionPickerMode::PickWindows;
-        ImGui::SameLine(0.0f, 2.0f);
-        std::snprintf(tooltip, sizeof(tooltip), "Draw an area (%s)", shortcuts.draw_region.c_str());
-        if (IconButton("##draw-region", RegionIcon::Crosshair, tooltip))
-            want_region_pick = RegionPickerMode::Draw;
         ImGui::SameLine(0.0f, 2.0f);
         if (SupportsFaceDetection()) {
             const bool none_found = g_faces_on_screen.load() == 0;
@@ -1325,6 +1385,22 @@ int main() {
                           none_found ? " - none on screen right now" : "");
             if (IconButton("##pick-face", RegionIcon::Face, tooltip, none_found))
                 want_region_pick = RegionPickerMode::PickFaces;
+            ImGui::SameLine(0.0f, 2.0f);
+        }
+        // Pins mark the vectorscope and the color picker; on the other
+        // scopes the tool would only puzzle, so it steps aside the way
+        // the full-screen button does when the region is already full.
+        const bool pins_shown = std::find(scope_stack.begin(), scope_stack.end(),
+                                          ScopeGlyph::Vectorscope) != scope_stack.end() ||
+                                std::find(scope_stack.begin(), scope_stack.end(),
+                                          ScopeGlyph::ColorPicker) != scope_stack.end();
+        if (pins_shown) {
+            std::snprintf(tooltip, sizeof(tooltip),
+                          "Pin a color - Shift+click keeps picking (%s pins at the cursor)",
+                          shortcuts.pin_color.c_str());
+            if (IconButton("##pin-color", RegionIcon::Dropper, tooltip))
+                want_region_pick = ImGui::GetIO().KeyShift ? RegionPickerMode::PinColors
+                                                           : RegionPickerMode::PinColor;
             ImGui::SameLine(0.0f, 2.0f);
         }
         if (!is_full_region()) {
@@ -1875,15 +1951,15 @@ int main() {
             // panes the actions would only puzzle.
             const bool pins_apply = clicked_pane < 0 || clicked(ScopeGlyph::Vectorscope) ||
                                     clicked(ScopeGlyph::ColorPicker);
-            if (pins_apply &&
-                (vectorscope_color || output.region_average_valid || !pinned_colors.empty())) {
+            if (pins_apply) {
                 separator();
+                action("Pin a Color...", kMenuPickPinColor, false,
+                       "Shift+" + shortcut_label(shortcuts.pin_color));
                 if (vectorscope_color)
                     action("Pin Cursor Color", kMenuPinCursorColor, false,
                            shortcut_label(shortcuts.pin_color));
                 if (output.region_average_valid)
-                    action("Pin Region Average", kMenuPinRegionAverage, false,
-                           "Shift+" + shortcut_label(shortcuts.pin_color));
+                    action("Pin Region Average", kMenuPinRegionAverage, false);
                 if (!pinned_colors.empty())
                     action("Clear Pinned Markers", kMenuClearPinnedMarkers, false);
             }
@@ -1973,6 +2049,9 @@ int main() {
                     break;
                 case kMenuPinCursorColor:
                     pin_reference_color(vectorscope_color);
+                    break;
+                case kMenuPickPinColor:
+                    want_region_pick = RegionPickerMode::PinColor;
                     break;
                 case kMenuPinRegionAverage:
                     if (output.region_average_valid) pin_reference_color(output.region_average);
@@ -2246,31 +2325,83 @@ int main() {
                 analysis_dirty = true;
                 last_activity = glfwGetTime();
             };
-            // Live preview only for the tracked display: previewing a
-            // suggestion on another display would mean flapping the
-            // capture stream on every hover. The switch happens once, on
-            // confirmation.
-            if (poll.preview && poll.display_id == capture_display) apply_region(*poll.preview);
-            if (poll.finished || !poll.active) {
-                region_picking = false;
-                if (poll.confirmed) {
-                    if (poll.display_id != 0 && poll.display_id != capture_display) {
-                        desired_display = poll.display_id;
-                        capture->Stop();
-                        if (!start_capture()) {
-                            capture_dead.store(true);
-                            next_capture_retry = glfwGetTime() + 2.0;
+            if (poll.pin_mode) {
+                // Color pinning never touches the region: clicks and
+                // drags deliver areas to average, and a finish - Esc, or
+                // the single flavor's one pin - just puts things back.
+                std::optional<FloatColor> chip;
+                if (const auto cursor = GlobalCursorPosition()) {
+                    if (DisplayAtPoint(*cursor).value_or(0) == capture_display &&
+                        !capture_dead.load()) {
+                        if (const auto geometry = GeometryOfDisplay(capture_display)) {
+                            const double span_x =
+                                kPinSamplePoints * ui_scale / geometry->width_points * 100.0;
+                            const double span_y =
+                                kPinSamplePoints * ui_scale / geometry->height_points * 100.0;
+                            RegionOfInterest patch;
+                            patch.left_percent =
+                                (cursor->x - geometry->origin_x) / geometry->width_points * 100.0 -
+                                span_x / 2;
+                            patch.right_percent = patch.left_percent + span_x;
+                            patch.top_percent =
+                                (cursor->y - geometry->origin_y) / geometry->height_points * 100.0 -
+                                span_y / 2;
+                            patch.bottom_percent = patch.top_percent + span_y;
+                            chip = average_frame_area(patch);
                         }
+                    } else {
+                        // Another display: the throttled one-shot sampler
+                        // already tracks the cursor there.
+                        std::lock_guard lock(screen_sample->mutex);
+                        chip = screen_sample->color;
                     }
-                    apply_region(*poll.confirmed);
-                } else {
-                    // Cancelled: reset all drawing, pending and confirmed.
-                    // Full region means capture snaps back to the display
-                    // this window sits on.
-                    apply_region(RegionOfInterest{});
                 }
-                sync_region_border();
-                last_activity = glfwGetTime();
+                SetRegionPickChipColor(chip);
+
+                if (poll.pinned_area) {
+                    std::optional<FloatColor> pinned;
+                    if (poll.display_id == capture_display && !capture_dead.load()) {
+                        pinned = average_frame_area(*poll.pinned_area);
+                    } else {
+                        std::lock_guard lock(screen_sample->mutex);
+                        pinned = screen_sample->color;
+                    }
+                    pin_reference_color(pinned);
+                    if (poll.pin_single) CancelRegionPick();
+                    last_activity = glfwGetTime();
+                }
+                if (poll.finished || !poll.active) {
+                    region_picking = false;
+                    sync_region_border();
+                    last_activity = glfwGetTime();
+                }
+            } else {
+                // Live preview only for the tracked display: previewing a
+                // suggestion on another display would mean flapping the
+                // capture stream on every hover. The switch happens once,
+                // on confirmation.
+                if (poll.preview && poll.display_id == capture_display) apply_region(*poll.preview);
+                if (poll.finished || !poll.active) {
+                    region_picking = false;
+                    if (poll.confirmed) {
+                        if (poll.display_id != 0 && poll.display_id != capture_display) {
+                            desired_display = poll.display_id;
+                            capture->Stop();
+                            if (!start_capture()) {
+                                capture_dead.store(true);
+                                next_capture_retry = glfwGetTime() + 2.0;
+                            }
+                        }
+                        apply_region(*poll.confirmed);
+                    } else {
+                        // Cancelled: reset all drawing, pending and
+                        // confirmed. Full region means capture snaps back
+                        // to the display this window sits on.
+                        apply_region(RegionOfInterest{});
+                    }
+                    sync_region_border();
+                    last_activity = glfwGetTime();
+                }
             }
         }
 

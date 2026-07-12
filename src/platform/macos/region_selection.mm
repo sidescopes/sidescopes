@@ -79,6 +79,27 @@ bool g_border_edit_changed = false;
 bool g_border_dismissed = false;
 RegionOfInterest g_border_edit_region;
 
+// The pin chip's live color, pushed by the application once per frame;
+// sampled from the capture stream so the chip previews exactly what a
+// click would pin.
+std::optional<FloatColor> g_pin_chip_color;
+
+// The sample patch a pin-mode click averages, in points.
+constexpr double kPinSamplePoints = 14.0;
+// The chip swatch beside the crosshair: size and cursor offset, points.
+constexpr double kChipSize = 18.0;
+constexpr double kChipOffset = 16.0;
+
+// The chip flips to the cursor's other side near the display's edges
+// instead of running off screen. View coordinates, bottom-left origin.
+NSRect ChipRect(NSPoint chip_point, NSRect bounds) {
+    CGFloat x = chip_point.x + kChipOffset;
+    CGFloat y = chip_point.y - kChipOffset - kChipSize;
+    if (x + kChipSize > NSMaxX(bounds)) x -= 2 * kChipOffset + kChipSize;
+    if (y < NSMinY(bounds)) y += 2 * kChipOffset + kChipSize;
+    return NSMakeRect(x, y, kChipSize, kChipSize);
+}
+
 }  // namespace
 }  // namespace sidescopes
 
@@ -107,6 +128,14 @@ RegionOfInterest g_border_edit_region;
 @property(nonatomic, assign) BOOL drawMode;
 // In picking mode: whether the face list is active instead of windows.
 @property(nonatomic, assign) BOOL facesMode;
+// Color pinning: clicks and drags report areas to average, the region
+// is never touched, and a cursor chip previews the sample.
+@property(nonatomic, assign) BOOL pinMode;
+@property(nonatomic, assign) BOOL pinMany;
+@property(nonatomic, assign) NSPoint chipPoint;
+@property(nonatomic, assign) BOOL chipValid;
+@property(nonatomic, assign) NSRect pinnedArea;
+@property(nonatomic, assign) BOOL pinnedReady;
 @property(nonatomic, assign) NSPoint dragStart;
 @property(nonatomic, assign) NSPoint dragCurrent;
 @property(nonatomic, assign) BOOL dragging;
@@ -118,18 +147,26 @@ RegionOfInterest g_border_edit_region;
 
 @implementation SidescopesPickerView
 
-// 0 = pick a window, 1 = draw, 2 = pick a face. Face mode is offered
-// even when no face was found: the honest answer is the empty overlay
-// saying so, not a key that silently does nothing.
+// 0 = pick a window, 1 = draw, 2 = pick a face, 3 = pin one color,
+// 4 = pin colors until ESC. Face mode is offered even when no face was
+// found: the honest answer is the empty overlay saying so, not a key
+// that silently does nothing.
 - (void)switchToMode:(int)mode {
     const BOOL draw = mode == 1;
     const BOOL faces = mode == 2;
-    if (self.drawMode == draw && self.facesMode == faces) return;
+    const BOOL pin = mode >= 3;
+    const BOOL many = mode == 4;
+    if (self.drawMode == draw && self.facesMode == faces && self.pinMode == pin &&
+        self.pinMany == many)
+        return;
     self.drawMode = draw;
     self.facesMode = faces;
+    self.pinMode = pin;
+    self.pinMany = many;
     suggestions_ = faces ? faces_ : windows_;
     self.hoveredSuggestion = -1;
     self.dragging = NO;
+    self.chipValid = NO;
     [self.window invalidateCursorRectsForView:self];
     self.needsDisplay = YES;
 }
@@ -219,6 +256,55 @@ RegionOfInterest g_border_edit_region;
 
 - (void)drawRect:(NSRect)dirty {
     (void)dirty;
+    if (self.pinMode) {
+        // No dim: judging a color through a wash misleads. The whisper
+        // of alpha is load-bearing - the window server treats fully
+        // transparent pixels as click-through, and pin clicks belong to
+        // the overlay.
+        [[NSColor colorWithWhite:0 alpha:0.05] setFill];
+        NSRectFillUsingOperation(self.bounds, NSCompositingOperationCopy);
+        if (self.dragging) {
+            // A two-tone frame: the white line rides a dark halo so one
+            // of the tones survives any undimmed background.
+            const NSRect selection = [self selectionRect];
+            NSBezierPath* halo = [NSBezierPath bezierPathWithRect:selection];
+            halo.lineWidth = 3.0;
+            [[NSColor colorWithWhite:0.1 alpha:0.7] setStroke];
+            [halo stroke];
+            NSBezierPath* line = [NSBezierPath bezierPathWithRect:selection];
+            line.lineWidth = 1.0;
+            [[NSColor whiteColor] setStroke];
+            [line stroke];
+        }
+        if (self.chipValid && sidescopes::g_pin_chip_color) {
+            const NSRect chip = sidescopes::ChipRect(self.chipPoint, self.bounds);
+            const sidescopes::FloatColor& color = *sidescopes::g_pin_chip_color;
+            [[NSColor colorWithSRGBRed:color.r / 255.0
+                                 green:color.g / 255.0
+                                  blue:color.b / 255.0
+                                 alpha:1.0] setFill];
+            NSRectFillUsingOperation(chip, NSCompositingOperationCopy);
+            NSBezierPath* rim = [NSBezierPath bezierPathWithRect:chip];
+            rim.lineWidth = 2.0;
+            [[NSColor colorWithWhite:0.1 alpha:0.7] setStroke];
+            [rim stroke];
+            NSBezierPath* ring = [NSBezierPath bezierPathWithRect:chip];
+            ring.lineWidth = 1.0;
+            [[NSColor colorWithWhite:0.97 alpha:0.95] setStroke];
+            [ring stroke];
+        }
+        if (!self.dragging) {
+            NSString* secondary =
+                sidescopes::SupportsFaceDetection()
+                    ? @"[A] pick a window    [D] draw    [F] pick a face    [Esc] done"
+                    : @"[A] pick a window    [D] draw    [Esc] done";
+            [self drawBanner:self.pinMany ? @"Click or drag to pin colors"
+                                          : @"Click or drag to pin a color"
+                   secondary:secondary
+                preferCenter:NO];
+        }
+        return;
+    }
     if (!self.drawMode) {
         [[NSColor colorWithWhite:0 alpha:0.2] setFill];
         NSRectFillUsingOperation(self.bounds, NSCompositingOperationSourceOver);
@@ -292,10 +378,23 @@ RegionOfInterest g_border_edit_region;
 
 - (void)resetCursorRects {
     [self addCursorRect:self.bounds
-                 cursor:self.drawMode ? NSCursor.crosshairCursor : NSCursor.pointingHandCursor];
+                 cursor:self.drawMode || self.pinMode ? NSCursor.crosshairCursor
+                                                      : NSCursor.pointingHandCursor];
 }
 
 - (void)mouseMoved:(NSEvent*)event {
+    if (self.pinMode) {
+        // The chip follows at mouse rate; its color refreshes at frame
+        // rate through SetRegionPickChipColor.
+        const NSPoint point = [self convertPoint:event.locationInWindow fromView:nil];
+        NSRect changed = sidescopes::ChipRect(point, self.bounds);
+        if (self.chipValid)
+            changed = NSUnionRect(changed, sidescopes::ChipRect(self.chipPoint, self.bounds));
+        self.chipPoint = point;
+        self.chipValid = YES;
+        [self setNeedsDisplayInRect:NSInsetRect(changed, -4, -4)];
+        return;
+    }
     if (self.drawMode) return;
     const NSPoint point = [self convertPoint:event.locationInWindow fromView:nil];
     const NSInteger hovered = [self suggestionAtPoint:point];
@@ -315,6 +414,28 @@ RegionOfInterest g_border_edit_region;
 }
 
 - (void)mouseDragged:(NSEvent*)event {
+    if (self.pinMode) {
+        const NSPoint point = [self convertPoint:event.locationInWindow fromView:nil];
+        const NSRect previous = [self selectionRect];
+        NSRect changed = sidescopes::ChipRect(point, self.bounds);
+        if (self.chipValid)
+            changed = NSUnionRect(changed, sidescopes::ChipRect(self.chipPoint, self.bounds));
+        self.chipPoint = point;
+        self.chipValid = YES;
+        self.dragCurrent = point;
+        if (!self.dragging && (std::abs(self.dragCurrent.x - self.dragStart.x) > 4 ||
+                               std::abs(self.dragCurrent.y - self.dragStart.y) > 4)) {
+            self.dragging = YES;
+            self.needsDisplay = YES;  // full: the banner leaves
+            return;
+        }
+        if (self.dragging) {
+            changed = NSUnionRect(changed, previous);
+            changed = NSUnionRect(changed, [self selectionRect]);
+        }
+        [self setNeedsDisplayInRect:NSInsetRect(changed, -4, -4)];
+        return;
+    }
     if (!self.drawMode) return;
     self.dragCurrent = [self convertPoint:event.locationInWindow fromView:nil];
     // A real drag only starts after a few points of travel, so a stray
@@ -327,6 +448,27 @@ RegionOfInterest g_border_edit_region;
 
 - (void)mouseUp:(NSEvent*)event {
     const NSPoint point = [self convertPoint:event.locationInWindow fromView:nil];
+    if (self.pinMode) {
+        self.dragCurrent = point;
+        const NSRect selection = [self selectionRect];
+        if (self.dragging && selection.size.width > 8 && selection.size.height > 8) {
+            self.pinnedArea = selection;
+        } else {
+            // A click pins a cursor-sized patch, not a pixel:
+            // photographs are textured, and a point sample is a lottery
+            // across the vectorscope cloud.
+            self.pinnedArea =
+                NSMakeRect(point.x - sidescopes::kPinSamplePoints / 2,
+                           point.y - sidescopes::kPinSamplePoints / 2, sidescopes::kPinSamplePoints,
+                           sidescopes::kPinSamplePoints);
+        }
+        self.pinnedReady = YES;
+        if (self.dragging) {
+            self.dragging = NO;
+            self.needsDisplay = YES;  // full: the frame leaves, the banner returns
+        }
+        return;
+    }
     if (!self.drawMode) {
         const NSInteger hovered = [self suggestionAtPoint:point];
         if (hovered < 0) return;  // a miss keeps the picker open
@@ -369,6 +511,12 @@ RegionOfInterest g_border_edit_region;
         }
         if (key == 'f' || key == 'F') {
             sidescopes::SetRegionPickMode(sidescopes::RegionPickerMode::PickFaces);
+            return;
+        }
+        if (key == 'p' || key == 'P') {
+            const bool many = (event.modifierFlags & NSEventModifierFlagShift) != 0;
+            sidescopes::SetRegionPickMode(many ? sidescopes::RegionPickerMode::PinColors
+                                               : sidescopes::RegionPickerMode::PinColor);
             return;
         }
     }
@@ -761,8 +909,10 @@ bool BeginRegionPick(const std::vector<PickerDisplay>& displays, RegionPickerMod
     // global so every display shows the same mode.
     bool any_windows = false;
     for (const PickerDisplay& entry : displays) any_windows |= !entry.windows.empty();
-    const bool draw = initial_mode == RegionPickerMode::Draw ||
-                      (initial_mode == RegionPickerMode::PickWindows && !any_windows);
+    const bool pin =
+        initial_mode == RegionPickerMode::PinColor || initial_mode == RegionPickerMode::PinColors;
+    const bool draw = !pin && (initial_mode == RegionPickerMode::Draw ||
+                               (initial_mode == RegionPickerMode::PickWindows && !any_windows));
     const bool faces = initial_mode == RegionPickerMode::PickFaces;
 
     for (const PickerDisplay& entry : displays) {
@@ -798,7 +948,9 @@ bool BeginRegionPick(const std::vector<PickerDisplay>& displays, RegionPickerMod
         }
         view.drawMode = draw ? YES : NO;
         view.facesMode = faces ? YES : NO;
-        if (!draw) view->suggestions_ = faces ? view->faces_ : view->windows_;
+        view.pinMode = pin ? YES : NO;
+        view.pinMany = initial_mode == RegionPickerMode::PinColors ? YES : NO;
+        if (!draw && !pin) view->suggestions_ = faces ? view->faces_ : view->windows_;
         overlay.contentView = view;
         overlay.acceptsMouseMovedEvents = YES;
 
@@ -842,6 +994,12 @@ RegionPickPoll PollRegionPick() {
     RegionPickPoll poll;
     if (g_picker_overlays.empty()) return poll;
     poll.active = true;
+    // Mode flags come first: the finishing poll returns early below, and
+    // the caller needs them to know a pin-mode finish never means a
+    // region change. The overlays switch modes in lockstep; the front
+    // one speaks for all.
+    poll.pin_mode = g_picker_overlays.front().view.pinMode;
+    poll.pin_single = poll.pin_mode && !g_picker_overlays.front().view.pinMany;
 
     // The banner dodges this application's own windows; their rectangles
     // refresh on a gentle cadence - nothing visual tracks them anymore,
@@ -886,9 +1044,18 @@ RegionPickPoll PollRegionPick() {
         return poll;
     }
 
+    for (PickerOverlay& overlay : g_picker_overlays) {
+        if (!overlay.view.pinnedReady) continue;
+        overlay.view.pinnedReady = NO;
+        poll.pinned_area = region_from_view(overlay.view.pinnedArea, overlay.size);
+        poll.display_id = overlay.display_id;
+        break;
+    }
+
     // The cursor is only ever on one display, so at most one overlay has
     // something to preview.
     for (PickerOverlay& overlay : g_picker_overlays) {
+        if (overlay.view.pinMode) break;  // pin modes never preview a region
         if (!overlay.view.drawMode) {
             const NSInteger hovered = overlay.view.hoveredSuggestion;
             if (hovered >= 0 &&
@@ -920,7 +1087,44 @@ void SetRegionPickMode(RegionPickerMode mode) {
     for (PickerOverlay& overlay : g_picker_overlays) {
         [overlay.view switchToMode:(mode == RegionPickerMode::Draw        ? 1
                                     : mode == RegionPickerMode::PickFaces ? 2
+                                    : mode == RegionPickerMode::PinColor  ? 3
+                                    : mode == RegionPickerMode::PinColors ? 4
                                                                           : 0)];
+    }
+}
+
+void SetRegionPickChipColor(const std::optional<FloatColor>& color) {
+    const bool color_changed = color.has_value() != g_pin_chip_color.has_value() ||
+                               (color && g_pin_chip_color &&
+                                (std::lround(color->r) != std::lround(g_pin_chip_color->r) ||
+                                 std::lround(color->g) != std::lround(g_pin_chip_color->g) ||
+                                 std::lround(color->b) != std::lround(g_pin_chip_color->b)));
+    g_pin_chip_color = color;
+    if (g_picker_overlays.empty()) return;
+    const NSPoint cursor = NSEvent.mouseLocation;
+    for (PickerOverlay& overlay : g_picker_overlays) {
+        SidescopesPickerView* view = overlay.view;
+        if (!view.pinMode) continue;
+        const NSRect frame = overlay.window.frame;
+        const NSPoint local = NSMakePoint(cursor.x - frame.origin.x, cursor.y - frame.origin.y);
+        if (!NSPointInRect(local, view.bounds)) {
+            // The cursor crossed to another display; the chip left with
+            // it.
+            if (view.chipValid) {
+                view.chipValid = NO;
+                [view setNeedsDisplayInRect:NSInsetRect(ChipRect(view.chipPoint, view.bounds), -4,
+                                                        -4)];
+            }
+            continue;
+        }
+        if (!view.chipValid || color_changed) {
+            NSRect changed = ChipRect(local, view.bounds);
+            if (view.chipValid)
+                changed = NSUnionRect(changed, ChipRect(view.chipPoint, view.bounds));
+            view.chipPoint = local;
+            view.chipValid = YES;
+            [view setNeedsDisplayInRect:NSInsetRect(changed, -4, -4)];
+        }
     }
 }
 

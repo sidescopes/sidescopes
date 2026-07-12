@@ -10,8 +10,12 @@ namespace sidescopes {
 
 // How the region picker starts out. The mode is chosen up front by the
 // toolbar button (or key) that opened the picker; inside it, A, D, and F
-// switch between window picking, drawing, and face picking.
-enum class RegionPickerMode { PickWindows, Draw, PickFaces };
+// switch between window picking, drawing, and face picking, and P (with
+// Shift for the repeating flavor) switches to color pinning. The two pin
+// modes pick colors rather than regions: undimmed, since judging a color
+// through a dim wash misleads, and the capture region is never touched.
+// PinColor closes after one pin; PinColors stays until ESC.
+enum class RegionPickerMode { PickWindows, Draw, PickFaces, PinColor, PinColors };
 
 // What the picker offers on one display. Region percentages are always
 // relative to their own display.
@@ -33,6 +37,15 @@ struct RegionPickPoll {
     uint32_t display_id = 0;
     std::optional<RegionOfInterest> preview;
     std::optional<RegionOfInterest> confirmed;
+    // Color pinning. `pinned_area` is the display-percent rectangle to
+    // average and pin - a click delivers a cursor-sized patch, a drag
+    // the dragged area - reported as it happens, without finishing the
+    // pick. The mode flags describe the pickers' CURRENT state (overlay
+    // keys switch modes mid-pick): while `pin_mode` is set the caller
+    // must not treat previews or a finish as region changes.
+    std::optional<RegionOfInterest> pinned_area;
+    bool pin_mode = false;
+    bool pin_single = false;
 };
 
 // Screenshot-style selection spanning every display at once: each gets
@@ -57,6 +70,12 @@ void CancelRegionPick();
 
 // Switches an active pick between its modes; no-op when none is active.
 void SetRegionPickMode(RegionPickerMode mode);
+
+// The live color for the pin modes' cursor chip, pushed by the
+// application each frame: the sample comes from the capture frame, so
+// the chip previews exactly what a click would pin. Ignored outside the
+// pin modes.
+void SetRegionPickChipColor(const std::optional<FloatColor>& color);
 
 // Persistent border around the monitored region so users can see what the
 // scopes are reading. Drawn OUTSIDE the region so the border itself never
