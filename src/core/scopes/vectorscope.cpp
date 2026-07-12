@@ -199,11 +199,22 @@ void Vectorscope::MapBinsToImage(uint64_t sample_count) {
         float densest_narrow = 0.0f;
         for (const float count : smoothed_) densest_narrow = std::max(densest_narrow, count);
         if (densest_narrow > 0.0f) {
+            // One nominal sample's weight, scaled to the actual sample
+            // count so the trace stays invariant to the sampling stride.
+            const float sample_floor = static_cast<float>(sample_count) *
+                                       static_cast<float>(256.0 / kReferenceSampleCount);
             for (std::size_t i = 0; i < smoothed_.size(); ++i) {
-                const float density = smoothed_[i] / densest_narrow;
+                // The wide estimate may redistribute, never amplify:
+                // next to the razor-thin ridges dense content forms, the
+                // binomial passes leak the ridge's mass outward, and an
+                // uncapped blend would paint a bright halo hundreds of
+                // times above the cells' own evidence. A floor of about
+                // one sample's weight keeps empty tail cells glowing.
+                const float capped = std::min(wide[i], 3.0f * smoothed_[i] + sample_floor);
+                const float density = capped / densest_narrow;
                 const float t = std::clamp((density - 0.001f) / (0.02f - 0.001f), 0.0f, 1.0f);
                 const float blend = t * t * (3.0f - 2.0f * t);  // smoothstep
-                smoothed_[i] = blend * smoothed_[i] + (1.0f - blend) * wide[i];
+                smoothed_[i] = blend * smoothed_[i] + (1.0f - blend) * capped;
             }
         }
     }
