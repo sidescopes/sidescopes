@@ -1935,7 +1935,11 @@ int main() {
                                       IM_COL32(0, 0, 0, 220), 0.0f, 0, 2.0f);
                         draw->AddRect(lo, hi, IM_COL32(235, 235, 235, 235), 0.0f, 0, 1.5f);
                     }
+                    // Text centers against the taller swatch instead of
+                    // hanging from the row's top edge.
+                    const float text_drop = (line_height - ImGui::GetFontSize()) / 2.0f;
                     ImGui::SameLine();
+                    ImGui::SetCursorPosY(ImGui::GetCursorPosY() + text_drop);
                     push_hex_font();
                     ImGui::TextUnformatted(pin_hex);
                     pop_hex_font();
@@ -1962,6 +1966,7 @@ int main() {
                                           static_cast<int>(std::lround(deltas[channel])));
                         ImGui::SameLine(deltas_start + channel * (delta_column + column_gap) +
                                         delta_column - ImGui::CalcTextSize(delta).x);
+                        ImGui::SetCursorPosY(ImGui::GetCursorPosY() + text_drop);
                         ImGui::TextDisabled("%s", delta);
                         ImGui::SetItemTooltip("live minus pinned, per channel");
                     }
