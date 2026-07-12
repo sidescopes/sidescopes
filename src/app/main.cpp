@@ -1398,7 +1398,15 @@ int main() {
             }
             if (pressed(shortcuts.vectorscope_zoom))
                 vectorscope_zoom = vectorscope_zoom >= 4 ? 1 : vectorscope_zoom * 2;
-            if (pressed(shortcuts.full_region)) reset_region_to_full();
+            if (pressed(shortcuts.full_region)) {
+                // Escape peels back one layer at a time: the settings
+                // window first, the drawn region only when nothing is
+                // stacked above it.
+                if (show_settings)
+                    show_settings = false;
+                else
+                    reset_region_to_full();
+            }
         }
 
         std::snprintf(tooltip, sizeof(tooltip), "Draw an area (%s)", shortcuts.draw_region.c_str());
