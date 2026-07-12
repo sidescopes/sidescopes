@@ -1354,6 +1354,9 @@ int main() {
             // Cmd+comma opens settings everywhere on macOS.
             if (ImGui::IsKeyPressed(ImGuiKey_Comma, false)) show_settings = true;
         }
+        if (PlatformQuitsOnControlQ() && modifiers.control && !modifiers.command &&
+            !modifiers.option && !io.WantTextInput && ImGui::IsKeyPressed(ImGuiKey_Q, false))
+            glfwSetWindowShouldClose(window, GLFW_TRUE);
         if (!io.WantTextInput && !system_chord) {
             if (pressed(shortcuts.vectorscope))
                 choose_scope(ScopeGlyph::Vectorscope, stack_modifier);

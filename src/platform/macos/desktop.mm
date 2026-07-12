@@ -103,6 +103,10 @@ bool PlatformClosesWindowOnCommandW() {
     return true;
 }
 
+bool PlatformQuitsOnControlQ() {
+    return false;
+}
+
 void OpenScreenRecordingSettings() {
     NSURL* url = [NSURL
         URLWithString:

@@ -187,6 +187,10 @@ bool PlatformClosesWindowOnCommandW() {
     return false;
 }
 
+bool PlatformQuitsOnControlQ() {
+    return true;
+}
+
 void OpenScreenRecordingSettings() {
     // Reading the desktop needs no permission on Windows.
 }

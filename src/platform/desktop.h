@@ -76,6 +76,11 @@ ModifierState CurrentModifiers();
 // title bar; a Ctrl+W there is no convention for utility windows.
 bool PlatformClosesWindowOnCommandW();
 
+// Whether Ctrl+Q quits (Windows, where Alt+F4 is the only system
+// affordance and frequent quit-and-relaunch deserves a lighter chord).
+// On macOS the application menu's Cmd+Q already owns quitting.
+bool PlatformQuitsOnControlQ();
+
 // Absolute paths of system fonts suitable for the interface, best first;
 // the application loads the first one that exists.
 std::vector<std::string> InterfaceFontFiles();
