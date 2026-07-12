@@ -168,6 +168,18 @@ private:
         auto last_publish = std::chrono::steady_clock::now() - minimum_interval;
 
         while (!stop_requested_.load()) {
+            // Pace before acquiring, not after: a frame acquired early and
+            // dropped would be the freshest desktop there is, and when the
+            // screen goes quiet right then, nothing else ever arrives - the
+            // scopes would sit one frame stale. Sleeping first means every
+            // frame actually acquired is published.
+            const auto due = last_publish + minimum_interval;
+            const auto now = std::chrono::steady_clock::now();
+            if (now < due) {
+                std::this_thread::sleep_for(due - now);
+                continue;
+            }
+
             DXGI_OUTDUPL_FRAME_INFO info{};
             ComPtr<IDXGIResource> resource;
             const HRESULT acquired = duplication->AcquireNextFrame(100, &info, &resource);
@@ -181,8 +193,11 @@ private:
                 return;
             }
 
-            const auto now = std::chrono::steady_clock::now();
-            if (now - last_publish < minimum_interval) {
+            // A zero present time is a metadata-only delivery - the mouse
+            // moved, the image did not. Copying the unchanged desktop just
+            // for the analysis hash to discard it would bill a full-screen
+            // copy to every cursor twitch.
+            if (info.LastPresentTime.QuadPart == 0) {
                 duplication->ReleaseFrame();
                 continue;
             }

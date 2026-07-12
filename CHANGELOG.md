@@ -63,3 +63,6 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Windows: region overlays repaint incrementally, so drawing a selection
   and moving or resizing the region border track the cursor instead of
   trailing it on high-resolution displays.
+- Windows: cursor-only desktop updates no longer cost a full-screen
+  copy, and the paced capture stream always publishes the newest frame
+  instead of dropping the last one before the screen goes quiet.
