@@ -837,6 +837,8 @@ int main() {
     int pending_columns = 0;
     int pending_image_height = 0;
     int pending_vectorscope = 0;
+    int pending_hist_width = 0;
+    int pending_hist_height = 0;
     double detail_pending_since = 0.0;
     const auto upload_scope = [&](std::unique_ptr<ScopeTexture>& texture, const ScopeImage& image) {
         if (image.width <= 0 || image.height <= 0) return;
@@ -1113,6 +1115,17 @@ int main() {
                                                                                  : 512);
                 want_height = wf_height >= 560.0f ? 512 : kWaveformLevels;
             }
+            int want_hist_width = analysis.histogram.image_width;
+            int want_hist_height = analysis.histogram.image_height;
+            if (scope_shown(ScopeGlyph::Histogram)) {
+                // Near one texture pixel per screen pixel keeps the
+                // outline's width even on flats and steep slopes alike.
+                const ImVec2 scope_pane = pane(ScopeGlyph::Histogram);
+                want_hist_width = scope_pane.x >= 1400.0f  ? 2048
+                                  : scope_pane.x >= 500.0f ? 1024
+                                                           : 512;
+                want_hist_height = scope_pane.y >= 560.0f ? 768 : 384;
+            }
             int want_vectorscope = analysis.vectorscope.size;
             if (scope_shown(ScopeGlyph::Vectorscope)) {
                 // Purely a display resolution: accumulation stays on the
@@ -1125,19 +1138,27 @@ int main() {
 
             const bool differs = want_columns != analysis.waveform.columns ||
                                  want_height != analysis.waveform.image_height ||
-                                 want_vectorscope != analysis.vectorscope.size;
+                                 want_vectorscope != analysis.vectorscope.size ||
+                                 want_hist_width != analysis.histogram.image_width ||
+                                 want_hist_height != analysis.histogram.image_height;
             if (!differs) {
                 pending_columns = 0;
             } else if (pending_columns != want_columns || pending_image_height != want_height ||
-                       pending_vectorscope != want_vectorscope) {
+                       pending_vectorscope != want_vectorscope ||
+                       pending_hist_width != want_hist_width ||
+                       pending_hist_height != want_hist_height) {
                 pending_columns = want_columns;
                 pending_image_height = want_height;
                 pending_vectorscope = want_vectorscope;
+                pending_hist_width = want_hist_width;
+                pending_hist_height = want_hist_height;
                 detail_pending_since = glfwGetTime();
             } else if (glfwGetTime() - detail_pending_since > 0.4) {
                 analysis.waveform.columns = want_columns;
                 analysis.waveform.image_height = want_height;
                 analysis.vectorscope.size = want_vectorscope;
+                analysis.histogram.image_width = want_hist_width;
+                analysis.histogram.image_height = want_hist_height;
                 analysis_dirty = true;
             }
         }

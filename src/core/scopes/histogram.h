@@ -20,6 +20,12 @@ struct HistogramSettings {
     HistogramStyle style = HistogramStyle::Combined;
     // Sample every Nth pixel horizontally and vertically (1..8).
     int sampling_stride = 1;
+    // Display image resolution. Sized near the pane, the plot renders
+    // close to one texture pixel per screen pixel, so the outline keeps
+    // one width on flats and steep slopes alike - a fixed texture
+    // stretched anisotropically turned the stroke elliptical.
+    int image_width = 2048;
+    int image_height = 768;
 };
 
 // Classic RGB histogram, the way photo editors draw it: one column per
@@ -35,13 +41,11 @@ struct HistogramSettings {
 class Histogram {
 public:
     static constexpr int kBins = 256;
-    // The plot is supersampled horizontally - eight image columns per
-    // bin, heights following a Catmull-Rom spline through the bin centers,
-    // top edge anti-aliased - so the histogram reads as a plotted
-    // function rather than a bar chart, without kinks at the bins.
+    // Defaults: supersampled horizontally - several image columns per
+    // bin, heights following a Catmull-Rom spline through the bin
+    // centers - so the histogram reads as a plotted function rather
+    // than a bar chart, without kinks at the bins.
     static constexpr int kImageWidth = kBins * 8;
-    // Tall enough that a full-window pane on a Retina display never
-    // stretches the plot into visible softness.
     static constexpr int kHeight = 768;
 
     Histogram();
@@ -53,7 +57,11 @@ public:
 private:
     void MapBinsToImage();
 
+    void Resize(int width, int height);
+
     HistogramSettings settings_;
+    int width_ = kImageWidth;
+    int height_ = kHeight;
     // Three planes of kBins counts: red, green, blue.
     std::vector<uint32_t> bins_;
     ScopeImage image_;

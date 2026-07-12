@@ -6,14 +6,24 @@
 namespace sidescopes {
 
 Histogram::Histogram() : bins_(static_cast<std::size_t>(kBins) * 3, 0) {
-    image_.width = kImageWidth;
-    image_.height = kHeight;
-    image_.rgba.assign(static_cast<std::size_t>(kImageWidth) * kHeight * 4, 0);
+    Resize(kImageWidth, kHeight);
+}
+
+void Histogram::Resize(int width, int height) {
+    width_ = width;
+    height_ = height;
+    image_.width = width_;
+    image_.height = height_;
+    image_.rgba.assign(static_cast<std::size_t>(width_) * height_ * 4, 0);
 }
 
 void Histogram::Configure(const HistogramSettings& settings) {
     settings_ = settings;
     settings_.sampling_stride = std::clamp(settings_.sampling_stride, 1, 8);
+    settings_.image_width = std::clamp(settings_.image_width, kBins, 4096);
+    settings_.image_height = std::clamp(settings_.image_height, 192, 1536);
+    if (settings_.image_width != width_ || settings_.image_height != height_)
+        Resize(settings_.image_width, settings_.image_height);
 }
 
 void Histogram::Accumulate(const FrameView& frame, IntRect region) {
@@ -65,7 +75,7 @@ void Histogram::MapBinsToImage() {
     // tonal tails stay visible. Parameter-free by design.
     const auto bar_height = [&](double count) -> double {
         if (count <= 0.0 || densest <= 0.0) return 0.0;
-        return std::max(1.0, std::sqrt(count / densest) * kHeight);
+        return std::max(1.0, std::sqrt(count / densest) * height_);
     };
 
     // Bin heights once, then the filled area under a Catmull-Rom spline
@@ -86,17 +96,16 @@ void Histogram::MapBinsToImage() {
     // and all three make a quiet neutral gray. Gradients were tried and
     // retired: they read as texture and drifted on varied photos.
     const bool split = settings_.style == HistogramStyle::PerChannel;
-    const int band_height = split ? kHeight / 3 : kHeight;
+    const int band_height = split ? height_ / 3 : height_;
     constexpr double kFillValue = 118.0;
     constexpr double kOutlineValue = 235.0;
     // Curve tops for every column first: the outline stroke must span
     // the gap between neighboring tops, or steep slopes and sharp peaks
     // break it into dashes.
     static thread_local std::vector<double> tops;
-    tops.assign(static_cast<std::size_t>(kImageWidth) * 3, static_cast<double>(kHeight));
-    for (int x = 0; x < kImageWidth; ++x) {
-        const double bin_position =
-            std::clamp((x + 0.5) * kBins / kImageWidth - 0.5, 0.0, kBins - 1.0);
+    tops.assign(static_cast<std::size_t>(width_) * 3, static_cast<double>(height_));
+    for (int x = 0; x < width_; ++x) {
+        const double bin_position = std::clamp((x + 0.5) * kBins / width_ - 0.5, 0.0, kBins - 1.0);
         const int center = static_cast<int>(bin_position);
         const double t = bin_position - center;
         for (int channel = 0; channel < 3; ++channel) {
@@ -115,11 +124,11 @@ void Histogram::MapBinsToImage() {
             // stays within the panel, and stretches between empty bins
             // stay empty.
             if (p1 <= 0.0 && p2 <= 0.0) height = 0.0;
-            height = std::clamp(height, 0.0, static_cast<double>(kHeight));
+            height = std::clamp(height, 0.0, static_cast<double>(height_));
             if (split) height /= 3.0;
             if (height <= 0.0) continue;
-            const int band_bottom = split ? (channel + 1) * band_height : kHeight;
-            tops[static_cast<std::size_t>(channel) * kImageWidth + x] = band_bottom - height;
+            const int band_bottom = split ? (channel + 1) * band_height : height_;
+            tops[static_cast<std::size_t>(channel) * width_ + x] = band_bottom - height;
         }
     }
     // Squared distance from a point to a segment, for the outline's
@@ -136,16 +145,15 @@ void Histogram::MapBinsToImage() {
         return std::sqrt(dx * dx + dy * dy);
     };
     std::fill(image_.rgba.begin(), image_.rgba.end(), uint8_t{0});
-    for (int x = 0; x < kImageWidth; ++x) {
+    for (int x = 0; x < width_; ++x) {
         for (int channel = 0; channel < 3; ++channel) {
-            const double* channel_tops =
-                tops.data() + static_cast<std::size_t>(channel) * kImageWidth;
+            const double* channel_tops = tops.data() + static_cast<std::size_t>(channel) * width_;
             // Red on top, then green, then blue, when split.
-            const int band_bottom = split ? (channel + 1) * band_height : kHeight;
+            const int band_bottom = split ? (channel + 1) * band_height : height_;
             const double top = channel_tops[x];
             if (top >= band_bottom) continue;
             const double left = channel_tops[std::max(0, x - 1)];
-            const double right = channel_tops[std::min(kImageWidth - 1, x + 1)];
+            const double right = channel_tops[std::min(width_ - 1, x + 1)];
             const double lowest = std::min({top, left, right});
             const double highest = std::max({top, left, right});
             // The fill's top edge fades over a few rows rather than one:
@@ -175,12 +183,12 @@ void Histogram::MapBinsToImage() {
                 const double value = std::max(kFillValue * coverage, kOutlineValue * stroke);
                 if (value <= 0.0) continue;
                 uint8_t* pixel =
-                    &image_.rgba[(static_cast<std::size_t>(row) * kImageWidth + x) * 4 + channel];
+                    &image_.rgba[(static_cast<std::size_t>(row) * width_ + x) * 4 + channel];
                 *pixel = static_cast<uint8_t>(std::max<double>(*pixel, value));
             }
         }
-        for (int row = 0; row < kHeight; ++row)
-            image_.rgba[(static_cast<std::size_t>(row) * kImageWidth + x) * 4 + 3] = 255;
+        for (int row = 0; row < height_; ++row)
+            image_.rgba[(static_cast<std::size_t>(row) * width_ + x) * 4 + 3] = 255;
     }
     ++image_.sequence;
 }
