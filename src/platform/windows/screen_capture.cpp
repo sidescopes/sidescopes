@@ -13,6 +13,7 @@
 
 #include <d3d11.h>
 #include <dxgi1_2.h>
+#include <dxgi1_5.h>
 #include <windows.h>
 #include <wrl/client.h>
 
@@ -127,22 +128,32 @@ private:
             ReportStatus("could not create a capture device");
             return;
         }
+        // The engines assume 8-bit BGRA. On an HDR display plain
+        // DuplicateOutput delivers half-float scRGB, so ask for BGRA
+        // explicitly where the system can tone-map for us (Windows 10
+        // 1703+); older systems fall back to the plain call, whose format
+        // is verified below and refused loudly rather than read as
+        // garbage.
         ComPtr<IDXGIOutputDuplication> duplication;
-        if (FAILED(output1->DuplicateOutput(device.Get(), &duplication))) {
+        ComPtr<IDXGIOutput5> output5;
+        HRESULT duplicated = E_NOINTERFACE;
+        if (SUCCEEDED(output.As(&output5))) {
+            const DXGI_FORMAT formats[] = {DXGI_FORMAT_B8G8R8A8_UNORM};
+            duplicated = output5->DuplicateOutput1(device.Get(), 0, 1, formats, &duplication);
+        }
+        if (FAILED(duplicated)) duplicated = output1->DuplicateOutput(device.Get(), &duplication);
+        if (FAILED(duplicated)) {
             ReportStatus("could not duplicate the display");
             return;
         }
         DXGI_OUTDUPL_DESC duplication_description{};
         duplication->GetDesc(&duplication_description);
-        // The engines assume upright 8-bit BGRA. HDR displays can deliver
-        // half-float scRGB and rotated outputs deliver rotated rows; both
-        // would be read as garbage, so they fail loudly until the port
-        // handles them (DuplicateOutput1 with an explicit SDR format list,
-        // and row rotation).
         if (duplication_description.ModeDesc.Format != DXGI_FORMAT_B8G8R8A8_UNORM) {
             ReportStatus("unsupported capture format (HDR display?)");
             return;
         }
+        // Rotated outputs deliver rotated rows: colors would survive but
+        // the waveform axes and the region mapping would not.
         if (duplication_description.Rotation != DXGI_MODE_ROTATION_IDENTITY &&
             duplication_description.Rotation != DXGI_MODE_ROTATION_UNSPECIFIED) {
             ReportStatus("rotated displays are not supported yet");
@@ -180,6 +191,18 @@ private:
             if (SUCCEEDED(resource.As(&texture))) {
                 D3D11_TEXTURE2D_DESC description{};
                 texture->GetDesc(&description);
+                // A resolution change usually kills the stream with
+                // ACCESS_LOST, but a driver may also start delivering
+                // different-size frames in place; copying those into the
+                // old staging texture would misbehave silently.
+                if (staging) {
+                    D3D11_TEXTURE2D_DESC staging_current{};
+                    staging->GetDesc(&staging_current);
+                    if (staging_current.Width != description.Width ||
+                        staging_current.Height != description.Height ||
+                        staging_current.Format != description.Format)
+                        staging.Reset();
+                }
                 if (!staging) {
                     D3D11_TEXTURE2D_DESC staging_description = description;
                     staging_description.Usage = D3D11_USAGE_STAGING;
