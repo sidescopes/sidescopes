@@ -118,8 +118,15 @@ void Histogram::MapBinsToImage() {
             for (int row = first_touched; row < band_bottom; ++row) {
                 const double coverage = std::clamp((row + 1.0 - top) / kFeather, 0.0, 1.0);
                 if (coverage <= 0.0) continue;
+                // The fill fades from the curve toward the baseline, so
+                // brightness carries meaning the way it does on every
+                // other scope - proximity to the plot - while the crisp
+                // curve edge stays, because a histogram draws a function,
+                // not a density cloud.
+                const double depth = std::max(0.0, row + 0.5 - top);
+                const double fade = 1.0 - 0.72 * std::min(1.0, depth / std::max(1.0, height));
                 image_.rgba[(static_cast<std::size_t>(row) * kImageWidth + x) * 4 + channel] =
-                    static_cast<uint8_t>(210 * coverage);
+                    static_cast<uint8_t>(210 * fade * coverage);
             }
         }
         for (int row = 0; row < kHeight; ++row)
