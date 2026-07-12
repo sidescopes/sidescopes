@@ -543,15 +543,36 @@ int main() {
     });
 
     uint32_t capture_display = 0;
+    // The display the user chose to scope, held across stream restarts.
+    // Zero means "whichever the backend lists first" - the main display.
+    uint32_t desired_display = 0;
     const bool permission_granted = capture->RequestPermission() == CapturePermission::Granted;
     const auto start_capture = [&]() -> bool {
         const auto targets = capture->ListTargets();
         if (targets.empty()) return false;
-        if (!capture->Start(targets.front(), 30, mailbox)) return false;
-        capture_display = targets.front().display_id;
+        const CaptureTarget* target = &targets.front();
+        if (desired_display != 0) {
+            const auto wanted =
+                std::find_if(targets.begin(), targets.end(), [&](const CaptureTarget& candidate) {
+                    return candidate.display_id == desired_display;
+                });
+            if (wanted == targets.end()) {
+                // The chosen display is disconnected. The scopes pause on
+                // the banner rather than silently jumping to another
+                // screen; the retry loop resumes the same region the
+                // moment the display returns.
+                std::lock_guard lock(status_mutex);
+                capture_status = "display disconnected - scopes resume when it returns";
+                return false;
+            }
+            target = &*wanted;
+        }
+        if (!capture->Start(*target, 30, mailbox)) return false;
+        capture_display = target->display_id;
+        desired_display = target->display_id;
         {
             std::lock_guard lock(status_mutex);
-            capture_status = "capturing " + targets.front().description;
+            capture_status = "capturing " + target->description;
         }
         capture_dead.store(false);
         return true;
@@ -1296,16 +1317,44 @@ int main() {
             SetRegionPickMode(*want_region_pick);
             want_region_pick.reset();
         }
+        // The picker opens on the display under the cursor - photographers
+        // park it near the editor - and scoping follows the picker: a pick
+        // aimed at another display switches capture there first, so the
+        // live preview on the scopes stays truthful. The old region was
+        // percentages of the old display and means nothing on this one.
+        bool switched_display = false;
+        if (want_region_pick && capture_display != 0) {
+            const uint32_t pick_display = DisplayUnderCursor().value_or(capture_display);
+            if (pick_display != capture_display) {
+                HideRegionBorder();
+                desired_display = pick_display;
+                analysis.region = RegionOfInterest{};
+                analysis_dirty = true;
+                capture->Stop();
+                if (start_capture()) {
+                    switched_display = true;
+                } else {
+                    // The switch failed (display just vanished?); the
+                    // retry loop owns recovery, and a picker without a
+                    // capture stream would preview nothing.
+                    capture_dead.store(true);
+                    next_capture_retry = glfwGetTime() + 2.0;
+                    want_region_pick.reset();
+                }
+            }
+        }
         if (want_region_pick && capture_display != 0) {
             HideRegionBorder();
             // The previous region's border must not leak into the analyzed
             // frame: its strokes read as rectangle edges and cut suggestions
             // short at the old region. The latest captured frame may predate
             // the hide, so wait briefly for one taken after the border left
-            // the screen. The 60 ms floor outlasts an in-flight pre-hide
-            // frame's capture-to-delivery; the 300 ms cap keeps the picker
+            // the screen - and a just-switched stream needs the same grace
+            // before its first frame of the new display arrives. The 60 ms
+            // floor outlasts an in-flight pre-hide frame's
+            // capture-to-delivery; the 300 ms cap keeps the picker
             // responsive if the capture stream has stalled.
-            if (!is_full_region()) {
+            if (!is_full_region() || switched_display) {
                 uint64_t stale_sequence = 0;
                 worker.WithLatestFrame(
                     [&](const FrameView& view) { stale_sequence = view.sequence; });
@@ -1316,7 +1365,9 @@ int main() {
                     uint64_t sequence = stale_sequence;
                     worker.WithLatestFrame(
                         [&](const FrameView& view) { sequence = view.sequence; });
-                    if (sequence > stale_sequence && elapsed >= 0.06) break;
+                    // Inequality, not greater-than: a freshly switched
+                    // stream counts its frames from one again.
+                    if (sequence != stale_sequence && elapsed >= 0.06) break;
                     std::this_thread::sleep_for(std::chrono::milliseconds(15));
                 }
             }

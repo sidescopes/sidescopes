@@ -62,6 +62,18 @@ std::optional<DisplayGeometry> GeometryOfDisplay(uint32_t display_id) {
     return DisplayGeometry{bounds.origin.x, bounds.origin.y, bounds.size.width, bounds.size.height};
 }
 
+std::optional<uint32_t> DisplayUnderCursor() {
+    const auto cursor = GlobalCursorPosition();
+    if (!cursor) return std::nullopt;
+    CGDirectDisplayID display = 0;
+    uint32_t matches = 0;
+    if (CGGetDisplaysWithPoint(CGPointMake(cursor->x, cursor->y), 1, &display, &matches) !=
+            kCGErrorSuccess ||
+        matches == 0)
+        return std::nullopt;
+    return display;
+}
+
 std::string PreferencesFilePath() {
     const char* home = std::getenv("HOME");
     return std::string(home ? home : ".") +
@@ -118,6 +130,14 @@ void ObserveSystemWake(std::function<void()> callback) {
                 usingBlock:observe];
     [[NSDistributedNotificationCenter defaultCenter]
         addObserverForName:@"com.apple.screenIsUnlocked"
+                    object:nil
+                     queue:[NSOperationQueue mainQueue]
+                usingBlock:observe];
+    // Display topology changes (a monitor connected, removed, or given a
+    // new resolution) can leave the stream running against a stale
+    // configuration; a restart is cheap and re-resolves the display.
+    [[NSNotificationCenter defaultCenter]
+        addObserverForName:NSApplicationDidChangeScreenParametersNotification
                     object:nil
                      queue:[NSOperationQueue mainQueue]
                 usingBlock:observe];

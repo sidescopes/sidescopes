@@ -43,6 +43,10 @@ std::optional<DesktopPoint> GlobalCursorPosition();
 
 std::optional<DisplayGeometry> GeometryOfDisplay(uint32_t display_id);
 
+// The display the cursor is on right now. Photographers park the cursor
+// near the editor, so this is where region picking should open.
+std::optional<uint32_t> DisplayUnderCursor();
+
 // Preferences file location in the platform's convention.
 std::string PreferencesFilePath();
 

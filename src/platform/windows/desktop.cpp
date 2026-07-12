@@ -140,6 +140,19 @@ std::optional<DisplayGeometry> GeometryOfDisplay(uint32_t display_id) {
                            static_cast<double>(monitor->rect.bottom) - monitor->rect.top};
 }
 
+std::optional<uint32_t> DisplayUnderCursor() {
+    POINT point{};
+    if (!GetCursorPos(&point)) return std::nullopt;
+    HMONITOR monitor = MonitorFromPoint(point, MONITOR_DEFAULTTONULL);
+    if (!monitor) return std::nullopt;
+    MONITORINFOEXW info{};
+    info.cbSize = sizeof(info);
+    if (!GetMonitorInfoW(monitor, &info)) return std::nullopt;
+    const uint32_t display_id = DisplayIdFromDeviceName(info.szDevice);
+    if (display_id == 0) return std::nullopt;
+    return display_id;
+}
+
 namespace {
 
 std::string ApplicationDataDirectory() {
