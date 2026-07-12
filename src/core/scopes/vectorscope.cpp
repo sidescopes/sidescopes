@@ -222,11 +222,10 @@ void Vectorscope::MapBinsToImage(uint64_t sample_count) {
         }
     }
 
-    // A finer display image interpolates the code grid with a separable
-    // Catmull-Rom, the same reconstruction the waveform uses for its
-    // level axis: the cloud gets the large pane's smoothness, and peak
-    // positions keep the sub-code placement the fractional splat gave
-    // them, without pretending to resolve chroma below one code.
+    // A finer display image interpolates the code grid bilinearly and
+    // settles the diamond artifacts with a light binomial at display
+    // resolution: unlike a cubic, this can neither ring at density
+    // cliffs nor staircase along thin diagonal ridges.
     const float* densities = smoothed_.data();
     int density_size = kSize;
     if (size_ > kSize) {
@@ -235,45 +234,37 @@ void Vectorscope::MapBinsToImage(uint64_t sample_count) {
             x = std::clamp(x, 0, kSize - 1);
             return smoothed_[static_cast<std::size_t>(y) * kSize + x];
         };
-        const auto weights = [](float t, float w[4]) {
-            w[0] = ((-0.5f * t + 1.0f) * t - 0.5f) * t;
-            w[1] = (1.5f * t - 2.5f) * t * t + 1.0f;
-            w[2] = ((-1.5f * t + 2.0f) * t + 0.5f) * t;
-            w[3] = (0.5f * t - 0.5f) * t * t;
-        };
         const float step = static_cast<float>(kSize) / static_cast<float>(size_);
         for (int py = 0; py < size_; ++py) {
             const float sy = (static_cast<float>(py) + 0.5f) * step - 0.5f;
             const int base_y = static_cast<int>(std::floor(sy));
-            float wy[4];
-            weights(sy - static_cast<float>(base_y), wy);
+            const float ty = sy - static_cast<float>(base_y);
             for (int px = 0; px < size_; ++px) {
                 const float sx = (static_cast<float>(px) + 0.5f) * step - 0.5f;
                 const int base_x = static_cast<int>(std::floor(sx));
-                float wx[4];
-                weights(sx - static_cast<float>(base_x), wx);
-                float value = 0.0f;
-                for (int j = 0; j < 4; ++j) {
-                    float row_value = 0.0f;
-                    for (int i = 0; i < 4; ++i)
-                        row_value += wx[i] * at(base_y - 1 + j, base_x - 1 + i);
-                    value += wy[j] * row_value;
-                }
-                // The spline's negative lobes ring hard at density
-                // cliffs - the display pipeline piles sky gradients four
-                // orders of magnitude above their neighbors, and the
-                // undershoot renders as black pits inside a bright
-                // cloud. Clamping to the hull of the four surrounding
-                // cells keeps the interpolation from inventing extrema.
-                const float c00 = at(base_y, base_x);
-                const float c01 = at(base_y, base_x + 1);
-                const float c10 = at(base_y + 1, base_x);
-                const float c11 = at(base_y + 1, base_x + 1);
-                const float lo = std::min(std::min(c00, c01), std::min(c10, c11));
-                const float hi = std::max(std::max(c00, c01), std::max(c10, c11));
-                upsampled_[static_cast<std::size_t>(py) * size_ + px] = std::clamp(value, lo, hi);
+                const float tx = sx - static_cast<float>(base_x);
+                const float top = at(base_y, base_x) * (1.0f - tx) + at(base_y, base_x + 1) * tx;
+                const float bottom =
+                    at(base_y + 1, base_x) * (1.0f - tx) + at(base_y + 1, base_x + 1) * tx;
+                upsampled_[static_cast<std::size_t>(py) * size_ + px] =
+                    top * (1.0f - ty) + bottom * ty;
             }
         }
+        std::vector<float> settled(upsampled_.size(), 0.0f);
+        for (int py = 0; py < size_; ++py) {
+            for (int px = 0; px < size_; ++px) {
+                const auto up = [&](int y, int x) -> float {
+                    if (y < 0 || y >= size_ || x < 0 || x >= size_) return 0.0f;
+                    return upsampled_[static_cast<std::size_t>(y) * size_ + x];
+                };
+                const auto row = [&](int y) {
+                    return up(y, px - 1) + 2.0f * up(y, px) + up(y, px + 1);
+                };
+                settled[static_cast<std::size_t>(py) * size_ + px] =
+                    0.5f * up(py, px) + 0.5f * (row(py - 1) + 2.0f * row(py) + row(py + 1)) / 16.0f;
+            }
+        }
+        upsampled_.swap(settled);
         densities = upsampled_.data();
         density_size = size_;
     }
