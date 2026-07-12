@@ -1772,8 +1772,10 @@ int main() {
                 last_activity = glfwGetTime();
             } else if (edit.region) {
                 analysis.region = *edit.region;
+                // The analysis-dirty path below syncs the border this same
+                // iteration; a second sync here would double the border
+                // work on every drag step.
                 analysis_dirty = true;
-                sync_region_border();
                 last_activity = glfwGetTime();
             }
         }

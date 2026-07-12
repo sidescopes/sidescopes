@@ -26,6 +26,7 @@ using std::min;
 
 #include <cmath>
 #include <limits>
+#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
@@ -99,7 +100,10 @@ double UiScale(HWND window) {
 }
 
 // A layered window's backing store: a premultiplied 32-bit DIB wrapped in
-// a GDI+ surface, pushed to the window with per-pixel alpha.
+// a GDI+ surface, pushed to the window with per-pixel alpha. Surfaces are
+// cached across paints: at 4K the DIB is tens of megabytes, and both the
+// allocation and the full-surface push are far too expensive to repeat on
+// every mouse move.
 class LayeredSurface {
 public:
     LayeredSurface(int width, int height) : width_(width), height_(height) {
@@ -128,6 +132,8 @@ public:
 
     [[nodiscard]] bool Valid() const { return bitmap_ != nullptr; }
     [[nodiscard]] HDC Dc() const { return dc_; }
+    [[nodiscard]] int Width() const { return width_; }
+    [[nodiscard]] int Height() const { return height_; }
 
     void Push(HWND window, int screen_x, int screen_y) {
         POINT position{screen_x, screen_y};
@@ -135,6 +141,31 @@ public:
         POINT source{0, 0};
         BLENDFUNCTION blend{AC_SRC_OVER, 0, 255, AC_SRC_ALPHA};
         UpdateLayeredWindow(window, nullptr, &position, &size, dc_, &source, 0, &blend, ULW_ALPHA);
+    }
+
+    // Pushes only the given surface rectangle to the compositor. A drag
+    // repaint touches a selection-sized sliver of a display-sized
+    // surface; pushing all of it would upload the full bitmap each move.
+    void PushDirty(HWND window, int screen_x, int screen_y, const Gdiplus::RectF& area) {
+        RECT dirty{max(0, static_cast<int>(std::floor(area.X))),
+                   max(0, static_cast<int>(std::floor(area.Y))),
+                   min(width_, static_cast<int>(std::ceil(area.GetRight()))),
+                   min(height_, static_cast<int>(std::ceil(area.GetBottom())))};
+        if (dirty.right <= dirty.left || dirty.bottom <= dirty.top) return;
+        POINT position{screen_x, screen_y};
+        SIZE size{width_, height_};
+        POINT source{0, 0};
+        BLENDFUNCTION blend{AC_SRC_OVER, 0, 255, AC_SRC_ALPHA};
+        UPDATELAYEREDWINDOWINFO info{};
+        info.cbSize = sizeof(info);
+        info.pptDst = &position;
+        info.psize = &size;
+        info.hdcSrc = dc_;
+        info.pptSrc = &source;
+        info.pblend = &blend;
+        info.dwFlags = ULW_ALPHA;
+        info.prcDirty = &dirty;
+        UpdateLayeredWindowIndirect(window, &info);
     }
 
 private:
@@ -191,6 +222,11 @@ struct PickerState {
     bool picked = false;
     bool finished = false;
     Gdiplus::RectF confirmed{};
+    // The cached backing store, plus the selection rectangle it last
+    // showed: successive drag repaints touch only the union of the two.
+    std::unique_ptr<LayeredSurface> surface;
+    Gdiplus::RectF painted_selection{};
+    bool selection_painted = false;
 };
 
 // One overlay per display; a pick anywhere is a pick there. Mode flags
@@ -218,6 +254,14 @@ struct BorderState {
     POINT drag_start_mouse{};
     RECT drag_start_region{};
     bool close_pressed = false;
+    // The cached backing store and the geometry it was painted for. The
+    // band's look depends on the window's size and scale, never on its
+    // position, so a move needs no repaint at all - the common case when
+    // the whole region is dragged around.
+    std::unique_ptr<LayeredSurface> surface;
+    int painted_width = 0;
+    int painted_height = 0;
+    double painted_scale = 0.0;
 };
 
 BorderState g_border;
@@ -375,15 +419,10 @@ void PunchRect(Gdiplus::Graphics& canvas, const Gdiplus::RectF& rect) {
     canvas.SetCompositingMode(previous);
 }
 
-void PaintPicker(PickerState& picker) {
-    if (!EnsureGdiplus()) return;
-    LayeredSurface surface(picker.width, picker.height);
-    if (!surface.Valid()) return;
-    Gdiplus::Graphics canvas(surface.Dc());
-    canvas.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
-    canvas.SetTextRenderingHint(Gdiplus::TextRenderingHintAntiAlias);
-    const double scale = UiScale(picker.window);
-
+// The overlay scene proper, described in full every time: the caller
+// owns the surface, the clip that limits what actually rasterizes, and
+// the push to the compositor.
+void PaintPickerScene(PickerState& picker, Gdiplus::Graphics& canvas, double scale) {
     const Gdiplus::RectF bounds(0, 0, static_cast<Gdiplus::REAL>(picker.width),
                                 static_cast<Gdiplus::REAL>(picker.height));
     if (!picker.draw_mode) {
@@ -452,8 +491,92 @@ void PaintPicker(PickerState& picker) {
             DrawBanner(canvas, picker, L"Drag to select an area", secondary, false, scale);
         }
     }
+}
 
-    surface.Push(picker.window, picker.origin_x, picker.origin_y);
+// Repaints the overlay. With a dirty rectangle, only that area is redrawn
+// and pushed - the clip keeps the rasterizer inside the changed sliver,
+// which is what makes a display-sized layered window affordable to update
+// per mouse move.
+void PaintPicker(PickerState& picker, const Gdiplus::RectF* dirty = nullptr) {
+    if (!EnsureGdiplus()) return;
+    if (!picker.surface || !picker.surface->Valid()) {
+        picker.surface = std::make_unique<LayeredSurface>(picker.width, picker.height);
+        if (!picker.surface->Valid()) return;
+        dirty = nullptr;  // a fresh surface has no previous frame to reuse
+    }
+    Gdiplus::Graphics canvas(picker.surface->Dc());
+    canvas.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
+    canvas.SetTextRenderingHint(Gdiplus::TextRenderingHintAntiAlias);
+    const double scale = UiScale(picker.window);
+    const Gdiplus::RectF bounds(0, 0, static_cast<Gdiplus::REAL>(picker.width),
+                                static_cast<Gdiplus::REAL>(picker.height));
+    if (dirty) canvas.SetClip(*dirty);
+    // The cached surface still holds the previous frame; painting starts
+    // from transparency the way it did when every paint got a fresh DIB.
+    canvas.SetCompositingMode(Gdiplus::CompositingModeSourceCopy);
+    Gdiplus::SolidBrush erase(Gdiplus::Color(0, 0, 0, 0));
+    canvas.FillRectangle(&erase, dirty ? *dirty : bounds);
+    canvas.SetCompositingMode(Gdiplus::CompositingModeSourceOver);
+    PaintPickerScene(picker, canvas, scale);
+    if (dirty) {
+        canvas.ResetClip();
+        picker.surface->PushDirty(picker.window, picker.origin_x, picker.origin_y, *dirty);
+    } else {
+        picker.surface->Push(picker.window, picker.origin_x, picker.origin_y);
+    }
+}
+
+// The per-move repaint of a live selection drag. Between two frames the
+// selection interiors agree (the same whisper punch) and the frame
+// strokes ride each rectangle's boundary - which never enters the shared
+// interior - so everything comfortably inside both rectangles is already
+// correct on the surface. Only the ring around that core is repainted,
+// and it is pushed as four bands: uploading the union's bounding box
+// would send the compositor megabytes it already holds, exactly what a
+// fast full-screen drag cannot afford.
+void PaintPickerSelectionDelta(PickerState& picker, const Gdiplus::RectF& previous,
+                               const Gdiplus::RectF& current, double scale) {
+    if (!EnsureGdiplus()) return;
+    if (!picker.surface || !picker.surface->Valid()) {
+        PaintPicker(picker);
+        return;
+    }
+    // Covers the frame stroke and its antialiasing on either rim.
+    const auto margin = static_cast<Gdiplus::REAL>(4 * scale);
+    Gdiplus::RectF outer;
+    Gdiplus::RectF::Union(outer, previous, current);
+    outer.Inflate(margin, margin);
+    Gdiplus::RectF core;
+    bool have_core = Gdiplus::RectF::Intersect(core, previous, current) != FALSE;
+    if (have_core) {
+        core.Inflate(-2 * margin, -2 * margin);
+        have_core = core.Width > 0 && core.Height > 0;
+    }
+    if (!have_core) {
+        PaintPicker(picker, &outer);
+        return;
+    }
+    Gdiplus::Graphics canvas(picker.surface->Dc());
+    canvas.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
+    canvas.SetTextRenderingHint(Gdiplus::TextRenderingHintAntiAlias);
+    Gdiplus::Region ring(outer);
+    ring.Exclude(core);
+    canvas.SetClip(&ring);
+    canvas.SetCompositingMode(Gdiplus::CompositingModeSourceCopy);
+    Gdiplus::SolidBrush erase(Gdiplus::Color(0, 0, 0, 0));
+    canvas.FillRectangle(&erase, outer);
+    canvas.SetCompositingMode(Gdiplus::CompositingModeSourceOver);
+    PaintPickerScene(picker, canvas, scale);
+    canvas.ResetClip();
+    const Gdiplus::RectF bands[4] = {
+        {outer.X, outer.Y, outer.Width, core.Y - outer.Y},
+        {outer.X, core.GetBottom(), outer.Width, outer.GetBottom() - core.GetBottom()},
+        {outer.X, core.Y, core.X - outer.X, core.Height},
+        {core.GetRight(), core.Y, outer.GetRight() - core.GetRight(), core.Height}};
+    for (const Gdiplus::RectF& band : bands) {
+        if (band.Width <= 0 || band.Height <= 0) continue;
+        picker.surface->PushDirty(picker.window, picker.origin_x, picker.origin_y, band);
+    }
 }
 
 // 0 = pick a window, 1 = draw, 2 = pick a face. Face mode is offered even
@@ -469,6 +592,7 @@ void SwitchPickerMode(int mode) {
         picker->suggestions = faces ? picker->faces : picker->windows;
         picker->hovered = -1;
         picker->dragging = false;
+        picker->selection_painted = false;
         PaintPicker(*picker);
     }
 }
@@ -489,12 +613,26 @@ LRESULT CALLBACK PickerProc(HWND window, UINT message, WPARAM w_param, LPARAM l_
                     picker.drag_current = point;
                     // A real drag only starts after a few points of travel,
                     // so a stray click never flashes a tiny selection.
-                    const double threshold = 4 * UiScale(window);
+                    const double scale = UiScale(window);
+                    const double threshold = 4 * scale;
                     if (!picker.dragging &&
                         (std::abs(picker.drag_current.x - picker.drag_start.x) > threshold ||
                          std::abs(picker.drag_current.y - picker.drag_start.y) > threshold))
                         picker.dragging = true;
-                    PaintPicker(picker);
+                    // Nothing on screen changes until the drag is real:
+                    // the pre-threshold scene is the banner one already
+                    // showing.
+                    if (picker.dragging) {
+                        const Gdiplus::RectF selection = SelectionRect(picker);
+                        if (picker.selection_painted) {
+                            PaintPickerSelectionDelta(picker, picker.painted_selection, selection,
+                                                      scale);
+                        } else {
+                            PaintPicker(picker);  // full: the banner leaves
+                        }
+                        picker.painted_selection = selection;
+                        picker.selection_painted = true;
+                    }
                 }
             } else {
                 const int hovered = SuggestionAtPoint(picker, point);
@@ -527,6 +665,7 @@ LRESULT CALLBACK PickerProc(HWND window, UINT message, WPARAM w_param, LPARAM l_
             if (picker.dragging) {
                 const Gdiplus::RectF selection = SelectionRect(picker);
                 picker.dragging = false;
+                picker.selection_painted = false;
                 const double minimum = 8 * UiScale(window);
                 if (selection.Width > minimum && selection.Height > minimum) {
                     picker.picked = true;
@@ -559,6 +698,46 @@ LRESULT CALLBACK PickerProc(HWND window, UINT message, WPARAM w_param, LPARAM l_
 // ---------------------------------------------------------------------------
 // Region border
 // ---------------------------------------------------------------------------
+
+// The hazard stripes as a repeating tile, rebuilt only when the scale
+// changes. Painting the band as two hundred antialiased diagonal lines
+// priced every repaint off the frame budget; one pre-rendered period
+// fills the same band as a single textured rectangle. The pattern is
+// periodic in both axes, and each stroke is overdrawn past every edge so
+// the antialiased fringes wrap seamlessly.
+struct StripeTile {
+    double scale = 0.0;
+    std::unique_ptr<Gdiplus::Bitmap> bitmap;
+    std::unique_ptr<Gdiplus::TextureBrush> brush;
+};
+StripeTile g_stripe_tile;
+
+Gdiplus::TextureBrush* StripeBrushFor(double scale) {
+    if (g_stripe_tile.brush && g_stripe_tile.scale == scale) return g_stripe_tile.brush.get();
+    const int period = max(1, static_cast<int>(std::lround(10.0 * scale)));
+    auto bitmap = std::make_unique<Gdiplus::Bitmap>(period, period, PixelFormat32bppPARGB);
+    if (bitmap->GetLastStatus() != Gdiplus::Ok) return nullptr;
+    {
+        Gdiplus::Graphics tile(bitmap.get());
+        tile.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
+        tile.Clear(Gdiplus::Color(115, 26, 26, 26));
+        Gdiplus::Pen stripe_pen(Gdiplus::Color(115, 230, 230, 230),
+                                static_cast<Gdiplus::REAL>(4.0 * scale));
+        const auto p = static_cast<Gdiplus::REAL>(period);
+        const auto overhang = static_cast<Gdiplus::REAL>(4.0 * scale);
+        // Strokes of constant x+y, one period apart: the same diagonal
+        // the full-band loop drew.
+        for (int line = -1; line <= 2; ++line) {
+            const auto c = static_cast<Gdiplus::REAL>(line) * p;
+            tile.DrawLine(&stripe_pen, c + overhang, -overhang, c - p - overhang, p + overhang);
+        }
+    }
+    g_stripe_tile.scale = scale;
+    g_stripe_tile.bitmap = std::move(bitmap);
+    g_stripe_tile.brush = std::make_unique<Gdiplus::TextureBrush>(g_stripe_tile.bitmap.get());
+    g_stripe_tile.brush->SetWrapMode(Gdiplus::WrapModeTile);
+    return g_stripe_tile.brush.get();
+}
 
 // The region rectangle in border-window-local pixels.
 Gdiplus::RectF BorderRegionLocal(double scale) {
@@ -651,9 +830,21 @@ void PaintBorder() {
     const Gdiplus::RectF region = BorderRegionLocal(scale);
     const int width = static_cast<int>(region.Width + 2 * pad);
     const int height = static_cast<int>(region.Height + 2 * pad);
-    LayeredSurface surface(width, height);
+    if (!g_border.surface || g_border.surface->Width() != width ||
+        g_border.surface->Height() != height) {
+        g_border.surface = std::make_unique<LayeredSurface>(width, height);
+    }
+    LayeredSurface& surface = *g_border.surface;
     if (!surface.Valid()) return;
+    g_border.painted_width = width;
+    g_border.painted_height = height;
+    g_border.painted_scale = scale;
     Gdiplus::Graphics canvas(surface.Dc());
+    canvas.SetCompositingMode(Gdiplus::CompositingModeSourceCopy);
+    Gdiplus::SolidBrush erase(Gdiplus::Color(0, 0, 0, 0));
+    canvas.FillRectangle(&erase, Gdiplus::RectF(0, 0, static_cast<Gdiplus::REAL>(width),
+                                                static_cast<Gdiplus::REAL>(height)));
+    canvas.SetCompositingMode(Gdiplus::CompositingModeSourceOver);
     canvas.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
 
     // The whole grab band is muted hazard tape, its own light-dark
@@ -669,14 +860,14 @@ void PaintBorder() {
                                region.Height + 2 * ring);
     canvas.SetClip(band);
     canvas.ExcludeClip(stripe_hole);
-    Gdiplus::SolidBrush band_brush(Gdiplus::Color(115, 26, 26, 26));
-    canvas.FillRectangle(&band_brush, band);
-    Gdiplus::Pen stripe_pen(Gdiplus::Color(115, 230, 230, 230),
-                            static_cast<Gdiplus::REAL>(4.0 * scale));
-    const auto diagonal = static_cast<Gdiplus::REAL>(height);
-    for (Gdiplus::REAL x = -diagonal; x < static_cast<Gdiplus::REAL>(width);
-         x += static_cast<Gdiplus::REAL>(10.0 * scale))
-        canvas.DrawLine(&stripe_pen, x, static_cast<Gdiplus::REAL>(height), x + diagonal, 0.0f);
+    if (Gdiplus::TextureBrush* stripes = StripeBrushFor(scale)) {
+        canvas.FillRectangle(stripes, band);
+    } else {
+        // Out of memory for a tile the size of a coin; the plain base
+        // keeps the band visible.
+        Gdiplus::SolidBrush band_brush(Gdiplus::Color(115, 26, 26, 26));
+        canvas.FillRectangle(&band_brush, band);
+    }
     canvas.ResetClip();
 
     // The measured edge is a filled ring spanning exactly from the region
@@ -1063,11 +1254,16 @@ void ShowRegionBorder(uint32_t display_id, const RegionOfInterest& region) {
     HWND insert_after = HWND_TOPMOST;
     const std::vector<HWND> own = OwnWindows();
     if (!own.empty()) insert_after = own.front();
-    SetWindowPos(
-        g_border.window, insert_after, g_border.region.left - pad, g_border.region.top - pad,
-        (g_border.region.right - g_border.region.left) + 2 * pad,
-        (g_border.region.bottom - g_border.region.top) + 2 * pad, SWP_NOACTIVATE | SWP_SHOWWINDOW);
-    PaintBorder();
+    const int width = (g_border.region.right - g_border.region.left) + 2 * pad;
+    const int height = (g_border.region.bottom - g_border.region.top) + 2 * pad;
+    SetWindowPos(g_border.window, insert_after, g_border.region.left - pad,
+                 g_border.region.top - pad, width, height, SWP_NOACTIVATE | SWP_SHOWWINDOW);
+    // The surface only shows size and scale; while the region is dragged
+    // around whole - or this sync fires for an unrelated settings change -
+    // moving the window above is the entire job.
+    if (width != g_border.painted_width || height != g_border.painted_height ||
+        scale != g_border.painted_scale)
+        PaintBorder();
 }
 
 void HideRegionBorder() {
