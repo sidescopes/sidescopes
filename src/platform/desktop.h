@@ -43,6 +43,9 @@ std::optional<DesktopPoint> GlobalCursorPosition();
 
 std::optional<DisplayGeometry> GeometryOfDisplay(uint32_t display_id);
 
+// The display containing the given desktop point, if any.
+std::optional<uint32_t> DisplayAtPoint(DesktopPoint point);
+
 // The display the cursor is on right now. Photographers park the cursor
 // near the editor, so this is where region picking should open.
 std::optional<uint32_t> DisplayUnderCursor();
@@ -77,5 +80,14 @@ std::vector<std::string> InterfaceFontFiles();
 // platforms whose capture dies loudly instead (Windows duplication
 // reports access loss and the retry loop rebuilds it).
 void ObserveSystemWake(std::function<void()> callback);
+
+// Invokes the callback when Escape is pressed while this application is
+// active but no window of it has keyboard focus. The region border never
+// takes focus - grabbing it must not pull the keyboard out of the editor
+// - so a border interaction can leave the application active yet deaf to
+// its own Escape shortcut; this closes that gap. A no-op on platforms
+// where the gap cannot occur (on Windows the border never activates the
+// application in the first place).
+void ObserveEscapeWithoutKeyWindow(std::function<void()> callback);
 
 }  // namespace sidescopes

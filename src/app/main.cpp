@@ -588,7 +588,20 @@ int main() {
         capture_dead.store(false);
         return true;
     };
+    // The display under this window's center: full-screen capture is a
+    // promise about the screen the user can see the scopes on.
+    const auto display_of_window = [&]() -> std::optional<uint32_t> {
+        int window_x = 0;
+        int window_y = 0;
+        int window_width = 0;
+        int window_height = 0;
+        glfwGetWindowPos(window, &window_x, &window_y);
+        glfwGetWindowSize(window, &window_width, &window_height);
+        return DisplayAtPoint(
+            DesktopPoint{window_x + window_width / 2.0, window_y + window_height / 2.0});
+    };
     if (permission_granted) {
+        desired_display = display_of_window().value_or(0);
         start_capture();
     } else {
         std::lock_guard lock(status_mutex);
@@ -698,6 +711,18 @@ int main() {
         else
             ShowRegionBorder(capture_display, analysis.region);
     };
+    // Resets all selection: a pending pick and the drawn region alike.
+    // The border sync rides the analysis-dirty path.
+    const auto reset_region_to_full = [&] {
+        CancelRegionPick();
+        analysis.region = RegionOfInterest{};
+        analysis_dirty = true;
+    };
+    // Escape pressed while this application is active but focusless (a
+    // border grab activates without focusing); consumed by the frame
+    // loop like any other cross-thread signal.
+    std::atomic<bool> orphan_escape{false};
+    ObserveEscapeWithoutKeyWindow([&orphan_escape] { orphan_escape.store(true); });
     const auto save_preferences = [&] {
         Preferences preferences;
         preferences.vectorscope_gain = analysis.vectorscope.gain;
@@ -731,6 +756,10 @@ int main() {
         // Capture is a service that dies (lock screen, display sleep);
         // restarting it is our job.
         if (g_face_check_requested.exchange(false)) RefreshFacePresence(worker, capture_display);
+        if (orphan_escape.exchange(false)) {
+            reset_region_to_full();
+            last_activity = glfwGetTime();
+        }
 
         if (capture_stale.exchange(false)) {
             std::fprintf(stderr, "sidescopes: restarting capture after wake or unlock\n");
@@ -744,6 +773,24 @@ int main() {
                 last_activity = glfwGetTime();
             else
                 next_capture_retry = glfwGetTime() + 2.0;
+        }
+
+        // With no region drawn, capture follows the display this window
+        // sits on: the fallback stays predictable - you always scope the
+        // screen you can see the scopes on. A drawn region pins capture
+        // to its own display regardless of where the window goes.
+        if (permission_granted && !capture_dead.load() && !region_picking && is_full_region()) {
+            const auto home_display = display_of_window();
+            if (home_display && *home_display != capture_display) {
+                desired_display = *home_display;
+                capture->Stop();
+                if (start_capture()) {
+                    last_activity = glfwGetTime();
+                } else {
+                    capture_dead.store(true);
+                    next_capture_retry = glfwGetTime() + 2.0;
+                }
+            }
         }
 
         // The window may have moved to a monitor with a different scale.
@@ -901,14 +948,7 @@ int main() {
             if (SupportsFaceDetection() && ImGui::IsKeyPressed(ImGuiKey_F, false))
                 want_region_pick = RegionPickerMode::PickFaces;
             if (ImGui::IsKeyPressed(ImGuiKey_P, false)) pin_cursor_color(vectorscope_color);
-            if (ImGui::IsKeyPressed(ImGuiKey_Escape, false)) {
-                // Esc resets all selection: a pending pick and the drawn
-                // region alike.
-                CancelRegionPick();
-                analysis.region = RegionOfInterest{};
-                analysis_dirty = true;
-                sync_region_border();
-            }
+            if (ImGui::IsKeyPressed(ImGuiKey_Escape, false)) reset_region_to_full();
         }
 
         if (IconButton("##pick-region", RegionIcon::PickHand, "Pick a window (A)"))
@@ -927,11 +967,8 @@ int main() {
             ImGui::SameLine(0.0f, 2.0f);
         }
         if (!is_full_region()) {
-            if (IconButton("##full-region", RegionIcon::Expand, "Reset to full screen (Esc)")) {
-                CancelRegionPick();
-                analysis.region = RegionOfInterest{};
-                analysis_dirty = true;
-            }
+            if (IconButton("##full-region", RegionIcon::Expand, "Reset to full screen (Esc)"))
+                reset_region_to_full();
             ImGui::SameLine(0.0f, 2.0f);
         }
 
@@ -1320,8 +1357,7 @@ int main() {
                     want_region_pick = RegionPickerMode::PickWindows;
                     break;
                 case kMenuFullScreenRegion:
-                    analysis.region = RegionOfInterest{};
-                    analysis_dirty = true;
+                    reset_region_to_full();
                     break;
                 case kMenuToggleGraticule:
                     show_graticule = !show_graticule;

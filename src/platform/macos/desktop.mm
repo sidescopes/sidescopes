@@ -62,16 +62,20 @@ std::optional<DisplayGeometry> GeometryOfDisplay(uint32_t display_id) {
     return DisplayGeometry{bounds.origin.x, bounds.origin.y, bounds.size.width, bounds.size.height};
 }
 
-std::optional<uint32_t> DisplayUnderCursor() {
-    const auto cursor = GlobalCursorPosition();
-    if (!cursor) return std::nullopt;
+std::optional<uint32_t> DisplayAtPoint(DesktopPoint point) {
     CGDirectDisplayID display = 0;
     uint32_t matches = 0;
-    if (CGGetDisplaysWithPoint(CGPointMake(cursor->x, cursor->y), 1, &display, &matches) !=
+    if (CGGetDisplaysWithPoint(CGPointMake(point.x, point.y), 1, &display, &matches) !=
             kCGErrorSuccess ||
         matches == 0)
         return std::nullopt;
     return display;
+}
+
+std::optional<uint32_t> DisplayUnderCursor() {
+    const auto cursor = GlobalCursorPosition();
+    if (!cursor) return std::nullopt;
+    return DisplayAtPoint(*cursor);
 }
 
 std::string PreferencesFilePath() {
@@ -141,6 +145,24 @@ void ObserveSystemWake(std::function<void()> callback) {
                     object:nil
                      queue:[NSOperationQueue mainQueue]
                 usingBlock:observe];
+}
+
+void ObserveEscapeWithoutKeyWindow(std::function<void()> callback) {
+    // Clicking the region border activates the application without
+    // giving any window keyboard focus - the border refuses key status
+    // by design, so grabbing it never pulls the keyboard out of the
+    // editor. Key presses in that state reach the application object and
+    // die there; a local monitor picks them up. Local monitors never see
+    // other applications' input.
+    auto shared = std::make_shared<std::function<void()>>(std::move(callback));
+    [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskKeyDown
+                                          handler:^NSEvent*(NSEvent* event) {
+                                            if (event.keyCode == 53 && NSApp.keyWindow == nil) {
+                                                (*shared)();
+                                                return nil;  // consumed
+                                            }
+                                            return event;
+                                          }];
 }
 
 }  // namespace sidescopes

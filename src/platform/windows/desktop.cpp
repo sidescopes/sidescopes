@@ -140,10 +140,9 @@ std::optional<DisplayGeometry> GeometryOfDisplay(uint32_t display_id) {
                            static_cast<double>(monitor->rect.bottom) - monitor->rect.top};
 }
 
-std::optional<uint32_t> DisplayUnderCursor() {
-    POINT point{};
-    if (!GetCursorPos(&point)) return std::nullopt;
-    HMONITOR monitor = MonitorFromPoint(point, MONITOR_DEFAULTTONULL);
+std::optional<uint32_t> DisplayAtPoint(DesktopPoint point) {
+    const POINT at{static_cast<LONG>(point.x), static_cast<LONG>(point.y)};
+    HMONITOR monitor = MonitorFromPoint(at, MONITOR_DEFAULTTONULL);
     if (!monitor) return std::nullopt;
     MONITORINFOEXW info{};
     info.cbSize = sizeof(info);
@@ -151,6 +150,12 @@ std::optional<uint32_t> DisplayUnderCursor() {
     const uint32_t display_id = DisplayIdFromDeviceName(info.szDevice);
     if (display_id == 0) return std::nullopt;
     return display_id;
+}
+
+std::optional<uint32_t> DisplayUnderCursor() {
+    POINT point{};
+    if (!GetCursorPos(&point)) return std::nullopt;
+    return DisplayAtPoint(DesktopPoint{static_cast<double>(point.x), static_cast<double>(point.y)});
 }
 
 namespace {
@@ -194,6 +199,12 @@ void ObserveSystemWake(std::function<void()>) {
     // Duplication dies loudly on lock and wake (access lost) and the
     // application's retry loop rebuilds it from scratch, so there is
     // nothing to observe here.
+}
+
+void ObserveEscapeWithoutKeyWindow(std::function<void()>) {
+    // The border window carries WS_EX_NOACTIVATE: interacting with it
+    // never activates the application, so the active-but-focusless state
+    // this seam exists for cannot occur here.
 }
 
 }  // namespace sidescopes
