@@ -57,9 +57,10 @@ Preferences LoadPreferences(const std::filesystem::path& file) {
         trace_response == 1 ? TraceResponse::Linear : TraceResponse::Boosted;
     int waveform_style = static_cast<int>(preferences.waveform_mode);
     read_int("waveform_mode", waveform_style);
-    preferences.waveform_mode = waveform_style == static_cast<int>(WaveformMode::Luma)
-                                    ? WaveformMode::Luma
-                                    : WaveformMode::Rgb;
+    preferences.waveform_mode =
+        waveform_style == static_cast<int>(WaveformMode::Luma)          ? WaveformMode::Luma
+        : waveform_style == static_cast<int>(WaveformMode::ColoredLuma) ? WaveformMode::ColoredLuma
+                                                                        : WaveformMode::Rgb;
     read_bool("histogram_per_channel", preferences.histogram_per_channel);
     // Two generations of legacy scope keys fold into the stack: the
     // single view_mode became the visible_scopes bit set, and the bit set

@@ -44,9 +44,10 @@ void Waveform::Accumulate(const FrameView& frame, IntRect region) {
     region = region.ClampedTo(frame.width, frame.height);
     std::fill(bins_.begin(), bins_.end(), 0u);
 
-    const bool wants_rgb = settings_.mode != WaveformMode::Luma;
-    const bool wants_luma =
-        settings_.mode == WaveformMode::Luma || settings_.mode == WaveformMode::RgbAndLuma;
+    const bool colored_luma = settings_.mode == WaveformMode::ColoredLuma;
+    const bool wants_rgb = settings_.mode != WaveformMode::Luma && !colored_luma;
+    const bool wants_luma = settings_.mode == WaveformMode::Luma ||
+                            settings_.mode == WaveformMode::RgbAndLuma || colored_luma;
     const std::size_t plane_size = PlaneSize();
     uint32_t* red_plane = bins_.data();
     uint32_t* green_plane = bins_.data() + plane_size;
@@ -84,7 +85,24 @@ void Waveform::Accumulate(const FrameView& frame, IntRect region) {
                     splat(green_plane, g);
                     splat(blue_plane, b);
                 }
-                if (wants_luma) splat(luma_plane, Luma709(r, g, b));
+                if (colored_luma) {
+                    // The luma plane carries the density; the channel
+                    // planes carry value-weighted mass at the same rows,
+                    // so each cell remembers the average color of the
+                    // pixels that landed on it.
+                    const int level = Luma709(r, g, b);
+                    const auto tint_splat = [&](uint32_t* plane, uint32_t value) {
+                        uint32_t* line = plane + static_cast<std::size_t>(255 - level) * columns_;
+                        line[column] += left_weight * value;
+                        line[next] += right_weight * value;
+                    };
+                    tint_splat(red_plane, static_cast<uint32_t>(r));
+                    tint_splat(green_plane, static_cast<uint32_t>(g));
+                    tint_splat(blue_plane, static_cast<uint32_t>(b));
+                    splat(luma_plane, level);
+                } else if (wants_luma) {
+                    splat(luma_plane, Luma709(r, g, b));
+                }
             }
         }
     }
@@ -270,9 +288,10 @@ void Waveform::MapBinsToImage(uint64_t sampled_rows) {
     }
     const std::vector<uint32_t>& traces = smoothed_;
 
-    const bool wants_rgb = settings_.mode != WaveformMode::Luma;
-    const bool wants_luma =
-        settings_.mode == WaveformMode::Luma || settings_.mode == WaveformMode::RgbAndLuma;
+    const bool colored_luma = settings_.mode == WaveformMode::ColoredLuma;
+    const bool wants_rgb = settings_.mode != WaveformMode::Luma && !colored_luma;
+    const bool wants_luma = settings_.mode == WaveformMode::Luma ||
+                            settings_.mode == WaveformMode::RgbAndLuma || colored_luma;
 
     uint32_t densest = 0;
     if (wants_rgb) {
@@ -382,7 +401,24 @@ void Waveform::MapBinsToImage(uint64_t sampled_rows) {
                 g = brightness(sample(green_plane, column));
                 b = brightness(sample(blue_plane, column));
             }
-            if (wants_luma) {
+            if (colored_luma) {
+                // Density decides how bright the trace is; the
+                // value-weighted planes only decide its color, so a
+                // dense shadow region draws as clearly as a dense
+                // highlight, each in its own tint.
+                const float density = brightness(sample(luma_plane, column));
+                const float mass_r = sample(red_plane, column);
+                const float mass_g = sample(green_plane, column);
+                const float mass_b = sample(blue_plane, column);
+                const float strongest = std::max({mass_r, mass_g, mass_b});
+                if (strongest > 0.0f) {
+                    r = density * (mass_r / strongest);
+                    g = density * (mass_g / strongest);
+                    b = density * (mass_b / strongest);
+                } else {
+                    r = g = b = density;
+                }
+            } else if (wants_luma) {
                 // In the combined mode luma rides on top as a dimmer
                 // white trace.
                 const float luma =

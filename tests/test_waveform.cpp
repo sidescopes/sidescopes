@@ -266,6 +266,27 @@ TEST_CASE("Waveform keeps a real clipping line bright") {
     CHECK(clip > body);
 }
 
+TEST_CASE("Colored luma waveform tints the trace with the source color") {
+    // A solid 75% red frame: the trace must sit on red's luma level and
+    // carry red's hue - density decides brightness, the value-weighted
+    // planes decide only the color.
+    TestFrame frame(64, 64);
+    frame.Fill(Color{191, 0, 0});
+
+    Waveform scope;
+    scope.Configure(SettingsFor(WaveformMode::ColoredLuma));
+    scope.Accumulate(frame.View(), IntRect{0, 0, 64, 64});
+
+    // Rec.709 luma of (191, 0, 0): 54 * 191 / 256 = 40 -> row 255 - 40.
+    const ScopeImage& image = scope.Image();
+    const int y = (255 - 40) * image.height / 256;
+    const uint8_t* pixel =
+        image.rgba.data() + (static_cast<std::size_t>(y) * image.width + image.width / 2) * 4;
+    CHECK(static_cast<int>(pixel[0]) > 150);           // bright...
+    CHECK(static_cast<int>(pixel[0]) > 4 * pixel[1]);  // ...and red
+    CHECK(static_cast<int>(pixel[0]) > 4 * pixel[2]);
+}
+
 TEST_CASE("Waveform renders taller images through the level spline") {
     // Level data always has 256 codes; a taller image samples them
     // through a spline, and a single-level trace must peak at the scaled

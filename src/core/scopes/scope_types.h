@@ -17,9 +17,11 @@ enum class ChromaMatrix { Bt601, Bt709 };
 enum class TraceResponse { Boosted, Linear };
 
 // What the waveform plots. RGB overlay is the default: separated colored
-// traces make color casts readable at a glance. Parade shows the three
-// channels side by side, each compressed to a third of the width.
-enum class WaveformMode { Luma, Rgb, RgbAndLuma, RgbParade };
+// traces make color casts readable at a glance. ColoredLuma plots
+// luminance and paints each part of the trace in the average color of
+// the pixels that put it there. Parade shows the three channels side by
+// side, each compressed to a third of the width.
+enum class WaveformMode { Luma, Rgb, RgbAndLuma, RgbParade, ColoredLuma };
 
 // A point in normalized scope-image coordinates, x and y in [0, 1].
 struct NormalizedPoint {

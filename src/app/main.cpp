@@ -53,6 +53,7 @@ enum MenuAction {
     kMenuMatrixBt709,
     kMenuTraceBoosted,
     kMenuTraceLinear,
+    kMenuWaveformStyleColoredLuma,
     kMenuSelectRegion = 30,
     kMenuFullScreenRegion,
     kMenuToggleGraticule = 40,
@@ -1237,7 +1238,9 @@ int main() {
             const DrawnScope scope = DrawScopeImage(texture, false);
             scope_gestures(scope, waveform_intensity, analysis.waveform.gain, 0.05f);
             if (show_graticule) DrawWaveformOverlay(scope);
-            if (kind == ScopeGlyph::Waveform && analysis.waveform.mode == WaveformMode::Luma) {
+            if (kind == ScopeGlyph::Waveform &&
+                (analysis.waveform.mode == WaveformMode::Luma ||
+                 analysis.waveform.mode == WaveformMode::ColoredLuma)) {
                 if (waveform_color) {
                     if (const auto point = projection_waveform.Project(*waveform_color))
                         DrawLevelMarker(scope, point->y, IM_COL32(255, 220, 80, 220));
@@ -1472,6 +1475,8 @@ int main() {
                  analysis.waveform.mode == WaveformMode::Rgb},
                 {Kind::Action, "Luma", kMenuWaveformStyleLuma,
                  analysis.waveform.mode == WaveformMode::Luma},
+                {Kind::Action, "Luma (Colored)", kMenuWaveformStyleColoredLuma,
+                 analysis.waveform.mode == WaveformMode::ColoredLuma},
                 {Kind::SubmenuEnd, "", -1, false},
                 {Kind::SubmenuBegin, "Histogram Style", -1, false},
                 {Kind::Action, "Combined", kMenuHistogramCombined,
@@ -1525,6 +1530,10 @@ int main() {
                     break;
                 case kMenuWaveformStyleLuma:
                     analysis.waveform.mode = WaveformMode::Luma;
+                    analysis_dirty = true;
+                    break;
+                case kMenuWaveformStyleColoredLuma:
+                    analysis.waveform.mode = WaveformMode::ColoredLuma;
                     analysis_dirty = true;
                     break;
                 case kMenuHistogramCombined:
