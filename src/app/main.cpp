@@ -1816,13 +1816,21 @@ int main() {
                     ImGui::SetClipboardText(pin_hex);
                 ImGui::SetItemTooltip("pinned  %s - click to copy", pin_hex);
                 if (!tiny) {
+                    // The labels take whichever ink survives their half:
+                    // dark on light colors, light on dark.
+                    const auto label_ink = [](const FloatColor& under) {
+                        const float luma =
+                            (54.0f * under.r + 183.0f * under.g + 19.0f * under.b) / 256.0f;
+                        return luma > 140.0f ? IM_COL32(0, 0, 0, 170)
+                                             : IM_COL32(255, 255, 255, 180);
+                    };
                     ImDrawList* draw = ImGui::GetWindowDrawList();
-                    draw->AddText(ImVec2(hero_origin.x + 5, hero_origin.y + 3), kGraticuleLabel,
+                    draw->AddText(ImVec2(hero_origin.x + 5, hero_origin.y + 3), label_ink(color),
                                   "LIVE");
                     const float pin_label = ImGui::CalcTextSize("PIN").x;
                     draw->AddText(
                         ImVec2(hero_origin.x + hero_width - pin_label - 5, hero_origin.y + 3),
-                        kGraticuleLabel, "PIN");
+                        label_ink(pinned_colors[static_cast<std::size_t>(comparator_pin)]), "PIN");
                 }
             }
 
@@ -1866,10 +1874,14 @@ int main() {
                     ImGui::SetItemTooltip(selected ? "click to unload from the comparator"
                                                    : "click to compare against the live color");
                     if (selected) {
+                        // A white ring inside a dark one reads on any pin
+                        // color; the gold rim vanished on skin tones.
                         const ImVec2 lo = ImGui::GetItemRectMin();
                         const ImVec2 hi = ImGui::GetItemRectMax();
-                        ImGui::GetWindowDrawList()->AddRect(lo, hi, kGraticuleAccent, 0.0f, 0,
-                                                            1.5f);
+                        ImDrawList* draw = ImGui::GetWindowDrawList();
+                        draw->AddRect(ImVec2(lo.x - 1, lo.y - 1), ImVec2(hi.x + 1, hi.y + 1),
+                                      IM_COL32(0, 0, 0, 220), 0.0f, 0, 2.0f);
+                        draw->AddRect(lo, hi, IM_COL32(235, 235, 235, 235), 0.0f, 0, 1.5f);
                     }
                     ImGui::SameLine();
                     ImGui::TextUnformatted(pin_hex);
@@ -1896,10 +1908,23 @@ int main() {
                     char close_id[24];
                     std::snprintf(close_id, sizeof(close_id), "##unpin-%d",
                                   static_cast<int>(index));
-                    const float close_width = ImGui::GetFrameHeight();
-                    ImGui::SameLine(ImGui::GetWindowContentRegionMax().x - close_width);
-                    if (ImGui::SmallButton((std::string("x") + close_id).c_str()))
+                    // A frameless glyph, square and centered on the row:
+                    // quiet gray until hovered, red at the moment of
+                    // intent. A pill background fought the black pane.
+                    ImGui::SameLine(ImGui::GetWindowContentRegionMax().x - line_height);
+                    if (ImGui::InvisibleButton(close_id, ImVec2(line_height, line_height)))
                         remove_pin = static_cast<int>(index);
+                    ImGui::SetItemTooltip("remove this pin");
+                    const ImVec2 glyph_center =
+                        ImVec2((ImGui::GetItemRectMin().x + ImGui::GetItemRectMax().x) / 2.0f,
+                               (ImGui::GetItemRectMin().y + ImGui::GetItemRectMax().y) / 2.0f);
+                    const ImVec2 glyph_size = ImGui::CalcTextSize("x");
+                    ImGui::GetWindowDrawList()->AddText(
+                        ImVec2(glyph_center.x - glyph_size.x / 2.0f,
+                               glyph_center.y - glyph_size.y / 2.0f),
+                        ImGui::IsItemHovered() ? IM_COL32(235, 90, 90, 255)
+                                               : IM_COL32(150, 150, 150, 180),
+                        "x");
                 }
                 draw_pinned_menu();
                 ImGui::EndChild();
@@ -1924,8 +1949,10 @@ int main() {
                     if (selected) {
                         const ImVec2 lo = ImGui::GetItemRectMin();
                         const ImVec2 hi = ImGui::GetItemRectMax();
-                        ImGui::GetWindowDrawList()->AddRect(lo, hi, kGraticuleAccent, 0.0f, 0,
-                                                            1.5f);
+                        ImDrawList* draw = ImGui::GetWindowDrawList();
+                        draw->AddRect(ImVec2(lo.x - 1, lo.y - 1), ImVec2(hi.x + 1, hi.y + 1),
+                                      IM_COL32(0, 0, 0, 220), 0.0f, 0, 2.0f);
+                        draw->AddRect(lo, hi, IM_COL32(235, 235, 235, 235), 0.0f, 0, 1.5f);
                     }
                 }
                 draw_pinned_menu();
