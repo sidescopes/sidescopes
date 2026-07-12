@@ -80,6 +80,13 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- The color picker pane is redesigned around comparison: a split
+  comparator holds the live color against a selected pin edge to edge,
+  values follow the percent preference with hex always at hand, and
+  pins grow into a reference deck with per-channel deltas against the
+  live color. Three size tiers keep it predictable from a sliver to a
+  full window.
+
 - The vectorscope defaults to the BT.709 matrix; BT.601 remains available
   in the menu. Integer rounding of the 709 coefficients now preserves the
   neutral axis exactly.
