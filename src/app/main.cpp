@@ -698,14 +698,28 @@ int main() {
     MarkerSmoother vectorscope_marker;
     MarkerSmoother waveform_marker;
 
+    // Scope textures are drawn the same frame their scope becomes
+    // visible, possibly before anything was ever uploaded - and a fresh
+    // GPU texture holds whatever memory the driver recycled into it, so
+    // every texture starts blanked to the scopes' black.
+    const auto create_blank_texture = [&](int width, int height) {
+        auto texture = graphics->CreateScopeTexture(width, height);
+        ScopeImage blank;
+        blank.width = width;
+        blank.height = height;
+        blank.rgba.assign(static_cast<std::size_t>(width) * height * 4, 0);
+        for (std::size_t i = 3; i < blank.rgba.size(); i += 4) blank.rgba[i] = 255;
+        texture->Upload(blank);
+        return texture;
+    };
     std::unique_ptr<ScopeTexture> vectorscope_texture =
-        graphics->CreateScopeTexture(Vectorscope::kSize, Vectorscope::kSize);
+        create_blank_texture(Vectorscope::kSize, Vectorscope::kSize);
     std::unique_ptr<ScopeTexture> waveform_texture =
-        graphics->CreateScopeTexture(Waveform::kColumns, Waveform::kLevels);
+        create_blank_texture(Waveform::kColumns, Waveform::kLevels);
     std::unique_ptr<ScopeTexture> waveform_parade_texture =
-        graphics->CreateScopeTexture(Waveform::kColumns, Waveform::kLevels);
+        create_blank_texture(Waveform::kColumns, Waveform::kLevels);
     std::unique_ptr<ScopeTexture> histogram_texture =
-        graphics->CreateScopeTexture(Histogram::kImageWidth, Histogram::kHeight);
+        create_blank_texture(Histogram::kImageWidth, Histogram::kHeight);
     // Adaptive scope detail: panes are measured at draw time (stacking
     // splits the window, so the pane is what matters, not the window),
     // and desired resolutions are debounced so a live resize does not
@@ -1030,12 +1044,37 @@ int main() {
         // is the common case, so a plain click or key shows one scope
         // alone; Shift stacks and unstacks, and the last scope on refuses
         // to turn off, so the window never goes empty.
+        // A scope draws the same frame it turns on, but the worker only
+        // computes what is enabled, so a newly shown scope's texture can
+        // be a frame or two behind - or never uploaded at all. Seeding it
+        // with the last output the worker did produce keeps the first
+        // frame plausible; the recompute the settings change triggers
+        // replaces it almost immediately.
+        const auto seed_scope_texture = [&](ScopeGlyph kind) {
+            switch (kind) {
+                case ScopeGlyph::Vectorscope:
+                    upload_scope(vectorscope_texture, output.vectorscope_image);
+                    break;
+                case ScopeGlyph::Waveform:
+                    upload_scope(waveform_texture, output.waveform_image);
+                    break;
+                case ScopeGlyph::WaveformParade:
+                    upload_scope(waveform_parade_texture, output.waveform_parade_image);
+                    break;
+                case ScopeGlyph::Histogram:
+                    upload_scope(histogram_texture, output.histogram_image);
+                    break;
+                default:
+                    break;
+            }
+        };
         const auto toggle_scope = [&](ScopeGlyph kind) {
             const auto at = std::find(scope_stack.begin(), scope_stack.end(), kind);
             if (at != scope_stack.end()) {
                 if (scope_stack.size() > 1) scope_stack.erase(at);
             } else {
                 scope_stack.push_back(kind);
+                seed_scope_texture(kind);
             }
             sync_enabled_scopes();
             analysis_dirty = true;
@@ -1044,7 +1083,9 @@ int main() {
             if (stack) {
                 toggle_scope(kind);
             } else {
+                const bool was_shown = scope_shown(kind);
                 scope_stack.assign(1, kind);
+                if (!was_shown) seed_scope_texture(kind);
                 sync_enabled_scopes();
                 analysis_dirty = true;
             }

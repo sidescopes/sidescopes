@@ -73,6 +73,11 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Activating a scope no longer flashes garbage or stale data for its
+  first frames: textures start blanked instead of holding recycled GPU
+  memory, and a newly shown scope is seeded with the analysis worker's
+  last output while its fresh computation lands.
+
 - The region border always stays beneath the scope window, and never
   leaks into the frame the picker analyzes when re-selecting a region.
 - Windows: region overlays repaint incrementally, so drawing a selection
