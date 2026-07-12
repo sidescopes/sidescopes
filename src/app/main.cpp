@@ -640,13 +640,10 @@ int main() {
         if (focused) g_face_check_requested.store(true);
     });
     glfwSetWindowIconifyCallback(window, [](GLFWwindow*, int) { g_iconify_changed.store(true); });
-    // Where the platform dismisses instead of quitting, the close button
-    // takes the same system-hide path as Cmd+W.
-    if (PlatformHidesWindowOnCommandW())
-        glfwSetWindowCloseCallback(window, [](GLFWwindow* closing) {
-            glfwSetWindowShouldClose(closing, GLFW_FALSE);
-            HideApplication();
-        });
+    // The close button and Cmd+Q quit; intercepting the close to hide
+    // instead swallowed BOTH, because the quit request reaches the
+    // application as a window close. Dismissal belongs to Cmd+W and
+    // Cmd+H alone.
 
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
