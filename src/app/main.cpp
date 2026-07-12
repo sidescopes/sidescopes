@@ -1349,8 +1349,11 @@ int main() {
             return key != ImGuiKey_None && ImGui::IsKeyPressed(key, false);
         };
         if (PlatformClosesWindowOnCommandW() && modifiers.command && !modifiers.control &&
-            !modifiers.option && !io.WantTextInput && ImGui::IsKeyPressed(ImGuiKey_W, false))
-            glfwSetWindowShouldClose(window, GLFW_TRUE);
+            !modifiers.option && !io.WantTextInput) {
+            if (ImGui::IsKeyPressed(ImGuiKey_W, false)) glfwSetWindowShouldClose(window, GLFW_TRUE);
+            // Cmd+comma opens settings everywhere on macOS.
+            if (ImGui::IsKeyPressed(ImGuiKey_Comma, false)) show_settings = true;
+        }
         if (!io.WantTextInput && !system_chord) {
             if (pressed(shortcuts.vectorscope))
                 choose_scope(ScopeGlyph::Vectorscope, stack_modifier);
