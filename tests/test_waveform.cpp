@@ -223,6 +223,49 @@ TEST_CASE("Waveform flattens the pipeline's code-density comb") {
     CHECK(doubled >= single * 3 / 4);
 }
 
+TEST_CASE("Waveform attenuates a display-pipeline pileup") {
+    // Display-profile conversions pile many source codes onto one output
+    // code and starve its neighbors - here level 100 carries twenty rows
+    // for every one row of its neighbors, next to a hole at 102. A real
+    // photo feature cannot look like this; the pileup must come down to
+    // its neighborhood instead of rendering as a bright line.
+    TestFrame frame(64, 260);
+    for (int py = 0; py < 260; ++py) {
+        uint8_t value = static_cast<uint8_t>(90 + (py % 26));
+        if (py % 26 == 10) value = 100;  // extra mass onto 100
+        if (value == 102) value = 100;   // and 102 is never emitted
+        frame.FillRows(py, py + 1, Color{value, value, value});
+    }
+
+    Waveform scope;
+    scope.Accumulate(frame.View(), IntRect{0, 0, 64, 260});
+
+    const int pileup = GreenValueAt(scope.Image(), 0, 255 - 100);
+    const int neighbor = GreenValueAt(scope.Image(), 0, 255 - 97);
+    REQUIRE(neighbor > 0);
+    CHECK(pileup <= neighbor * 4 / 3);
+}
+
+TEST_CASE("Waveform keeps a real clipping line bright") {
+    // Crushed blacks concentrate at the very bottom of the populated
+    // range with nothing below - a real feature the photographer must
+    // see. The pileup correction may not touch it.
+    TestFrame frame(64, 64);
+    frame.FillRows(0, 32, Color{16, 16, 16});  // crushed shadows
+    for (int py = 32; py < 64; ++py) {
+        const uint8_t value = static_cast<uint8_t>(80 + py);
+        frame.FillRows(py, py + 1, Color{value, value, value});
+    }
+
+    Waveform scope;
+    scope.Accumulate(frame.View(), IntRect{0, 0, 64, 64});
+
+    const int clip = GreenValueAt(scope.Image(), 0, 255 - 16);
+    const int body = GreenValueAt(scope.Image(), 0, 255 - 120);
+    REQUIRE(body > 0);
+    CHECK(clip > body);
+}
+
 TEST_CASE("Waveform column brightness is invariant to stride and region size") {
     // Two gray levels stacked 3:1 vertically, so every sampled column sees
     // the same 3:1 level mix at stride 1, stride 2, and in a half-size

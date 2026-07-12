@@ -113,6 +113,16 @@ void Waveform::MapBinsToImage(uint64_t sampled_rows) {
         // density and over-lift them - manufacturing the very banding
         // this removes. The median ignores isolated spikes, so real
         // lines keep their real neighbors.
+        // The populated range: spikes at its edges are real clipping
+        // lines - crushed blacks, blown whites - and stay protected.
+        int lowest = kLevels;
+        int highest = -1;
+        for (int row = 0; row < kLevels; ++row) {
+            if (global[row] == 0) continue;
+            if (lowest == kLevels) lowest = row;
+            highest = row;
+        }
+
         uint32_t flatten[kLevels];
         for (int row = 0; row < kLevels; ++row) {
             uint64_t neighborhood[12];
@@ -134,9 +144,26 @@ void Waveform::MapBinsToImage(uint64_t sampled_rows) {
             }
             const int middle = counted / 2;
             const double expected = counted > 0 ? static_cast<double>(neighborhood[middle]) : 0.0;
+
+            // A pipeline pileup steals its mass from nearby codes, so it
+            // always travels with starved neighbors inside the populated
+            // range; a real flat tone starves nothing, and a real
+            // clipping line sits at the range's edge. Only the pileups
+            // may be attenuated without limit.
+            bool starved_nearby = false;
+            if (expected > 0.0) {
+                for (int near = row - 4; near <= row + 4; ++near) {
+                    if (near == row || near <= lowest + 1 || near >= highest - 1) continue;
+                    if (static_cast<double>(global[near]) < expected * 0.1) starved_nearby = true;
+                }
+            }
+            const bool interior = row > lowest + 2 && row < highest - 2;
+            const double attenuation_floor = (starved_nearby && interior) ? 1.0 / 64.0 : 1.0 / 3.0;
+
             double weight = 1.0;
             if (global[row] > 0 && expected > 0.0)
-                weight = std::clamp(expected / static_cast<double>(global[row]), 1.0 / 3.0, 3.0);
+                weight =
+                    std::clamp(expected / static_cast<double>(global[row]), attenuation_floor, 3.0);
             flatten[row] = static_cast<uint32_t>(weight * 256.0);
         }
 
