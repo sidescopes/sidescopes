@@ -2,7 +2,10 @@
 // CMake so the numbers track project(VERSION) in one place.
 #include <windows.h>
 
-1 ICON "@SIDESCOPES_ICON_PATH@"
+// GLFW looks this name up for the window-class icon (title bar and
+// taskbar); Explorer takes the first icon resource either way, so one
+// entry serves both.
+GLFW_ICON ICON "@SIDESCOPES_ICON_PATH@"
 
 VS_VERSION_INFO VERSIONINFO
  FILEVERSION @PROJECT_VERSION_MAJOR@,@PROJECT_VERSION_MINOR@,@PROJECT_VERSION_PATCH@,0
