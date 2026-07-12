@@ -1943,23 +1943,30 @@ int main() {
                     // A frameless glyph, square and centered on the row:
                     // quiet gray until hovered, red at the moment of
                     // intent. A pill background fought the black pane.
-                    ImGui::SameLine(ImGui::GetWindowContentRegionMax().x - line_height);
-                    // Anchor the glyph to the row's top so it centers on
-                    // the swatch, not the text baseline below it.
+                    // The remove control follows the deltas with a small
+                    // margin instead of hugging the pane's right edge,
+                    // where a narrow window pushed it over the numbers;
+                    // in an extremely narrow pane it clips away instead.
+                    ImGui::SameLine(deltas_start + 3.0f * (delta_column + column_gap) +
+                                    2.0f * column_gap);
                     ImGui::SetCursorScreenPos(ImVec2(ImGui::GetCursorScreenPos().x, row_top));
                     if (ImGui::InvisibleButton(close_id, ImVec2(line_height, line_height)))
                         remove_pin = static_cast<int>(index);
                     ImGui::SetItemTooltip("remove this pin");
-                    const ImVec2 glyph_center =
+                    // A drawn cross, not a text glyph: the letter's ink
+                    // sits below its box's center and reads misaligned no
+                    // matter how the box is placed.
+                    const ImVec2 cross_center =
                         ImVec2((ImGui::GetItemRectMin().x + ImGui::GetItemRectMax().x) / 2.0f,
                                (ImGui::GetItemRectMin().y + ImGui::GetItemRectMax().y) / 2.0f);
-                    const ImVec2 glyph_size = ImGui::CalcTextSize("x");
-                    ImGui::GetWindowDrawList()->AddText(
-                        ImVec2(glyph_center.x - glyph_size.x / 2.0f,
-                               glyph_center.y - glyph_size.y / 2.0f),
-                        ImGui::IsItemHovered() ? IM_COL32(235, 90, 90, 255)
-                                               : IM_COL32(150, 150, 150, 180),
-                        "x");
+                    const float arm = line_height * 0.17f;
+                    const ImU32 ink = ImGui::IsItemHovered() ? IM_COL32(235, 90, 90, 255)
+                                                             : IM_COL32(150, 150, 150, 180);
+                    ImDrawList* cross = ImGui::GetWindowDrawList();
+                    cross->AddLine(ImVec2(cross_center.x - arm, cross_center.y - arm),
+                                   ImVec2(cross_center.x + arm, cross_center.y + arm), ink, 1.4f);
+                    cross->AddLine(ImVec2(cross_center.x - arm, cross_center.y + arm),
+                                   ImVec2(cross_center.x + arm, cross_center.y - arm), ink, 1.4f);
                 }
                 draw_pinned_menu();
                 ImGui::EndChild();
