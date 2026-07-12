@@ -183,12 +183,21 @@ ModifierState CurrentModifiers() {
     return state;
 }
 
-bool PlatformClosesWindowOnCommandW() {
+bool PlatformHidesWindowOnCommandW() {
     return false;
+}
+
+bool PlatformMinimizesWindowOnControlW() {
+    return true;
 }
 
 bool PlatformQuitsOnControlQ() {
     return true;
+}
+
+void HideApplication() {
+    // Windows dismisses through minimize; there is no application-wide
+    // hide to invoke.
 }
 
 void OpenScreenRecordingSettings() {

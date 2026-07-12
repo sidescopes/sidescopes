@@ -99,12 +99,20 @@ ModifierState CurrentModifiers() {
     return state;
 }
 
-bool PlatformClosesWindowOnCommandW() {
+bool PlatformHidesWindowOnCommandW() {
     return true;
+}
+
+bool PlatformMinimizesWindowOnControlW() {
+    return false;
 }
 
 bool PlatformQuitsOnControlQ() {
     return false;
+}
+
+void HideApplication() {
+    [NSApp hide:nil];
 }
 
 void OpenScreenRecordingSettings() {

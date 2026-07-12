@@ -108,8 +108,11 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the window on macOS instead of opening the waveform, and any
   Command/Control/Option combination leaves the plain-letter shortcuts
   alone on both platforms. Ctrl+Q quits on Windows, where Alt+F4 was
-  the only affordance. Minimizing hides the region border along with
-  the scopes on both platforms, with every setting kept for restore.
+  the only affordance; Ctrl+W minimizes there. On macOS, Cmd+W and the
+  close button dismiss the window while the application keeps running -
+  the Dock icon brings it back with every setting intact - and Cmd+Q
+  owns the real quit. Minimizing hides the region border along with the
+  scopes on both platforms.
 
 - Activating a scope no longer flashes garbage or stale data for its
   first frames: textures start blanked instead of holding recycled GPU

@@ -640,6 +640,13 @@ int main() {
         if (focused) g_face_check_requested.store(true);
     });
     glfwSetWindowIconifyCallback(window, [](GLFWwindow*, int) { g_iconify_changed.store(true); });
+    // Where the platform dismisses instead of quitting, the close button
+    // takes the same system-hide path as Cmd+W.
+    if (PlatformHidesWindowOnCommandW())
+        glfwSetWindowCloseCallback(window, [](GLFWwindow* closing) {
+            glfwSetWindowShouldClose(closing, GLFW_FALSE);
+            HideApplication();
+        });
 
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
@@ -1357,12 +1364,20 @@ int main() {
             const ImGuiKey key = key_for(binding);
             return key != ImGuiKey_None && ImGui::IsKeyPressed(key, false);
         };
-        if (PlatformClosesWindowOnCommandW() && modifiers.command && !modifiers.control &&
+        if (PlatformHidesWindowOnCommandW() && modifiers.command && !modifiers.control &&
             !modifiers.option && !io.WantTextInput) {
-            if (ImGui::IsKeyPressed(ImGuiKey_W, false)) glfwSetWindowShouldClose(window, GLFW_TRUE);
+            // Cmd+W dismisses through the system hide - the exact
+            // machinery behind Cmd+H, so the Dock click or Cmd+Tab
+            // restores every window natively, the border included.
+            // Hiding only the GLFW window stranded the application with
+            // no visible way back.
+            if (ImGui::IsKeyPressed(ImGuiKey_W, false)) HideApplication();
             // Cmd+comma opens settings everywhere on macOS.
             if (ImGui::IsKeyPressed(ImGuiKey_Comma, false)) show_settings = true;
         }
+        if (PlatformMinimizesWindowOnControlW() && modifiers.control && !modifiers.command &&
+            !modifiers.option && !io.WantTextInput && ImGui::IsKeyPressed(ImGuiKey_W, false))
+            glfwIconifyWindow(window);
         if (PlatformQuitsOnControlQ() && modifiers.control && !modifiers.command &&
             !modifiers.option && !io.WantTextInput && ImGui::IsKeyPressed(ImGuiKey_Q, false))
             glfwSetWindowShouldClose(window, GLFW_TRUE);

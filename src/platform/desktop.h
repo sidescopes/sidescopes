@@ -71,15 +71,25 @@ struct ModifierState {
 };
 ModifierState CurrentModifiers();
 
-// Whether the platform's convention closes the window on a Command+W
-// chord (macOS). Windows closes through the system's Alt+F4 and the
-// title bar; a Ctrl+W there is no convention for utility windows.
-bool PlatformClosesWindowOnCommandW();
+// Whether Command+W dismisses the window while the application keeps
+// running (macOS single-window convention: the Dock icon stays, a click
+// there brings the window back; Cmd+Q owns the real quit).
+bool PlatformHidesWindowOnCommandW();
+
+// Whether Ctrl+W minimizes (Windows: a non-destructive dismissal that
+// mirrors the macOS story, with the taskbar as the way back; the title
+// bar and Alt+F4 keep owning the real close).
+bool PlatformMinimizesWindowOnControlW();
 
 // Whether Ctrl+Q quits (Windows, where Alt+F4 is the only system
 // affordance and frequent quit-and-relaunch deserves a lighter chord).
 // On macOS the application menu's Cmd+Q already owns quitting.
 bool PlatformQuitsOnControlQ();
+
+// Hides the whole application the platform's way (macOS: the same
+// system hide as Cmd+H, so the Dock click restores every window
+// natively). A no-op where no such concept exists.
+void HideApplication();
 
 // Absolute paths of system fonts suitable for the interface, best first;
 // the application loads the first one that exists.
