@@ -25,6 +25,13 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   that application is back on screen.
 - Pinned reference colors on the vectorscope (P or the context menu), for
   matching skin tones across photos; the context menu clears them.
+- Vectorscope view magnification: Z cycles 1x/2x/4x, scaling the trace,
+  graticule, and markers together, with a badge naming the factor.
+- A linear trace response option beside the default boosted curve: density
+  maps to brightness the way a phosphor scope glows, and in both modes the
+  densest mass blooms toward white - a neutral core reads at a glance.
+- Colored luminance waveform style: the trace plots luma while carrying
+  the average color of the pixels behind each point.
 - Scope toggles that stack: V, W and H show one scope alone, Shift stacks
   and unstacks it, and enabled scopes split the window.
 - RGB parade waveform style: the three channels side by side.
@@ -55,6 +62,14 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   smoothing and a snap window.
 - Region change hash that skips re-analysis of unchanged content and masks
   the application's own window out of change detection.
+
+### Changed
+
+- The vectorscope defaults to the BT.709 matrix; BT.601 remains available
+  in the menu. Integer rounding of the 709 coefficients now preserves the
+  neutral axis exactly.
+- All scopes share one graticule palette, brighter than before; the
+  parade separates its three panes with dark gutters.
 
 ### Fixed
 
