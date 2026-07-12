@@ -24,6 +24,10 @@ int ShowNativeContextMenu(const std::vector<NativeMenuItem>& items) {
                 break;
             case NativeMenuItem::Kind::SubmenuBegin: {
                 HMENU submenu = CreatePopupMenu();
+                // On the rare failure the submenu's items land in the
+                // enclosing menu - degraded but usable, never a null
+                // handle on the stack.
+                if (!submenu) break;
                 AppendMenuW(current, MF_POPUP, reinterpret_cast<UINT_PTR>(submenu),
                             WideFromUtf8(item.label).c_str());
                 stack.push_back(submenu);
