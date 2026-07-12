@@ -48,9 +48,13 @@ Preferences LoadPreferences(const std::filesystem::path& file) {
     read_int("histogram_stride", preferences.histogram_stride);
     read_float("vectorscope_smoothing_ms", preferences.vectorscope_smoothing_ms);
     read_float("waveform_smoothing_ms", preferences.waveform_smoothing_ms);
-    int matrix = 0;
+    int matrix = 1;
     read_int("matrix", matrix);
-    preferences.matrix = matrix == 1 ? ChromaMatrix::Bt709 : ChromaMatrix::Bt601;
+    preferences.matrix = matrix == 0 ? ChromaMatrix::Bt601 : ChromaMatrix::Bt709;
+    int trace_response = 0;
+    read_int("trace_response", trace_response);
+    preferences.trace_response =
+        trace_response == 1 ? TraceResponse::Linear : TraceResponse::Boosted;
     int waveform_style = static_cast<int>(preferences.waveform_mode);
     read_int("waveform_mode", waveform_style);
     preferences.waveform_mode = waveform_style == static_cast<int>(WaveformMode::Luma)
@@ -132,6 +136,8 @@ bool SavePreferences(const Preferences& preferences, const std::filesystem::path
         << "vectorscope_smoothing_ms=" << preferences.vectorscope_smoothing_ms << '\n'
         << "waveform_smoothing_ms=" << preferences.waveform_smoothing_ms << '\n'
         << "matrix=" << (preferences.matrix == ChromaMatrix::Bt709 ? 1 : 0) << '\n'
+        << "trace_response=" << (preferences.trace_response == TraceResponse::Linear ? 1 : 0)
+        << '\n'
         << "scope_stack=" << preferences.scope_stack << '\n'
         << "waveform_mode=" << static_cast<int>(preferences.waveform_mode) << '\n'
         << "histogram_per_channel=" << (preferences.histogram_per_channel ? 1 : 0) << '\n'

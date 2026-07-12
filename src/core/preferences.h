@@ -18,7 +18,8 @@ struct Preferences {
     int histogram_stride = 1;
     float vectorscope_smoothing_ms = 75.0f;
     float waveform_smoothing_ms = 100.0f;
-    ChromaMatrix matrix = ChromaMatrix::Bt601;
+    ChromaMatrix matrix = ChromaMatrix::Bt709;
+    TraceResponse trace_response = TraceResponse::Boosted;
     // The waveform scope's style; the parade is its own scope.
     WaveformMode waveform_mode = WaveformMode::Rgb;
     bool histogram_per_channel = false;

@@ -51,6 +51,8 @@ enum MenuAction {
     kMenuHistogramPerChannel,
     kMenuMatrixBt601 = 20,
     kMenuMatrixBt709,
+    kMenuTraceBoosted,
+    kMenuTraceLinear,
     kMenuSelectRegion = 30,
     kMenuFullScreenRegion,
     kMenuToggleGraticule = 40,
@@ -625,6 +627,7 @@ int main() {
     analysis.vectorscope.gain = startup.vectorscope_gain;
     analysis.vectorscope.sampling_stride = startup.vectorscope_stride;
     analysis.vectorscope.matrix = startup.matrix;
+    analysis.vectorscope.response = startup.trace_response;
     analysis.waveform.gain = startup.waveform_gain;
     analysis.waveform.sampling_stride = startup.waveform_stride;
     analysis.histogram.sampling_stride = startup.histogram_stride;
@@ -773,6 +776,7 @@ int main() {
         preferences.vectorscope_smoothing_ms = vectorscope_smoothing_ms;
         preferences.waveform_smoothing_ms = waveform_smoothing_ms;
         preferences.matrix = analysis.vectorscope.matrix;
+        preferences.trace_response = analysis.vectorscope.response;
         preferences.histogram_stride = analysis.histogram.sampling_stride;
         preferences.waveform_mode = analysis.waveform.mode;
         preferences.histogram_per_channel = analysis.histogram.style == HistogramStyle::PerChannel;
@@ -1455,6 +1459,12 @@ int main() {
                 {Kind::Action, "BT.601", kMenuMatrixBt601, bt601},
                 {Kind::Action, "BT.709", kMenuMatrixBt709, !bt601},
                 {Kind::SubmenuEnd, "", -1, false},
+                {Kind::SubmenuBegin, "Trace Response", -1, false},
+                {Kind::Action, "Boosted", kMenuTraceBoosted,
+                 analysis.vectorscope.response == TraceResponse::Boosted},
+                {Kind::Action, "Linear", kMenuTraceLinear,
+                 analysis.vectorscope.response == TraceResponse::Linear},
+                {Kind::SubmenuEnd, "", -1, false},
                 {Kind::Separator, "", -1, false},
                 {Kind::Action, "Select Area...", kMenuSelectRegion, false},
                 {Kind::Action, "Full Screen Area", kMenuFullScreenRegion, is_full_region()},
@@ -1513,6 +1523,14 @@ int main() {
                     break;
                 case kMenuMatrixBt709:
                     analysis.vectorscope.matrix = ChromaMatrix::Bt709;
+                    analysis_dirty = true;
+                    break;
+                case kMenuTraceBoosted:
+                    analysis.vectorscope.response = TraceResponse::Boosted;
+                    analysis_dirty = true;
+                    break;
+                case kMenuTraceLinear:
+                    analysis.vectorscope.response = TraceResponse::Linear;
                     analysis_dirty = true;
                     break;
                 case kMenuSelectRegion:
