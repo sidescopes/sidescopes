@@ -72,90 +72,6 @@ if(APPLE)
         "-framework Vision"
     )
     sidescopes_target_defaults(sidescopes_platform)
-
-    # --- application ---
-    include(FetchContent)
-    set(GLFW_BUILD_DOCS OFF CACHE BOOL "" FORCE)
-    set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
-    set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
-    FetchContent_Declare(
-        glfw
-        GIT_REPOSITORY https://github.com/glfw/glfw.git
-        GIT_TAG 3.4
-        GIT_SHALLOW TRUE
-    )
-    FetchContent_Declare(
-        imgui
-        GIT_REPOSITORY https://github.com/ocornut/imgui.git
-        GIT_TAG v1.92.8
-        GIT_SHALLOW TRUE
-    )
-    FetchContent_MakeAvailable(glfw imgui)
-
-    add_library(imgui STATIC
-        ${imgui_SOURCE_DIR}/imgui.cpp
-        ${imgui_SOURCE_DIR}/imgui_draw.cpp
-        ${imgui_SOURCE_DIR}/imgui_tables.cpp
-        ${imgui_SOURCE_DIR}/imgui_widgets.cpp
-        ${imgui_SOURCE_DIR}/backends/imgui_impl_glfw.cpp
-        ${imgui_SOURCE_DIR}/backends/imgui_impl_metal.mm
-    )
-    target_include_directories(imgui PUBLIC ${imgui_SOURCE_DIR} ${imgui_SOURCE_DIR}/backends)
-    target_link_libraries(imgui PUBLIC glfw)
-    set_source_files_properties(${imgui_SOURCE_DIR}/backends/imgui_impl_metal.mm
-        PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
-
-    # The graphics backend lives with the platform code but compiles into
-    # the application: it owns the ImGui render backend, and only the
-    # application links ImGui.
-    add_executable(SideScopes MACOSX_BUNDLE
-        src/app/main.cpp
-        src/platform/macos/graphics.mm
-        assets/icon/sidescopes.icns
-    )
-    set_source_files_properties(assets/icon/sidescopes.icns
-        PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
-    set_source_files_properties(src/platform/macos/graphics.mm
-        PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
-    set_target_properties(SideScopes PROPERTIES
-        MACOSX_BUNDLE_INFO_PLIST ${CMAKE_SOURCE_DIR}/cmake/Info.plist.in
-        MACOSX_BUNDLE_BUNDLE_NAME "SideScopes"
-        MACOSX_BUNDLE_GUI_IDENTIFIER "org.sidescopes.app"
-        MACOSX_BUNDLE_BUNDLE_VERSION ${PROJECT_VERSION}
-        MACOSX_BUNDLE_SHORT_VERSION_STRING ${PROJECT_VERSION}
-    )
-    target_link_libraries(SideScopes PRIVATE
-        sidescopes_platform
-        imgui
-        glfw
-        "-framework Metal"
-        "-framework QuartzCore"
-    )
-    sidescopes_target_defaults(SideScopes)
-
-    # The screen-recording permission is bound to the bundle's code-signing
-    # identity. An ad-hoc signature's identity is the binary hash, so it
-    # changes on every build and the granted permission is lost each time.
-    # Signing with a stable identity keeps a single grant valid across
-    # rebuilds. If a self-signed "SideScopes Dev" certificate is present (see
-    # CONTRIBUTING), use it; otherwise fall back to ad-hoc. Releases override
-    # this with a Developer ID.
-    if(NOT DEFINED SIDESCOPES_CODESIGN_IDENTITY)
-        execute_process(
-            COMMAND security find-certificate -c "SideScopes Dev"
-            RESULT_VARIABLE _sidescopes_no_dev_cert
-            OUTPUT_QUIET ERROR_QUIET)
-        if(_sidescopes_no_dev_cert EQUAL 0)
-            set(SIDESCOPES_CODESIGN_IDENTITY "SideScopes Dev")
-        else()
-            set(SIDESCOPES_CODESIGN_IDENTITY "-")
-        endif()
-    endif()
-    message(STATUS "SideScopes code-signing identity: ${SIDESCOPES_CODESIGN_IDENTITY}")
-    add_custom_command(TARGET SideScopes POST_BUILD
-        COMMAND codesign --force --sign "${SIDESCOPES_CODESIGN_IDENTITY}"
-                $<TARGET_BUNDLE_DIR:SideScopes>
-    )
 endif()
 
 if(WIN32)
@@ -182,6 +98,116 @@ if(WIN32)
         gdiplus
     )
     sidescopes_target_defaults(sidescopes_platform)
+endif()
+
+if(APPLE OR WIN32)
+    # --- application ---
+    include(FetchContent)
+    set(GLFW_BUILD_DOCS OFF CACHE BOOL "" FORCE)
+    set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+    set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+    FetchContent_Declare(
+        glfw
+        GIT_REPOSITORY https://github.com/glfw/glfw.git
+        GIT_TAG 3.4
+        GIT_SHALLOW TRUE
+    )
+    FetchContent_Declare(
+        imgui
+        GIT_REPOSITORY https://github.com/ocornut/imgui.git
+        GIT_TAG v1.92.8
+        GIT_SHALLOW TRUE
+    )
+    FetchContent_MakeAvailable(glfw imgui)
+
+    add_library(imgui STATIC
+        ${imgui_SOURCE_DIR}/imgui.cpp
+        ${imgui_SOURCE_DIR}/imgui_draw.cpp
+        ${imgui_SOURCE_DIR}/imgui_tables.cpp
+        ${imgui_SOURCE_DIR}/imgui_widgets.cpp
+        ${imgui_SOURCE_DIR}/backends/imgui_impl_glfw.cpp
+    )
+    target_include_directories(imgui PUBLIC ${imgui_SOURCE_DIR} ${imgui_SOURCE_DIR}/backends)
+    target_link_libraries(imgui PUBLIC glfw)
+    if(APPLE)
+        target_sources(imgui PRIVATE ${imgui_SOURCE_DIR}/backends/imgui_impl_metal.mm)
+        set_source_files_properties(${imgui_SOURCE_DIR}/backends/imgui_impl_metal.mm
+            PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
+    else()
+        target_sources(imgui PRIVATE ${imgui_SOURCE_DIR}/backends/imgui_impl_opengl3.cpp)
+    endif()
+
+    # The graphics backends live with the platform code but compile into
+    # the application: they own the ImGui render backends, and only the
+    # application links ImGui.
+    if(APPLE)
+        add_executable(SideScopes MACOSX_BUNDLE
+            src/app/main.cpp
+            src/platform/macos/graphics.mm
+            assets/icon/sidescopes.icns
+        )
+        set_source_files_properties(assets/icon/sidescopes.icns
+            PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
+        set_source_files_properties(src/platform/macos/graphics.mm
+            PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
+        set_target_properties(SideScopes PROPERTIES
+            MACOSX_BUNDLE_INFO_PLIST ${CMAKE_SOURCE_DIR}/cmake/Info.plist.in
+            MACOSX_BUNDLE_BUNDLE_NAME "SideScopes"
+            MACOSX_BUNDLE_GUI_IDENTIFIER "org.sidescopes.app"
+            MACOSX_BUNDLE_BUNDLE_VERSION ${PROJECT_VERSION}
+            MACOSX_BUNDLE_SHORT_VERSION_STRING ${PROJECT_VERSION}
+        )
+        target_link_libraries(SideScopes PRIVATE
+            sidescopes_platform
+            imgui
+            glfw
+            "-framework Metal"
+            "-framework QuartzCore"
+        )
+        sidescopes_target_defaults(SideScopes)
+
+        # The screen-recording permission is bound to the bundle's code-signing
+        # identity. An ad-hoc signature's identity is the binary hash, so it
+        # changes on every build and the granted permission is lost each time.
+        # Signing with a stable identity keeps a single grant valid across
+        # rebuilds. If a self-signed "SideScopes Dev" certificate is present (see
+        # CONTRIBUTING), use it; otherwise fall back to ad-hoc. Releases override
+        # this with a Developer ID.
+        if(NOT DEFINED SIDESCOPES_CODESIGN_IDENTITY)
+            execute_process(
+                COMMAND security find-certificate -c "SideScopes Dev"
+                RESULT_VARIABLE _sidescopes_no_dev_cert
+                OUTPUT_QUIET ERROR_QUIET)
+            if(_sidescopes_no_dev_cert EQUAL 0)
+                set(SIDESCOPES_CODESIGN_IDENTITY "SideScopes Dev")
+            else()
+                set(SIDESCOPES_CODESIGN_IDENTITY "-")
+            endif()
+        endif()
+        message(STATUS "SideScopes code-signing identity: ${SIDESCOPES_CODESIGN_IDENTITY}")
+        add_custom_command(TARGET SideScopes POST_BUILD
+            COMMAND codesign --force --sign "${SIDESCOPES_CODESIGN_IDENTITY}"
+                    $<TARGET_BUNDLE_DIR:SideScopes>
+        )
+    else()
+        # WIN32_EXECUTABLE hides the console; main() stays the portable
+        # entry point, so the linker is told where to find it. The manifest
+        # declares per-monitor DPI awareness before the first window-system
+        # call.
+        add_executable(SideScopes WIN32
+            src/app/main.cpp
+            src/platform/windows/graphics.cpp
+            cmake/sidescopes.manifest
+        )
+        target_link_options(SideScopes PRIVATE /ENTRY:mainCRTStartup)
+        target_link_libraries(SideScopes PRIVATE
+            sidescopes_platform
+            imgui
+            glfw
+            opengl32
+        )
+        sidescopes_target_defaults(SideScopes)
+    endif()
 endif()
 
 if(SIDESCOPES_BUILD_TESTS)

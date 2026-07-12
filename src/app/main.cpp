@@ -455,6 +455,26 @@ void LoadInterfaceFont(GLFWwindow* window) {
     }
 }
 
+// The interface is authored in 100%-scale units. On macOS GLFW window
+// coordinates are already such units - the framebuffer alone carries the
+// Retina factor - so this is 1.0; on Windows the window is sized in
+// physical pixels and the monitor's content scale (1.25, 1.5, ...) says
+// how many of them the interface should treat as one.
+float UiScale(GLFWwindow* window) {
+    float scale_x = 1.0f;
+    float scale_y = 1.0f;
+    glfwGetWindowContentScale(window, &scale_x, &scale_y);
+    int window_width = 0;
+    int window_height = 0;
+    int framebuffer_width = 0;
+    int framebuffer_height = 0;
+    glfwGetWindowSize(window, &window_width, &window_height);
+    glfwGetFramebufferSize(window, &framebuffer_width, &framebuffer_height);
+    const float density =
+        window_width > 0 ? framebuffer_width / static_cast<float>(window_width) : 1.0f;
+    return density > 0 ? scale_x / density : scale_x;
+}
+
 }  // namespace
 
 int main() {
@@ -465,6 +485,10 @@ int main() {
     std::unique_ptr<GraphicsBackend> graphics = CreateGraphicsBackend();
     graphics->SetWindowHints();
     glfwWindowHint(GLFW_FLOATING, GLFW_TRUE);
+    // On Windows the window follows its monitor's scale, so it keeps its
+    // physical size when dragged between differently scaled monitors;
+    // macOS ignores the hint (scaling lives in the framebuffer there).
+    glfwWindowHint(GLFW_SCALE_TO_MONITOR, GLFW_TRUE);
     GLFWwindow* window = glfwCreateWindow(startup.window_width, startup.window_height, "SideScopes",
                                           nullptr, nullptr);
     if (!window) {
@@ -485,6 +509,16 @@ int main() {
     ImGui::StyleColorsDark();
     ApplyTheme();
     LoadInterfaceFont(window);
+    float ui_scale = UiScale(window);
+    const auto apply_ui_scale = [&ui_scale](float scale) {
+        ui_scale = scale;
+        // Scaling an already scaled style would compound, so rebuild from
+        // the base theme each time.
+        ApplyTheme();
+        ImGui::GetStyle().ScaleAllSizes(scale);
+        ImGui::GetStyle().FontScaleMain = scale;
+    };
+    if (ui_scale != 1.0f) apply_ui_scale(ui_scale);
     if (!graphics->Init(window)) {
         ImGui::DestroyContext();
         glfwDestroyWindow(window);
@@ -681,6 +715,13 @@ int main() {
                 next_capture_retry = glfwGetTime() + 2.0;
         }
 
+        // The window may have moved to a monitor with a different scale.
+        const float current_scale = UiScale(window);
+        if (current_scale != ui_scale) {
+            apply_ui_scale(current_scale);
+            last_activity = glfwGetTime();
+        }
+
         int framebuffer_width = 0;
         int framebuffer_height = 0;
         glfwGetFramebufferSize(window, &framebuffer_width, &framebuffer_height);
@@ -708,11 +749,13 @@ int main() {
                 glfwGetWindowSize(window, &window_w, &window_h);
                 const double scale_x = frame_size->width / geometry->width_points;
                 const double scale_y = frame_size->height / geometry->height_points;
+                // The chrome margins are 100%-scale units like the rest of
+                // the interface, so they grow with the monitor's scale.
                 const IntRect self_window{
-                    static_cast<int>((window_x - geometry->origin_x - 8) * scale_x),
-                    static_cast<int>((window_y - geometry->origin_y - 42) * scale_y),
-                    static_cast<int>((window_w + 16) * scale_x),
-                    static_cast<int>((window_h + 58) * scale_y)};
+                    static_cast<int>((window_x - geometry->origin_x - 8 * ui_scale) * scale_x),
+                    static_cast<int>((window_y - geometry->origin_y - 42 * ui_scale) * scale_y),
+                    static_cast<int>((window_w + 16 * ui_scale) * scale_x),
+                    static_cast<int>((window_h + 58 * ui_scale) * scale_y)};
                 if (self_window.x != analysis.masked_window.x ||
                     self_window.y != analysis.masked_window.y ||
                     self_window.width != analysis.masked_window.width ||
@@ -1299,7 +1342,7 @@ int main() {
                 };
                 std::vector<DesktopWindow> visible_windows;
                 std::vector<DesktopWindow> auxiliary_windows;
-                for (const DesktopWindow& window : on_screen) {
+                for (const DesktopWindow& candidate : on_screen) {
                     constexpr int kMaxWindowSuggestions = 5;
                     if (static_cast<int>(visible_windows.size()) >= kMaxWindowSuggestions) break;
                     // A window living mostly inside a bigger window of the
@@ -1312,44 +1355,46 @@ int main() {
                     // borders.
                     bool auxiliary = false;
                     for (const DesktopWindow& other : on_screen) {
-                        if (&other == &window || other.application != window.application) continue;
-                        if (other.width * other.height <= window.width * window.height) continue;
-                        if (contained_fraction(window, other) > 0.9) {
+                        if (&other == &candidate || other.application != candidate.application)
+                            continue;
+                        if (other.width * other.height <= candidate.width * candidate.height)
+                            continue;
+                        if (contained_fraction(candidate, other) > 0.9) {
                             auxiliary = true;
                             break;
                         }
                     }
                     if (auxiliary) {
-                        auxiliary_windows.push_back(window);
+                        auxiliary_windows.push_back(candidate);
                         continue;
                     }
                     bool mostly_covered = false;
                     for (const DesktopWindow& front : visible_windows) {
-                        if (contained_fraction(window, front) > 0.8) {
+                        if (contained_fraction(candidate, front) > 0.8) {
                             mostly_covered = true;
                             break;
                         }
                     }
-                    if (!mostly_covered) visible_windows.push_back(window);
+                    if (!mostly_covered) visible_windows.push_back(candidate);
                 }
 
-                for (const DesktopWindow& window : visible_windows) {
+                for (const DesktopWindow& visible : visible_windows) {
                     WindowRegion region;
-                    region.region.left_percent =
-                        std::clamp((window.x - geometry->origin_x) / geometry->width_points * 100.0,
-                                   0.0, 100.0);
+                    region.region.left_percent = std::clamp(
+                        (visible.x - geometry->origin_x) / geometry->width_points * 100.0, 0.0,
+                        100.0);
                     region.region.top_percent = std::clamp(
-                        (window.y - geometry->origin_y) / geometry->height_points * 100.0, 0.0,
+                        (visible.y - geometry->origin_y) / geometry->height_points * 100.0, 0.0,
                         100.0);
                     region.region.right_percent =
-                        std::clamp((window.x + window.width - geometry->origin_x) /
+                        std::clamp((visible.x + visible.width - geometry->origin_x) /
                                        geometry->width_points * 100.0,
                                    0.0, 100.0);
                     region.region.bottom_percent =
-                        std::clamp((window.y + window.height - geometry->origin_y) /
+                        std::clamp((visible.y + visible.height - geometry->origin_y) /
                                        geometry->height_points * 100.0,
                                    0.0, 100.0);
-                    region.application = window.application;
+                    region.application = visible.application;
                     window_regions.push_back(std::move(region));
                 }
             }
@@ -1369,11 +1414,12 @@ int main() {
             if (DebugSuggestionsRequested()) {
                 std::FILE* report = OpenDebugFile("/tmp/sidescopes-suggestions.txt", "w");
                 if (report) {
-                    for (const auto& window : window_regions)
-                        std::fprintf(report, "window '%s' %.1f,%.1f..%.1f,%.1f%%\n",
-                                     window.application.c_str(), window.region.left_percent,
-                                     window.region.top_percent, window.region.right_percent,
-                                     window.region.bottom_percent);
+                    for (const auto& window_region : window_regions)
+                        std::fprintf(
+                            report, "window '%s' %.1f,%.1f..%.1f,%.1f%%\n",
+                            window_region.application.c_str(), window_region.region.left_percent,
+                            window_region.region.top_percent, window_region.region.right_percent,
+                            window_region.region.bottom_percent);
                     for (const auto& suggestion : suggestions)
                         std::fprintf(report, "suggestion '%s' %.1f,%.1f..%.1f,%.1f%%\n",
                                      suggestion.label.c_str(), suggestion.region.left_percent,
