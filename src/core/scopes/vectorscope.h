@@ -17,10 +17,12 @@ struct VectorscopeSettings {
     // Sample every Nth pixel horizontally and vertically (1..8).
     int sampling_stride = 1;
     ChromaMatrix matrix = ChromaMatrix::Bt601;
-    // Chroma grid resolution per axis. The fixed-point transform holds
-    // more precision than 256 bins use, so a finer grid carries real
-    // sub-detail on panes large enough to show it - when the region
-    // supplies enough samples to fill it.
+    // Display image resolution per axis. Accumulation always happens on
+    // the 256-code chroma grid - 8-bit content quantizes to it, and a
+    // finer accumulation grid renders the quantization as gridded
+    // texture. A finer IMAGE is interpolated from the code grid, which
+    // keeps big panes smooth while the fractional splat preserves
+    // sub-code peak positions.
     int size = kDefaultVectorscopeSize;
 };
 
@@ -54,7 +56,9 @@ private:
 
     VectorscopeSettings settings_;
     int size_ = kDefaultVectorscopeSize;
-    std::vector<uint32_t> bins_;
+    std::vector<uint32_t> bins_;    // always kSize x kSize (code grid)
+    std::vector<float> smoothed_;   // code grid, post-kernel densities
+    std::vector<float> upsampled_;  // size_ x size_ when finer than kSize
     std::vector<uint8_t> tint_;
     ScopeImage image_;
 };

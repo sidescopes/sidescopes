@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <vector>
@@ -122,6 +123,35 @@ TEST_CASE("Vectorscope carries real detail on a finer grid") {
     CHECK(px <= 201);
     CHECK(py >= 86);
     CHECK(py <= 90);
+}
+
+TEST_CASE("Vectorscope leaves no gap between adjacent chroma codes on the fine grid") {
+    // 8-bit content quantizes chroma to whole codes, so neighboring
+    // colors in a photograph sit one code apart - two pixels on the 512
+    // image. Accumulating on a grid that fine renders the quantization
+    // as gridded texture; the fine image must instead interpolate the
+    // code grid, keeping the space between two equally-strong adjacent
+    // codes as bright as the codes themselves.
+    TestFrame frame(32, 32);
+    frame.Fill(0, 16, Color{191, 0, 0});   // Cb 99.65 -> code 100
+    frame.Fill(16, 32, Color{191, 0, 2});  // Cb 100.52 -> code 101
+
+    Vectorscope scope;
+    VectorscopeSettings settings;
+    settings.size = 512;
+    scope.Configure(settings);
+    scope.Accumulate(frame.View(), IntRect{0, 0, 32, 32});
+
+    const auto [px, py] = BrightestPixel(scope.Image());
+    const auto brightness = [&](int x, int y) {
+        const uint8_t* pixel =
+            scope.Image().rgba.data() + (static_cast<std::size_t>(y) * 512 + x) * 4;
+        return static_cast<int>(pixel[0]) + pixel[1] + pixel[2];
+    };
+    const int peak = brightness(px, py);
+    int valley = peak;
+    for (int x = px - 4; x <= px + 4; ++x) valley = std::min(valley, brightness(x, py));
+    CHECK(valley * 4 >= peak * 3);
 }
 
 TEST_CASE("Vectorscope trace is invariant to the sampling stride") {

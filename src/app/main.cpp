@@ -943,12 +943,10 @@ int main() {
                 return ImVec2(points.x * density, points.y * density);
             };
             int region_width = 0;
-            int region_height = 0;
             if (frame_size) {
                 const IntRect region_pixels =
                     analysis.region.ToPixels(frame_size->width, frame_size->height);
                 region_width = region_pixels.width;
-                region_height = region_pixels.height;
             }
 
             int want_columns = analysis.waveform.columns;
@@ -967,11 +965,12 @@ int main() {
             }
             int want_vectorscope = analysis.vectorscope.size;
             if (scope_shown(ScopeGlyph::Vectorscope)) {
+                // Purely a display resolution: accumulation stays on the
+                // 256-code grid and a finer image is interpolated from
+                // it, so a sparse region costs nothing extra.
                 const ImVec2 scope_pane = pane(ScopeGlyph::Vectorscope);
                 const float extent = std::min(scope_pane.x, scope_pane.y);
-                const uint64_t samples =
-                    static_cast<uint64_t>(region_width) * static_cast<uint64_t>(region_height);
-                want_vectorscope = (extent >= 480.0f && samples >= 1'000'000) ? 512 : 256;
+                want_vectorscope = extent >= 480.0f ? 512 : 256;
             }
 
             const bool differs = want_columns != analysis.waveform.columns ||

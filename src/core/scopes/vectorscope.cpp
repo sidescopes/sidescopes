@@ -35,7 +35,7 @@ void Vectorscope::Configure(const VectorscopeSettings& settings) {
     const bool matrix_changed = settings.matrix != settings_.matrix;
     settings_ = settings;
     settings_.sampling_stride = std::clamp(settings_.sampling_stride, 1, 8);
-    settings_.size = std::clamp(settings_.size, 128, 512);
+    settings_.size = std::clamp(settings_.size, kSize, 512);
     if (settings_.size != size_)
         Resize(settings_.size);
     else if (matrix_changed)
@@ -44,7 +44,9 @@ void Vectorscope::Configure(const VectorscopeSettings& settings) {
 
 void Vectorscope::Resize(int size) {
     size_ = size;
-    bins_.assign(static_cast<std::size_t>(size_) * size_, 0);
+    bins_.assign(static_cast<std::size_t>(kSize) * kSize, 0);
+    smoothed_.assign(static_cast<std::size_t>(kSize) * kSize, 0.0f);
+    upsampled_.assign(size_ > kSize ? static_cast<std::size_t>(size_) * size_ : 0, 0.0f);
     tint_.assign(static_cast<std::size_t>(size_) * size_ * 3, 0);
     image_.width = size_;
     image_.height = size_;
@@ -63,15 +65,17 @@ void Vectorscope::Accumulate(const FrameView& frame, IntRect region) {
         for (int py = region.y; py < region.y + region.height; py += stride) {
             const uint8_t* pixel = frame.PixelAt(region.x, py);
             const uint8_t* row_end = frame.PixelAt(region.x + region.width, py);
-            // The raw transform carries eight bits below the classic 256
-            // grid; scaling it to the configured grid instead of always
-            // shifting by eight is what makes a finer grid real detail.
-            // Samples splat bilinearly across the four bins they
-            // straddle, in sixteenths per axis: truncation used to alias
-            // the chroma lattice into gridded texture, and parked the
-            // whole cloud half a bin off the positions the projection -
-            // and with it every marker and graticule target - reports.
-            const int size = size_;
+            // Accumulation always uses the 256-code grid: 8-bit content
+            // quantizes its chroma to those codes (and piles unevenly
+            // onto fixed sub-code positions, measured at 45% of a grass
+            // frame on a single one), so a finer accumulation grid
+            // renders quantization as gridded texture. Samples splat
+            // bilinearly across the four bins they straddle, in
+            // sixteenths per axis: truncation used to alias the code
+            // lattice into texture even at 256, and parked the whole
+            // cloud half a bin off the positions the projection - and
+            // with it every marker and graticule target - reports.
+            const int size = kSize;
             const int span = size * 16;
             for (; pixel < row_end; pixel += static_cast<std::ptrdiff_t>(4) * stride) {
                 const int b = pixel[0], g = pixel[1], r = pixel[2];
@@ -146,58 +150,73 @@ void Vectorscope::RebuildTintTable() {
 }
 
 void Vectorscope::MapBinsToImage(uint64_t sample_count) {
-    // Eight-bit content carries no chroma information below one code:
-    // photographs arrive chroma-quantized (JPEG stores integer Cb/Cr),
-    // so their colors sit on a one-code lattice. A grid finer than that
-    // lattice must not resolve below it, or big areas of similar color
-    // render the codec's quantization as gridded texture. Widening the
-    // splat tent to one whole code restores flatness - a tent as wide as
-    // the lattice spacing sums to a constant across it - and a separable
-    // [1,2,1] pass over the bins is exactly that widening, upgrading the
-    // accumulated one-bin tent to a two-bin one.
-    if (size_ > 256) {
-        std::vector<uint32_t> widened(bins_.size(), 0);
-        for (int py = 0; py < size_; ++py) {
-            const auto at = [&](int y, int x) -> uint32_t {
-                if (y < 0 || y >= size_ || x < 0 || x >= size_) return 0;
-                return bins_[static_cast<std::size_t>(y) * size_ + x];
-            };
-            for (int px = 0; px < size_; ++px) {
-                const auto row = [&](int y) {
-                    return at(y, px - 1) + 2u * at(y, px) + at(y, px + 1);
-                };
-                widened[static_cast<std::size_t>(py) * size_ + px] =
-                    (row(py - 1) + 2u * row(py) + row(py + 1) + 8u) / 16u;
-            }
-        }
-        bins_.swap(widened);
-    }
-
-    // An aesthetic 3x3 binomial then takes the residual speckle out of
-    // the cloud. Its strength follows the grid so the smoothing stays
-    // constant in chroma units and the adaptive tier switch is seamless:
-    // full strength on the fine grid, half strength at 256 where a bin
-    // already spans a whole code and the full kernel reads as gaussian
+    // A half-strength 3x3 binomial takes the worst speckle out of the
+    // cloud without softening it: the fractional splat already spreads
+    // each sample as a tent, so a full binomial on top reads as gaussian
     // blur at large pane sizes.
-    const bool fine_grid = size_ > 256;
-    std::vector<float> smoothed(bins_.size(), 0.0f);
-    for (int py = 0; py < size_; ++py) {
-        for (int px = 0; px < size_; ++px) {
+    for (int py = 0; py < kSize; ++py) {
+        for (int px = 0; px < kSize; ++px) {
             const auto at = [&](int y, int x) -> float {
-                if (y < 0 || y >= size_ || x < 0 || x >= size_) return 0.0f;
-                return static_cast<float>(bins_[static_cast<std::size_t>(y) * size_ + x]);
+                if (y < 0 || y >= kSize || x < 0 || x >= kSize) return 0.0f;
+                return static_cast<float>(bins_[static_cast<std::size_t>(y) * kSize + x]);
             };
             const auto row = [&](int y) {
                 return at(y, px - 1) + 2.0f * at(y, px) + at(y, px + 1);
             };
-            const float binomial = (row(py - 1) + 2.0f * row(py) + row(py + 1)) / 16.0f;
-            smoothed[static_cast<std::size_t>(py) * size_ + px] =
-                fine_grid ? binomial : 0.5f * at(py, px) + 0.5f * binomial;
+            smoothed_[static_cast<std::size_t>(py) * kSize + px] =
+                0.5f * at(py, px) + 0.5f * (row(py - 1) + 2.0f * row(py) + row(py + 1)) / 16.0f;
         }
     }
 
+    // A finer display image interpolates the code grid with a separable
+    // Catmull-Rom, the same reconstruction the waveform uses for its
+    // level axis: the cloud gets the large pane's smoothness, and peak
+    // positions keep the sub-code placement the fractional splat gave
+    // them, without pretending to resolve chroma below one code.
+    const float* densities = smoothed_.data();
+    int density_size = kSize;
+    if (size_ > kSize) {
+        const auto at = [&](int y, int x) -> float {
+            y = std::clamp(y, 0, kSize - 1);
+            x = std::clamp(x, 0, kSize - 1);
+            return smoothed_[static_cast<std::size_t>(y) * kSize + x];
+        };
+        const auto weights = [](float t, float w[4]) {
+            w[0] = ((-0.5f * t + 1.0f) * t - 0.5f) * t;
+            w[1] = (1.5f * t - 2.5f) * t * t + 1.0f;
+            w[2] = ((-1.5f * t + 2.0f) * t + 0.5f) * t;
+            w[3] = (0.5f * t - 0.5f) * t * t;
+        };
+        const float step = static_cast<float>(kSize) / static_cast<float>(size_);
+        for (int py = 0; py < size_; ++py) {
+            const float sy = (static_cast<float>(py) + 0.5f) * step - 0.5f;
+            const int base_y = static_cast<int>(std::floor(sy));
+            float wy[4];
+            weights(sy - static_cast<float>(base_y), wy);
+            for (int px = 0; px < size_; ++px) {
+                const float sx = (static_cast<float>(px) + 0.5f) * step - 0.5f;
+                const int base_x = static_cast<int>(std::floor(sx));
+                float wx[4];
+                weights(sx - static_cast<float>(base_x), wx);
+                float value = 0.0f;
+                for (int j = 0; j < 4; ++j) {
+                    float row_value = 0.0f;
+                    for (int i = 0; i < 4; ++i)
+                        row_value += wx[i] * at(base_y - 1 + j, base_x - 1 + i);
+                    value += wy[j] * row_value;
+                }
+                // Catmull-Rom undershoots next to sharp peaks; densities
+                // cannot be negative.
+                upsampled_[static_cast<std::size_t>(py) * size_ + px] = std::max(value, 0.0f);
+            }
+        }
+        densities = upsampled_.data();
+        density_size = size_;
+    }
+
     float densest = 0.0f;
-    for (const float count : smoothed) densest = std::max(densest, count);
+    const std::size_t density_count = static_cast<std::size_t>(density_size) * density_size;
+    for (std::size_t i = 0; i < density_count; ++i) densest = std::max(densest, densities[i]);
 
     // Each sample contributes 256 weight units (the splat's sixteenths
     // squared); the normalization divides them back out so the gain
@@ -211,8 +230,8 @@ void Vectorscope::MapBinsToImage(uint64_t sample_count) {
 
     uint8_t* out = image_.rgba.data();
     const uint8_t* tint = tint_.data();
-    for (std::size_t i = 0; i < smoothed.size(); ++i, out += 4, tint += 3) {
-        const float count = smoothed[i];
+    for (std::size_t i = 0; i < density_count; ++i, out += 4, tint += 3) {
+        const float count = densities[i];
         if (count <= 0.0f) {
             out[0] = out[1] = out[2] = 0;
             out[3] = 255;
