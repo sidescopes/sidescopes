@@ -16,7 +16,8 @@ struct VectorscopeSettings {
     float gain = 3.0f;
     // Sample every Nth pixel horizontally and vertically (1..8).
     int sampling_stride = 1;
-    ChromaMatrix matrix = ChromaMatrix::Bt601;
+    ChromaMatrix matrix = ChromaMatrix::Bt709;
+    TraceResponse response = TraceResponse::Boosted;
     // Display image resolution per axis. Accumulation always happens on
     // the 256-code chroma grid - 8-bit content quantizes to it, and a
     // finer accumulation grid renders the quantization as gridded

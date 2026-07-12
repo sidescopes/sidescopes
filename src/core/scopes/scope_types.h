@@ -5,9 +5,16 @@
 
 namespace sidescopes {
 
-// RGB -> chroma matrix for the vectorscope. BT.601 is the convention most
-// scope users know; BT.709 matches HD video material.
+// RGB -> chroma matrix for the vectorscope. BT.709 is what today's scope
+// users expect (every HD-era tool measures with it); BT.601 remains for
+// reading SD material and codec-native JPEG chroma.
 enum class ChromaMatrix { Bt601, Bt709 };
+
+// How trace density maps to brightness. Boosted lifts dim regions with a
+// log curve so sparse traces stay readable; Linear behaves like a
+// phosphor scope, where only genuinely dense mass glows brightly and
+// faint spread stays faint.
+enum class TraceResponse { Boosted, Linear };
 
 // What the waveform plots. RGB overlay is the default: separated colored
 // traces make color casts readable at a glance. Parade shows the three

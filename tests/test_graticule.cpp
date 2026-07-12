@@ -30,6 +30,8 @@ TEST_CASE("Vectorscope graticule targets follow the matrix") {
     Vectorscope bt601;
     Vectorscope bt709;
     VectorscopeSettings settings;
+    settings.matrix = ChromaMatrix::Bt601;
+    bt601.Configure(settings);
     settings.matrix = ChromaMatrix::Bt709;
     bt709.Configure(settings);
 

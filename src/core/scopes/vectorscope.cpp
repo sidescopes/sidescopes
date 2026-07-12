@@ -14,8 +14,11 @@ struct ChromaCoefficients {
     int cr_from_r, cr_from_g, cr_from_b;
 };
 
+// Each row sums to zero exactly: a gray input must land dead on the
+// neutral center, so the rounding error goes into the green coefficient
+// (0.3% of its weight) rather than into a bias of the neutral axis.
 constexpr ChromaCoefficients kBt601{-38, -74, 112, 112, -94, -18};
-constexpr ChromaCoefficients kBt709{-26, -87, 112, 112, -102, -10};
+constexpr ChromaCoefficients kBt709{-26, -86, 112, 112, -102, -10};
 
 constexpr const ChromaCoefficients& CoefficientsFor(ChromaMatrix matrix) {
     return matrix == ChromaMatrix::Bt601 ? kBt601 : kBt709;
@@ -288,6 +291,19 @@ void Vectorscope::MapBinsToImage(uint64_t sample_count) {
     const double gain = static_cast<double>(settings_.gain) * per_sample_scale;
     const double log_ceiling = densest > 0.0f ? std::log1p(densest * gain) : 0.0;
     const double intensity_scale = log_ceiling > 0.0 ? 1.0 / log_ceiling : 0.0;
+    const bool linear = settings_.response == TraceResponse::Linear;
+    // The linear response emulates a phosphor: exposure saturates
+    // exponentially, so the densest mass just reaches full glow at the
+    // default gain and faint spread stays honestly faint. The gain acts
+    // as the phosphor's sensitivity.
+    const double phosphor_rate =
+        densest > 0.0f ? static_cast<double>(settings_.gain) / static_cast<double>(densest) : 0.0;
+
+    // Where the beam parks, phosphor overexposes toward white: past the
+    // bloom knee the tint desaturates with density. The white-hot core
+    // over neutral content doubles as an at-a-glance neutrality check.
+    const float bloom_knee = linear ? 0.72f : 0.88f;
+    const float bloom_scale = 0.9f / (1.0f - bloom_knee);
 
     uint8_t* out = image_.rgba.data();
     const uint8_t* tint = tint_.data();
@@ -298,15 +314,28 @@ void Vectorscope::MapBinsToImage(uint64_t sample_count) {
             out[3] = 255;
             continue;
         }
-        // The gamma lifts the mid-density body of the cloud: normalizing
-        // to the densest bin pushes everything else down, and a linear
-        // ramp leaves the trace dim at any gain.
-        const float normalized =
-            static_cast<float>(std::log1p(static_cast<double>(count) * gain) * intensity_scale);
-        const float brightness = std::pow(normalized, 0.65f);
-        out[0] = static_cast<uint8_t>(static_cast<float>(tint[0]) * brightness);
-        out[1] = static_cast<uint8_t>(static_cast<float>(tint[1]) * brightness);
-        out[2] = static_cast<uint8_t>(static_cast<float>(tint[2]) * brightness);
+        float brightness;
+        if (linear) {
+            brightness =
+                static_cast<float>(1.0 - std::exp(-static_cast<double>(count) * phosphor_rate));
+        } else {
+            // The gamma lifts the mid-density body of the cloud:
+            // normalizing to the densest bin pushes everything else
+            // down, and a linear ramp leaves the trace dim at any gain.
+            const float normalized =
+                static_cast<float>(std::log1p(static_cast<double>(count) * gain) * intensity_scale);
+            brightness = std::pow(normalized, 0.65f);
+        }
+        const float whiteness = std::clamp((brightness - bloom_knee) * bloom_scale, 0.0f, 0.9f);
+        out[0] = static_cast<uint8_t>(
+            (static_cast<float>(tint[0]) + (255.0f - static_cast<float>(tint[0])) * whiteness) *
+            brightness);
+        out[1] = static_cast<uint8_t>(
+            (static_cast<float>(tint[1]) + (255.0f - static_cast<float>(tint[1])) * whiteness) *
+            brightness);
+        out[2] = static_cast<uint8_t>(
+            (static_cast<float>(tint[2]) + (255.0f - static_cast<float>(tint[2])) * whiteness) *
+            brightness);
         out[3] = 255;
     }
     ++image_.sequence;

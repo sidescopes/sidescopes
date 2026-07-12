@@ -75,8 +75,8 @@ TEST_CASE("AnalysisWorker produces scope images from published frames") {
     uint64_t seen = 0;
     AnalysisWorker::Output output;
     REQUIRE(WaitFor([&] { return worker.FetchOutput(seen, output); }));
-    // 75% red lands on the BT.601 target (bin 99, 44).
-    CHECK(PixelLit(output.vectorscope_image, 99, 44));
+    // 75% red lands on the default BT.709 target (bin 109, 43).
+    CHECK(PixelLit(output.vectorscope_image, 109, 43));
     CHECK(output.frames_processed == 1);
 }
 
@@ -145,13 +145,13 @@ TEST_CASE("AnalysisWorker recomputes on settings changes without a new frame") {
     uint64_t seen = 0;
     AnalysisWorker::Output output;
     REQUIRE(WaitFor([&] { return worker.FetchOutput(seen, output); }));
-    CHECK(PixelLit(output.vectorscope_image, 99, 44));  // BT.601 target
+    CHECK(PixelLit(output.vectorscope_image, 109, 43));  // default BT.709 target
 
     AnalysisSettings settings;
-    settings.vectorscope.matrix = ChromaMatrix::Bt709;
+    settings.vectorscope.matrix = ChromaMatrix::Bt601;
     worker.UpdateSettings(settings);
     REQUIRE(WaitFor([&] { return worker.FetchOutput(seen, output); }));
-    CHECK(PixelLit(output.vectorscope_image, 108, 44));  // BT.709 target
+    CHECK(PixelLit(output.vectorscope_image, 100, 43));  // BT.601 target
     CHECK(output.frames_processed == 1);                 // same frame, reanalyzed
 }
 
@@ -202,9 +202,10 @@ TEST_CASE("AnalysisWorker restricts analysis to the region of interest") {
     uint64_t seen = 0;
     AnalysisWorker::Output output;
     REQUIRE(WaitFor([&] { return worker.FetchOutput(seen, output); }));
-    CHECK(PixelLit(output.vectorscope_image, 99, 44));  // red target
-    // Blue's BT.601 target: Cb = ((112*191)>>8)+128 = 211, Cr = ((-18*191)>>8)+128 = 114.
-    CHECK_FALSE(PixelLit(output.vectorscope_image, 211, 255 - 114));
+    CHECK(PixelLit(output.vectorscope_image, 109, 43));  // red target
+    // Blue's BT.709 target: Cb = 112 * 191 / 256 + 128 = 211.6,
+    // Cr = -10 * 191 / 256 + 128 = 120.5 -> pixel (212, 255 - 121).
+    CHECK_FALSE(PixelLit(output.vectorscope_image, 212, 255 - 121));
 }
 
 }  // namespace sidescopes

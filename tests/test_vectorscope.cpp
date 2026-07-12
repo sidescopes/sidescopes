@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
+#include <cstdlib>
 #include <vector>
 
 #include "core/scopes/vectorscope.h"
@@ -57,17 +58,34 @@ std::pair<int, int> BrightestPixel(const ScopeImage& image) {
 }  // namespace
 
 TEST_CASE("Vectorscope places 75% red on the classic BT.601 target") {
-    // 75% red (191, 0, 0) sits at Cb = 99.65, Cr = 211.56. The bilinear
-    // splat peaks on the ROUNDED position - bin (100, 255 - 212 = 43) -
-    // where integer truncation used to floor it to (99, 44), half a bin
-    // away from where the projection puts the markers.
+    // 75% red (191, 0, 0) sits at Cb = 99.65, Cr = 211.56 under BT.601.
+    // The bilinear splat peaks on the ROUNDED position - bin
+    // (100, 255 - 212 = 43) - where integer truncation used to floor it
+    // to (99, 44), half a bin away from where the projection puts the
+    // markers.
+    TestFrame frame(8, 8);
+    frame.Fill(0, 8, Color{191, 0, 0});
+
+    Vectorscope scope;
+    VectorscopeSettings settings;
+    settings.matrix = ChromaMatrix::Bt601;
+    scope.Configure(settings);
+    scope.Accumulate(frame.View(), IntRect{0, 0, 8, 8});
+
+    CHECK(BrightestPixel(scope.Image()) == std::pair<int, int>{100, 43});
+}
+
+TEST_CASE("Vectorscope defaults to the BT.709 matrix") {
+    // Every HD-era scope measures with 709; with no configuration at all
+    // 75% red must land on the 709 position (Cb 108.6 -> bin 109), not
+    // the 601 one.
     TestFrame frame(8, 8);
     frame.Fill(0, 8, Color{191, 0, 0});
 
     Vectorscope scope;
     scope.Accumulate(frame.View(), IntRect{0, 0, 8, 8});
 
-    CHECK(BrightestPixel(scope.Image()) == std::pair<int, int>{100, 43});
+    CHECK(BrightestPixel(scope.Image()) == std::pair<int, int>{109, 43});
 }
 
 TEST_CASE("Vectorscope maps neutral gray to the center") {
@@ -82,6 +100,9 @@ TEST_CASE("Vectorscope maps neutral gray to the center") {
 
 TEST_CASE("Vectorscope projection agrees with accumulation") {
     Vectorscope scope;
+    VectorscopeSettings settings;
+    settings.matrix = ChromaMatrix::Bt601;
+    scope.Configure(settings);
     const auto point = scope.Project(FloatColor{191.0f, 0.0f, 0.0f});
     REQUIRE(point.has_value());
     // Floating-point chroma for 75% red: Cb = 99.65, Cr = 211.56.
@@ -113,6 +134,7 @@ TEST_CASE("Vectorscope carries real detail on a finer grid") {
 
     Vectorscope scope;
     VectorscopeSettings settings;
+    settings.matrix = ChromaMatrix::Bt601;
     settings.size = 512;
     scope.Configure(settings);
     scope.Accumulate(frame.View(), IntRect{0, 0, 32, 32});
@@ -139,6 +161,10 @@ TEST_CASE("Vectorscope leaves no gap between adjacent chroma codes on the fine g
     Vectorscope scope;
     VectorscopeSettings settings;
     settings.size = 512;
+    // Linear response at unit gain keeps the peak below the bloom knee,
+    // so the ratio below measures the interpolation alone.
+    settings.response = TraceResponse::Linear;
+    settings.gain = 1.0f;
     scope.Configure(settings);
     scope.Accumulate(frame.View(), IntRect{0, 0, 32, 32});
 
@@ -148,10 +174,67 @@ TEST_CASE("Vectorscope leaves no gap between adjacent chroma codes on the fine g
             scope.Image().rgba.data() + (static_cast<std::size_t>(y) * 512 + x) * 4;
         return static_cast<int>(pixel[0]) + pixel[1] + pixel[2];
     };
+    // The two codes render as two nearby peaks; the space between them
+    // must hold, not fall dark.
     const int peak = brightness(px, py);
+    int second_x = px - 2;
+    for (int x = px - 6; x <= px + 6; ++x)
+        if (std::abs(x - px) >= 2 && brightness(x, py) > brightness(second_x, py)) second_x = x;
+    const int second = brightness(second_x, py);
     int valley = peak;
-    for (int x = px - 4; x <= px + 4; ++x) valley = std::min(valley, brightness(x, py));
-    CHECK(valley * 4 >= peak * 3);
+    for (int x = std::min(px, second_x); x <= std::max(px, second_x); ++x)
+        valley = std::min(valley, brightness(x, py));
+    CHECK(second * 2 >= peak);
+    CHECK(valley * 4 >= second * 3);
+}
+
+TEST_CASE("Vectorscope linear response keeps sparse mass faint") {
+    // 63 parts red to 1 part blue. The boosted log curve lifts the blue
+    // speck into clear visibility; the phosphor-linear response must
+    // leave it far dimmer than the dominant mass, the way a hardware
+    // scope would.
+    TestFrame frame(64, 64);
+    frame.Fill(0, 63, Color{191, 0, 0});
+    frame.Fill(63, 64, Color{0, 0, 191});
+
+    const auto brightness_at_blue = [](TraceResponse response) {
+        Vectorscope scope;
+        VectorscopeSettings settings;
+        settings.response = response;
+        scope.Configure(settings);
+        TestFrame frame(64, 64);
+        frame.Fill(0, 63, Color{191, 0, 0});
+        frame.Fill(63, 64, Color{0, 0, 191});
+        scope.Accumulate(frame.View(), IntRect{0, 0, 64, 64});
+        // 75% blue under BT.709: Cb = 112 * 191 / 256 = 83.6 -> bin 212,
+        // Cr = -10 * 191 / 256 = -7.5 -> row 255 - 121 = 134.
+        const uint8_t* pixel =
+            scope.Image().rgba.data() + (static_cast<std::size_t>(134) * 256 + 212) * 4;
+        return static_cast<int>(pixel[0]) + pixel[1] + pixel[2];
+    };
+
+    const int boosted = brightness_at_blue(TraceResponse::Boosted);
+    const int linear = brightness_at_blue(TraceResponse::Linear);
+    CHECK(boosted > 150);
+    CHECK(linear * 3 < boosted);
+}
+
+TEST_CASE("Vectorscope blooms the densest mass toward white") {
+    // A solid color parks all mass on one spot; the phosphor bloom must
+    // desaturate that core toward white while the same tint one code
+    // away from saturation stays clearly colored.
+    TestFrame frame(16, 16);
+    frame.Fill(0, 16, Color{191, 0, 0});
+
+    Vectorscope scope;
+    scope.Accumulate(frame.View(), IntRect{0, 0, 16, 16});
+
+    const auto [px, py] = BrightestPixel(scope.Image());
+    const uint8_t* peak = scope.Image().rgba.data() + (static_cast<std::size_t>(py) * 256 + px) * 4;
+    const int strongest = std::max({peak[0], peak[1], peak[2]});
+    const int weakest = std::min({peak[0], peak[1], peak[2]});
+    CHECK(strongest >= 200);
+    CHECK(weakest * 10 >= strongest * 7);  // near-white core
 }
 
 TEST_CASE("Vectorscope trace is invariant to the sampling stride") {
