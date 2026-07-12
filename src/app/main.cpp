@@ -1778,8 +1778,8 @@ int main() {
             const auto swatch_color = [](const FloatColor& source) {
                 return ImVec4(source.r / 255.0f, source.g / 255.0f, source.b / 255.0f, 1.0f);
             };
-            const auto pin_hex_of = [&](std::size_t index, char (&buffer)[8]) {
-                std::snprintf(buffer, sizeof(buffer), "#%02X%02X%02X",
+            const auto pin_hex_of = [&](std::size_t index, char* buffer) {
+                std::snprintf(buffer, 8, "#%02X%02X%02X",
                               static_cast<int>(std::lround(pinned_colors[index].r)),
                               static_cast<int>(std::lround(pinned_colors[index].g)),
                               static_cast<int>(std::lround(pinned_colors[index].b)));
