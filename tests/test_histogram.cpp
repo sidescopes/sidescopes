@@ -197,7 +197,7 @@ TEST_CASE("Histogram exports its curve for display-resolution stroking") {
     scope.Accumulate(frame.View(), IntRect{0, 0, 32, 32});
 
     const std::vector<float>& outline = scope.OutlineHeights();
-    REQUIRE(outline.size() == 3 * Histogram::kBins);
+    REQUIRE(outline.size() == static_cast<std::size_t>(3) * Histogram::kBins);
     // Each channel's curve peaks at its value, at full normalized scale
     // regardless of the style.
     const auto peak_bin = [&](int channel) {

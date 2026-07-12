@@ -1556,7 +1556,7 @@ int main() {
             // anisotropically with the pane - thick on flats, thin on
             // slopes. Sampled through the same spline the fill uses, so
             // line and fill edge agree.
-            if (output.histogram_outline.size() == 3 * Histogram::kBins) {
+            if (output.histogram_outline.size() == static_cast<std::size_t>(3) * Histogram::kBins) {
                 ImDrawList* draw = ImGui::GetWindowDrawList();
                 draw->PushClipRect(
                     scope.origin,
