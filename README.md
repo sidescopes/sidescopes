@@ -55,7 +55,8 @@ ctest --test-dir build
 ```
 
 Requires CMake 3.24+ and a C++20 compiler. Dependencies are fetched during
-configuration.
+configuration. Toolchain setup for macOS (Homebrew) and Windows (winget) is
+covered in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Troubleshooting
 

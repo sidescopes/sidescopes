@@ -10,9 +10,40 @@ cmake --build build
 ctest --test-dir build
 ```
 
-CMake 3.24+, Ninja (recommended), and a C++20 compiler. macOS builds need the
-Command Line Tools; the app target builds on macOS only, while the core
-library and its tests build everywhere.
+CMake 3.24+, a C++20 compiler, and `clang-format` for the formatting check.
+The application builds on macOS and Windows; the core library and its tests
+build everywhere.
+
+### macOS
+
+Xcode Command Line Tools provide the compiler. The rest comes from
+[Homebrew](https://brew.sh):
+
+```sh
+xcode-select --install
+brew install cmake ninja clang-format
+```
+
+### Windows
+
+Visual Studio 2022 or newer with the "Desktop development with C++" workload
+provides the compiler. The rest comes from
+[winget](https://learn.microsoft.com/windows/package-manager/):
+
+```powershell
+winget install Kitware.CMake Ninja-build.Ninja LLVM.LLVM
+```
+
+`LLVM.LLVM` supplies `clang-format`; add `C:\Program Files\LLVM\bin` to
+`PATH` if the installer did not. Configure and build from a "Developer
+PowerShell for VS" so the MSVC toolchain is on the environment, or pass
+`-G "Visual Studio 17 2022"` and build with `--config Release`:
+
+```powershell
+cmake -B build
+cmake --build build --config Release
+ctest --test-dir build -C Release
+```
 
 ## Screen-recording permission for development builds (macOS)
 
