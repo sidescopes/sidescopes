@@ -53,10 +53,12 @@ equivalent and passes `-m` for you: `cmake --preset vs`,
 warnings-as-errors build in a separate `build-werror/` tree.
 
 To work in the Visual Studio IDE, use File > Open > Folder on the
-repository: it picks the presets up automatically, builds into the same
-`build/` directory as the command line, and offers the Debug and Release
-configurations. Pick `SideScopes.exe` as the startup item to run or
-debug.
+repository and select the "Visual Studio IDE (Ninja)" preset - the IDE
+drives Ninja best and supplies the MSVC environment itself. It builds
+into `build-ide/` with both Debug and Release configurations. Pick
+`SideScopes.exe` as the startup item to run or debug. If the
+configuration dropdown ever comes up empty, Project > Delete Cache and
+Reconfigure clears the IDE's stale state.
 
 ## Screen-recording permission for development builds (macOS)
 

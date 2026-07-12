@@ -21,6 +21,18 @@
             "cacheVariables": {
                 "SIDESCOPES_WERROR": "ON"
             }
+        },
+        {
+            "name": "ide",
+            "displayName": "Visual Studio IDE (Ninja)",
+            "description": "For Open Folder in the IDE, which drives Ninja best; the IDE supplies the MSVC environment",
+            "generator": "Ninja Multi-Config",
+            "binaryDir": "${sourceDir}/build-ide",
+            "condition": {
+                "type": "equals",
+                "lhs": "${hostSystemName}",
+                "rhs": "Windows"
+            }
         }
     ],
     "buildPresets": [
@@ -41,6 +53,16 @@
             "configurePreset": "vs-werror",
             "configuration": "Release",
             "nativeToolOptions": ["-m"]
+        },
+        {
+            "name": "ide-debug",
+            "configurePreset": "ide",
+            "configuration": "Debug"
+        },
+        {
+            "name": "ide-release",
+            "configurePreset": "ide",
+            "configuration": "Release"
         }
     ],
     "testPresets": [
