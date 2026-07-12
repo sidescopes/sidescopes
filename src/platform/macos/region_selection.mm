@@ -41,13 +41,14 @@ constexpr double kCornerZone = 22.0;
 constexpr double kMidpointZone = 22.0;
 // Regions cannot shrink beyond this many points per side.
 constexpr double kMinimumRegionSize = 24.0;
-// The hover-revealed close button on the band: visible radius, its
-// larger hit target, and the region width below which it yields to the
-// resize handles (the band gets crowded before it gets useless).
-constexpr double kCloseRadius = 7.0;
+// The hover-revealed close button: a badge on the band's outer corner,
+// diagonally off the corner handle, so it visibly belongs to the region
+// as a whole. Pulled inward a touch so the disc mostly rides the band;
+// tiny regions still yield it to the resize zones.
+constexpr double kCloseRadius = 6.5;
 constexpr double kCloseHitRadius = 11.0;
-constexpr double kCloseCornerGap = 4.0;
-constexpr double kMinimumWidthForClose = 80.0;
+constexpr double kCloseCornerInset = 2.0;
+constexpr double kMinimumWidthForClose = 48.0;
 
 NSScreen* ScreenForDisplay(uint32_t display_id) {
     for (NSScreen* screen in NSScreen.screens) {
@@ -419,13 +420,13 @@ RegionOfInterest g_border_edit_region;
            region.size.width >= sidescopes::kMinimumWidthForClose;
 }
 
-// On the band above the top edge, just clear of the top-right corner's
-// resize zone.
+// On the band's outer corner, at forty-five degrees off the top-right
+// handle dot - anchored to the corner rather than parked beside it.
 - (NSPoint)closeCenter {
     const NSRect region = [self regionRect];
-    return NSMakePoint(NSMaxX(region) - sidescopes::kCornerZone - sidescopes::kCloseCornerGap -
-                           sidescopes::kCloseRadius,
-                       NSMaxY(region) + sidescopes::kBorderPad / 2 + sidescopes::kEdgeRing);
+    return NSMakePoint(NSMaxX(region) + sidescopes::kBorderPad - sidescopes::kCloseCornerInset,
+                       NSMaxY(region) + sidescopes::kBorderPad - sidescopes::kCloseCornerInset +
+                           sidescopes::kEdgeRing);
 }
 
 - (void)drawRect:(NSRect)dirty {
@@ -522,9 +523,9 @@ RegionOfInterest g_border_edit_region;
         [[NSColor colorWithWhite:0.97 alpha:0.95] setStroke];
         button.lineWidth = 1.0;
         [button stroke];
-        const CGFloat arm = sidescopes::kCloseRadius - 3.8;
+        const CGFloat arm = sidescopes::kCloseRadius - 3.7;
         NSBezierPath* cross = [NSBezierPath bezierPath];
-        cross.lineWidth = 1.4;
+        cross.lineWidth = 1.3;
         cross.lineCapStyle = NSLineCapStyleRound;
         [cross moveToPoint:NSMakePoint(center.x - arm, center.y - arm)];
         [cross lineToPoint:NSMakePoint(center.x + arm, center.y + arm)];

@@ -60,13 +60,14 @@ constexpr double kCornerZone = 22.0;
 constexpr double kMidpointZone = 22.0;
 // Regions cannot shrink beyond this many points per side.
 constexpr double kMinimumRegionSize = 24.0;
-// The hover-revealed close button on the band: visible radius, its
-// larger hit target, and the region width below which it yields to the
-// resize handles (the band gets crowded before it gets useless).
-constexpr double kCloseRadius = 7.0;
+// The hover-revealed close button: a badge on the band's outer corner,
+// diagonally off the corner handle, so it visibly belongs to the region
+// as a whole. Pulled inward a touch so the disc mostly rides the band;
+// tiny regions still yield it to the resize zones.
+constexpr double kCloseRadius = 6.5;
 constexpr double kCloseHitRadius = 11.0;
-constexpr double kCloseCornerGap = 4.0;
-constexpr double kMinimumWidthForClose = 80.0;
+constexpr double kCloseCornerInset = 2.0;
+constexpr double kMinimumWidthForClose = 48.0;
 
 // Which edges a border drag adjusts; Move relocates the whole region.
 enum ZoneBits : unsigned {
@@ -580,13 +581,14 @@ bool CloseVisible(double scale) {
            region.Width >= kMinimumWidthForClose * scale;
 }
 
-// On the band above the top edge, just clear of the top-right corner's
-// resize zone.
+// On the band's outer corner, at forty-five degrees off the top-right
+// handle dot - anchored to the corner rather than parked beside it.
 Gdiplus::PointF CloseCenter(double scale) {
     const Gdiplus::RectF region = BorderRegionLocal(scale);
-    return {static_cast<Gdiplus::REAL>(region.GetRight() -
-                                       (kCornerZone + kCloseCornerGap + kCloseRadius) * scale),
-            static_cast<Gdiplus::REAL>(region.Y - kBorderPad * scale / 2 - kEdgeRing * scale)};
+    return {
+        static_cast<Gdiplus::REAL>(region.GetRight() + (kBorderPad - kCloseCornerInset) * scale),
+        static_cast<Gdiplus::REAL>(region.Y -
+                                   (kBorderPad - kCloseCornerInset + kEdgeRing) * scale)};
 }
 
 unsigned BorderZoneAtPoint(double x, double y, double scale) {
@@ -734,9 +736,9 @@ void PaintBorder() {
         Gdiplus::Pen disc_ring(Gdiplus::Color(242, 247, 247, 247),
                                static_cast<Gdiplus::REAL>(1.0 * scale));
         canvas.DrawEllipse(&disc_ring, disc);
-        const auto arm = static_cast<Gdiplus::REAL>((kCloseRadius - 3.8) * scale);
+        const auto arm = static_cast<Gdiplus::REAL>((kCloseRadius - 3.7) * scale);
         Gdiplus::Pen cross(Gdiplus::Color(242, 247, 247, 247),
-                           static_cast<Gdiplus::REAL>(1.4 * scale));
+                           static_cast<Gdiplus::REAL>(1.3 * scale));
         cross.SetStartCap(Gdiplus::LineCapRound);
         cross.SetEndCap(Gdiplus::LineCapRound);
         canvas.DrawLine(&cross, center.X - arm, center.Y - arm, center.X + arm, center.Y + arm);
