@@ -1146,14 +1146,15 @@ int main() {
         char tooltip[96];
         const auto scope_tooltip = [&](const char* name, const std::string& binding,
                                        const char* extra) {
-            std::snprintf(tooltip, sizeof(tooltip), "%s - %s shows only this, Shift+%s stacks%s",
-                          name, binding.c_str(), binding.c_str(), extra);
+            std::snprintf(tooltip, sizeof(tooltip), "%s - %s to switch, Shift+%s to stack%s", name,
+                          binding.c_str(), binding.c_str(), extra);
             return tooltip;
         };
         scope_toggle("##toggle-vectorscope", ScopeGlyph::Vectorscope,
                      scope_tooltip("Vectorscope", shortcuts.vectorscope, ""));
-        scope_toggle("##toggle-waveform", ScopeGlyph::Waveform,
-                     scope_tooltip("Waveform", shortcuts.waveform, "; style in right-click menu"));
+        scope_toggle(
+            "##toggle-waveform", ScopeGlyph::Waveform,
+            scope_tooltip("Waveform", shortcuts.waveform, "; styles in the right-click menu"));
         scope_toggle("##toggle-waveform-parade", ScopeGlyph::WaveformParade,
                      scope_tooltip("RGB parade", shortcuts.parade, ""));
         scope_toggle("##toggle-histogram", ScopeGlyph::Histogram,
@@ -1665,18 +1666,22 @@ int main() {
 
             separator();
             action("Graticule", kMenuToggleGraticule, show_graticule);
-            action("Values as Percent", kMenuTogglePercentValues, values_as_percent);
 
-            if (vectorscope_color || output.region_average_valid || !pinned_colors.empty())
-                separator();
-            if (vectorscope_color)
-                action("Pin Cursor Color", kMenuPinCursorColor, false,
-                       shortcut_label(shortcuts.pin_color));
-            if (output.region_average_valid)
-                action("Pin Region Average", kMenuPinRegionAverage, false,
-                       "Shift+" + shortcut_label(shortcuts.pin_color));
-            if (!pinned_colors.empty())
-                action("Clear Pinned Markers", kMenuClearPinnedMarkers, false);
+            // Pins mark the vectorscope and the color picker; on the other
+            // panes the actions would only puzzle.
+            const bool pins_apply = over(ScopeGlyph::Vectorscope) || over(ScopeGlyph::ColorPicker);
+            if (pins_apply) {
+                if (vectorscope_color || output.region_average_valid || !pinned_colors.empty())
+                    separator();
+                if (vectorscope_color)
+                    action("Pin Cursor Color", kMenuPinCursorColor, false,
+                           shortcut_label(shortcuts.pin_color));
+                if (output.region_average_valid)
+                    action("Pin Region Average", kMenuPinRegionAverage, false,
+                           "Shift+" + shortcut_label(shortcuts.pin_color));
+                if (!pinned_colors.empty())
+                    action("Clear Pinned Markers", kMenuClearPinnedMarkers, false);
+            }
 
             separator();
             action("Settings...", kMenuOpenSettings, false);
@@ -1757,9 +1762,6 @@ int main() {
                     break;
                 case kMenuToggleGraticule:
                     show_graticule = !show_graticule;
-                    break;
-                case kMenuTogglePercentValues:
-                    values_as_percent = !values_as_percent;
                     break;
                 case kMenuPinCursorColor:
                     pin_reference_color(vectorscope_color);
