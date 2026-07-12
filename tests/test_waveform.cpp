@@ -181,6 +181,27 @@ uint8_t GreenValueAt(const ScopeImage& image, int px, int py) {
 
 }  // namespace
 
+TEST_CASE("Waveform fills a missing level between populated neighbors") {
+    // The capture pipeline's 8-bit color conversion leaves "missing
+    // codes": level values that almost never occur. Each rendered as a
+    // dark line across the trace once the pane grew large. Alternating
+    // columns of 100 and 102 leave 101 empty; the wide vertical kernel
+    // must light it comparably to its populated neighbors.
+    TestFrame frame(64, 64);
+    for (int py = 0; py < 64; ++py) {
+        const uint8_t value = py % 2 == 0 ? 100 : 102;
+        frame.FillRows(py, py + 1, Color{value, value, value});
+    }
+
+    Waveform scope;
+    scope.Accumulate(frame.View(), IntRect{0, 0, 64, 64});
+
+    const int populated = GreenValueAt(scope.Image(), 0, 255 - 100);
+    const int gap = GreenValueAt(scope.Image(), 0, 255 - 101);
+    REQUIRE(populated > 0);
+    CHECK(gap >= populated * 3 / 4);
+}
+
 TEST_CASE("Waveform column brightness is invariant to stride and region size") {
     // Two gray levels stacked 3:1 vertically, so every sampled column sees
     // the same 3:1 level mix at stride 1, stride 2, and in a half-size

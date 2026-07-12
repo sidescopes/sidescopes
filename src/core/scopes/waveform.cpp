@@ -50,17 +50,29 @@ void Waveform::Accumulate(const FrameView& frame, IntRect region) {
             for (int px = 0; px < region.width; px += stride) {
                 const uint8_t* pixel = row + static_cast<std::size_t>(px) * 4;
                 const int b = pixel[0], g = pixel[1], r = pixel[2];
-                const std::size_t column =
-                    static_cast<std::size_t>(static_cast<int64_t>(px) * kColumns / region.width);
+                // Samples splat fractionally across the two columns they
+                // straddle, in sixteenths. Integer bucketing made columns
+                // aggregate alternately two and three image columns at
+                // typical region widths - a density comb that rendered as
+                // fine vertical striping on large panes.
+                const auto position = static_cast<std::size_t>(static_cast<int64_t>(px) * kColumns *
+                                                               16 / region.width);
+                const std::size_t column = position >> 4;
+                const uint32_t right_weight = position & 15u;
+                const uint32_t left_weight = 16u - right_weight;
+                const std::size_t next =
+                    column + 1 < static_cast<std::size_t>(kColumns) ? column + 1 : column;
+                const auto splat = [&](uint32_t* plane, int value) {
+                    uint32_t* line = plane + static_cast<std::size_t>(255 - value) * kColumns;
+                    line[column] += left_weight;
+                    line[next] += right_weight;
+                };
                 if (wants_rgb) {
-                    ++red_plane[static_cast<std::size_t>(255 - r) * kColumns + column];
-                    ++green_plane[static_cast<std::size_t>(255 - g) * kColumns + column];
-                    ++blue_plane[static_cast<std::size_t>(255 - b) * kColumns + column];
+                    splat(red_plane, r);
+                    splat(green_plane, g);
+                    splat(blue_plane, b);
                 }
-                if (wants_luma) {
-                    const int luma = Luma709(r, g, b);
-                    ++luma_plane[static_cast<std::size_t>(255 - luma) * kColumns + column];
-                }
+                if (wants_luma) splat(luma_plane, Luma709(r, g, b));
             }
         }
     }
@@ -73,17 +85,17 @@ std::optional<NormalizedPoint> Waveform::Project(const FloatColor& color) const 
 }
 
 void Waveform::MapBinsToImage(uint64_t sampled_rows) {
-    // A 3x3 binomial blur takes the speckle and the column striping out
-    // of the traces: levels quantize to integers and each display column
-    // aggregates several image columns, so raw bins render as grain with
-    // vertical streaks. One column of blur is spatially negligible at
-    // this width.
+    // Smoothing takes the speckle and the quantization combs out of the
+    // traces. The vertical kernel is the histogram's 1-4-6-4-1: the
+    // capture pipeline's 8-bit color conversion leaves "missing codes" -
+    // level values that almost never occur - and each of them used to
+    // render as a dark line across the full width once the pane grew
+    // large. The wide binomial fills a single missing level almost
+    // completely; the narrower 1-4-1 left a visible residue.
     smoothed_.resize(bins_.size());
     for (int plane = 0; plane < 4; ++plane) {
         const uint32_t* in = bins_.data() + static_cast<std::size_t>(plane) * kPlaneSize;
         uint32_t* out = smoothed_.data() + static_cast<std::size_t>(plane) * kPlaneSize;
-        // Vertical 1-4-1 within each column: light, so a sharp level
-        // stays crisp while single-bin grain still fills in.
         for (int column = 0; column < kColumns; ++column) {
             for (int row = 0; row < kLevels; ++row) {
                 const auto at = [&](int level) -> uint32_t {
@@ -91,7 +103,9 @@ void Waveform::MapBinsToImage(uint64_t sampled_rows) {
                     return in[static_cast<std::size_t>(level) * kColumns + column];
                 };
                 out[static_cast<std::size_t>(row) * kColumns + column] =
-                    (at(row - 1) + 4 * at(row) + at(row + 1) + 3) / 6;
+                    (at(row - 2) + 4 * at(row - 1) + 6 * at(row) + 4 * at(row + 1) + at(row + 2) +
+                     8) /
+                    16;
             }
         }
         // Horizontal 1-2-1 within each row, in place.
@@ -121,8 +135,11 @@ void Waveform::MapBinsToImage(uint64_t sampled_rows) {
             densest = std::max(densest, traces[i]);
     }
 
+    // Each sample contributes sixteen weight units (the splat's
+    // sixteenths), so the per-row normalization divides them back out and
+    // the gain setting keeps its calibrated feel.
     const double per_row_scale =
-        sampled_rows > 0 ? kReferenceRowCount / static_cast<double>(sampled_rows) : 0.0;
+        sampled_rows > 0 ? kReferenceRowCount / (static_cast<double>(sampled_rows) * 16.0) : 0.0;
     const double gain = static_cast<double>(settings_.gain) * per_row_scale;
     const double log_ceiling = densest > 0 ? std::log1p(static_cast<double>(densest) * gain) : 0.0;
     const double intensity_scale = log_ceiling > 0.0 ? 255.0 / log_ceiling : 0.0;
