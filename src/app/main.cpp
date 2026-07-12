@@ -1,20 +1,11 @@
-// The SideScopes application shell: a compact, always-on-top window showing
-// one scope at a time. All analysis lives in the core library on its own
-// thread; this file owns the window, the Metal textures, the interaction
-// model (gestures, native menu, region selection), and preferences.
-
-#import <Cocoa/Cocoa.h>
-#import <Metal/Metal.h>
-#import <QuartzCore/QuartzCore.h>
+// The SideScopes application shell, shared by every platform: a compact,
+// always-on-top window stacking the enabled scopes. All analysis lives in
+// the core library on its own thread; this file owns the interaction
+// model (gestures, native menu, region selection) and preferences, while
+// rendering and window chrome live behind the graphics seam.
 
 #define GLFW_INCLUDE_NONE
-#define GLFW_EXPOSE_NATIVE_COCOA
 #include <GLFW/glfw3.h>
-#include <GLFW/glfw3native.h>
-
-#include "imgui.h"
-#include "imgui_impl_glfw.h"
-#include "imgui_impl_metal.h"
 
 #include <algorithm>
 #include <atomic>
@@ -35,8 +26,10 @@
 #include "core/region_suggestions.h"
 #include "core/scopes/graticule.h"
 #include "core/trace_intensity.h"
+#include "imgui.h"
 #include "platform/desktop.h"
 #include "platform/face_detection.h"
+#include "platform/graphics.h"
 #include "platform/native_menu.h"
 #include "platform/region_selection.h"
 #include "platform/screen_capture.h"
@@ -70,40 +63,6 @@ enum MenuAction {
 // Rendering helpers
 // ---------------------------------------------------------------------------
 
-// A texture the CPU-side scope images are uploaded into every time the
-// analysis worker publishes a new version.
-struct ScopeTexture {
-    ScopeTexture(id<MTLDevice> device, int width, int height) : width_(width), height_(height) {
-        MTLTextureDescriptor* descriptor =
-            [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatRGBA8Unorm
-                                                               width:width
-                                                              height:height
-                                                           mipmapped:NO];
-        descriptor.usage = MTLTextureUsageShaderRead;
-        descriptor.storageMode = MTLStorageModeManaged;
-        texture_ = [device newTextureWithDescriptor:descriptor];
-    }
-
-    void Upload(const ScopeImage& image) {
-        // A scope just toggled on can race one worker pass: the fetched
-        // output predates the toggle and carries an empty image for it.
-        // Uploading that null buffer is a GPU-side crash; skip the frame.
-        if (image.rgba.size() < static_cast<std::size_t>(width_) * height_ * 4) return;
-        [texture_ replaceRegion:MTLRegionMake2D(0, 0, width_, height_)
-                    mipmapLevel:0
-                      withBytes:image.rgba.data()
-                    bytesPerRow:static_cast<NSUInteger>(width_) * 4];
-    }
-
-    [[nodiscard]] ImTextureID Id() const {
-        return reinterpret_cast<ImTextureID>((__bridge void*)texture_);
-    }
-
-    int width_;
-    int height_;
-    id<MTLTexture> texture_;
-};
-
 struct DrawnScope {
     ImVec2 origin;
     ImVec2 size;
@@ -117,9 +76,9 @@ DrawnScope DrawScopeImage(const ScopeTexture& texture, bool keep_aspect) {
     ImVec2 size = available;
     if (keep_aspect) {
         const float scale =
-            std::max(0.05f, std::min(available.x / static_cast<float>(texture.width_),
-                                     available.y / static_cast<float>(texture.height_)));
-        size = ImVec2(texture.width_ * scale, texture.height_ * scale);
+            std::max(0.05f, std::min(available.x / static_cast<float>(texture.Width()),
+                                     available.y / static_cast<float>(texture.Height())));
+        size = ImVec2(texture.Width() * scale, texture.Height() * scale);
     }
     ImVec2 cursor = ImGui::GetCursorPos();
     cursor.x += std::max(0.0f, (available.x - size.x) * 0.5f);
@@ -426,6 +385,31 @@ void RefreshFacePresence(AnalysisWorker& worker, uint32_t capture_display) {
     }).detach();
 }
 
+// The secure-CRT deprecations make std::getenv and std::fopen hard errors
+// under MSVC's warnings-as-errors, so the debug-dump plumbing goes through
+// the annexes Microsoft accepts.
+bool DebugSuggestionsRequested() {
+#ifdef _MSC_VER
+    char* value = nullptr;
+    std::size_t size = 0;
+    if (_dupenv_s(&value, &size, "SIDESCOPES_DEBUG_SUGGESTIONS") != 0 || value == nullptr)
+        return false;
+    std::free(value);
+    return true;
+#else
+    return std::getenv("SIDESCOPES_DEBUG_SUGGESTIONS") != nullptr;
+#endif
+}
+
+std::FILE* OpenDebugFile(const char* path, const char* mode) {
+#ifdef _MSC_VER
+    std::FILE* file = nullptr;
+    return fopen_s(&file, path, mode) == 0 ? file : nullptr;
+#else
+    return std::fopen(path, mode);
+#endif
+}
+
 void ApplyTheme() {
     ImGuiStyle& style = ImGui::GetStyle();
     style.WindowRounding = 8.0f;
@@ -466,10 +450,8 @@ void LoadInterfaceFont(GLFWwindow* window) {
     ImFontConfig config;
     config.RasterizerDensity = scale_x;
     ImGuiIO& io = ImGui::GetIO();
-    for (const char* path :
-         {"/System/Library/Fonts/HelveticaNeue.ttc", "/System/Library/Fonts/SFNS.ttf",
-          "/System/Library/Fonts/Supplemental/Arial.ttf"}) {
-        if (io.Fonts->AddFontFromFileTTF(path, 13.0f, &config)) return;
+    for (const std::string& path : InterfaceFontFiles()) {
+        if (io.Fonts->AddFontFromFileTTF(path.c_str(), 13.0f, &config)) return;
     }
 }
 
@@ -480,7 +462,8 @@ int main() {
 
     const Preferences startup = LoadPreferences(PreferencesFilePath());
 
-    glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
+    std::unique_ptr<GraphicsBackend> graphics = CreateGraphicsBackend();
+    graphics->SetWindowHints();
     glfwWindowHint(GLFW_FLOATING, GLFW_TRUE);
     GLFWwindow* window = glfwCreateWindow(startup.window_width, startup.window_height, "SideScopes",
                                           nullptr, nullptr);
@@ -489,39 +472,11 @@ int main() {
         return 1;
     }
     if (startup.window_x >= 0) glfwSetWindowPos(window, startup.window_x, startup.window_y);
+    // Installed before the ImGui backend so it chains this callback
+    // instead of being replaced by it.
     glfwSetWindowFocusCallback(window, [](GLFWwindow*, int focused) {
         if (focused) g_face_check_requested.store(true);
     });
-
-    id<MTLDevice> device = MTLCreateSystemDefaultDevice();
-    id<MTLCommandQueue> command_queue = [device newCommandQueue];
-
-    NSWindow* native_window = glfwGetCocoaWindow(window);
-    CAMetalLayer* layer = [CAMetalLayer layer];
-    layer.device = device;
-    layer.pixelFormat = MTLPixelFormatBGRA8Unorm;
-    native_window.contentView.layer = layer;
-    native_window.contentView.wantsLayer = YES;
-    // During a live window resize macOS runs a modal tracking loop that
-    // stalls the render loop; by default the layer stretches its last
-    // frame to the new size, warping the scopes until release. Pinning
-    // the contents to the top-left keeps the last frame 1:1 - blank space
-    // when growing, cropped when shrinking - and the loop redraws
-    // correctly the moment the drag ends.
-    layer.contentsGravity = kCAGravityTopLeft;
-    // Gravity makes the contents scale meaningful: without it the Retina
-    // drawable displays at double size. The stretch gravity used to hide
-    // that this was never set.
-    layer.contentsScale = native_window.backingScaleFactor;
-    // The area beyond the pinned contents during a grow shows the layer
-    // and window background; both match the application's black.
-    layer.backgroundColor = CGColorGetConstantColor(kCGColorBlack);
-    native_window.backgroundColor = NSColor.blackColor;
-    // Above document and panel windows (Quick Look previews float higher
-    // than ordinary floating windows), on every Space.
-    native_window.level = NSStatusWindowLevel;
-    native_window.collectionBehavior =
-        NSWindowCollectionBehaviorCanJoinAllSpaces | NSWindowCollectionBehaviorFullScreenAuxiliary;
 
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
@@ -530,8 +485,12 @@ int main() {
     ImGui::StyleColorsDark();
     ApplyTheme();
     LoadInterfaceFont(window);
-    ImGui_ImplGlfw_InitForOther(window, true);
-    ImGui_ImplMetal_Init(device);
+    if (!graphics->Init(window)) {
+        ImGui::DestroyContext();
+        glfwDestroyWindow(window);
+        glfwTerminate();
+        return 1;
+    }
 
     // --- capture and analysis ---
     FrameMailbox mailbox;
@@ -567,8 +526,9 @@ int main() {
         start_capture();
     } else {
         std::lock_guard lock(status_mutex);
-        capture_status = "screen recording permission missing - grant it in System Settings and "
-                         "relaunch";
+        capture_status =
+            "screen recording permission missing - grant it in System Settings and "
+            "relaunch";
     }
 
     // --- state, seeded from preferences ---
@@ -634,10 +594,14 @@ int main() {
     MarkerSmoother vectorscope_marker;
     MarkerSmoother waveform_marker;
 
-    ScopeTexture vectorscope_texture(device, Vectorscope::kSize, Vectorscope::kSize);
-    ScopeTexture waveform_texture(device, Waveform::kColumns, Waveform::kLevels);
-    ScopeTexture waveform_parade_texture(device, Waveform::kColumns, Waveform::kLevels);
-    ScopeTexture histogram_texture(device, Histogram::kImageWidth, Histogram::kHeight);
+    const std::unique_ptr<ScopeTexture> vectorscope_texture =
+        graphics->CreateScopeTexture(Vectorscope::kSize, Vectorscope::kSize);
+    const std::unique_ptr<ScopeTexture> waveform_texture =
+        graphics->CreateScopeTexture(Waveform::kColumns, Waveform::kLevels);
+    const std::unique_ptr<ScopeTexture> waveform_parade_texture =
+        graphics->CreateScopeTexture(Waveform::kColumns, Waveform::kLevels);
+    const std::unique_ptr<ScopeTexture> histogram_texture =
+        graphics->CreateScopeTexture(Histogram::kImageWidth, Histogram::kHeight);
 
     worker.Start();
     WarmFaceDetection();
@@ -650,28 +614,10 @@ int main() {
     // Waking the display or unlocking the session can leave the stream a
     // zombie: it either stops delivering without an error, or a retry that
     // ran while the screen was locked started a stream bound to the wrong
-    // session. Both look alive, so these events force a restart - cheap on
-    // a screen that was just black.
+    // session. Both look alive, so the wake signal forces a restart -
+    // cheap on a screen that was just black.
     std::atomic<bool> capture_stale{false};
-    std::atomic<bool>* const capture_stale_flag = &capture_stale;  // blocks copy captures
-    const auto observe = ^(NSNotification*) {
-      capture_stale_flag->store(true);
-    };
-    [[[NSWorkspace sharedWorkspace] notificationCenter]
-        addObserverForName:NSWorkspaceScreensDidWakeNotification
-                    object:nil
-                     queue:[NSOperationQueue mainQueue]
-                usingBlock:observe];
-    [[[NSWorkspace sharedWorkspace] notificationCenter]
-        addObserverForName:NSWorkspaceSessionDidBecomeActiveNotification
-                    object:nil
-                     queue:[NSOperationQueue mainQueue]
-                usingBlock:observe];
-    [[NSDistributedNotificationCenter defaultCenter]
-        addObserverForName:@"com.apple.screenIsUnlocked"
-                    object:nil
-                     queue:[NSOperationQueue mainQueue]
-                usingBlock:observe];
+    ObserveSystemWake([&capture_stale] { capture_stale.store(true); });
     double intensity_flash_until = 0.0;
     double next_preferences_save = -1.0;
     DesktopPoint last_cursor{-1.0, -1.0};
@@ -739,24 +685,16 @@ int main() {
         int framebuffer_height = 0;
         glfwGetFramebufferSize(window, &framebuffer_width, &framebuffer_height);
         if (framebuffer_width == 0 || framebuffer_height == 0) continue;
-        layer.drawableSize = CGSizeMake(framebuffer_width, framebuffer_height);
-        if (layer.contentsScale != native_window.backingScaleFactor)
-            layer.contentsScale = native_window.backingScaleFactor;
-        // The area beyond the pinned contents during a grow shows the layer
-        // and window background; both match the application's black.
-        layer.backgroundColor = CGColorGetConstantColor(kCGColorBlack);
-        native_window.backgroundColor = NSColor.blackColor;  // display changed
-        id<CAMetalDrawable> drawable = [layer nextDrawable];
-        if (!drawable) continue;
+        if (!graphics->BeginFrame(framebuffer_width, framebuffer_height)) continue;
 
         if (worker.FetchOutput(output_version, output)) {
             if (scope_shown(ScopeGlyph::Vectorscope))
-                vectorscope_texture.Upload(output.vectorscope_image);
-            if (scope_shown(ScopeGlyph::Waveform)) waveform_texture.Upload(output.waveform_image);
+                vectorscope_texture->Upload(output.vectorscope_image);
+            if (scope_shown(ScopeGlyph::Waveform)) waveform_texture->Upload(output.waveform_image);
             if (scope_shown(ScopeGlyph::WaveformParade))
-                waveform_parade_texture.Upload(output.waveform_parade_image);
+                waveform_parade_texture->Upload(output.waveform_parade_image);
             if (scope_shown(ScopeGlyph::Histogram))
-                histogram_texture.Upload(output.histogram_image);
+                histogram_texture->Upload(output.histogram_image);
             last_activity = glfwGetTime();
         }
 
@@ -813,17 +751,6 @@ int main() {
         }
 
         // --- frame ---
-        MTLRenderPassDescriptor* pass = [MTLRenderPassDescriptor renderPassDescriptor];
-        pass.colorAttachments[0].texture = drawable.texture;
-        pass.colorAttachments[0].loadAction = MTLLoadActionClear;
-        pass.colorAttachments[0].storeAction = MTLStoreActionStore;
-        pass.colorAttachments[0].clearColor = MTLClearColorMake(0, 0, 0, 1);
-
-        id<MTLCommandBuffer> commands = [command_queue commandBuffer];
-        id<MTLRenderCommandEncoder> encoder = [commands renderCommandEncoderWithDescriptor:pass];
-
-        ImGui_ImplMetal_NewFrame(pass);
-        ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
 
         const ImGuiViewport* viewport = ImGui::GetMainViewport();
@@ -992,7 +919,7 @@ int main() {
         };
 
         const auto draw_vectorscope = [&] {
-            const DrawnScope scope = DrawScopeImage(vectorscope_texture, true);
+            const DrawnScope scope = DrawScopeImage(*vectorscope_texture, true);
             scope_gestures(scope, vectorscope_intensity, analysis.vectorscope.gain, 3.0f,
                            kVectorscopeIntensityShift);
             if (show_graticule)
@@ -1027,8 +954,8 @@ int main() {
                                 (channel + 1) / 3.0f);
         };
         const auto draw_waveform = [&](ScopeGlyph kind) {
-            ScopeTexture& texture =
-                kind == ScopeGlyph::Waveform ? waveform_texture : waveform_parade_texture;
+            const ScopeTexture& texture =
+                kind == ScopeGlyph::Waveform ? *waveform_texture : *waveform_parade_texture;
             const DrawnScope scope = DrawScopeImage(texture, false);
             scope_gestures(scope, waveform_intensity, analysis.waveform.gain, 0.05f);
             if (show_graticule) DrawWaveformOverlay(scope);
@@ -1047,7 +974,7 @@ int main() {
         const auto draw_histogram = [&] {
             // No intensity gesture here: the histogram's scale adjusts
             // itself, the way every editor draws it.
-            const DrawnScope scope = DrawScopeImage(histogram_texture, false);
+            const DrawnScope scope = DrawScopeImage(*histogram_texture, false);
             if (show_graticule) {
                 ImDrawList* draw = ImGui::GetWindowDrawList();
                 for (int quarter = 0; quarter <= 4; ++quarter) {
@@ -1316,10 +1243,7 @@ int main() {
         }
 
         ImGui::Render();
-        ImGui_ImplMetal_RenderDrawData(ImGui::GetDrawData(), commands, encoder);
-        [encoder endEncoding];
-        [commands presentDrawable:drawable];
-        [commands commit];
+        graphics->EndFrame();
 
         // The blocking overlay runs after the frame is submitted; capture and
         // analysis keep flowing underneath.
@@ -1442,8 +1366,8 @@ int main() {
             const auto suggestions = BuildRegionSuggestions(window_regions);
             // Field diagnosis: dump exactly what the pipeline saw. Enable
             // with `launchctl setenv SIDESCOPES_DEBUG_SUGGESTIONS 1`.
-            if (std::getenv("SIDESCOPES_DEBUG_SUGGESTIONS")) {
-                std::FILE* report = std::fopen("/tmp/sidescopes-suggestions.txt", "w");
+            if (DebugSuggestionsRequested()) {
+                std::FILE* report = OpenDebugFile("/tmp/sidescopes-suggestions.txt", "w");
                 if (report) {
                     for (const auto& window : window_regions)
                         std::fprintf(report, "window '%s' %.1f,%.1f..%.1f,%.1f%%\n",
@@ -1458,7 +1382,7 @@ int main() {
                     std::fclose(report);
                 }
                 worker.WithLatestFrame([&](const FrameView& view) {
-                    std::FILE* image = std::fopen("/tmp/sidescopes-frame.ppm", "wb");
+                    std::FILE* image = OpenDebugFile("/tmp/sidescopes-frame.ppm", "wb");
                     if (!image) return;
                     std::fprintf(image, "P6\n%d %d\n255\n", view.width / 2, view.height / 2);
                     for (int py = 0; py < view.height - 1; py += 2) {
@@ -1536,8 +1460,7 @@ int main() {
     HideRegionBorder();
     worker.Stop();
     capture->Stop();
-    ImGui_ImplMetal_Shutdown();
-    ImGui_ImplGlfw_Shutdown();
+    graphics->Shutdown();
     ImGui::DestroyContext();
     glfwDestroyWindow(window);
     glfwTerminate();

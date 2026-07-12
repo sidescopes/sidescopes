@@ -105,13 +105,18 @@ if(APPLE)
     set_source_files_properties(${imgui_SOURCE_DIR}/backends/imgui_impl_metal.mm
         PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
 
+    # The graphics backend lives with the platform code but compiles into
+    # the application: it owns the ImGui render backend, and only the
+    # application links ImGui.
     add_executable(SideScopes MACOSX_BUNDLE
-        src/app/main.mm
+        src/app/main.cpp
+        src/platform/macos/graphics.mm
         assets/icon/sidescopes.icns
     )
     set_source_files_properties(assets/icon/sidescopes.icns
         PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
-    set_source_files_properties(src/app/main.mm PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
+    set_source_files_properties(src/platform/macos/graphics.mm
+        PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
     set_target_properties(SideScopes PROPERTIES
         MACOSX_BUNDLE_INFO_PLIST ${CMAKE_SOURCE_DIR}/cmake/Info.plist.in
         MACOSX_BUNDLE_BUNDLE_NAME "SideScopes"

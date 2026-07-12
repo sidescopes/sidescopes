@@ -90,4 +90,37 @@ void OpenScreenRecordingSettings() {
     [[NSWorkspace sharedWorkspace] openURL:url];
 }
 
+std::vector<std::string> InterfaceFontFiles() {
+    return {"/System/Library/Fonts/HelveticaNeue.ttc", "/System/Library/Fonts/SFNS.ttf",
+            "/System/Library/Fonts/Supplemental/Arial.ttf"};
+}
+
+void ObserveSystemWake(std::function<void()> callback) {
+    // Waking the display or unlocking the session can leave a capture
+    // stream a zombie: it either stops delivering without an error, or a
+    // retry that ran while the screen was locked started a stream bound
+    // to the wrong session. Both look alive, so these events tell the
+    // application to force a restart - cheap on a screen that was just
+    // black.
+    auto shared = std::make_shared<std::function<void()>>(std::move(callback));
+    const auto observe = ^(NSNotification*) {
+      (*shared)();
+    };
+    [[[NSWorkspace sharedWorkspace] notificationCenter]
+        addObserverForName:NSWorkspaceScreensDidWakeNotification
+                    object:nil
+                     queue:[NSOperationQueue mainQueue]
+                usingBlock:observe];
+    [[[NSWorkspace sharedWorkspace] notificationCenter]
+        addObserverForName:NSWorkspaceSessionDidBecomeActiveNotification
+                    object:nil
+                     queue:[NSOperationQueue mainQueue]
+                usingBlock:observe];
+    [[NSDistributedNotificationCenter defaultCenter]
+        addObserverForName:@"com.apple.screenIsUnlocked"
+                    object:nil
+                     queue:[NSOperationQueue mainQueue]
+                usingBlock:observe];
+}
+
 }  // namespace sidescopes

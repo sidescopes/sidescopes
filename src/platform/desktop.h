@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <optional>
 #include <string>
 #include <vector>
@@ -60,5 +61,17 @@ struct ModifierState {
     bool command = false;
 };
 ModifierState CurrentModifiers();
+
+// Absolute paths of system fonts suitable for the interface, best first;
+// the application loads the first one that exists.
+std::vector<std::string> InterfaceFontFiles();
+
+// Invokes the callback - on the platform's main-thread event context -
+// whenever the display or the user session wakes up. Capture streams
+// survive those transitions as zombies that look alive but deliver
+// nothing, so the application restarts capture on the signal. A no-op on
+// platforms whose capture dies loudly instead (Windows duplication
+// reports access loss and the retry loop rebuilds it).
+void ObserveSystemWake(std::function<void()> callback);
 
 }  // namespace sidescopes
