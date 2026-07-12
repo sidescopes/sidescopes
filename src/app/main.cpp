@@ -96,20 +96,29 @@ ImVec2 At(const DrawnScope& scope, const NormalizedPoint& point) {
     return ImVec2(scope.origin.x + point.x * scope.size.x, scope.origin.y + point.y * scope.size.y);
 }
 
+// Every scope speaks with one graticule voice: the same champagne gold
+// at a handful of strengths. The scales used to be neutral gray while
+// the vectorscope wore gold, which read as two different instruments.
+constexpr ImU32 kGraticuleMinor = IM_COL32(205, 172, 110, 70);
+constexpr ImU32 kGraticuleMajor = IM_COL32(205, 172, 110, 130);
+constexpr ImU32 kGraticuleAccent = IM_COL32(218, 175, 95, 180);
+constexpr ImU32 kGraticuleLabel = IM_COL32(226, 198, 145, 200);
+constexpr ImU32 kGraticuleSkinTone = IM_COL32(230, 170, 140, 160);
+
 void DrawVectorscopeOverlay(const DrawnScope& scope, const VectorscopeGraticule& graticule) {
     ImDrawList* draw = ImGui::GetWindowDrawList();
     const auto stroke_color = [](GraticuleStroke stroke) -> ImU32 {
         switch (stroke) {
             case GraticuleStroke::GridMajor:
-                return IM_COL32(150, 150, 150, 90);
+                return kGraticuleMajor;
             case GraticuleStroke::Accent:
-                return IM_COL32(210, 165, 70, 130);
+                return kGraticuleAccent;
             case GraticuleStroke::SkinTone:
-                return IM_COL32(230, 170, 140, 150);
+                return kGraticuleSkinTone;
             case GraticuleStroke::Grid:
                 break;
         }
-        return IM_COL32(120, 120, 120, 45);
+        return kGraticuleMinor;
     };
 
     for (const GraticuleLine& line : graticule.lines) {
@@ -120,14 +129,14 @@ void DrawVectorscopeOverlay(const DrawnScope& scope, const VectorscopeGraticule&
         draw->AddCircle(At(scope, circle.center), circle.radius * scope.size.x,
                         stroke_color(circle.stroke), 64);
     }
-    const ImU32 target_color = IM_COL32(210, 165, 70, 130);
     for (const GraticuleTarget& target : graticule.targets) {
         const ImVec2 center = At(scope, target.center);
         const float box = target.primary ? 5.0f : 3.0f;
         draw->AddRect(ImVec2(center.x - box, center.y - box),
-                      ImVec2(center.x + box, center.y + box), target_color);
+                      ImVec2(center.x + box, center.y + box), kGraticuleAccent);
         if (!target.label.empty())
-            draw->AddText(ImVec2(center.x + 7, center.y - 7), target_color, target.label.c_str());
+            draw->AddText(ImVec2(center.x + 7, center.y - 7), kGraticuleLabel,
+                          target.label.c_str());
     }
 }
 
@@ -136,11 +145,10 @@ void DrawWaveformOverlay(const DrawnScope& scope) {
     const bool roomy = scope.size.y >= 140.0f;
     for (const WaveformScaleLine& line : BuildWaveformScale()) {
         const float y = scope.origin.y + line.y * scope.size.y;
-        const ImU32 color = line.major ? IM_COL32(170, 170, 170, 140) : IM_COL32(150, 150, 150, 85);
+        const ImU32 color = line.major ? kGraticuleMajor : kGraticuleMinor;
         draw->AddLine(ImVec2(scope.origin.x, y), ImVec2(scope.origin.x + scope.size.x, y), color);
         if (line.major || roomy)
-            draw->AddText(ImVec2(scope.origin.x + 4, y + 1), IM_COL32(190, 190, 190, 170),
-                          line.label.c_str());
+            draw->AddText(ImVec2(scope.origin.x + 4, y + 1), kGraticuleLabel, line.label.c_str());
     }
 }
 
@@ -1223,7 +1231,7 @@ int main() {
                     const float x = scope.origin.x + scope.size.x * quarter / 4.0f;
                     draw->AddLine(ImVec2(x, scope.origin.y),
                                   ImVec2(x, scope.origin.y + scope.size.y),
-                                  IM_COL32(150, 150, 150, 70));
+                                  quarter % 2 == 0 ? kGraticuleMajor : kGraticuleMinor);
                 }
             }
             if (vectorscope_color) {
