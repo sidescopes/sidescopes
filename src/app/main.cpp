@@ -63,8 +63,6 @@ enum MenuAction {
     kMenuFullScreenRegion,
     kMenuToggleGraticule = 40,
     kMenuTogglePercentValues,
-    kMenuPinCursorColor,
-    kMenuPinRegionAverage,
     kMenuClearPinnedMarkers,
     kMenuPickPinColor,
     kMenuOpenSettings = 50,
@@ -372,19 +370,16 @@ bool IconButton(const char* id, RegionIcon icon, const char* tooltip, bool dimme
         }
         draw->AddPolyline(smile, 5, color, ImDrawFlags_None, 1.4f);
     } else if (icon == RegionIcon::Dropper) {
-        // An eyedropper: the tip toward lower-left, the bulb end upper
-        // right, a ferrule tick across the barrel.
-        const ImVec2 outline[] = {
-            {-6.4f, 6.4f}, {-2.9f, 5.1f}, {5.7f, -3.5f},
-            {6.4f, -6.4f}, {3.5f, -5.7f}, {-5.1f, 2.9f},
-        };
-        ImVec2 points[std::size(outline)];
-        for (std::size_t i = 0; i < std::size(outline); ++i)
-            points[i] = ImVec2(center.x + outline[i].x, center.y + outline[i].y);
-        draw->AddPolyline(points, static_cast<int>(std::size(outline)), color, ImDrawFlags_Closed,
-                          1.4f);
-        draw->AddLine(ImVec2(center.x - 2.0f, center.y + 5.8f),
-                      ImVec2(center.x - 5.8f, center.y + 2.0f), color, 1.4f);
+        // The classic pipette silhouette, filled so it reads at chip
+        // size: round bulb, a separate wider collar band, a long
+        // tapering tip, and a drop fallen just past it.
+        draw->AddCircleFilled(ImVec2(center.x + 4.4f, center.y - 4.4f), 2.4f, color);
+        draw->AddLine(ImVec2(center.x + 1.7f, center.y - 1.7f),
+                      ImVec2(center.x + 3.0f, center.y - 3.0f), color, 4.2f);
+        draw->AddTriangleFilled(ImVec2(center.x - 5.3f, center.y + 5.3f),
+                                ImVec2(center.x + 1.3f, center.y + 0.7f),
+                                ImVec2(center.x - 0.7f, center.y - 1.3f), color);
+        draw->AddCircleFilled(ImVec2(center.x - 6.6f, center.y + 6.6f), 1.0f, color);
     } else {
         // Two arrows expanding to opposite corners, the fullscreen idiom.
         const auto arrow = [&](ImVec2 from, ImVec2 to, float head_x, float head_y) {
@@ -812,6 +807,12 @@ int main() {
     // and previews the indicated region on the scopes; cancelling resets
     // to the full screen.
     bool region_picking = false;
+    // Whether the active pick is the pin tool - the two families never
+    // morph into each other - and whether its cancellation was ordered by
+    // a tool switch, which must not reset the region the way a user's Esc
+    // on a region pick deliberately does.
+    bool region_pick_is_pin = false;
+    bool region_pick_swallow_cancel = false;
 
     // Projection-only engine instances kept in sync with the analysis
     // settings; they never accumulate, they only place overlays and markers.
@@ -1370,14 +1371,11 @@ int main() {
             if (SupportsFaceDetection() && pressed(shortcuts.pick_faces))
                 want_region_pick = RegionPickerMode::PickFaces;
             if (pressed(shortcuts.pin_color)) {
-                if (stack_modifier) {
-                    // The repeating pin picker; the region average lives
-                    // in the context menu, replaced here by the picker's
-                    // drag-to-average.
-                    want_region_pick = RegionPickerMode::PinColors;
-                } else {
-                    pin_reference_color(vectorscope_color);
-                }
+                // The pin tool: plain opens pin-one-and-close, Shift the
+                // repeating flavor. Pinning the cursor color directly and
+                // the region average live in the context menu.
+                want_region_pick =
+                    stack_modifier ? RegionPickerMode::PinColors : RegionPickerMode::PinColor;
             }
             if (pressed(shortcuts.vectorscope_zoom))
                 vectorscope_zoom = vectorscope_zoom >= 4 ? 1 : vectorscope_zoom * 2;
@@ -1410,8 +1408,7 @@ int main() {
                                 std::find(scope_stack.begin(), scope_stack.end(),
                                           ScopeGlyph::ColorPicker) != scope_stack.end();
         if (pins_shown) {
-            std::snprintf(tooltip, sizeof(tooltip),
-                          "Pin a color - Shift+click keeps picking (%s pins at the cursor)",
+            std::snprintf(tooltip, sizeof(tooltip), "Pin a color (%s) - Shift+click keeps picking",
                           shortcuts.pin_color.c_str());
             if (IconButton("##pin-color", RegionIcon::Dropper, tooltip))
                 want_region_pick = ImGui::GetIO().KeyShift ? RegionPickerMode::PinColors
@@ -1865,6 +1862,17 @@ int main() {
             };
             const auto end_submenu = [&] { menu.push_back({Kind::SubmenuEnd, "", -1, false, ""}); };
 
+            // Pins are a scope tool: they mark the vectorscope and the
+            // color picker, so their submenu rides those scopes' own
+            // sections and never appears beside a waveform.
+            const auto pin_options = [&] {
+                submenu("Pins");
+                action("Pin a Color...", kMenuPickPinColor, false,
+                       shortcut_label(shortcuts.pin_color));
+                if (!pinned_colors.empty())
+                    action("Clear Pinned Markers", kMenuClearPinnedMarkers, false);
+                end_submenu();
+            };
             const auto vectorscope_options = [&] {
                 submenu("Matrix");
                 const bool bt601 = analysis.vectorscope.matrix == ChromaMatrix::Bt601;
@@ -1885,6 +1893,7 @@ int main() {
                 action("4x", kMenuZoom4, vectorscope_zoom == 4,
                        shortcut_label(shortcuts.vectorscope_zoom));
                 end_submenu();
+                pin_options();
             };
             const auto waveform_options = [&] {
                 action("RGB", kMenuWaveformStyleRgb, analysis.waveform.mode == WaveformMode::Rgb);
@@ -1913,6 +1922,9 @@ int main() {
                 submenu("Style");
                 histogram_options();
                 end_submenu();
+                separator();
+            } else if (clicked(ScopeGlyph::ColorPicker)) {
+                pin_options();
                 separator();
             }
 
@@ -1946,6 +1958,13 @@ int main() {
                 histogram_options();
                 end_submenu();
             }
+            // The vectorscope's section already carries the pins; when
+            // only the color picker is up, they ride under its name.
+            if (shown_or_global(ScopeGlyph::ColorPicker) && !scope_shown(ScopeGlyph::Vectorscope)) {
+                submenu("Color Picker");
+                pin_options();
+                end_submenu();
+            }
 
             separator();
             action("Pick Window or Photo...", kMenuSelectRegion, false,
@@ -1956,23 +1975,6 @@ int main() {
                        shortcut_label(shortcuts.pick_faces));
             action("Watch Full Screen", kMenuFullScreenRegion, is_full_region(),
                    shortcut_label(shortcuts.full_region));
-
-            // Pins mark the vectorscope and the color picker; on the other
-            // panes the actions would only puzzle.
-            const bool pins_apply = clicked_pane < 0 || clicked(ScopeGlyph::Vectorscope) ||
-                                    clicked(ScopeGlyph::ColorPicker);
-            if (pins_apply) {
-                separator();
-                action("Pin a Color...", kMenuPickPinColor, false,
-                       "Shift+" + shortcut_label(shortcuts.pin_color));
-                if (vectorscope_color)
-                    action("Pin Cursor Color", kMenuPinCursorColor, false,
-                           shortcut_label(shortcuts.pin_color));
-                if (output.region_average_valid)
-                    action("Pin Region Average", kMenuPinRegionAverage, false);
-                if (!pinned_colors.empty())
-                    action("Clear Pinned Markers", kMenuClearPinnedMarkers, false);
-            }
 
             separator();
             action("Graticule", kMenuToggleGraticule, show_graticule);
@@ -2057,14 +2059,8 @@ int main() {
                 case kMenuToggleGraticule:
                     show_graticule = !show_graticule;
                     break;
-                case kMenuPinCursorColor:
-                    pin_reference_color(vectorscope_color);
-                    break;
                 case kMenuPickPinColor:
                     want_region_pick = RegionPickerMode::PinColor;
-                    break;
-                case kMenuPinRegionAverage:
-                    if (output.region_average_valid) pin_reference_color(output.region_average);
                     break;
                 case kMenuClearPinnedMarkers:
                     pinned_colors.clear();
@@ -2130,12 +2126,24 @@ int main() {
         // The blocking overlay runs after the frame is submitted; capture and
         // analysis keep flowing underneath.
         if (region_picking && want_region_pick) {
-            // The toolbar keeps working mid-pick: choosing a selection tool
-            // switches the active picker's mode instead of stacking one.
-            SetRegionPickMode(*want_region_pick);
-            want_region_pick.reset();
+            const bool target_pin = *want_region_pick == RegionPickerMode::PinColor ||
+                                    *want_region_pick == RegionPickerMode::PinColors;
+            if (target_pin || region_pick_is_pin) {
+                // Region picking and color pinning are separate tools; a
+                // pick never morphs across that boundary. The active pick
+                // closes - with no effect on the region - and the
+                // requested tool opens fresh once it is gone.
+                region_pick_swallow_cancel = true;
+                CancelRegionPick();
+            } else {
+                // The toolbar keeps working mid-pick: choosing a region
+                // tool switches the active picker's mode instead of
+                // stacking one.
+                SetRegionPickMode(*want_region_pick);
+                want_region_pick.reset();
+            }
         }
-        if (want_region_pick && capture_display != 0) {
+        if (!region_picking && want_region_pick && capture_display != 0) {
             HideRegionBorder();
             // The previous region's border must not leak into the analyzed
             // frame: its strokes read as rectangle edges and cut suggestions
@@ -2298,7 +2306,14 @@ int main() {
                     std::fclose(image);
                 });
             }
-            if (BeginRegionPick(picker_displays, *want_region_pick)) region_picking = true;
+            if (BeginRegionPick(picker_displays, *want_region_pick)) {
+                region_picking = true;
+                region_pick_is_pin = *want_region_pick == RegionPickerMode::PinColor ||
+                                     *want_region_pick == RegionPickerMode::PinColors;
+            }
+            // Consumed either way: a request that could not open (a
+            // display gone mid-flight) must not retry every frame.
+            want_region_pick.reset();
             last_activity = glfwGetTime();
         }
 
@@ -2382,6 +2397,7 @@ int main() {
                 }
                 if (poll.finished || !poll.active) {
                     region_picking = false;
+                    region_pick_swallow_cancel = false;
                     sync_region_border();
                     last_activity = glfwGetTime();
                 }
@@ -2403,12 +2419,15 @@ int main() {
                             }
                         }
                         apply_region(*poll.confirmed);
-                    } else {
+                    } else if (!region_pick_swallow_cancel) {
                         // Cancelled: reset all drawing, pending and
                         // confirmed. Full region means capture snaps back
-                        // to the display this window sits on.
+                        // to the display this window sits on. A cancel
+                        // ordered by a tool switch is not the user's Esc
+                        // and resets nothing.
                         apply_region(RegionOfInterest{});
                     }
+                    region_pick_swallow_cancel = false;
                     sync_region_border();
                     last_activity = glfwGetTime();
                 }

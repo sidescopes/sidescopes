@@ -80,22 +80,6 @@ TEST_CASE("AnalysisWorker produces scope images from published frames") {
     CHECK(output.frames_processed == 1);
 }
 
-TEST_CASE("AnalysisWorker reports the region's average color") {
-    FrameMailbox mailbox;
-    AnalysisWorker worker(mailbox);
-    worker.Start();
-
-    mailbox.Publish(MakeSolidFrame(64, 64, Color{100, 150, 200}, 1));
-
-    uint64_t seen = 0;
-    AnalysisWorker::Output output;
-    REQUIRE(WaitFor([&] { return worker.FetchOutput(seen, output); }));
-    REQUIRE(output.region_average_valid);
-    CHECK(output.region_average.r == 100.0f);
-    CHECK(output.region_average.g == 150.0f);
-    CHECK(output.region_average.b == 200.0f);
-}
-
 TEST_CASE("AnalysisWorker skips frames with unchanged content") {
     FrameMailbox mailbox;
     AnalysisWorker worker(mailbox);

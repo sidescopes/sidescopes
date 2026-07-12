@@ -151,34 +151,6 @@ void AnalysisWorker::Run() {
         const uint32_t enabled = settings.enabled_scopes;
         const auto started = std::chrono::steady_clock::now();
 
-        // The average samples a bounded grid regardless of region size,
-        // so it costs the same on a laptop corner and a 6K full screen.
-        FloatColor region_average;
-        bool region_average_valid = false;
-        {
-            const int stride = std::max(1, std::max(region.width, region.height) / 256);
-            double sum_r = 0.0;
-            double sum_g = 0.0;
-            double sum_b = 0.0;
-            uint64_t samples = 0;
-            for (int py = region.y; py < region.y + region.height; py += stride) {
-                for (int px = region.x; px < region.x + region.width; px += stride) {
-                    const Color color = view.ColorAt(px, py);
-                    sum_r += color.r;
-                    sum_g += color.g;
-                    sum_b += color.b;
-                    ++samples;
-                }
-            }
-            if (samples > 0) {
-                region_average =
-                    FloatColor{static_cast<float>(sum_r / static_cast<double>(samples)),
-                               static_cast<float>(sum_g / static_cast<double>(samples)),
-                               static_cast<float>(sum_b / static_cast<double>(samples))};
-                region_average_valid = true;
-            }
-        }
-
         if (enabled & kScopeVectorscope) vectorscope.Accumulate(view, region);
         if (enabled & kScopeWaveform) waveform.Accumulate(view, region);
         if (enabled & kScopeWaveformParade) waveform_parade.Accumulate(view, region);
@@ -196,8 +168,6 @@ void AnalysisWorker::Run() {
             output_.histogram_image = histogram.Image();
             output_.histogram_outline = histogram.OutlineHeights();
         }
-        output_.region_average = region_average;
-        output_.region_average_valid = region_average_valid;
         output_.accumulate_milliseconds = elapsed_ms;
         output_.frames_processed = frames_processed;
         ++output_.version;

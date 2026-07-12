@@ -63,11 +63,6 @@ public:
         // The histogram's curve, stroked by the interface at display
         // resolution (three channels of normalized heights).
         std::vector<float> histogram_outline;
-        // The region's average color, riding along with every pass: the
-        // reference-pinning workflow wants it (pin the average of a face
-        // region), and it is cheap next to the engines.
-        FloatColor region_average;
-        bool region_average_valid = false;
         double accumulate_milliseconds = 0.0;
         uint64_t frames_processed = 0;
         uint64_t version = 0;

@@ -79,25 +79,73 @@ bool g_border_edit_changed = false;
 bool g_border_dismissed = false;
 RegionOfInterest g_border_edit_region;
 
-// The pin chip's live color, pushed by the application once per frame;
-// sampled from the capture stream so the chip previews exactly what a
-// click would pin.
+// The pin cursor's swatch color, pushed by the application once per
+// frame; sampled from the capture stream so the swatch previews exactly
+// what a click would pin.
 std::optional<FloatColor> g_pin_chip_color;
 
 // The sample patch a pin-mode click averages, in points.
 constexpr double kPinSamplePoints = 14.0;
-// The chip swatch beside the crosshair: size and cursor offset, points.
-constexpr double kChipSize = 18.0;
-constexpr double kChipOffset = 16.0;
 
-// The chip flips to the cursor's other side near the display's edges
-// instead of running off screen. View coordinates, bottom-left origin.
-NSRect ChipRect(NSPoint chip_point, NSRect bounds) {
-    CGFloat x = chip_point.x + kChipOffset;
-    CGFloat y = chip_point.y - kChipOffset - kChipSize;
-    if (x + kChipSize > NSMaxX(bounds)) x -= 2 * kChipOffset + kChipSize;
-    if (y < NSMinY(bounds)) y += 2 * kChipOffset + kChipSize;
-    return NSMakeRect(x, y, kChipSize, kChipSize);
+// The pin cursor: crosshair and preview swatch drawn into the CURSOR
+// itself. A swatch painted into the overlay always trails the pointer
+// by a composition frame - the cursor image rides its own zero-latency
+// plane, so the swatch does too. The crosshair is a two-tone grey, the
+// look the system crosshair only has over dimmed content.
+constexpr double kPinCursorHotspot = 12.0;  // crosshair center, points
+constexpr double kPinCursorArm = 8.0;
+constexpr double kPinCursorGap = 2.0;
+constexpr double kPinSwatchOffset = 7.0;  // from the hotspot, points
+constexpr double kPinSwatchSize = 13.0;
+
+NSCursor* g_pin_cursor = nil;
+
+NSCursor* BuildPinCursor(const std::optional<FloatColor>& color) {
+    const CGFloat side = kPinCursorHotspot + kPinSwatchOffset + kPinSwatchSize + 2;
+    NSImage* image = [[NSImage alloc] initWithSize:NSMakeSize(side, side)];
+    [image lockFocus];
+    // Image coordinates are bottom-left; the hotspot NSCursor takes is
+    // top-left. The crosshair centers on (hotspot, hotspot) from the
+    // top, the swatch hangs below-right of it.
+    const CGFloat center_x = kPinCursorHotspot;
+    const CGFloat center_y = side - kPinCursorHotspot;
+    const auto stroke = [&](CGFloat width, NSColor* tone) {
+        NSBezierPath* arms = [NSBezierPath bezierPath];
+        arms.lineWidth = width;
+        [arms moveToPoint:NSMakePoint(center_x, center_y + kPinCursorGap)];
+        [arms lineToPoint:NSMakePoint(center_x, center_y + kPinCursorArm)];
+        [arms moveToPoint:NSMakePoint(center_x, center_y - kPinCursorGap)];
+        [arms lineToPoint:NSMakePoint(center_x, center_y - kPinCursorArm)];
+        [arms moveToPoint:NSMakePoint(center_x + kPinCursorGap, center_y)];
+        [arms lineToPoint:NSMakePoint(center_x + kPinCursorArm, center_y)];
+        [arms moveToPoint:NSMakePoint(center_x - kPinCursorGap, center_y)];
+        [arms lineToPoint:NSMakePoint(center_x - kPinCursorArm, center_y)];
+        [tone setStroke];
+        [arms stroke];
+    };
+    stroke(3.2, [NSColor colorWithWhite:0.1 alpha:0.85]);
+    stroke(1.5, [NSColor colorWithWhite:0.8 alpha:0.95]);
+    if (color) {
+        const NSRect swatch =
+            NSMakeRect(center_x + kPinSwatchOffset, center_y - kPinSwatchOffset - kPinSwatchSize,
+                       kPinSwatchSize, kPinSwatchSize);
+        [[NSColor colorWithSRGBRed:color->r / 255.0
+                             green:color->g / 255.0
+                              blue:color->b / 255.0
+                             alpha:1.0] setFill];
+        NSRectFillUsingOperation(swatch, NSCompositingOperationCopy);
+        NSBezierPath* rim = [NSBezierPath bezierPathWithRect:swatch];
+        rim.lineWidth = 2.0;
+        [[NSColor colorWithWhite:0.1 alpha:0.7] setStroke];
+        [rim stroke];
+        NSBezierPath* ring = [NSBezierPath bezierPathWithRect:swatch];
+        ring.lineWidth = 1.0;
+        [[NSColor colorWithWhite:0.97 alpha:0.95] setStroke];
+        [ring stroke];
+    }
+    [image unlockFocus];
+    return [[NSCursor alloc] initWithImage:image
+                                   hotSpot:NSMakePoint(kPinCursorHotspot, kPinCursorHotspot)];
 }
 
 }  // namespace
@@ -132,8 +180,6 @@ NSRect ChipRect(NSPoint chip_point, NSRect bounds) {
 // is never touched, and a cursor chip previews the sample.
 @property(nonatomic, assign) BOOL pinMode;
 @property(nonatomic, assign) BOOL pinMany;
-@property(nonatomic, assign) NSPoint chipPoint;
-@property(nonatomic, assign) BOOL chipValid;
 @property(nonatomic, assign) NSRect pinnedArea;
 @property(nonatomic, assign) BOOL pinnedReady;
 @property(nonatomic, assign) NSPoint dragStart;
@@ -166,7 +212,6 @@ NSRect ChipRect(NSPoint chip_point, NSRect bounds) {
     suggestions_ = faces ? faces_ : windows_;
     self.hoveredSuggestion = -1;
     self.dragging = NO;
-    self.chipValid = NO;
     [self.window invalidateCursorRectsForView:self];
     self.needsDisplay = YES;
 }
@@ -257,12 +302,11 @@ NSRect ChipRect(NSPoint chip_point, NSRect bounds) {
 - (void)drawRect:(NSRect)dirty {
     (void)dirty;
     if (self.pinMode) {
-        // No dim: judging a color through a wash misleads. The whisper
-        // of alpha is load-bearing - the window server treats fully
-        // transparent pixels as click-through, and pin clicks belong to
-        // the overlay.
-        [[NSColor colorWithWhite:0 alpha:0.05] setFill];
-        NSRectFillUsingOperation(self.bounds, NSCompositingOperationCopy);
+        // No dim at all - judging a color through even a light wash
+        // misleads. Nothing is painted over the screen; the overlay owns
+        // its clicks because pin-mode windows set ignoresMouseEvents
+        // explicitly, which switches the window server off its per-pixel
+        // transparency hit-testing.
         if (self.dragging) {
             // A two-tone frame: the white line rides a dark halo so one
             // of the tones survives any undimmed background.
@@ -276,31 +320,13 @@ NSRect ChipRect(NSPoint chip_point, NSRect bounds) {
             [[NSColor whiteColor] setStroke];
             [line stroke];
         }
-        if (self.chipValid && sidescopes::g_pin_chip_color) {
-            const NSRect chip = sidescopes::ChipRect(self.chipPoint, self.bounds);
-            const sidescopes::FloatColor& color = *sidescopes::g_pin_chip_color;
-            [[NSColor colorWithSRGBRed:color.r / 255.0
-                                 green:color.g / 255.0
-                                  blue:color.b / 255.0
-                                 alpha:1.0] setFill];
-            NSRectFillUsingOperation(chip, NSCompositingOperationCopy);
-            NSBezierPath* rim = [NSBezierPath bezierPathWithRect:chip];
-            rim.lineWidth = 2.0;
-            [[NSColor colorWithWhite:0.1 alpha:0.7] setStroke];
-            [rim stroke];
-            NSBezierPath* ring = [NSBezierPath bezierPathWithRect:chip];
-            ring.lineWidth = 1.0;
-            [[NSColor colorWithWhite:0.97 alpha:0.95] setStroke];
-            [ring stroke];
-        }
         if (!self.dragging) {
-            NSString* secondary =
-                sidescopes::SupportsFaceDetection()
-                    ? @"[A] pick a window    [D] draw    [F] pick a face    [Esc] done"
-                    : @"[A] pick a window    [D] draw    [Esc] done";
+            // Pinning is its own tool: no mode keys here and none of the
+            // region modes lead back - crossing over midway would blur
+            // what a click means.
             [self drawBanner:self.pinMany ? @"Click or drag to pin colors"
                                           : @"Click or drag to pin a color"
-                   secondary:secondary
+                   secondary:self.pinMany ? @"[Esc] done" : @"[Esc] cancel"
                 preferCenter:NO];
         }
         return;
@@ -377,24 +403,18 @@ NSRect ChipRect(NSPoint chip_point, NSRect bounds) {
 }
 
 - (void)resetCursorRects {
-    [self addCursorRect:self.bounds
-                 cursor:self.drawMode || self.pinMode ? NSCursor.crosshairCursor
-                                                      : NSCursor.pointingHandCursor];
+    NSCursor* cursor = NSCursor.pointingHandCursor;
+    if (self.pinMode)
+        cursor = sidescopes::g_pin_cursor ? sidescopes::g_pin_cursor : NSCursor.crosshairCursor;
+    else if (self.drawMode)
+        cursor = NSCursor.crosshairCursor;
+    [self addCursorRect:self.bounds cursor:cursor];
 }
 
 - (void)mouseMoved:(NSEvent*)event {
-    if (self.pinMode) {
-        // The chip follows at mouse rate; its color refreshes at frame
-        // rate through SetRegionPickChipColor.
-        const NSPoint point = [self convertPoint:event.locationInWindow fromView:nil];
-        NSRect changed = sidescopes::ChipRect(point, self.bounds);
-        if (self.chipValid)
-            changed = NSUnionRect(changed, sidescopes::ChipRect(self.chipPoint, self.bounds));
-        self.chipPoint = point;
-        self.chipValid = YES;
-        [self setNeedsDisplayInRect:NSInsetRect(changed, -4, -4)];
-        return;
-    }
+    // In pin mode the swatch rides the cursor image itself; motion needs
+    // nothing from the view.
+    if (self.pinMode) return;
     if (self.drawMode) return;
     const NSPoint point = [self convertPoint:event.locationInWindow fromView:nil];
     const NSInteger hovered = [self suggestionAtPoint:point];
@@ -417,11 +437,6 @@ NSRect ChipRect(NSPoint chip_point, NSRect bounds) {
     if (self.pinMode) {
         const NSPoint point = [self convertPoint:event.locationInWindow fromView:nil];
         const NSRect previous = [self selectionRect];
-        NSRect changed = sidescopes::ChipRect(point, self.bounds);
-        if (self.chipValid)
-            changed = NSUnionRect(changed, sidescopes::ChipRect(self.chipPoint, self.bounds));
-        self.chipPoint = point;
-        self.chipValid = YES;
         self.dragCurrent = point;
         if (!self.dragging && (std::abs(self.dragCurrent.x - self.dragStart.x) > 4 ||
                                std::abs(self.dragCurrent.y - self.dragStart.y) > 4)) {
@@ -429,10 +444,8 @@ NSRect ChipRect(NSPoint chip_point, NSRect bounds) {
             self.needsDisplay = YES;  // full: the banner leaves
             return;
         }
-        if (self.dragging) {
-            changed = NSUnionRect(changed, previous);
-            changed = NSUnionRect(changed, [self selectionRect]);
-        }
+        if (!self.dragging) return;
+        NSRect changed = NSUnionRect(previous, [self selectionRect]);
         [self setNeedsDisplayInRect:NSInsetRect(changed, -4, -4)];
         return;
     }
@@ -497,6 +510,8 @@ NSRect ChipRect(NSPoint chip_point, NSRect bounds) {
         self.finished = YES;
         return;
     }
+    // Pinning is its own tool: while it is up, only ESC speaks.
+    if (self.pinMode) return;
     NSString* keys = event.charactersIgnoringModifiers;
     if (keys.length == 1) {
         // Modes switch on every display's overlay at once.
@@ -511,12 +526,6 @@ NSRect ChipRect(NSPoint chip_point, NSRect bounds) {
         }
         if (key == 'f' || key == 'F') {
             sidescopes::SetRegionPickMode(sidescopes::RegionPickerMode::PickFaces);
-            return;
-        }
-        if (key == 'p' || key == 'P') {
-            const bool many = (event.modifierFlags & NSEventModifierFlagShift) != 0;
-            sidescopes::SetRegionPickMode(many ? sidescopes::RegionPickerMode::PinColors
-                                               : sidescopes::RegionPickerMode::PinColor);
             return;
         }
     }
@@ -953,6 +962,12 @@ bool BeginRegionPick(const std::vector<PickerDisplay>& displays, RegionPickerMod
         if (!draw && !pin) view->suggestions_ = faces ? view->faces_ : view->windows_;
         overlay.contentView = view;
         overlay.acceptsMouseMovedEvents = YES;
+        // Pin mode paints nothing over the screen, and an all-transparent
+        // window would be click-through: the explicit assignment - even
+        // to NO - switches the window server off its per-pixel
+        // transparency hit-testing, so the overlay owns every click. The
+        // region border must never do this; the picker wants exactly it.
+        if (pin) overlay.ignoresMouseEvents = NO;
 
         g_picker_overlays.push_back(PickerOverlay{overlay, view, entry.display_id, view_size});
     }
@@ -1041,6 +1056,7 @@ RegionPickPoll PollRegionPick() {
         g_raised_windows.clear();
         for (PickerOverlay& each : g_picker_overlays) [each.window orderOut:nil];
         g_picker_overlays.clear();
+        g_pin_cursor = nil;
         return poll;
     }
 
@@ -1084,6 +1100,12 @@ void CancelRegionPick() {
 }
 
 void SetRegionPickMode(RegionPickerMode mode) {
+    // Region picking and color pinning are separate tools; a pick never
+    // crosses between the families midway.
+    const bool pin = mode == RegionPickerMode::PinColor || mode == RegionPickerMode::PinColors;
+    if (!g_picker_overlays.empty() &&
+        (g_picker_overlays.front().view.pinMode ? YES : NO) != (pin ? YES : NO))
+        return;
     for (PickerOverlay& overlay : g_picker_overlays) {
         [overlay.view switchToMode:(mode == RegionPickerMode::Draw        ? 1
                                     : mode == RegionPickerMode::PickFaces ? 2
@@ -1100,31 +1122,14 @@ void SetRegionPickChipColor(const std::optional<FloatColor>& color) {
                                  std::lround(color->g) != std::lround(g_pin_chip_color->g) ||
                                  std::lround(color->b) != std::lround(g_pin_chip_color->b)));
     g_pin_chip_color = color;
-    if (g_picker_overlays.empty()) return;
-    const NSPoint cursor = NSEvent.mouseLocation;
+    if (g_picker_overlays.empty() || !g_picker_overlays.front().view.pinMode) return;
+    if (g_pin_cursor && !color_changed) return;
+    g_pin_cursor = BuildPinCursor(color);
+    // Re-arming the cursor rects makes AppKit apply the fresh cursor
+    // wherever the pointer already stands.
     for (PickerOverlay& overlay : g_picker_overlays) {
-        SidescopesPickerView* view = overlay.view;
-        if (!view.pinMode) continue;
-        const NSRect frame = overlay.window.frame;
-        const NSPoint local = NSMakePoint(cursor.x - frame.origin.x, cursor.y - frame.origin.y);
-        if (!NSPointInRect(local, view.bounds)) {
-            // The cursor crossed to another display; the chip left with
-            // it.
-            if (view.chipValid) {
-                view.chipValid = NO;
-                [view setNeedsDisplayInRect:NSInsetRect(ChipRect(view.chipPoint, view.bounds), -4,
-                                                        -4)];
-            }
-            continue;
-        }
-        if (!view.chipValid || color_changed) {
-            NSRect changed = ChipRect(local, view.bounds);
-            if (view.chipValid)
-                changed = NSUnionRect(changed, ChipRect(view.chipPoint, view.bounds));
-            view.chipPoint = local;
-            view.chipValid = YES;
-            [view setNeedsDisplayInRect:NSInsetRect(changed, -4, -4)];
-        }
+        if (!overlay.view.pinMode) continue;
+        [overlay.window invalidateCursorRectsForView:overlay.view];
     }
 }
 
