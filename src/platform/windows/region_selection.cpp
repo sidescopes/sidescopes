@@ -217,7 +217,6 @@ struct BorderState {
     unsigned drag_zone = kZoneNone;
     POINT drag_start_mouse{};
     RECT drag_start_region{};
-    bool band_hovered = false;
     bool close_pressed = false;
 };
 
@@ -571,14 +570,12 @@ Gdiplus::RectF BorderRegionLocal(double scale) {
 // Eight handles, no modifier: the corners resize both axes, the edge
 // midpoints resize their edge, and the rest of the band moves. The
 // visible handles say which is which - a modifier key never could.
-// The close button materializes on hover only, so the border at rest
-// stays exactly the instrument it was; it hides again during drags and
-// yields on regions too narrow to share the top edge with the corner
-// zones.
+// Always visible while the border is up - hover-revealing it flickered
+// on every band crossing, and crossing the band is what a cursor does
+// all day. It still hides during drags and yields on tiny regions.
 bool CloseVisible(double scale) {
     const Gdiplus::RectF region = BorderRegionLocal(scale);
-    return g_border.band_hovered && g_border.drag_zone == kZoneNone &&
-           region.Width >= kMinimumWidthForClose * scale;
+    return g_border.drag_zone == kZoneNone && region.Width >= kMinimumWidthForClose * scale;
 }
 
 // On the band's outer corner, at forty-five degrees off the top-right
@@ -804,18 +801,7 @@ LRESULT CALLBACK BorderProc(HWND window, UINT message, WPARAM w_param, LPARAM l_
             return 0;
         }
         case WM_MOUSEMOVE: {
-            if (g_border.drag_zone == kZoneNone) {
-                if (!g_border.band_hovered) {
-                    g_border.band_hovered = true;
-                    // The leave notification arms per entry; interior
-                    // points hit-test transparent, so leaving into the
-                    // region counts as leaving the window.
-                    TRACKMOUSEEVENT track{sizeof(track), TME_LEAVE, window, 0};
-                    TrackMouseEvent(&track);
-                    PaintBorder();
-                }
-                return 0;
-            }
+            if (g_border.drag_zone == kZoneNone) return 0;
             // Screen coordinates throughout: the window itself moves as
             // the application applies each edit, so client coordinates
             // shift under the cursor mid-drag.
@@ -855,12 +841,6 @@ LRESULT CALLBACK BorderProc(HWND window, UINT message, WPARAM w_param, LPARAM l_
             g_border_edit_changed = true;
             return 0;
         }
-        case WM_MOUSELEAVE:
-            if (g_border.band_hovered) {
-                g_border.band_hovered = false;
-                PaintBorder();
-            }
-            return 0;
         case WM_LBUTTONUP: {
             if (g_border.close_pressed) {
                 g_border.close_pressed = false;

@@ -400,7 +400,6 @@ RegionOfInterest g_border_edit_region;
 @property(nonatomic, assign) SidescopesDragEdges dragZone;
 @property(nonatomic, assign) NSPoint dragStartMouse;  // global screen coords
 @property(nonatomic, assign) NSRect dragStartRegion;  // global screen coords
-@property(nonatomic, assign) BOOL bandHovered;
 @property(nonatomic, assign) BOOL closePressed;
 @end
 @implementation SidescopesBorderView
@@ -410,13 +409,12 @@ RegionOfInterest g_border_edit_region;
     return NSInsetRect(self.bounds, sidescopes::kWindowPad, sidescopes::kWindowPad);
 }
 
-// The close button materializes on hover only, so the border at rest
-// stays exactly the instrument it was; it hides again during drags and
-// yields on regions too narrow to share the top edge with the corner
-// zones.
+// Always visible while the border is up - hover-revealing it flickered
+// on every band crossing, and crossing the band is what a cursor does
+// all day. It still hides during drags and yields on tiny regions.
 - (BOOL)closeVisible {
     const NSRect region = [self regionRect];
-    return self.bandHovered && self.dragZone == SidescopesDragEdgeNone &&
+    return self.dragZone == SidescopesDragEdgeNone &&
            region.size.width >= sidescopes::kMinimumWidthForClose;
 }
 
@@ -612,21 +610,11 @@ RegionOfInterest g_border_edit_region;
 - (void)mouseMoved:(NSEvent*)event {
     if (self.dragZone != SidescopesDragEdgeNone) return;  // drag owns the cursor
     const NSPoint local = [self convertPoint:event.locationInWindow fromView:nil];
-    const SidescopesDragEdges zone = [self zoneAtPoint:local];
-    const BOOL hovered = zone != SidescopesDragEdgeNone;
-    if (hovered != self.bandHovered) {
-        self.bandHovered = hovered;
-        self.needsDisplay = YES;
-    }
-    [self applyCursorForZone:zone];
+    [self applyCursorForZone:[self zoneAtPoint:local]];
 }
 
 - (void)mouseExited:(NSEvent*)event {
     (void)event;
-    if (self.bandHovered) {
-        self.bandHovered = NO;
-        self.needsDisplay = YES;
-    }
     if (self.dragZone == SidescopesDragEdgeNone) [NSCursor.arrowCursor set];
 }
 
