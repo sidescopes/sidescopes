@@ -1117,6 +1117,13 @@ void PaintBorder() {
 
 LRESULT CALLBACK BorderProc(HWND window, UINT message, WPARAM w_param, LPARAM l_param) {
     switch (message) {
+        case WM_MOUSEACTIVATE:
+            // The band is mouse-only. WS_EX_NOACTIVATE keeps it from
+            // BECOMING the foreground window, but without this answer a
+            // click still DEACTIVATES whichever window holds the
+            // keyboard - every shortcut dead until the scope window is
+            // clicked again, with the band taking nothing in exchange.
+            return MA_NOACTIVATE;
         case WM_NCHITTEST: {
             // The interior is the editor's, not ours; only the band takes
             // the mouse.
