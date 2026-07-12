@@ -194,11 +194,16 @@ if(APPLE OR WIN32)
         # WIN32_EXECUTABLE hides the console; main() stays the portable
         # entry point, so the linker is told where to find it. The manifest
         # declares per-monitor DPI awareness before the first window-system
-        # call.
+        # call. The version resource carries the icon and the metadata the
+        # shell shows in Properties and Task Manager.
+        enable_language(RC)  # Ninja does not enable resource compilation on its own
+        set(SIDESCOPES_ICON_PATH "${CMAKE_SOURCE_DIR}/assets/icon/sidescopes.ico")
+        configure_file(cmake/sidescopes.rc.in sidescopes.rc @ONLY)
         add_executable(SideScopes WIN32
             src/app/main.cpp
             src/platform/windows/graphics.cpp
             cmake/sidescopes.manifest
+            ${CMAKE_CURRENT_BINARY_DIR}/sidescopes.rc
         )
         target_link_options(SideScopes PRIVATE /ENTRY:mainCRTStartup)
         target_link_libraries(SideScopes PRIVATE

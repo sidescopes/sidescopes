@@ -41,6 +41,8 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - macOS platform layer: ScreenCaptureKit capture, native context menus,
   the region picker with a persistent click-through border, and desktop
   services.
+- Windows executable identity: the application icon and the version
+  metadata the shell shows in Properties and Task Manager.
 - Preferences persisted between sessions: calibration, region, visible
   scopes, toggles, and window placement.
 - Graticule geometry built from the engines' own projections: vectorscope

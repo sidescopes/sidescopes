@@ -3,11 +3,12 @@
 
 Renders a vectorscope motif - graticule ring, skin-tone line, and a warm
 trace cloud with the cursor marker on it - onto a Big Sur style rounded
-square, then assembles assets/icon/sidescopes.icns. Pure Python on purpose:
+square, then assembles assets/icon/sidescopes.ico and, when the macOS
+tools are available, assets/icon/sidescopes.icns. Pure Python on purpose:
 no image libraries to install, and the icon stays reproducible from source.
 
-Usage: python3 scripts/generate_icon.py  (from the repository root; needs
-macOS sips and iconutil)
+Usage: python3 scripts/generate_icon.py  (from the repository root; the
+.icns step needs macOS sips and iconutil and is skipped elsewhere)
 """
 
 import math
@@ -138,19 +139,130 @@ def render():
     return rows
 
 
-def write_png(path, rows):
+def png_bytes(rows, size):
     def chunk(kind, payload):
         data = kind + payload
         return struct.pack(">I", len(payload)) + data + struct.pack(">I", zlib.crc32(data))
 
-    raw = b"".join(b"\x00" + row for row in rows)
-    header = struct.pack(">IIBBBBB", SIZE, SIZE, 8, 6, 0, 0, 0)
-    path.write_bytes(
+    raw = b"".join(b"\x00" + bytes(row) for row in rows)
+    header = struct.pack(">IIBBBBB", size, size, 8, 6, 0, 0, 0)
+    return (
         b"\x89PNG\r\n\x1a\n"
         + chunk(b"IHDR", header)
         + chunk(b"IDAT", zlib.compress(raw, 9))
         + chunk(b"IEND", b"")
     )
+
+
+def write_png(path, rows):
+    path.write_bytes(png_bytes(rows, SIZE))
+
+
+def box_weights(source, destination):
+    """For each destination index, the (source index, overlap) pairs of an
+    exact area-average box - fractional at the seams when the ratio is not
+    an integer, as it is not for the 48-pixel icon entry."""
+    weights = []
+    ratio = source / destination
+    for index in range(destination):
+        start = index * ratio
+        end = start + ratio
+        cell = []
+        position = int(start)
+        while position < end and position < source:
+            overlap = min(end, position + 1) - max(start, position)
+            if overlap > 0:
+                cell.append((position, overlap))
+            position += 1
+        weights.append(cell)
+    return weights
+
+
+def downscale(rows, destination):
+    """Area-averages the master to destination x destination, premultiplied
+    so transparent corner pixels do not bleed darkness into the edge."""
+    source = len(rows)
+    horizontal = box_weights(source, destination)
+    vertical = box_weights(source, destination)
+
+    narrow = []  # horizontally scaled, premultiplied floats
+    for row in rows:
+        out = []
+        for cell in horizontal:
+            r = g = b = a = 0.0
+            total = 0.0
+            for position, overlap in cell:
+                base = position * 4
+                alpha = row[base + 3] / 255.0
+                r += row[base] / 255.0 * alpha * overlap
+                g += row[base + 1] / 255.0 * alpha * overlap
+                b += row[base + 2] / 255.0 * alpha * overlap
+                a += alpha * overlap
+                total += overlap
+            out.append((r / total, g / total, b / total, a / total))
+        narrow.append(out)
+
+    result = []
+    for cell in vertical:
+        out = bytearray()
+        for x in range(destination):
+            r = g = b = a = 0.0
+            total = 0.0
+            for position, overlap in cell:
+                pr, pg, pb, pa = narrow[position][x]
+                r += pr * overlap
+                g += pg * overlap
+                b += pb * overlap
+                a += pa * overlap
+                total += overlap
+            a /= total
+            if a > 0.0:
+                r /= total * a
+                g /= total * a
+                b /= total * a
+            out += bytes(
+                (
+                    min(255, round(r * a * 255)),
+                    min(255, round(g * a * 255)),
+                    min(255, round(b * a * 255)),
+                    min(255, round(a * 255)),
+                )
+            )
+        result.append(out)
+    return result
+
+
+def write_ico(path, master_rows):
+    """Assembles the classic Windows icon sizes: 16/32/48 as plain 32-bit
+    bitmaps for maximum compatibility, 256 PNG-compressed as the format
+    requires."""
+    entries = []
+    for size in (16, 32, 48):
+        rows = downscale(master_rows, size)
+        # A 32-bit ICO bitmap: BITMAPINFOHEADER with doubled height, BGRA
+        # rows bottom-up, then the 1-bit AND mask (all zero - the alpha
+        # channel carries the shape).
+        header = struct.pack("<IiiHHIIiiII", 40, size, size * 2, 1, 32, 0,
+                             size * size * 4, 0, 0, 0, 0)
+        pixels = bytearray()
+        for row in reversed(rows):
+            for x in range(size):
+                base = x * 4
+                pixels += bytes((row[base + 2], row[base + 1], row[base], row[base + 3]))
+        mask_stride = ((size + 31) // 32) * 4
+        mask = bytes(mask_stride * size)
+        entries.append((size, header + bytes(pixels) + mask))
+    entries.append((256, png_bytes(downscale(master_rows, 256), 256)))
+
+    directory = struct.pack("<HHH", 0, 1, len(entries))
+    offset = len(directory) + 16 * len(entries)
+    body = b""
+    for size, data in entries:
+        directory += struct.pack(
+            "<BBBBHHII", size % 256, size % 256, 0, 0, 1, 32, len(data), offset)
+        offset += len(data)
+        body += data
+    path.write_bytes(directory + body)
 
 
 def main():
@@ -159,8 +271,17 @@ def main():
     icon_dir.mkdir(parents=True, exist_ok=True)
 
     print("rendering master 1024x1024", file=sys.stderr)
+    master_rows = render()
     master = icon_dir / "sidescopes-1024.png"
-    write_png(master, render())
+    write_png(master, master_rows)
+
+    print("assembling sidescopes.ico", file=sys.stderr)
+    write_ico(icon_dir / "sidescopes.ico", master_rows)
+    print(f"wrote {icon_dir / 'sidescopes.ico'}", file=sys.stderr)
+
+    if not (shutil.which("sips") and shutil.which("iconutil")):
+        print("sips/iconutil not found; skipping sidescopes.icns", file=sys.stderr)
+        return
 
     with tempfile.TemporaryDirectory() as scratch:
         iconset = pathlib.Path(scratch) / "sidescopes.iconset"
