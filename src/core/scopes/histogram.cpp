@@ -122,6 +122,19 @@ void Histogram::MapBinsToImage() {
             tops[static_cast<std::size_t>(channel) * kImageWidth + x] = band_bottom - height;
         }
     }
+    // Squared distance from a point to a segment, for the outline's
+    // anti-aliasing: the stroke is a true line, equally thick on flats,
+    // slopes, and vertical spikes.
+    const auto segment_distance = [](double px, double py, double ax, double ay, double bx,
+                                     double by) {
+        const double abx = bx - ax;
+        const double aby = by - ay;
+        const double t = std::clamp(
+            ((px - ax) * abx + (py - ay) * aby) / std::max(1e-9, abx * abx + aby * aby), 0.0, 1.0);
+        const double dx = px - (ax + t * abx);
+        const double dy = py - (ay + t * aby);
+        return std::sqrt(dx * dx + dy * dy);
+    };
     std::fill(image_.rgba.begin(), image_.rgba.end(), uint8_t{0});
     for (int x = 0; x < kImageWidth; ++x) {
         for (int channel = 0; channel < 3; ++channel) {
@@ -133,24 +146,32 @@ void Histogram::MapBinsToImage() {
             if (top >= band_bottom) continue;
             const double left = channel_tops[std::max(0, x - 1)];
             const double right = channel_tops[std::min(kImageWidth - 1, x + 1)];
-            const double stroke_low = std::min({top, (top + left) / 2.0, (top + right) / 2.0});
-            const double stroke_high = std::max({top, (top + left) / 2.0, (top + right) / 2.0});
+            const double lowest = std::min({top, left, right});
+            const double highest = std::max({top, left, right});
             // The fill's top edge fades over a few rows rather than one:
             // the pane can magnify the plot, and a single-pixel edge
             // would come back as a ladder on the slopes.
             constexpr double kFeather = 2.5;
+            // The stroke: a line of this half-width traced along the
+            // curve through the neighboring columns' tops, rendered by
+            // perpendicular distance so steep segments stay as smooth
+            // and as thick as flat ones.
+            constexpr double kStrokeHalfWidth = 1.1;
             const int first_touched =
-                std::max(band_bottom - band_height, static_cast<int>(std::floor(stroke_low - 2.0)));
+                std::max(band_bottom - band_height,
+                         static_cast<int>(std::floor(lowest - kStrokeHalfWidth - 1.5)));
+            const int stroke_last = static_cast<int>(std::ceil(highest + kStrokeHalfWidth + 1.5));
             for (int row = first_touched; row < band_bottom; ++row) {
                 const double coverage = std::clamp((row + 1.0 - top) / kFeather, 0.0, 1.0);
-                // The stroke follows the curve as a connected line: it
-                // spans from the midpoint toward the lower neighbor to
-                // the midpoint toward the higher one, plus its own
-                // thickness, with soft ends.
-                const double position = row + 0.5;
-                const double into = (position - (stroke_low - 1.4)) / 1.4;
-                const double out = ((stroke_high + 2.6) - position) / 1.4;
-                const double stroke = std::clamp(std::min(into, out), 0.0, 1.0);
+                double stroke = 0.0;
+                if (row <= stroke_last) {
+                    const double px = x + 0.5;
+                    const double py = row + 0.5;
+                    const double distance =
+                        std::min(segment_distance(px, py, x - 0.5, left, x + 0.5, top),
+                                 segment_distance(px, py, x + 0.5, top, x + 1.5, right));
+                    stroke = std::clamp(kStrokeHalfWidth + 0.75 - distance, 0.0, 1.0);
+                }
                 const double value = std::max(kFillValue * coverage, kOutlineValue * stroke);
                 if (value <= 0.0) continue;
                 uint8_t* pixel =
