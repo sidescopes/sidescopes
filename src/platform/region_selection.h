@@ -59,8 +59,12 @@ void ShowRegionBorder(uint32_t display_id, const RegionOfInterest& region);
 void HideRegionBorder();
 
 // The border's in-progress or just-finished adjustment, if any.
+// `dismissed` reports the border's own close affordances - the hover
+// close button and a double-click on the band - and means "stop
+// tracking this region"; the application resets to full screen.
 struct RegionBorderEdit {
     bool editing = false;
+    bool dismissed = false;
     std::optional<RegionOfInterest> region;
 };
 RegionBorderEdit PollRegionBorderEdit();

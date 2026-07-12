@@ -60,6 +60,13 @@ constexpr double kCornerZone = 22.0;
 constexpr double kMidpointZone = 22.0;
 // Regions cannot shrink beyond this many points per side.
 constexpr double kMinimumRegionSize = 24.0;
+// The hover-revealed close button on the band: visible radius, its
+// larger hit target, and the region width below which it yields to the
+// resize handles (the band gets crowded before it gets useless).
+constexpr double kCloseRadius = 7.0;
+constexpr double kCloseHitRadius = 11.0;
+constexpr double kCloseCornerGap = 4.0;
+constexpr double kMinimumWidthForClose = 80.0;
 
 // Which edges a border drag adjusts; Move relocates the whole region.
 enum ZoneBits : unsigned {
@@ -69,6 +76,7 @@ enum ZoneBits : unsigned {
     kZoneTop = 1u << 2,
     kZoneBottom = 1u << 3,
     kZoneMove = 1u << 4,
+    kZoneClose = 1u << 5,
 };
 
 bool EnsureGdiplus() {
@@ -197,6 +205,8 @@ struct BorderState {
     unsigned drag_zone = kZoneNone;
     POINT drag_start_mouse{};
     RECT drag_start_region{};
+    bool band_hovered = false;
+    bool close_pressed = false;
 };
 
 BorderState g_border;
@@ -204,6 +214,7 @@ BorderState g_border;
 // Shared edit state the application polls once per frame.
 bool g_border_editing = false;
 bool g_border_edit_changed = false;
+bool g_border_dismissed = false;
 RegionOfInterest g_border_edit_region;
 
 // This application's own top-level windows, except the overlays
@@ -549,10 +560,36 @@ Gdiplus::RectF BorderRegionLocal(double scale) {
 // Eight handles, no modifier: the corners resize both axes, the edge
 // midpoints resize their edge, and the rest of the band moves. The
 // visible handles say which is which - a modifier key never could.
+// The close button materializes on hover only, so the border at rest
+// stays exactly the instrument it was; it hides again during drags and
+// yields on regions too narrow to share the top edge with the corner
+// zones.
+bool CloseVisible(double scale) {
+    const Gdiplus::RectF region = BorderRegionLocal(scale);
+    return g_border.band_hovered && g_border.drag_zone == kZoneNone &&
+           region.Width >= kMinimumWidthForClose * scale;
+}
+
+// On the band above the top edge, just clear of the top-right corner's
+// resize zone.
+Gdiplus::PointF CloseCenter(double scale) {
+    const Gdiplus::RectF region = BorderRegionLocal(scale);
+    return {static_cast<Gdiplus::REAL>(region.GetRight() -
+                                       (kCornerZone + kCloseCornerGap + kCloseRadius) * scale),
+            static_cast<Gdiplus::REAL>(region.Y - kBorderPad * scale / 2 - kEdgeRing * scale)};
+}
+
 unsigned BorderZoneAtPoint(double x, double y, double scale) {
     const Gdiplus::RectF region = BorderRegionLocal(scale);
     if (region.Contains(static_cast<Gdiplus::REAL>(x), static_cast<Gdiplus::REAL>(y)))
         return kZoneNone;  // click-through anyway
+    if (CloseVisible(scale)) {
+        const Gdiplus::PointF center = CloseCenter(scale);
+        const double dx = x - center.X;
+        const double dy = y - center.Y;
+        const double hit = kCloseHitRadius * scale;
+        if (dx * dx + dy * dy <= hit * hit) return kZoneClose;
+    }
     const double corner = kCornerZone * scale;
     const bool near_left = x < region.X + corner;
     const bool near_right = x > region.GetRight() - corner;
@@ -577,6 +614,10 @@ unsigned BorderZoneAtPoint(double x, double y, double scale) {
 void ApplyBorderCursor(unsigned zone) {
     if (zone == kZoneNone) {
         SetCursor(LoadCursorW(nullptr, IDC_ARROW));
+        return;
+    }
+    if ((zone & kZoneClose) != 0) {
+        SetCursor(LoadCursorW(nullptr, IDC_HAND));
         return;
     }
     if ((zone & kZoneMove) != 0) {
@@ -670,6 +711,28 @@ void PaintBorder() {
     handle(region.X + region.Width / 2, region.GetBottom());
     handle(region.GetRight(), region.GetBottom());
 
+    // The hover-revealed close button, in the handles' own visual
+    // language: a dark disc where the dots are light, so it reads as an
+    // action rather than a grip, with the same bright ring and an x.
+    if (CloseVisible(scale)) {
+        const Gdiplus::PointF center = CloseCenter(scale);
+        const auto close_radius = static_cast<Gdiplus::REAL>(kCloseRadius * scale);
+        const Gdiplus::RectF disc(center.X - close_radius, center.Y - close_radius,
+                                  close_radius * 2, close_radius * 2);
+        Gdiplus::SolidBrush disc_brush(Gdiplus::Color(217, 26, 26, 26));
+        canvas.FillEllipse(&disc_brush, disc);
+        Gdiplus::Pen disc_ring(Gdiplus::Color(242, 247, 247, 247),
+                               static_cast<Gdiplus::REAL>(1.0 * scale));
+        canvas.DrawEllipse(&disc_ring, disc);
+        const auto arm = static_cast<Gdiplus::REAL>((kCloseRadius - 3.8) * scale);
+        Gdiplus::Pen cross(Gdiplus::Color(242, 247, 247, 247),
+                           static_cast<Gdiplus::REAL>(1.4 * scale));
+        cross.SetStartCap(Gdiplus::LineCapRound);
+        cross.SetEndCap(Gdiplus::LineCapRound);
+        canvas.DrawLine(&cross, center.X - arm, center.Y - arm, center.X + arm, center.Y + arm);
+        canvas.DrawLine(&cross, center.X - arm, center.Y + arm, center.X + arm, center.Y - arm);
+    }
+
     surface.Push(g_border.window, g_border.region.left - static_cast<int>(kWindowPad * scale),
                  g_border.region.top - static_cast<int>(kWindowPad * scale));
 }
@@ -700,20 +763,47 @@ LRESULT CALLBACK BorderProc(HWND window, UINT message, WPARAM w_param, LPARAM l_
                 BorderZoneAtPoint(cursor.x - frame.left, cursor.y - frame.top, scale));
             return TRUE;
         }
+        case WM_LBUTTONDBLCLK: {
+            // Double-clicking anywhere on the band dismisses the region -
+            // the fast path once the close button has taught the
+            // gesture's home.
+            const double scale = UiScale(window);
+            const double x = static_cast<short>(LOWORD(l_param));
+            const double y = static_cast<short>(HIWORD(l_param));
+            if (BorderZoneAtPoint(x, y, scale) != kZoneNone) g_border_dismissed = true;
+            return 0;
+        }
         case WM_LBUTTONDOWN: {
             const double scale = UiScale(window);
             const double x = static_cast<short>(LOWORD(l_param));
             const double y = static_cast<short>(HIWORD(l_param));
-            g_border.drag_zone = BorderZoneAtPoint(x, y, scale);
-            if (g_border.drag_zone == kZoneNone) return 0;
+            const unsigned zone = BorderZoneAtPoint(x, y, scale);
+            if (zone == kZoneNone) return 0;
+            if ((zone & kZoneClose) != 0) {
+                g_border.close_pressed = true;
+                return 0;
+            }
+            g_border.drag_zone = zone;
             GetCursorPos(&g_border.drag_start_mouse);
             g_border.drag_start_region = g_border.region;
             g_border_editing = true;
             SetCapture(window);
+            PaintBorder();  // the close button hides while dragging
             return 0;
         }
         case WM_MOUSEMOVE: {
-            if (g_border.drag_zone == kZoneNone) return 0;
+            if (g_border.drag_zone == kZoneNone) {
+                if (!g_border.band_hovered) {
+                    g_border.band_hovered = true;
+                    // The leave notification arms per entry; interior
+                    // points hit-test transparent, so leaving into the
+                    // region counts as leaving the window.
+                    TRACKMOUSEEVENT track{sizeof(track), TME_LEAVE, window, 0};
+                    TrackMouseEvent(&track);
+                    PaintBorder();
+                }
+                return 0;
+            }
             // Screen coordinates throughout: the window itself moves as
             // the application applies each edit, so client coordinates
             // shift under the cursor mid-drag.
@@ -753,23 +843,41 @@ LRESULT CALLBACK BorderProc(HWND window, UINT message, WPARAM w_param, LPARAM l_
             g_border_edit_changed = true;
             return 0;
         }
-        case WM_LBUTTONUP:
+        case WM_MOUSELEAVE:
+            if (g_border.band_hovered) {
+                g_border.band_hovered = false;
+                PaintBorder();
+            }
+            return 0;
+        case WM_LBUTTONUP: {
+            if (g_border.close_pressed) {
+                g_border.close_pressed = false;
+                const double scale = UiScale(window);
+                const double x = static_cast<short>(LOWORD(l_param));
+                const double y = static_cast<short>(HIWORD(l_param));
+                if ((BorderZoneAtPoint(x, y, scale) & kZoneClose) != 0) g_border_dismissed = true;
+                return 0;
+            }
             if (g_border.drag_zone != kZoneNone) {
                 g_border.drag_zone = kZoneNone;
                 g_border_editing = false;
                 ReleaseCapture();
+                PaintBorder();
             }
             return 0;
+        }
         default:
             break;
     }
     return DefWindowProcW(window, message, w_param, l_param);
 }
 
-HWND CreateOverlayWindow(const wchar_t* class_name, WNDPROC procedure, DWORD ex_style) {
+HWND CreateOverlayWindow(const wchar_t* class_name, WNDPROC procedure, DWORD ex_style,
+                         UINT class_style) {
     const HINSTANCE instance = GetModuleHandleW(nullptr);
     WNDCLASSEXW window_class{};
     window_class.cbSize = sizeof(window_class);
+    window_class.style = class_style;
     window_class.lpfnWndProc = procedure;
     window_class.hInstance = instance;
     window_class.lpszClassName = class_name;
@@ -816,7 +924,7 @@ bool BeginRegionPick(uint32_t display_id, const std::vector<SuggestedRegion>& wi
     }
 
     picker->window = CreateOverlayWindow(L"SidescopesPickerOverlay", PickerProc,
-                                         WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TOOLWINDOW);
+                                         WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TOOLWINDOW, 0);
     if (!picker->window) {
         delete picker;
         return false;
@@ -905,9 +1013,10 @@ void ShowRegionBorder(uint32_t display_id, const RegionOfInterest& region) {
     if (!geometry) return;
 
     if (!g_border.window) {
+        // CS_DBLCLKS so the band can take the double-click dismissal.
         g_border.window = CreateOverlayWindow(
             L"SidescopesRegionBorder", BorderProc,
-            WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE);
+            WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, CS_DBLCLKS);
         if (!g_border.window) return;
     }
 
@@ -945,6 +1054,8 @@ void HideRegionBorder() {
 RegionBorderEdit PollRegionBorderEdit() {
     RegionBorderEdit edit;
     edit.editing = g_border_editing;
+    edit.dismissed = g_border_dismissed;
+    g_border_dismissed = false;
     if (g_border_edit_changed) {
         edit.region = g_border_edit_region;
         g_border_edit_changed = false;

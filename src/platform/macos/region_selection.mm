@@ -14,6 +14,7 @@ typedef NS_OPTIONS(NSUInteger, SidescopesDragEdges) {
     SidescopesDragEdgeBottom = 1 << 2,
     SidescopesDragEdgeTop = 1 << 3,
     SidescopesDragMove = 1 << 4,
+    SidescopesDragClose = 1 << 5,
 };
 
 namespace sidescopes {
@@ -39,6 +40,13 @@ constexpr double kCornerZone = 22.0;
 constexpr double kMidpointZone = 22.0;
 // Regions cannot shrink beyond this many points per side.
 constexpr double kMinimumRegionSize = 24.0;
+// The hover-revealed close button on the band: visible radius, its
+// larger hit target, and the region width below which it yields to the
+// resize handles (the band gets crowded before it gets useless).
+constexpr double kCloseRadius = 7.0;
+constexpr double kCloseHitRadius = 11.0;
+constexpr double kCloseCornerGap = 4.0;
+constexpr double kMinimumWidthForClose = 80.0;
 
 NSScreen* ScreenForDisplay(uint32_t display_id) {
     for (NSScreen* screen in NSScreen.screens) {
@@ -66,6 +74,7 @@ RegionOfInterest RegionFromScreenRect(NSRect rect, NSRect screen_frame) {
 // Shared edit state the application polls once per frame.
 bool g_border_editing = false;
 bool g_border_edit_changed = false;
+bool g_border_dismissed = false;
 RegionOfInterest g_border_edit_region;
 
 }  // namespace
@@ -385,12 +394,33 @@ RegionOfInterest g_border_edit_region;
 @property(nonatomic, assign) SidescopesDragEdges dragZone;
 @property(nonatomic, assign) NSPoint dragStartMouse;  // global screen coords
 @property(nonatomic, assign) NSRect dragStartRegion;  // global screen coords
+@property(nonatomic, assign) BOOL bandHovered;
+@property(nonatomic, assign) BOOL closePressed;
 @end
 @implementation SidescopesBorderView
 
 // The region rectangle in view coordinates.
 - (NSRect)regionRect {
     return NSInsetRect(self.bounds, sidescopes::kWindowPad, sidescopes::kWindowPad);
+}
+
+// The close button materializes on hover only, so the border at rest
+// stays exactly the instrument it was; it hides again during drags and
+// yields on regions too narrow to share the top edge with the corner
+// zones.
+- (BOOL)closeVisible {
+    const NSRect region = [self regionRect];
+    return self.bandHovered && self.dragZone == SidescopesDragEdgeNone &&
+           region.size.width >= sidescopes::kMinimumWidthForClose;
+}
+
+// On the band above the top edge, just clear of the top-right corner's
+// resize zone.
+- (NSPoint)closeCenter {
+    const NSRect region = [self regionRect];
+    return NSMakePoint(NSMaxX(region) - sidescopes::kCornerZone - sidescopes::kCloseCornerGap -
+                           sidescopes::kCloseRadius,
+                       NSMaxY(region) + sidescopes::kBorderPad / 2 + sidescopes::kEdgeRing);
 }
 
 - (void)drawRect:(NSRect)dirty {
@@ -472,6 +502,31 @@ RegionOfInterest g_border_edit_region;
     handle(NSMinX(lane), NSMaxY(lane));
     handle(NSMidX(lane), NSMaxY(lane));
     handle(NSMaxX(lane), NSMaxY(lane));
+
+    // The hover-revealed close button, in the handles' own visual
+    // language: a dark disc where the dots are light, so it reads as an
+    // action rather than a grip, with the same bright ring and an x.
+    if ([self closeVisible]) {
+        const NSPoint center = [self closeCenter];
+        const NSRect disc =
+            NSMakeRect(center.x - sidescopes::kCloseRadius, center.y - sidescopes::kCloseRadius,
+                       sidescopes::kCloseRadius * 2, sidescopes::kCloseRadius * 2);
+        NSBezierPath* button = [NSBezierPath bezierPathWithOvalInRect:disc];
+        [[NSColor colorWithWhite:0.1 alpha:0.85] setFill];
+        [button fill];
+        [[NSColor colorWithWhite:0.97 alpha:0.95] setStroke];
+        button.lineWidth = 1.0;
+        [button stroke];
+        const CGFloat arm = sidescopes::kCloseRadius - 3.8;
+        NSBezierPath* cross = [NSBezierPath bezierPath];
+        cross.lineWidth = 1.4;
+        cross.lineCapStyle = NSLineCapStyleRound;
+        [cross moveToPoint:NSMakePoint(center.x - arm, center.y - arm)];
+        [cross lineToPoint:NSMakePoint(center.x + arm, center.y + arm)];
+        [cross moveToPoint:NSMakePoint(center.x - arm, center.y + arm)];
+        [cross lineToPoint:NSMakePoint(center.x + arm, center.y - arm)];
+        [cross stroke];
+    }
 }
 
 // Eight handles, no modifier: the corners resize both axes, the edge
@@ -480,6 +535,13 @@ RegionOfInterest g_border_edit_region;
 - (SidescopesDragEdges)zoneAtPoint:(NSPoint)point {
     const NSRect region = [self regionRect];
     if (NSPointInRect(point, region)) return SidescopesDragEdgeNone;  // click-through anyway
+    if ([self closeVisible]) {
+        const NSPoint center = [self closeCenter];
+        const CGFloat dx = point.x - center.x;
+        const CGFloat dy = point.y - center.y;
+        if (dx * dx + dy * dy <= sidescopes::kCloseHitRadius * sidescopes::kCloseHitRadius)
+            return SidescopesDragClose;
+    }
     const BOOL near_left = point.x < NSMinX(region) + sidescopes::kCornerZone;
     const BOOL near_right = point.x > NSMaxX(region) - sidescopes::kCornerZone;
     const BOOL near_bottom = point.y < NSMinY(region) + sidescopes::kCornerZone;
@@ -516,6 +578,10 @@ RegionOfInterest g_border_edit_region;
         [NSCursor.arrowCursor set];
         return;
     }
+    if (zone & SidescopesDragClose) {
+        [NSCursor.pointingHandCursor set];
+        return;
+    }
     if (zone & SidescopesDragMove) {
         [NSCursor.openHandCursor set];
         return;
@@ -540,23 +606,46 @@ RegionOfInterest g_border_edit_region;
 - (void)mouseMoved:(NSEvent*)event {
     if (self.dragZone != SidescopesDragEdgeNone) return;  // drag owns the cursor
     const NSPoint local = [self convertPoint:event.locationInWindow fromView:nil];
-    [self applyCursorForZone:[self zoneAtPoint:local]];
+    const SidescopesDragEdges zone = [self zoneAtPoint:local];
+    const BOOL hovered = zone != SidescopesDragEdgeNone;
+    if (hovered != self.bandHovered) {
+        self.bandHovered = hovered;
+        self.needsDisplay = YES;
+    }
+    [self applyCursorForZone:zone];
 }
 
 - (void)mouseExited:(NSEvent*)event {
     (void)event;
+    if (self.bandHovered) {
+        self.bandHovered = NO;
+        self.needsDisplay = YES;
+    }
     if (self.dragZone == SidescopesDragEdgeNone) [NSCursor.arrowCursor set];
 }
 
 - (void)mouseDown:(NSEvent*)event {
     const NSPoint local = [self convertPoint:event.locationInWindow fromView:nil];
-    self.dragZone = [self zoneAtPoint:local];
-    if (self.dragZone == SidescopesDragEdgeNone) return;
+    const SidescopesDragEdges zone = [self zoneAtPoint:local];
+    if (zone == SidescopesDragEdgeNone) return;
+    // Double-clicking anywhere on the band dismisses the region - the
+    // fast path once the close button has taught the gesture's home.
+    if (event.clickCount == 2) {
+        self.closePressed = NO;
+        sidescopes::g_border_dismissed = true;
+        return;
+    }
+    if (zone & SidescopesDragClose) {
+        self.closePressed = YES;
+        return;
+    }
+    self.dragZone = zone;
     if (self.dragZone & SidescopesDragMove) [NSCursor.closedHandCursor set];
     self.dragStartMouse = NSEvent.mouseLocation;
     self.dragStartRegion =
         NSInsetRect(self.window.frame, sidescopes::kWindowPad, sidescopes::kWindowPad);
     sidescopes::g_border_editing = true;
+    self.needsDisplay = YES;  // the close button hides while dragging
 }
 
 - (void)mouseDragged:(NSEvent*)event {
@@ -596,11 +685,19 @@ RegionOfInterest g_border_edit_region;
 }
 
 - (void)mouseUp:(NSEvent*)event {
+    const NSPoint local = [self convertPoint:event.locationInWindow fromView:nil];
+    if (self.closePressed) {
+        self.closePressed = NO;
+        if ([self zoneAtPoint:local] & SidescopesDragClose) {
+            sidescopes::g_border_dismissed = true;
+            return;
+        }
+    }
     if (self.dragZone & SidescopesDragMove) [NSCursor.openHandCursor set];
     self.dragZone = SidescopesDragEdgeNone;
     sidescopes::g_border_editing = false;
-    const NSPoint local = [self convertPoint:event.locationInWindow fromView:nil];
     [self applyCursorForZone:[self zoneAtPoint:local]];
+    self.needsDisplay = YES;
 }
 
 // The scoped editor is usually the active application; without this, the
@@ -826,6 +923,8 @@ void HideRegionBorder() {
 RegionBorderEdit PollRegionBorderEdit() {
     RegionBorderEdit edit;
     edit.editing = g_border_editing;
+    edit.dismissed = g_border_dismissed;
+    g_border_dismissed = false;
     if (g_border_edit_changed) {
         edit.region = g_border_edit_region;
         g_border_edit_changed = false;

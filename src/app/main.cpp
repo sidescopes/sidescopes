@@ -1622,7 +1622,12 @@ int main() {
         // tab adjusts the region with the scopes following along.
         if (!region_picking) {
             const RegionBorderEdit edit = PollRegionBorderEdit();
-            if (edit.region) {
+            if (edit.dismissed) {
+                // The border's own close affordances mean "stop tracking
+                // this region"; full screen is the fallback.
+                reset_region_to_full();
+                last_activity = glfwGetTime();
+            } else if (edit.region) {
                 analysis.region = *edit.region;
                 analysis_dirty = true;
                 sync_region_border();
