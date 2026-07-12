@@ -165,15 +165,21 @@ if(WIN32)
     add_library(sidescopes_platform STATIC
         src/platform/windows/desktop.cpp
         src/platform/windows/face_detection.cpp
+        src/platform/windows/native_menu.cpp
+        src/platform/windows/region_selection.cpp
         src/platform/windows/screen_capture.cpp
     )
     target_include_directories(sidescopes_platform PUBLIC src)
+    # The layer calls wide APIs explicitly; UNICODE makes the
+    # resource-id macros (IDC_*) match them.
+    target_compile_definitions(sidescopes_platform PRIVATE UNICODE _UNICODE)
     target_link_libraries(sidescopes_platform
         PUBLIC
         sidescopes_core
         d3d11
         dxgi
         dwmapi
+        gdiplus
     )
     sidescopes_target_defaults(sidescopes_platform)
 endif()

@@ -1,0 +1,57 @@
+// Native context menu via TrackPopupMenu. Command identifiers are the
+// caller's action ids shifted by one, because zero is TrackPopupMenu's
+// "dismissed" and the caller's ids start wherever it likes.
+
+#include "platform/native_menu.h"
+
+#include <string>
+#include <vector>
+
+#include "platform/windows/wide_strings.h"
+
+namespace sidescopes {
+
+int ShowNativeContextMenu(const std::vector<NativeMenuItem>& items) {
+    HMENU root = CreatePopupMenu();
+    if (!root) return -1;
+
+    std::vector<HMENU> stack{root};
+    for (const NativeMenuItem& item : items) {
+        HMENU current = stack.back();
+        switch (item.kind) {
+            case NativeMenuItem::Kind::Separator:
+                AppendMenuW(current, MF_SEPARATOR, 0, nullptr);
+                break;
+            case NativeMenuItem::Kind::SubmenuBegin: {
+                HMENU submenu = CreatePopupMenu();
+                AppendMenuW(current, MF_POPUP, reinterpret_cast<UINT_PTR>(submenu),
+                            WideFromUtf8(item.label).c_str());
+                stack.push_back(submenu);
+                break;
+            }
+            case NativeMenuItem::Kind::SubmenuEnd:
+                if (stack.size() > 1) stack.pop_back();
+                break;
+            case NativeMenuItem::Kind::Action:
+                AppendMenuW(current, MF_STRING | (item.checked ? MF_CHECKED : MF_UNCHECKED),
+                            static_cast<UINT_PTR>(item.action_id + 1),
+                            WideFromUtf8(item.label).c_str());
+                break;
+        }
+    }
+
+    // TrackPopupMenu needs an owner window in the foreground or the menu
+    // refuses to dismiss when the user clicks elsewhere. The application
+    // window is active - the user just right-clicked it.
+    HWND owner = GetActiveWindow();
+    if (!owner) owner = GetForegroundWindow();
+    POINT cursor{};
+    GetCursorPos(&cursor);
+    const int command =
+        static_cast<int>(TrackPopupMenu(root, TPM_RETURNCMD | TPM_NONOTIFY | TPM_RIGHTBUTTON,
+                                        cursor.x, cursor.y, 0, owner, nullptr));
+    DestroyMenu(root);  // recursively destroys the submenus
+    return command == 0 ? -1 : command - 1;
+}
+
+}  // namespace sidescopes

@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "platform/windows/display_identity.h"
+#include "platform/windows/wide_strings.h"
 
 namespace sidescopes {
 namespace {
@@ -42,15 +43,6 @@ std::optional<MonitorLookup> FindMonitor(uint32_t display_id) {
     EnumDisplayMonitors(nullptr, nullptr, CollectMonitor, reinterpret_cast<LPARAM>(&lookup));
     if (!lookup.monitor) return std::nullopt;
     return lookup;
-}
-
-std::string Utf8FromWide(const wchar_t* wide, int wide_length) {
-    if (wide_length <= 0) return {};
-    const int size =
-        WideCharToMultiByte(CP_UTF8, 0, wide, wide_length, nullptr, 0, nullptr, nullptr);
-    std::string utf8(static_cast<std::size_t>(size), '\0');
-    WideCharToMultiByte(CP_UTF8, 0, wide, wide_length, utf8.data(), size, nullptr, nullptr);
-    return utf8;
 }
 
 std::string ApplicationNameOfWindow(HWND window) {
