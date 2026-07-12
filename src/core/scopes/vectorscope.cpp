@@ -168,6 +168,46 @@ void Vectorscope::MapBinsToImage(uint64_t sample_count) {
         }
     }
 
+    // Adaptive density estimation: where the cloud is dim, counts are
+    // low and the photograph's own chroma quantization shows through as
+    // code-level ripple that the log display amplifies - measured on a
+    // production frame, the source JPEG's code populations are bumpier
+    // than the framebuffer's, so this is content, not the pipeline, and
+    // cannot be corrected, only estimated. The dense body has the
+    // statistics to support full sharpness and keeps it; two extra
+    // binomial passes build a wide estimate, and each cell blends
+    // toward it as its density falls.
+    {
+        std::vector<float> wide(smoothed_);
+        for (int pass = 0; pass < 2; ++pass) {
+            std::vector<float> next(wide.size(), 0.0f);
+            for (int py = 0; py < kSize; ++py) {
+                for (int px = 0; px < kSize; ++px) {
+                    const auto at = [&](int y, int x) -> float {
+                        if (y < 0 || y >= kSize || x < 0 || x >= kSize) return 0.0f;
+                        return wide[static_cast<std::size_t>(y) * kSize + x];
+                    };
+                    const auto row = [&](int y) {
+                        return at(y, px - 1) + 2.0f * at(y, px) + at(y, px + 1);
+                    };
+                    next[static_cast<std::size_t>(py) * kSize + px] =
+                        (row(py - 1) + 2.0f * row(py) + row(py + 1)) / 16.0f;
+                }
+            }
+            wide.swap(next);
+        }
+        float densest_narrow = 0.0f;
+        for (const float count : smoothed_) densest_narrow = std::max(densest_narrow, count);
+        if (densest_narrow > 0.0f) {
+            for (std::size_t i = 0; i < smoothed_.size(); ++i) {
+                const float density = smoothed_[i] / densest_narrow;
+                const float t = std::clamp((density - 0.001f) / (0.02f - 0.001f), 0.0f, 1.0f);
+                const float blend = t * t * (3.0f - 2.0f * t);  // smoothstep
+                smoothed_[i] = blend * smoothed_[i] + (1.0f - blend) * wide[i];
+            }
+        }
+    }
+
     // A finer display image interpolates the code grid with a separable
     // Catmull-Rom, the same reconstruction the waveform uses for its
     // level axis: the cloud gets the large pane's smoothness, and peak
