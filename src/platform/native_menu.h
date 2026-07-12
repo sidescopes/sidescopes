@@ -15,6 +15,10 @@ struct NativeMenuItem {
     std::string label;
     int action_id = -1;
     bool checked = false;
+    // Display-only keyboard shortcut, shown the platform's way: a single
+    // letter, optionally prefixed "Shift+", or "Esc". The application
+    // handles the keys itself; the menu only teaches them.
+    std::string shortcut;
 };
 
 int ShowNativeContextMenu(const std::vector<NativeMenuItem>& items);

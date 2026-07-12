@@ -32,6 +32,9 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   densest mass blooms toward white - a neutral core reads at a glance.
 - Colored luminance waveform style: the trace plots luma while carrying
   the average color of the pixels behind each point.
+- The context menu shows keyboard shortcuts, offers every region action
+  (pick, draw, faces, full screen), and tailors its options to the scope
+  under the cursor. Shortcuts are configurable in the preferences file.
 - Scope toggles that stack: V, W and H show one scope alone, Shift stacks
   and unstacks it, and enabled scopes split the window.
 - RGB parade waveform style: the three channels side by side.

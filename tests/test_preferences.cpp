@@ -22,6 +22,8 @@ TEST_CASE("Preferences round-trip through a file") {
     saved.matrix = ChromaMatrix::Bt709;
     saved.trace_response = TraceResponse::Linear;
     saved.vectorscope_zoom = 2;
+    saved.shortcuts.waveform = "X";
+    saved.shortcuts.full_region = "Q";
     saved.scope_stack = "HWV";  // stacking order is part of the setting
     saved.show_graticule = false;
     saved.values_as_percent = false;
@@ -39,6 +41,9 @@ TEST_CASE("Preferences round-trip through a file") {
     CHECK(loaded.matrix == ChromaMatrix::Bt709);
     CHECK(loaded.trace_response == TraceResponse::Linear);
     CHECK(loaded.vectorscope_zoom == 2);
+    CHECK(loaded.shortcuts.waveform == "X");
+    CHECK(loaded.shortcuts.full_region == "Q");
+    CHECK(loaded.shortcuts.parade == "R");  // untouched bindings keep defaults
     CHECK(loaded.scope_stack == "HWV");
     CHECK_FALSE(loaded.show_graticule);
     CHECK_FALSE(loaded.values_as_percent);

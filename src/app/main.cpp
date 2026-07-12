@@ -54,6 +54,11 @@ enum MenuAction {
     kMenuTraceBoosted,
     kMenuTraceLinear,
     kMenuWaveformStyleColoredLuma,
+    kMenuDrawRegion,
+    kMenuPickFaces,
+    kMenuZoom1,
+    kMenuZoom2,
+    kMenuZoom4,
     kMenuSelectRegion = 30,
     kMenuFullScreenRegion,
     kMenuToggleGraticule = 40,
@@ -670,6 +675,18 @@ int main() {
     bool show_graticule = startup.show_graticule;
     bool values_as_percent = startup.values_as_percent;
     int vectorscope_zoom = startup.vectorscope_zoom;
+    // Shortcuts come from the preferences file: the key handler acts on
+    // them and the context menu displays them, resolved once here.
+    const ShortcutBindings shortcuts = startup.shortcuts;
+    const auto key_for = [](const std::string& name) -> ImGuiKey {
+        if (name == "Escape") return ImGuiKey_Escape;
+        if (name.size() == 1 && name[0] >= 'A' && name[0] <= 'Z')
+            return static_cast<ImGuiKey>(ImGuiKey_A + (name[0] - 'A'));
+        return ImGuiKey_None;
+    };
+    const auto shortcut_label = [](const std::string& name) -> std::string {
+        return name == "Escape" ? "Esc" : name;
+    };
     bool show_settings = false;
     // Reference colors pinned on the vectorscope (session-scoped): pin a
     // corrected skin tone, then match the next photo against it.
@@ -809,6 +826,7 @@ int main() {
         preferences.show_graticule = show_graticule;
         preferences.vectorscope_zoom = vectorscope_zoom;
         preferences.values_as_percent = values_as_percent;
+        preferences.shortcuts = shortcuts;
         glfwGetWindowPos(window, &preferences.window_x, &preferences.window_y);
         glfwGetWindowSize(window, &preferences.window_width, &preferences.window_height);
         SavePreferences(preferences, PreferencesFilePath());
@@ -1124,60 +1142,71 @@ int main() {
                 choose_scope(kind, stack_modifier);
             ImGui::SameLine(0.0f, 2.0f);
         };
+        // Tooltips name the configured shortcut, not an assumed one.
+        char tooltip[96];
+        const auto scope_tooltip = [&](const char* name, const std::string& binding,
+                                       const char* extra) {
+            std::snprintf(tooltip, sizeof(tooltip), "%s - %s shows only this, Shift+%s stacks%s",
+                          name, binding.c_str(), binding.c_str(), extra);
+            return tooltip;
+        };
         scope_toggle("##toggle-vectorscope", ScopeGlyph::Vectorscope,
-                     "Vectorscope - V shows only this, Shift+V stacks");
+                     scope_tooltip("Vectorscope", shortcuts.vectorscope, ""));
         scope_toggle("##toggle-waveform", ScopeGlyph::Waveform,
-                     "Waveform - W shows only this, Shift+W stacks; style in right-click menu");
+                     scope_tooltip("Waveform", shortcuts.waveform, "; style in right-click menu"));
         scope_toggle("##toggle-waveform-parade", ScopeGlyph::WaveformParade,
-                     "RGB parade - R shows only this, Shift+R stacks");
+                     scope_tooltip("RGB parade", shortcuts.parade, ""));
         scope_toggle("##toggle-histogram", ScopeGlyph::Histogram,
-                     "Histogram - H shows only this, Shift+H stacks");
+                     scope_tooltip("Histogram", shortcuts.histogram, ""));
         scope_toggle("##toggle-color-picker", ScopeGlyph::ColorPicker,
-                     "Color picker - C shows only this, Shift+C stacks");
+                     scope_tooltip("Color picker", shortcuts.color_picker, ""));
         ImGui::SameLine(0.0f, 8.0f);
 
         // Keyboard shortcuts mirror the toolbar and region tools.
         std::optional<RegionPickerMode> want_region_pick;
+        const auto pressed = [&](const std::string& binding) {
+            const ImGuiKey key = key_for(binding);
+            return key != ImGuiKey_None && ImGui::IsKeyPressed(key, false);
+        };
         if (!io.WantTextInput) {
-            if (ImGui::IsKeyPressed(ImGuiKey_V, false))
+            if (pressed(shortcuts.vectorscope))
                 choose_scope(ScopeGlyph::Vectorscope, stack_modifier);
-            if (ImGui::IsKeyPressed(ImGuiKey_W, false))
-                choose_scope(ScopeGlyph::Waveform, stack_modifier);
-            if (ImGui::IsKeyPressed(ImGuiKey_R, false))
-                choose_scope(ScopeGlyph::WaveformParade, stack_modifier);
-            if (ImGui::IsKeyPressed(ImGuiKey_H, false))
-                choose_scope(ScopeGlyph::Histogram, stack_modifier);
-            if (ImGui::IsKeyPressed(ImGuiKey_C, false))
+            if (pressed(shortcuts.waveform)) choose_scope(ScopeGlyph::Waveform, stack_modifier);
+            if (pressed(shortcuts.parade)) choose_scope(ScopeGlyph::WaveformParade, stack_modifier);
+            if (pressed(shortcuts.histogram)) choose_scope(ScopeGlyph::Histogram, stack_modifier);
+            if (pressed(shortcuts.color_picker))
                 choose_scope(ScopeGlyph::ColorPicker, stack_modifier);
-            if (ImGui::IsKeyPressed(ImGuiKey_A, false))
-                want_region_pick = RegionPickerMode::PickWindows;
-            if (ImGui::IsKeyPressed(ImGuiKey_D, false)) want_region_pick = RegionPickerMode::Draw;
-            if (SupportsFaceDetection() && ImGui::IsKeyPressed(ImGuiKey_F, false))
+            if (pressed(shortcuts.pick_window)) want_region_pick = RegionPickerMode::PickWindows;
+            if (pressed(shortcuts.draw_region)) want_region_pick = RegionPickerMode::Draw;
+            if (SupportsFaceDetection() && pressed(shortcuts.pick_faces))
                 want_region_pick = RegionPickerMode::PickFaces;
-            if (ImGui::IsKeyPressed(ImGuiKey_P, false)) {
+            if (pressed(shortcuts.pin_color)) {
                 if (stack_modifier) {
                     if (output.region_average_valid) pin_reference_color(output.region_average);
                 } else {
                     pin_reference_color(vectorscope_color);
                 }
             }
-            if (ImGui::IsKeyPressed(ImGuiKey_Z, false))
+            if (pressed(shortcuts.vectorscope_zoom))
                 vectorscope_zoom = vectorscope_zoom >= 4 ? 1 : vectorscope_zoom * 2;
-            if (ImGui::IsKeyPressed(ImGuiKey_Escape, false)) reset_region_to_full();
+            if (pressed(shortcuts.full_region)) reset_region_to_full();
         }
 
-        if (IconButton("##pick-region", RegionIcon::PickHand, "Pick a window (A)"))
+        std::snprintf(tooltip, sizeof(tooltip), "Pick a window (%s)",
+                      shortcuts.pick_window.c_str());
+        if (IconButton("##pick-region", RegionIcon::PickHand, tooltip))
             want_region_pick = RegionPickerMode::PickWindows;
         ImGui::SameLine(0.0f, 2.0f);
-        if (IconButton("##draw-region", RegionIcon::Crosshair, "Draw an area (D)"))
+        std::snprintf(tooltip, sizeof(tooltip), "Draw an area (%s)", shortcuts.draw_region.c_str());
+        if (IconButton("##draw-region", RegionIcon::Crosshair, tooltip))
             want_region_pick = RegionPickerMode::Draw;
         ImGui::SameLine(0.0f, 2.0f);
         if (SupportsFaceDetection()) {
             const bool none_found = g_faces_on_screen.load() == 0;
-            if (IconButton(
-                    "##pick-face", RegionIcon::Face,
-                    none_found ? "Pick a face (F) - none on screen right now" : "Pick a face (F)",
-                    none_found))
+            std::snprintf(tooltip, sizeof(tooltip), "Pick a face (%s)%s",
+                          shortcuts.pick_faces.c_str(),
+                          none_found ? " - none on screen right now" : "");
+            if (IconButton("##pick-face", RegionIcon::Face, tooltip, none_found))
                 want_region_pick = RegionPickerMode::PickFaces;
             ImGui::SameLine(0.0f, 2.0f);
         }
@@ -1478,8 +1507,15 @@ int main() {
 
         // The enabled scopes stack in a fixed order, splitting the window
         // along its longer axis.
+        // Which pane is under the cursor decides which options the
+        // context menu shows; rects refresh as the panes draw.
+        ImVec4 pane_rects[5] = {};
         const auto draw_scope = [&](ScopeGlyph kind) {
             pane_points[static_cast<int>(kind)] = ImGui::GetContentRegionAvail();
+            const ImVec2 pane_min = ImGui::GetCursorScreenPos();
+            const ImVec2 pane_avail = ImGui::GetContentRegionAvail();
+            pane_rects[static_cast<int>(kind)] = ImVec4(
+                pane_min.x, pane_min.y, pane_min.x + pane_avail.x, pane_min.y + pane_avail.y);
             if (kind == ScopeGlyph::Vectorscope)
                 draw_vectorscope();
             else if (kind == ScopeGlyph::Histogram)
@@ -1532,61 +1568,120 @@ int main() {
                                    ImGuiHoveredFlags_AllowWhenBlockedByActiveItem) &&
             !ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel)) {
             using Kind = NativeMenuItem::Kind;
-            const bool bt601 = analysis.vectorscope.matrix == ChromaMatrix::Bt601;
-            std::vector<NativeMenuItem> menu{
-                {Kind::Action, "Vectorscope", kMenuShowVectorscope,
-                 scope_shown(ScopeGlyph::Vectorscope)},
-                {Kind::Action, "Waveform", kMenuShowWaveform, scope_shown(ScopeGlyph::Waveform)},
-                {Kind::Action, "RGB Parade", kMenuShowWaveformParade,
-                 scope_shown(ScopeGlyph::WaveformParade)},
-                {Kind::Action, "Histogram", kMenuShowHistogram, scope_shown(ScopeGlyph::Histogram)},
-                {Kind::Action, "Color Picker", kMenuShowColorPicker,
-                 scope_shown(ScopeGlyph::ColorPicker)},
-                {Kind::Separator, "", -1, false},
-                {Kind::SubmenuBegin, "Waveform Style", -1, false},
-                {Kind::Action, "RGB", kMenuWaveformStyleRgb,
-                 analysis.waveform.mode == WaveformMode::Rgb},
-                {Kind::Action, "Luma", kMenuWaveformStyleLuma,
-                 analysis.waveform.mode == WaveformMode::Luma},
-                {Kind::Action, "Luma (Colored)", kMenuWaveformStyleColoredLuma,
-                 analysis.waveform.mode == WaveformMode::ColoredLuma},
-                {Kind::SubmenuEnd, "", -1, false},
-                {Kind::SubmenuBegin, "Histogram Style", -1, false},
-                {Kind::Action, "Combined", kMenuHistogramCombined,
-                 analysis.histogram.style == HistogramStyle::Combined},
-                {Kind::Action, "Per Channel", kMenuHistogramPerChannel,
-                 analysis.histogram.style == HistogramStyle::PerChannel},
-                {Kind::SubmenuEnd, "", -1, false},
-                {Kind::SubmenuBegin, "Vectorscope Matrix", -1, false},
-                {Kind::Action, "BT.601", kMenuMatrixBt601, bt601},
-                {Kind::Action, "BT.709", kMenuMatrixBt709, !bt601},
-                {Kind::SubmenuEnd, "", -1, false},
-                {Kind::SubmenuBegin, "Trace Response", -1, false},
-                {Kind::Action, "Boosted", kMenuTraceBoosted,
-                 analysis.vectorscope.response == TraceResponse::Boosted},
-                {Kind::Action, "Linear", kMenuTraceLinear,
-                 analysis.vectorscope.response == TraceResponse::Linear},
-                {Kind::SubmenuEnd, "", -1, false},
-                {Kind::Separator, "", -1, false},
-                {Kind::Action, "Select Area...", kMenuSelectRegion, false},
-                {Kind::Action, "Full Screen Area", kMenuFullScreenRegion, is_full_region()},
-                {Kind::Separator, "", -1, false},
-                {Kind::Action, "Graticule", kMenuToggleGraticule, show_graticule},
-                {Kind::Action, "Cursor Values as %", kMenuTogglePercentValues, values_as_percent},
+            // The menu shows every scope but only the options of the pane
+            // under the cursor: right-clicking the waveform offers its
+            // styles, the vectorscope its matrix, response, and zoom.
+            // Clicking the toolbar or background offers everything.
+            const ImVec2 mouse = ImGui::GetMousePos();
+            int clicked_pane = -1;
+            for (int pane = 0; pane < 5; ++pane) {
+                const ImVec4& rect = pane_rects[pane];
+                if (rect.z <= rect.x || rect.w <= rect.y) continue;
+                if (mouse.x >= rect.x && mouse.x < rect.z && mouse.y >= rect.y && mouse.y < rect.w)
+                    clicked_pane = pane;
+            }
+            const auto over = [&](ScopeGlyph kind) {
+                return clicked_pane < 0 || clicked_pane == static_cast<int>(kind);
             };
+
+            std::vector<NativeMenuItem> menu;
+            const auto action = [&](const char* label, int id, bool checked,
+                                    std::string shortcut = "") {
+                menu.push_back({Kind::Action, label, id, checked, std::move(shortcut)});
+            };
+            const auto separator = [&] { menu.push_back({Kind::Separator, "", -1, false, ""}); };
+            const auto submenu = [&](const char* label) {
+                menu.push_back({Kind::SubmenuBegin, label, -1, false, ""});
+            };
+            const auto end_submenu = [&] { menu.push_back({Kind::SubmenuEnd, "", -1, false, ""}); };
+
+            action("Vectorscope", kMenuShowVectorscope, scope_shown(ScopeGlyph::Vectorscope),
+                   shortcut_label(shortcuts.vectorscope));
+            action("Waveform", kMenuShowWaveform, scope_shown(ScopeGlyph::Waveform),
+                   shortcut_label(shortcuts.waveform));
+            action("RGB Parade", kMenuShowWaveformParade, scope_shown(ScopeGlyph::WaveformParade),
+                   shortcut_label(shortcuts.parade));
+            action("Histogram", kMenuShowHistogram, scope_shown(ScopeGlyph::Histogram),
+                   shortcut_label(shortcuts.histogram));
+            action("Color Picker", kMenuShowColorPicker, scope_shown(ScopeGlyph::ColorPicker),
+                   shortcut_label(shortcuts.color_picker));
+
+            bool options_shown = false;
+            const auto options_separator = [&] {
+                if (!options_shown) separator();
+                options_shown = true;
+            };
+            if (over(ScopeGlyph::Waveform)) {
+                options_separator();
+                submenu("Waveform Style");
+                action("RGB", kMenuWaveformStyleRgb, analysis.waveform.mode == WaveformMode::Rgb);
+                action("Luma", kMenuWaveformStyleLuma,
+                       analysis.waveform.mode == WaveformMode::Luma);
+                action("Luma (Colored)", kMenuWaveformStyleColoredLuma,
+                       analysis.waveform.mode == WaveformMode::ColoredLuma);
+                end_submenu();
+            }
+            if (over(ScopeGlyph::Vectorscope)) {
+                options_separator();
+                const bool bt601 = analysis.vectorscope.matrix == ChromaMatrix::Bt601;
+                submenu("Vectorscope Matrix");
+                action("BT.601", kMenuMatrixBt601, bt601);
+                action("BT.709", kMenuMatrixBt709, !bt601);
+                end_submenu();
+                submenu("Trace Response");
+                action("Boosted", kMenuTraceBoosted,
+                       analysis.vectorscope.response == TraceResponse::Boosted);
+                action("Linear", kMenuTraceLinear,
+                       analysis.vectorscope.response == TraceResponse::Linear);
+                end_submenu();
+                submenu("Zoom");
+                action("1x", kMenuZoom1, vectorscope_zoom == 1,
+                       shortcut_label(shortcuts.vectorscope_zoom));
+                action("2x", kMenuZoom2, vectorscope_zoom == 2,
+                       shortcut_label(shortcuts.vectorscope_zoom));
+                action("4x", kMenuZoom4, vectorscope_zoom == 4,
+                       shortcut_label(shortcuts.vectorscope_zoom));
+                end_submenu();
+            }
+            if (over(ScopeGlyph::Histogram)) {
+                options_separator();
+                submenu("Histogram Style");
+                action("Combined", kMenuHistogramCombined,
+                       analysis.histogram.style == HistogramStyle::Combined);
+                action("Per Channel", kMenuHistogramPerChannel,
+                       analysis.histogram.style == HistogramStyle::PerChannel);
+                end_submenu();
+            }
+
+            separator();
+            action("Pick Window or Photo...", kMenuSelectRegion, false,
+                   shortcut_label(shortcuts.pick_window));
+            action("Draw Area...", kMenuDrawRegion, false, shortcut_label(shortcuts.draw_region));
+            if (SupportsFaceDetection())
+                action("Find Faces...", kMenuPickFaces, false,
+                       shortcut_label(shortcuts.pick_faces));
+            action("Watch Full Screen", kMenuFullScreenRegion, is_full_region(),
+                   shortcut_label(shortcuts.full_region));
+
+            separator();
+            action("Graticule", kMenuToggleGraticule, show_graticule);
+            action("Values as Percent", kMenuTogglePercentValues, values_as_percent);
+
+            if (vectorscope_color || output.region_average_valid || !pinned_colors.empty())
+                separator();
             if (vectorscope_color)
-                menu.push_back({Kind::Action, "Pin Cursor Color", kMenuPinCursorColor, false});
+                action("Pin Cursor Color", kMenuPinCursorColor, false,
+                       shortcut_label(shortcuts.pin_color));
             if (output.region_average_valid)
-                menu.push_back({Kind::Action, "Pin Region Average", kMenuPinRegionAverage, false});
+                action("Pin Region Average", kMenuPinRegionAverage, false,
+                       "Shift+" + shortcut_label(shortcuts.pin_color));
             if (!pinned_colors.empty())
-                menu.push_back(
-                    {Kind::Action, "Clear Pinned Markers", kMenuClearPinnedMarkers, false});
-            for (NativeMenuItem item : std::initializer_list<NativeMenuItem>{
-                     {Kind::Separator, "", -1, false},
-                     {Kind::Action, "Settings...", kMenuOpenSettings, false},
-                     {Kind::Action, "Quit", kMenuQuit, false},
-                 })
-                menu.push_back(std::move(item));
+                action("Clear Pinned Markers", kMenuClearPinnedMarkers, false);
+
+            separator();
+            action("Settings...", kMenuOpenSettings, false);
+            action("Quit", kMenuQuit, false);
+
             switch (ShowNativeContextMenu(menu)) {
                 case kMenuShowVectorscope:
                     toggle_scope(ScopeGlyph::Vectorscope);
@@ -1641,6 +1736,21 @@ int main() {
                     break;
                 case kMenuSelectRegion:
                     want_region_pick = RegionPickerMode::PickWindows;
+                    break;
+                case kMenuDrawRegion:
+                    want_region_pick = RegionPickerMode::Draw;
+                    break;
+                case kMenuPickFaces:
+                    want_region_pick = RegionPickerMode::PickFaces;
+                    break;
+                case kMenuZoom1:
+                    vectorscope_zoom = 1;
+                    break;
+                case kMenuZoom2:
+                    vectorscope_zoom = 2;
+                    break;
+                case kMenuZoom4:
+                    vectorscope_zoom = 4;
                     break;
                 case kMenuFullScreenRegion:
                     reset_region_to_full();

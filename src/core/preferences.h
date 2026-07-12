@@ -7,6 +7,24 @@
 
 namespace sidescopes {
 
+// Keyboard bindings for every shortcut the application offers, editable
+// in the preferences file. Each is a single letter A-Z or "Escape";
+// anything else falls back to the default. Shift composes where an
+// action documents it (stacking scopes, pinning the region average).
+struct ShortcutBindings {
+    std::string vectorscope = "V";
+    std::string waveform = "W";
+    std::string parade = "R";
+    std::string histogram = "H";
+    std::string color_picker = "C";
+    std::string pick_window = "A";
+    std::string draw_region = "D";
+    std::string pick_faces = "F";
+    std::string pin_color = "P";
+    std::string vectorscope_zoom = "Z";
+    std::string full_region = "Escape";
+};
+
 // Everything worth remembering between sessions. Serialized as a small
 // key=value text file: trivially diffable, no dependency, and unknown keys
 // are ignored so older builds tolerate newer files.
@@ -35,6 +53,7 @@ struct Preferences {
     int window_y = -1;
     int window_width = 440;
     int window_height = 500;
+    ShortcutBindings shortcuts;
 };
 
 // Missing or unreadable files yield the defaults; malformed lines and

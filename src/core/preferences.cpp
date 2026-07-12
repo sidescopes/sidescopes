@@ -120,6 +120,24 @@ Preferences LoadPreferences(const std::filesystem::path& file) {
     if (preferences.vectorscope_zoom != 2 && preferences.vectorscope_zoom != 4)
         preferences.vectorscope_zoom = 1;
     read_bool("values_as_percent", preferences.values_as_percent);
+    const auto read_shortcut = [&](const char* key, std::string& out) {
+        const auto found = values.find(key);
+        if (found == values.end()) return;
+        const std::string& value = found->second;
+        const bool letter = value.size() == 1 && value[0] >= 'A' && value[0] <= 'Z';
+        if (letter || value == "Escape") out = value;
+    };
+    read_shortcut("shortcut_vectorscope", preferences.shortcuts.vectorscope);
+    read_shortcut("shortcut_waveform", preferences.shortcuts.waveform);
+    read_shortcut("shortcut_parade", preferences.shortcuts.parade);
+    read_shortcut("shortcut_histogram", preferences.shortcuts.histogram);
+    read_shortcut("shortcut_color_picker", preferences.shortcuts.color_picker);
+    read_shortcut("shortcut_pick_window", preferences.shortcuts.pick_window);
+    read_shortcut("shortcut_draw_region", preferences.shortcuts.draw_region);
+    read_shortcut("shortcut_pick_faces", preferences.shortcuts.pick_faces);
+    read_shortcut("shortcut_pin_color", preferences.shortcuts.pin_color);
+    read_shortcut("shortcut_vectorscope_zoom", preferences.shortcuts.vectorscope_zoom);
+    read_shortcut("shortcut_full_region", preferences.shortcuts.full_region);
     read_int("window_x", preferences.window_x);
     read_int("window_y", preferences.window_y);
     read_int("window_width", preferences.window_width);
@@ -151,7 +169,18 @@ bool SavePreferences(const Preferences& preferences, const std::filesystem::path
         << "window_x=" << preferences.window_x << '\n'
         << "window_y=" << preferences.window_y << '\n'
         << "window_width=" << preferences.window_width << '\n'
-        << "window_height=" << preferences.window_height << '\n';
+        << "window_height=" << preferences.window_height << '\n'
+        << "shortcut_vectorscope=" << preferences.shortcuts.vectorscope << '\n'
+        << "shortcut_waveform=" << preferences.shortcuts.waveform << '\n'
+        << "shortcut_parade=" << preferences.shortcuts.parade << '\n'
+        << "shortcut_histogram=" << preferences.shortcuts.histogram << '\n'
+        << "shortcut_color_picker=" << preferences.shortcuts.color_picker << '\n'
+        << "shortcut_pick_window=" << preferences.shortcuts.pick_window << '\n'
+        << "shortcut_draw_region=" << preferences.shortcuts.draw_region << '\n'
+        << "shortcut_pick_faces=" << preferences.shortcuts.pick_faces << '\n'
+        << "shortcut_pin_color=" << preferences.shortcuts.pin_color << '\n'
+        << "shortcut_vectorscope_zoom=" << preferences.shortcuts.vectorscope_zoom << '\n'
+        << "shortcut_full_region=" << preferences.shortcuts.full_region << '\n';
 
     std::ofstream output(file, std::ios::trunc);
     if (!output) return false;

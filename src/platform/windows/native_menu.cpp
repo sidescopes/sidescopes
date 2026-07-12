@@ -36,11 +36,14 @@ int ShowNativeContextMenu(const std::vector<NativeMenuItem>& items) {
             case NativeMenuItem::Kind::SubmenuEnd:
                 if (stack.size() > 1) stack.pop_back();
                 break;
-            case NativeMenuItem::Kind::Action:
+            case NativeMenuItem::Kind::Action: {
+                // A tab column is how Win32 menus draw shortcuts.
+                std::string label = item.label;
+                if (!item.shortcut.empty()) label += "\t" + item.shortcut;
                 AppendMenuW(current, MF_STRING | (item.checked ? MF_CHECKED : MF_UNCHECKED),
-                            static_cast<UINT_PTR>(item.action_id + 1),
-                            WideFromUtf8(item.label).c_str());
+                            static_cast<UINT_PTR>(item.action_id + 1), WideFromUtf8(label).c_str());
                 break;
+            }
         }
     }
 
