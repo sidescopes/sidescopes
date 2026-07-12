@@ -56,6 +56,7 @@ enum MenuAction {
     kMenuToggleGraticule = 40,
     kMenuTogglePercentValues,
     kMenuPinCursorColor,
+    kMenuPinRegionAverage,
     kMenuClearPinnedMarkers,
     kMenuOpenSettings = 50,
     kMenuQuit,
@@ -652,8 +653,11 @@ int main() {
     // Reference colors pinned on the vectorscope (session-scoped): pin a
     // corrected skin tone, then match the next photo against it.
     std::vector<FloatColor> pinned_colors;
+    int pinned_menu_index = -1;  // swatch under the management popup
     constexpr std::size_t kMaximumPinnedColors = 8;
-    const auto pin_cursor_color = [&](const std::optional<FloatColor>& color) {
+    // References come from two places: what the cursor reads (P), and
+    // the region's average (Shift+P) - select a face, pin its skin.
+    const auto pin_reference_color = [&](const std::optional<FloatColor>& color) {
         if (!color) return;
         if (pinned_colors.size() >= kMaximumPinnedColors)
             pinned_colors.erase(pinned_colors.begin());
@@ -979,7 +983,13 @@ int main() {
             if (ImGui::IsKeyPressed(ImGuiKey_D, false)) want_region_pick = RegionPickerMode::Draw;
             if (SupportsFaceDetection() && ImGui::IsKeyPressed(ImGuiKey_F, false))
                 want_region_pick = RegionPickerMode::PickFaces;
-            if (ImGui::IsKeyPressed(ImGuiKey_P, false)) pin_cursor_color(vectorscope_color);
+            if (ImGui::IsKeyPressed(ImGuiKey_P, false)) {
+                if (stack_modifier) {
+                    if (output.region_average_valid) pin_reference_color(output.region_average);
+                } else {
+                    pin_reference_color(vectorscope_color);
+                }
+            }
             if (ImGui::IsKeyPressed(ImGuiKey_Escape, false)) reset_region_to_full();
         }
 
@@ -1241,7 +1251,30 @@ int main() {
                             ImGuiColorEditFlags_NoTooltip | ImGuiColorEditFlags_NoDragDrop,
                             ImVec2(small, small)))
                         ImGui::SetClipboardText(pin_hex);
-                    ImGui::SetItemTooltip("%s - click to copy", pin_hex);
+                    if (ImGui::IsItemClicked(ImGuiMouseButton_Right)) {
+                        pinned_menu_index = static_cast<int>(index);
+                        ImGui::OpenPopup("##pinned-menu");
+                    }
+                    ImGui::SetItemTooltip("%s - click to copy, right-click to manage", pin_hex);
+                }
+                // Managing a pin happens where the pin lives; the
+                // app-wide native menu yields to this popup.
+                if (ImGui::BeginPopup("##pinned-menu")) {
+                    if (pinned_menu_index >= 0 &&
+                        pinned_menu_index < static_cast<int>(pinned_colors.size())) {
+                        const std::size_t chosen = static_cast<std::size_t>(pinned_menu_index);
+                        char chosen_hex[8];
+                        std::snprintf(chosen_hex, sizeof(chosen_hex), "#%02X%02X%02X",
+                                      static_cast<int>(std::lround(pinned_colors[chosen].r)),
+                                      static_cast<int>(std::lround(pinned_colors[chosen].g)),
+                                      static_cast<int>(std::lround(pinned_colors[chosen].b)));
+                        if (ImGui::MenuItem(chosen_hex)) ImGui::SetClipboardText(chosen_hex);
+                        if (ImGui::MenuItem("Remove"))
+                            pinned_colors.erase(pinned_colors.begin() + static_cast<long>(chosen));
+                        ImGui::Separator();
+                        if (ImGui::MenuItem("Clear All")) pinned_colors.clear();
+                    }
+                    ImGui::EndPopup();
                 }
             }
         };
@@ -1298,7 +1331,8 @@ int main() {
         // Right-click: the native menu carries the modes and toggles.
         if (ImGui::IsMouseReleased(ImGuiMouseButton_Right) &&
             ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows |
-                                   ImGuiHoveredFlags_AllowWhenBlockedByActiveItem)) {
+                                   ImGuiHoveredFlags_AllowWhenBlockedByActiveItem) &&
+            !ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel)) {
             using Kind = NativeMenuItem::Kind;
             const bool bt601 = analysis.vectorscope.matrix == ChromaMatrix::Bt601;
             std::vector<NativeMenuItem> menu{
@@ -1336,6 +1370,8 @@ int main() {
             };
             if (vectorscope_color)
                 menu.push_back({Kind::Action, "Pin Cursor Color", kMenuPinCursorColor, false});
+            if (output.region_average_valid)
+                menu.push_back({Kind::Action, "Pin Region Average", kMenuPinRegionAverage, false});
             if (!pinned_colors.empty())
                 menu.push_back(
                     {Kind::Action, "Clear Pinned Markers", kMenuClearPinnedMarkers, false});
@@ -1398,7 +1434,10 @@ int main() {
                     values_as_percent = !values_as_percent;
                     break;
                 case kMenuPinCursorColor:
-                    pin_cursor_color(vectorscope_color);
+                    pin_reference_color(vectorscope_color);
+                    break;
+                case kMenuPinRegionAverage:
+                    if (output.region_average_valid) pin_reference_color(output.region_average);
                     break;
                 case kMenuClearPinnedMarkers:
                     pinned_colors.clear();
