@@ -207,4 +207,56 @@ void ObserveEscapeWithoutKeyWindow(std::function<void()>) {
     // this seam exists for cannot occur here.
 }
 
+void SampleScreenColorAsync(DesktopPoint point,
+                            std::function<void(std::optional<FloatColor>)> callback) {
+    // GDI reads any monitor of the virtual screen synchronously.
+    // CAPTUREBLT includes other applications' layered windows (tooltips,
+    // notification toasts) the way the eye sees them; this application's
+    // own overlays stay out through their capture affinity.
+    constexpr int kSide = 3;
+    const int left = static_cast<int>(point.x) - kSide / 2;
+    const int top = static_cast<int>(point.y) - kSide / 2;
+
+    HDC screen = GetDC(nullptr);
+    if (!screen) {
+        callback(std::nullopt);
+        return;
+    }
+    std::optional<FloatColor> color;
+    HDC memory = CreateCompatibleDC(screen);
+    BITMAPINFO info{};
+    info.bmiHeader.biSize = sizeof(info.bmiHeader);
+    info.bmiHeader.biWidth = kSide;
+    info.bmiHeader.biHeight = -kSide;  // top-down rows
+    info.bmiHeader.biPlanes = 1;
+    info.bmiHeader.biBitCount = 32;
+    info.bmiHeader.biCompression = BI_RGB;
+    void* bits = nullptr;
+    HBITMAP bitmap =
+        memory ? CreateDIBSection(memory, &info, DIB_RGB_COLORS, &bits, nullptr, 0) : nullptr;
+    if (bitmap) {
+        HGDIOBJ previous = SelectObject(memory, bitmap);
+        if (BitBlt(memory, 0, 0, kSide, kSide, screen, left, top, SRCCOPY | CAPTUREBLT)) {
+            const auto* pixels = static_cast<const uint8_t*>(bits);
+            double sum_r = 0;
+            double sum_g = 0;
+            double sum_b = 0;
+            for (int index = 0; index < kSide * kSide; ++index) {
+                sum_b += pixels[index * 4 + 0];
+                sum_g += pixels[index * 4 + 1];
+                sum_r += pixels[index * 4 + 2];
+            }
+            constexpr double kCount = static_cast<double>(kSide) * kSide;
+            color =
+                FloatColor{static_cast<float>(sum_r / kCount), static_cast<float>(sum_g / kCount),
+                           static_cast<float>(sum_b / kCount)};
+        }
+        SelectObject(memory, previous);
+        DeleteObject(bitmap);
+    }
+    if (memory) DeleteDC(memory);
+    ReleaseDC(nullptr, screen);
+    callback(color);
+}
+
 }  // namespace sidescopes

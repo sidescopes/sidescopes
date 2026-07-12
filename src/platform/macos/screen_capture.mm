@@ -18,10 +18,12 @@
 #import <CoreMedia/CoreMedia.h>
 #import <ScreenCaptureKit/ScreenCaptureKit.h>
 
+#include <algorithm>
 #include <atomic>
 #include <cstring>
 #include <string>
 
+#include "platform/desktop.h"
 #include "platform/screen_capture.h"
 
 namespace sidescopes {
@@ -231,6 +233,122 @@ private:
 
 std::unique_ptr<ScreenCaptureSource> CreateScreenCaptureSource() {
     return std::make_unique<SckScreenCaptureSource>();
+}
+
+namespace {
+
+// Shareable content is an XPC round trip, far too heavy per sample; the
+// one-shot sampler caches it and refreshes only when the wanted display
+// is missing or its geometry went stale (a resolution change keeps the
+// display id). Main-thread only, like the sampler itself.
+SCShareableContent* g_sampler_content = nil;
+
+SCDisplay* SamplerDisplay(CGDirectDisplayID display_id) {
+    const CGRect bounds = CGDisplayBounds(display_id);
+    const auto lookup = [&]() -> SCDisplay* {
+        for (SCDisplay* candidate in g_sampler_content.displays) {
+            if (candidate.displayID == display_id &&
+                candidate.width == static_cast<NSInteger>(bounds.size.width) &&
+                candidate.height == static_cast<NSInteger>(bounds.size.height))
+                return candidate;
+        }
+        return nil;
+    };
+    if (SCDisplay* display = lookup()) return display;
+    g_sampler_content = FetchShareableContent();
+    return lookup();
+}
+
+}  // namespace
+
+// The cursor readout away from the tracked display: a one-shot capture
+// of a tiny rectangle around the point, excluding this application the
+// way the main stream does, requested in sRGB for the same honest
+// values.
+void SampleScreenColorAsync(DesktopPoint point,
+                            std::function<void(std::optional<FloatColor>)> callback) {
+    CGDirectDisplayID display_id = 0;
+    uint32_t matches = 0;
+    if (CGGetDisplaysWithPoint(CGPointMake(point.x, point.y), 1, &display_id, &matches) !=
+            kCGErrorSuccess ||
+        matches == 0) {
+        callback(std::nullopt);
+        return;
+    }
+    SCDisplay* display = SamplerDisplay(display_id);
+    if (!display) {
+        callback(std::nullopt);
+        return;
+    }
+    SCRunningApplication* self_application = nil;
+    for (SCRunningApplication* application in g_sampler_content.applications) {
+        if (application.processID == NSProcessInfo.processInfo.processIdentifier) {
+            self_application = application;
+            break;
+        }
+    }
+    SCContentFilter* filter =
+        self_application ? [[SCContentFilter alloc] initWithDisplay:display
+                                              excludingApplications:@[ self_application ]
+                                                   exceptingWindows:@[]]
+                         : [[SCContentFilter alloc] initWithDisplay:display excludingWindows:@[]];
+
+    // A small neighborhood around the point, clamped inside the display,
+    // in the display's own point coordinates.
+    const CGRect bounds = CGDisplayBounds(display_id);
+    constexpr double kSide = 5.0;
+    constexpr size_t kPixels = 8;
+    const double local_x =
+        std::clamp(point.x - bounds.origin.x - kSide / 2, 0.0, bounds.size.width - kSide);
+    const double local_y =
+        std::clamp(point.y - bounds.origin.y - kSide / 2, 0.0, bounds.size.height - kSide);
+
+    SCStreamConfiguration* configuration = [[SCStreamConfiguration alloc] init];
+    configuration.sourceRect = CGRectMake(local_x, local_y, kSide, kSide);
+    configuration.width = kPixels;
+    configuration.height = kPixels;
+    configuration.showsCursor = NO;
+    configuration.pixelFormat = kCVPixelFormatType_32BGRA;
+    configuration.colorSpaceName = kCGColorSpaceSRGB;
+
+    auto shared =
+        std::make_shared<std::function<void(std::optional<FloatColor>)>>(std::move(callback));
+    [SCScreenshotManager
+        captureImageWithFilter:filter
+                 configuration:configuration
+             completionHandler:^(CGImageRef image, NSError* error) {
+               if (!image || error) {
+                   (*shared)(std::nullopt);
+                   return;
+               }
+               // Redrawing into a known-layout bitmap sidesteps whatever
+               // byte order the capture returned.
+               uint8_t pixels[kPixels * kPixels * 4] = {};
+               CGColorSpaceRef srgb = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
+               CGContextRef context =
+                   CGBitmapContextCreate(pixels, kPixels, kPixels, 8, kPixels * 4, srgb,
+                                         static_cast<uint32_t>(kCGImageAlphaPremultipliedLast) |
+                                             static_cast<uint32_t>(kCGBitmapByteOrder32Big));
+               CGColorSpaceRelease(srgb);
+               if (!context) {
+                   (*shared)(std::nullopt);
+                   return;
+               }
+               CGContextDrawImage(context, CGRectMake(0, 0, kPixels, kPixels), image);
+               CGContextRelease(context);
+               double sum_r = 0;
+               double sum_g = 0;
+               double sum_b = 0;
+               for (size_t index = 0; index < kPixels * kPixels; ++index) {
+                   sum_r += pixels[index * 4 + 0];
+                   sum_g += pixels[index * 4 + 1];
+                   sum_b += pixels[index * 4 + 2];
+               }
+               constexpr double kCount = static_cast<double>(kPixels * kPixels);
+               (*shared)(FloatColor{static_cast<float>(sum_r / kCount),
+                                    static_cast<float>(sum_g / kCount),
+                                    static_cast<float>(sum_b / kCount)});
+             }];
 }
 
 }  // namespace sidescopes

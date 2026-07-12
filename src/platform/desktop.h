@@ -6,6 +6,8 @@
 #include <string>
 #include <vector>
 
+#include "core/frame.h"
+
 namespace sidescopes {
 
 // Small desktop services the app needs outside capture itself.
@@ -89,5 +91,15 @@ void ObserveSystemWake(std::function<void()> callback);
 // where the gap cannot occur (on Windows the border never activates the
 // application in the first place).
 void ObserveEscapeWithoutKeyWindow(std::function<void()> callback);
+
+// Samples the averaged screen color around a desktop point on whatever
+// display it falls on, independent of the capture stream, so the cursor
+// readout works on every screen and not only the tracked one. This
+// application's own windows are excluded where the platform allows.
+// Asynchronous: the callback may fire on any thread, or synchronously
+// where reading the screen is immediate; it receives nothing when the
+// point cannot be read. Callers own the pacing.
+void SampleScreenColorAsync(DesktopPoint point,
+                            std::function<void(std::optional<FloatColor>)> callback);
 
 }  // namespace sidescopes

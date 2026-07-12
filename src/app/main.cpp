@@ -14,6 +14,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -699,6 +700,15 @@ int main() {
     double intensity_flash_until = 0.0;
     double next_preferences_save = -1.0;
     DesktopPoint last_cursor{-1.0, -1.0};
+    // The freshest cross-display sample: the async sampler's callback may
+    // land on any thread, and may still be in flight at shutdown, so the
+    // state it writes is shared ownership.
+    struct ScreenSample {
+        std::mutex mutex;
+        std::optional<FloatColor> color;
+    };
+    auto screen_sample = std::make_shared<ScreenSample>();
+    double next_screen_sample = 0.0;
 
     const auto is_full_region = [&] {
         return analysis.region.left_percent <= 0.0 && analysis.region.top_percent <= 0.0 &&
@@ -844,29 +854,51 @@ int main() {
             }
         }
 
-        // Cursor color, smoothed per scope with its own rhythm.
+        // Cursor color, smoothed per scope with its own rhythm. On the
+        // tracked display it reads the capture stream's frame; on every
+        // other display a throttled one-shot sample keeps the readout,
+        // the markers, and the picker pane alive - even while capture
+        // itself is paused.
         std::optional<FloatColor> vectorscope_color;
         std::optional<FloatColor> waveform_color;
-        if (!capture_dead.load() && frame_size && capture_display != 0) {
+        if (capture_display != 0) {
             if (const auto cursor = GlobalCursorPosition()) {
                 if (std::abs(cursor->x - last_cursor.x) + std::abs(cursor->y - last_cursor.y) >
                     0.5) {
                     last_cursor = *cursor;
                     last_activity = glfwGetTime();
                 }
-                if (const auto geometry = GeometryOfDisplay(capture_display)) {
-                    const int pixel_x =
-                        static_cast<int>((cursor->x - geometry->origin_x) * frame_size->width /
-                                         geometry->width_points);
-                    const int pixel_y =
-                        static_cast<int>((cursor->y - geometry->origin_y) * frame_size->height /
-                                         geometry->height_points);
-                    if (const auto sampled = worker.SampleFrameColor(pixel_x, pixel_y)) {
-                        vectorscope_marker.SetTimeConstant(vectorscope_smoothing_ms);
-                        waveform_marker.SetTimeConstant(waveform_smoothing_ms);
-                        vectorscope_color = vectorscope_marker.Update(*sampled, io.DeltaTime);
-                        waveform_color = waveform_marker.Update(*sampled, io.DeltaTime);
+                std::optional<FloatColor> sampled;
+                const bool on_tracked_display =
+                    DisplayAtPoint(*cursor).value_or(0) == capture_display;
+                if (on_tracked_display && !capture_dead.load() && frame_size) {
+                    if (const auto geometry = GeometryOfDisplay(capture_display)) {
+                        const int pixel_x =
+                            static_cast<int>((cursor->x - geometry->origin_x) * frame_size->width /
+                                             geometry->width_points);
+                        const int pixel_y =
+                            static_cast<int>((cursor->y - geometry->origin_y) * frame_size->height /
+                                             geometry->height_points);
+                        sampled = worker.SampleFrameColor(pixel_x, pixel_y);
                     }
+                } else {
+                    if (glfwGetTime() > next_screen_sample) {
+                        next_screen_sample = glfwGetTime() + 0.05;
+                        SampleScreenColorAsync(*cursor,
+                                               [screen_sample](std::optional<FloatColor> color) {
+                                                   if (!color) return;
+                                                   std::lock_guard lock(screen_sample->mutex);
+                                                   screen_sample->color = color;
+                                               });
+                    }
+                    std::lock_guard lock(screen_sample->mutex);
+                    sampled = screen_sample->color;
+                }
+                if (sampled) {
+                    vectorscope_marker.SetTimeConstant(vectorscope_smoothing_ms);
+                    waveform_marker.SetTimeConstant(waveform_smoothing_ms);
+                    vectorscope_color = vectorscope_marker.Update(*sampled, io.DeltaTime);
+                    waveform_color = waveform_marker.Update(*sampled, io.DeltaTime);
                 }
             }
         }
@@ -1162,7 +1194,7 @@ int main() {
             const float line_height = ImGui::GetTextLineHeightWithSpacing();
             if (!vectorscope_color) {
                 ImGui::Dummy(ImVec2(0.0f, std::max(0.0f, (area.y - line_height) / 2.0f)));
-                const char* hint = "move the cursor over the captured display";
+                const char* hint = "no color under the cursor yet";
                 const float width = ImGui::CalcTextSize(hint).x;
                 ImGui::SetCursorPosX(
                     std::max(0.0f, (ImGui::GetWindowContentRegionMax().x - width) / 2.0f));
