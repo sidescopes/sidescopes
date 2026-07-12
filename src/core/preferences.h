@@ -40,7 +40,7 @@ struct Preferences {
     TraceResponse trace_response = TraceResponse::Boosted;
     // The waveform scope's style; the parade is its own scope.
     WaveformMode waveform_mode = WaveformMode::Rgb;
-    bool histogram_per_channel = false;
+    bool histogram_per_channel = true;
     // The scopes on screen, one letter each in stacking order: V
     // vectorscope, W RGB waveform, L luma waveform, R RGB parade, H
     // histogram. Never empty.

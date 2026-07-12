@@ -1747,10 +1747,10 @@ int main() {
                        analysis.waveform.mode == WaveformMode::ColoredLuma);
             };
             const auto histogram_options = [&] {
-                action("Combined", kMenuHistogramCombined,
-                       analysis.histogram.style == HistogramStyle::Combined);
                 action("Per Channel", kMenuHistogramPerChannel,
                        analysis.histogram.style == HistogramStyle::PerChannel);
+                action("Combined", kMenuHistogramCombined,
+                       analysis.histogram.style == HistogramStyle::Combined);
             };
 
             // The clicked pane's options, first and unprefixed.

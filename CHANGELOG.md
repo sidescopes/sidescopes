@@ -78,7 +78,10 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   parade separates its three panes with dark gutters.
 - The histogram draws dim solid fills under bright solid outlines that
   ride each channel's curve, so shapes stay traceable through every
-  overlap and the plot sits quietly next to the other scopes.
+  overlap and the plot sits quietly next to the other scopes. It sizes
+  itself to its pane like the other scopes, and the per-channel style
+  is the default - it reads like the parade and keeps the family
+  consistent.
 - The region border hides while the window is minimized and returns on
   restore: minimized scopes measure nothing, and the border's grab band
   should not sit interactive over the editor meanwhile.

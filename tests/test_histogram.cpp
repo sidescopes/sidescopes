@@ -64,6 +64,9 @@ TEST_CASE("Histogram places uniform color at its channel values") {
     frame.FillColumns(0, 32, Color{10, 150, 240});
 
     Histogram scope;
+    HistogramSettings full_height;
+    full_height.style = HistogramStyle::Combined;
+    scope.Configure(full_height);
     scope.Accumulate(frame.View(), IntRect{0, 0, 32, 32});
 
     // Smoothing spreads one bin's population to its neighbors; the true
@@ -85,6 +88,9 @@ TEST_CASE("Histogram bar heights order by pixel population") {
     frame.FillColumns(48, 64, Color{200, 200, 200});
 
     Histogram scope;
+    HistogramSettings full_height;
+    full_height.style = HistogramStyle::Combined;
+    scope.Configure(full_height);
     scope.Accumulate(frame.View(), IntRect{0, 0, 64, 32});
 
     const int dominant = BarHeight(scope.Image(), 64, 1);
@@ -134,6 +140,9 @@ TEST_CASE("Histogram keeps sparse tones readable under a dominant one") {
         }
 
     Histogram scope;
+    HistogramSettings full_height;
+    full_height.style = HistogramStyle::Combined;
+    scope.Configure(full_height);
     scope.Accumulate(frame.View(), IntRect{0, 0, 256, 10});
 
     CHECK(BarHeight(scope.Image(), 200, 1) >= Histogram::kHeight - 20);

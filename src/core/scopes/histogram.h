@@ -8,16 +8,17 @@
 namespace sidescopes {
 
 enum class HistogramStyle {
-    // All three channels overlaid additively in one plot: the photo
-    // editors' default, where secondary colors encode channel overlap.
+    // All three channels overlaid additively in one plot, the photo
+    // editors' habit: secondary colors encode channel overlap.
     Combined,
-    // Three stacked bands, one channel each: nothing occludes, for
-    // reading exact per-channel shapes the way video tools draw it.
+    // Three stacked bands, one channel each: nothing occludes, exact
+    // per-channel shapes - and the default, because it reads like the
+    // parade and keeps the scope family consistent.
     PerChannel,
 };
 
 struct HistogramSettings {
-    HistogramStyle style = HistogramStyle::Combined;
+    HistogramStyle style = HistogramStyle::PerChannel;
     // Sample every Nth pixel horizontally and vertically (1..8).
     int sampling_stride = 1;
     // Display image resolution. Sized near the pane, the plot renders
