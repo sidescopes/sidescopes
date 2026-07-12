@@ -146,12 +146,40 @@ void Vectorscope::RebuildTintTable() {
 }
 
 void Vectorscope::MapBinsToImage(uint64_t sample_count) {
-    // A half-strength 3x3 binomial takes the worst speckle out of the
-    // cloud without softening it: the fractional splat already spreads
-    // each sample as a tent, so a full binomial on top reads as gaussian
-    // blur at large pane sizes. Averaging the raw bin with its binomial
-    // neighborhood keeps single-pixel grain and the quantization lattice
-    // damped while the cloud's fine streaks stay crisp.
+    // Eight-bit content carries no chroma information below one code:
+    // photographs arrive chroma-quantized (JPEG stores integer Cb/Cr),
+    // so their colors sit on a one-code lattice. A grid finer than that
+    // lattice must not resolve below it, or big areas of similar color
+    // render the codec's quantization as gridded texture. Widening the
+    // splat tent to one whole code restores flatness - a tent as wide as
+    // the lattice spacing sums to a constant across it - and a separable
+    // [1,2,1] pass over the bins is exactly that widening, upgrading the
+    // accumulated one-bin tent to a two-bin one.
+    if (size_ > 256) {
+        std::vector<uint32_t> widened(bins_.size(), 0);
+        for (int py = 0; py < size_; ++py) {
+            const auto at = [&](int y, int x) -> uint32_t {
+                if (y < 0 || y >= size_ || x < 0 || x >= size_) return 0;
+                return bins_[static_cast<std::size_t>(y) * size_ + x];
+            };
+            for (int px = 0; px < size_; ++px) {
+                const auto row = [&](int y) {
+                    return at(y, px - 1) + 2u * at(y, px) + at(y, px + 1);
+                };
+                widened[static_cast<std::size_t>(py) * size_ + px] =
+                    (row(py - 1) + 2u * row(py) + row(py + 1) + 8u) / 16u;
+            }
+        }
+        bins_.swap(widened);
+    }
+
+    // An aesthetic 3x3 binomial then takes the residual speckle out of
+    // the cloud. Its strength follows the grid so the smoothing stays
+    // constant in chroma units and the adaptive tier switch is seamless:
+    // full strength on the fine grid, half strength at 256 where a bin
+    // already spans a whole code and the full kernel reads as gaussian
+    // blur at large pane sizes.
+    const bool fine_grid = size_ > 256;
     std::vector<float> smoothed(bins_.size(), 0.0f);
     for (int py = 0; py < size_; ++py) {
         for (int px = 0; px < size_; ++px) {
@@ -162,8 +190,9 @@ void Vectorscope::MapBinsToImage(uint64_t sample_count) {
             const auto row = [&](int y) {
                 return at(y, px - 1) + 2.0f * at(y, px) + at(y, px + 1);
             };
+            const float binomial = (row(py - 1) + 2.0f * row(py) + row(py + 1)) / 16.0f;
             smoothed[static_cast<std::size_t>(py) * size_ + px] =
-                0.5f * at(py, px) + 0.5f * (row(py - 1) + 2.0f * row(py) + row(py + 1)) / 16.0f;
+                fine_grid ? binomial : 0.5f * at(py, px) + 0.5f * binomial;
         }
     }
 
