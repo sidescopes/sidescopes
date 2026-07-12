@@ -13,33 +13,43 @@ namespace sidescopes {
 // switch between window picking, drawing, and face picking.
 enum class RegionPickerMode { PickWindows, Draw, PickFaces };
 
+// What the picker offers on one display. Region percentages are always
+// relative to their own display.
+struct PickerDisplay {
+    uint32_t display_id = 0;
+    std::vector<SuggestedRegion> windows;
+    std::vector<SuggestedRegion> faces;
+};
+
 // One poll of the asynchronous picker. `preview` is whatever the user is
-// currently indicating - the hovered suggestion, the drag in progress, or
-// the adjusted rectangle - so the application can feed it to the scopes
-// live. On the poll that delivers `finished`, `confirmed` carries the
-// chosen region, or nothing on cancel, and the overlay is gone.
+// currently indicating - the hovered suggestion or the drag in progress -
+// so the application can feed it to the scopes live; `display_id` says
+// which display it belongs to. On the poll that delivers `finished`,
+// `confirmed` carries the chosen region, or nothing on cancel, and the
+// overlays are gone.
 struct RegionPickPoll {
     bool active = false;
     bool finished = false;
+    uint32_t display_id = 0;
     std::optional<RegionOfInterest> preview;
     std::optional<RegionOfInterest> confirmed;
 };
 
-// Screenshot-style selection over the captured display. Pick mode
+// Screenshot-style selection spanning every display at once: each gets
+// its own dimmed overlay, and a pick anywhere is a pick there. Pick mode
 // highlights the application window under the cursor with the system
 // accent for one-click confirmation, the way the macOS screenshot
-// interface selects windows; draw mode dims the screen
-// for dragging a fresh area by hand - adjusting an existing region happens
-// on the region border itself, not in here. ESC cancels. This
-// application's own windows stay undimmed and clickable through the
-// overlay, so the toolbar keeps working while picking.
+// interface selects windows; draw mode drags a fresh area by hand within
+// one display - adjusting an existing region happens on the region
+// border itself, not in here. ESC cancels. This application's own
+// windows stay undimmed and clickable through the overlays, so the
+// toolbar keeps working while picking.
 //
-// The picker is asynchronous: Begin shows the overlay and returns, the
+// The picker is asynchronous: Begin shows the overlays and returns, the
 // application keeps running its frame loop (which also pumps the
-// overlay's events), and PollRegionPick is read once per frame so the
+// overlays' events), and PollRegionPick is read once per frame so the
 // scopes can preview the selection before it is confirmed.
-bool BeginRegionPick(uint32_t display_id, const std::vector<SuggestedRegion>& windows,
-                     const std::vector<SuggestedRegion>& faces, RegionPickerMode initial_mode);
+bool BeginRegionPick(const std::vector<PickerDisplay>& displays, RegionPickerMode initial_mode);
 RegionPickPoll PollRegionPick();
 
 // Cancels an active pick as if ESC had been pressed on the overlay.

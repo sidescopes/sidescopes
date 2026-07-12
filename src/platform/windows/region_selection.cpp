@@ -168,6 +168,7 @@ Gdiplus::RectF LocalRectFromRegion(const RegionOfInterest& region, double width,
 
 struct PickerState {
     HWND window = nullptr;
+    uint32_t display_id = 0;
     int origin_x = 0;  // the covered monitor, virtual-screen pixels
     int origin_y = 0;
     int width = 0;
@@ -191,7 +192,17 @@ struct PickerState {
     Gdiplus::RectF confirmed{};
 };
 
-PickerState* g_picker = nullptr;
+// One overlay per display; a pick anywhere is a pick there. Mode flags
+// live per overlay and are switched in lockstep, the way the shared
+// keyboard expects.
+std::vector<PickerState*> g_pickers;
+
+PickerState* PickerForWindow(HWND window) {
+    for (PickerState* picker : g_pickers) {
+        if (picker->window == window) return picker;
+    }
+    return nullptr;
+}
 
 struct BorderState {
     HWND window = nullptr;
@@ -232,7 +243,7 @@ std::vector<HWND> OwnWindows() {
             DWORD process = 0;
             GetWindowThreadProcessId(window, &process);
             if (process != state->process || !IsWindowVisible(window)) return TRUE;
-            if (g_picker && window == g_picker->window) return TRUE;
+            if (PickerForWindow(window) != nullptr) return TRUE;
             if (window == g_border.window) return TRUE;
             state->windows->push_back(window);
             return TRUE;
@@ -241,14 +252,13 @@ std::vector<HWND> OwnWindows() {
     return windows;
 }
 
-std::vector<Gdiplus::RectF> OwnWindowExclusions() {
+std::vector<Gdiplus::RectF> OwnWindowExclusions(const PickerState& picker) {
     std::vector<Gdiplus::RectF> exclusions;
-    if (!g_picker) return exclusions;
     for (HWND window : OwnWindows()) {
         RECT rect{};
         if (!GetWindowRect(window, &rect)) continue;
-        exclusions.emplace_back(static_cast<Gdiplus::REAL>(rect.left - g_picker->origin_x),
-                                static_cast<Gdiplus::REAL>(rect.top - g_picker->origin_y),
+        exclusions.emplace_back(static_cast<Gdiplus::REAL>(rect.left - picker.origin_x),
+                                static_cast<Gdiplus::REAL>(rect.top - picker.origin_y),
                                 static_cast<Gdiplus::REAL>(rect.right - rect.left),
                                 static_cast<Gdiplus::REAL>(rect.bottom - rect.top));
     }
@@ -365,9 +375,8 @@ void PunchRect(Gdiplus::Graphics& canvas, const Gdiplus::RectF& rect) {
     canvas.SetCompositingMode(previous);
 }
 
-void PaintPicker() {
-    if (!g_picker || !EnsureGdiplus()) return;
-    PickerState& picker = *g_picker;
+void PaintPicker(PickerState& picker) {
+    if (!EnsureGdiplus()) return;
     LayeredSurface surface(picker.width, picker.height);
     if (!surface.Valid()) return;
     Gdiplus::Graphics canvas(surface.Dc());
@@ -451,22 +460,23 @@ void PaintPicker() {
 // when no face was found: the honest answer is the empty overlay saying
 // so, not a key that silently does nothing.
 void SwitchPickerMode(int mode) {
-    if (!g_picker) return;
     const bool draw = mode == 1;
     const bool faces = mode == 2;
-    if (g_picker->draw_mode == draw && g_picker->faces_mode == faces) return;
-    g_picker->draw_mode = draw;
-    g_picker->faces_mode = faces;
-    g_picker->suggestions = faces ? g_picker->faces : g_picker->windows;
-    g_picker->hovered = -1;
-    g_picker->dragging = false;
-    PaintPicker();
+    for (PickerState* picker : g_pickers) {
+        if (picker->draw_mode == draw && picker->faces_mode == faces) continue;
+        picker->draw_mode = draw;
+        picker->faces_mode = faces;
+        picker->suggestions = faces ? picker->faces : picker->windows;
+        picker->hovered = -1;
+        picker->dragging = false;
+        PaintPicker(*picker);
+    }
 }
 
 LRESULT CALLBACK PickerProc(HWND window, UINT message, WPARAM w_param, LPARAM l_param) {
-    if (!g_picker || window != g_picker->window)
-        return DefWindowProcW(window, message, w_param, l_param);
-    PickerState& picker = *g_picker;
+    PickerState* state = PickerForWindow(window);
+    if (!state) return DefWindowProcW(window, message, w_param, l_param);
+    PickerState& picker = *state;
     switch (message) {
         case WM_SETCURSOR:
             SetCursor(LoadCursorW(nullptr, picker.draw_mode ? IDC_CROSS : IDC_HAND));
@@ -484,13 +494,13 @@ LRESULT CALLBACK PickerProc(HWND window, UINT message, WPARAM w_param, LPARAM l_
                         (std::abs(picker.drag_current.x - picker.drag_start.x) > threshold ||
                          std::abs(picker.drag_current.y - picker.drag_start.y) > threshold))
                         picker.dragging = true;
-                    PaintPicker();
+                    PaintPicker(picker);
                 }
             } else {
                 const int hovered = SuggestionAtPoint(picker, point);
                 if (hovered != picker.hovered) {
                     picker.hovered = hovered;
-                    PaintPicker();
+                    PaintPicker(picker);
                 }
             }
             return 0;
@@ -523,7 +533,7 @@ LRESULT CALLBACK PickerProc(HWND window, UINT message, WPARAM w_param, LPARAM l_
                     picker.confirmed = selection;
                     picker.finished = true;
                 } else {
-                    PaintPicker();
+                    PaintPicker(picker);
                 }
             }
             return 0;
@@ -894,62 +904,76 @@ HWND CreateOverlayWindow(const wchar_t* class_name, WNDPROC procedure, DWORD ex_
 
 }  // namespace
 
-bool BeginRegionPick(uint32_t display_id, const std::vector<SuggestedRegion>& windows,
-                     const std::vector<SuggestedRegion>& faces, RegionPickerMode initial_mode) {
-    if (g_picker) return false;  // one picker at a time
-    const auto geometry = GeometryOfDisplay(display_id);
-    if (!geometry) return false;
+bool BeginRegionPick(const std::vector<PickerDisplay>& displays, RegionPickerMode initial_mode) {
+    if (!g_pickers.empty()) return false;  // one picker at a time
 
-    auto* picker = new PickerState;
-    picker->origin_x = static_cast<int>(geometry->origin_x);
-    picker->origin_y = static_cast<int>(geometry->origin_y);
-    picker->width = static_cast<int>(geometry->width_points);
-    picker->height = static_cast<int>(geometry->height_points);
-    for (const SuggestedRegion& suggestion : windows)
-        picker->windows.emplace_back(
-            LocalRectFromRegion(suggestion.region, picker->width, picker->height),
-            WideFromUtf8(suggestion.label));
-    for (const SuggestedRegion& suggestion : faces)
-        picker->faces.emplace_back(
-            LocalRectFromRegion(suggestion.region, picker->width, picker->height),
-            WideFromUtf8(suggestion.label));
-    if (initial_mode == RegionPickerMode::Draw ||
-        (initial_mode == RegionPickerMode::PickWindows && windows.empty())) {
-        picker->draw_mode = true;
-    } else if (initial_mode == RegionPickerMode::PickFaces) {
-        picker->faces_mode = true;
-        picker->suggestions = picker->faces;
-    } else {
-        picker->suggestions = picker->windows;
-    }
+    // A window pick with nothing to pick anywhere opens as drawing, like
+    // before, but the decision is global so every display shows the same
+    // mode.
+    bool any_windows = false;
+    for (const PickerDisplay& entry : displays) any_windows |= !entry.windows.empty();
+    const bool draw = initial_mode == RegionPickerMode::Draw ||
+                      (initial_mode == RegionPickerMode::PickWindows && !any_windows);
+    const bool faces = initial_mode == RegionPickerMode::PickFaces;
 
-    picker->window = CreateOverlayWindow(L"SidescopesPickerOverlay", PickerProc,
-                                         WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TOOLWINDOW, 0);
-    if (!picker->window) {
-        delete picker;
-        return false;
+    for (const PickerDisplay& entry : displays) {
+        const auto geometry = GeometryOfDisplay(entry.display_id);
+        if (!geometry) continue;  // gone between enumeration and now
+
+        auto* picker = new PickerState;
+        picker->display_id = entry.display_id;
+        picker->origin_x = static_cast<int>(geometry->origin_x);
+        picker->origin_y = static_cast<int>(geometry->origin_y);
+        picker->width = static_cast<int>(geometry->width_points);
+        picker->height = static_cast<int>(geometry->height_points);
+        for (const SuggestedRegion& suggestion : entry.windows)
+            picker->windows.emplace_back(
+                LocalRectFromRegion(suggestion.region, picker->width, picker->height),
+                WideFromUtf8(suggestion.label));
+        for (const SuggestedRegion& suggestion : entry.faces)
+            picker->faces.emplace_back(
+                LocalRectFromRegion(suggestion.region, picker->width, picker->height),
+                WideFromUtf8(suggestion.label));
+        picker->draw_mode = draw;
+        picker->faces_mode = faces;
+        if (!draw) picker->suggestions = faces ? picker->faces : picker->windows;
+
+        picker->window = CreateOverlayWindow(L"SidescopesPickerOverlay", PickerProc,
+                                             WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TOOLWINDOW, 0);
+        if (!picker->window) {
+            delete picker;
+            continue;
+        }
+        g_pickers.push_back(picker);
+        SetWindowPos(picker->window, HWND_TOPMOST, picker->origin_x, picker->origin_y,
+                     picker->width, picker->height, SWP_SHOWWINDOW | SWP_NOACTIVATE);
     }
-    g_picker = picker;
-    SetWindowPos(picker->window, HWND_TOPMOST, picker->origin_x, picker->origin_y, picker->width,
-                 picker->height, SWP_SHOWWINDOW);
-    // This application's own visible windows float above the overlay for
+    if (g_pickers.empty()) return false;
+
+    // This application's own visible windows float above the overlays for
     // the duration: they stay undimmed and clickable by ordinary window
     // compositing. Their rectangles still feed the banner placement,
     // which avoids sitting beneath them. They are topmost already (the
     // scope window floats), so there is no level to restore afterwards.
     for (HWND window : OwnWindows())
         SetWindowPos(window, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
-    picker->exclusions = OwnWindowExclusions();
-    // The overlay owns the keyboard for ESC and the mode keys.
-    SetForegroundWindow(picker->window);
-    SetFocus(picker->window);
-    PaintPicker();
+    // The keyboard starts on the display under the cursor - that is where
+    // the user's attention is - and follows clicks after.
+    PickerState* key_picker = g_pickers.front();
+    const uint32_t cursor_display = DisplayUnderCursor().value_or(0);
+    for (PickerState* picker : g_pickers) {
+        picker->exclusions = OwnWindowExclusions(*picker);
+        if (picker->display_id == cursor_display) key_picker = picker;
+    }
+    SetForegroundWindow(key_picker->window);
+    SetFocus(key_picker->window);
+    for (PickerState* picker : g_pickers) PaintPicker(*picker);
     return true;
 }
 
 RegionPickPoll PollRegionPick() {
     RegionPickPoll poll;
-    if (!g_picker) return poll;
+    if (g_pickers.empty()) return poll;
     poll.active = true;
 
     // The banner dodges this application's own windows; their rectangles
@@ -959,50 +983,67 @@ RegionPickPoll PollRegionPick() {
     const ULONGLONG now = GetTickCount64();
     if (now - last_exclusion_refresh > 200) {
         last_exclusion_refresh = now;
-        std::vector<Gdiplus::RectF> exclusions = OwnWindowExclusions();
-        if (exclusions.size() != g_picker->exclusions.size() ||
-            !std::equal(
-                exclusions.begin(), exclusions.end(), g_picker->exclusions.begin(),
-                [](const Gdiplus::RectF& a, const Gdiplus::RectF& b) { return a.Equals(b); })) {
-            g_picker->exclusions = std::move(exclusions);
-            PaintPicker();
+        for (PickerState* picker : g_pickers) {
+            std::vector<Gdiplus::RectF> exclusions = OwnWindowExclusions(*picker);
+            if (exclusions.size() != picker->exclusions.size() ||
+                !std::equal(
+                    exclusions.begin(), exclusions.end(), picker->exclusions.begin(),
+                    [](const Gdiplus::RectF& a, const Gdiplus::RectF& b) { return a.Equals(b); })) {
+                picker->exclusions = std::move(exclusions);
+                PaintPicker(*picker);
+            }
         }
     }
 
-    if (g_picker->finished) {
+    // Any overlay finishing - a confirm there, or ESC anywhere - ends the
+    // pick on every display.
+    for (PickerState* finished_picker : g_pickers) {
+        if (!finished_picker->finished) continue;
         poll.finished = true;
-        if (g_picker->picked)
-            poll.confirmed =
-                RegionFromLocalRect(g_picker->confirmed, g_picker->width, g_picker->height);
-        DestroyWindow(g_picker->window);
-        delete g_picker;
-        g_picker = nullptr;
+        poll.display_id = finished_picker->display_id;
+        if (finished_picker->picked)
+            poll.confirmed = RegionFromLocalRect(finished_picker->confirmed, finished_picker->width,
+                                                 finished_picker->height);
+        for (PickerState* picker : g_pickers) {
+            DestroyWindow(picker->window);
+            delete picker;
+        }
+        g_pickers.clear();
         return poll;
     }
 
-    if (!g_picker->draw_mode) {
-        if (g_picker->hovered >= 0 &&
-            g_picker->hovered < static_cast<int>(g_picker->suggestions.size()))
-            poll.preview = RegionFromLocalRect(
-                g_picker->suggestions[static_cast<std::size_t>(g_picker->hovered)].first,
-                g_picker->width, g_picker->height);
-    } else if (g_picker->dragging) {
-        const Gdiplus::RectF selection = SelectionRect(*g_picker);
-        const double minimum = 8 * UiScale(g_picker->window);
-        if (selection.Width > minimum && selection.Height > minimum)
-            poll.preview = RegionFromLocalRect(selection, g_picker->width, g_picker->height);
+    // The cursor is only ever on one display, so at most one overlay has
+    // something to preview.
+    for (PickerState* picker : g_pickers) {
+        if (!picker->draw_mode) {
+            if (picker->hovered >= 0 &&
+                picker->hovered < static_cast<int>(picker->suggestions.size())) {
+                poll.preview = RegionFromLocalRect(
+                    picker->suggestions[static_cast<std::size_t>(picker->hovered)].first,
+                    picker->width, picker->height);
+                poll.display_id = picker->display_id;
+                break;
+            }
+        } else if (picker->dragging) {
+            const Gdiplus::RectF selection = SelectionRect(*picker);
+            const double minimum = 8 * UiScale(picker->window);
+            if (selection.Width > minimum && selection.Height > minimum) {
+                poll.preview = RegionFromLocalRect(selection, picker->width, picker->height);
+                poll.display_id = picker->display_id;
+                break;
+            }
+        }
     }
     return poll;
 }
 
 void CancelRegionPick() {
-    if (!g_picker) return;
-    g_picker->picked = false;
-    g_picker->finished = true;
+    if (g_pickers.empty()) return;
+    g_pickers.front()->picked = false;
+    g_pickers.front()->finished = true;
 }
 
 void SetRegionPickMode(RegionPickerMode mode) {
-    if (!g_picker) return;
     SwitchPickerMode(mode == RegionPickerMode::Draw        ? 1
                      : mode == RegionPickerMode::PickFaces ? 2
                                                            : 0);

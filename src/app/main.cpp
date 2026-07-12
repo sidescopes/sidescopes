@@ -1469,44 +1469,16 @@ int main() {
             SetRegionPickMode(*want_region_pick);
             want_region_pick.reset();
         }
-        // The picker opens on the display under the cursor - photographers
-        // park it near the editor - and scoping follows the picker: a pick
-        // aimed at another display switches capture there first, so the
-        // live preview on the scopes stays truthful. The old region was
-        // percentages of the old display and means nothing on this one.
-        bool switched_display = false;
-        if (want_region_pick && capture_display != 0) {
-            const uint32_t pick_display = DisplayUnderCursor().value_or(capture_display);
-            if (pick_display != capture_display) {
-                HideRegionBorder();
-                desired_display = pick_display;
-                analysis.region = RegionOfInterest{};
-                analysis_dirty = true;
-                capture->Stop();
-                if (start_capture()) {
-                    switched_display = true;
-                } else {
-                    // The switch failed (display just vanished?); the
-                    // retry loop owns recovery, and a picker without a
-                    // capture stream would preview nothing.
-                    capture_dead.store(true);
-                    next_capture_retry = glfwGetTime() + 2.0;
-                    want_region_pick.reset();
-                }
-            }
-        }
         if (want_region_pick && capture_display != 0) {
             HideRegionBorder();
             // The previous region's border must not leak into the analyzed
             // frame: its strokes read as rectangle edges and cut suggestions
             // short at the old region. The latest captured frame may predate
             // the hide, so wait briefly for one taken after the border left
-            // the screen - and a just-switched stream needs the same grace
-            // before its first frame of the new display arrives. The 60 ms
-            // floor outlasts an in-flight pre-hide frame's
-            // capture-to-delivery; the 300 ms cap keeps the picker
+            // the screen. The 60 ms floor outlasts an in-flight pre-hide
+            // frame's capture-to-delivery; the 300 ms cap keeps the picker
             // responsive if the capture stream has stalled.
-            if (!is_full_region() || switched_display) {
+            if (!is_full_region()) {
                 uint64_t stale_sequence = 0;
                 worker.WithLatestFrame(
                     [&](const FrameView& view) { stale_sequence = view.sequence; });
@@ -1523,84 +1495,94 @@ int main() {
                     std::this_thread::sleep_for(std::chrono::milliseconds(15));
                 }
             }
-            // The offer: the visible application windows, frontmost first
-            // - window rectangles come from the operating system and are
-            // exact - plus, behind their own key, the faces the platform
-            // detector finds in the current frame.
-            std::vector<WindowRegion> window_regions;
-            std::vector<SuggestedRegion> face_suggestions;
-            if (const auto geometry = GeometryOfDisplay(capture_display)) {
-                // Frontmost windows only, skipping ones mostly hidden behind
-                // fronter windows: the user is not scoping what they cannot
-                // see, and invisible system windows have no business here.
-                const std::vector<DesktopWindow> on_screen = OnScreenWindows(capture_display);
-                const auto contained_fraction = [](const DesktopWindow& inner,
-                                                   const DesktopWindow& outer) {
-                    const double left = std::max(inner.x, outer.x);
-                    const double top = std::max(inner.y, outer.y);
-                    const double right = std::min(inner.x + inner.width, outer.x + outer.width);
-                    const double bottom = std::min(inner.y + inner.height, outer.y + outer.height);
-                    if (right <= left || bottom <= top) return 0.0;
-                    return (right - left) * (bottom - top) / (inner.width * inner.height);
-                };
-                std::vector<DesktopWindow> visible_windows;
-                std::vector<DesktopWindow> auxiliary_windows;
-                for (const DesktopWindow& candidate : on_screen) {
-                    constexpr int kMaxWindowSuggestions = 5;
-                    if (static_cast<int>(visible_windows.size()) >= kMaxWindowSuggestions) break;
-                    // A window living mostly inside a bigger window of the
-                    // same application is an auxiliary surface - Lightroom
-                    // draws its panels and its loupe info overlay as
-                    // borderless windows over the main one - and picking it
-                    // is never meant. It is remembered as chrome: the
-                    // detector masks it out, so panels and overlays neither
-                    // spawn candidates nor interrupt the photograph's
-                    // borders.
-                    bool auxiliary = false;
-                    for (const DesktopWindow& other : on_screen) {
-                        if (&other == &candidate || other.application != candidate.application)
-                            continue;
-                        if (other.width * other.height <= candidate.width * candidate.height)
-                            continue;
-                        if (contained_fraction(candidate, other) > 0.9) {
-                            auxiliary = true;
+            // The offer, per display: the visible application windows,
+            // frontmost first - window rectangles come from the operating
+            // system and are exact - plus, behind their own key, the faces
+            // the platform detector finds in the current frame. Faces are
+            // offered on the tracked display only: that is the display
+            // whose pixels we hold.
+            const auto window_suggestions_for =
+                [&](uint32_t display_id) -> std::vector<SuggestedRegion> {
+                std::vector<WindowRegion> window_regions;
+                const auto geometry = GeometryOfDisplay(display_id);
+                if (geometry) {
+                    // Frontmost windows only, skipping ones mostly hidden behind
+                    // fronter windows: the user is not scoping what they cannot
+                    // see, and invisible system windows have no business here.
+                    const std::vector<DesktopWindow> on_screen = OnScreenWindows(display_id);
+                    const auto contained_fraction = [](const DesktopWindow& inner,
+                                                       const DesktopWindow& outer) {
+                        const double left = std::max(inner.x, outer.x);
+                        const double top = std::max(inner.y, outer.y);
+                        const double right = std::min(inner.x + inner.width, outer.x + outer.width);
+                        const double bottom =
+                            std::min(inner.y + inner.height, outer.y + outer.height);
+                        if (right <= left || bottom <= top) return 0.0;
+                        return (right - left) * (bottom - top) / (inner.width * inner.height);
+                    };
+                    std::vector<DesktopWindow> visible_windows;
+                    std::vector<DesktopWindow> auxiliary_windows;
+                    for (const DesktopWindow& candidate : on_screen) {
+                        constexpr int kMaxWindowSuggestions = 5;
+                        if (static_cast<int>(visible_windows.size()) >= kMaxWindowSuggestions)
                             break;
+                        // A window living mostly inside a bigger window of the
+                        // same application is an auxiliary surface - Lightroom
+                        // draws its panels and its loupe info overlay as
+                        // borderless windows over the main one - and picking it
+                        // is never meant. It is remembered as chrome: the
+                        // detector masks it out, so panels and overlays neither
+                        // spawn candidates nor interrupt the photograph's
+                        // borders.
+                        bool auxiliary = false;
+                        for (const DesktopWindow& other : on_screen) {
+                            if (&other == &candidate || other.application != candidate.application)
+                                continue;
+                            if (other.width * other.height <= candidate.width * candidate.height)
+                                continue;
+                            if (contained_fraction(candidate, other) > 0.9) {
+                                auxiliary = true;
+                                break;
+                            }
                         }
-                    }
-                    if (auxiliary) {
-                        auxiliary_windows.push_back(candidate);
-                        continue;
-                    }
-                    bool mostly_covered = false;
-                    for (const DesktopWindow& front : visible_windows) {
-                        if (contained_fraction(candidate, front) > 0.8) {
-                            mostly_covered = true;
-                            break;
+                        if (auxiliary) {
+                            auxiliary_windows.push_back(candidate);
+                            continue;
                         }
+                        bool mostly_covered = false;
+                        for (const DesktopWindow& front : visible_windows) {
+                            if (contained_fraction(candidate, front) > 0.8) {
+                                mostly_covered = true;
+                                break;
+                            }
+                        }
+                        if (!mostly_covered) visible_windows.push_back(candidate);
                     }
-                    if (!mostly_covered) visible_windows.push_back(candidate);
-                }
 
-                for (const DesktopWindow& visible : visible_windows) {
-                    WindowRegion region;
-                    region.region.left_percent = std::clamp(
-                        (visible.x - geometry->origin_x) / geometry->width_points * 100.0, 0.0,
-                        100.0);
-                    region.region.top_percent = std::clamp(
-                        (visible.y - geometry->origin_y) / geometry->height_points * 100.0, 0.0,
-                        100.0);
-                    region.region.right_percent =
-                        std::clamp((visible.x + visible.width - geometry->origin_x) /
-                                       geometry->width_points * 100.0,
-                                   0.0, 100.0);
-                    region.region.bottom_percent =
-                        std::clamp((visible.y + visible.height - geometry->origin_y) /
-                                       geometry->height_points * 100.0,
-                                   0.0, 100.0);
-                    region.application = visible.application;
-                    window_regions.push_back(std::move(region));
+                    for (const DesktopWindow& visible : visible_windows) {
+                        WindowRegion region;
+                        region.region.left_percent = std::clamp(
+                            (visible.x - geometry->origin_x) / geometry->width_points * 100.0, 0.0,
+                            100.0);
+                        region.region.top_percent = std::clamp(
+                            (visible.y - geometry->origin_y) / geometry->height_points * 100.0, 0.0,
+                            100.0);
+                        region.region.right_percent =
+                            std::clamp((visible.x + visible.width - geometry->origin_x) /
+                                           geometry->width_points * 100.0,
+                                       0.0, 100.0);
+                        region.region.bottom_percent =
+                            std::clamp((visible.y + visible.height - geometry->origin_y) /
+                                           geometry->height_points * 100.0,
+                                       0.0, 100.0);
+                        region.application = visible.application;
+                        window_regions.push_back(std::move(region));
+                    }
                 }
-            }
+                return BuildRegionSuggestions(window_regions);
+            };
+
+            std::vector<SuggestedRegion> face_suggestions;
             if (SupportsFaceDetection()) {
                 worker.WithLatestFrame([&](const FrameView& view) {
                     const auto geometry = GeometryOfDisplay(capture_display);
@@ -1611,23 +1593,28 @@ int main() {
                     g_faces_on_screen.store(static_cast<int>(face_suggestions.size()));
                 });
             }
-            const auto suggestions = BuildRegionSuggestions(window_regions);
+
+            std::vector<PickerDisplay> picker_displays;
+            for (const CaptureTarget& target : capture->ListTargets()) {
+                PickerDisplay entry;
+                entry.display_id = target.display_id;
+                entry.windows = window_suggestions_for(target.display_id);
+                if (target.display_id == capture_display) entry.faces = face_suggestions;
+                picker_displays.push_back(std::move(entry));
+            }
+
             // Field diagnosis: dump exactly what the pipeline saw. Enable
             // with `launchctl setenv SIDESCOPES_DEBUG_SUGGESTIONS 1`.
             if (DebugSuggestionsRequested()) {
                 std::FILE* report = OpenDebugFile("/tmp/sidescopes-suggestions.txt", "w");
                 if (report) {
-                    for (const auto& window_region : window_regions)
-                        std::fprintf(
-                            report, "window '%s' %.1f,%.1f..%.1f,%.1f%%\n",
-                            window_region.application.c_str(), window_region.region.left_percent,
-                            window_region.region.top_percent, window_region.region.right_percent,
-                            window_region.region.bottom_percent);
-                    for (const auto& suggestion : suggestions)
-                        std::fprintf(report, "suggestion '%s' %.1f,%.1f..%.1f,%.1f%%\n",
-                                     suggestion.label.c_str(), suggestion.region.left_percent,
-                                     suggestion.region.top_percent, suggestion.region.right_percent,
-                                     suggestion.region.bottom_percent);
+                    for (const auto& entry : picker_displays)
+                        for (const auto& suggestion : entry.windows)
+                            std::fprintf(
+                                report, "display %u suggestion '%s' %.1f,%.1f..%.1f,%.1f%%\n",
+                                entry.display_id, suggestion.label.c_str(),
+                                suggestion.region.left_percent, suggestion.region.top_percent,
+                                suggestion.region.right_percent, suggestion.region.bottom_percent);
                     std::fclose(report);
                 }
                 worker.WithLatestFrame([&](const FrameView& view) {
@@ -1645,8 +1632,7 @@ int main() {
                     std::fclose(image);
                 });
             }
-            if (BeginRegionPick(capture_display, suggestions, face_suggestions, *want_region_pick))
-                region_picking = true;
+            if (BeginRegionPick(picker_displays, *want_region_pick)) region_picking = true;
             last_activity = glfwGetTime();
         }
 
@@ -1681,13 +1667,27 @@ int main() {
                 analysis_dirty = true;
                 last_activity = glfwGetTime();
             };
-            if (poll.preview) apply_region(*poll.preview);
+            // Live preview only for the tracked display: previewing a
+            // suggestion on another display would mean flapping the
+            // capture stream on every hover. The switch happens once, on
+            // confirmation.
+            if (poll.preview && poll.display_id == capture_display) apply_region(*poll.preview);
             if (poll.finished || !poll.active) {
                 region_picking = false;
                 if (poll.confirmed) {
+                    if (poll.display_id != 0 && poll.display_id != capture_display) {
+                        desired_display = poll.display_id;
+                        capture->Stop();
+                        if (!start_capture()) {
+                            capture_dead.store(true);
+                            next_capture_retry = glfwGetTime() + 2.0;
+                        }
+                    }
                     apply_region(*poll.confirmed);
                 } else {
                     // Cancelled: reset all drawing, pending and confirmed.
+                    // Full region means capture snaps back to the display
+                    // this window sits on.
                     apply_region(RegionOfInterest{});
                 }
                 sync_region_border();

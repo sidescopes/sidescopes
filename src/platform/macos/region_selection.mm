@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 
+#include "platform/desktop.h"
 #include "platform/face_detection.h"
 #include "platform/region_selection.h"
 
@@ -304,6 +305,9 @@ RegionOfInterest g_border_edit_region;
 }
 
 - (void)mouseDown:(NSEvent*)event {
+    // The keyboard follows the click across displays: whichever overlay
+    // was clicked last owns ESC and the mode keys.
+    if (!self.window.keyWindow) [self.window makeKeyAndOrderFront:nil];
     self.dragStart = [self convertPoint:event.locationInWindow fromView:nil];
     self.dragCurrent = self.dragStart;
     self.needsDisplay = YES;
@@ -352,17 +356,18 @@ RegionOfInterest g_border_edit_region;
     }
     NSString* keys = event.charactersIgnoringModifiers;
     if (keys.length == 1) {
+        // Modes switch on every display's overlay at once.
         const unichar key = [keys characterAtIndex:0];
         if (key == 'a' || key == 'A') {
-            [self switchToMode:0];
+            sidescopes::SetRegionPickMode(sidescopes::RegionPickerMode::PickWindows);
             return;
         }
         if (key == 'd' || key == 'D') {
-            [self switchToMode:1];
+            sidescopes::SetRegionPickMode(sidescopes::RegionPickerMode::Draw);
             return;
         }
         if (key == 'f' || key == 'F') {
-            [self switchToMode:2];
+            sidescopes::SetRegionPickMode(sidescopes::RegionPickerMode::PickFaces);
             return;
         }
     }
@@ -713,19 +718,34 @@ namespace sidescopes {
 namespace {
 
 NSWindow* g_border_window = nil;
-SidescopesPickerWindow* g_picker_window = nil;
-SidescopesPickerView* g_picker_view = nil;
-NSSize g_picker_size = {0, 0};
-// This application's own windows are raised above the overlay for the
+
+// One overlay per display; a pick anywhere is a pick there.
+struct PickerOverlay {
+    SidescopesPickerWindow* window = nil;
+    SidescopesPickerView* view = nil;
+    uint32_t display_id = 0;
+    NSSize size = {0, 0};
+};
+std::vector<PickerOverlay> g_picker_overlays;
+
+// This application's own windows are raised above the overlays for the
 // pick, with their previous levels remembered for the teardown: real
 // window compositing keeps their rounded corners and click handling,
 // where punching rectangular holes in the dimming could not.
 std::vector<std::pair<NSWindow*, NSInteger>> g_raised_windows;
 
-std::vector<NSRect> OwnWindowExclusions(NSWindow* overlay, NSPoint screen_origin) {
+bool IsPickerOverlayWindow(NSWindow* window) {
+    for (const PickerOverlay& overlay : g_picker_overlays) {
+        if (overlay.window == window) return true;
+    }
+    return false;
+}
+
+std::vector<NSRect> OwnWindowExclusions(NSPoint screen_origin) {
     std::vector<NSRect> exclusions;
     for (NSWindow* window in NSApp.windows) {
-        if (window == overlay || window == g_border_window || !window.isVisible) continue;
+        if (IsPickerOverlayWindow(window) || window == g_border_window || !window.isVisible)
+            continue;
         const NSRect frame = window.frame;
         exclusions.push_back(NSMakeRect(frame.origin.x - screen_origin.x,
                                         frame.origin.y - screen_origin.y, frame.size.width,
@@ -744,71 +764,94 @@ NSRect RegionToViewRect(const RegionOfInterest& region, NSSize view_size) {
 
 }  // namespace
 
-bool BeginRegionPick(uint32_t display_id, const std::vector<SuggestedRegion>& windows,
-                     const std::vector<SuggestedRegion>& faces, RegionPickerMode initial_mode) {
-    if (g_picker_view) return false;  // one picker at a time
-    NSScreen* screen = ScreenForDisplay(display_id);
+bool BeginRegionPick(const std::vector<PickerDisplay>& displays, RegionPickerMode initial_mode) {
+    if (!g_picker_overlays.empty()) return false;  // one picker at a time
 
-    SidescopesPickerWindow* overlay =
-        [[SidescopesPickerWindow alloc] initWithContentRect:screen.frame
-                                                  styleMask:NSWindowStyleMaskBorderless
-                                                    backing:NSBackingStoreBuffered
-                                                      defer:NO];
-    overlay.backgroundColor = NSColor.clearColor;
-    overlay.opaque = NO;
-    overlay.level = NSStatusWindowLevel + 1;
-    overlay.collectionBehavior =
-        NSWindowCollectionBehaviorCanJoinAllSpaces | NSWindowCollectionBehaviorFullScreenAuxiliary;
+    // Window suggestions may be empty everywhere; a window pick with
+    // nothing to pick opens as drawing, like before, but the decision is
+    // global so every display shows the same mode.
+    bool any_windows = false;
+    for (const PickerDisplay& entry : displays) any_windows |= !entry.windows.empty();
+    const bool draw = initial_mode == RegionPickerMode::Draw ||
+                      (initial_mode == RegionPickerMode::PickWindows && !any_windows);
+    const bool faces = initial_mode == RegionPickerMode::PickFaces;
 
-    SidescopesPickerView* view =
-        [[SidescopesPickerView alloc] initWithFrame:overlay.contentView.bounds];
-    view.hoveredSuggestion = -1;
-    const NSSize view_size = screen.frame.size;
-    for (const SuggestedRegion& suggestion : windows) {
-        view->windows_.emplace_back(RegionToViewRect(suggestion.region, view_size),
-                                    suggestion.label);
+    for (const PickerDisplay& entry : displays) {
+        NSScreen* screen = nil;
+        for (NSScreen* candidate in NSScreen.screens) {
+            NSNumber* number = candidate.deviceDescription[@"NSScreenNumber"];
+            if (number && number.unsignedIntValue == entry.display_id) screen = candidate;
+        }
+        if (!screen) continue;  // gone between enumeration and now
+
+        SidescopesPickerWindow* overlay =
+            [[SidescopesPickerWindow alloc] initWithContentRect:screen.frame
+                                                      styleMask:NSWindowStyleMaskBorderless
+                                                        backing:NSBackingStoreBuffered
+                                                          defer:NO];
+        overlay.backgroundColor = NSColor.clearColor;
+        overlay.opaque = NO;
+        overlay.level = NSStatusWindowLevel + 1;
+        overlay.collectionBehavior = NSWindowCollectionBehaviorCanJoinAllSpaces |
+                                     NSWindowCollectionBehaviorFullScreenAuxiliary;
+
+        SidescopesPickerView* view =
+            [[SidescopesPickerView alloc] initWithFrame:overlay.contentView.bounds];
+        view.hoveredSuggestion = -1;
+        const NSSize view_size = screen.frame.size;
+        for (const SuggestedRegion& suggestion : entry.windows) {
+            view->windows_.emplace_back(RegionToViewRect(suggestion.region, view_size),
+                                        suggestion.label);
+        }
+        for (const SuggestedRegion& suggestion : entry.faces) {
+            view->faces_.emplace_back(RegionToViewRect(suggestion.region, view_size),
+                                      suggestion.label);
+        }
+        view.drawMode = draw ? YES : NO;
+        view.facesMode = faces ? YES : NO;
+        if (!draw) view->suggestions_ = faces ? view->faces_ : view->windows_;
+        overlay.contentView = view;
+        overlay.acceptsMouseMovedEvents = YES;
+
+        g_picker_overlays.push_back(PickerOverlay{overlay, view, entry.display_id, view_size});
     }
-    for (const SuggestedRegion& suggestion : faces) {
-        view->faces_.emplace_back(RegionToViewRect(suggestion.region, view_size), suggestion.label);
-    }
-    // This application's own visible windows float above the overlay for
+    if (g_picker_overlays.empty()) return false;
+
+    // This application's own visible windows float above the overlays for
     // the duration: they stay undimmed and clickable by ordinary window
     // compositing, corners and all, and follow their own movement with no
     // repainting on our side. The rectangles still feed the banner
     // placement, which avoids sitting beneath them.
     for (NSWindow* window in NSApp.windows) {
-        if (window == overlay || window == g_border_window || !window.isVisible) continue;
+        if (IsPickerOverlayWindow(window) || window == g_border_window || !window.isVisible)
+            continue;
         g_raised_windows.emplace_back(window, window.level);
-        window.level = overlay.level + 1;
+        window.level = NSStatusWindowLevel + 2;
     }
-    view->exclusions_ = OwnWindowExclusions(overlay, screen.frame.origin);
-    if (initial_mode == RegionPickerMode::Draw ||
-        (initial_mode == RegionPickerMode::PickWindows && windows.empty())) {
-        view.drawMode = YES;
-    } else if (initial_mode == RegionPickerMode::PickFaces) {
-        view.facesMode = YES;
-        view->suggestions_ = view->faces_;
-    } else {
-        view->suggestions_ = view->windows_;
-    }
-    overlay.contentView = view;
-    overlay.acceptsMouseMovedEvents = YES;
+    for (PickerOverlay& overlay : g_picker_overlays)
+        overlay.view->exclusions_ = OwnWindowExclusions(overlay.window.frame.origin);
 
-    // Force the app frontmost so the overlay owns the mouse for the whole
-    // interaction; otherwise clicks can activate whatever is behind it.
+    // Force the app frontmost so the overlays own the mouse for the whole
+    // interaction; the keyboard starts on the display under the cursor -
+    // that is where the user's attention is - and follows clicks after.
     [NSApp activateIgnoringOtherApps:YES];
-    [overlay makeKeyAndOrderFront:nil];
-    [overlay makeFirstResponder:view];
-
-    g_picker_window = overlay;
-    g_picker_view = view;
-    g_picker_size = view_size;
+    const uint32_t cursor_display = DisplayUnderCursor().value_or(0);
+    PickerOverlay* key_overlay = &g_picker_overlays.front();
+    for (PickerOverlay& overlay : g_picker_overlays) {
+        if (overlay.display_id == cursor_display) key_overlay = &overlay;
+    }
+    for (PickerOverlay& overlay : g_picker_overlays) {
+        if (&overlay == key_overlay) continue;
+        [overlay.window orderFrontRegardless];
+    }
+    [key_overlay->window makeKeyAndOrderFront:nil];
+    [key_overlay->window makeFirstResponder:key_overlay->view];
     return true;
 }
 
 RegionPickPoll PollRegionPick() {
     RegionPickPoll poll;
-    if (!g_picker_view) return poll;
+    if (g_picker_overlays.empty()) return poll;
     poll.active = true;
 
     // The banner dodges this application's own windows; their rectangles
@@ -818,13 +861,14 @@ RegionPickPoll PollRegionPick() {
     const double now = CFAbsoluteTimeGetCurrent();
     if (now - last_exclusion_refresh > 0.2) {
         last_exclusion_refresh = now;
-        std::vector<NSRect> exclusions =
-            OwnWindowExclusions(g_picker_window, g_picker_window.frame.origin);
-        if (exclusions.size() != g_picker_view->exclusions_.size() ||
-            !std::equal(exclusions.begin(), exclusions.end(), g_picker_view->exclusions_.begin(),
-                        [](const NSRect& a, const NSRect& b) { return NSEqualRects(a, b); })) {
-            g_picker_view->exclusions_ = std::move(exclusions);
-            g_picker_view.needsDisplay = YES;
+        for (PickerOverlay& overlay : g_picker_overlays) {
+            std::vector<NSRect> exclusions = OwnWindowExclusions(overlay.window.frame.origin);
+            if (exclusions.size() != overlay.view->exclusions_.size() ||
+                !std::equal(exclusions.begin(), exclusions.end(), overlay.view->exclusions_.begin(),
+                            [](const NSRect& a, const NSRect& b) { return NSEqualRects(a, b); })) {
+                overlay.view->exclusions_ = std::move(exclusions);
+                overlay.view.needsDisplay = YES;
+            }
         }
     }
 
@@ -838,42 +882,57 @@ RegionPickPoll PollRegionPick() {
         return region;
     };
 
-    if (g_picker_view.finished) {
+    // Any overlay finishing - a confirm there, or ESC anywhere - ends the
+    // pick on every display.
+    for (PickerOverlay& overlay : g_picker_overlays) {
+        if (!overlay.view.finished) continue;
         poll.finished = true;
-        if (g_picker_view.picked)
-            poll.confirmed = region_from_view(g_picker_view.confirmedRect, g_picker_size);
+        poll.display_id = overlay.display_id;
+        if (overlay.view.picked)
+            poll.confirmed = region_from_view(overlay.view.confirmedRect, overlay.size);
         for (const auto& [window, level] : g_raised_windows) window.level = level;
         g_raised_windows.clear();
-        [g_picker_window orderOut:nil];
-        g_picker_window = nil;
-        g_picker_view = nil;
+        for (PickerOverlay& each : g_picker_overlays) [each.window orderOut:nil];
+        g_picker_overlays.clear();
         return poll;
     }
 
-    if (!g_picker_view.drawMode) {
-        const NSInteger hovered = g_picker_view.hoveredSuggestion;
-        if (hovered >= 0 && hovered < static_cast<NSInteger>(g_picker_view->suggestions_.size()))
-            poll.preview =
-                region_from_view(g_picker_view->suggestions_[hovered].first, g_picker_size);
-    } else if (g_picker_view.dragging) {
-        const NSRect selection = [g_picker_view selectionRect];
-        if (selection.size.width > 8 && selection.size.height > 8)
-            poll.preview = region_from_view(selection, g_picker_size);
+    // The cursor is only ever on one display, so at most one overlay has
+    // something to preview.
+    for (PickerOverlay& overlay : g_picker_overlays) {
+        if (!overlay.view.drawMode) {
+            const NSInteger hovered = overlay.view.hoveredSuggestion;
+            if (hovered >= 0 &&
+                hovered < static_cast<NSInteger>(overlay.view->suggestions_.size())) {
+                poll.preview =
+                    region_from_view(overlay.view->suggestions_[hovered].first, overlay.size);
+                poll.display_id = overlay.display_id;
+                break;
+            }
+        } else if (overlay.view.dragging) {
+            const NSRect selection = [overlay.view selectionRect];
+            if (selection.size.width > 8 && selection.size.height > 8) {
+                poll.preview = region_from_view(selection, overlay.size);
+                poll.display_id = overlay.display_id;
+                break;
+            }
+        }
     }
     return poll;
 }
 
 void CancelRegionPick() {
-    if (!g_picker_view) return;
-    g_picker_view.picked = NO;
-    g_picker_view.finished = YES;
+    if (g_picker_overlays.empty()) return;
+    g_picker_overlays.front().view.picked = NO;
+    g_picker_overlays.front().view.finished = YES;
 }
 
 void SetRegionPickMode(RegionPickerMode mode) {
-    if (!g_picker_view) return;
-    [g_picker_view switchToMode:(mode == RegionPickerMode::Draw        ? 1
-                                 : mode == RegionPickerMode::PickFaces ? 2
-                                                                       : 0)];
+    for (PickerOverlay& overlay : g_picker_overlays) {
+        [overlay.view switchToMode:(mode == RegionPickerMode::Draw        ? 1
+                                    : mode == RegionPickerMode::PickFaces ? 2
+                                                                          : 0)];
+    }
 }
 
 void ShowRegionBorder(uint32_t display_id, const RegionOfInterest& region) {
