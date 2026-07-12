@@ -1194,15 +1194,14 @@ int main() {
         const float toolbar_end = ImGui::GetCursorPosX();
         if (vectorscope_color) {
             const FloatColor& color = *vectorscope_color;
-            char readout[48];
-            if (values_as_percent)
-                std::snprintf(readout, sizeof(readout), "%2.0f%% %2.0f%% %2.0f%%", color.r / 2.55,
-                              color.g / 2.55, color.b / 2.55);
-            else
-                std::snprintf(readout, sizeof(readout), "%3.0f %3.0f %3.0f", color.r, color.g,
-                              color.b);
-            const float text_width = ImGui::CalcTextSize(readout).x;
+            // The readout's geometry never follows its digits: each value
+            // gets a column sized for the widest it can be and is
+            // right-aligned inside it, so neither the swatch nor the
+            // numbers wander as the cursor moves across the screen.
+            const float column_width = ImGui::CalcTextSize(values_as_percent ? "100%" : "255").x;
+            const float column_gap = ImGui::CalcTextSize(" ").x;
             const float swatch = ImGui::GetTextLineHeight();
+            const float text_width = 3 * column_width + 2 * column_gap;
             const float readout_start =
                 ImGui::GetWindowContentRegionMax().x - (text_width + swatch + 6);
             if (readout_start >= toolbar_end + 8) {
@@ -1212,8 +1211,19 @@ int main() {
                     ImVec4(color.r / 255.0f, color.g / 255.0f, color.b / 255.0f, 1.0f),
                     ImGuiColorEditFlags_NoTooltip | ImGuiColorEditFlags_NoDragDrop,
                     ImVec2(swatch, swatch));
-                ImGui::SameLine(0.0f, 6.0f);
-                ImGui::TextUnformatted(readout);
+                const float columns_start = readout_start + swatch + 6;
+                const float channels[3] = {color.r, color.g, color.b};
+                for (int channel = 0; channel < 3; ++channel) {
+                    char value[8];
+                    if (values_as_percent)
+                        std::snprintf(value, sizeof(value), "%.0f%%", channels[channel] / 2.55);
+                    else
+                        std::snprintf(value, sizeof(value), "%.0f", channels[channel]);
+                    const float column_start =
+                        columns_start + channel * (column_width + column_gap);
+                    ImGui::SameLine(column_start + column_width - ImGui::CalcTextSize(value).x);
+                    ImGui::TextUnformatted(value);
+                }
             } else {
                 ImGui::NewLine();
             }
