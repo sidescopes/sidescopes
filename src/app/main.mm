@@ -502,6 +502,21 @@ int main() {
     layer.pixelFormat = MTLPixelFormatBGRA8Unorm;
     native_window.contentView.layer = layer;
     native_window.contentView.wantsLayer = YES;
+    // During a live window resize macOS runs a modal tracking loop that
+    // stalls the render loop; by default the layer stretches its last
+    // frame to the new size, warping the scopes until release. Pinning
+    // the contents to the top-left keeps the last frame 1:1 - blank space
+    // when growing, cropped when shrinking - and the loop redraws
+    // correctly the moment the drag ends.
+    layer.contentsGravity = kCAGravityTopLeft;
+    // Gravity makes the contents scale meaningful: without it the Retina
+    // drawable displays at double size. The stretch gravity used to hide
+    // that this was never set.
+    layer.contentsScale = native_window.backingScaleFactor;
+    // The area beyond the pinned contents during a grow shows the layer
+    // and window background; both match the application's black.
+    layer.backgroundColor = CGColorGetConstantColor(kCGColorBlack);
+    native_window.backgroundColor = NSColor.blackColor;
     // Above document and panel windows (Quick Look previews float higher
     // than ordinary floating windows), on every Space.
     native_window.level = NSStatusWindowLevel;
@@ -725,6 +740,12 @@ int main() {
         glfwGetFramebufferSize(window, &framebuffer_width, &framebuffer_height);
         if (framebuffer_width == 0 || framebuffer_height == 0) continue;
         layer.drawableSize = CGSizeMake(framebuffer_width, framebuffer_height);
+        if (layer.contentsScale != native_window.backingScaleFactor)
+            layer.contentsScale = native_window.backingScaleFactor;
+        // The area beyond the pinned contents during a grow shows the layer
+        // and window background; both match the application's black.
+        layer.backgroundColor = CGColorGetConstantColor(kCGColorBlack);
+        native_window.backgroundColor = NSColor.blackColor;  // display changed
         id<CAMetalDrawable> drawable = [layer nextDrawable];
         if (!drawable) continue;
 
@@ -909,6 +930,11 @@ int main() {
             ImGui::SameLine(0.0f, 2.0f);
         }
 
+        // The readout yields before the icons do: on a narrow window it
+        // would right-align on top of the toolbar buttons, and whoever
+        // wants the window that small still needs the buttons - the
+        // cursor color has the vectorscope marker and the context menu.
+        const float toolbar_end = ImGui::GetCursorPosX();
         if (vectorscope_color) {
             const FloatColor& color = *vectorscope_color;
             char readout[48];
@@ -920,13 +946,20 @@ int main() {
                               color.b);
             const float text_width = ImGui::CalcTextSize(readout).x;
             const float swatch = ImGui::GetTextLineHeight();
-            ImGui::SameLine(ImGui::GetWindowContentRegionMax().x - (text_width + swatch + 6));
-            ImGui::ColorButton("##cursor-color",
-                               ImVec4(color.r / 255.0f, color.g / 255.0f, color.b / 255.0f, 1.0f),
-                               ImGuiColorEditFlags_NoTooltip | ImGuiColorEditFlags_NoDragDrop,
-                               ImVec2(swatch, swatch));
-            ImGui::SameLine(0.0f, 6.0f);
-            ImGui::TextUnformatted(readout);
+            const float readout_start =
+                ImGui::GetWindowContentRegionMax().x - (text_width + swatch + 6);
+            if (readout_start >= toolbar_end + 8) {
+                ImGui::SameLine(readout_start);
+                ImGui::ColorButton(
+                    "##cursor-color",
+                    ImVec4(color.r / 255.0f, color.g / 255.0f, color.b / 255.0f, 1.0f),
+                    ImGuiColorEditFlags_NoTooltip | ImGuiColorEditFlags_NoDragDrop,
+                    ImVec2(swatch, swatch));
+                ImGui::SameLine(0.0f, 6.0f);
+                ImGui::TextUnformatted(readout);
+            } else {
+                ImGui::NewLine();
+            }
         } else {
             ImGui::NewLine();
         }
