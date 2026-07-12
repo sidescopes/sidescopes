@@ -394,6 +394,11 @@ std::atomic<int> g_faces_on_screen{-1};
 std::atomic<bool> g_face_check_requested{false};
 std::atomic<bool> g_face_check_running{false};
 
+// Minimizing is "get out of my way": the region border follows the
+// window down and returns on restore. The flag wakes the frame loop's
+// border sync when the iconified state flips either way.
+std::atomic<bool> g_iconify_changed{false};
+
 void RefreshFacePresence(AnalysisWorker& worker, uint32_t capture_display) {
     if (!SupportsFaceDetection()) return;
     if (g_face_check_running.exchange(true)) return;
@@ -623,6 +628,7 @@ int main() {
     glfwSetWindowFocusCallback(window, [](GLFWwindow*, int focused) {
         if (focused) g_face_check_requested.store(true);
     });
+    glfwSetWindowIconifyCallback(window, [](GLFWwindow*, int) { g_iconify_changed.store(true); });
 
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
@@ -876,7 +882,7 @@ int main() {
     };
     const auto sync_region_border = [&] {
         if (capture_display == 0) return;
-        if (is_full_region())
+        if (is_full_region() || glfwGetWindowAttrib(window, GLFW_ICONIFIED))
             HideRegionBorder();
         else
             ShowRegionBorder(capture_display, analysis.region);
@@ -929,6 +935,10 @@ int main() {
         // Capture is a service that dies (lock screen, display sleep);
         // restarting it is our job.
         if (g_face_check_requested.exchange(false)) RefreshFacePresence(worker, capture_display);
+        if (g_iconify_changed.exchange(false)) {
+            sync_region_border();
+            last_activity = glfwGetTime();
+        }
         if (orphan_escape.exchange(false)) {
             reset_region_to_full();
             last_activity = glfwGetTime();

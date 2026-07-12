@@ -76,6 +76,9 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   neutral axis exactly.
 - All scopes share one graticule palette, brighter than before; the
   parade separates its three panes with dark gutters.
+- The region border hides while the window is minimized and returns on
+  restore: minimized scopes measure nothing, and the border's grab band
+  should not sit interactive over the editor meanwhile.
 
 ### Fixed
 
