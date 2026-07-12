@@ -496,6 +496,11 @@ void ApplyTheme() {
     colors[ImGuiCol_TextDisabled] = ImVec4(0.50f, 0.50f, 0.53f, 1.0f);
 }
 
+// The fixed-width companion for values whose glyphs must align - hex
+// codes most of all; null when no system monospace font was found, and
+// the interface font stands in.
+ImFont* g_monospace_font = nullptr;
+
 void LoadInterfaceFont(GLFWwindow* window) {
     float scale_x = 2.0f;
     float scale_y = 2.0f;
@@ -503,9 +508,17 @@ void LoadInterfaceFont(GLFWwindow* window) {
     ImFontConfig config;
     config.RasterizerDensity = scale_x;
     ImGuiIO& io = ImGui::GetIO();
+    bool loaded = false;
     for (const std::string& path : InterfaceFontFiles()) {
-        if (io.Fonts->AddFontFromFileTTF(path.c_str(), 13.0f, &config)) return;
+        if (io.Fonts->AddFontFromFileTTF(path.c_str(), 13.0f, &config)) {
+            loaded = true;
+            break;
+        }
     }
+    for (const std::string& path : MonospaceFontFiles()) {
+        if ((g_monospace_font = io.Fonts->AddFontFromFileTTF(path.c_str(), 13.0f, &config))) break;
+    }
+    (void)loaded;
 }
 
 // The interface is authored in 100%-scale units. On macOS GLFW window
@@ -1717,6 +1730,14 @@ int main() {
         // small swatches with the same click.
         // Managing a pin happens where the pin lives; the app-wide
         // native menu yields to this popup.
+        // Hex codes render in the fixed-width font when one loaded, so
+        // every code is the same width and columns anchor exactly.
+        const auto push_hex_font = [&] {
+            if (g_monospace_font) ImGui::PushFont(g_monospace_font);
+        };
+        const auto pop_hex_font = [&] {
+            if (g_monospace_font) ImGui::PopFont();
+        };
         const auto draw_pinned_menu = [&] {
             if (!ImGui::BeginPopup("##pinned-menu")) return;
             if (pinned_menu_index >= 0 &&
@@ -1865,6 +1886,7 @@ int main() {
                 ImGui::TextUnformatted(value);
             }
             ImGui::SameLine(0.0f, 0.0f);
+            push_hex_font();
             const float hex_width = ImGui::CalcTextSize(hex).x;
             if (ImGui::GetContentRegionAvail().x >= hex_width + 12.0f) {
                 ImGui::SameLine(area.x - hex_width);
@@ -1873,6 +1895,7 @@ int main() {
                 ImGui::NewLine();
                 ImGui::TextUnformatted(hex);
             }
+            pop_hex_font();
             if (ImGui::IsItemClicked()) ImGui::SetClipboardText(hex);
             ImGui::SetItemTooltip("click to copy");
 
@@ -1913,15 +1936,20 @@ int main() {
                         draw->AddRect(lo, hi, IM_COL32(235, 235, 235, 235), 0.0f, 0, 1.5f);
                     }
                     ImGui::SameLine();
+                    push_hex_font();
                     ImGui::TextUnformatted(pin_hex);
+                    pop_hex_font();
                     if (ImGui::IsItemClicked()) ImGui::SetClipboardText(pin_hex);
                     ImGui::SetItemTooltip("click to copy");
                     // The delta against the live color answers the deck's
                     // question - does the picture match the reference? -
                     // per channel, continuously, each value in a fixed
                     // column so nothing twitches as the cursor moves.
+                    push_hex_font();
+                    const float hex_column = ImGui::CalcTextSize("#DDDDDD").x;
+                    pop_hex_font();
                     const float deltas_start = ImGui::GetCursorPosX() + line_height + column_gap +
-                                               ImGui::CalcTextSize("#DDDDDD").x + 2 * column_gap;
+                                               hex_column + 2 * column_gap;
                     const float deltas[3] = {color.r - pinned_colors[index].r,
                                              color.g - pinned_colors[index].g,
                                              color.b - pinned_colors[index].b};
@@ -1937,6 +1965,12 @@ int main() {
                         ImGui::TextDisabled("%s", delta);
                         ImGui::SetItemTooltip("live minus pinned, per channel");
                     }
+                    // The cross centers on the text it sits beside, not
+                    // on the taller row: glyphs center a couple of pixels
+                    // above the row's middle, and the eye reads against
+                    // the neighboring digits.
+                    const float text_center_y =
+                        (ImGui::GetItemRectMin().y + ImGui::GetItemRectMax().y) / 2.0f;
                     char close_id[24];
                     std::snprintf(close_id, sizeof(close_id), "##unpin-%d",
                                   static_cast<int>(index));
@@ -1958,7 +1992,7 @@ int main() {
                     // matter how the box is placed.
                     const ImVec2 cross_center =
                         ImVec2((ImGui::GetItemRectMin().x + ImGui::GetItemRectMax().x) / 2.0f,
-                               (ImGui::GetItemRectMin().y + ImGui::GetItemRectMax().y) / 2.0f);
+                               text_center_y);
                     const float arm = line_height * 0.17f;
                     const ImU32 ink = ImGui::IsItemHovered() ? IM_COL32(235, 90, 90, 255)
                                                              : IM_COL32(150, 150, 150, 180);

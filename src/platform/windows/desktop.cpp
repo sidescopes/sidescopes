@@ -212,6 +212,14 @@ std::vector<std::string> InterfaceFontFiles() {
     return {base + "\\Fonts\\segoeui.ttf", base + "\\Fonts\\arial.ttf"};
 }
 
+std::vector<std::string> MonospaceFontFiles() {
+    wchar_t windows_directory[MAX_PATH];
+    const UINT length = GetWindowsDirectoryW(windows_directory, MAX_PATH);
+    if (length == 0 || length >= MAX_PATH) return {};
+    const std::string base = Utf8FromWide(windows_directory, static_cast<int>(length));
+    return {base + "\\Fonts\\consola.ttf", base + "\\Fonts\\cour.ttf"};
+}
+
 void ObserveSystemWake(std::function<void()>) {
     // Duplication dies loudly on lock and wake (access lost) and the
     // application's retry loop rebuilds it from scratch, so there is

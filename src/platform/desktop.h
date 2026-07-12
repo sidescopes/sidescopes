@@ -95,6 +95,10 @@ void HideApplication();
 // the application loads the first one that exists.
 std::vector<std::string> InterfaceFontFiles();
 
+// Absolute paths of fixed-width system fonts, best first, for values
+// whose glyphs must align - hex codes most of all.
+std::vector<std::string> MonospaceFontFiles();
+
 // Invokes the callback - on the platform's main-thread event context -
 // whenever the display or the user session wakes up. Capture streams
 // survive those transitions as zombies that look alive but deliver

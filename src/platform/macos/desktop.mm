@@ -127,6 +127,11 @@ std::vector<std::string> InterfaceFontFiles() {
             "/System/Library/Fonts/Supplemental/Arial.ttf"};
 }
 
+std::vector<std::string> MonospaceFontFiles() {
+    return {"/System/Library/Fonts/SFNSMono.ttf", "/System/Library/Fonts/Menlo.ttc",
+            "/System/Library/Fonts/Supplemental/Courier New.ttf"};
+}
+
 void ObserveSystemWake(std::function<void()> callback) {
     // Waking the display or unlocking the session can leave a capture
     // stream a zombie: it either stops delivering without an error, or a
