@@ -99,6 +99,10 @@ ModifierState CurrentModifiers() {
     return state;
 }
 
+bool PlatformClosesWindowOnCommandW() {
+    return true;
+}
+
 void OpenScreenRecordingSettings() {
     NSURL* url = [NSURL
         URLWithString:

@@ -71,6 +71,11 @@ struct ModifierState {
 };
 ModifierState CurrentModifiers();
 
+// Whether the platform's convention closes the window on a Command+W
+// chord (macOS). Windows closes through the system's Alt+F4 and the
+// title bar; a Ctrl+W there is no convention for utility windows.
+bool PlatformClosesWindowOnCommandW();
+
 // Absolute paths of system fonts suitable for the interface, best first;
 // the application loads the first one that exists.
 std::vector<std::string> InterfaceFontFiles();

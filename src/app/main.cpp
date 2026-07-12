@@ -1308,7 +1308,13 @@ int main() {
         // modifiers on every key press and click, so a Shift key-up
         // swallowed by a system overlay (the screenshot interface) leaves
         // the cache stuck exactly when the user next switches a scope.
-        const bool stack_modifier = CurrentModifiers().shift;
+        const ModifierState modifiers = CurrentModifiers();
+        const bool stack_modifier = modifiers.shift;
+        // Command, Control, and Option chords belong to the system and
+        // the window - Cmd+W closes a window on macOS, it must never
+        // open the waveform - so any of them silences the plain-letter
+        // shortcuts. Shift alone stays meaningful: it stacks.
+        const bool system_chord = modifiers.command || modifiers.control || modifiers.option;
         const auto scope_toggle = [&](const char* id, ScopeGlyph kind, const char* tooltip) {
             const char letter[2] = {ScopeLetter(kind), '\0'};
             if (ScopeToggleButton(id, letter, scope_shown(kind), tooltip))
@@ -1342,7 +1348,10 @@ int main() {
             const ImGuiKey key = key_for(binding);
             return key != ImGuiKey_None && ImGui::IsKeyPressed(key, false);
         };
-        if (!io.WantTextInput) {
+        if (PlatformClosesWindowOnCommandW() && modifiers.command && !modifiers.control &&
+            !modifiers.option && !io.WantTextInput && ImGui::IsKeyPressed(ImGuiKey_W, false))
+            glfwSetWindowShouldClose(window, GLFW_TRUE);
+        if (!io.WantTextInput && !system_chord) {
             if (pressed(shortcuts.vectorscope))
                 choose_scope(ScopeGlyph::Vectorscope, stack_modifier);
             if (pressed(shortcuts.waveform)) choose_scope(ScopeGlyph::Waveform, stack_modifier);

@@ -183,6 +183,10 @@ ModifierState CurrentModifiers() {
     return state;
 }
 
+bool PlatformClosesWindowOnCommandW() {
+    return false;
+}
+
 void OpenScreenRecordingSettings() {
     // Reading the desktop needs no permission on Windows.
 }

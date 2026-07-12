@@ -100,6 +100,11 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- System shortcut chords no longer trigger scope switches: Cmd+W closes
+  the window on macOS instead of opening the waveform, and any
+  Command/Control/Option combination leaves the plain-letter shortcuts
+  alone on both platforms.
+
 - Activating a scope no longer flashes garbage or stale data for its
   first frames: textures start blanked instead of holding recycled GPU
   memory, and turning a scope on waits briefly for the analysis worker
