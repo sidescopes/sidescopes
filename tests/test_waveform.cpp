@@ -121,20 +121,27 @@ TEST_CASE("Waveform parade shows each channel in its own third") {
     scope.Accumulate(frame.View(), IntRect{0, 0, 32, 16});
 
     constexpr int kThird = Waveform::kColumns / 3;
-    const auto value_at = [&](int column, int row, int channel) {
-        return scope.Image()
-            .rgba[(static_cast<std::size_t>(row) * Waveform::kColumns + column) * 4 + channel];
+    // Sparse test frames splat isolated columns and the gutters shift
+    // the pane mapping, so probe by scanning each pane's interior.
+    const auto pane_peak = [&](int pane, int row, int channel) {
+        int peak = 0;
+        for (int column = pane * kThird; column < (pane + 1) * kThird; ++column)
+            peak = std::max<int>(
+                peak, scope.Image()
+                          .rgba[(static_cast<std::size_t>(row) * Waveform::kColumns + column) * 4 +
+                                channel]);
+        return peak;
     };
     // Red third: lit at row 255-10 in red, dark in green and blue.
-    CHECK(value_at(kThird / 2, 255 - 10, 0) > 0);
-    CHECK(value_at(kThird / 2, 255 - 10, 1) == 0);
-    CHECK(value_at(kThird / 2, 255 - 150, 0) == 0);
+    CHECK(pane_peak(0, 255 - 10, 0) > 0);
+    CHECK(pane_peak(0, 255 - 10, 1) == 0);
+    CHECK(pane_peak(0, 255 - 150, 0) == 0);
     // Green third: lit at row 255-150 in green only.
-    CHECK(value_at(kThird + kThird / 2, 255 - 150, 1) > 0);
-    CHECK(value_at(kThird + kThird / 2, 255 - 150, 0) == 0);
+    CHECK(pane_peak(1, 255 - 150, 1) > 0);
+    CHECK(pane_peak(1, 255 - 150, 0) == 0);
     // Blue third: lit at row 255-240 in blue only.
-    CHECK(value_at(2 * kThird + kThird / 2, 255 - 240, 2) > 0);
-    CHECK(value_at(2 * kThird + kThird / 2, 255 - 240, 1) == 0);
+    CHECK(pane_peak(2, 255 - 240, 2) > 0);
+    CHECK(pane_peak(2, 255 - 240, 1) == 0);
 }
 
 TEST_CASE("Waveform parade preserves horizontal position within each third") {
@@ -154,14 +161,20 @@ TEST_CASE("Waveform parade preserves horizontal position within each third") {
     scope.Accumulate(frame.View(), IntRect{0, 0, 64, 16});
 
     constexpr int kThird = Waveform::kColumns / 3;
-    const auto red_at = [&](int column, int row) {
-        return scope.Image()
-            .rgba[(static_cast<std::size_t>(row) * Waveform::kColumns + column) * 4];
+    // Scan each local half of the red pane: the gutters shift exact
+    // column positions, the halves' contents do not move between them.
+    const auto half_peak = [&](int begin, int end, int row) {
+        int peak = 0;
+        for (int column = begin; column < end; ++column)
+            peak = std::max<int>(
+                peak, scope.Image()
+                          .rgba[(static_cast<std::size_t>(row) * Waveform::kColumns + column) * 4]);
+        return peak;
     };
-    CHECK(red_at(kThird / 4, 255 - 200) > 0);  // left local half: bright level
-    CHECK(red_at(kThird / 4, 255 - 50) == 0);
-    CHECK(red_at(3 * kThird / 4, 255 - 50) > 0);  // right local half: dark level
-    CHECK(red_at(3 * kThird / 4, 255 - 200) == 0);
+    CHECK(half_peak(0, kThird / 2, 255 - 200) > 0);  // left local half: bright level
+    CHECK(half_peak(0, kThird / 2 - 8, 255 - 50) == 0);
+    CHECK(half_peak(kThird / 2 + 8, kThird, 255 - 50) > 0);  // right local half: dark level
+    CHECK(half_peak(kThird / 2 + 8, kThird, 255 - 200) == 0);
 }
 
 TEST_CASE("Waveform projection reports the luma level") {

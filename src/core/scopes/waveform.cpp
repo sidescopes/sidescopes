@@ -332,19 +332,24 @@ void Waveform::MapBinsToImage(uint64_t sampled_rows) {
         // the overlaid modes.
         parade_.assign(3 * plane_size, 0);
         const int third = columns_ / 3;
+        // A dark gutter separates the panes so each channel reads as its
+        // own plot instead of three traces colliding at hard seams.
+        const int gutter = std::max(2, columns_ / 256);
         const uint32_t* planes[3] = {red_plane, green_plane, blue_plane};
         for (int channel = 0; channel < 3; ++channel) {
             uint32_t* out_plane = parade_.data() + static_cast<std::size_t>(channel) * plane_size;
-            const int first = channel * third;
-            const int last = channel == 2 ? columns_ : (channel + 1) * third;
+            const int first = channel * third + (channel > 0 ? gutter : 0);
+            const int last =
+                (channel == 2 ? columns_ : (channel + 1) * third) - (channel < 2 ? gutter : 0);
+            const int span = last - first;
             for (int row = 0; row < kLevels; ++row) {
                 const uint32_t* source_row =
                     planes[channel] + static_cast<std::size_t>(row) * columns_;
                 uint32_t* out_row = out_plane + static_cast<std::size_t>(row) * columns_;
                 for (int column = first; column < last; ++column) {
                     const int local = column - first;
-                    const int begin = local * columns_ / third;
-                    const int end = std::min((local + 1) * columns_ / third, columns_);
+                    const int begin = local * columns_ / span;
+                    const int end = std::min((local + 1) * columns_ / span, columns_);
                     uint32_t densest_in_window = 0;
                     for (int source = begin; source < end; ++source)
                         densest_in_window = std::max(densest_in_window, source_row[source]);
