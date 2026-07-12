@@ -1,5 +1,6 @@
 # Build
 build/
+build-*/
 cmake-build-*/
 
 # Tooling caches
@@ -9,6 +10,7 @@ compile_commands.json
 # Editors / OS
 .DS_Store
 .idea/
+.vs/
 .vscode/
 imgui.ini
 
