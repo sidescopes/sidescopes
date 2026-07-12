@@ -96,6 +96,7 @@ if(WIN32)
         dxgi
         dwmapi
         gdiplus
+        WindowsApp  # C++/WinRT (the in-box face detector)
     )
     sidescopes_target_defaults(sidescopes_platform)
 endif()
