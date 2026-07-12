@@ -179,8 +179,8 @@ NSCursor* BuildPinCursor(const std::optional<FloatColor>& color) {
 // Color pinning: clicks and drags report areas to average, the region
 // is never touched, and a cursor chip previews the sample.
 @property(nonatomic, assign) BOOL pinMode;
-@property(nonatomic, assign) BOOL pinMany;
 @property(nonatomic, assign) NSRect pinnedArea;
+@property(nonatomic, assign) BOOL pinnedKeepOpen;
 @property(nonatomic, assign) BOOL pinnedReady;
 @property(nonatomic, assign) NSPoint dragStart;
 @property(nonatomic, assign) NSPoint dragCurrent;
@@ -193,22 +193,17 @@ NSCursor* BuildPinCursor(const std::optional<FloatColor>& color) {
 
 @implementation SidescopesPickerView
 
-// 0 = pick a window, 1 = draw, 2 = pick a face, 3 = pin one color,
-// 4 = pin colors until ESC. Face mode is offered even when no face was
-// found: the honest answer is the empty overlay saying so, not a key
-// that silently does nothing.
+// 0 = pick a window, 1 = draw, 2 = pick a face, 3 = pin colors. Face
+// mode is offered even when no face was found: the honest answer is the
+// empty overlay saying so, not a key that silently does nothing.
 - (void)switchToMode:(int)mode {
     const BOOL draw = mode == 1;
     const BOOL faces = mode == 2;
-    const BOOL pin = mode >= 3;
-    const BOOL many = mode == 4;
-    if (self.drawMode == draw && self.facesMode == faces && self.pinMode == pin &&
-        self.pinMany == many)
-        return;
+    const BOOL pin = mode == 3;
+    if (self.drawMode == draw && self.facesMode == faces && self.pinMode == pin) return;
     self.drawMode = draw;
     self.facesMode = faces;
     self.pinMode = pin;
-    self.pinMany = many;
     suggestions_ = faces ? faces_ : windows_;
     self.hoveredSuggestion = -1;
     self.dragging = NO;
@@ -324,9 +319,8 @@ NSCursor* BuildPinCursor(const std::optional<FloatColor>& color) {
             // Pinning is its own tool: no mode keys here and none of the
             // region modes lead back - crossing over midway would blur
             // what a click means.
-            [self drawBanner:self.pinMany ? @"Click or drag to pin colors"
-                                          : @"Click or drag to pin a color"
-                   secondary:self.pinMany ? @"[Esc] done" : @"[Esc] cancel"
+            [self drawBanner:@"Click or drag to pin a color"
+                   secondary:@"[Shift+click] pin and continue    [Esc] done"
                 preferCenter:NO];
         }
         return;
@@ -475,6 +469,9 @@ NSCursor* BuildPinCursor(const std::optional<FloatColor>& color) {
                            point.y - sidescopes::kPinSamplePoints / 2, sidescopes::kPinSamplePoints,
                            sidescopes::kPinSamplePoints);
         }
+        // The click's Shift carries the per-pin decision: pin and keep
+        // picking, or pin and be done.
+        self.pinnedKeepOpen = (event.modifierFlags & NSEventModifierFlagShift) != 0;
         self.pinnedReady = YES;
         if (self.dragging) {
             self.dragging = NO;
@@ -930,8 +927,7 @@ bool BeginRegionPick(const std::vector<PickerDisplay>& displays, RegionPickerMod
     // global so every display shows the same mode.
     bool any_windows = false;
     for (const PickerDisplay& entry : displays) any_windows |= !entry.windows.empty();
-    const bool pin =
-        initial_mode == RegionPickerMode::PinColor || initial_mode == RegionPickerMode::PinColors;
+    const bool pin = initial_mode == RegionPickerMode::PinColor;
     const bool draw = !pin && (initial_mode == RegionPickerMode::Draw ||
                                (initial_mode == RegionPickerMode::PickWindows && !any_windows));
     const bool faces = initial_mode == RegionPickerMode::PickFaces;
@@ -970,7 +966,6 @@ bool BeginRegionPick(const std::vector<PickerDisplay>& displays, RegionPickerMod
         view.drawMode = draw ? YES : NO;
         view.facesMode = faces ? YES : NO;
         view.pinMode = pin ? YES : NO;
-        view.pinMany = initial_mode == RegionPickerMode::PinColors ? YES : NO;
         if (!draw && !pin) view->suggestions_ = faces ? view->faces_ : view->windows_;
         overlay.contentView = view;
         overlay.acceptsMouseMovedEvents = YES;
@@ -1026,7 +1021,6 @@ RegionPickPoll PollRegionPick() {
     // region change. The overlays switch modes in lockstep; the front
     // one speaks for all.
     poll.pin_mode = g_picker_overlays.front().view.pinMode;
-    poll.pin_single = poll.pin_mode && !g_picker_overlays.front().view.pinMany;
 
     // The banner dodges this application's own windows; their rectangles
     // refresh on a gentle cadence - nothing visual tracks them anymore,
@@ -1076,6 +1070,7 @@ RegionPickPoll PollRegionPick() {
         if (!overlay.view.pinnedReady) continue;
         overlay.view.pinnedReady = NO;
         poll.pinned_area = region_from_view(overlay.view.pinnedArea, overlay.size);
+        poll.pinned_keep_open = overlay.view.pinnedKeepOpen;
         poll.display_id = overlay.display_id;
         break;
     }
@@ -1114,7 +1109,7 @@ void CancelRegionPick() {
 void SetRegionPickMode(RegionPickerMode mode) {
     // Region picking and color pinning are separate tools; a pick never
     // crosses between the families midway.
-    const bool pin = mode == RegionPickerMode::PinColor || mode == RegionPickerMode::PinColors;
+    const bool pin = mode == RegionPickerMode::PinColor;
     if (!g_picker_overlays.empty() &&
         (g_picker_overlays.front().view.pinMode ? YES : NO) != (pin ? YES : NO))
         return;
@@ -1122,7 +1117,6 @@ void SetRegionPickMode(RegionPickerMode mode) {
         [overlay.view switchToMode:(mode == RegionPickerMode::Draw        ? 1
                                     : mode == RegionPickerMode::PickFaces ? 2
                                     : mode == RegionPickerMode::PinColor  ? 3
-                                    : mode == RegionPickerMode::PinColors ? 4
                                                                           : 0)];
     }
 }

@@ -65,7 +65,6 @@ enum MenuAction {
     kMenuTogglePercentValues,
     kMenuClearPinnedMarkers,
     kMenuPickPinColor,
-    kMenuPickPinColors,
     kMenuOpenSettings = 50,
     kMenuQuit,
 };
@@ -1409,10 +1408,10 @@ int main() {
             if (SupportsFaceDetection() && pressed(shortcuts.pick_faces))
                 want_region_pick = RegionPickerMode::PickFaces;
             if (pins_available && pressed(shortcuts.pin_color)) {
-                // The pin tool: plain opens pin-one-and-close, Shift the
-                // repeating flavor.
-                want_region_pick =
-                    stack_modifier ? RegionPickerMode::PinColors : RegionPickerMode::PinColor;
+                // One pin tool; each click inside decides between
+                // pin-and-close and Shift's pin-and-continue. A leftover
+                // Shift on the shortcut itself changes nothing.
+                want_region_pick = RegionPickerMode::PinColor;
             }
             if (pressed(shortcuts.vectorscope_zoom))
                 vectorscope_zoom = vectorscope_zoom >= 4 ? 1 : vectorscope_zoom * 2;
@@ -1438,11 +1437,10 @@ int main() {
         ImGui::SameLine(0.0f, 2.0f);
         if (pins_available) {
             std::snprintf(tooltip, sizeof(tooltip),
-                          "Pin a color (%s) - Shift+click to pin multiple colors",
+                          "Pin a color (%s) - Shift+click a color to pin several",
                           shortcuts.pin_color.c_str());
             if (IconButton("##pin-color", RegionIcon::Dropper, tooltip))
-                want_region_pick = ImGui::GetIO().KeyShift ? RegionPickerMode::PinColors
-                                                           : RegionPickerMode::PinColor;
+                want_region_pick = RegionPickerMode::PinColor;
             ImGui::SameLine(0.0f, 2.0f);
         }
         // The face button sits last among the pickers: it is the one
@@ -2148,10 +2146,8 @@ int main() {
             // sections and never appears beside a waveform.
             const auto pin_options = [&] {
                 submenu("Pins");
-                action("Pin a Color...", kMenuPickPinColor, false,
+                action("Pin Colors...", kMenuPickPinColor, false,
                        shortcut_label(shortcuts.pin_color));
-                action("Pin Multiple Colors...", kMenuPickPinColors, false,
-                       "Shift+" + shortcut_label(shortcuts.pin_color));
                 if (!pinned_colors.empty())
                     action("Clear Pinned Markers", kMenuClearPinnedMarkers, false);
                 end_submenu();
@@ -2345,9 +2341,6 @@ int main() {
                 case kMenuPickPinColor:
                     want_region_pick = RegionPickerMode::PinColor;
                     break;
-                case kMenuPickPinColors:
-                    want_region_pick = RegionPickerMode::PinColors;
-                    break;
                 case kMenuClearPinnedMarkers:
                     pinned_colors.clear();
                     break;
@@ -2412,8 +2405,7 @@ int main() {
         // The blocking overlay runs after the frame is submitted; capture and
         // analysis keep flowing underneath.
         if (region_picking && want_region_pick) {
-            const bool target_pin = *want_region_pick == RegionPickerMode::PinColor ||
-                                    *want_region_pick == RegionPickerMode::PinColors;
+            const bool target_pin = *want_region_pick == RegionPickerMode::PinColor;
             if (target_pin || region_pick_is_pin) {
                 // Region picking and color pinning are separate tools; a
                 // pick never morphs across that boundary. The active pick
@@ -2594,8 +2586,7 @@ int main() {
             }
             if (BeginRegionPick(picker_displays, *want_region_pick)) {
                 region_picking = true;
-                region_pick_is_pin = *want_region_pick == RegionPickerMode::PinColor ||
-                                     *want_region_pick == RegionPickerMode::PinColors;
+                region_pick_is_pin = *want_region_pick == RegionPickerMode::PinColor;
             }
             // Consumed either way: a request that could not open (a
             // display gone mid-flight) must not retry every frame.
@@ -2678,7 +2669,9 @@ int main() {
                         pinned = screen_sample->color;
                     }
                     pin_reference_color(pinned);
-                    if (poll.pin_single) CancelRegionPick();
+                    // The click's own Shift decided: pin-and-continue
+                    // stays, a plain pin ends the errand.
+                    if (!poll.pinned_keep_open) CancelRegionPick();
                     last_activity = glfwGetTime();
                 }
                 if (poll.finished || !poll.active) {

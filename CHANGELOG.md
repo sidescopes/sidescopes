@@ -30,10 +30,11 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   carries a live swatch previewing the sample, a click pins a
   cursor-sized patch, and a drag pins the average of the dragged area -
   photographs are textured, so pins come from areas, never single
-  pixels. A click pins one color and closes (P opens this flavor);
-  Shift+click or Shift+P keeps picking until Esc. Neither flavor ever
-  touches the capture region, and the pin tool and the region tools
-  never switch into each other midway.
+  pixels. Each click decides its own fate: a plain click or drag pins
+  and closes, holding Shift pins and keeps picking - a run of pins
+  ends with a plain click, or Esc. Pinning never touches the capture
+  region, and the pin tool and the region tools never switch into
+  each other midway.
 - Vectorscope view magnification: Z cycles 1x/2x/4x, scaling the trace,
   graticule, and markers together, with a badge naming the factor.
 - A linear trace response option beside the default boosted curve: density
@@ -102,12 +103,14 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The region border hides while the window is minimized and returns on
   restore: minimized scopes measure nothing, and the border's grab band
   should not sit interactive over the editor meanwhile.
-- P opens the pin tool and Shift+P its repeating flavor; the pin
-  actions live in a Pins submenu riding the vectorscope's and the
-  color picker's own menu sections. Pinning the region average and
-  pinning the cursor color blind are gone - the tool covers both: a
-  drag averages any area without giving up the monitored region, and
-  a click pins what the cursor swatch already shows.
+- P opens the one pin tool - the single-or-multiple choice moved from
+  the opening shortcut to each click's own Shift, made at the moment
+  the user actually knows the answer. The pin actions live in a Pins
+  submenu riding the vectorscope's and the color picker's own menu
+  sections. Pinning the region average and pinning the cursor color
+  blind are gone - the tool covers both: a drag averages any area
+  without giving up the monitored region, and a click pins what the
+  cursor swatch already shows.
 
 ### Fixed
 

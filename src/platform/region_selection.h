@@ -9,13 +9,14 @@
 namespace sidescopes {
 
 // How the region picker starts out. The mode is chosen up front by the
-// toolbar button (or key) that opened the picker; inside it, A, D, and F
-// switch between window picking, drawing, and face picking, and P (with
-// Shift for the repeating flavor) switches to color pinning. The two pin
-// modes pick colors rather than regions: undimmed, since judging a color
-// through a dim wash misleads, and the capture region is never touched.
-// PinColor closes after one pin; PinColors stays until ESC.
-enum class RegionPickerMode { PickWindows, Draw, PickFaces, PinColor, PinColors };
+// toolbar button (or key) that opened the picker; inside the region
+// modes, A, D, and F switch between window picking, drawing, and face
+// picking. PinColor is its own tool, never switched into or out of: it
+// picks colors rather than regions - undimmed, since judging a color
+// through a dim wash misleads - and the capture region is never
+// touched. Each click decides its own fate: a plain pin closes the
+// tool, a Shift+click (or Shift+drag) pins and keeps it open.
+enum class RegionPickerMode { PickWindows, Draw, PickFaces, PinColor };
 
 // What the picker offers on one display. Region percentages are always
 // relative to their own display.
@@ -40,12 +41,12 @@ struct RegionPickPoll {
     // Color pinning. `pinned_area` is the display-percent rectangle to
     // average and pin - a click delivers a cursor-sized patch, a drag
     // the dragged area - reported as it happens, without finishing the
-    // pick. The mode flags describe the pickers' CURRENT state (overlay
-    // keys switch modes mid-pick): while `pin_mode` is set the caller
-    // must not treat previews or a finish as region changes.
+    // pick. `pinned_keep_open` carries the click's Shift state: the
+    // user's per-pin choice to keep picking. While `pin_mode` is set the
+    // caller must not treat previews or a finish as region changes.
     std::optional<RegionOfInterest> pinned_area;
+    bool pinned_keep_open = false;
     bool pin_mode = false;
-    bool pin_single = false;
 };
 
 // Screenshot-style selection spanning every display at once: each gets

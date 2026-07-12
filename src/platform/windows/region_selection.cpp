@@ -211,10 +211,11 @@ struct PickerState {
     // Color pinning: clicks and drags report areas to average, the
     // region is never touched, and a cursor chip previews the sample.
     bool pin_mode = false;
-    bool pin_many = false;
     // An area the application should average and pin, in overlay-local
-    // pixels, left here until the next poll collects it.
+    // pixels, left here until the next poll collects it - with the
+    // click's Shift state, the per-pin choice to keep picking.
     Gdiplus::RectF pinned_area{};
+    bool pinned_keep_open = false;
     bool pinned_ready = false;
     // The active suggestion list in overlay-local pixels, with labels -
     // the windows or the faces, depending on the mode.
@@ -534,10 +535,8 @@ void PaintPickerScene(PickerState& picker, Gdiplus::Graphics& canvas, double sca
             // Pinning is its own tool: no mode keys here and none of the
             // region modes lead back - crossing over midway would blur
             // what a click means.
-            DrawBanner(
-                canvas, picker,
-                picker.pin_many ? L"Click or drag to pin colors" : L"Click or drag to pin a color",
-                picker.pin_many ? L"[Esc] done" : L"[Esc] cancel", false, scale);
+            DrawBanner(canvas, picker, L"Click or drag to pin a color",
+                       L"[Shift+click] pin and continue    [Esc] done", false, scale);
         }
         return;
     }
@@ -695,26 +694,22 @@ void PaintPickerSelectionDelta(PickerState& picker, const Gdiplus::RectF& previo
     }
 }
 
-// 0 = pick a window, 1 = draw, 2 = pick a face, 3 = pin one color,
-// 4 = pin colors until ESC. Face mode is offered even when no face was
-// found: the honest answer is the empty overlay saying so, not a key
-// that silently does nothing.
+// 0 = pick a window, 1 = draw, 2 = pick a face, 3 = pin colors. Face
+// mode is offered even when no face was found: the honest answer is the
+// empty overlay saying so, not a key that silently does nothing.
 void SwitchPickerMode(int mode) {
     const bool draw = mode == 1;
     const bool faces = mode == 2;
-    const bool pin = mode >= 3;
-    const bool pin_many = mode == 4;
+    const bool pin = mode == 3;
     // Region picking and color pinning are separate tools; a pick never
     // crosses between the families midway.
     if (!g_pickers.empty() && g_pickers.front()->pin_mode != pin) return;
     for (PickerState* picker : g_pickers) {
-        if (picker->draw_mode == draw && picker->faces_mode == faces && picker->pin_mode == pin &&
-            picker->pin_many == pin_many)
+        if (picker->draw_mode == draw && picker->faces_mode == faces && picker->pin_mode == pin)
             continue;
         picker->draw_mode = draw;
         picker->faces_mode = faces;
         picker->pin_mode = pin;
-        picker->pin_many = pin_many;
         picker->suggestions = faces ? picker->faces : picker->windows;
         picker->hovered = -1;
         picker->dragging = false;
@@ -822,6 +817,9 @@ LRESULT CALLBACK PickerProc(HWND window, UINT message, WPARAM w_param, LPARAM l_
                         Gdiplus::RectF(static_cast<Gdiplus::REAL>(point.x) - span / 2,
                                        static_cast<Gdiplus::REAL>(point.y) - span / 2, span, span);
                 }
+                // The click's Shift carries the per-pin decision: pin
+                // and keep picking, or pin and be done.
+                picker.pinned_keep_open = (w_param & MK_SHIFT) != 0;
                 picker.pinned_ready = true;
                 if (picker.dragging) {
                     picker.dragging = false;
@@ -1270,8 +1268,7 @@ bool BeginRegionPick(const std::vector<PickerDisplay>& displays, RegionPickerMod
     // mode.
     bool any_windows = false;
     for (const PickerDisplay& entry : displays) any_windows |= !entry.windows.empty();
-    const bool pin =
-        initial_mode == RegionPickerMode::PinColor || initial_mode == RegionPickerMode::PinColors;
+    const bool pin = initial_mode == RegionPickerMode::PinColor;
     const bool draw = !pin && (initial_mode == RegionPickerMode::Draw ||
                                (initial_mode == RegionPickerMode::PickWindows && !any_windows));
     const bool faces = initial_mode == RegionPickerMode::PickFaces;
@@ -1297,7 +1294,6 @@ bool BeginRegionPick(const std::vector<PickerDisplay>& displays, RegionPickerMod
         picker->draw_mode = draw;
         picker->faces_mode = faces;
         picker->pin_mode = pin;
-        picker->pin_many = initial_mode == RegionPickerMode::PinColors;
         if (!draw && !pin) picker->suggestions = faces ? picker->faces : picker->windows;
 
         picker->window = CreateOverlayWindow(L"SidescopesPickerOverlay", PickerProc,
@@ -1342,11 +1338,11 @@ RegionPickPoll PollRegionPick() {
     // region change. The pickers switch modes in lockstep; the front one
     // speaks for all.
     poll.pin_mode = g_pickers.front()->pin_mode;
-    poll.pin_single = poll.pin_mode && !g_pickers.front()->pin_many;
     for (PickerState* picker : g_pickers) {
         if (!picker->pinned_ready) continue;
         picker->pinned_ready = false;
         poll.pinned_area = RegionFromLocalRect(picker->pinned_area, picker->width, picker->height);
+        poll.pinned_keep_open = picker->pinned_keep_open;
         poll.display_id = picker->display_id;
         break;
     }
@@ -1427,7 +1423,6 @@ void SetRegionPickMode(RegionPickerMode mode) {
     SwitchPickerMode(mode == RegionPickerMode::Draw        ? 1
                      : mode == RegionPickerMode::PickFaces ? 2
                      : mode == RegionPickerMode::PinColor  ? 3
-                     : mode == RegionPickerMode::PinColors ? 4
                                                            : 0);
 }
 
