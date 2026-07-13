@@ -132,8 +132,7 @@ ctest --test-dir build --output-on-failure
 
 The project is GPL-3.0-or-later. To keep long-term options open (such as
 signed store builds that GPL terms alone cannot cover), contributors will be
-asked to sign a lightweight CLA when submitting their first pull request. The
-promise in the README holds regardless: what is free stays free.
+asked to sign a lightweight CLA when submitting their first pull request.
 
 ## Releasing
 

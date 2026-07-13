@@ -14,12 +14,12 @@ screen itself, so it works with every editor and needs no plugins.
 ## Features
 
 - Vectorscope (BT.601/BT.709) with classic graticule and skin-tone line
-- Waveform with luma, RGB overlay, combined, and RGB parade modes
-- Histogram with per-channel bars
-- Smart region selection: click a detected photo, face, or window, or draw
-  the area yourself — the screenshot-tool idiom you already know
-- Per-application memory: the region you scoped in an editor is offered
-  again when you come back to it
+- Waveform with RGB, luma, and colored-luma styles, plus an RGB parade
+- Histogram with per-channel or combined bars
+- Color picker that holds the live color against pinned references, with
+  values you can copy at a click
+- Smart region selection: click a window or a detected face, or draw the area
+  yourself — the screenshot-tool idiom you already know
 - Live marker showing the color under your cursor on every scope, with
   pinnable reference colors for matching skin tones across photos
 - Compact, always-on-top window designed for small laptop screens
@@ -29,8 +29,8 @@ screen itself, so it works with every editor and needs no plugins.
 
 | Key | Action |
 | --- | ------ |
-| V / W / R / H | show one scope alone: vectorscope, waveform, RGB parade, histogram |
-| Shift+V / W / R / H | stack or unstack a scope; panes follow the order they were turned on |
+| V / W / R / H / C | show one scope alone: vectorscope, waveform, RGB parade, histogram, color picker |
+| Shift+V / W / R / H / C | stack or unstack a scope; panes follow the order they were turned on |
 | A | pick a window |
 | F | pick a face (macOS) |
 | D | draw an area |
@@ -43,8 +43,8 @@ resize that edge alone.
 
 ## Status
 
-Early development. macOS support lands first; Windows follows; Linux is
-planned. Watch the releases page.
+First public release. Native builds for macOS and Windows; Linux is planned.
+See the releases page for downloads.
 
 ## Building
 
@@ -74,9 +74,5 @@ the switch in System Settings only takes effect after the app restarts.
 
 ## License
 
-SideScopes is free software, licensed under the
+SideScopes is free and open-source software, licensed under the
 [GNU GPL v3.0 or later](LICENSE).
-
-The full application is free and always will be: features that are free today
-stay free. If optional paid extras ever appear, they will only ever be
-additions on top of the complete, free tool.
