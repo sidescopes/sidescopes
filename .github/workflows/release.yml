@@ -14,6 +14,8 @@ jobs:
   create-release:
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v7
+
       - name: Create the draft release if it does not exist
         env:
           GH_TOKEN: ${{ github.token }}
@@ -24,9 +26,20 @@ jobs:
           case "$GITHUB_REF_NAME" in
             *-*) prerelease="--prerelease" ;;
           esac
+          # Notes come from the CHANGELOG section for this version (a pre-release
+          # tag reuses its base version's section), so they never depend on the
+          # previous tag the way --generate-notes does. Fall back to generated
+          # notes only if the section is missing.
+          base="${GITHUB_REF_NAME#v}"; base="${base%%-*}"
+          awk -v h="## [$base]" 'index($0, h) == 1 {c=1; next} c && /^## \[/{exit} c' CHANGELOG.md > notes.md
+          if [ -s notes.md ]; then
+            notes=(--notes-file notes.md)
+          else
+            notes=(--generate-notes)
+          fi
           gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 ||
             gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
-              --draft $prerelease --title "SideScopes $GITHUB_REF_NAME" --generate-notes
+              --draft $prerelease "${notes[@]}" --title "SideScopes $GITHUB_REF_NAME"
 
   macos:
     needs: create-release
