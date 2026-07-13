@@ -19,6 +19,7 @@ endif()
 
 option(SIDESCOPES_BUILD_TESTS "Build the test suite" ON)
 option(SIDESCOPES_WERROR "Treat compiler warnings as errors" OFF)
+option(SIDESCOPES_MODULES_DYNAMIC "Load built-in scope modules dynamically" OFF)
 set(SIDESCOPES_SANITIZE "" CACHE STRING
     "Comma-separated sanitizers to build and link with (e.g. address,undefined or thread)")
 
@@ -41,6 +42,12 @@ function(sidescopes_target_defaults target)
     endif()
 endfunction()
 
+# The hourglass in build form: each scope engine and its module shim live
+# in a per-module static (or, in dynamic mode, MODULE) library; core keeps
+# only shared machinery. frame.cpp and graticule.cpp stay in core because
+# the module shims call their symbols and duplicating them across modules
+# would clash at link. The registry is host machinery and stays in core;
+# its extern references to the module entries resolve at the final link.
 add_library(sidescopes_core STATIC
     src/core/frame.cpp
     src/core/region_hash.cpp
@@ -49,17 +56,89 @@ add_library(sidescopes_core STATIC
     src/core/analysis_worker.cpp
     src/core/preferences.cpp
     src/core/region_suggestions.cpp
-    src/core/scopes/vectorscope.cpp
-    src/core/scopes/waveform.cpp
     src/core/scopes/graticule.cpp
-    src/core/scopes/histogram.cpp
     src/modules/module_registry.cpp
-    src/modules/vectorscope_module.cpp
-    src/modules/waveform_module.cpp
-    src/modules/histogram_module.cpp
 )
 target_include_directories(sidescopes_core PUBLIC src include)
 sidescopes_target_defaults(sidescopes_core)
+
+# --- scope modules ---
+# STATIC by default; MODULE shared objects in the dynamic dev/CI mode. Each
+# pairs a module shim with its engine. Engine headers under src are private;
+# only include/sidescopes/module.h is the public boundary.
+if(SIDESCOPES_MODULES_DYNAMIC)
+    set(SIDESCOPES_MODULE_KIND MODULE)
+else()
+    set(SIDESCOPES_MODULE_KIND STATIC)
+endif()
+
+function(sidescopes_add_module name)
+    add_library(${name} ${SIDESCOPES_MODULE_KIND} ${ARGN})
+    target_include_directories(${name} PRIVATE src PUBLIC include)
+    # The shims reference frame/graticule symbols that live in core; core
+    # never links the modules, so this dependency edge stays acyclic.
+    target_link_libraries(${name} PRIVATE sidescopes_core)
+    sidescopes_target_defaults(${name})
+    if(SIDESCOPES_MODULES_DYNAMIC)
+        # Hidden visibility with a single default-visible ss_module_entry,
+        # dropped alongside the loader's search directory.
+        set_target_properties(${name} PROPERTIES
+            CXX_VISIBILITY_PRESET hidden
+            VISIBILITY_INLINES_HIDDEN ON
+            LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/modules)
+        if(APPLE)
+            # CMake gives MODULE bundles the .so suffix on macOS; the loader
+            # scans for the platform-native .dylib, so match it.
+            set_target_properties(${name} PROPERTIES SUFFIX ".dylib")
+        endif()
+        target_compile_definitions(${name} PRIVATE SIDESCOPES_MODULE_DYNAMIC)
+        # graticule.cpp (shared in core) bundles BuildVectorscopeGraticule,
+        # which calls Vectorscope::Project, with the engine-agnostic
+        # BuildWaveformScale. A module that uses only the latter still pulls
+        # the whole object and so references Project, whose definition lives
+        # only in the vectorscope module. In the static build the final link
+        # supplies it; a MODULE bundle instead defers that symbol to load
+        # time. The path is never reached in a module that lacks the
+        # vectorscope engine, so it is dead, not a runtime dependency.
+        if(APPLE)
+            target_link_options(${name} PRIVATE -Wl,-undefined,dynamic_lookup)
+        else()
+            target_link_options(${name} PRIVATE -Wl,--allow-shlib-undefined)
+        endif()
+    endif()
+endfunction()
+
+sidescopes_add_module(sidescopes_module_vectorscope
+    src/modules/vectorscope_module.cpp
+    src/core/scopes/vectorscope.cpp)
+sidescopes_add_module(sidescopes_module_waveform
+    src/modules/waveform_module.cpp
+    src/core/scopes/waveform.cpp)
+sidescopes_add_module(sidescopes_module_histogram
+    src/modules/histogram_module.cpp
+    src/core/scopes/histogram.cpp)
+
+# Consumers (app, tests) link these ahead of core. In static mode the module
+# libs carry the built-in entries the registry references and the engines the
+# shims use; in dynamic mode SIDESCOPES_MODULE_LINK_LIBS is empty and the
+# entries come from the loaded shared objects instead, so nothing links them
+# and the registry is told where to load them from.
+if(SIDESCOPES_MODULES_DYNAMIC)
+    target_compile_definitions(sidescopes_core PRIVATE
+        SIDESCOPES_MODULES_DYNAMIC
+        "SIDESCOPES_MODULES_DIR=\"${CMAKE_BINARY_DIR}/modules\"")
+    target_sources(sidescopes_core PRIVATE src/modules/module_loader.cpp)
+    set(SIDESCOPES_MODULE_LINK_LIBS "")
+else()
+    # core and the module libs depend on each other: the registry references
+    # each module's entry, while each shim references core's frame/graticule
+    # symbols. GNU ld's single left-to-right pass cannot resolve that cycle
+    # from link order alone, so force every module object into the link.
+    # WHOLE_ARCHIVE maps to --whole-archive / -force_load / /WHOLEARCHIVE per
+    # toolchain (ld64 and MSVC already tolerated the cycle; GNU ld did not).
+    set(SIDESCOPES_MODULE_LINK_LIBS
+        "$<LINK_LIBRARY:WHOLE_ARCHIVE,sidescopes_module_vectorscope,sidescopes_module_waveform,sidescopes_module_histogram>")
+endif()
 
 if(APPLE)
     enable_language(OBJCXX)
@@ -170,6 +249,7 @@ if(APPLE OR WIN32)
             MACOSX_BUNDLE_SHORT_VERSION_STRING ${PROJECT_VERSION}
         )
         target_link_libraries(SideScopes PRIVATE
+            ${SIDESCOPES_MODULE_LINK_LIBS}
             sidescopes_platform
             imgui
             glfw
@@ -218,12 +298,29 @@ if(APPLE OR WIN32)
         )
         target_link_options(SideScopes PRIVATE /ENTRY:mainCRTStartup)
         target_link_libraries(SideScopes PRIVATE
+            ${SIDESCOPES_MODULE_LINK_LIBS}
             sidescopes_platform
             imgui
             glfw
             opengl32
         )
         sidescopes_target_defaults(SideScopes)
+    endif()
+
+    if(SIDESCOPES_MODULES_DYNAMIC)
+        # Nothing links the modules in dynamic mode; make the app wait for
+        # the shared objects it loads at runtime.
+        add_dependencies(SideScopes
+            sidescopes_module_vectorscope
+            sidescopes_module_waveform
+            sidescopes_module_histogram)
+        # The app still uses the engine classes directly (P1 is mid-
+        # migration to instances). With the engines only in the MODULE
+        # bundles, compile their sources into the app, as the tests do.
+        target_sources(SideScopes PRIVATE
+            src/core/scopes/vectorscope.cpp
+            src/core/scopes/waveform.cpp
+            src/core/scopes/histogram.cpp)
     endif()
 endif()
 

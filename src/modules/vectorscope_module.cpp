@@ -9,6 +9,7 @@
 
 #include "core/scopes/graticule.h"
 #include "core/scopes/vectorscope.h"
+#include "modules/module_export.h"
 #include "modules/module_registry.h"
 #include "sidescopes/module.h"
 
@@ -22,12 +23,12 @@ struct VectorscopeInstance
     VectorscopeSettings settings;
 };
 
-VectorscopeInstance* Self(SsScopeInstance* instance)
+VectorscopeInstance* impl(SsScopeInstance* instance)
 {
     return static_cast<VectorscopeInstance*>(instance->instance_data);
 }
 
-const VectorscopeInstance* Self(const SsScopeInstance* instance)
+const VectorscopeInstance* impl(const SsScopeInstance* instance)
 {
     return static_cast<const VectorscopeInstance*>(instance->instance_data);
 }
@@ -35,7 +36,7 @@ const VectorscopeInstance* Self(const SsScopeInstance* instance)
 bool configure(SsScopeInstance* instance, const SsParamValue* values, uint32_t count)
 {
     try {
-        VectorscopeInstance* self = Self(instance);
+        VectorscopeInstance* self = impl(instance);
         for (uint32_t index = 0; index < count; ++index) {
             const SsParamValue& value = values[index];
             if (std::strcmp(value.key, "gain") == 0) {
@@ -66,7 +67,7 @@ bool accumulate(SsScopeInstance* instance, const SsFrameView* frame, SsRect regi
                              frame->height,
                              frame->color_space == SS_COLOR_SPACE_SRGB ? ColorSpaceHint::Srgb : ColorSpaceHint::Unknown,
                              frame->sequence};
-        Self(instance)->engine.accumulate(view, IntRect{region.x, region.y, region.width, region.height});
+        impl(instance)->engine.accumulate(view, IntRect{region.x, region.y, region.width, region.height});
 
         return true;
     } catch (...) {
@@ -76,12 +77,12 @@ bool accumulate(SsScopeInstance* instance, const SsFrameView* frame, SsRect regi
 
 SsImageView image(const SsScopeInstance* instance)
 {
-    const ScopeImage& image = Self(instance)->engine.image();
+    const ScopeImage& image = impl(instance)->engine.image();
 
     return SsImageView{image.rgba.data(), image.width, image.height, image.sequence};
 }
 
-uint32_t StrokeOf(GraticuleStroke stroke)
+uint32_t strokeOf(GraticuleStroke stroke)
 {
     switch (stroke) {
     case GraticuleStroke::GridMajor:
@@ -97,10 +98,10 @@ uint32_t StrokeOf(GraticuleStroke stroke)
     return SS_STROKE_GRID;
 }
 
-uint32_t Graticule(const SsScopeInstance* instance, SsGraticulePrimitive* primitives, uint32_t capacity)
+uint32_t graticule(const SsScopeInstance* instance, SsGraticulePrimitive* primitives, uint32_t capacity)
 {
     try {
-        const VectorscopeGraticule graticule = buildVectorscopeGraticule(Self(instance)->engine);
+        const VectorscopeGraticule graticule = buildVectorscopeGraticule(impl(instance)->engine);
         uint32_t needed = 0;
         const auto emit = [&](const SsGraticulePrimitive& primitive) {
             if (needed < capacity) {
@@ -111,7 +112,7 @@ uint32_t Graticule(const SsScopeInstance* instance, SsGraticulePrimitive* primit
         for (const GraticuleLine& line : graticule.lines) {
             SsGraticulePrimitive primitive{};
             primitive.kind = SS_PRIMITIVE_LINE;
-            primitive.stroke = StrokeOf(line.stroke);
+            primitive.stroke = strokeOf(line.stroke);
             primitive.x0 = line.from.x;
             primitive.y0 = line.from.y;
             primitive.x1 = line.to.x;
@@ -122,7 +123,7 @@ uint32_t Graticule(const SsScopeInstance* instance, SsGraticulePrimitive* primit
         for (const GraticuleCircle& circle : graticule.circles) {
             SsGraticulePrimitive primitive{};
             primitive.kind = SS_PRIMITIVE_CIRCLE;
-            primitive.stroke = StrokeOf(circle.stroke);
+            primitive.stroke = strokeOf(circle.stroke);
             primitive.x0 = circle.center.x;
             primitive.y0 = circle.center.y;
             primitive.x1 = circle.radius;
@@ -148,10 +149,10 @@ uint32_t Graticule(const SsScopeInstance* instance, SsGraticulePrimitive* primit
     }
 }
 
-uint32_t Markers(const SsScopeInstance* instance, SsColor color, SsMarker* markers, uint32_t capacity)
+uint32_t markers(const SsScopeInstance* instance, SsColor color, SsMarker* markers, uint32_t capacity)
 {
     try {
-        const auto point = Self(instance)->engine.project(FloatColor{color.r, color.g, color.b});
+        const auto point = impl(instance)->engine.project(FloatColor{color.r, color.g, color.b});
         if (!point) {
             return 0;
         }
@@ -172,19 +173,19 @@ uint32_t Markers(const SsScopeInstance* instance, SsColor color, SsMarker* marke
     }
 }
 
-void SetImageSize(SsScopeInstance* instance, int32_t, int32_t height)
+void setImageSize(SsScopeInstance* instance, int32_t, int32_t height)
 {
     try {
-        VectorscopeInstance* self = Self(instance);
+        VectorscopeInstance* self = impl(instance);
         self->settings.size = height;
         self->engine.configure(self->settings);
     } catch (...) {
     }
 }
 
-constexpr SsAdaptiveImageExtension AdaptiveImage{SetImageSize};
+constexpr SsAdaptiveImageExtension AdaptiveImage{setImageSize};
 
-const void* GetExtension(const SsScopeInstance*, const char* id)
+const void* getExtension(const SsScopeInstance*, const char* id)
 {
     if (std::strcmp(id, AdaptiveImageExtension) == 0) {
         return &AdaptiveImage;
@@ -193,9 +194,9 @@ const void* GetExtension(const SsScopeInstance*, const char* id)
     return nullptr;
 }
 
-void Destroy(SsScopeInstance* instance)
+void destroy(SsScopeInstance* instance)
 {
-    delete Self(instance);
+    delete impl(instance);
 }
 
 const char* const MatrixChoices[] = {"BT.601", "BT.709", nullptr};
@@ -219,26 +220,26 @@ const SsScopeDescriptor VectorscopeDescriptor{
     static_cast<uint32_t>(sizeof(Params) / sizeof(Params[0])),
 };
 
-bool ModuleInit(void)
+bool moduleInit(void)
 {
     return true;
 }
 
-void ModuleDeinit(void)
+void moduleDeinit(void)
 {
 }
 
-uint32_t ScopeCount(void)
+uint32_t scopeCount(void)
 {
     return 1;
 }
 
-const SsScopeDescriptor* Descriptor(uint32_t index)
+const SsScopeDescriptor* descriptor(uint32_t index)
 {
     return index == 0 ? &VectorscopeDescriptor : nullptr;
 }
 
-SsScopeInstance* Create(const char* scopeId, const SsHost*)
+SsScopeInstance* create(const char* scopeId, const SsHost*)
 {
     try {
         if (std::strcmp(scopeId, VectorscopeDescriptor.id) != 0) {
@@ -250,10 +251,10 @@ SsScopeInstance* Create(const char* scopeId, const SsHost*)
         self->vtable.configure = configure;
         self->vtable.accumulate = accumulate;
         self->vtable.image = image;
-        self->vtable.graticule = Graticule;
-        self->vtable.markers = Markers;
-        self->vtable.get_extension = GetExtension;
-        self->vtable.destroy = Destroy;
+        self->vtable.graticule = graticule;
+        self->vtable.markers = markers;
+        self->vtable.get_extension = getExtension;
+        self->vtable.destroy = destroy;
 
         return &self->vtable;
     } catch (...) {
@@ -264,7 +265,13 @@ SsScopeInstance* Create(const char* scopeId, const SsHost*)
 }  // namespace
 
 const SsModuleEntry VectorscopeModuleEntry{
-    SS_ABI_MAJOR, SS_ABI_MINOR, ModuleInit, ModuleDeinit, ScopeCount, Descriptor, Create,
+    SS_ABI_MAJOR, SS_ABI_MINOR, moduleInit, moduleDeinit, scopeCount, descriptor, create,
 };
+
+#ifdef SIDESCOPES_MODULE_DYNAMIC
+// The loader finds this by name; it aliases the same entry the static
+// registry uses.
+extern "C" SS_MODULE_EXPORT const SsModuleEntry ss_module_entry = VectorscopeModuleEntry;
+#endif
 
 }  // namespace sidescopes

@@ -2,6 +2,10 @@
 
 #include <cstdio>
 
+#ifdef SIDESCOPES_MODULES_DYNAMIC
+#include "modules/module_loader.h"
+#endif
+
 namespace sidescopes {
 namespace {
 
@@ -82,9 +86,15 @@ ModuleRegistry& builtinModules()
 {
     static ModuleRegistry registry;
     static const bool registered = [] {
+#ifdef SIDESCOPES_MODULES_DYNAMIC
+        // Dev/CI: the modules are separate shared objects the build stamped
+        // into this directory. The loader registers whatever it finds.
+        LoadModulesFrom(SIDESCOPES_MODULES_DIR, registry);
+#else
         registry.registerModule(VectorscopeModuleEntry);
         registry.registerModule(WaveformModuleEntry);
         registry.registerModule(HistogramModuleEntry);
+#endif
         return true;
     }();
     (void)registered;

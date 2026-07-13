@@ -41,14 +41,14 @@ and its precedent research live outside the repository.
 - [x] AnalysisWorker drives analysis through instances
 - [x] Adaptive image sizing via the "sidescopes.adaptive_image/1"
       instance extension (worker side)
-- [ ] Per-module CMake targets: sidescopes_module_vectorscope (its
+- [x] Per-module CMake targets: sidescopes_module_vectorscope (its
       module shim + vectorscope.cpp), _waveform (+ waveform.cpp),
       _histogram (+ histogram.cpp); frame.cpp and graticule.cpp stay in
       sidescopes_core (shared, or module targets would duplicate their
       symbols at link). Core links the module targets PUBLIC; the app
       and tests change nothing. This is the build-enforced hourglass in
       its static form.
-- [ ] Dev/CI dynamic mode behind -DSIDESCOPES_MODULES_DYNAMIC=ON:
+- [x] Dev/CI dynamic mode behind -DSIDESCOPES_MODULES_DYNAMIC=ON:
       each module target becomes a MODULE library with hidden
       visibility exporting `extern "C" const SsModuleEntry
       ss_module_entry` (a small #ifdef block at the bottom of each

@@ -11,6 +11,7 @@
 
 #include "core/scopes/graticule.h"
 #include "core/scopes/waveform.h"
+#include "modules/module_export.h"
 #include "modules/module_registry.h"
 #include "sidescopes/module.h"
 
@@ -323,5 +324,11 @@ SsScopeInstance* create(const char* scopeId, const SsHost*)
 const SsModuleEntry WaveformModuleEntry{
     SS_ABI_MAJOR, SS_ABI_MINOR, moduleInit, moduleDeinit, scopeCount, descriptor, create,
 };
+
+#ifdef SIDESCOPES_MODULE_DYNAMIC
+// The loader finds this by name; it aliases the same entry the static
+// registry uses.
+extern "C" SS_MODULE_EXPORT const SsModuleEntry ss_module_entry = WaveformModuleEntry;
+#endif
 
 }  // namespace sidescopes

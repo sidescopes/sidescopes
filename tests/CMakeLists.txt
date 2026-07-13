@@ -23,7 +23,33 @@ add_executable(sidescopes_tests
     test_modules.cpp
     test_waveform.cpp
 )
-target_link_libraries(sidescopes_tests PRIVATE sidescopes_core Catch2::Catch2WithMain)
+
+# The engine tests (test_vectorscope/waveform/histogram/graticule) are
+# white-box: they include the engine headers and link the engine directly,
+# which in the static build comes in through the module targets. In dynamic
+# mode those engines compile only into the MODULE bundles (not linkable
+# archives), so the test binary compiles the engine sources directly. This
+# also supplies Vectorscope::Project for core's shared graticule.cpp. The
+# module boundary itself is still exercised by test_modules.cpp through the
+# loaded dylibs.
+if(SIDESCOPES_MODULES_DYNAMIC)
+    target_sources(sidescopes_tests PRIVATE
+        ${CMAKE_SOURCE_DIR}/src/core/scopes/vectorscope.cpp
+        ${CMAKE_SOURCE_DIR}/src/core/scopes/waveform.cpp
+        ${CMAKE_SOURCE_DIR}/src/core/scopes/histogram.cpp)
+endif()
+# The module libraries link ahead of core (see the top-level comment on
+# link order). In dynamic mode SIDESCOPES_MODULE_LINK_LIBS is empty and the
+# modules are loaded from disk at runtime, so the test binary only needs to
+# be built after them.
+target_link_libraries(sidescopes_tests PRIVATE
+    ${SIDESCOPES_MODULE_LINK_LIBS} sidescopes_core Catch2::Catch2WithMain)
+if(SIDESCOPES_MODULES_DYNAMIC)
+    add_dependencies(sidescopes_tests
+        sidescopes_module_vectorscope
+        sidescopes_module_waveform
+        sidescopes_module_histogram)
+endif()
 sidescopes_target_defaults(sidescopes_tests)
 
 list(APPEND CMAKE_MODULE_PATH ${catch2_SOURCE_DIR}/extras)
