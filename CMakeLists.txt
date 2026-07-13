@@ -55,6 +55,8 @@ add_library(sidescopes_core STATIC
     src/core/scopes/histogram.cpp
     src/modules/module_registry.cpp
     src/modules/vectorscope_module.cpp
+    src/modules/waveform_module.cpp
+    src/modules/histogram_module.cpp
 )
 target_include_directories(sidescopes_core PUBLIC src include)
 sidescopes_target_defaults(sidescopes_core)

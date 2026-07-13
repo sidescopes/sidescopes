@@ -5,7 +5,7 @@
 namespace sidescopes {
 namespace {
 
-void HostLog(const SsHost*, uint32_t level, const char* message)
+void hostLog(const SsHost*, uint32_t level, const char* message)
 {
     std::fprintf(stderr, "sidescopes module [%s]: %s\n",
                  level == SS_LOG_ERROR     ? "error"
@@ -14,7 +14,7 @@ void HostLog(const SsHost*, uint32_t level, const char* message)
                  message);
 }
 
-const void* HostGetExtension(const SsHost*, const char*)
+const void* hostGetExtension(const SsHost*, const char*)
 {
     return nullptr;  // no host extensions yet
 }
@@ -26,8 +26,8 @@ ModuleRegistry::ModuleRegistry()
     m_host.abi_major = SS_ABI_MAJOR;
     m_host.abi_minor = SS_ABI_MINOR;
     m_host.host_data = this;
-    m_host.get_extension = HostGetExtension;
-    m_host.log = HostLog;
+    m_host.get_extension = hostGetExtension;
+    m_host.log = hostLog;
 }
 
 ModuleRegistry::~ModuleRegistry()
@@ -37,7 +37,7 @@ ModuleRegistry::~ModuleRegistry()
     }
 }
 
-bool ModuleRegistry::RegisterModule(const SsModuleEntry& entry)
+bool ModuleRegistry::registerModule(const SsModuleEntry& entry)
 {
     if (entry.abi_major != SS_ABI_MAJOR) {
         std::fprintf(stderr, "sidescopes module: rejected ABI %u.%u (host %u.%u)\n", entry.abi_major, entry.abi_minor,
@@ -57,7 +57,7 @@ bool ModuleRegistry::RegisterModule(const SsModuleEntry& entry)
     return true;
 }
 
-const RegisteredScope* ModuleRegistry::FindScope(const std::string& id) const
+const RegisteredScope* ModuleRegistry::findScope(const std::string& id) const
 {
     for (const RegisteredScope& scope : m_scopes) {
         if (id == scope.descriptor->id) {
@@ -68,9 +68,9 @@ const RegisteredScope* ModuleRegistry::FindScope(const std::string& id) const
     return nullptr;
 }
 
-ScopeInstance ModuleRegistry::CreateInstance(const std::string& id) const
+ScopeInstance ModuleRegistry::createInstance(const std::string& id) const
 {
-    const RegisteredScope* scope = FindScope(id);
+    const RegisteredScope* scope = findScope(id);
     if (!scope) {
         return ScopeInstance{};
     }
@@ -78,11 +78,13 @@ ScopeInstance ModuleRegistry::CreateInstance(const std::string& id) const
     return ScopeInstance{scope->module->create(id.c_str(), &m_host)};
 }
 
-ModuleRegistry& BuiltinModules()
+ModuleRegistry& builtinModules()
 {
     static ModuleRegistry registry;
     static const bool registered = [] {
-        registry.RegisterModule(VectorscopeModuleEntry);
+        registry.registerModule(VectorscopeModuleEntry);
+        registry.registerModule(WaveformModuleEntry);
+        registry.registerModule(HistogramModuleEntry);
         return true;
     }();
     (void)registered;

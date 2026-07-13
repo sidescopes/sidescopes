@@ -30,7 +30,7 @@ public:
     ScopeInstance& operator=(ScopeInstance&& other) noexcept
     {
         if (this != &other) {
-            Reset();
+            reset();
             m_instance = other.m_instance;
             other.m_instance = nullptr;
         }
@@ -43,10 +43,10 @@ public:
 
     ~ScopeInstance()
     {
-        Reset();
+        reset();
     }
 
-    [[nodiscard]] bool Valid() const
+    [[nodiscard]] bool valid() const
     {
         return m_instance != nullptr;
     }
@@ -66,7 +66,7 @@ public:
         return m_instance->image(m_instance);
     }
 
-    [[nodiscard]] std::vector<SsGraticulePrimitive> Graticule() const
+    [[nodiscard]] std::vector<SsGraticulePrimitive> graticule() const
     {
         std::vector<SsGraticulePrimitive> primitives(32);
         const uint32_t needed =
@@ -79,7 +79,7 @@ public:
         return primitives;
     }
 
-    [[nodiscard]] std::vector<SsMarker> Markers(SsColor color) const
+    [[nodiscard]] std::vector<SsMarker> markers(SsColor color) const
     {
         std::vector<SsMarker> markers(8);
         const uint32_t needed =
@@ -92,13 +92,19 @@ public:
         return markers;
     }
 
-    [[nodiscard]] const void* GetExtension(const char* id) const
+    [[nodiscard]] const void* getExtension(const char* id) const
     {
         return m_instance->get_extension(m_instance, id);
     }
 
+    /// The raw handle, for extension calls that take the instance back.
+    [[nodiscard]] const SsScopeInstance* raw() const
+    {
+        return m_instance;
+    }
+
 private:
-    void Reset()
+    void reset()
     {
         if (m_instance) {
             m_instance->destroy(m_instance);
@@ -130,17 +136,17 @@ public:
     ModuleRegistry& operator=(const ModuleRegistry&) = delete;
 
     /// Registers a module; false when the ABI major differs or the module's init failed.
-    bool RegisterModule(const SsModuleEntry& entry);
+    bool registerModule(const SsModuleEntry& entry);
 
-    [[nodiscard]] const std::vector<RegisteredScope>& Scopes() const
+    [[nodiscard]] const std::vector<RegisteredScope>& scopes() const
     {
         return m_scopes;
     }
 
-    [[nodiscard]] const RegisteredScope* FindScope(const std::string& id) const;
+    [[nodiscard]] const RegisteredScope* findScope(const std::string& id) const;
 
     /// Creates an instance by id; an invalid instance means the id is unknown or creation failed.
-    [[nodiscard]] ScopeInstance CreateInstance(const std::string& id) const;
+    [[nodiscard]] ScopeInstance createInstance(const std::string& id) const;
 
 private:
     std::vector<const SsModuleEntry*> m_modules;
@@ -149,11 +155,13 @@ private:
 };
 
 /// The application's registry with every built-in module registered.
-ModuleRegistry& BuiltinModules();
+ModuleRegistry& builtinModules();
 
-/// Built-in module entry, defined in its module's translation unit. The
-/// extern declaration gives the const definition external linkage.
+/// Built-in module entries, defined in their modules' translation units.
+/// The extern declarations give the const definitions external linkage.
 extern const SsModuleEntry VectorscopeModuleEntry;
+extern const SsModuleEntry WaveformModuleEntry;
+extern const SsModuleEntry HistogramModuleEntry;
 
 /// Instance extension: the host drives adaptive display resolution through
 /// this, keeping image sizing out of the parameter list users see. Extension
