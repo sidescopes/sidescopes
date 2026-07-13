@@ -32,14 +32,14 @@ and its precedent research live outside the repository.
 ## P1 continuation checklist
 
 - [x] include/sidescopes/module.h - the boundary contract
-- [ ] src/modules/module_registry.{h,cpp} - static registration, host
+- [x] src/modules/module_registry.{h,cpp} - static registration, host
       struct, C++ RAII instance wrapper
-- [ ] src/modules/vectorscope_module.cpp - the pattern-setter
-- [ ] src/modules/waveform_module.cpp - registers the waveform AND the
+- [x] src/modules/vectorscope_module.cpp - the pattern-setter
+- [x] src/modules/waveform_module.cpp - registers the waveform AND the
       parade (one module, two scopes)
-- [ ] src/modules/histogram_module.cpp
-- [ ] AnalysisWorker drives analysis through instances
-- [ ] Adaptive image sizing via the "sidescopes.adaptive_image/1"
+- [x] src/modules/histogram_module.cpp
+- [x] AnalysisWorker drives analysis through instances
+- [x] Adaptive image sizing via the "sidescopes.adaptive_image/1"
       instance extension (worker side)
 - [ ] Per-module CMake targets that see only module.h at their boundary
       (the build-enforced hourglass; engines compile into their module)

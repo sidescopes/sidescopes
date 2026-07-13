@@ -103,6 +103,11 @@ public:
         return m_instance;
     }
 
+    [[nodiscard]] SsScopeInstance* raw()
+    {
+        return m_instance;
+    }
+
 private:
     void reset()
     {
@@ -159,9 +164,14 @@ ModuleRegistry& builtinModules();
 
 /// Built-in module entries, defined in their modules' translation units.
 /// The extern declarations give the const definitions external linkage.
+/// In the dynamic configuration the module objects are not linked into
+/// core, so these definitions do not exist: the loader supplies the
+/// entries instead (see BuiltinModules).
+#ifndef SIDESCOPES_MODULES_DYNAMIC
 extern const SsModuleEntry VectorscopeModuleEntry;
 extern const SsModuleEntry WaveformModuleEntry;
 extern const SsModuleEntry HistogramModuleEntry;
+#endif
 
 /// Instance extension: the host drives adaptive display resolution through
 /// this, keeping image sizing out of the parameter list users see. Extension
@@ -170,7 +180,7 @@ inline constexpr char AdaptiveImageExtension[] = "sidescopes.adaptive_image/1";
 
 struct SsAdaptiveImageExtension
 {
-    void (*set_image_size)(SsScopeInstance* instance, int32_t width, int32_t height);
+    void (*setImageSize)(SsScopeInstance* instance, int32_t width, int32_t height);
 };
 
 /// Instance extension: normalized curve heights for display-resolution
