@@ -4,25 +4,18 @@ All notable changes to this project are documented in this file. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.1.0] - 2026-07-13
 
 ### Added
 
 - Screenshot-style region selection: toolbar icons (and keys) open the
-  picker to click a detected rectangle (A), draw an area over the dimmed
-  screen (D), or reset to the full screen (F). Drawing shows the current
-  region with handles for moving and resizing; picking highlights the
-  rectangle under the cursor with the system accent.
-- Rectangle detection that finds photographs displayed by any application:
-  boundary-based, so it works for black-and-white and smooth images, sees
-  low-contrast borders through antialiasing, survives occlusion by the
-  scope window itself, and offers both a window and the photo inside it.
+  picker to click a window (A) or draw an area over the dimmed screen (D);
+  Escape resets to the full screen. Drawing shows the current region with
+  handles for moving and resizing; picking highlights the window under the
+  cursor with the system accent.
 - Detected faces as picker suggestions, padded so the surrounding skin
   joins the sample. Detection runs locally via the platform's built-in
   detector.
-- Per-application region memory: the confirmed region is remembered for
-  the application it belongs to and leads the picker's suggestions when
-  that application is back on screen.
 - Pinned reference colors on the vectorscope (P or the context menu), for
   matching skin tones across photos; the context menu clears them.
 - A pin tool in the toolbar, shown while the vectorscope or the color
