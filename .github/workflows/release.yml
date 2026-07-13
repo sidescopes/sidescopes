@@ -48,6 +48,13 @@ jobs:
       - name: Test
         run: ctest --test-dir build -C Release --output-on-failure
 
+      - name: Re-sign the bundle so the signature seals every resource
+        # The CMake post-build sign can run before the app icon is placed in
+        # the bundle, which leaves the seal invalid and makes Gatekeeper call a
+        # downloaded build "damaged". Re-signing the finished bundle fixes it;
+        # a Developer ID signature (below) overrides this ad-hoc one when set.
+        run: codesign --force --deep --sign - build/SideScopes.app
+
       # With a Developer ID certificate in the secrets, the bundle is
       # signed with the hardened runtime, notarized, and stapled. Without
       # one, the ad-hoc build ships as-is and Gatekeeper asks users to
@@ -81,6 +88,9 @@ jobs:
           xcrun notarytool submit notarize.zip --wait \
             --apple-id "$APPLE_ID" --password "$APPLE_PASSWORD" --team-id "$APPLE_TEAM"
           xcrun stapler staple build/SideScopes.app
+
+      - name: Verify the signature seals the whole bundle
+        run: codesign --verify --deep --strict --verbose=2 build/SideScopes.app
 
       - name: Package
         run: |
