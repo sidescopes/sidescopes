@@ -20,6 +20,7 @@ add_executable(sidescopes_tests
     test_preferences.cpp
     test_region_suggestions.cpp
     test_vectorscope.cpp
+    test_modules.cpp
     test_waveform.cpp
 )
 target_link_libraries(sidescopes_tests PRIVATE sidescopes_core Catch2::Catch2WithMain)

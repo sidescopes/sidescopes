@@ -53,8 +53,10 @@ add_library(sidescopes_core STATIC
     src/core/scopes/waveform.cpp
     src/core/scopes/graticule.cpp
     src/core/scopes/histogram.cpp
+    src/modules/module_registry.cpp
+    src/modules/vectorscope_module.cpp
 )
-target_include_directories(sidescopes_core PUBLIC src)
+target_include_directories(sidescopes_core PUBLIC src include)
 sidescopes_target_defaults(sidescopes_core)
 
 if(APPLE)
