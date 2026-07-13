@@ -12,9 +12,17 @@
    git push origin main v0.1.0
    ```
 
-The `Release` workflow builds the app bundle, runs the tests, packages
-`SideScopes-<tag>-macos.zip` with a SHA-256 checksum, and publishes a GitHub
-release with generated notes.
+The `Release` workflow creates a draft release first, then the macOS and
+Windows jobs build, test, and upload their own artifacts
+(`SideScopes-<tag>-macos.zip` and `SideScopes-<tag>-windows.zip`, each with a
+SHA-256 checksum) to it in parallel. A final job publishes the release only
+after both platforms succeed, so it never goes live incomplete. If a platform
+fails, the release stays a draft; re-running the failed job (Actions →
+"Re-run failed jobs") rebuilds only that platform and then re-runs publish, so
+a fixed run finishes the release on its own. The Windows executable links the
+C runtime statically, so it needs no Visual C++ redistributable. Verify a
+Windows build on a clean machine before relying on it; a `v*-rc` pre-release
+tag is a safe way to exercise the full pipeline first.
 
 ## Signing and notarization
 

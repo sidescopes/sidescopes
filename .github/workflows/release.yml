@@ -8,7 +8,28 @@ permissions:
   contents: write
 
 jobs:
+  # Create the release as a DRAFT up front, so the platform jobs only ever
+  # upload to it. They run in parallel and independently; the release stays
+  # hidden until the publish job flips it, once both platforms have succeeded.
+  create-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create the draft release if it does not exist
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # A tag with a hyphen is a semver pre-release (v0.1.0-rc1); mark it so
+          # it never shows up as the latest release.
+          prerelease=""
+          case "$GITHUB_REF_NAME" in
+            *-*) prerelease="--prerelease" ;;
+          esac
+          gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 ||
+            gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
+              --draft $prerelease --title "SideScopes $GITHUB_REF_NAME" --generate-notes
+
   macos:
+    needs: create-release
     runs-on: macos-latest
     # The secrets context is not allowed in step conditions; these flags
     # carry the presence checks somewhere it is.
@@ -67,12 +88,55 @@ jobs:
           shasum -a 256 SideScopes-${GITHUB_REF_NAME}-macos.zip > \
             SideScopes-${GITHUB_REF_NAME}-macos.zip.sha256
 
-      - name: Publish release
+      - name: Upload macOS assets
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" \
+          gh release upload "$GITHUB_REF_NAME" \
             SideScopes-${GITHUB_REF_NAME}-macos.zip \
-            SideScopes-${GITHUB_REF_NAME}-macos.zip.sha256 \
-            --title "SideScopes $GITHUB_REF_NAME" \
-            --generate-notes
+            SideScopes-${GITHUB_REF_NAME}-macos.zip.sha256 --clobber
+
+  windows:
+    needs: create-release
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Configure
+        # Static CRT so the packaged .exe runs without a Visual C++
+        # redistributable; it applies to the fetched dependencies too.
+        run: cmake -B build -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded
+
+      - name: Build
+        run: cmake --build build --config Release
+
+      - name: Test
+        run: ctest --test-dir build -C Release --output-on-failure
+
+      - name: Package
+        shell: pwsh
+        run: |
+          $zip = "SideScopes-$env:GITHUB_REF_NAME-windows.zip"
+          Compress-Archive -Path build/Release/SideScopes.exe -DestinationPath $zip
+          $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()
+          "$hash  $zip" | Out-File -Encoding ascii "$zip.sha256"
+
+      - name: Upload Windows assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          $zip = "SideScopes-$env:GITHUB_REF_NAME-windows.zip"
+          gh release upload "$env:GITHUB_REF_NAME" $zip "$zip.sha256" --clobber
+
+  # Flip the draft to published only after both platform jobs succeed. Because
+  # this depends on both, GitHub's "Re-run failed jobs" re-runs it (a skipped
+  # dependent) once a previously-failed platform is re-run and passes.
+  publish:
+    needs: [macos, windows]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft=false
