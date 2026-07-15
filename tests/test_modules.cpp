@@ -17,7 +17,6 @@ std::vector<uint8_t> solidRed(int width, int height)
         data[pixel + 2] = 191;
         data[pixel + 3] = 255;
     }
-
     return data;
 }
 
@@ -31,7 +30,6 @@ std::vector<uint8_t> solidGray(int width, int height, uint8_t level)
         data[pixel + 2] = level;
         data[pixel + 3] = 255;
     }
-
     return data;
 }
 

@@ -101,12 +101,10 @@ int main()
     if (!ranExactlyOne || !allPassed || timedOut) {
         std::fprintf(stderr, "UI smoke test FAILED: tested=%d success=%d frames=%d timed_out=%d\n", summary.CountTested,
                      summary.CountSuccess, frame, timedOut ? 1 : 0);
-
         return 1;
     }
 
     std::printf("UI smoke test passed: tested=%d success=%d frames=%d\n", summary.CountTested, summary.CountSuccess,
                 frame);
-
     return 0;
 }

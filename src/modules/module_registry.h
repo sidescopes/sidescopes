@@ -34,7 +34,6 @@ public:
             m_instance = other.m_instance;
             other.m_instance = nullptr;
         }
-
         return *this;
     }
 
@@ -75,7 +74,6 @@ public:
         if (needed > 32) {
             m_instance->graticule(m_instance, primitives.data(), needed);
         }
-
         return primitives;
     }
 
@@ -88,7 +86,6 @@ public:
         if (needed > 8) {
             m_instance->markers(m_instance, color, markers.data(), needed);
         }
-
         return markers;
     }
 

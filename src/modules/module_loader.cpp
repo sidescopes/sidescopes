@@ -73,7 +73,6 @@ bool LoadModulesFrom(const std::filesystem::path& directory, ModuleRegistry& reg
             LoadOne(file.path(), registry);
         }
     }
-
     return true;
 }
 

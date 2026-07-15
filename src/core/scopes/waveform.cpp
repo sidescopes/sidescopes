@@ -50,7 +50,6 @@ PopulatedRange populatedRange(const uint64_t* global)
         }
         highest = row;
     }
-
     return {lowest, highest};
 }
 
@@ -77,7 +76,6 @@ double neighborhoodMedian(const uint64_t* global, int row)
         neighborhood[j + 1] = value;
     }
     const int middle = counted / 2;
-
     return counted > 0 ? static_cast<double>(neighborhood[middle]) : 0.0;
 }
 
@@ -236,7 +234,6 @@ uint32_t peakDensity(const std::vector<uint32_t>& traces, std::size_t planeSize,
             densest = std::max(densest, traces[i]);
         }
     }
-
     return densest;
 }
 
@@ -251,7 +248,6 @@ float waveformBrightness(float count, double gain, double intensityScale)
     // on the vectorscope: normalizing to the densest bin pushes
     // everything else down, and a linear ramp reads dim at any gain.
     const double normalized = std::log1p(static_cast<double>(count) * gain) * intensityScale / 255.0;
-
     return static_cast<float>(255.0 * std::pow(normalized, 0.65));
 }
 
@@ -337,7 +333,6 @@ LevelSample levelSampleWeights(int y, int imageHeight, bool nativeHeight)
         tap.weight2 = -1.5f * t3 + 2.0f * t2 + 0.5f * t;
         tap.weight3 = 0.5f * t3 - 0.5f * t2;
     }
-
     return tap;
 }
 

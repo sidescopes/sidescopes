@@ -57,7 +57,6 @@ bool ModuleRegistry::registerModule(const SsModuleEntry& entry)
     for (uint32_t index = 0; index < count; ++index) {
         m_scopes.push_back(RegisteredScope{entry.descriptor(index), &entry});
     }
-
     return true;
 }
 
@@ -68,7 +67,6 @@ const RegisteredScope* ModuleRegistry::findScope(const std::string& id) const
             return &scope;
         }
     }
-
     return nullptr;
 }
 
@@ -78,7 +76,6 @@ ScopeInstance ModuleRegistry::createInstance(const std::string& id) const
     if (!scope) {
         return ScopeInstance{};
     }
-
     return ScopeInstance{scope->module->create(id.c_str(), &m_host)};
 }
 
@@ -98,7 +95,6 @@ ModuleRegistry& builtinModules()
         return true;
     }();
     (void)registered;
-
     return registry;
 }
 

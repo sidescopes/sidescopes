@@ -51,7 +51,6 @@ bool configure(SsScopeInstance* instance, const SsParamValue* values, uint32_t c
         }
 
         self->engine.configure(self->settings);
-
         return true;
     } catch (...) {
         return false;
@@ -68,7 +67,6 @@ bool accumulate(SsScopeInstance* instance, const SsFrameView* frame, SsRect regi
                              frame->color_space == SS_COLOR_SPACE_SRGB ? ColorSpaceHint::Srgb : ColorSpaceHint::Unknown,
                              frame->sequence};
         impl(instance)->engine.accumulate(view, IntRect{region.x, region.y, region.width, region.height});
-
         return true;
     } catch (...) {
         return false;
@@ -78,7 +76,6 @@ bool accumulate(SsScopeInstance* instance, const SsFrameView* frame, SsRect regi
 SsImageView image(const SsScopeInstance* instance)
 {
     const ScopeImage& image = impl(instance)->engine.image();
-
     return SsImageView{image.rgba.data(), image.width, image.height, image.sequence};
 }
 
@@ -94,7 +91,6 @@ uint32_t strokeOf(GraticuleStroke stroke)
     case GraticuleStroke::Grid:
         break;
     }
-
     return SS_STROKE_GRID;
 }
 
@@ -142,7 +138,6 @@ uint32_t graticule(const SsScopeInstance* instance, SsGraticulePrimitive* primit
             std::snprintf(primitive.label, sizeof(primitive.label), "%s", target.label.c_str());
             emit(primitive);
         }
-
         return needed;
     } catch (...) {
         return 0;
@@ -166,7 +161,6 @@ uint32_t markers(const SsScopeInstance* instance, SsColor color, SsMarker* marke
             marker.channel_mask = 0x7;
             markers[0] = marker;
         }
-
         return 1;
     } catch (...) {
         return 0;
@@ -190,7 +184,6 @@ const void* getExtension(const SsScopeInstance*, const char* id)
     if (std::strcmp(id, AdaptiveImageExtension) == 0) {
         return &AdaptiveImage;
     }
-
     return nullptr;
 }
 
@@ -255,7 +248,6 @@ SsScopeInstance* create(const char* scopeId, const SsHost*)
         self->vtable.markers = markers;
         self->vtable.get_extension = getExtension;
         self->vtable.destroy = destroy;
-
         return &self->vtable;
     } catch (...) {
         return nullptr;

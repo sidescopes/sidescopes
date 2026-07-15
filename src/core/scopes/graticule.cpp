@@ -66,7 +66,6 @@ VectorscopeGraticule buildVectorscopeGraticule(const Vectorscope& scope)
                 {Center, {Center.x + dx * scale, Center.y + dy * scale}, GraticuleStroke::SkinTone});
         }
     }
-
     return graticule;
 }
 
