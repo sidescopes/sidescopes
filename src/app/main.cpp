@@ -663,6 +663,91 @@ void restoreWindowPlacement(GLFWwindow* window, const Preferences& startup)
     }
 }
 
+// The histogram pane draws the filled texture, strokes each channel's curve
+// over it at display resolution, then adds the graticule and cursor-value
+// markers.
+void drawHistogram(const ScopeTexture& texture, const AnalysisWorker::Output& output, HistogramStyle style,
+                   bool showGraticule, const std::optional<FloatColor>& markerColor)
+{
+    // No intensity gesture here: the histogram's scale adjusts
+    // itself, the way every editor draws it.
+    const DrawnScope scope = drawScopeImage(texture, false);
+    // The curve outline strokes at display resolution over the
+    // filled texture: baked into the texture it would stretch
+    // anisotropically with the pane - thick on flats, thin on
+    // slopes. Sampled through the same spline the fill uses, so
+    // line and fill edge agree.
+    if (output.histogramOutline.size() == static_cast<std::size_t>(3) * Histogram::Bins) {
+        ImDrawList* draw = ImGui::GetWindowDrawList();
+        draw->PushClipRect(scope.origin, ImVec2(scope.origin.x + scope.size.x, scope.origin.y + scope.size.y), true);
+        const bool bands = style == HistogramStyle::PerChannel;
+        const int samples = std::clamp(static_cast<int>(scope.size.x), 128, 2 * Histogram::Bins);
+        static std::vector<ImVec2> points;
+        for (int channel = 0; channel < 3; ++channel) {
+            const float* plane = output.histogramOutline.data() + channel * Histogram::Bins;
+            const float bandTop = scope.origin.y + (bands ? channel * scope.size.y / 3.0f : 0.0f);
+            const float bandHeight = bands ? scope.size.y / 3.0f : scope.size.y;
+            points.clear();
+            for (int sample = 0; sample < samples; ++sample) {
+                const float binPosition =
+                    std::clamp((sample + 0.5f) * Histogram::Bins / samples - 0.5f, 0.0f, Histogram::Bins - 1.0f);
+                const int center = static_cast<int>(binPosition);
+                const float t = binPosition - center;
+                const auto at = [&](int index) { return plane[std::clamp(index, 0, Histogram::Bins - 1)]; };
+                const float p0 = at(center - 1);
+                const float p1 = at(center);
+                const float p2 = at(center + 1);
+                const float p3 = at(center + 2);
+                float height =
+                    p1 +
+                    0.5f * t *
+                        (p2 - p0 + t * (2.0f * p0 - 5.0f * p1 + 4.0f * p2 - p3 + t * (3.0f * (p1 - p2) + p3 - p0)));
+                if (p1 <= 0.0f && p2 <= 0.0f) {
+                    height = 0.0f;
+                }
+                height = std::clamp(height, 0.0f, 1.0f);
+                // Empty stretches ride the baseline: the outline
+                // stays one continuous reading of the channel,
+                // rather than blinking away wherever the plot
+                // touches zero. Kept just inside the band so the
+                // stroke survives the clip.
+                const float y = std::min(bandTop + (1.0f - height) * bandHeight, bandTop + bandHeight - 1.0f);
+                points.push_back(ImVec2(scope.origin.x + (sample + 0.5f) * scope.size.x / samples, y));
+            }
+            if (points.size() >= 2) {
+                draw->AddPolyline(points.data(), static_cast<int>(points.size()), channelMaskColor(1 << channel),
+                                  ImDrawFlags_None, 1.6f);
+            }
+        }
+        draw->PopClipRect();
+    }
+    if (showGraticule) {
+        ImDrawList* draw = ImGui::GetWindowDrawList();
+        for (int quarter = 0; quarter <= 4; ++quarter) {
+            const float x = scope.origin.x + scope.size.x * quarter / 4.0f;
+            draw->AddLine(ImVec2(x, scope.origin.y), ImVec2(x, scope.origin.y + scope.size.y),
+                          quarter % 2 == 0 ? GraticuleMajor : GraticuleMinor);
+        }
+    }
+    if (markerColor) {
+        if (style == HistogramStyle::PerChannel) {
+            // Each channel's marker stays a single color inside
+            // its own band.
+            const float channels[3] = {markerColor->r, markerColor->g, markerColor->b};
+            for (int channel = 0; channel < 3; ++channel) {
+                drawValueMarker(scope, channels[channel] / 255.0f, channelMaskColor(1 << channel), channel / 3.0f,
+                                (channel + 1) / 3.0f);
+            }
+        } else {
+            ChannelMarker markers[3];
+            const int count = groupChannelMarkers(*markerColor, markers);
+            for (int i = 0; i < count; ++i) {
+                drawValueMarker(scope, markers[i].value / 255.0f, markers[i].color);
+            }
+        }
+    }
+}
+
 // When nothing can be captured, the scope area explains why and how to fix it
 // instead of drawing empty instruments; a non-technical user should never face
 // a blank vectorscope.
@@ -1730,87 +1815,6 @@ int main()
             }
         };
 
-        const auto drawHistogram = [&] {
-            // No intensity gesture here: the histogram's scale adjusts
-            // itself, the way every editor draws it.
-            const DrawnScope scope = drawScopeImage(*histogramTexture, false);
-            // The curve outline strokes at display resolution over the
-            // filled texture: baked into the texture it would stretch
-            // anisotropically with the pane - thick on flats, thin on
-            // slopes. Sampled through the same spline the fill uses, so
-            // line and fill edge agree.
-            if (output.histogramOutline.size() == static_cast<std::size_t>(3) * Histogram::Bins) {
-                ImDrawList* draw = ImGui::GetWindowDrawList();
-                draw->PushClipRect(scope.origin, ImVec2(scope.origin.x + scope.size.x, scope.origin.y + scope.size.y),
-                                   true);
-                const bool bands = analysis.histogram.style == HistogramStyle::PerChannel;
-                const int samples = std::clamp(static_cast<int>(scope.size.x), 128, 2 * Histogram::Bins);
-                static std::vector<ImVec2> points;
-                for (int channel = 0; channel < 3; ++channel) {
-                    const float* plane = output.histogramOutline.data() + channel * Histogram::Bins;
-                    const float bandTop = scope.origin.y + (bands ? channel * scope.size.y / 3.0f : 0.0f);
-                    const float bandHeight = bands ? scope.size.y / 3.0f : scope.size.y;
-                    points.clear();
-                    for (int sample = 0; sample < samples; ++sample) {
-                        const float binPosition = std::clamp((sample + 0.5f) * Histogram::Bins / samples - 0.5f, 0.0f,
-                                                             Histogram::Bins - 1.0f);
-                        const int center = static_cast<int>(binPosition);
-                        const float t = binPosition - center;
-                        const auto at = [&](int index) { return plane[std::clamp(index, 0, Histogram::Bins - 1)]; };
-                        const float p0 = at(center - 1);
-                        const float p1 = at(center);
-                        const float p2 = at(center + 1);
-                        const float p3 = at(center + 2);
-                        float height =
-                            p1 + 0.5f * t *
-                                     (p2 - p0 +
-                                      t * (2.0f * p0 - 5.0f * p1 + 4.0f * p2 - p3 + t * (3.0f * (p1 - p2) + p3 - p0)));
-                        if (p1 <= 0.0f && p2 <= 0.0f) {
-                            height = 0.0f;
-                        }
-                        height = std::clamp(height, 0.0f, 1.0f);
-                        // Empty stretches ride the baseline: the outline
-                        // stays one continuous reading of the channel,
-                        // rather than blinking away wherever the plot
-                        // touches zero. Kept just inside the band so the
-                        // stroke survives the clip.
-                        const float y = std::min(bandTop + (1.0f - height) * bandHeight, bandTop + bandHeight - 1.0f);
-                        points.push_back(ImVec2(scope.origin.x + (sample + 0.5f) * scope.size.x / samples, y));
-                    }
-                    if (points.size() >= 2) {
-                        draw->AddPolyline(points.data(), static_cast<int>(points.size()),
-                                          channelMaskColor(1 << channel), ImDrawFlags_None, 1.6f);
-                    }
-                }
-                draw->PopClipRect();
-            }
-            if (showGraticule) {
-                ImDrawList* draw = ImGui::GetWindowDrawList();
-                for (int quarter = 0; quarter <= 4; ++quarter) {
-                    const float x = scope.origin.x + scope.size.x * quarter / 4.0f;
-                    draw->AddLine(ImVec2(x, scope.origin.y), ImVec2(x, scope.origin.y + scope.size.y),
-                                  quarter % 2 == 0 ? GraticuleMajor : GraticuleMinor);
-                }
-            }
-            if (vectorscopeColor) {
-                if (analysis.histogram.style == HistogramStyle::PerChannel) {
-                    // Each channel's marker stays a single color inside
-                    // its own band.
-                    const float channels[3] = {vectorscopeColor->r, vectorscopeColor->g, vectorscopeColor->b};
-                    for (int channel = 0; channel < 3; ++channel) {
-                        drawValueMarker(scope, channels[channel] / 255.0f, channelMaskColor(1 << channel),
-                                        channel / 3.0f, (channel + 1) / 3.0f);
-                    }
-                } else {
-                    ChannelMarker markers[3];
-                    const int count = groupChannelMarkers(*vectorscopeColor, markers);
-                    for (int i = 0; i < count; ++i) {
-                        drawValueMarker(scope, markers[i].value / 255.0f, markers[i].color);
-                    }
-                }
-            }
-        };
-
         // The color picker pane: the sampled cursor color as a large
         // swatch with its values spelled out three ways at once - 0-255,
         // percent, and hex - because matching a reference means never
@@ -2159,7 +2163,7 @@ int main()
             if (kind == ScopeGlyph::Vectorscope) {
                 drawVectorscope();
             } else if (kind == ScopeGlyph::Histogram) {
-                drawHistogram();
+                drawHistogram(*histogramTexture, output, analysis.histogram.style, showGraticule, vectorscopeColor);
             } else if (kind == ScopeGlyph::ColorPicker) {
                 drawColorPicker();
             } else {
