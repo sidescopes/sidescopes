@@ -20,6 +20,7 @@ endif()
 option(SIDESCOPES_BUILD_TESTS "Build the test suite" ON)
 option(SIDESCOPES_WERROR "Treat compiler warnings as errors" OFF)
 option(SIDESCOPES_MODULES_DYNAMIC "Load built-in scope modules dynamically" OFF)
+option(SIDESCOPES_UI_TESTS "Build the Dear ImGui Test Engine UI-test target" OFF)
 set(SIDESCOPES_SANITIZE "" CACHE STRING
     "Comma-separated sanitizers to build and link with (e.g. address,undefined or thread)")
 
@@ -327,4 +328,17 @@ endif()
 if(SIDESCOPES_BUILD_TESTS)
     enable_testing()
     add_subdirectory(tests)
+endif()
+
+# Opt-in UI tests on the Dear ImGui Test Engine. Everything the engine needs
+# (its fetch, a hooked Dear ImGui build, the test executable) lives under
+# tests/ui and is reached only here, so the default build is unaffected. The
+# engine builds against the same Dear ImGui the app fetches, so it is only
+# available where that is built.
+if(SIDESCOPES_UI_TESTS)
+    if(NOT (APPLE OR WIN32))
+        message(FATAL_ERROR "SIDESCOPES_UI_TESTS requires the Dear ImGui build (APPLE or WIN32).")
+    endif()
+    enable_testing()
+    add_subdirectory(tests/ui)
 endif()

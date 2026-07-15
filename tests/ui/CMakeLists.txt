@@ -1,0 +1,68 @@
+# Opt-in UI-test target built on the Dear ImGui Test Engine. Enabled only when
+# SIDESCOPES_UI_TESTS=ON; with the option OFF (the default and what CI uses)
+# this directory is never added, so nothing here is fetched or built.
+#
+# The Test Engine (https://github.com/ocornut/imgui_test_engine) is NOT an OSI
+# license. This project qualifies for its Free License (a natural-person,
+# publicly released open-source project). It is fetched at configure time and
+# never vendored, so this GPL-3 source tree never redistributes it.
+#   Dear ImGui Test Engine (c) 2018-2026 Omar Cornut / DISCO HELLO
+#   License: imgui_test_engine/LICENSE.txt in the fetched tree.
+
+include(FetchContent)
+
+# Pinned to the tag matching the application's Dear ImGui (imgui GIT_TAG
+# v1.92.8 in the top-level CMakeLists); the two version in lockstep.
+FetchContent_Declare(
+    imgui_test_engine
+    GIT_REPOSITORY https://github.com/ocornut/imgui_test_engine.git
+    GIT_TAG v1.92.8
+    GIT_SHALLOW TRUE
+    GIT_SUBMODULES ""  # skip the perf-suite's implot submodule; unused here
+)
+FetchContent_MakeAvailable(imgui_test_engine)
+
+# A dedicated Dear ImGui build with the test-engine hooks compiled in, paired
+# with Dear ImGui's official null (headless) backend. Kept entirely separate
+# from the application's `imgui` target: IMGUI_ENABLE_TEST_ENGINE changes the
+# ImGuiContext layout, so the hooked Dear ImGui, the engine, and the test
+# executable must all share this one build, and the shipping app must not.
+add_library(sidescopes_imgui_te STATIC
+    ${imgui_SOURCE_DIR}/imgui.cpp
+    ${imgui_SOURCE_DIR}/imgui_draw.cpp
+    ${imgui_SOURCE_DIR}/imgui_tables.cpp
+    ${imgui_SOURCE_DIR}/imgui_widgets.cpp
+    ${imgui_SOURCE_DIR}/backends/imgui_impl_null.cpp
+)
+target_include_directories(sidescopes_imgui_te PUBLIC
+    ${imgui_SOURCE_DIR}
+    ${imgui_SOURCE_DIR}/backends
+)
+target_compile_definitions(sidescopes_imgui_te PUBLIC IMGUI_ENABLE_TEST_ENGINE)
+
+# The Test Engine library. The std::thread coroutine implementation lets the
+# engine drive tests without any app-provided scheduler. Linking imgui_te
+# PUBLIC propagates the Dear ImGui headers and IMGUI_ENABLE_TEST_ENGINE so the
+# engine and the hooked Dear ImGui see one identical ImGuiContext.
+set(_ss_te_dir ${imgui_test_engine_SOURCE_DIR}/imgui_test_engine)
+add_library(sidescopes_imgui_test_engine STATIC
+    ${_ss_te_dir}/imgui_te_context.cpp
+    ${_ss_te_dir}/imgui_te_coroutine.cpp
+    ${_ss_te_dir}/imgui_te_engine.cpp
+    ${_ss_te_dir}/imgui_te_exporters.cpp
+    ${_ss_te_dir}/imgui_te_perftool.cpp
+    ${_ss_te_dir}/imgui_te_ui.cpp
+    ${_ss_te_dir}/imgui_te_utils.cpp
+    ${_ss_te_dir}/imgui_capture_tool.cpp
+)
+target_include_directories(sidescopes_imgui_test_engine PUBLIC
+    ${imgui_test_engine_SOURCE_DIR})
+target_compile_definitions(sidescopes_imgui_test_engine PUBLIC
+    IMGUI_TEST_ENGINE_ENABLE_COROUTINE_STDTHREAD_IMPL=1)
+target_link_libraries(sidescopes_imgui_test_engine PUBLIC sidescopes_imgui_te)
+
+# The headless smoke test proving the harness runs.
+add_executable(sidescopes_ui_tests smoke_test.cpp)
+target_link_libraries(sidescopes_ui_tests PRIVATE sidescopes_imgui_test_engine)
+
+add_test(NAME sidescopes_ui_smoke COMMAND sidescopes_ui_tests)
