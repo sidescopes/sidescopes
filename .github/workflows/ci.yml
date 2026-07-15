@@ -34,7 +34,8 @@ jobs:
         run: cmake -B build
       - name: Analyze
         run: |
-          files=$(git ls-files 'src/core/*.cpp' 'src/core/**/*.cpp' 'tests/*.cpp')
+          # tests/ui is the optional UI-test target, absent from the default compile database.
+          files=$(git ls-files 'src/core/*.cpp' 'src/core/**/*.cpp' 'tests/*.cpp' ':(exclude)tests/ui/*')
           clang-tidy-18 -p build --quiet $files
 
   test:
