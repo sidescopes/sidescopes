@@ -663,6 +663,39 @@ void restoreWindowPlacement(GLFWwindow* window, const Preferences& startup)
     }
 }
 
+// When nothing can be captured, the scope area explains why and how to fix it
+// instead of drawing empty instruments; a non-technical user should never face
+// a blank vectorscope.
+void drawCaptureHelp(const char* headline, const std::vector<std::string>& lines, bool offerSettings)
+{
+    const ImVec2 area = ImGui::GetContentRegionAvail();
+    const float lineHeight = ImGui::GetTextLineHeightWithSpacing();
+    const float blockHeight =
+        lineHeight * (2.0f + static_cast<float>(lines.size())) + (offerSettings ? lineHeight * 2.0f : 0.0f);
+    ImGui::Dummy(ImVec2(0.0f, std::max(0.0f, (area.y - blockHeight) / 2.0f)));
+    const auto centeredText = [&](const char* text) {
+        const float width = ImGui::CalcTextSize(text).x;
+        ImGui::SetCursorPosX(std::max(0.0f, (ImGui::GetWindowContentRegionMax().x - width) / 2.0f));
+        ImGui::TextUnformatted(text);
+    };
+    centeredText(headline);
+    ImGui::Dummy(ImVec2(0.0f, lineHeight * 0.4f));
+    ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+    for (const std::string& line : lines) {
+        centeredText(line.c_str());
+    }
+    ImGui::PopStyleColor();
+    if (offerSettings) {
+        ImGui::Dummy(ImVec2(0.0f, lineHeight * 0.6f));
+        const char* label = "Open System Settings";
+        const float width = ImGui::CalcTextSize(label).x + ImGui::GetStyle().FramePadding.x * 2.0f;
+        ImGui::SetCursorPosX(std::max(0.0f, (ImGui::GetWindowContentRegionMax().x - width) / 2.0f));
+        if (ImGui::Button(label)) {
+            openScreenRecordingSettings();
+        }
+    }
+}
+
 }  // namespace
 
 int main()
@@ -1774,39 +1807,6 @@ int main()
                     for (int i = 0; i < count; ++i) {
                         drawValueMarker(scope, markers[i].value / 255.0f, markers[i].color);
                     }
-                }
-            }
-        };
-
-        // When nothing can be captured, the scope area explains why and how
-        // to fix it instead of drawing empty instruments; a non-technical
-        // user should never face a blank vectorscope.
-        const auto drawCaptureHelp = [&](const char* headline, const std::vector<std::string>& lines,
-                                         bool offerSettings) {
-            const ImVec2 area = ImGui::GetContentRegionAvail();
-            const float lineHeight = ImGui::GetTextLineHeightWithSpacing();
-            const float blockHeight =
-                lineHeight * (2.0f + static_cast<float>(lines.size())) + (offerSettings ? lineHeight * 2.0f : 0.0f);
-            ImGui::Dummy(ImVec2(0.0f, std::max(0.0f, (area.y - blockHeight) / 2.0f)));
-            const auto centeredText = [&](const char* text) {
-                const float width = ImGui::CalcTextSize(text).x;
-                ImGui::SetCursorPosX(std::max(0.0f, (ImGui::GetWindowContentRegionMax().x - width) / 2.0f));
-                ImGui::TextUnformatted(text);
-            };
-            centeredText(headline);
-            ImGui::Dummy(ImVec2(0.0f, lineHeight * 0.4f));
-            ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
-            for (const std::string& line : lines) {
-                centeredText(line.c_str());
-            }
-            ImGui::PopStyleColor();
-            if (offerSettings) {
-                ImGui::Dummy(ImVec2(0.0f, lineHeight * 0.6f));
-                const char* label = "Open System Settings";
-                const float width = ImGui::CalcTextSize(label).x + ImGui::GetStyle().FramePadding.x * 2.0f;
-                ImGui::SetCursorPosX(std::max(0.0f, (ImGui::GetWindowContentRegionMax().x - width) / 2.0f));
-                if (ImGui::Button(label)) {
-                    openScreenRecordingSettings();
                 }
             }
         };
