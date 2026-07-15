@@ -663,6 +663,90 @@ void restoreWindowPlacement(GLFWwindow* window, const Preferences& startup)
     }
 }
 
+// Frontmost, non-auxiliary windows on a display become region suggestions.
+// A window mostly inside a larger one of the same app is auxiliary chrome
+// (Lightroom panels and overlays); one mostly hidden behind another is
+// skipped.
+std::vector<SuggestedRegion> windowSuggestionsFor(uint32_t displayId)
+{
+    std::vector<WindowRegion> windowRegions;
+    const auto geometry = geometryOfDisplay(displayId);
+    if (geometry) {
+        // Frontmost windows only, skipping ones mostly hidden behind
+        // fronter windows: the user is not scoping what they cannot
+        // see, and invisible system windows have no business here.
+        const std::vector<DesktopWindow> onScreen = onScreenWindows(displayId);
+        const auto containedFraction = [](const DesktopWindow& inner, const DesktopWindow& outer) {
+            const double left = std::max(inner.x, outer.x);
+            const double top = std::max(inner.y, outer.y);
+            const double right = std::min(inner.x + inner.width, outer.x + outer.width);
+            const double bottom = std::min(inner.y + inner.height, outer.y + outer.height);
+            if (right <= left || bottom <= top) {
+                return 0.0;
+            }
+            return (right - left) * (bottom - top) / (inner.width * inner.height);
+        };
+        std::vector<DesktopWindow> visibleWindows;
+        std::vector<DesktopWindow> auxiliaryWindows;
+        for (const DesktopWindow& candidate : onScreen) {
+            constexpr int MaxWindowSuggestions = 5;
+            if (static_cast<int>(visibleWindows.size()) >= MaxWindowSuggestions) {
+                break;
+            }
+            // A window living mostly inside a bigger window of the
+            // same application is an auxiliary surface - Lightroom
+            // draws its panels and its loupe info overlay as
+            // borderless windows over the main one - and picking it
+            // is never meant. It is remembered as chrome: the
+            // detector masks it out, so panels and overlays neither
+            // spawn candidates nor interrupt the photograph's
+            // borders.
+            bool auxiliary = false;
+            for (const DesktopWindow& other : onScreen) {
+                if (&other == &candidate || other.application != candidate.application) {
+                    continue;
+                }
+                if (other.width * other.height <= candidate.width * candidate.height) {
+                    continue;
+                }
+                if (containedFraction(candidate, other) > 0.9) {
+                    auxiliary = true;
+                    break;
+                }
+            }
+            if (auxiliary) {
+                auxiliaryWindows.push_back(candidate);
+                continue;
+            }
+            bool mostlyCovered = false;
+            for (const DesktopWindow& front : visibleWindows) {
+                if (containedFraction(candidate, front) > 0.8) {
+                    mostlyCovered = true;
+                    break;
+                }
+            }
+            if (!mostlyCovered) {
+                visibleWindows.push_back(candidate);
+            }
+        }
+
+        for (const DesktopWindow& visible : visibleWindows) {
+            WindowRegion region;
+            region.region.leftPercent =
+                std::clamp((visible.x - geometry->originX) / geometry->widthPoints * 100.0, 0.0, 100.0);
+            region.region.topPercent =
+                std::clamp((visible.y - geometry->originY) / geometry->heightPoints * 100.0, 0.0, 100.0);
+            region.region.rightPercent =
+                std::clamp((visible.x + visible.width - geometry->originX) / geometry->widthPoints * 100.0, 0.0, 100.0);
+            region.region.bottomPercent = std::clamp(
+                (visible.y + visible.height - geometry->originY) / geometry->heightPoints * 100.0, 0.0, 100.0);
+            region.application = visible.application;
+            windowRegions.push_back(std::move(region));
+        }
+    }
+    return buildRegionSuggestions(windowRegions);
+}
+
 // The histogram pane draws the filled texture, strokes each channel's curve
 // over it at display resolution, then adds the graticule and cursor-value
 // markers.
@@ -2545,86 +2629,6 @@ int main()
             // the platform detector finds in the current frame. Faces are
             // offered on the tracked display only: that is the display
             // whose pixels we hold.
-            const auto windowSuggestionsFor = [&](uint32_t displayId) -> std::vector<SuggestedRegion> {
-                std::vector<WindowRegion> windowRegions;
-                const auto geometry = geometryOfDisplay(displayId);
-                if (geometry) {
-                    // Frontmost windows only, skipping ones mostly hidden behind
-                    // fronter windows: the user is not scoping what they cannot
-                    // see, and invisible system windows have no business here.
-                    const std::vector<DesktopWindow> onScreen = onScreenWindows(displayId);
-                    const auto containedFraction = [](const DesktopWindow& inner, const DesktopWindow& outer) {
-                        const double left = std::max(inner.x, outer.x);
-                        const double top = std::max(inner.y, outer.y);
-                        const double right = std::min(inner.x + inner.width, outer.x + outer.width);
-                        const double bottom = std::min(inner.y + inner.height, outer.y + outer.height);
-                        if (right <= left || bottom <= top) {
-                            return 0.0;
-                        }
-                        return (right - left) * (bottom - top) / (inner.width * inner.height);
-                    };
-                    std::vector<DesktopWindow> visibleWindows;
-                    std::vector<DesktopWindow> auxiliaryWindows;
-                    for (const DesktopWindow& candidate : onScreen) {
-                        constexpr int MaxWindowSuggestions = 5;
-                        if (static_cast<int>(visibleWindows.size()) >= MaxWindowSuggestions) {
-                            break;
-                        }
-                        // A window living mostly inside a bigger window of the
-                        // same application is an auxiliary surface - Lightroom
-                        // draws its panels and its loupe info overlay as
-                        // borderless windows over the main one - and picking it
-                        // is never meant. It is remembered as chrome: the
-                        // detector masks it out, so panels and overlays neither
-                        // spawn candidates nor interrupt the photograph's
-                        // borders.
-                        bool auxiliary = false;
-                        for (const DesktopWindow& other : onScreen) {
-                            if (&other == &candidate || other.application != candidate.application) {
-                                continue;
-                            }
-                            if (other.width * other.height <= candidate.width * candidate.height) {
-                                continue;
-                            }
-                            if (containedFraction(candidate, other) > 0.9) {
-                                auxiliary = true;
-                                break;
-                            }
-                        }
-                        if (auxiliary) {
-                            auxiliaryWindows.push_back(candidate);
-                            continue;
-                        }
-                        bool mostlyCovered = false;
-                        for (const DesktopWindow& front : visibleWindows) {
-                            if (containedFraction(candidate, front) > 0.8) {
-                                mostlyCovered = true;
-                                break;
-                            }
-                        }
-                        if (!mostlyCovered) {
-                            visibleWindows.push_back(candidate);
-                        }
-                    }
-
-                    for (const DesktopWindow& visible : visibleWindows) {
-                        WindowRegion region;
-                        region.region.leftPercent =
-                            std::clamp((visible.x - geometry->originX) / geometry->widthPoints * 100.0, 0.0, 100.0);
-                        region.region.topPercent =
-                            std::clamp((visible.y - geometry->originY) / geometry->heightPoints * 100.0, 0.0, 100.0);
-                        region.region.rightPercent =
-                            std::clamp((visible.x + visible.width - geometry->originX) / geometry->widthPoints * 100.0,
-                                       0.0, 100.0);
-                        region.region.bottomPercent = std::clamp(
-                            (visible.y + visible.height - geometry->originY) / geometry->heightPoints * 100.0, 0.0,
-                            100.0);
-                        region.application = visible.application;
-                        windowRegions.push_back(std::move(region));
-                    }
-                }
-                return buildRegionSuggestions(windowRegions);
-            };
 
             std::vector<SuggestedRegion> faceSuggestions;
             if (supportsFaceDetection()) {
