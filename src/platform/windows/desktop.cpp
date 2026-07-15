@@ -18,18 +18,19 @@
 namespace sidescopes {
 namespace {
 
-struct MonitorLookup {
-    uint32_t wanted_id = 0;
+struct MonitorLookup
+{
+    uint32_t wantedId = 0;
     HMONITOR monitor = nullptr;
     RECT rect{};
 };
 
-BOOL CALLBACK CollectMonitor(HMONITOR monitor, HDC, LPRECT rect, LPARAM context) {
+BOOL CALLBACK collectMonitor(HMONITOR monitor, HDC, LPRECT rect, LPARAM context)
+{
     auto* lookup = reinterpret_cast<MonitorLookup*>(context);
     MONITORINFOEXW info{};
     info.cbSize = sizeof(info);
-    if (GetMonitorInfoW(monitor, &info) &&
-        DisplayIdFromDeviceName(info.szDevice) == lookup->wanted_id) {
+    if (GetMonitorInfoW(monitor, &info) && displayIdFromDeviceName(info.szDevice) == lookup->wantedId) {
         lookup->monitor = monitor;
         lookup->rect = *rect;
         return FALSE;
@@ -37,19 +38,25 @@ BOOL CALLBACK CollectMonitor(HMONITOR monitor, HDC, LPRECT rect, LPARAM context)
     return TRUE;
 }
 
-std::optional<MonitorLookup> FindMonitor(uint32_t display_id) {
+std::optional<MonitorLookup> findMonitor(uint32_t displayId)
+{
     MonitorLookup lookup;
-    lookup.wanted_id = display_id;
-    EnumDisplayMonitors(nullptr, nullptr, CollectMonitor, reinterpret_cast<LPARAM>(&lookup));
-    if (!lookup.monitor) return std::nullopt;
+    lookup.wantedId = displayId;
+    EnumDisplayMonitors(nullptr, nullptr, collectMonitor, reinterpret_cast<LPARAM>(&lookup));
+    if (!lookup.monitor) {
+        return std::nullopt;
+    }
     return lookup;
 }
 
-std::string ApplicationNameOfWindow(HWND window) {
-    DWORD process_id = 0;
-    GetWindowThreadProcessId(window, &process_id);
-    HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, process_id);
-    if (!process) return {};
+std::string applicationNameOfWindow(HWND window)
+{
+    DWORD processId = 0;
+    GetWindowThreadProcessId(window, &processId);
+    HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, processId);
+    if (!process) {
+        return {};
+    }
     wchar_t path[MAX_PATH];
     DWORD length = MAX_PATH;
     std::string name;
@@ -58,189 +65,241 @@ std::string ApplicationNameOfWindow(HWND window) {
         const auto slash = full.find_last_of(L"\\/");
         std::wstring base = slash == std::wstring::npos ? full : full.substr(slash + 1);
         const auto dot = base.find_last_of(L'.');
-        if (dot != std::wstring::npos) base.resize(dot);
-        name = Utf8FromWide(base.c_str(), static_cast<int>(base.size()));
+        if (dot != std::wstring::npos) {
+            base.resize(dot);
+        }
+        name = utf8FromWide(base.c_str(), static_cast<int>(base.size()));
     }
     CloseHandle(process);
     return name;
 }
 
-struct WindowCollector {
+struct WindowCollector
+{
     HMONITOR monitor = nullptr;
-    DWORD own_process = 0;
+    DWORD ownProcess = 0;
     std::vector<DesktopWindow>* windows = nullptr;
 };
 
-BOOL CALLBACK CollectWindow(HWND window, LPARAM context) {
+BOOL CALLBACK collectWindow(HWND window, LPARAM context)
+{
     auto* collector = reinterpret_cast<WindowCollector*>(context);
-    if (!IsWindowVisible(window)) return TRUE;
-    if (GetWindowTextLengthW(window) == 0) return TRUE;
-    const LONG_PTR ex_style = GetWindowLongPtrW(window, GWL_EXSTYLE);
-    if (ex_style & WS_EX_TOOLWINDOW) return TRUE;
+    if (!IsWindowVisible(window)) {
+        return TRUE;
+    }
+    if (GetWindowTextLengthW(window) == 0) {
+        return TRUE;
+    }
+    const LONG_PTR exStyle = GetWindowLongPtrW(window, GWL_EXSTYLE);
+    if (exStyle & WS_EX_TOOLWINDOW) {
+        return TRUE;
+    }
 
     // Minimized and suspended-store windows stay visible to EnumWindows but
     // are cloaked from the desktop.
     DWORD cloaked = 0;
-    if (SUCCEEDED(DwmGetWindowAttribute(window, DWMWA_CLOAKED, &cloaked, sizeof(cloaked))) &&
-        cloaked != 0)
+    if (SUCCEEDED(DwmGetWindowAttribute(window, DWMWA_CLOAKED, &cloaked, sizeof(cloaked))) && cloaked != 0) {
         return TRUE;
+    }
 
-    DWORD process_id = 0;
-    GetWindowThreadProcessId(window, &process_id);
-    if (process_id == collector->own_process) return TRUE;
+    DWORD processId = 0;
+    GetWindowThreadProcessId(window, &processId);
+    if (processId == collector->ownProcess) {
+        return TRUE;
+    }
 
-    if (MonitorFromWindow(window, MONITOR_DEFAULTTONULL) != collector->monitor) return TRUE;
+    if (MonitorFromWindow(window, MONITOR_DEFAULTTONULL) != collector->monitor) {
+        return TRUE;
+    }
 
     RECT frame{};
-    if (FAILED(DwmGetWindowAttribute(window, DWMWA_EXTENDED_FRAME_BOUNDS, &frame, sizeof(frame))))
+    if (FAILED(DwmGetWindowAttribute(window, DWMWA_EXTENDED_FRAME_BOUNDS, &frame, sizeof(frame)))) {
         GetWindowRect(window, &frame);
+    }
     const double width = static_cast<double>(frame.right) - frame.left;
     const double height = static_cast<double>(frame.bottom) - frame.top;
-    if (width < 64.0 || height < 64.0) return TRUE;
+    if (width < 64.0 || height < 64.0) {
+        return TRUE;
+    }
 
     DesktopWindow entry;
     entry.x = static_cast<double>(frame.left);
     entry.y = static_cast<double>(frame.top);
     entry.width = width;
     entry.height = height;
-    entry.application = ApplicationNameOfWindow(window);
+    entry.application = applicationNameOfWindow(window);
     collector->windows->push_back(std::move(entry));
     return TRUE;
 }
 
 }  // namespace
 
-std::vector<DesktopWindow> OnScreenWindows(uint32_t display_id) {
+std::vector<DesktopWindow> onScreenWindows(uint32_t displayId)
+{
     std::vector<DesktopWindow> windows;
-    const auto monitor = FindMonitor(display_id);
-    if (!monitor) return windows;
+    const auto monitor = findMonitor(displayId);
+    if (!monitor) {
+        return windows;
+    }
 
     WindowCollector collector;
     collector.monitor = monitor->monitor;
-    collector.own_process = GetCurrentProcessId();
+    collector.ownProcess = GetCurrentProcessId();
     collector.windows = &windows;
     // EnumWindows walks top-level windows in z-order, frontmost first,
     // matching the contract.
-    EnumWindows(CollectWindow, reinterpret_cast<LPARAM>(&collector));
+    EnumWindows(collectWindow, reinterpret_cast<LPARAM>(&collector));
     return windows;
 }
 
-std::optional<DesktopPoint> GlobalCursorPosition() {
+std::optional<DesktopPoint> globalCursorPosition()
+{
     POINT point{};
-    if (!GetCursorPos(&point)) return std::nullopt;
+    if (!GetCursorPos(&point)) {
+        return std::nullopt;
+    }
     return DesktopPoint{static_cast<double>(point.x), static_cast<double>(point.y)};
 }
 
-std::optional<DisplayGeometry> GeometryOfDisplay(uint32_t display_id) {
-    const auto monitor = FindMonitor(display_id);
-    if (!monitor) return std::nullopt;
-    return DisplayGeometry{static_cast<double>(monitor->rect.left),
-                           static_cast<double>(monitor->rect.top),
+std::optional<DisplayGeometry> geometryOfDisplay(uint32_t displayId)
+{
+    const auto monitor = findMonitor(displayId);
+    if (!monitor) {
+        return std::nullopt;
+    }
+    return DisplayGeometry{static_cast<double>(monitor->rect.left), static_cast<double>(monitor->rect.top),
                            static_cast<double>(monitor->rect.right) - monitor->rect.left,
                            static_cast<double>(monitor->rect.bottom) - monitor->rect.top};
 }
 
-std::optional<uint32_t> DisplayAtPoint(DesktopPoint point) {
+std::optional<uint32_t> displayAtPoint(DesktopPoint point)
+{
     const POINT at{static_cast<LONG>(point.x), static_cast<LONG>(point.y)};
     HMONITOR monitor = MonitorFromPoint(at, MONITOR_DEFAULTTONULL);
-    if (!monitor) return std::nullopt;
+    if (!monitor) {
+        return std::nullopt;
+    }
     MONITORINFOEXW info{};
     info.cbSize = sizeof(info);
-    if (!GetMonitorInfoW(monitor, &info)) return std::nullopt;
-    const uint32_t display_id = DisplayIdFromDeviceName(info.szDevice);
-    if (display_id == 0) return std::nullopt;
-    return display_id;
+    if (!GetMonitorInfoW(monitor, &info)) {
+        return std::nullopt;
+    }
+    const uint32_t displayId = displayIdFromDeviceName(info.szDevice);
+    if (displayId == 0) {
+        return std::nullopt;
+    }
+    return displayId;
 }
 
-std::optional<uint32_t> DisplayUnderCursor() {
+std::optional<uint32_t> displayUnderCursor()
+{
     POINT point{};
-    if (!GetCursorPos(&point)) return std::nullopt;
-    return DisplayAtPoint(DesktopPoint{static_cast<double>(point.x), static_cast<double>(point.y)});
+    if (!GetCursorPos(&point)) {
+        return std::nullopt;
+    }
+    return displayAtPoint(DesktopPoint{static_cast<double>(point.x), static_cast<double>(point.y)});
 }
 
 namespace {
 
-std::string ApplicationDataDirectory() {
+std::string applicationDataDirectory()
+{
     wchar_t appdata[MAX_PATH];
     const DWORD length = GetEnvironmentVariableW(L"APPDATA", appdata, MAX_PATH);
-    if (length == 0 || length >= MAX_PATH) return ".";
-    return Utf8FromWide(appdata, static_cast<int>(length));
+    if (length == 0 || length >= MAX_PATH) {
+        return ".";
+    }
+    return utf8FromWide(appdata, static_cast<int>(length));
 }
 
 }  // namespace
 
-std::string PreferencesFilePath() {
-    return ApplicationDataDirectory() + "\\SideScopes\\preferences.txt";
+std::string preferencesFilePath()
+{
+    return applicationDataDirectory() + "\\SideScopes\\preferences.txt";
 }
 
-ModifierState CurrentModifiers() {
+ModifierState currentModifiers()
+{
     ModifierState state;
     state.shift = (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
     state.control = (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0;
     state.option = (GetAsyncKeyState(VK_MENU) & 0x8000) != 0;
-    state.command =
-        (GetAsyncKeyState(VK_LWIN) & 0x8000) != 0 || (GetAsyncKeyState(VK_RWIN) & 0x8000) != 0;
+    state.command = (GetAsyncKeyState(VK_LWIN) & 0x8000) != 0 || (GetAsyncKeyState(VK_RWIN) & 0x8000) != 0;
     return state;
 }
 
-bool PlatformHidesWindowOnCommandW() {
+bool platformHidesWindowOnCommandW()
+{
     return false;
 }
 
-bool PlatformMinimizesWindowOnControlW() {
+bool platformMinimizesWindowOnControlW()
+{
     return true;
 }
 
-bool PlatformQuitsOnControlQ() {
+bool platformQuitsOnControlQ()
+{
     return true;
 }
 
-void HideApplication() {
+void hideApplication()
+{
     // Windows dismisses through minimize; there is no application-wide
     // hide to invoke.
 }
 
-void OpenScreenRecordingSettings() {
+void openScreenRecordingSettings()
+{
     // Reading the desktop needs no permission on Windows.
 }
 
-std::vector<std::string> InterfaceFontFiles() {
-    wchar_t windows_directory[MAX_PATH];
-    const UINT length = GetWindowsDirectoryW(windows_directory, MAX_PATH);
-    if (length == 0 || length >= MAX_PATH) return {};
-    const std::string base = Utf8FromWide(windows_directory, static_cast<int>(length));
+std::vector<std::string> interfaceFontFiles()
+{
+    wchar_t windowsDirectory[MAX_PATH];
+    const UINT length = GetWindowsDirectoryW(windowsDirectory, MAX_PATH);
+    if (length == 0 || length >= MAX_PATH) {
+        return {};
+    }
+    const std::string base = utf8FromWide(windowsDirectory, static_cast<int>(length));
     return {base + "\\Fonts\\segoeui.ttf", base + "\\Fonts\\arial.ttf"};
 }
 
-std::vector<std::string> MonospaceFontFiles() {
-    wchar_t windows_directory[MAX_PATH];
-    const UINT length = GetWindowsDirectoryW(windows_directory, MAX_PATH);
-    if (length == 0 || length >= MAX_PATH) return {};
-    const std::string base = Utf8FromWide(windows_directory, static_cast<int>(length));
+std::vector<std::string> monospaceFontFiles()
+{
+    wchar_t windowsDirectory[MAX_PATH];
+    const UINT length = GetWindowsDirectoryW(windowsDirectory, MAX_PATH);
+    if (length == 0 || length >= MAX_PATH) {
+        return {};
+    }
+    const std::string base = utf8FromWide(windowsDirectory, static_cast<int>(length));
     return {base + "\\Fonts\\consola.ttf", base + "\\Fonts\\cour.ttf"};
 }
 
-void ObserveSystemWake(std::function<void()>) {
+void observeSystemWake(std::function<void()>)
+{
     // Duplication dies loudly on lock and wake (access lost) and the
     // application's retry loop rebuilds it from scratch, so there is
     // nothing to observe here.
 }
 
-void ObserveEscapeWithoutKeyWindow(std::function<void()>) {
+void observeEscapeWithoutKeyWindow(std::function<void()>)
+{
     // The border window carries WS_EX_NOACTIVATE: interacting with it
     // never activates the application, so the active-but-focusless state
     // this seam exists for cannot occur here.
 }
 
-void SampleScreenColorAsync(DesktopPoint point,
-                            std::function<void(std::optional<FloatColor>)> callback) {
+void sampleScreenColorAsync(DesktopPoint point, std::function<void(std::optional<FloatColor>)> callback)
+{
     // GDI reads any monitor of the virtual screen synchronously.
     // CAPTUREBLT includes other applications' layered windows (tooltips,
     // notification toasts) the way the eye sees them; this application's
     // own overlays stay out through their capture affinity.
-    constexpr int kSide = 3;
-    const int left = static_cast<int>(point.x) - kSide / 2;
-    const int top = static_cast<int>(point.y) - kSide / 2;
+    constexpr int side = 3;
+    const int left = static_cast<int>(point.x) - side / 2;
+    const int top = static_cast<int>(point.y) - side / 2;
 
     HDC screen = GetDC(nullptr);
     if (!screen) {
@@ -251,35 +310,35 @@ void SampleScreenColorAsync(DesktopPoint point,
     HDC memory = CreateCompatibleDC(screen);
     BITMAPINFO info{};
     info.bmiHeader.biSize = sizeof(info.bmiHeader);
-    info.bmiHeader.biWidth = kSide;
-    info.bmiHeader.biHeight = -kSide;  // top-down rows
+    info.bmiHeader.biWidth = side;
+    info.bmiHeader.biHeight = -side;  // top-down rows
     info.bmiHeader.biPlanes = 1;
     info.bmiHeader.biBitCount = 32;
     info.bmiHeader.biCompression = BI_RGB;
     void* bits = nullptr;
-    HBITMAP bitmap =
-        memory ? CreateDIBSection(memory, &info, DIB_RGB_COLORS, &bits, nullptr, 0) : nullptr;
+    HBITMAP bitmap = memory ? CreateDIBSection(memory, &info, DIB_RGB_COLORS, &bits, nullptr, 0) : nullptr;
     if (bitmap) {
         HGDIOBJ previous = SelectObject(memory, bitmap);
-        if (BitBlt(memory, 0, 0, kSide, kSide, screen, left, top, SRCCOPY | CAPTUREBLT)) {
+        if (BitBlt(memory, 0, 0, side, side, screen, left, top, SRCCOPY | CAPTUREBLT)) {
             const auto* pixels = static_cast<const uint8_t*>(bits);
-            double sum_r = 0;
-            double sum_g = 0;
-            double sum_b = 0;
-            for (int index = 0; index < kSide * kSide; ++index) {
-                sum_b += pixels[index * 4 + 0];
-                sum_g += pixels[index * 4 + 1];
-                sum_r += pixels[index * 4 + 2];
+            double sumR = 0;
+            double sumG = 0;
+            double sumB = 0;
+            for (int index = 0; index < side * side; ++index) {
+                sumB += pixels[index * 4 + 0];
+                sumG += pixels[index * 4 + 1];
+                sumR += pixels[index * 4 + 2];
             }
-            constexpr double kCount = static_cast<double>(kSide) * kSide;
-            color =
-                FloatColor{static_cast<float>(sum_r / kCount), static_cast<float>(sum_g / kCount),
-                           static_cast<float>(sum_b / kCount)};
+            constexpr double count = static_cast<double>(side) * side;
+            color = FloatColor{static_cast<float>(sumR / count), static_cast<float>(sumG / count),
+                               static_cast<float>(sumB / count)};
         }
         SelectObject(memory, previous);
         DeleteObject(bitmap);
     }
-    if (memory) DeleteDC(memory);
+    if (memory) {
+        DeleteDC(memory);
+    }
     ReleaseDC(nullptr, screen);
     callback(color);
 }

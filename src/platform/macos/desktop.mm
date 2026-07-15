@@ -7,33 +7,46 @@
 
 namespace sidescopes {
 
-std::vector<DesktopWindow> OnScreenWindows(uint32_t display_id) {
+std::vector<DesktopWindow> onScreenWindows(uint32_t displayId)
+{
     std::vector<DesktopWindow> windows;
-    const CGRect display_bounds = CGDisplayBounds(display_id);
-    const pid_t own_pid = getpid();
+    const CGRect displayBounds = CGDisplayBounds(displayId);
+    const pid_t ownPid = getpid();
 
-    CFArrayRef list = CGWindowListCopyWindowInfo(
-        kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements, kCGNullWindowID);
-    if (!list) return windows;
+    CFArrayRef list = CGWindowListCopyWindowInfo(kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements,
+                                                 kCGNullWindowID);
+    if (!list) {
+        return windows;
+    }
 
     const CFIndex count = CFArrayGetCount(list);
     for (CFIndex index = 0; index < count; ++index) {
         NSDictionary* info = (__bridge NSDictionary*)CFArrayGetValueAtIndex(list, index);
         // Layer 0 is ordinary application windows; everything else is
         // chrome (menu bar, dock, overlays - including our own).
-        if ([info[(__bridge NSString*)kCGWindowLayer] intValue] != 0) continue;
-        if ([info[(__bridge NSString*)kCGWindowOwnerPID] intValue] == own_pid) continue;
+        if ([info[(__bridge NSString*)kCGWindowLayer] intValue] != 0) {
+            continue;
+        }
+        if ([info[(__bridge NSString*)kCGWindowOwnerPID] intValue] == ownPid) {
+            continue;
+        }
         // Invisible system helper windows (accessibility warnings and the
         // like) sit at layer zero with zero alpha; the window list reports
         // them as if they were real.
         NSNumber* alpha = info[(__bridge NSString*)kCGWindowAlpha];
-        if (alpha && alpha.doubleValue < 0.05) continue;
+        if (alpha && alpha.doubleValue < 0.05) {
+            continue;
+        }
 
         CGRect bounds = CGRectZero;
-        CGRectMakeWithDictionaryRepresentation(
-            (__bridge CFDictionaryRef)info[(__bridge NSString*)kCGWindowBounds], &bounds);
-        if (bounds.size.width < 64 || bounds.size.height < 64) continue;
-        if (!CGRectIntersectsRect(bounds, display_bounds)) continue;
+        CGRectMakeWithDictionaryRepresentation((__bridge CFDictionaryRef)info[(__bridge NSString*)kCGWindowBounds],
+                                               &bounds);
+        if (bounds.size.width < 64 || bounds.size.height < 64) {
+            continue;
+        }
+        if (!CGRectIntersectsRect(bounds, displayBounds)) {
+            continue;
+        }
 
         DesktopWindow window;
         window.x = bounds.origin.x;
@@ -48,43 +61,54 @@ std::vector<DesktopWindow> OnScreenWindows(uint32_t display_id) {
     return windows;
 }
 
-std::optional<DesktopPoint> GlobalCursorPosition() {
+std::optional<DesktopPoint> globalCursorPosition()
+{
     CGEventRef event = CGEventCreate(nullptr);
-    if (!event) return std::nullopt;
+    if (!event) {
+        return std::nullopt;
+    }
     const CGPoint location = CGEventGetLocation(event);
     CFRelease(event);
     return DesktopPoint{location.x, location.y};
 }
 
-std::optional<DisplayGeometry> GeometryOfDisplay(uint32_t display_id) {
-    const CGRect bounds = CGDisplayBounds(display_id);
-    if (CGRectIsEmpty(bounds)) return std::nullopt;
+std::optional<DisplayGeometry> geometryOfDisplay(uint32_t displayId)
+{
+    const CGRect bounds = CGDisplayBounds(displayId);
+    if (CGRectIsEmpty(bounds)) {
+        return std::nullopt;
+    }
     return DisplayGeometry{bounds.origin.x, bounds.origin.y, bounds.size.width, bounds.size.height};
 }
 
-std::optional<uint32_t> DisplayAtPoint(DesktopPoint point) {
+std::optional<uint32_t> displayAtPoint(DesktopPoint point)
+{
     CGDirectDisplayID display = 0;
     uint32_t matches = 0;
-    if (CGGetDisplaysWithPoint(CGPointMake(point.x, point.y), 1, &display, &matches) !=
-            kCGErrorSuccess ||
-        matches == 0)
+    if (CGGetDisplaysWithPoint(CGPointMake(point.x, point.y), 1, &display, &matches) != kCGErrorSuccess ||
+        matches == 0) {
         return std::nullopt;
+    }
     return display;
 }
 
-std::optional<uint32_t> DisplayUnderCursor() {
-    const auto cursor = GlobalCursorPosition();
-    if (!cursor) return std::nullopt;
-    return DisplayAtPoint(*cursor);
+std::optional<uint32_t> displayUnderCursor()
+{
+    const auto cursor = globalCursorPosition();
+    if (!cursor) {
+        return std::nullopt;
+    }
+    return displayAtPoint(*cursor);
 }
 
-std::string PreferencesFilePath() {
+std::string preferencesFilePath()
+{
     const char* home = std::getenv("HOME");
-    return std::string(home ? home : ".") +
-           "/Library/Application Support/SideScopes/preferences.txt";
+    return std::string(home ? home : ".") + "/Library/Application Support/SideScopes/preferences.txt";
 }
 
-ModifierState CurrentModifiers() {
+ModifierState currentModifiers()
+{
     // NSEvent.modifierFlags mirrors the application's own event stream,
     // which is precisely what a system overlay starves - it reads stuck
     // in the very situation this exists to heal. The Quartz event source
@@ -99,40 +123,46 @@ ModifierState CurrentModifiers() {
     return state;
 }
 
-bool PlatformHidesWindowOnCommandW() {
+bool platformHidesWindowOnCommandW()
+{
     return true;
 }
 
-bool PlatformMinimizesWindowOnControlW() {
+bool platformMinimizesWindowOnControlW()
+{
     return false;
 }
 
-bool PlatformQuitsOnControlQ() {
+bool platformQuitsOnControlQ()
+{
     return false;
 }
 
-void HideApplication() {
+void hideApplication()
+{
     [NSApp hide:nil];
 }
 
-void OpenScreenRecordingSettings() {
-    NSURL* url = [NSURL
-        URLWithString:
-            @"x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture"];
+void openScreenRecordingSettings()
+{
+    NSURL* url = [NSURL URLWithString:@"x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture"];
     [[NSWorkspace sharedWorkspace] openURL:url];
 }
 
-std::vector<std::string> InterfaceFontFiles() {
+std::vector<std::string> interfaceFontFiles()
+{
     return {"/System/Library/Fonts/HelveticaNeue.ttc", "/System/Library/Fonts/SFNS.ttf",
             "/System/Library/Fonts/Supplemental/Arial.ttf"};
 }
 
-std::vector<std::string> MonospaceFontFiles() {
+std::vector<std::string> monospaceFontFiles()
+{
     return {"/System/Library/Fonts/SFNSMono.ttf", "/System/Library/Fonts/Menlo.ttc",
             "/System/Library/Fonts/Supplemental/Courier New.ttf"};
 }
 
-void ObserveSystemWake(std::function<void()> callback) {
+void observeSystemWake(std::function<void()> callback)
+{
     // Waking the display or unlocking the session can leave a capture
     // stream a zombie: it either stops delivering without an error, or a
     // retry that ran while the screen was locked started a stream bound
@@ -143,32 +173,29 @@ void ObserveSystemWake(std::function<void()> callback) {
     const auto observe = ^(NSNotification*) {
       (*shared)();
     };
-    [[[NSWorkspace sharedWorkspace] notificationCenter]
-        addObserverForName:NSWorkspaceScreensDidWakeNotification
-                    object:nil
-                     queue:[NSOperationQueue mainQueue]
-                usingBlock:observe];
-    [[[NSWorkspace sharedWorkspace] notificationCenter]
-        addObserverForName:NSWorkspaceSessionDidBecomeActiveNotification
-                    object:nil
-                     queue:[NSOperationQueue mainQueue]
-                usingBlock:observe];
-    [[NSDistributedNotificationCenter defaultCenter]
-        addObserverForName:@"com.apple.screenIsUnlocked"
-                    object:nil
-                     queue:[NSOperationQueue mainQueue]
-                usingBlock:observe];
+    [[[NSWorkspace sharedWorkspace] notificationCenter] addObserverForName:NSWorkspaceScreensDidWakeNotification
+                                                                    object:nil
+                                                                     queue:[NSOperationQueue mainQueue]
+                                                                usingBlock:observe];
+    [[[NSWorkspace sharedWorkspace] notificationCenter] addObserverForName:NSWorkspaceSessionDidBecomeActiveNotification
+                                                                    object:nil
+                                                                     queue:[NSOperationQueue mainQueue]
+                                                                usingBlock:observe];
+    [[NSDistributedNotificationCenter defaultCenter] addObserverForName:@"com.apple.screenIsUnlocked"
+                                                                 object:nil
+                                                                  queue:[NSOperationQueue mainQueue]
+                                                             usingBlock:observe];
     // Display topology changes (a monitor connected, removed, or given a
     // new resolution) can leave the stream running against a stale
     // configuration; a restart is cheap and re-resolves the display.
-    [[NSNotificationCenter defaultCenter]
-        addObserverForName:NSApplicationDidChangeScreenParametersNotification
-                    object:nil
-                     queue:[NSOperationQueue mainQueue]
-                usingBlock:observe];
+    [[NSNotificationCenter defaultCenter] addObserverForName:NSApplicationDidChangeScreenParametersNotification
+                                                      object:nil
+                                                       queue:[NSOperationQueue mainQueue]
+                                                  usingBlock:observe];
 }
 
-void ObserveEscapeWithoutKeyWindow(std::function<void()> callback) {
+void observeEscapeWithoutKeyWindow(std::function<void()> callback)
+{
     // Clicking the region border activates the application without
     // giving any window keyboard focus - the border refuses key status
     // by design, so grabbing it never pulls the keyboard out of the

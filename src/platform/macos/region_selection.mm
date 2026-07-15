@@ -23,116 +23,115 @@ namespace {
 
 // The border window extends this far beyond the region: the grab band,
 // wide enough to hit with a cursor, slim enough to stay unobtrusive.
-constexpr double kBorderPad = 12.0;
+constexpr double BorderPad = 12.0;
 // The macOS-screenshot-style handle dots protrude past the band's outer
 // edge; the window carries a transparent margin so they are not clipped.
-constexpr double kHandleRadius = 3.5;
+constexpr double HandleRadius = 3.5;
 // Thickness of the measured-edge ring between the region and the hazard
 // stripes. The stripes' cutoff and the ring share this one constant, so
 // they abut exactly at every display scale - two independently tuned
 // numbers once left a hairline of bare transparency between them.
-constexpr double kEdgeRing = 1.0;
-constexpr double kHandleMargin = kHandleRadius + 2.0;
-constexpr double kWindowPad = kBorderPad + kHandleMargin;
+constexpr double EdgeRing = 1.0;
+constexpr double HandleMargin = HandleRadius + 2.0;
+constexpr double WindowPad = BorderPad + HandleMargin;
 // Within this distance of a region corner, a grab resizes; the rest of
 // the band moves the region (Shift-drag resizes a single edge).
-constexpr double kCornerZone = 22.0;
+constexpr double CornerZone = 22.0;
 // Half-length of the edge-midpoint handle's grab zone along its edge.
-constexpr double kMidpointZone = 22.0;
+constexpr double MidpointZone = 22.0;
 // Regions cannot shrink beyond this many points per side.
-constexpr double kMinimumRegionSize = 24.0;
+constexpr double MinimumRegionSize = 24.0;
 // The hover-revealed close button: a badge on the band's outer corner,
 // diagonally off the corner handle, so it visibly belongs to the region
 // as a whole. Pulled inward a touch so the disc mostly rides the band;
 // tiny regions still yield it to the resize zones.
-constexpr double kCloseRadius = 6.5;
-constexpr double kCloseHitRadius = 11.0;
-constexpr double kCloseCornerInset = 2.0;
-constexpr double kMinimumWidthForClose = 48.0;
+constexpr double CloseRadius = 6.5;
+constexpr double CloseHitRadius = 11.0;
+constexpr double CloseCornerInset = 2.0;
+constexpr double MinimumWidthForClose = 48.0;
 
-NSScreen* ScreenForDisplay(uint32_t display_id) {
+NSScreen* screenForDisplay(uint32_t displayId)
+{
     for (NSScreen* screen in NSScreen.screens) {
         NSNumber* number = screen.deviceDescription[@"NSScreenNumber"];
-        if (number && number.unsignedIntValue == display_id) return screen;
+        if (number && number.unsignedIntValue == displayId) {
+            return screen;
+        }
     }
     return NSScreen.mainScreen;
 }
 
-RegionOfInterest RegionFromScreenRect(NSRect rect, NSRect screen_frame) {
+RegionOfInterest regionFromScreenRect(NSRect rect, NSRect screenFrame)
+{
     // Screen coordinates are bottom-left-origin; the region convention is
     // top-left-origin percentages.
     RegionOfInterest region;
-    region.left_percent = (rect.origin.x - screen_frame.origin.x) / screen_frame.size.width * 100.0;
-    region.right_percent =
-        (rect.origin.x + rect.size.width - screen_frame.origin.x) / screen_frame.size.width * 100.0;
-    region.top_percent =
-        (screen_frame.origin.y + screen_frame.size.height - (rect.origin.y + rect.size.height)) /
-        screen_frame.size.height * 100.0;
-    region.bottom_percent = (screen_frame.origin.y + screen_frame.size.height - rect.origin.y) /
-                            screen_frame.size.height * 100.0;
+    region.leftPercent = (rect.origin.x - screenFrame.origin.x) / screenFrame.size.width * 100.0;
+    region.rightPercent = (rect.origin.x + rect.size.width - screenFrame.origin.x) / screenFrame.size.width * 100.0;
+    region.topPercent = (screenFrame.origin.y + screenFrame.size.height - (rect.origin.y + rect.size.height)) /
+                        screenFrame.size.height * 100.0;
+    region.bottomPercent =
+        (screenFrame.origin.y + screenFrame.size.height - rect.origin.y) / screenFrame.size.height * 100.0;
     return region;
 }
 
 // Shared edit state the application polls once per frame.
-bool g_border_editing = false;
-bool g_border_edit_changed = false;
-bool g_border_dismissed = false;
-RegionOfInterest g_border_edit_region;
+bool g_borderEditing = false;
+bool g_borderEditChanged = false;
+bool g_borderDismissed = false;
+RegionOfInterest g_borderEditRegion;
 
 // The pin cursor's swatch color, pushed by the application once per
 // frame; sampled from the capture stream so the swatch previews exactly
 // what a click would pin.
-std::optional<FloatColor> g_pin_chip_color;
+std::optional<FloatColor> g_pinChipColor;
 
 // The sample patch a pin-mode click averages, in points.
-constexpr double kPinSamplePoints = 14.0;
+constexpr double PinSamplePoints = 14.0;
 
 // The pin cursor: crosshair and preview swatch drawn into the CURSOR
 // itself. A swatch painted into the overlay always trails the pointer
 // by a composition frame - the cursor image rides its own zero-latency
 // plane, so the swatch does too. The crosshair is a two-tone grey, the
 // look the system crosshair only has over dimmed content.
-constexpr double kPinCursorHotspot = 12.0;  // crosshair center, points
-constexpr double kPinCursorArm = 8.0;
-constexpr double kPinCursorGap = 2.0;
-constexpr double kPinSwatchOffset = 7.0;  // from the hotspot, points
-constexpr double kPinSwatchSize = 13.0;
+constexpr double PinCursorHotspot = 12.0;  // crosshair center, points
+constexpr double PinCursorArm = 8.0;
+constexpr double PinCursorGap = 2.0;
+constexpr double PinSwatchOffset = 7.0;  // from the hotspot, points
+constexpr double PinSwatchSize = 13.0;
 
-NSCursor* g_pin_cursor = nil;
+NSCursor* g_pinCursor = nil;
 
-NSCursor* BuildPinCursor(const std::optional<FloatColor>& color) {
-    const CGFloat side = kPinCursorHotspot + kPinSwatchOffset + kPinSwatchSize + 2;
+NSCursor* buildPinCursor(const std::optional<FloatColor>& color)
+{
+    const CGFloat side = PinCursorHotspot + PinSwatchOffset + PinSwatchSize + 2;
     NSImage* image = [[NSImage alloc] initWithSize:NSMakeSize(side, side)];
     [image lockFocus];
     // Image coordinates are bottom-left; the hotspot NSCursor takes is
     // top-left. The crosshair centers on (hotspot, hotspot) from the
     // top, the swatch hangs below-right of it.
-    const CGFloat center_x = kPinCursorHotspot;
-    const CGFloat center_y = side - kPinCursorHotspot;
+    const CGFloat centerX = PinCursorHotspot;
+    const CGFloat centerY = side - PinCursorHotspot;
     const auto stroke = [&](CGFloat width, NSColor* tone) {
         NSBezierPath* arms = [NSBezierPath bezierPath];
         arms.lineWidth = width;
-        [arms moveToPoint:NSMakePoint(center_x, center_y + kPinCursorGap)];
-        [arms lineToPoint:NSMakePoint(center_x, center_y + kPinCursorArm)];
-        [arms moveToPoint:NSMakePoint(center_x, center_y - kPinCursorGap)];
-        [arms lineToPoint:NSMakePoint(center_x, center_y - kPinCursorArm)];
-        [arms moveToPoint:NSMakePoint(center_x + kPinCursorGap, center_y)];
-        [arms lineToPoint:NSMakePoint(center_x + kPinCursorArm, center_y)];
-        [arms moveToPoint:NSMakePoint(center_x - kPinCursorGap, center_y)];
-        [arms lineToPoint:NSMakePoint(center_x - kPinCursorArm, center_y)];
+        [arms moveToPoint:NSMakePoint(centerX, centerY + PinCursorGap)];
+        [arms lineToPoint:NSMakePoint(centerX, centerY + PinCursorArm)];
+        [arms moveToPoint:NSMakePoint(centerX, centerY - PinCursorGap)];
+        [arms lineToPoint:NSMakePoint(centerX, centerY - PinCursorArm)];
+        [arms moveToPoint:NSMakePoint(centerX + PinCursorGap, centerY)];
+        [arms lineToPoint:NSMakePoint(centerX + PinCursorArm, centerY)];
+        [arms moveToPoint:NSMakePoint(centerX - PinCursorGap, centerY)];
+        [arms lineToPoint:NSMakePoint(centerX - PinCursorArm, centerY)];
         [tone setStroke];
         [arms stroke];
     };
     stroke(3.2, [NSColor colorWithWhite:0.1 alpha:0.85]);
     stroke(1.5, [NSColor colorWithWhite:0.8 alpha:0.95]);
     if (color) {
-        const NSRect swatch =
-            NSMakeRect(center_x + kPinSwatchOffset, center_y - kPinSwatchOffset - kPinSwatchSize,
-                       kPinSwatchSize, kPinSwatchSize);
-        [[NSColor colorWithSRGBRed:color->r / 255.0
-                             green:color->g / 255.0
-                              blue:color->b / 255.0
-                             alpha:1.0] setFill];
+        const NSRect swatch = NSMakeRect(centerX + PinSwatchOffset, centerY - PinSwatchOffset - PinSwatchSize,
+                                         PinSwatchSize, PinSwatchSize);
+        [[NSColor colorWithSRGBRed:color->r / 255.0 green:color->g / 255.0 blue:color->b / 255.0 alpha:1.0] setFill];
         NSRectFillUsingOperation(swatch, NSCompositingOperationCopy);
         NSBezierPath* rim = [NSBezierPath bezierPathWithRect:swatch];
         rim.lineWidth = 2.0;
@@ -144,8 +143,7 @@ NSCursor* BuildPinCursor(const std::optional<FloatColor>& color) {
         [ring stroke];
     }
     [image unlockFocus];
-    return [[NSCursor alloc] initWithImage:image
-                                   hotSpot:NSMakePoint(kPinCursorHotspot, kPinCursorHotspot)];
+    return [[NSCursor alloc] initWithImage:image hotSpot:NSMakePoint(PinCursorHotspot, PinCursorHotspot)];
 }
 
 }  // namespace
@@ -156,9 +154,12 @@ NSCursor* BuildPinCursor(const std::optional<FloatColor>& color) {
 @interface SidescopesPickerWindow : NSWindow
 @end
 @implementation SidescopesPickerWindow
-- (BOOL)canBecomeKeyWindow {
+
+- (BOOL)canBecomeKeyWindow
+{
     return YES;
 }
+
 @end
 
 @interface SidescopesPickerView : NSView {
@@ -196,11 +197,14 @@ NSCursor* BuildPinCursor(const std::optional<FloatColor>& color) {
 // 0 = pick a window, 1 = draw, 2 = pick a face, 3 = pin colors. Face
 // mode is offered even when no face was found: the honest answer is the
 // empty overlay saying so, not a key that silently does nothing.
-- (void)switchToMode:(int)mode {
+- (void)switchToMode:(int)mode
+{
     const BOOL draw = mode == 1;
     const BOOL faces = mode == 2;
     const BOOL pin = mode == 3;
-    if (self.drawMode == draw && self.facesMode == faces && self.pinMode == pin) return;
+    if (self.drawMode == draw && self.facesMode == faces && self.pinMode == pin) {
+        return;
+    }
     self.drawMode = draw;
     self.facesMode = faces;
     self.pinMode = pin;
@@ -213,26 +217,28 @@ NSCursor* BuildPinCursor(const std::optional<FloatColor>& color) {
 
 // The smallest suggestion under the cursor wins, so a photo canvas beats
 // the window that contains it.
-- (NSInteger)suggestionAtPoint:(NSPoint)point {
+- (NSInteger)suggestionAtPoint:(NSPoint)point
+{
     NSInteger best = -1;
-    CGFloat best_area = CGFLOAT_MAX;
+    CGFloat bestArea = CGFLOAT_MAX;
     for (NSUInteger index = 0; index < suggestions_.size(); ++index) {
         const NSRect rect = suggestions_[index].first;
-        if (!NSPointInRect(point, rect)) continue;
+        if (!NSPointInRect(point, rect)) {
+            continue;
+        }
         const CGFloat area = rect.size.width * rect.size.height;
-        if (area < best_area) {
-            best_area = area;
+        if (area < bestArea) {
+            bestArea = area;
             best = static_cast<NSInteger>(index);
         }
     }
     return best;
 }
 
-- (NSRect)selectionRect {
-    return NSMakeRect(std::min(self.dragStart.x, self.dragCurrent.x),
-                      std::min(self.dragStart.y, self.dragCurrent.y),
-                      std::abs(self.dragCurrent.x - self.dragStart.x),
-                      std::abs(self.dragCurrent.y - self.dragStart.y));
+- (NSRect)selectionRect
+{
+    return NSMakeRect(std::min(self.dragStart.x, self.dragCurrent.x), std::min(self.dragStart.y, self.dragCurrent.y),
+                      std::abs(self.dragCurrent.x - self.dragStart.x), std::abs(self.dragCurrent.y - self.dragStart.y));
 }
 
 // A punched hole must keep a whisper of alpha when it should stay
@@ -240,7 +246,8 @@ NSCursor* BuildPinCursor(const std::optional<FloatColor>& color) {
 // click-through. The picker uses both behaviors deliberately - 5% black
 // for its own click targets, true zero alpha over this application's
 // windows so clicks reach them.
-- (void)punchRect:(NSRect)rect {
+- (void)punchRect:(NSRect)rect
+{
     [[NSColor clearColor] setFill];
     NSRectFillUsingOperation(rect, NSCompositingOperationCopy);
     [[NSColor colorWithWhite:0 alpha:0.05] setFill];
@@ -251,24 +258,25 @@ NSCursor* BuildPinCursor(const std::optional<FloatColor>& color) {
 // dark pill, placed where this application's own windows do not cover
 // it - they float above the overlay, and a message half-hidden behind
 // the scope window reads as a glitch.
-- (void)drawBanner:(NSString*)primary secondary:(NSString*)secondary preferCenter:(BOOL)center {
-    NSDictionary* primary_attributes = @{
+- (void)drawBanner:(NSString*)primary secondary:(NSString*)secondary preferCenter:(BOOL)center
+{
+    NSDictionary* primaryAttributes = @{
         NSForegroundColorAttributeName : [NSColor whiteColor],
         NSFontAttributeName : [NSFont systemFontOfSize:22 weight:NSFontWeightSemibold],
     };
-    NSDictionary* secondary_attributes = @{
+    NSDictionary* secondaryAttributes = @{
         NSForegroundColorAttributeName : [NSColor colorWithWhite:1 alpha:0.75],
         NSFontAttributeName : [NSFont systemFontOfSize:14 weight:NSFontWeightRegular],
     };
-    const NSSize primary_size = [primary sizeWithAttributes:primary_attributes];
-    const NSSize secondary_size = [secondary sizeWithAttributes:secondary_attributes];
-    const CGFloat width = std::max(primary_size.width, secondary_size.width) + 48;
-    const CGFloat height = primary_size.height + secondary_size.height + 30;
+    const NSSize primarySize = [primary sizeWithAttributes:primaryAttributes];
+    const NSSize secondarySize = [secondary sizeWithAttributes:secondaryAttributes];
+    const CGFloat width = std::max(primarySize.width, secondarySize.width) + 48;
+    const CGFloat height = primarySize.height + secondarySize.height + 30;
     const CGFloat x = (self.bounds.size.width - width) / 2;
-    const CGFloat top_y = self.bounds.size.height - height - 80;
-    const CGFloat center_y = (self.bounds.size.height - height) / 2;
-    const CGFloat low_y = self.bounds.size.height * 0.22;
-    const CGFloat candidates[3] = {center ? center_y : top_y, center ? top_y : center_y, low_y};
+    const CGFloat topY = self.bounds.size.height - height - 80;
+    const CGFloat centerY = (self.bounds.size.height - height) / 2;
+    const CGFloat lowY = self.bounds.size.height * 0.22;
+    const CGFloat candidates[3] = {center ? centerY : topY, center ? topY : centerY, lowY};
     NSRect banner = NSMakeRect(x, candidates[0], width, height);
     for (const CGFloat candidate : candidates) {
         const NSRect probe = NSMakeRect(x, candidate, width, height);
@@ -286,15 +294,15 @@ NSCursor* BuildPinCursor(const std::optional<FloatColor>& color) {
     }
     [[NSColor colorWithWhite:0 alpha:0.55] setFill];
     [[NSBezierPath bezierPathWithRoundedRect:banner xRadius:12 yRadius:12] fill];
-    [primary drawAtPoint:NSMakePoint(banner.origin.x + (width - primary_size.width) / 2,
-                                     NSMaxY(banner) - primary_size.height - 10)
-          withAttributes:primary_attributes];
-    [secondary drawAtPoint:NSMakePoint(banner.origin.x + (width - secondary_size.width) / 2,
-                                       banner.origin.y + 10)
-            withAttributes:secondary_attributes];
+    [primary drawAtPoint:NSMakePoint(banner.origin.x + (width - primarySize.width) / 2,
+                                     NSMaxY(banner) - primarySize.height - 10)
+          withAttributes:primaryAttributes];
+    [secondary drawAtPoint:NSMakePoint(banner.origin.x + (width - secondarySize.width) / 2, banner.origin.y + 10)
+            withAttributes:secondaryAttributes];
 }
 
-- (void)drawRect:(NSRect)dirty {
+- (void)drawRect:(NSRect)dirty
+{
     (void)dirty;
     if (self.pinMode) {
         // No dim at all - judging a color through even a light wash
@@ -334,15 +342,16 @@ NSCursor* BuildPinCursor(const std::optional<FloatColor>& color) {
             // hovered one still gets the full accent treatment below.
             [[NSColor colorWithWhite:1 alpha:0.85] setStroke];
             for (NSInteger i = 0; i < static_cast<NSInteger>(suggestions_.size()); ++i) {
-                if (i == self.hoveredSuggestion) continue;
+                if (i == self.hoveredSuggestion) {
+                    continue;
+                }
                 [self punchRect:suggestions_[i].first];
                 NSBezierPath* outline = [NSBezierPath bezierPathWithRect:suggestions_[i].first];
                 outline.lineWidth = 1.5;
                 [outline stroke];
             }
         }
-        if (self.hoveredSuggestion >= 0 &&
-            self.hoveredSuggestion < static_cast<NSInteger>(suggestions_.size())) {
+        if (self.hoveredSuggestion >= 0 && self.hoveredSuggestion < static_cast<NSInteger>(suggestions_.size())) {
             // Only the rectangle under the cursor is shown, washed with the
             // system accent like window selection in the macOS screenshot
             // interface. Outlining every candidate at once was clutter.
@@ -355,23 +364,21 @@ NSCursor* BuildPinCursor(const std::optional<FloatColor>& color) {
             border.lineWidth = 2.0;
             [border stroke];
             NSString* label = [NSString stringWithUTF8String:hovered.second.c_str()];
-            NSDictionary* label_attributes = @{
+            NSDictionary* labelAttributes = @{
                 NSForegroundColorAttributeName : [NSColor whiteColor],
                 NSFontAttributeName : [NSFont systemFontOfSize:12 weight:NSFontWeightMedium],
             };
             [label drawAtPoint:NSMakePoint(hovered.first.origin.x + 6, NSMaxY(hovered.first) - 20)
-                withAttributes:label_attributes];
+                withAttributes:labelAttributes];
         }
         if (self.facesMode) {
-            [self drawBanner:suggestions_.empty() ? @"No faces found on this screen"
-                                                  : @"Click a face"
+            [self drawBanner:suggestions_.empty() ? @"No faces found on this screen" : @"Click a face"
                    secondary:@"[A] pick a window    [D] draw    [Esc] full screen"
                 preferCenter:suggestions_.empty()];
         } else {
             [self drawBanner:@"Click a window"
-                   secondary:sidescopes::SupportsFaceDetection()
-                                 ? @"[F] pick a face    [D] draw    [Esc] full screen"
-                                 : @"[D] draw    [Esc] full screen"
+                   secondary:sidescopes::supportsFaceDetection() ? @"[F] pick a face    [D] draw    [Esc] full screen"
+                                                                 : @"[D] draw    [Esc] full screen"
                 preferCenter:NO];
         }
     } else {
@@ -387,29 +394,37 @@ NSCursor* BuildPinCursor(const std::optional<FloatColor>& color) {
         }
         if (!self.dragging) {
             NSString* secondary = @"[Esc] full screen";
-            if (!windows_.empty() && sidescopes::SupportsFaceDetection())
+            if (!windows_.empty() && sidescopes::supportsFaceDetection()) {
                 secondary = @"[A] pick a window    [F] pick a face    [Esc] full screen";
-            else if (!windows_.empty())
+            } else if (!windows_.empty()) {
                 secondary = @"[A] pick a window    [Esc] full screen";
+            }
             [self drawBanner:@"Drag to select an area" secondary:secondary preferCenter:NO];
         }
     }
 }
 
-- (void)resetCursorRects {
+- (void)resetCursorRects
+{
     NSCursor* cursor = NSCursor.pointingHandCursor;
-    if (self.pinMode)
-        cursor = sidescopes::g_pin_cursor ? sidescopes::g_pin_cursor : NSCursor.crosshairCursor;
-    else if (self.drawMode)
+    if (self.pinMode) {
+        cursor = sidescopes::g_pinCursor ? sidescopes::g_pinCursor : NSCursor.crosshairCursor;
+    } else if (self.drawMode) {
         cursor = NSCursor.crosshairCursor;
+    }
     [self addCursorRect:self.bounds cursor:cursor];
 }
 
-- (void)mouseMoved:(NSEvent*)event {
+- (void)mouseMoved:(NSEvent*)event
+{
     // In pin mode the swatch rides the cursor image itself; motion needs
     // nothing from the view.
-    if (self.pinMode) return;
-    if (self.drawMode) return;
+    if (self.pinMode) {
+        return;
+    }
+    if (self.drawMode) {
+        return;
+    }
     const NSPoint point = [self convertPoint:event.locationInWindow fromView:nil];
     const NSInteger hovered = [self suggestionAtPoint:point];
     if (hovered != self.hoveredSuggestion) {
@@ -418,16 +433,20 @@ NSCursor* BuildPinCursor(const std::optional<FloatColor>& color) {
     }
 }
 
-- (void)mouseDown:(NSEvent*)event {
+- (void)mouseDown:(NSEvent*)event
+{
     // The keyboard follows the click across displays: whichever overlay
     // was clicked last owns ESC and the mode keys.
-    if (!self.window.keyWindow) [self.window makeKeyAndOrderFront:nil];
+    if (!self.window.keyWindow) {
+        [self.window makeKeyAndOrderFront:nil];
+    }
     self.dragStart = [self convertPoint:event.locationInWindow fromView:nil];
     self.dragCurrent = self.dragStart;
     self.needsDisplay = YES;
 }
 
-- (void)mouseDragged:(NSEvent*)event {
+- (void)mouseDragged:(NSEvent*)event
+{
     if (self.pinMode) {
         const NSPoint point = [self convertPoint:event.locationInWindow fromView:nil];
         const NSRect previous = [self selectionRect];
@@ -438,22 +457,28 @@ NSCursor* BuildPinCursor(const std::optional<FloatColor>& color) {
             self.needsDisplay = YES;  // full: the banner leaves
             return;
         }
-        if (!self.dragging) return;
+        if (!self.dragging) {
+            return;
+        }
         NSRect changed = NSUnionRect(previous, [self selectionRect]);
         [self setNeedsDisplayInRect:NSInsetRect(changed, -4, -4)];
         return;
     }
-    if (!self.drawMode) return;
+    if (!self.drawMode) {
+        return;
+    }
     self.dragCurrent = [self convertPoint:event.locationInWindow fromView:nil];
     // A real drag only starts after a few points of travel, so a stray
     // click never flashes a tiny manual selection.
-    if (!self.dragging && (std::abs(self.dragCurrent.x - self.dragStart.x) > 4 ||
-                           std::abs(self.dragCurrent.y - self.dragStart.y) > 4))
+    if (!self.dragging &&
+        (std::abs(self.dragCurrent.x - self.dragStart.x) > 4 || std::abs(self.dragCurrent.y - self.dragStart.y) > 4)) {
         self.dragging = YES;
+    }
     self.needsDisplay = YES;
 }
 
-- (void)mouseUp:(NSEvent*)event {
+- (void)mouseUp:(NSEvent*)event
+{
     const NSPoint point = [self convertPoint:event.locationInWindow fromView:nil];
     if (self.pinMode) {
         self.dragCurrent = point;
@@ -465,9 +490,8 @@ NSCursor* BuildPinCursor(const std::optional<FloatColor>& color) {
             // photographs are textured, and a point sample is a lottery
             // across the vectorscope cloud.
             self.pinnedArea =
-                NSMakeRect(point.x - sidescopes::kPinSamplePoints / 2,
-                           point.y - sidescopes::kPinSamplePoints / 2, sidescopes::kPinSamplePoints,
-                           sidescopes::kPinSamplePoints);
+                NSMakeRect(point.x - sidescopes::PinSamplePoints / 2, point.y - sidescopes::PinSamplePoints / 2,
+                           sidescopes::PinSamplePoints, sidescopes::PinSamplePoints);
         }
         // The click's Shift carries the per-pin decision: pin and keep
         // picking, or pin and be done.
@@ -481,7 +505,9 @@ NSCursor* BuildPinCursor(const std::optional<FloatColor>& color) {
     }
     if (!self.drawMode) {
         const NSInteger hovered = [self suggestionAtPoint:point];
-        if (hovered < 0) return;  // a miss keeps the picker open
+        if (hovered < 0) {
+            return;  // a miss keeps the picker open
+        }
         self.picked = YES;
         self.confirmedRect = suggestions_[hovered].first;
         self.finished = YES;
@@ -501,42 +527,47 @@ NSCursor* BuildPinCursor(const std::optional<FloatColor>& color) {
     }
 }
 
-- (void)keyDown:(NSEvent*)event {
+- (void)keyDown:(NSEvent*)event
+{
     if (event.keyCode == 53) {  // ESC
         self.picked = NO;
         self.finished = YES;
         return;
     }
     // Pinning is its own tool: while it is up, only ESC speaks.
-    if (self.pinMode) return;
+    if (self.pinMode) {
+        return;
+    }
     NSString* keys = event.charactersIgnoringModifiers;
     if (keys.length == 1) {
         // Modes switch on every display's overlay at once.
         const unichar key = [keys characterAtIndex:0];
         if (key == 'a' || key == 'A') {
-            sidescopes::SetRegionPickMode(sidescopes::RegionPickerMode::PickWindows);
+            sidescopes::setRegionPickMode(sidescopes::RegionPickerMode::PickWindows);
             return;
         }
         if (key == 'd' || key == 'D') {
-            sidescopes::SetRegionPickMode(sidescopes::RegionPickerMode::Draw);
+            sidescopes::setRegionPickMode(sidescopes::RegionPickerMode::Draw);
             return;
         }
         if (key == 'f' || key == 'F') {
-            sidescopes::SetRegionPickMode(sidescopes::RegionPickerMode::PickFaces);
+            sidescopes::setRegionPickMode(sidescopes::RegionPickerMode::PickFaces);
             return;
         }
     }
     [super keyDown:event];
 }
 
-- (BOOL)acceptsFirstResponder {
+- (BOOL)acceptsFirstResponder
+{
     return YES;
 }
 
 // Without this, the first click on the overlay is swallowed as a
 // window-activation gesture and never reaches the view - the symptom was
 // clicks falling through to the app behind while only ESC worked.
-- (BOOL)acceptsFirstMouse:(NSEvent*)event {
+- (BOOL)acceptsFirstMouse:(NSEvent*)event
+{
     (void)event;
     return YES;
 }
@@ -559,29 +590,31 @@ NSCursor* BuildPinCursor(const std::optional<FloatColor>& color) {
 @implementation SidescopesBorderView
 
 // The region rectangle in view coordinates.
-- (NSRect)regionRect {
-    return NSInsetRect(self.bounds, sidescopes::kWindowPad, sidescopes::kWindowPad);
+- (NSRect)regionRect
+{
+    return NSInsetRect(self.bounds, sidescopes::WindowPad, sidescopes::WindowPad);
 }
 
 // Always visible while the border is up - hover-revealing it flickered
 // on every band crossing, and crossing the band is what a cursor does
 // all day. It still hides during drags and yields on tiny regions.
-- (BOOL)closeVisible {
+- (BOOL)closeVisible
+{
     const NSRect region = [self regionRect];
-    return self.dragZone == SidescopesDragEdgeNone &&
-           region.size.width >= sidescopes::kMinimumWidthForClose;
+    return self.dragZone == SidescopesDragEdgeNone && region.size.width >= sidescopes::MinimumWidthForClose;
 }
 
 // On the band's outer corner, at forty-five degrees off the top-right
 // handle dot - anchored to the corner rather than parked beside it.
-- (NSPoint)closeCenter {
+- (NSPoint)closeCenter
+{
     const NSRect region = [self regionRect];
-    return NSMakePoint(NSMaxX(region) + sidescopes::kBorderPad - sidescopes::kCloseCornerInset,
-                       NSMaxY(region) + sidescopes::kBorderPad - sidescopes::kCloseCornerInset +
-                           sidescopes::kEdgeRing);
+    return NSMakePoint(NSMaxX(region) + sidescopes::BorderPad - sidescopes::CloseCornerInset,
+                       NSMaxY(region) + sidescopes::BorderPad - sidescopes::CloseCornerInset + sidescopes::EdgeRing);
 }
 
-- (void)drawRect:(NSRect)dirty {
+- (void)drawRect:(NSRect)dirty
+{
     (void)dirty;
     const NSRect region = [self regionRect];
 
@@ -589,15 +622,15 @@ NSCursor* BuildPinCursor(const std::optional<FloatColor>& color) {
     // beside the photograph while its own light-dark alternation keeps it
     // visible on any content. The interior is never painted and therefore
     // stays click-through.
-    const NSRect band = NSInsetRect(region, -sidescopes::kBorderPad, -sidescopes::kBorderPad);
+    const NSRect band = NSInsetRect(region, -sidescopes::BorderPad, -sidescopes::BorderPad);
     // The stripes stop short of the measured-edge ring: crossing it
     // would read as the band bleeding into the measured area.
-    const NSRect stripe_hole = NSInsetRect(region, -sidescopes::kEdgeRing, -sidescopes::kEdgeRing);
-    NSBezierPath* ring_clip = [NSBezierPath bezierPathWithRect:band];
-    [ring_clip appendBezierPathWithRect:stripe_hole];
-    ring_clip.windingRule = NSWindingRuleEvenOdd;
+    const NSRect stripeHole = NSInsetRect(region, -sidescopes::EdgeRing, -sidescopes::EdgeRing);
+    NSBezierPath* ringClip = [NSBezierPath bezierPathWithRect:band];
+    [ringClip appendBezierPathWithRect:stripeHole];
+    ringClip.windingRule = NSWindingRuleEvenOdd;
     [NSGraphicsContext saveGraphicsState];
-    [ring_clip addClip];
+    [ringClip addClip];
     [[NSColor colorWithWhite:0.1 alpha:0.45] setFill];
     NSRectFillUsingOperation(band, NSCompositingOperationCopy);
     NSBezierPath* stripes = [NSBezierPath bezierPath];
@@ -616,15 +649,14 @@ NSCursor* BuildPinCursor(const std::optional<FloatColor>& color) {
     // to disagree. White dashes ride over the dark ring, so one of the
     // two tones survives any background - the screenshot tools'
     // marching-ants idea, standing still.
-    NSBezierPath* edge_ring = [NSBezierPath bezierPathWithRect:stripe_hole];
-    [edge_ring appendBezierPathWithRect:region];
-    edge_ring.windingRule = NSWindingRuleEvenOdd;
+    NSBezierPath* edgeRing = [NSBezierPath bezierPathWithRect:stripeHole];
+    [edgeRing appendBezierPathWithRect:region];
+    edgeRing.windingRule = NSWindingRuleEvenOdd;
     [[NSColor colorWithWhite:0.1 alpha:0.85] setFill];
-    [edge_ring fill];
+    [edgeRing fill];
     NSBezierPath* dashes =
-        [NSBezierPath bezierPathWithRect:NSInsetRect(region, -sidescopes::kEdgeRing / 2,
-                                                     -sidescopes::kEdgeRing / 2)];
-    dashes.lineWidth = sidescopes::kEdgeRing;
+        [NSBezierPath bezierPathWithRect:NSInsetRect(region, -sidescopes::EdgeRing / 2, -sidescopes::EdgeRing / 2)];
+    dashes.lineWidth = sidescopes::EdgeRing;
     const CGFloat dash[2] = {4.0, 4.0};
     [dashes setLineDash:dash count:2 phase:0];
     [[NSColor colorWithWhite:0.97 alpha:0.95] setStroke];
@@ -636,9 +668,8 @@ NSCursor* BuildPinCursor(const std::optional<FloatColor>& color) {
     // muted, they cost only a few pixels of the sample's rim.
     const NSRect lane = region;
     const auto handle = [&](CGFloat x, CGFloat y) {
-        const NSRect circle =
-            NSMakeRect(x - sidescopes::kHandleRadius, y - sidescopes::kHandleRadius,
-                       sidescopes::kHandleRadius * 2, sidescopes::kHandleRadius * 2);
+        const NSRect circle = NSMakeRect(x - sidescopes::HandleRadius, y - sidescopes::HandleRadius,
+                                         sidescopes::HandleRadius * 2, sidescopes::HandleRadius * 2);
         NSBezierPath* dot = [NSBezierPath bezierPathWithOvalInRect:circle];
         [[NSColor colorWithWhite:0.78 alpha:1.0] setFill];
         [dot fill];
@@ -666,16 +697,15 @@ NSCursor* BuildPinCursor(const std::optional<FloatColor>& color) {
     // action rather than a grip, with the same bright ring and an x.
     if ([self closeVisible]) {
         const NSPoint center = [self closeCenter];
-        const NSRect disc =
-            NSMakeRect(center.x - sidescopes::kCloseRadius, center.y - sidescopes::kCloseRadius,
-                       sidescopes::kCloseRadius * 2, sidescopes::kCloseRadius * 2);
+        const NSRect disc = NSMakeRect(center.x - sidescopes::CloseRadius, center.y - sidescopes::CloseRadius,
+                                       sidescopes::CloseRadius * 2, sidescopes::CloseRadius * 2);
         NSBezierPath* button = [NSBezierPath bezierPathWithOvalInRect:disc];
         [[NSColor colorWithWhite:0.1 alpha:0.85] setFill];
         [button fill];
         [[NSColor colorWithWhite:0.97 alpha:0.95] setStroke];
         button.lineWidth = 1.0;
         [button stroke];
-        const CGFloat arm = sidescopes::kCloseRadius - 3.7;
+        const CGFloat arm = sidescopes::CloseRadius - 3.7;
         NSBezierPath* cross = [NSBezierPath bezierPath];
         cross.lineWidth = 1.3;
         cross.lineCapStyle = NSLineCapStyleRound;
@@ -690,48 +720,64 @@ NSCursor* BuildPinCursor(const std::optional<FloatColor>& color) {
 // Eight handles, no modifier: the corners resize both axes, the edge
 // midpoints resize their edge, and the rest of the band moves. The
 // visible handles say which is which - a modifier key never could.
-- (SidescopesDragEdges)zoneAtPoint:(NSPoint)point {
+- (SidescopesDragEdges)zoneAtPoint:(NSPoint)point
+{
     const NSRect region = [self regionRect];
-    if (NSPointInRect(point, region)) return SidescopesDragEdgeNone;  // click-through anyway
+    if (NSPointInRect(point, region)) {
+        return SidescopesDragEdgeNone;  // click-through anyway
+    }
     if ([self closeVisible]) {
         const NSPoint center = [self closeCenter];
         const CGFloat dx = point.x - center.x;
         const CGFloat dy = point.y - center.y;
-        if (dx * dx + dy * dy <= sidescopes::kCloseHitRadius * sidescopes::kCloseHitRadius)
+        if (dx * dx + dy * dy <= sidescopes::CloseHitRadius * sidescopes::CloseHitRadius) {
             return SidescopesDragClose;
+        }
     }
-    const BOOL near_left = point.x < NSMinX(region) + sidescopes::kCornerZone;
-    const BOOL near_right = point.x > NSMaxX(region) - sidescopes::kCornerZone;
-    const BOOL near_bottom = point.y < NSMinY(region) + sidescopes::kCornerZone;
-    const BOOL near_top = point.y > NSMaxY(region) - sidescopes::kCornerZone;
-    if ((near_left || near_right) && (near_top || near_bottom)) {
+    const BOOL nearLeft = point.x < NSMinX(region) + sidescopes::CornerZone;
+    const BOOL nearRight = point.x > NSMaxX(region) - sidescopes::CornerZone;
+    const BOOL nearBottom = point.y < NSMinY(region) + sidescopes::CornerZone;
+    const BOOL nearTop = point.y > NSMaxY(region) - sidescopes::CornerZone;
+    if ((nearLeft || nearRight) && (nearTop || nearBottom)) {
         SidescopesDragEdges edges = SidescopesDragEdgeNone;
-        edges |= near_left ? SidescopesDragEdgeLeft : SidescopesDragEdgeRight;
-        edges |= near_bottom ? SidescopesDragEdgeBottom : SidescopesDragEdgeTop;
+        edges |= nearLeft ? SidescopesDragEdgeLeft : SidescopesDragEdgeRight;
+        edges |= nearBottom ? SidescopesDragEdgeBottom : SidescopesDragEdgeTop;
         return edges;
     }
-    const BOOL mid_x = std::abs(point.x - NSMidX(region)) <= sidescopes::kMidpointZone;
-    const BOOL mid_y = std::abs(point.y - NSMidY(region)) <= sidescopes::kMidpointZone;
-    if (mid_x && point.y > NSMaxY(region)) return SidescopesDragEdgeTop;
-    if (mid_x && point.y < NSMinY(region)) return SidescopesDragEdgeBottom;
-    if (mid_y && point.x < NSMinX(region)) return SidescopesDragEdgeLeft;
-    if (mid_y && point.x > NSMaxX(region)) return SidescopesDragEdgeRight;
+    const BOOL midX = std::abs(point.x - NSMidX(region)) <= sidescopes::MidpointZone;
+    const BOOL midY = std::abs(point.y - NSMidY(region)) <= sidescopes::MidpointZone;
+    if (midX && point.y > NSMaxY(region)) {
+        return SidescopesDragEdgeTop;
+    }
+    if (midX && point.y < NSMinY(region)) {
+        return SidescopesDragEdgeBottom;
+    }
+    if (midY && point.x < NSMinX(region)) {
+        return SidescopesDragEdgeLeft;
+    }
+    if (midY && point.x > NSMaxX(region)) {
+        return SidescopesDragEdgeRight;
+    }
     return SidescopesDragMove;
 }
 
-- (void)updateTrackingAreas {
+- (void)updateTrackingAreas
+{
     [super updateTrackingAreas];
-    for (NSTrackingArea* area in self.trackingAreas) [self removeTrackingArea:area];
-    NSTrackingArea* tracking = [[NSTrackingArea alloc]
-        initWithRect:NSZeroRect
-             options:NSTrackingMouseMoved | NSTrackingMouseEnteredAndExited |
-                     NSTrackingActiveAlways | NSTrackingInVisibleRect
-               owner:self
-            userInfo:nil];
+    for (NSTrackingArea* area in self.trackingAreas) {
+        [self removeTrackingArea:area];
+    }
+    NSTrackingArea* tracking =
+        [[NSTrackingArea alloc] initWithRect:NSZeroRect
+                                     options:NSTrackingMouseMoved | NSTrackingMouseEnteredAndExited |
+                                             NSTrackingActiveAlways | NSTrackingInVisibleRect
+                                       owner:self
+                                    userInfo:nil];
     [self addTrackingArea:tracking];
 }
 
-- (void)applyCursorForZone:(SidescopesDragEdges)zone {
+- (void)applyCursorForZone:(SidescopesDragEdges)zone
+{
     if (zone == SidescopesDragEdgeNone) {
         [NSCursor.arrowCursor set];
         return;
@@ -748,8 +794,7 @@ NSCursor* BuildPinCursor(const std::optional<FloatColor>& color) {
     const BOOL vertical = (zone & (SidescopesDragEdgeTop | SidescopesDragEdgeBottom)) != 0;
     if (horizontal && vertical) {
         if (@available(macOS 15.0, *)) {
-            const BOOL rising =
-                ((zone & SidescopesDragEdgeLeft) != 0) == ((zone & SidescopesDragEdgeBottom) != 0);
+            const BOOL rising = ((zone & SidescopesDragEdgeLeft) != 0) == ((zone & SidescopesDragEdgeBottom) != 0);
             [[NSCursor frameResizeCursorFromPosition:rising ? NSCursorFrameResizePositionBottomLeft
                                                             : NSCursorFrameResizePositionBottomRight
                                         inDirections:NSCursorFrameResizeDirectionsAll] set];
@@ -761,28 +806,39 @@ NSCursor* BuildPinCursor(const std::optional<FloatColor>& color) {
     [horizontal ? NSCursor.resizeLeftRightCursor : NSCursor.resizeUpDownCursor set];
 }
 
-- (void)mouseMoved:(NSEvent*)event {
-    if (self.dragZone != SidescopesDragEdgeNone) return;  // drag owns the cursor
+- (void)mouseMoved:(NSEvent*)event
+{
+    if (self.dragZone != SidescopesDragEdgeNone) {
+        return;  // drag owns the cursor
+    }
     const NSPoint local = [self convertPoint:event.locationInWindow fromView:nil];
     [self applyCursorForZone:[self zoneAtPoint:local]];
 }
 
-- (void)mouseExited:(NSEvent*)event {
+- (void)mouseExited:(NSEvent*)event
+{
     (void)event;
-    if (self.dragZone == SidescopesDragEdgeNone) [NSCursor.arrowCursor set];
+    if (self.dragZone == SidescopesDragEdgeNone) {
+        [NSCursor.arrowCursor set];
+    }
 }
 
-- (void)mouseDown:(NSEvent*)event {
+- (void)mouseDown:(NSEvent*)event
+{
     const NSPoint local = [self convertPoint:event.locationInWindow fromView:nil];
     const SidescopesDragEdges zone = [self zoneAtPoint:local];
-    if (zone == SidescopesDragEdgeNone) return;
+    if (zone == SidescopesDragEdgeNone) {
+        return;
+    }
     // The band is mouse-only: its borderless window can never become
     // key, so a click here would otherwise strand the keyboard with no
     // key window at all - every application shortcut dead until the
     // scope window is clicked. Hand the keyboard to the application
     // window instead.
     for (NSWindow* candidate in NSApp.orderedWindows) {
-        if (candidate == self.window) continue;
+        if (candidate == self.window) {
+            continue;
+        }
         if (candidate.canBecomeKeyWindow && candidate.visible) {
             [candidate makeKeyWindow];
             break;
@@ -792,7 +848,7 @@ NSCursor* BuildPinCursor(const std::optional<FloatColor>& color) {
     // fast path once the close button has taught the gesture's home.
     if (event.clickCount == 2) {
         self.closePressed = NO;
-        sidescopes::g_border_dismissed = true;
+        sidescopes::g_borderDismissed = true;
         return;
     }
     if (zone & SidescopesDragClose) {
@@ -800,18 +856,24 @@ NSCursor* BuildPinCursor(const std::optional<FloatColor>& color) {
         return;
     }
     self.dragZone = zone;
-    if (self.dragZone & SidescopesDragMove) [NSCursor.closedHandCursor set];
+    if (self.dragZone & SidescopesDragMove) {
+        [NSCursor.closedHandCursor set];
+    }
     self.dragStartMouse = NSEvent.mouseLocation;
-    self.dragStartRegion =
-        NSInsetRect(self.window.frame, sidescopes::kWindowPad, sidescopes::kWindowPad);
-    sidescopes::g_border_editing = true;
+    self.dragStartRegion = NSInsetRect(self.window.frame, sidescopes::WindowPad, sidescopes::WindowPad);
+    sidescopes::g_borderEditing = true;
     self.needsDisplay = YES;  // the close button hides while dragging
 }
 
-- (void)mouseDragged:(NSEvent*)event {
+- (void)mouseDragged:(NSEvent*)event
+{
     (void)event;
-    if (self.dragZone == SidescopesDragEdgeNone) return;
-    if (self.dragZone & SidescopesDragMove) [NSCursor.closedHandCursor set];
+    if (self.dragZone == SidescopesDragEdgeNone) {
+        return;
+    }
+    if (self.dragZone & SidescopesDragMove) {
+        [NSCursor.closedHandCursor set];
+    }
     const NSPoint mouse = NSEvent.mouseLocation;
     const CGFloat dx = mouse.x - self.dragStartMouse.x;
     const CGFloat dy = mouse.y - self.dragStartMouse.y;
@@ -821,48 +883,52 @@ NSCursor* BuildPinCursor(const std::optional<FloatColor>& color) {
         rect.origin.y += dy;
     } else {
         if (self.dragZone & SidescopesDragEdgeLeft) {
-            const CGFloat limit = NSMaxX(self.dragStartRegion) - sidescopes::kMinimumRegionSize;
+            const CGFloat limit = NSMaxX(self.dragStartRegion) - sidescopes::MinimumRegionSize;
             const CGFloat left = std::min(NSMinX(self.dragStartRegion) + dx, limit);
             rect.size.width = NSMaxX(self.dragStartRegion) - left;
             rect.origin.x = left;
         }
-        if (self.dragZone & SidescopesDragEdgeRight)
-            rect.size.width =
-                std::max(sidescopes::kMinimumRegionSize, self.dragStartRegion.size.width + dx);
+        if (self.dragZone & SidescopesDragEdgeRight) {
+            rect.size.width = std::max(sidescopes::MinimumRegionSize, self.dragStartRegion.size.width + dx);
+        }
         if (self.dragZone & SidescopesDragEdgeBottom) {
-            const CGFloat limit = NSMaxY(self.dragStartRegion) - sidescopes::kMinimumRegionSize;
+            const CGFloat limit = NSMaxY(self.dragStartRegion) - sidescopes::MinimumRegionSize;
             const CGFloat bottom = std::min(NSMinY(self.dragStartRegion) + dy, limit);
             rect.size.height = NSMaxY(self.dragStartRegion) - bottom;
             rect.origin.y = bottom;
         }
-        if (self.dragZone & SidescopesDragEdgeTop)
-            rect.size.height =
-                std::max(sidescopes::kMinimumRegionSize, self.dragStartRegion.size.height + dy);
+        if (self.dragZone & SidescopesDragEdgeTop) {
+            rect.size.height = std::max(sidescopes::MinimumRegionSize, self.dragStartRegion.size.height + dy);
+        }
     }
     NSScreen* screen = self.window.screen ? self.window.screen : NSScreen.mainScreen;
-    sidescopes::g_border_edit_region = sidescopes::RegionFromScreenRect(rect, screen.frame);
-    sidescopes::g_border_edit_changed = true;
+    sidescopes::g_borderEditRegion = sidescopes::regionFromScreenRect(rect, screen.frame);
+    sidescopes::g_borderEditChanged = true;
 }
 
-- (void)mouseUp:(NSEvent*)event {
+- (void)mouseUp:(NSEvent*)event
+{
     const NSPoint local = [self convertPoint:event.locationInWindow fromView:nil];
     if (self.closePressed) {
         self.closePressed = NO;
         if ([self zoneAtPoint:local] & SidescopesDragClose) {
-            sidescopes::g_border_dismissed = true;
+            sidescopes::g_borderDismissed = true;
             return;
         }
     }
-    if (self.dragZone & SidescopesDragMove) [NSCursor.openHandCursor set];
+    if (self.dragZone & SidescopesDragMove) {
+        [NSCursor.openHandCursor set];
+    }
     self.dragZone = SidescopesDragEdgeNone;
-    sidescopes::g_border_editing = false;
+    sidescopes::g_borderEditing = false;
     [self applyCursorForZone:[self zoneAtPoint:local]];
     self.needsDisplay = YES;
 }
 
 // The scoped editor is usually the active application; without this, the
 // first grab of the border is swallowed as an activation gesture.
-- (BOOL)acceptsFirstMouse:(NSEvent*)event {
+- (BOOL)acceptsFirstMouse:(NSEvent*)event
+{
     (void)event;
     return YES;
 }
@@ -872,73 +938,89 @@ NSCursor* BuildPinCursor(const std::optional<FloatColor>& color) {
 namespace sidescopes {
 namespace {
 
-NSWindow* g_border_window = nil;
+NSWindow* g_borderWindow = nil;
 
 // One overlay per display; a pick anywhere is a pick there.
-struct PickerOverlay {
+struct PickerOverlay
+{
     SidescopesPickerWindow* window = nil;
     SidescopesPickerView* view = nil;
-    uint32_t display_id = 0;
+    uint32_t displayId = 0;
     NSSize size = {0, 0};
 };
-std::vector<PickerOverlay> g_picker_overlays;
+
+std::vector<PickerOverlay> g_pickerOverlays;
 
 // This application's own windows are raised above the overlays for the
 // pick, with their previous levels remembered for the teardown: real
 // window compositing keeps their rounded corners and click handling,
 // where punching rectangular holes in the dimming could not.
-std::vector<std::pair<NSWindow*, NSInteger>> g_raised_windows;
+std::vector<std::pair<NSWindow*, NSInteger>> g_raisedWindows;
 
-bool IsPickerOverlayWindow(NSWindow* window) {
-    for (const PickerOverlay& overlay : g_picker_overlays) {
-        if (overlay.window == window) return true;
+bool isPickerOverlayWindow(NSWindow* window)
+{
+    for (const PickerOverlay& overlay : g_pickerOverlays) {
+        if (overlay.window == window) {
+            return true;
+        }
     }
     return false;
 }
 
-std::vector<NSRect> OwnWindowExclusions(NSPoint screen_origin) {
+std::vector<NSRect> ownWindowExclusions(NSPoint screenOrigin)
+{
     std::vector<NSRect> exclusions;
     for (NSWindow* window in NSApp.windows) {
-        if (IsPickerOverlayWindow(window) || window == g_border_window || !window.isVisible)
+        if (isPickerOverlayWindow(window) || window == g_borderWindow || !window.isVisible) {
             continue;
+        }
         const NSRect frame = window.frame;
-        exclusions.push_back(NSMakeRect(frame.origin.x - screen_origin.x,
-                                        frame.origin.y - screen_origin.y, frame.size.width,
-                                        frame.size.height));
+        exclusions.push_back(NSMakeRect(frame.origin.x - screenOrigin.x, frame.origin.y - screenOrigin.y,
+                                        frame.size.width, frame.size.height));
     }
     return exclusions;
 }
 
-NSRect RegionToViewRect(const RegionOfInterest& region, NSSize view_size) {
+NSRect regionToViewRect(const RegionOfInterest& region, NSSize viewSize)
+{
     // Percent (top-left origin) to view coordinates (bottom-left origin).
-    return NSMakeRect(region.left_percent / 100.0 * view_size.width,
-                      (100.0 - region.bottom_percent) / 100.0 * view_size.height,
-                      (region.right_percent - region.left_percent) / 100.0 * view_size.width,
-                      (region.bottom_percent - region.top_percent) / 100.0 * view_size.height);
+    return NSMakeRect(region.leftPercent / 100.0 * viewSize.width,
+                      (100.0 - region.bottomPercent) / 100.0 * viewSize.height,
+                      (region.rightPercent - region.leftPercent) / 100.0 * viewSize.width,
+                      (region.bottomPercent - region.topPercent) / 100.0 * viewSize.height);
 }
 
 }  // namespace
 
-bool BeginRegionPick(const std::vector<PickerDisplay>& displays, RegionPickerMode initial_mode) {
-    if (!g_picker_overlays.empty()) return false;  // one picker at a time
+bool beginRegionPick(const std::vector<PickerDisplay>& displays, RegionPickerMode initialMode)
+{
+    if (!g_pickerOverlays.empty()) {
+        return false;  // one picker at a time
+    }
 
     // Window suggestions may be empty everywhere; a window pick with
     // nothing to pick opens as drawing, like before, but the decision is
     // global so every display shows the same mode.
-    bool any_windows = false;
-    for (const PickerDisplay& entry : displays) any_windows |= !entry.windows.empty();
-    const bool pin = initial_mode == RegionPickerMode::PinColor;
-    const bool draw = !pin && (initial_mode == RegionPickerMode::Draw ||
-                               (initial_mode == RegionPickerMode::PickWindows && !any_windows));
-    const bool faces = initial_mode == RegionPickerMode::PickFaces;
+    bool anyWindows = false;
+    for (const PickerDisplay& entry : displays) {
+        anyWindows |= !entry.windows.empty();
+    }
+    const bool pin = initialMode == RegionPickerMode::PinColor;
+    const bool draw = !pin && (initialMode == RegionPickerMode::Draw ||
+                               (initialMode == RegionPickerMode::PickWindows && !anyWindows));
+    const bool faces = initialMode == RegionPickerMode::PickFaces;
 
     for (const PickerDisplay& entry : displays) {
         NSScreen* screen = nil;
         for (NSScreen* candidate in NSScreen.screens) {
             NSNumber* number = candidate.deviceDescription[@"NSScreenNumber"];
-            if (number && number.unsignedIntValue == entry.display_id) screen = candidate;
+            if (number && number.unsignedIntValue == entry.displayId) {
+                screen = candidate;
+            }
         }
-        if (!screen) continue;  // gone between enumeration and now
+        if (!screen) {
+            continue;  // gone between enumeration and now
+        }
 
         SidescopesPickerWindow* overlay =
             [[SidescopesPickerWindow alloc] initWithContentRect:screen.frame
@@ -948,25 +1030,24 @@ bool BeginRegionPick(const std::vector<PickerDisplay>& displays, RegionPickerMod
         overlay.backgroundColor = NSColor.clearColor;
         overlay.opaque = NO;
         overlay.level = NSStatusWindowLevel + 1;
-        overlay.collectionBehavior = NSWindowCollectionBehaviorCanJoinAllSpaces |
-                                     NSWindowCollectionBehaviorFullScreenAuxiliary;
+        overlay.collectionBehavior =
+            NSWindowCollectionBehaviorCanJoinAllSpaces | NSWindowCollectionBehaviorFullScreenAuxiliary;
 
-        SidescopesPickerView* view =
-            [[SidescopesPickerView alloc] initWithFrame:overlay.contentView.bounds];
+        SidescopesPickerView* view = [[SidescopesPickerView alloc] initWithFrame:overlay.contentView.bounds];
         view.hoveredSuggestion = -1;
-        const NSSize view_size = screen.frame.size;
+        const NSSize viewSize = screen.frame.size;
         for (const SuggestedRegion& suggestion : entry.windows) {
-            view->windows_.emplace_back(RegionToViewRect(suggestion.region, view_size),
-                                        suggestion.label);
+            view->windows_.emplace_back(regionToViewRect(suggestion.region, viewSize), suggestion.label);
         }
         for (const SuggestedRegion& suggestion : entry.faces) {
-            view->faces_.emplace_back(RegionToViewRect(suggestion.region, view_size),
-                                      suggestion.label);
+            view->faces_.emplace_back(regionToViewRect(suggestion.region, viewSize), suggestion.label);
         }
         view.drawMode = draw ? YES : NO;
         view.facesMode = faces ? YES : NO;
         view.pinMode = pin ? YES : NO;
-        if (!draw && !pin) view->suggestions_ = faces ? view->faces_ : view->windows_;
+        if (!draw && !pin) {
+            view->suggestions_ = faces ? view->faces_ : view->windows_;
+        }
         overlay.contentView = view;
         overlay.acceptsMouseMovedEvents = YES;
         // Pin mode paints nothing over the screen, and an all-transparent
@@ -974,11 +1055,15 @@ bool BeginRegionPick(const std::vector<PickerDisplay>& displays, RegionPickerMod
         // to NO - switches the window server off its per-pixel
         // transparency hit-testing, so the overlay owns every click. The
         // region border must never do this; the picker wants exactly it.
-        if (pin) overlay.ignoresMouseEvents = NO;
+        if (pin) {
+            overlay.ignoresMouseEvents = NO;
+        }
 
-        g_picker_overlays.push_back(PickerOverlay{overlay, view, entry.display_id, view_size});
+        g_pickerOverlays.push_back(PickerOverlay{overlay, view, entry.displayId, viewSize});
     }
-    if (g_picker_overlays.empty()) return false;
+    if (g_pickerOverlays.empty()) {
+        return false;
+    }
 
     // This application's own visible windows float above the overlays for
     // the duration: they stay undimmed and clickable by ordinary window
@@ -986,51 +1071,60 @@ bool BeginRegionPick(const std::vector<PickerDisplay>& displays, RegionPickerMod
     // repainting on our side. The rectangles still feed the banner
     // placement, which avoids sitting beneath them.
     for (NSWindow* window in NSApp.windows) {
-        if (IsPickerOverlayWindow(window) || window == g_border_window || !window.isVisible)
+        if (isPickerOverlayWindow(window) || window == g_borderWindow || !window.isVisible) {
             continue;
-        g_raised_windows.emplace_back(window, window.level);
+        }
+        g_raisedWindows.emplace_back(window, window.level);
         window.level = NSStatusWindowLevel + 2;
     }
-    for (PickerOverlay& overlay : g_picker_overlays)
-        overlay.view->exclusions_ = OwnWindowExclusions(overlay.window.frame.origin);
+    for (PickerOverlay& overlay : g_pickerOverlays) {
+        overlay.view->exclusions_ = ownWindowExclusions(overlay.window.frame.origin);
+    }
 
     // Force the app frontmost so the overlays own the mouse for the whole
     // interaction; the keyboard starts on the display under the cursor -
     // that is where the user's attention is - and follows clicks after.
     [NSApp activateIgnoringOtherApps:YES];
-    const uint32_t cursor_display = DisplayUnderCursor().value_or(0);
-    PickerOverlay* key_overlay = &g_picker_overlays.front();
-    for (PickerOverlay& overlay : g_picker_overlays) {
-        if (overlay.display_id == cursor_display) key_overlay = &overlay;
+    const uint32_t cursorDisplay = displayUnderCursor().value_or(0);
+    PickerOverlay* keyOverlay = &g_pickerOverlays.front();
+    for (PickerOverlay& overlay : g_pickerOverlays) {
+        if (overlay.displayId == cursorDisplay) {
+            keyOverlay = &overlay;
+        }
     }
-    for (PickerOverlay& overlay : g_picker_overlays) {
-        if (&overlay == key_overlay) continue;
+    for (PickerOverlay& overlay : g_pickerOverlays) {
+        if (&overlay == keyOverlay) {
+            continue;
+        }
         [overlay.window orderFrontRegardless];
     }
-    [key_overlay->window makeKeyAndOrderFront:nil];
-    [key_overlay->window makeFirstResponder:key_overlay->view];
+    [keyOverlay->window makeKeyAndOrderFront:nil];
+    [keyOverlay->window makeFirstResponder:keyOverlay->view];
     return true;
 }
 
-RegionPickPoll PollRegionPick() {
+RegionPickPoll pollRegionPick()
+{
     RegionPickPoll poll;
-    if (g_picker_overlays.empty()) return poll;
+    if (g_pickerOverlays.empty()) {
+        return poll;
+    }
     poll.active = true;
     // Mode flags come first: the finishing poll returns early below, and
     // the caller needs them to know a pin-mode finish never means a
     // region change. The overlays switch modes in lockstep; the front
     // one speaks for all.
-    poll.pin_mode = g_picker_overlays.front().view.pinMode;
+    poll.pinMode = g_pickerOverlays.front().view.pinMode;
 
     // The banner dodges this application's own windows; their rectangles
     // refresh on a gentle cadence - nothing visual tracks them anymore,
     // so per-frame repaints would be waste.
-    static double last_exclusion_refresh = 0.0;
+    static double lastExclusionRefresh = 0.0;
     const double now = CFAbsoluteTimeGetCurrent();
-    if (now - last_exclusion_refresh > 0.2) {
-        last_exclusion_refresh = now;
-        for (PickerOverlay& overlay : g_picker_overlays) {
-            std::vector<NSRect> exclusions = OwnWindowExclusions(overlay.window.frame.origin);
+    if (now - lastExclusionRefresh > 0.2) {
+        lastExclusionRefresh = now;
+        for (PickerOverlay& overlay : g_pickerOverlays) {
+            std::vector<NSRect> exclusions = ownWindowExclusions(overlay.window.frame.origin);
             if (exclusions.size() != overlay.view->exclusions_.size() ||
                 !std::equal(exclusions.begin(), exclusions.end(), overlay.view->exclusions_.begin(),
                             [](const NSRect& a, const NSRect& b) { return NSEqualRects(a, b); })) {
@@ -1040,59 +1134,67 @@ RegionPickPoll PollRegionPick() {
         }
     }
 
-    const auto region_from_view = [](NSRect rect, NSSize size) {
+    const auto regionFromView = [](NSRect rect, NSSize size) {
         RegionOfInterest region;
-        region.left_percent = rect.origin.x / size.width * 100.0;
-        region.right_percent = (rect.origin.x + rect.size.width) / size.width * 100.0;
-        region.top_percent =
-            (size.height - (rect.origin.y + rect.size.height)) / size.height * 100.0;
-        region.bottom_percent = (size.height - rect.origin.y) / size.height * 100.0;
+        region.leftPercent = rect.origin.x / size.width * 100.0;
+        region.rightPercent = (rect.origin.x + rect.size.width) / size.width * 100.0;
+        region.topPercent = (size.height - (rect.origin.y + rect.size.height)) / size.height * 100.0;
+        region.bottomPercent = (size.height - rect.origin.y) / size.height * 100.0;
         return region;
     };
 
     // Any overlay finishing - a confirm there, or ESC anywhere - ends the
     // pick on every display.
-    for (PickerOverlay& overlay : g_picker_overlays) {
-        if (!overlay.view.finished) continue;
+    for (PickerOverlay& overlay : g_pickerOverlays) {
+        if (!overlay.view.finished) {
+            continue;
+        }
         poll.finished = true;
-        poll.display_id = overlay.display_id;
-        if (overlay.view.picked)
-            poll.confirmed = region_from_view(overlay.view.confirmedRect, overlay.size);
-        for (const auto& [window, level] : g_raised_windows) window.level = level;
-        g_raised_windows.clear();
-        for (PickerOverlay& each : g_picker_overlays) [each.window orderOut:nil];
-        g_picker_overlays.clear();
-        g_pin_cursor = nil;
+        poll.displayId = overlay.displayId;
+        if (overlay.view.picked) {
+            poll.confirmed = regionFromView(overlay.view.confirmedRect, overlay.size);
+        }
+        for (const auto& [window, level] : g_raisedWindows) {
+            window.level = level;
+        }
+        g_raisedWindows.clear();
+        for (PickerOverlay& each : g_pickerOverlays) {
+            [each.window orderOut:nil];
+        }
+        g_pickerOverlays.clear();
+        g_pinCursor = nil;
         return poll;
     }
 
-    for (PickerOverlay& overlay : g_picker_overlays) {
-        if (!overlay.view.pinnedReady) continue;
+    for (PickerOverlay& overlay : g_pickerOverlays) {
+        if (!overlay.view.pinnedReady) {
+            continue;
+        }
         overlay.view.pinnedReady = NO;
-        poll.pinned_area = region_from_view(overlay.view.pinnedArea, overlay.size);
-        poll.pinned_keep_open = overlay.view.pinnedKeepOpen;
-        poll.display_id = overlay.display_id;
+        poll.pinnedArea = regionFromView(overlay.view.pinnedArea, overlay.size);
+        poll.pinnedKeepOpen = overlay.view.pinnedKeepOpen;
+        poll.displayId = overlay.displayId;
         break;
     }
 
     // The cursor is only ever on one display, so at most one overlay has
     // something to preview.
-    for (PickerOverlay& overlay : g_picker_overlays) {
-        if (overlay.view.pinMode) break;  // pin modes never preview a region
+    for (PickerOverlay& overlay : g_pickerOverlays) {
+        if (overlay.view.pinMode) {
+            break;  // pin modes never preview a region
+        }
         if (!overlay.view.drawMode) {
             const NSInteger hovered = overlay.view.hoveredSuggestion;
-            if (hovered >= 0 &&
-                hovered < static_cast<NSInteger>(overlay.view->suggestions_.size())) {
-                poll.preview =
-                    region_from_view(overlay.view->suggestions_[hovered].first, overlay.size);
-                poll.display_id = overlay.display_id;
+            if (hovered >= 0 && hovered < static_cast<NSInteger>(overlay.view->suggestions_.size())) {
+                poll.preview = regionFromView(overlay.view->suggestions_[hovered].first, overlay.size);
+                poll.displayId = overlay.displayId;
                 break;
             }
         } else if (overlay.view.dragging) {
             const NSRect selection = [overlay.view selectionRect];
             if (selection.size.width > 8 && selection.size.height > 8) {
-                poll.preview = region_from_view(selection, overlay.size);
-                poll.display_id = overlay.display_id;
+                poll.preview = regionFromView(selection, overlay.size);
+                poll.displayId = overlay.displayId;
                 break;
             }
         }
@@ -1100,20 +1202,24 @@ RegionPickPoll PollRegionPick() {
     return poll;
 }
 
-void CancelRegionPick() {
-    if (g_picker_overlays.empty()) return;
-    g_picker_overlays.front().view.picked = NO;
-    g_picker_overlays.front().view.finished = YES;
+void cancelRegionPick()
+{
+    if (g_pickerOverlays.empty()) {
+        return;
+    }
+    g_pickerOverlays.front().view.picked = NO;
+    g_pickerOverlays.front().view.finished = YES;
 }
 
-void SetRegionPickMode(RegionPickerMode mode) {
+void setRegionPickMode(RegionPickerMode mode)
+{
     // Region picking and color pinning are separate tools; a pick never
     // crosses between the families midway.
     const bool pin = mode == RegionPickerMode::PinColor;
-    if (!g_picker_overlays.empty() &&
-        (g_picker_overlays.front().view.pinMode ? YES : NO) != (pin ? YES : NO))
+    if (!g_pickerOverlays.empty() && (g_pickerOverlays.front().view.pinMode ? YES : NO) != (pin ? YES : NO)) {
         return;
-    for (PickerOverlay& overlay : g_picker_overlays) {
+    }
+    for (PickerOverlay& overlay : g_pickerOverlays) {
         [overlay.view switchToMode:(mode == RegionPickerMode::Draw        ? 1
                                     : mode == RegionPickerMode::PickFaces ? 2
                                     : mode == RegionPickerMode::PinColor  ? 3
@@ -1121,45 +1227,51 @@ void SetRegionPickMode(RegionPickerMode mode) {
     }
 }
 
-void SetRegionPickChipColor(const std::optional<FloatColor>& color) {
-    const bool color_changed = color.has_value() != g_pin_chip_color.has_value() ||
-                               (color && g_pin_chip_color &&
-                                (std::lround(color->r) != std::lround(g_pin_chip_color->r) ||
-                                 std::lround(color->g) != std::lround(g_pin_chip_color->g) ||
-                                 std::lround(color->b) != std::lround(g_pin_chip_color->b)));
-    g_pin_chip_color = color;
-    if (g_picker_overlays.empty() || !g_picker_overlays.front().view.pinMode) return;
-    if (g_pin_cursor && !color_changed) return;
-    g_pin_cursor = BuildPinCursor(color);
+void setRegionPickChipColor(const std::optional<FloatColor>& color)
+{
+    const bool colorChanged =
+        color.has_value() != g_pinChipColor.has_value() || (color && g_pinChipColor &&
+                                                            (std::lround(color->r) != std::lround(g_pinChipColor->r) ||
+                                                             std::lround(color->g) != std::lround(g_pinChipColor->g) ||
+                                                             std::lround(color->b) != std::lround(g_pinChipColor->b)));
+    g_pinChipColor = color;
+    if (g_pickerOverlays.empty() || !g_pickerOverlays.front().view.pinMode) {
+        return;
+    }
+    if (g_pinCursor && !colorChanged) {
+        return;
+    }
+    g_pinCursor = buildPinCursor(color);
     // Re-arming the cursor rects makes AppKit apply the fresh cursor
     // wherever the pointer already stands.
-    for (PickerOverlay& overlay : g_picker_overlays) {
-        if (!overlay.view.pinMode) continue;
+    for (PickerOverlay& overlay : g_pickerOverlays) {
+        if (!overlay.view.pinMode) {
+            continue;
+        }
         [overlay.window invalidateCursorRectsForView:overlay.view];
     }
 }
 
-void ShowRegionBorder(uint32_t display_id, const RegionOfInterest& region) {
-    NSScreen* screen = ScreenForDisplay(display_id);
+void showRegionBorder(uint32_t displayId, const RegionOfInterest& region)
+{
+    NSScreen* screen = screenForDisplay(displayId);
     const NSRect frame = screen.frame;
 
-    const double left = frame.origin.x + region.left_percent / 100.0 * frame.size.width;
-    const double right = frame.origin.x + region.right_percent / 100.0 * frame.size.width;
-    const double bottom =
-        frame.origin.y + (100.0 - region.bottom_percent) / 100.0 * frame.size.height;
-    const double top = frame.origin.y + (100.0 - region.top_percent) / 100.0 * frame.size.height;
-    const NSRect rect =
-        NSMakeRect(left - kWindowPad, bottom - kWindowPad, (right - left) + 2 * kWindowPad,
-                   (top - bottom) + 2 * kWindowPad);
+    const double left = frame.origin.x + region.leftPercent / 100.0 * frame.size.width;
+    const double right = frame.origin.x + region.rightPercent / 100.0 * frame.size.width;
+    const double bottom = frame.origin.y + (100.0 - region.bottomPercent) / 100.0 * frame.size.height;
+    const double top = frame.origin.y + (100.0 - region.topPercent) / 100.0 * frame.size.height;
+    const NSRect rect = NSMakeRect(left - WindowPad, bottom - WindowPad, (right - left) + 2 * WindowPad,
+                                   (top - bottom) + 2 * WindowPad);
 
-    if (!g_border_window) {
-        g_border_window = [[NSWindow alloc] initWithContentRect:rect
-                                                      styleMask:NSWindowStyleMaskBorderless
-                                                        backing:NSBackingStoreBuffered
-                                                          defer:NO];
-        g_border_window.backgroundColor = NSColor.clearColor;
-        g_border_window.opaque = NO;
-        g_border_window.hasShadow = NO;
+    if (!g_borderWindow) {
+        g_borderWindow = [[NSWindow alloc] initWithContentRect:rect
+                                                     styleMask:NSWindowStyleMaskBorderless
+                                                       backing:NSBackingStoreBuffered
+                                                         defer:NO];
+        g_borderWindow.backgroundColor = NSColor.clearColor;
+        g_borderWindow.opaque = NO;
+        g_borderWindow.hasShadow = NO;
         // The interior is truly transparent and therefore click-through;
         // only the grab ring and tab take the mouse. ignoresMouseEvents is
         // deliberately never set: an explicit assignment - even to NO -
@@ -1168,29 +1280,31 @@ void ShowRegionBorder(uint32_t display_id, const RegionOfInterest& region) {
         // One level below the scope window: both float above Quick Look,
         // but the border must never cover the scopes. Sharing a level would
         // leave their order to whoever ordered front last.
-        g_border_window.level = NSStatusWindowLevel - 1;
-        g_border_window.collectionBehavior = NSWindowCollectionBehaviorCanJoinAllSpaces |
-                                             NSWindowCollectionBehaviorFullScreenAuxiliary |
-                                             NSWindowCollectionBehaviorStationary;
-        g_border_window.contentView = [[SidescopesBorderView alloc] initWithFrame:NSZeroRect];
+        g_borderWindow.level = NSStatusWindowLevel - 1;
+        g_borderWindow.collectionBehavior = NSWindowCollectionBehaviorCanJoinAllSpaces |
+                                            NSWindowCollectionBehaviorFullScreenAuxiliary |
+                                            NSWindowCollectionBehaviorStationary;
+        g_borderWindow.contentView = [[SidescopesBorderView alloc] initWithFrame:NSZeroRect];
     }
-    [g_border_window setFrame:rect display:YES];
-    [g_border_window invalidateCursorRectsForView:g_border_window.contentView];
-    [g_border_window orderFrontRegardless];
+    [g_borderWindow setFrame:rect display:YES];
+    [g_borderWindow invalidateCursorRectsForView:g_borderWindow.contentView];
+    [g_borderWindow orderFrontRegardless];
 }
 
-void HideRegionBorder() {
-    [g_border_window orderOut:nil];
+void hideRegionBorder()
+{
+    [g_borderWindow orderOut:nil];
 }
 
-RegionBorderEdit PollRegionBorderEdit() {
+RegionBorderEdit pollRegionBorderEdit()
+{
     RegionBorderEdit edit;
-    edit.editing = g_border_editing;
-    edit.dismissed = g_border_dismissed;
-    g_border_dismissed = false;
-    if (g_border_edit_changed) {
-        edit.region = g_border_edit_region;
-        g_border_edit_changed = false;
+    edit.editing = g_borderEditing;
+    edit.dismissed = g_borderDismissed;
+    g_borderDismissed = false;
+    if (g_borderEditChanged) {
+        edit.region = g_borderEditRegion;
+        g_borderEditChanged = false;
     }
     return edit;
 }

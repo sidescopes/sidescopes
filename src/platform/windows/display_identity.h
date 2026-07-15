@@ -10,19 +10,20 @@ namespace sidescopes {
 // suffix is the display id shared between capture targets and the desktop
 // services. Zero means the name did not parse and never matches a real
 // display.
-inline uint32_t DisplayIdFromDeviceName(const wchar_t* device_name) {
+inline uint32_t displayIdFromDeviceName(const wchar_t* deviceName)
+{
     uint32_t id = 0;
-    bool seen_digit = false;
-    for (const wchar_t* at = device_name; *at != L'\0'; ++at) {
+    bool seenDigit = false;
+    for (const wchar_t* at = deviceName; *at != L'\0'; ++at) {
         if (*at >= L'0' && *at <= L'9') {
             id = id * 10 + static_cast<uint32_t>(*at - L'0');
-            seen_digit = true;
+            seenDigit = true;
         } else {
             id = 0;
-            seen_digit = false;
+            seenDigit = false;
         }
     }
-    return seen_digit ? id : 0;
+    return seenDigit ? id : 0;
 }
 
 }  // namespace sidescopes

@@ -7,140 +7,150 @@
 namespace sidescopes {
 namespace {
 
-std::filesystem::path TemporaryFile(const char* name) {
+std::filesystem::path temporaryFile(const char* name)
+{
     return std::filesystem::temp_directory_path() / "sidescopes-tests" / name;
 }
 
 }  // namespace
 
-TEST_CASE("Preferences round-trip through a file") {
+TEST_CASE("Preferences round-trip through a file")
+{
     Preferences saved;
-    saved.vectorscope_gain = 4.5f;
-    saved.waveform_gain = 0.12f;
-    saved.waveform_stride = 2;
-    saved.vectorscope_smoothing_ms = 60.0f;
+    saved.vectorscopeGain = 4.5f;
+    saved.waveformGain = 0.12f;
+    saved.waveformStride = 2;
+    saved.vectorscopeSmoothingMs = 60.0f;
     saved.matrix = ChromaMatrix::Bt709;
-    saved.trace_response = TraceResponse::Linear;
-    saved.vectorscope_zoom = 2;
+    saved.traceResponse = TraceResponse::Linear;
+    saved.vectorscopeZoom = 2;
     saved.shortcuts.waveform = "X";
-    saved.shortcuts.full_region = "Q";
-    saved.scope_stack = "HWV";  // stacking order is part of the setting
-    saved.show_graticule = false;
-    saved.values_as_percent = false;
-    saved.window_x = 120;
-    saved.window_width = 640;
+    saved.shortcuts.fullRegion = "Q";
+    saved.scopeStack = "HWV";  // stacking order is part of the setting
+    saved.showGraticule = false;
+    saved.valuesAsPercent = false;
+    saved.windowX = 120;
+    saved.windowWidth = 640;
 
-    const auto file = TemporaryFile("roundtrip.txt");
-    REQUIRE(SavePreferences(saved, file));
+    const auto file = temporaryFile("roundtrip.txt");
+    REQUIRE(savePreferences(saved, file));
 
-    const Preferences loaded = LoadPreferences(file);
-    CHECK(loaded.vectorscope_gain == saved.vectorscope_gain);
-    CHECK(loaded.waveform_gain == saved.waveform_gain);
-    CHECK(loaded.waveform_stride == saved.waveform_stride);
-    CHECK(loaded.vectorscope_smoothing_ms == saved.vectorscope_smoothing_ms);
+    const Preferences loaded = loadPreferences(file);
+    CHECK(loaded.vectorscopeGain == saved.vectorscopeGain);
+    CHECK(loaded.waveformGain == saved.waveformGain);
+    CHECK(loaded.waveformStride == saved.waveformStride);
+    CHECK(loaded.vectorscopeSmoothingMs == saved.vectorscopeSmoothingMs);
     CHECK(loaded.matrix == ChromaMatrix::Bt709);
-    CHECK(loaded.trace_response == TraceResponse::Linear);
-    CHECK(loaded.vectorscope_zoom == 2);
+    CHECK(loaded.traceResponse == TraceResponse::Linear);
+    CHECK(loaded.vectorscopeZoom == 2);
     CHECK(loaded.shortcuts.waveform == "X");
-    CHECK(loaded.shortcuts.full_region == "Q");
+    CHECK(loaded.shortcuts.fullRegion == "Q");
     CHECK(loaded.shortcuts.parade == "R");  // untouched bindings keep defaults
-    CHECK(loaded.scope_stack == "HWV");
-    CHECK_FALSE(loaded.show_graticule);
-    CHECK_FALSE(loaded.values_as_percent);
-    CHECK(loaded.window_x == 120);
-    CHECK(loaded.window_width == 640);
+    CHECK(loaded.scopeStack == "HWV");
+    CHECK_FALSE(loaded.showGraticule);
+    CHECK_FALSE(loaded.valuesAsPercent);
+    CHECK(loaded.windowX == 120);
+    CHECK(loaded.windowWidth == 640);
 
     std::filesystem::remove(file);
 }
 
-TEST_CASE("Preferences default when the file is missing") {
-    const Preferences loaded = LoadPreferences(TemporaryFile("does-not-exist.txt"));
-    CHECK(loaded.vectorscope_gain == 3.0f);
-    CHECK(loaded.waveform_gain == 0.05f);
-    CHECK(loaded.show_graticule);
+TEST_CASE("Preferences default when the file is missing")
+{
+    const Preferences loaded = loadPreferences(temporaryFile("does-not-exist.txt"));
+    CHECK(loaded.vectorscopeGain == 3.0f);
+    CHECK(loaded.waveformGain == 0.05f);
+    CHECK(loaded.showGraticule);
 }
 
-TEST_CASE("Preferences migrate the legacy single view mode") {
-    const auto file = TemporaryFile("legacy-view-mode.txt");
+TEST_CASE("Preferences migrate the legacy single view mode")
+{
+    const auto file = temporaryFile("legacy-view-mode.txt");
     std::filesystem::create_directories(file.parent_path());
     std::ofstream(file) << "view_mode=2\n";  // the old vectorscope-and-waveform pair
 
-    const Preferences loaded = LoadPreferences(file);
-    CHECK(loaded.scope_stack == "VW");
+    const Preferences loaded = loadPreferences(file);
+    CHECK(loaded.scopeStack == "VW");
 
     std::filesystem::remove(file);
 }
 
-TEST_CASE("Preferences migrate the scope bit set and waveform style") {
+TEST_CASE("Preferences migrate the scope bit set and waveform style")
+{
     // The RGB+Luma composite folds into the one waveform scope, whose
     // style now lives in the context menu.
-    const auto file = TemporaryFile("legacy-bit-set.txt");
+    const auto file = temporaryFile("legacy-bit-set.txt");
     std::filesystem::create_directories(file.parent_path());
     std::ofstream(file) << "visible_scopes=6\nwaveform_mode=2\n";
 
-    const Preferences loaded = LoadPreferences(file);
-    CHECK(loaded.scope_stack == "WH");
+    const Preferences loaded = loadPreferences(file);
+    CHECK(loaded.scopeStack == "WH");
 
     std::filesystem::remove(file);
 }
 
-TEST_CASE("Preferences fold the retired luma scope into the waveform style") {
+TEST_CASE("Preferences fold the retired luma scope into the waveform style")
+{
     // A stack saved with the short-lived separate luma waveform: the
     // letter becomes W, the style becomes Luma, the parade stays.
-    const auto file = TemporaryFile("legacy-luma-letter.txt");
+    const auto file = temporaryFile("legacy-luma-letter.txt");
     std::filesystem::create_directories(file.parent_path());
     std::ofstream(file) << "scope_stack=LR\n";
 
-    const Preferences loaded = LoadPreferences(file);
-    CHECK(loaded.scope_stack == "WR");
-    CHECK(loaded.waveform_mode == WaveformMode::Luma);
+    const Preferences loaded = loadPreferences(file);
+    CHECK(loaded.scopeStack == "WR");
+    CHECK(loaded.waveformMode == WaveformMode::Luma);
 
     std::filesystem::remove(file);
 }
 
-TEST_CASE("Preferences never load an empty scope set") {
-    const auto file = TemporaryFile("empty-scopes.txt");
+TEST_CASE("Preferences never load an empty scope set")
+{
+    const auto file = temporaryFile("empty-scopes.txt");
     std::filesystem::create_directories(file.parent_path());
     std::ofstream(file) << "scope_stack=XYZ\n";  // no known scope letters
 
-    const Preferences loaded = LoadPreferences(file);
-    CHECK(loaded.scope_stack == "V");
+    const Preferences loaded = loadPreferences(file);
+    CHECK(loaded.scopeStack == "V");
 
     std::filesystem::remove(file);
 }
 
-TEST_CASE("Preferences deduplicate scope letters") {
-    const auto file = TemporaryFile("dup-scopes.txt");
+TEST_CASE("Preferences deduplicate scope letters")
+{
+    const auto file = temporaryFile("dup-scopes.txt");
     std::filesystem::create_directories(file.parent_path());
     std::ofstream(file) << "scope_stack=RWRxW\n";
 
-    const Preferences loaded = LoadPreferences(file);
-    CHECK(loaded.scope_stack == "RW");
+    const Preferences loaded = loadPreferences(file);
+    CHECK(loaded.scopeStack == "RW");
 
     std::filesystem::remove(file);
 }
 
-TEST_CASE("Preferences keep the color picker in the stack") {
-    const auto file = TemporaryFile("picker-scope.txt");
+TEST_CASE("Preferences keep the color picker in the stack")
+{
+    const auto file = temporaryFile("picker-scope.txt");
     std::filesystem::create_directories(file.parent_path());
     std::ofstream(file) << "scope_stack=CV\n";
 
-    const Preferences loaded = LoadPreferences(file);
-    CHECK(loaded.scope_stack == "CV");
+    const Preferences loaded = loadPreferences(file);
+    CHECK(loaded.scopeStack == "CV");
 
     std::filesystem::remove(file);
 }
 
-TEST_CASE("Preferences tolerate unknown keys and malformed lines") {
-    const auto file = TemporaryFile("forward-compat.txt");
+TEST_CASE("Preferences tolerate unknown keys and malformed lines")
+{
+    const auto file = temporaryFile("forward-compat.txt");
     std::filesystem::create_directories(file.parent_path());
     std::ofstream(file) << "future_feature=42\n"
                         << "no separator here\n"
                         << "waveform_gain=0.2\n";
 
-    const Preferences loaded = LoadPreferences(file);
-    CHECK(loaded.waveform_gain == 0.2f);
-    CHECK(loaded.vectorscope_gain == 3.0f);
+    const Preferences loaded = loadPreferences(file);
+    CHECK(loaded.waveformGain == 0.2f);
+    CHECK(loaded.vectorscopeGain == 3.0f);
 
     std::filesystem::remove(file);
 }

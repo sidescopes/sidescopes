@@ -1,8 +1,46 @@
-# Google base, 4-space indent, 100 columns
+# SideScopes C++ style, Google base. See docs/CODESTYLE.md.
+# The C ABI (include/sidescopes/module.h) keeps C conventions.
 BasedOnStyle: Google
 IndentWidth: 4
-ColumnLimit: 100
+ColumnLimit: 120
 AccessModifierOffset: -4
 DerivePointerAlignment: false
 PointerAlignment: Left
-AllowShortFunctionsOnASingleLine: Inline
+# Functions and control bodies always take real lines: no single-line
+# collapsing, and every if/for/while/else gets braces.
+AllowShortFunctionsOnASingleLine: None
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine: false
+AllowShortBlocksOnASingleLine: Never
+AllowShortCaseLabelsOnASingleLine: false
+InsertBraces: true
+# Vertical breathing room: a blank line between definitions and before an
+# access modifier that follows other members.
+SeparateDefinitionBlocks: Always
+EmptyLineBeforeAccessModifier: LogicalBlock
+# Braces: functions, classes, structs and enums open on their own line;
+# namespaces and control statements keep the brace attached.
+BreakBeforeBraces: Custom
+BraceWrapping:
+  AfterClass: true
+  AfterStruct: true
+  AfterUnion: true
+  AfterEnum: true
+  AfterFunction: true
+  AfterNamespace: false
+  AfterControlStatement: Never
+  AfterCaseLabel: false
+  BeforeElse: false
+  BeforeCatch: false
+  BeforeWhile: false
+  SplitEmptyFunction: true
+  SplitEmptyRecord: true
+  SplitEmptyNamespace: true
+# Constructor initializers: leading colon, one field initializer per line.
+PackConstructorInitializers: Never
+BreakConstructorInitializers: BeforeColon
+ConstructorInitializerIndentWidth: 4
+# Case labels sit flush with the switch; braced lists carry no interior
+# spaces.
+IndentCaseLabels: false
+Cpp11BracedListStyle: true

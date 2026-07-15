@@ -27,7 +27,7 @@ namespace sidescopes {
 namespace {
 
 // Faces smaller than this (in points) are thumbnails, not scoping targets.
-constexpr double kMinimumFacePoints = 72.0;
+constexpr double MinimumFacePoints = 72.0;
 
 using winrt::Windows::Graphics::Imaging::BitmapBufferAccessMode;
 using winrt::Windows::Graphics::Imaging::BitmapPixelFormat;
@@ -35,11 +35,13 @@ using winrt::Windows::Graphics::Imaging::SoftwareBitmap;
 using winrt::Windows::Media::FaceAnalysis::FaceDetector;
 
 // Rec.709 luma, fixed-point x256: the detector consumes grayscale.
-inline uint8_t Luma709(int r, int g, int b) {
+inline uint8_t luma709(int r, int g, int b)
+{
     return static_cast<uint8_t>((54 * r + 183 * g + 19 * b) >> 8);
 }
 
-SoftwareBitmap GrayBitmapFromFrame(const FrameView& frame) {
+SoftwareBitmap grayBitmapFromFrame(const FrameView& frame)
+{
     SoftwareBitmap bitmap(BitmapPixelFormat::Gray8, frame.width, frame.height);
     {
         const auto buffer = bitmap.LockBuffer(BitmapBufferAccessMode::Write);
@@ -50,10 +52,11 @@ SoftwareBitmap GrayBitmapFromFrame(const FrameView& frame) {
         uint32_t capacity = 0;
         winrt::check_hresult(access->GetBuffer(&data, &capacity));
         for (int py = 0; py < frame.height; ++py) {
-            const uint8_t* source = frame.PixelAt(0, py);
+            const uint8_t* source = frame.pixelAt(0, py);
             uint8_t* out = data + plane.StartIndex + static_cast<std::size_t>(py) * plane.Stride;
-            for (int px = 0; px < frame.width; ++px, source += 4)
-                out[px] = Luma709(source[2], source[1], source[0]);
+            for (int px = 0; px < frame.width; ++px, source += 4) {
+                out[px] = luma709(source[2], source[1], source[0]);
+            }
         }
         reference.Close();
         buffer.Close();
@@ -61,24 +64,26 @@ SoftwareBitmap GrayBitmapFromFrame(const FrameView& frame) {
     return bitmap;
 }
 
-std::vector<IntRect> DetectOnOwnApartment(const FrameView& frame, float pixels_per_point) {
+std::vector<IntRect> detectOnOwnApartment(const FrameView& frame, float pixelsPerPoint)
+{
     std::vector<IntRect> faces;
     winrt::init_apartment();
     {
-        const SoftwareBitmap bitmap = GrayBitmapFromFrame(frame);
+        const SoftwareBitmap bitmap = grayBitmapFromFrame(frame);
         const FaceDetector detector = FaceDetector::CreateAsync().get();
         const auto detected = detector.DetectFacesAsync(bitmap).get();
 
-        const double minimum_pixels = kMinimumFacePoints * pixels_per_point;
+        const double minimumPixels = MinimumFacePoints * pixelsPerPoint;
         for (const auto& face : detected) {
             const auto box = face.FaceBox();
-            if (box.Width < minimum_pixels || box.Height < minimum_pixels) continue;
-            faces.push_back(IntRect{static_cast<int>(box.X), static_cast<int>(box.Y),
-                                    static_cast<int>(box.Width), static_cast<int>(box.Height)});
+            if (box.Width < minimumPixels || box.Height < minimumPixels) {
+                continue;
+            }
+            faces.push_back(IntRect{static_cast<int>(box.X), static_cast<int>(box.Y), static_cast<int>(box.Width),
+                                    static_cast<int>(box.Height)});
         }
         std::sort(faces.begin(), faces.end(), [](const IntRect& a, const IntRect& b) {
-            return static_cast<int64_t>(a.width) * a.height >
-                   static_cast<int64_t>(b.width) * b.height;
+            return static_cast<int64_t>(a.width) * a.height > static_cast<int64_t>(b.width) * b.height;
         });
     }
     winrt::uninit_apartment();
@@ -87,7 +92,8 @@ std::vector<IntRect> DetectOnOwnApartment(const FrameView& frame, float pixels_p
 
 }  // namespace
 
-bool SupportsFaceDetection() {
+bool supportsFaceDetection()
+{
     // Queried once, off the caller's thread: the WinRT support check
     // itself needs an apartment, and this function is called from the
     // interface loop. The face action appears as soon as the answer is
@@ -95,7 +101,9 @@ bool SupportsFaceDetection() {
     static std::atomic<int> supported{-1};
     static std::atomic<bool> querying{false};
     const int known = supported.load();
-    if (known >= 0) return known == 1;
+    if (known >= 0) {
+        return known == 1;
+    }
     if (!querying.exchange(true)) {
         std::thread([] {
             bool answer = false;
@@ -112,7 +120,8 @@ bool SupportsFaceDetection() {
     return false;
 }
 
-void WarmFaceDetection() {
+void warmFaceDetection()
+{
     // The first FaceDetector construction loads the model; pay that cost
     // in the background at startup, the way the macOS warmer does.
     std::thread([] {
@@ -126,14 +135,19 @@ void WarmFaceDetection() {
     }).detach();
 }
 
-std::vector<IntRect> DetectFaces(const FrameView& frame, float pixels_per_point) {
+std::vector<IntRect> detectFaces(const FrameView& frame, float pixelsPerPoint)
+{
     std::vector<IntRect> faces;
-    if (!frame.bgra || frame.width <= 0 || frame.height <= 0) return faces;
-    if (!SupportsFaceDetection()) return faces;
+    if (!frame.bgra || frame.width <= 0 || frame.height <= 0) {
+        return faces;
+    }
+    if (!supportsFaceDetection()) {
+        return faces;
+    }
 
     std::thread worker([&] {
         try {
-            faces = DetectOnOwnApartment(frame, pixels_per_point);
+            faces = detectOnOwnApartment(frame, pixelsPerPoint);
         } catch (...) {
             faces.clear();  // an honest empty answer beats a crash
         }

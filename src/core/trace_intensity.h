@@ -17,10 +17,10 @@ namespace sidescopes {
 // The calibrated defaults land at comfortable positions on this scale:
 // a waveform gain of 0.05 is 25%, a vectorscope gain of 3.0 is about
 // 49% on its shifted scale.
-float TraceGainFromIntensity(float intensity_percent, float shift_percent = 0.0f);
-float IntensityFromTraceGain(float gain, float shift_percent = 0.0f);
+float traceGainFromIntensity(float intensityPercent, float shiftPercent = 0.0f);
+float intensityFromTraceGain(float gain, float shiftPercent = 0.0f);
 
 // The vectorscope's scale shift, shared by every conversion site.
-constexpr float kVectorscopeIntensityShift = 20.0f;
+constexpr float VectorscopeIntensityShift = 20.0f;
 
 }  // namespace sidescopes

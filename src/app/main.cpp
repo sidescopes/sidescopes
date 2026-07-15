@@ -39,41 +39,43 @@ namespace {
 
 using namespace sidescopes;
 
-enum MenuAction {
-    kMenuShowVectorscope = 1,
-    kMenuShowWaveform,
-    kMenuShowWaveformParade,
-    kMenuShowHistogram,
-    kMenuShowColorPicker,
-    kMenuWaveformStyleRgb = 10,
-    kMenuWaveformStyleLuma,
-    kMenuHistogramCombined,
-    kMenuHistogramPerChannel,
-    kMenuMatrixBt601 = 20,
-    kMenuMatrixBt709,
-    kMenuTraceBoosted,
-    kMenuTraceLinear,
-    kMenuWaveformStyleColoredLuma,
-    kMenuDrawRegion,
-    kMenuPickFaces,
-    kMenuZoom1,
-    kMenuZoom2,
-    kMenuZoom4,
-    kMenuSelectRegion = 30,
-    kMenuFullScreenRegion,
-    kMenuToggleGraticule = 40,
-    kMenuTogglePercentValues,
-    kMenuClearPinnedMarkers,
-    kMenuPickPinColor,
-    kMenuOpenSettings = 50,
-    kMenuQuit,
+enum MenuAction
+{
+    MenuShowVectorscope = 1,
+    MenuShowWaveform,
+    MenuShowWaveformParade,
+    MenuShowHistogram,
+    MenuShowColorPicker,
+    MenuWaveformStyleRgb = 10,
+    MenuWaveformStyleLuma,
+    MenuHistogramCombined,
+    MenuHistogramPerChannel,
+    MenuMatrixBt601 = 20,
+    MenuMatrixBt709,
+    MenuTraceBoosted,
+    MenuTraceLinear,
+    MenuWaveformStyleColoredLuma,
+    MenuDrawRegion,
+    MenuPickFaces,
+    MenuZoom1,
+    MenuZoom2,
+    MenuZoom4,
+    MenuSelectRegion = 30,
+    MenuFullScreenRegion,
+    MenuToggleGraticule = 40,
+    MenuTogglePercentValues,
+    MenuClearPinnedMarkers,
+    MenuPickPinColor,
+    MenuOpenSettings = 50,
+    MenuQuit,
 };
 
 // ---------------------------------------------------------------------------
 // Rendering helpers
 // ---------------------------------------------------------------------------
 
-struct DrawnScope {
+struct DrawnScope
+{
     ImVec2 origin;
     ImVec2 size;
     float zoom = 1.0f;
@@ -85,14 +87,14 @@ struct DrawnScope {
 // around the center - trace, graticule, and markers together, which is
 // what keeps every overlay glued to the cloud - by cropping the
 // texture's center and scaling overlay coordinates through At().
-DrawnScope DrawScopeImage(const ScopeTexture& texture, bool keep_aspect, float zoom = 1.0f) {
+DrawnScope drawScopeImage(const ScopeTexture& texture, bool keepAspect, float zoom = 1.0f)
+{
     const ImVec2 available = ImGui::GetContentRegionAvail();
     ImVec2 size = available;
-    if (keep_aspect) {
-        const float scale =
-            std::max(0.05f, std::min(available.x / static_cast<float>(texture.Width()),
-                                     available.y / static_cast<float>(texture.Height())));
-        size = ImVec2(texture.Width() * scale, texture.Height() * scale);
+    if (keepAspect) {
+        const float scale = std::max(0.05f, std::min(available.x / static_cast<float>(texture.width()),
+                                                     available.y / static_cast<float>(texture.height())));
+        size = ImVec2(texture.width() * scale, texture.height() * scale);
     }
     ImVec2 cursor = ImGui::GetCursorPos();
     cursor.x += std::max(0.0f, (available.x - size.x) * 0.5f);
@@ -100,12 +102,12 @@ DrawnScope DrawScopeImage(const ScopeTexture& texture, bool keep_aspect, float z
     ImGui::SetCursorPos(cursor);
     const ImVec2 origin = ImGui::GetCursorScreenPos();
     const float crop = 0.5f / zoom;
-    ImGui::Image(texture.Id(), size, ImVec2(0.5f - crop, 0.5f - crop),
-                 ImVec2(0.5f + crop, 0.5f + crop));
+    ImGui::Image(texture.textureId(), size, ImVec2(0.5f - crop, 0.5f - crop), ImVec2(0.5f + crop, 0.5f + crop));
     return DrawnScope{origin, size, zoom};
 }
 
-ImVec2 At(const DrawnScope& scope, const NormalizedPoint& point) {
+ImVec2 at(const DrawnScope& scope, const NormalizedPoint& point)
+{
     const float x = (point.x - 0.5f) * scope.zoom + 0.5f;
     const float y = (point.y - 0.5f) * scope.zoom + 0.5f;
     return ImVec2(scope.origin.x + x * scope.size.x, scope.origin.y + y * scope.size.y);
@@ -114,194 +116,213 @@ ImVec2 At(const DrawnScope& scope, const NormalizedPoint& point) {
 // Every scope speaks with one graticule voice: the same champagne gold
 // at a handful of strengths. The scales used to be neutral gray while
 // the vectorscope wore gold, which read as two different instruments.
-constexpr ImU32 kGraticuleMinor = IM_COL32(205, 172, 110, 70);
-constexpr ImU32 kGraticuleMajor = IM_COL32(205, 172, 110, 130);
-constexpr ImU32 kGraticuleAccent = IM_COL32(218, 175, 95, 180);
-constexpr ImU32 kGraticuleLabel = IM_COL32(226, 198, 145, 200);
-constexpr ImU32 kGraticuleSkinTone = IM_COL32(230, 170, 140, 160);
+constexpr ImU32 GraticuleMinor = IM_COL32(205, 172, 110, 70);
+constexpr ImU32 GraticuleMajor = IM_COL32(205, 172, 110, 130);
+constexpr ImU32 GraticuleAccent = IM_COL32(218, 175, 95, 180);
+constexpr ImU32 GraticuleLabel = IM_COL32(226, 198, 145, 200);
+constexpr ImU32 GraticuleSkinTone = IM_COL32(230, 170, 140, 160);
 
-void DrawVectorscopeOverlay(const DrawnScope& scope, const VectorscopeGraticule& graticule) {
+void drawVectorscopeOverlay(const DrawnScope& scope, const VectorscopeGraticule& graticule)
+{
     ImDrawList* draw = ImGui::GetWindowDrawList();
-    const auto stroke_color = [](GraticuleStroke stroke) -> ImU32 {
+    const auto strokeColor = [](GraticuleStroke stroke) -> ImU32 {
         switch (stroke) {
-            case GraticuleStroke::GridMajor:
-                return kGraticuleMajor;
-            case GraticuleStroke::Accent:
-                return kGraticuleAccent;
-            case GraticuleStroke::SkinTone:
-                return kGraticuleSkinTone;
-            case GraticuleStroke::Grid:
-                break;
+        case GraticuleStroke::GridMajor:
+            return GraticuleMajor;
+        case GraticuleStroke::Accent:
+            return GraticuleAccent;
+        case GraticuleStroke::SkinTone:
+            return GraticuleSkinTone;
+        case GraticuleStroke::Grid:
+            break;
         }
-        return kGraticuleMinor;
+        return GraticuleMinor;
     };
 
     for (const GraticuleLine& line : graticule.lines) {
-        draw->AddLine(At(scope, line.from), At(scope, line.to), stroke_color(line.stroke),
+        draw->AddLine(at(scope, line.from), at(scope, line.to), strokeColor(line.stroke),
                       line.stroke == GraticuleStroke::GridMajor ? 1.5f : 1.0f);
     }
     for (const GraticuleCircle& circle : graticule.circles) {
-        draw->AddCircle(At(scope, circle.center), circle.radius * scope.size.x * scope.zoom,
-                        stroke_color(circle.stroke), 64);
+        draw->AddCircle(at(scope, circle.center), circle.radius * scope.size.x * scope.zoom, strokeColor(circle.stroke),
+                        64);
     }
     for (const GraticuleTarget& target : graticule.targets) {
-        const ImVec2 center = At(scope, target.center);
+        const ImVec2 center = at(scope, target.center);
         const float box = target.primary ? 5.0f : 3.0f;
-        draw->AddRect(ImVec2(center.x - box, center.y - box),
-                      ImVec2(center.x + box, center.y + box), kGraticuleAccent);
-        if (!target.label.empty())
-            draw->AddText(ImVec2(center.x + 7, center.y - 7), kGraticuleLabel,
-                          target.label.c_str());
+        draw->AddRect(ImVec2(center.x - box, center.y - box), ImVec2(center.x + box, center.y + box), GraticuleAccent);
+        if (!target.label.empty()) {
+            draw->AddText(ImVec2(center.x + 7, center.y - 7), GraticuleLabel, target.label.c_str());
+        }
     }
 }
 
-void DrawWaveformOverlay(const DrawnScope& scope) {
+void drawWaveformOverlay(const DrawnScope& scope)
+{
     ImDrawList* draw = ImGui::GetWindowDrawList();
     const bool roomy = scope.size.y >= 140.0f;
-    for (const WaveformScaleLine& line : BuildWaveformScale()) {
+    for (const WaveformScaleLine& line : buildWaveformScale()) {
         const float y = scope.origin.y + line.y * scope.size.y;
-        const ImU32 color = line.major ? kGraticuleMajor : kGraticuleMinor;
+        const ImU32 color = line.major ? GraticuleMajor : GraticuleMinor;
         draw->AddLine(ImVec2(scope.origin.x, y), ImVec2(scope.origin.x + scope.size.x, y), color);
-        if (line.major || roomy)
-            draw->AddText(ImVec2(scope.origin.x + 4, y + 1), kGraticuleLabel, line.label.c_str());
+        if (line.major || roomy) {
+            draw->AddText(ImVec2(scope.origin.x + 4, y + 1), GraticuleLabel, line.label.c_str());
+        }
     }
 }
 
-void DrawPointMarker(const DrawnScope& scope, const NormalizedPoint& point, ImU32 color) {
+void drawPointMarker(const DrawnScope& scope, const NormalizedPoint& point, ImU32 color)
+{
     ImDrawList* draw = ImGui::GetWindowDrawList();
-    const ImVec2 center = At(scope, point);
+    const ImVec2 center = at(scope, point);
     draw->AddCircle(center, 5.0f, color, 0, 2.0f);
     draw->AddCircle(center, 6.5f, IM_COL32(0, 0, 0, 200), 0, 1.0f);
 }
 
-void DrawLevelMarker(const DrawnScope& scope, float normalized_y, ImU32 color, float from_x = 0.0f,
-                     float to_x = 1.0f) {
+void drawLevelMarker(const DrawnScope& scope, float normalizedY, ImU32 color, float fromX = 0.0f, float toX = 1.0f)
+{
     ImDrawList* draw = ImGui::GetWindowDrawList();
-    const float y = scope.origin.y + normalized_y * scope.size.y;
-    draw->AddLine(ImVec2(scope.origin.x + from_x * scope.size.x, y),
-                  ImVec2(scope.origin.x + to_x * scope.size.x, y), color, 1.5f);
+    const float y = scope.origin.y + normalizedY * scope.size.y;
+    draw->AddLine(ImVec2(scope.origin.x + fromX * scope.size.x, y), ImVec2(scope.origin.x + toX * scope.size.x, y),
+                  color, 1.5f);
 }
 
-void DrawValueMarker(const DrawnScope& scope, float normalized_x, ImU32 color, float from_y = 0.0f,
-                     float to_y = 1.0f) {
+void drawValueMarker(const DrawnScope& scope, float normalizedX, ImU32 color, float fromY = 0.0f, float toY = 1.0f)
+{
     ImDrawList* draw = ImGui::GetWindowDrawList();
-    const float x = scope.origin.x + normalized_x * scope.size.x;
-    draw->AddLine(ImVec2(x, scope.origin.y + from_y * scope.size.y),
-                  ImVec2(x, scope.origin.y + to_y * scope.size.y), color, 1.5f);
+    const float x = scope.origin.x + normalizedX * scope.size.x;
+    draw->AddLine(ImVec2(x, scope.origin.y + fromY * scope.size.y), ImVec2(x, scope.origin.y + toY * scope.size.y),
+                  color, 1.5f);
 }
 
 // Cursor markers for the three channels, merged where the values
 // coincide: lines folding into one must read as the mix - gray for all
 // three, yellow, magenta, or cyan for a pair - not as whichever channel
 // happened to draw last.
-struct ChannelMarker {
+struct ChannelMarker
+{
     float value = 0.0f;  // 0..255
     ImU32 color = 0;
 };
 
-ImU32 ChannelMaskColor(int mask) {
+ImU32 channelMaskColor(int mask)
+{
     switch (mask) {
-        case 0b001:
-            return IM_COL32(255, 90, 90, 230);  // red
-        case 0b010:
-            return IM_COL32(90, 255, 90, 230);  // green
-        case 0b100:
-            return IM_COL32(110, 110, 255, 230);  // blue
-        case 0b011:
-            return IM_COL32(255, 235, 90, 230);  // red+green: yellow
-        case 0b101:
-            return IM_COL32(255, 90, 255, 230);  // red+blue: magenta
-        case 0b110:
-            return IM_COL32(90, 235, 255, 230);  // green+blue: cyan
-        default:
-            return IM_COL32(235, 235, 235, 230);  // all three: gray
+    case 0b001:
+        return IM_COL32(255, 90, 90, 230);  // red
+    case 0b010:
+        return IM_COL32(90, 255, 90, 230);  // green
+    case 0b100:
+        return IM_COL32(110, 110, 255, 230);  // blue
+    case 0b011:
+        return IM_COL32(255, 235, 90, 230);  // red+green: yellow
+    case 0b101:
+        return IM_COL32(255, 90, 255, 230);  // red+blue: magenta
+    case 0b110:
+        return IM_COL32(90, 235, 255, 230);  // green+blue: cyan
+    default:
+        return IM_COL32(235, 235, 235, 230);  // all three: gray
     }
 }
 
-int GroupChannelMarkers(const FloatColor& color, ChannelMarker out[3]) {
+int groupChannelMarkers(const FloatColor& color, ChannelMarker out[3])
+{
     const float channels[3] = {color.r, color.g, color.b};
-    constexpr float kMergeEpsilon = 2.0f;
+    constexpr float MergeEpsilon = 2.0f;
     bool grouped[3] = {false, false, false};
     int count = 0;
     for (int channel = 0; channel < 3; ++channel) {
-        if (grouped[channel]) continue;
+        if (grouped[channel]) {
+            continue;
+        }
         int mask = 1 << channel;
         float sum = channels[channel];
         int members = 1;
         for (int other = channel + 1; other < 3; ++other) {
-            if (grouped[other]) continue;
-            if (std::abs(channels[other] - channels[channel]) <= kMergeEpsilon) {
+            if (grouped[other]) {
+                continue;
+            }
+            if (std::abs(channels[other] - channels[channel]) <= MergeEpsilon) {
                 grouped[other] = true;
                 mask |= 1 << other;
                 sum += channels[other];
                 ++members;
             }
         }
-        out[count++] = ChannelMarker{sum / static_cast<float>(members), ChannelMaskColor(mask)};
+        out[count++] = ChannelMarker{sum / static_cast<float>(members), channelMaskColor(mask)};
     }
     return count;
 }
 
 // Toolbar icon buttons drawn with the draw list: corner brackets for region
 // selection, an outline rectangle for full screen.
-enum class ScopeGlyph { Vectorscope, Waveform, WaveformParade, Histogram, ColorPicker };
+enum class ScopeGlyph
+{
+    Vectorscope,
+    Waveform,
+    WaveformParade,
+    Histogram,
+    ColorPicker
+};
 
 // Everything stackable, in the fixed toolbar order.
-constexpr ScopeGlyph kAllScopes[] = {ScopeGlyph::Vectorscope, ScopeGlyph::Waveform,
-                                     ScopeGlyph::WaveformParade, ScopeGlyph::Histogram,
-                                     ScopeGlyph::ColorPicker};
+constexpr ScopeGlyph AllScopes[] = {ScopeGlyph::Vectorscope, ScopeGlyph::Waveform, ScopeGlyph::WaveformParade,
+                                    ScopeGlyph::Histogram, ScopeGlyph::ColorPicker};
 
 // Letter chips and preference letters share one alphabet.
-constexpr char ScopeLetter(ScopeGlyph kind) {
+constexpr char scopeLetter(ScopeGlyph kind)
+{
     switch (kind) {
-        case ScopeGlyph::Vectorscope:
-            return 'V';
-        case ScopeGlyph::Waveform:
-            return 'W';
-        case ScopeGlyph::WaveformParade:
-            return 'R';
-        case ScopeGlyph::Histogram:
-            return 'H';
-        case ScopeGlyph::ColorPicker:
-            return 'C';
+    case ScopeGlyph::Vectorscope:
+        return 'V';
+    case ScopeGlyph::Waveform:
+        return 'W';
+    case ScopeGlyph::WaveformParade:
+        return 'R';
+    case ScopeGlyph::Histogram:
+        return 'H';
+    case ScopeGlyph::ColorPicker:
+        return 'C';
     }
     return 'V';
 }
 
-constexpr uint32_t ScopeEnableBit(ScopeGlyph kind) {
+constexpr uint32_t scopeEnableBit(ScopeGlyph kind)
+{
     switch (kind) {
-        case ScopeGlyph::Vectorscope:
-            return kScopeVectorscope;
-        case ScopeGlyph::Waveform:
-            return kScopeWaveform;
-        case ScopeGlyph::WaveformParade:
-            return kScopeWaveformParade;
-        case ScopeGlyph::Histogram:
-            return kScopeHistogram;
-        case ScopeGlyph::ColorPicker:
-            // Reads the sampled cursor color; asks nothing of the worker.
-            return 0;
+    case ScopeGlyph::Vectorscope:
+        return ScopeVectorscope;
+    case ScopeGlyph::Waveform:
+        return ScopeWaveform;
+    case ScopeGlyph::WaveformParade:
+        return ScopeWaveformParade;
+    case ScopeGlyph::Histogram:
+        return ScopeHistogram;
+    case ScopeGlyph::ColorPicker:
+        // Reads the sampled cursor color; asks nothing of the worker.
+        return 0;
     }
-    return kScopeVectorscope;
+    return ScopeVectorscope;
 }
 
 // Scope toggles are letter chips: professional tools label scopes with
 // text because no icon language exists for them, and the letters double
 // as the keyboard shortcuts.
-bool ScopeToggleButton(const char* id, const char* letter, bool enabled, const char* tooltip) {
+bool scopeToggleButton(const char* id, const char* letter, bool enabled, const char* tooltip)
+{
     const float height = ImGui::GetTextLineHeight() + 4.0f;
     const bool pressed = ImGui::InvisibleButton(id, ImVec2(height + 8.0f, height));
     ImDrawList* draw = ImGui::GetWindowDrawList();
     const ImVec2 min = ImGui::GetItemRectMin();
     const ImVec2 max = ImGui::GetItemRectMax();
-    if (enabled)
+    if (enabled) {
         draw->AddRectFilled(min, max, ImGui::GetColorU32(ImGuiCol_ButtonActive), 3.0f);
-    else if (ImGui::IsItemHovered())
+    } else if (ImGui::IsItemHovered()) {
         draw->AddRectFilled(min, max, ImGui::GetColorU32(ImGuiCol_ButtonHovered), 3.0f);
+    }
     const ImU32 color = ImGui::GetColorU32(enabled ? ImGuiCol_Text : ImGuiCol_TextDisabled);
     const ImVec2 size = ImGui::CalcTextSize(letter);
-    const ImVec2 at(std::floor(min.x + (max.x - min.x - size.x) / 2),
-                    std::floor(min.y + (max.y - min.y - size.y) / 2));
+    const ImVec2 at(std::floor(min.x + (max.x - min.x - size.x) / 2), std::floor(min.y + (max.y - min.y - size.y) / 2));
     draw->AddText(at, color, letter);
     ImGui::SetItemTooltip("%s", tooltip);
     return pressed;
@@ -311,18 +332,26 @@ bool ScopeToggleButton(const char* id, const char* letter, bool enabled, const c
 // for picking a window (the pick-mode hover cursor), a crosshair
 // for drawing one (the draw-mode cursor), an eyedropper for pinning
 // colors, expanding arrows for full screen.
-enum class RegionIcon { PickHand, Crosshair, Face, Dropper, Expand };
+enum class RegionIcon
+{
+    PickHand,
+    Crosshair,
+    Face,
+    Dropper,
+    Expand
+};
 
-bool IconButton(const char* id, RegionIcon icon, const char* tooltip, bool dimmed = false) {
+bool iconButton(const char* id, RegionIcon icon, const char* tooltip, bool dimmed = false)
+{
     const float height = ImGui::GetTextLineHeight() + 4.0f;
     const bool pressed = ImGui::InvisibleButton(id, ImVec2(height + 8.0f, height));
     ImDrawList* draw = ImGui::GetWindowDrawList();
     const ImVec2 min = ImGui::GetItemRectMin();
     const ImVec2 max = ImGui::GetItemRectMax();
-    if (ImGui::IsItemHovered())
+    if (ImGui::IsItemHovered()) {
         draw->AddRectFilled(min, max, ImGui::GetColorU32(ImGuiCol_ButtonHovered), 3.0f);
-    const ImVec2 center(std::floor((min.x + max.x) / 2) + 0.5f,
-                        std::floor((min.y + max.y) / 2) + 0.5f);
+    }
+    const ImVec2 center(std::floor((min.x + max.x) / 2) + 0.5f, std::floor((min.y + max.y) / 2) + 0.5f);
     const float half = 7.0f;
     const ImVec2 a(center.x - half, center.y - half + 1.0f);
     const ImVec2 b(center.x + half, center.y + half - 1.0f);
@@ -337,17 +366,16 @@ bool IconButton(const char* id, RegionIcon icon, const char* tooltip, bool dimme
         // web sweeping diagonally down-left, and a flat cuff. Outlined,
         // like the rest of the icon row.
         const ImVec2 outline[] = {
-            {-2.8f, 7.5f},  {-5.6f, 1.8f},  {-6.0f, 0.4f},  {-5.6f, -0.4f}, {-4.6f, -0.6f},
-            {-2.7f, 0.6f},  {-2.7f, -6.6f}, {-2.2f, -7.5f}, {-1.1f, -7.5f}, {-0.6f, -6.6f},
-            {-0.6f, -2.8f}, {0.1f, -3.3f},  {1.1f, -3.3f},  {1.5f, -2.6f},  {1.7f, -2.4f},
-            {2.4f, -2.5f},  {2.9f, -1.8f},  {3.2f, -1.6f},  {4.0f, -1.5f},  {4.5f, -0.8f},
-            {4.5f, 6.3f},   {3.9f, 7.5f},
+            {-2.8f, 7.5f},  {-5.6f, 1.8f},  {-6.0f, 0.4f},  {-5.6f, -0.4f}, {-4.6f, -0.6f}, {-2.7f, 0.6f},
+            {-2.7f, -6.6f}, {-2.2f, -7.5f}, {-1.1f, -7.5f}, {-0.6f, -6.6f}, {-0.6f, -2.8f}, {0.1f, -3.3f},
+            {1.1f, -3.3f},  {1.5f, -2.6f},  {1.7f, -2.4f},  {2.4f, -2.5f},  {2.9f, -1.8f},  {3.2f, -1.6f},
+            {4.0f, -1.5f},  {4.5f, -0.8f},  {4.5f, 6.3f},   {3.9f, 7.5f},
         };
         ImVec2 points[std::size(outline)];
-        for (std::size_t i = 0; i < std::size(outline); ++i)
+        for (std::size_t i = 0; i < std::size(outline); ++i) {
             points[i] = ImVec2(center.x + outline[i].x, center.y + outline[i].y);
-        draw->AddPolyline(points, static_cast<int>(std::size(outline)), color, ImDrawFlags_Closed,
-                          1.4f);
+        }
+        draw->AddPolyline(points, static_cast<int>(std::size(outline)), color, ImDrawFlags_Closed, 1.4f);
     } else if (icon == RegionIcon::Crosshair) {
         // The draw-mode crosshair: long thin beams, small center gap.
         const auto beam = [&](float dx, float dy) {
@@ -374,18 +402,16 @@ bool IconButton(const char* id, RegionIcon icon, const char* tooltip, bool dimme
         // size: round bulb, a separate wider collar band, a long
         // tapering tip, and a drop fallen just past it.
         draw->AddCircleFilled(ImVec2(center.x + 4.4f, center.y - 4.4f), 2.4f, color);
-        draw->AddLine(ImVec2(center.x + 1.7f, center.y - 1.7f),
-                      ImVec2(center.x + 3.0f, center.y - 3.0f), color, 4.2f);
-        draw->AddTriangleFilled(ImVec2(center.x - 5.3f, center.y + 5.3f),
-                                ImVec2(center.x + 1.3f, center.y + 0.7f),
+        draw->AddLine(ImVec2(center.x + 1.7f, center.y - 1.7f), ImVec2(center.x + 3.0f, center.y - 3.0f), color, 4.2f);
+        draw->AddTriangleFilled(ImVec2(center.x - 5.3f, center.y + 5.3f), ImVec2(center.x + 1.3f, center.y + 0.7f),
                                 ImVec2(center.x - 0.7f, center.y - 1.3f), color);
         draw->AddCircleFilled(ImVec2(center.x - 6.6f, center.y + 6.6f), 1.0f, color);
     } else {
         // Two arrows expanding to opposite corners, the fullscreen idiom.
-        const auto arrow = [&](ImVec2 from, ImVec2 to, float head_x, float head_y) {
+        const auto arrow = [&](ImVec2 from, ImVec2 to, float headX, float headY) {
             draw->AddLine(from, to, color, stroke);
-            draw->AddLine(to, ImVec2(to.x + head_x * 3.5f, to.y), color, stroke);
-            draw->AddLine(to, ImVec2(to.x, to.y + head_y * 3.5f), color, stroke);
+            draw->AddLine(to, ImVec2(to.x + headX * 3.5f, to.y), color, stroke);
+            draw->AddLine(to, ImVec2(to.x, to.y + headY * 3.5f), color, stroke);
         };
         arrow(ImVec2(center.x - 1.5f, center.y + 1.5f), ImVec2(a.x + 0.5f, b.y - 0.5f), 1, -1);
         arrow(ImVec2(center.x + 1.5f, center.y - 1.5f), ImVec2(b.x - 0.5f, a.y + 0.5f), -1, 1);
@@ -400,52 +426,60 @@ bool IconButton(const char* id, RegionIcon icon, const char* tooltip, bool dimme
 // - dimmed when there is currently nothing to pick. The state can go
 // stale while the user works elsewhere, so the button only dims, never
 // disables: pressing F always detects freshly.
-std::atomic<int> g_faces_on_screen{-1};
-std::atomic<bool> g_face_check_requested{false};
-std::atomic<bool> g_face_check_running{false};
+std::atomic<int> g_facesOnScreen{-1};
+std::atomic<bool> g_faceCheckRequested{false};
+std::atomic<bool> g_faceCheckRunning{false};
 
 // Minimizing is "get out of my way": the region border follows the
 // window down and returns on restore. The flag wakes the frame loop's
 // border sync when the iconified state flips either way.
-std::atomic<bool> g_iconify_changed{false};
+std::atomic<bool> g_iconifyChanged{false};
 
-void RefreshFacePresence(AnalysisWorker& worker, uint32_t capture_display) {
-    if (!SupportsFaceDetection()) return;
-    if (g_face_check_running.exchange(true)) return;
+void refreshFacePresence(AnalysisWorker& worker, uint32_t captureDisplay)
+{
+    if (!supportsFaceDetection()) {
+        return;
+    }
+    if (g_faceCheckRunning.exchange(true)) {
+        return;
+    }
     // Detection takes long enough to hitch a frame, so it runs on a copy
     // of the latest frame in a background thread.
     auto pixels = std::make_shared<std::vector<uint8_t>>();
     int width = 0;
     int height = 0;
-    worker.WithLatestFrame([&](const FrameView& view) {
+    worker.withLatestFrame([&](const FrameView& view) {
         width = view.width;
         height = view.height;
-        pixels->resize(static_cast<std::size_t>(view.height) * view.stride_bytes);
+        pixels->resize(static_cast<std::size_t>(view.height) * view.strideBytes);
         std::memcpy(pixels->data(), view.bgra, pixels->size());
     });
     if (width == 0 || height == 0) {
-        g_face_check_running.store(false);
+        g_faceCheckRunning.store(false);
         return;
     }
-    float pixels_per_point = 1.0f;
-    if (const auto geometry = GeometryOfDisplay(capture_display))
-        pixels_per_point = static_cast<float>(width / geometry->width_points);
-    std::thread([pixels, width, height, pixels_per_point] {
+    float pixelsPerPoint = 1.0f;
+    if (const auto geometry = geometryOfDisplay(captureDisplay)) {
+        pixelsPerPoint = static_cast<float>(width / geometry->widthPoints);
+    }
+    std::thread([pixels, width, height, pixelsPerPoint] {
         const FrameView view{pixels->data(), width * 4, width, height, ColorSpaceHint::Srgb, 0};
-        g_faces_on_screen.store(static_cast<int>(DetectFaces(view, pixels_per_point).size()));
-        g_face_check_running.store(false);
+        g_facesOnScreen.store(static_cast<int>(detectFaces(view, pixelsPerPoint).size()));
+        g_faceCheckRunning.store(false);
     }).detach();
 }
 
 // The secure-CRT deprecations make std::getenv and std::fopen hard errors
 // under MSVC's warnings-as-errors, so the debug-dump plumbing goes through
 // the annexes Microsoft accepts.
-bool DebugSuggestionsRequested() {
+bool debugSuggestionsRequested()
+{
 #ifdef _MSC_VER
     char* value = nullptr;
     std::size_t size = 0;
-    if (_dupenv_s(&value, &size, "SIDESCOPES_DEBUG_SUGGESTIONS") != 0 || value == nullptr)
+    if (_dupenv_s(&value, &size, "SIDESCOPES_DEBUG_SUGGESTIONS") != 0 || value == nullptr) {
         return false;
+    }
     std::free(value);
     return true;
 #else
@@ -453,7 +487,8 @@ bool DebugSuggestionsRequested() {
 #endif
 }
 
-std::FILE* OpenDebugFile(const char* path, const char* mode) {
+std::FILE* openDebugFile(const char* path, const char* mode)
+{
 #ifdef _MSC_VER
     std::FILE* file = nullptr;
     return fopen_s(&file, path, mode) == 0 ? file : nullptr;
@@ -462,7 +497,8 @@ std::FILE* OpenDebugFile(const char* path, const char* mode) {
 #endif
 }
 
-void ApplyTheme() {
+void applyTheme()
+{
     ImGuiStyle& style = ImGui::GetStyle();
     style.WindowRounding = 8.0f;
     style.FrameRounding = 4.0f;
@@ -498,24 +534,27 @@ void ApplyTheme() {
 // The fixed-width companion for values whose glyphs must align - hex
 // codes most of all; null when no system monospace font was found, and
 // the interface font stands in.
-ImFont* g_monospace_font = nullptr;
+ImFont* g_monospaceFont = nullptr;
 
-void LoadInterfaceFont(GLFWwindow* window) {
-    float scale_x = 2.0f;
-    float scale_y = 2.0f;
-    glfwGetWindowContentScale(window, &scale_x, &scale_y);
+void loadInterfaceFont(GLFWwindow* window)
+{
+    float scaleX = 2.0f;
+    float scaleY = 2.0f;
+    glfwGetWindowContentScale(window, &scaleX, &scaleY);
     ImFontConfig config;
-    config.RasterizerDensity = scale_x;
+    config.RasterizerDensity = scaleX;
     ImGuiIO& io = ImGui::GetIO();
     bool loaded = false;
-    for (const std::string& path : InterfaceFontFiles()) {
+    for (const std::string& path : interfaceFontFiles()) {
         if (io.Fonts->AddFontFromFileTTF(path.c_str(), 13.0f, &config)) {
             loaded = true;
             break;
         }
     }
-    for (const std::string& path : MonospaceFontFiles()) {
-        if ((g_monospace_font = io.Fonts->AddFontFromFileTTF(path.c_str(), 13.0f, &config))) break;
+    for (const std::string& path : monospaceFontFiles()) {
+        if ((g_monospaceFont = io.Fonts->AddFontFromFileTTF(path.c_str(), 13.0f, &config))) {
+            break;
+        }
     }
     (void)loaded;
 }
@@ -525,19 +564,19 @@ void LoadInterfaceFont(GLFWwindow* window) {
 // Retina factor - so this is 1.0; on Windows the window is sized in
 // physical pixels and the monitor's content scale (1.25, 1.5, ...) says
 // how many of them the interface should treat as one.
-float UiScale(GLFWwindow* window) {
-    float scale_x = 1.0f;
-    float scale_y = 1.0f;
-    glfwGetWindowContentScale(window, &scale_x, &scale_y);
-    int window_width = 0;
-    int window_height = 0;
-    int framebuffer_width = 0;
-    int framebuffer_height = 0;
-    glfwGetWindowSize(window, &window_width, &window_height);
-    glfwGetFramebufferSize(window, &framebuffer_width, &framebuffer_height);
-    const float density =
-        window_width > 0 ? framebuffer_width / static_cast<float>(window_width) : 1.0f;
-    return density > 0 ? scale_x / density : scale_x;
+float computeUiScale(GLFWwindow* window)
+{
+    float scaleX = 1.0f;
+    float scaleY = 1.0f;
+    glfwGetWindowContentScale(window, &scaleX, &scaleY);
+    int windowWidth = 0;
+    int windowHeight = 0;
+    int framebufferWidth = 0;
+    int framebufferHeight = 0;
+    glfwGetWindowSize(window, &windowWidth, &windowHeight);
+    glfwGetFramebufferSize(window, &framebufferWidth, &framebufferHeight);
+    const float density = windowWidth > 0 ? framebufferWidth / static_cast<float>(windowWidth) : 1.0f;
+    return density > 0 ? scaleX / density : scaleX;
 }
 
 // Applies the saved window placement and keeps the window on screen.
@@ -555,15 +594,18 @@ float UiScale(GLFWwindow* window) {
 // mostly lies on. A window that starts beyond the desktop edge shows
 // its never-composited strip as white while a drag holds the frame
 // loop; a window that never starts off screen has no such strip.
-void RestoreWindowPlacement(GLFWwindow* window, const Preferences& startup) {
-    if (startup.window_x >= 0) {
-        glfwSetWindowPos(window, startup.window_x, startup.window_y);
-        glfwSetWindowSize(window, startup.window_width, startup.window_height);
+void restoreWindowPlacement(GLFWwindow* window, const Preferences& startup)
+{
+    if (startup.windowX >= 0) {
+        glfwSetWindowPos(window, startup.windowX, startup.windowY);
+        glfwSetWindowSize(window, startup.windowWidth, startup.windowHeight);
     }
 
-    int monitor_count = 0;
-    GLFWmonitor** monitors = glfwGetMonitors(&monitor_count);
-    if (!monitors || monitor_count == 0) return;
+    int monitorCount = 0;
+    GLFWmonitor** monitors = glfwGetMonitors(&monitorCount);
+    if (!monitors || monitorCount == 0) {
+        return;
+    }
 
     int x = 0;
     int y = 0;
@@ -571,65 +613,68 @@ void RestoreWindowPlacement(GLFWwindow* window, const Preferences& startup) {
     int height = 0;
     glfwGetWindowPos(window, &x, &y);
     glfwGetWindowSize(window, &width, &height);
-    int frame_left = 0;
-    int frame_top = 0;
-    int frame_right = 0;
-    int frame_bottom = 0;
-    glfwGetWindowFrameSize(window, &frame_left, &frame_top, &frame_right, &frame_bottom);
+    int frameLeft = 0;
+    int frameTop = 0;
+    int frameRight = 0;
+    int frameBottom = 0;
+    glfwGetWindowFrameSize(window, &frameLeft, &frameTop, &frameRight, &frameBottom);
 
     // The monitor carrying most of the window; the primary when none is.
-    int work_x = 0;
-    int work_y = 0;
-    int work_width = 0;
-    int work_height = 0;
-    glfwGetMonitorWorkarea(monitors[0], &work_x, &work_y, &work_width, &work_height);
-    long long best_overlap = 0;
-    for (int index = 0; index < monitor_count; ++index) {
-        int monitor_x = 0;
-        int monitor_y = 0;
-        int monitor_width = 0;
-        int monitor_height = 0;
-        glfwGetMonitorWorkarea(monitors[index], &monitor_x, &monitor_y, &monitor_width,
-                               &monitor_height);
-        const long long overlap_width =
-            std::min<long long>(x + width, monitor_x + monitor_width) - std::max(x, monitor_x);
-        const long long overlap_height =
-            std::min<long long>(y + height, monitor_y + monitor_height) - std::max(y, monitor_y);
-        const long long overlap =
-            std::max<long long>(overlap_width, 0) * std::max<long long>(overlap_height, 0);
-        if (overlap > best_overlap) {
-            best_overlap = overlap;
-            work_x = monitor_x;
-            work_y = monitor_y;
-            work_width = monitor_width;
-            work_height = monitor_height;
+    int workX = 0;
+    int workY = 0;
+    int workWidth = 0;
+    int workHeight = 0;
+    glfwGetMonitorWorkarea(monitors[0], &workX, &workY, &workWidth, &workHeight);
+    long long bestOverlap = 0;
+    for (int index = 0; index < monitorCount; ++index) {
+        int monitorX = 0;
+        int monitorY = 0;
+        int monitorWidth = 0;
+        int monitorHeight = 0;
+        glfwGetMonitorWorkarea(monitors[index], &monitorX, &monitorY, &monitorWidth, &monitorHeight);
+        const long long overlapWidth = std::min<long long>(x + width, monitorX + monitorWidth) - std::max(x, monitorX);
+        const long long overlapHeight =
+            std::min<long long>(y + height, monitorY + monitorHeight) - std::max(y, monitorY);
+        const long long overlap = std::max<long long>(overlapWidth, 0) * std::max<long long>(overlapHeight, 0);
+        if (overlap > bestOverlap) {
+            bestOverlap = overlap;
+            workX = monitorX;
+            workY = monitorY;
+            workWidth = monitorWidth;
+            workHeight = monitorHeight;
         }
     }
 
-    const int available_width = std::max(1, work_width - frame_left - frame_right);
-    const int available_height = std::max(1, work_height - frame_top - frame_bottom);
-    const int clamped_width = std::min(width, available_width);
-    const int clamped_height = std::min(height, available_height);
-    const int min_x = work_x + frame_left;
-    const int max_x = work_x + work_width - frame_right - clamped_width;
-    const int min_y = work_y + frame_top;
-    const int max_y = work_y + work_height - frame_bottom - clamped_height;
-    const int clamped_x = std::max(min_x, std::min(x, max_x));
-    const int clamped_y = std::max(min_y, std::min(y, max_y));
-    if (clamped_width != width || clamped_height != height)
-        glfwSetWindowSize(window, clamped_width, clamped_height);
-    if (clamped_x != x || clamped_y != y) glfwSetWindowPos(window, clamped_x, clamped_y);
+    const int availableWidth = std::max(1, workWidth - frameLeft - frameRight);
+    const int availableHeight = std::max(1, workHeight - frameTop - frameBottom);
+    const int clampedWidth = std::min(width, availableWidth);
+    const int clampedHeight = std::min(height, availableHeight);
+    const int minX = workX + frameLeft;
+    const int maxX = workX + workWidth - frameRight - clampedWidth;
+    const int minY = workY + frameTop;
+    const int maxY = workY + workHeight - frameBottom - clampedHeight;
+    const int clampedX = std::max(minX, std::min(x, maxX));
+    const int clampedY = std::max(minY, std::min(y, maxY));
+    if (clampedWidth != width || clampedHeight != height) {
+        glfwSetWindowSize(window, clampedWidth, clampedHeight);
+    }
+    if (clampedX != x || clampedY != y) {
+        glfwSetWindowPos(window, clampedX, clampedY);
+    }
 }
 
 }  // namespace
 
-int main() {
-    if (!glfwInit()) return 1;
+int main()
+{
+    if (!glfwInit()) {
+        return 1;
+    }
 
-    const Preferences startup = LoadPreferences(PreferencesFilePath());
+    const Preferences startup = loadPreferences(preferencesFilePath());
 
-    std::unique_ptr<GraphicsBackend> graphics = CreateGraphicsBackend();
-    graphics->SetWindowHints();
+    std::unique_ptr<GraphicsBackend> graphics = createGraphicsBackend();
+    graphics->setWindowHints();
     glfwWindowHint(GLFW_FLOATING, GLFW_TRUE);
     // On Windows the window follows its monitor's scale, so it keeps its
     // physical size when dragged between differently scaled monitors;
@@ -638,20 +683,21 @@ int main() {
     // Hidden until the saved placement is applied: geometry settles
     // before the first paint, and no intermediate rectangle flashes.
     glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
-    GLFWwindow* window = glfwCreateWindow(startup.window_width, startup.window_height, "SideScopes",
-                                          nullptr, nullptr);
+    GLFWwindow* window = glfwCreateWindow(startup.windowWidth, startup.windowHeight, "SideScopes", nullptr, nullptr);
     if (!window) {
         glfwTerminate();
         return 1;
     }
-    RestoreWindowPlacement(window, startup);
+    restoreWindowPlacement(window, startup);
     glfwShowWindow(window);
     // Installed before the ImGui backend so it chains this callback
     // instead of being replaced by it.
     glfwSetWindowFocusCallback(window, [](GLFWwindow*, int focused) {
-        if (focused) g_face_check_requested.store(true);
+        if (focused) {
+            g_faceCheckRequested.store(true);
+        }
     });
-    glfwSetWindowIconifyCallback(window, [](GLFWwindow*, int) { g_iconify_changed.store(true); });
+    glfwSetWindowIconifyCallback(window, [](GLFWwindow*, int) { g_iconifyChanged.store(true); });
     // The close button and Cmd+Q quit; intercepting the close to hide
     // instead swallowed BOTH, because the quit request reaches the
     // application as a window close. Dismissal belongs to Cmd+W and
@@ -662,19 +708,21 @@ int main() {
     ImGuiIO& io = ImGui::GetIO();
     io.IniFilename = nullptr;  // window layout is ours to persist
     ImGui::StyleColorsDark();
-    ApplyTheme();
-    LoadInterfaceFont(window);
-    float ui_scale = UiScale(window);
-    const auto apply_ui_scale = [&ui_scale](float scale) {
-        ui_scale = scale;
+    applyTheme();
+    loadInterfaceFont(window);
+    float uiScale = computeUiScale(window);
+    const auto applyUiScale = [&uiScale](float scale) {
+        uiScale = scale;
         // Scaling an already scaled style would compound, so rebuild from
         // the base theme each time.
-        ApplyTheme();
+        applyTheme();
         ImGui::GetStyle().ScaleAllSizes(scale);
         ImGui::GetStyle().FontScaleMain = scale;
     };
-    if (ui_scale != 1.0f) apply_ui_scale(ui_scale);
-    if (!graphics->Init(window)) {
+    if (uiScale != 1.0f) {
+        applyUiScale(uiScale);
+    }
+    if (!graphics->init(window)) {
         ImGui::DestroyContext();
         glfwDestroyWindow(window);
         glfwTerminate();
@@ -684,428 +732,456 @@ int main() {
     // --- capture and analysis ---
     FrameMailbox mailbox;
     AnalysisWorker worker(mailbox);
-    auto capture = CreateScreenCaptureSource();
+    auto capture = createScreenCaptureSource();
 
-    std::mutex status_mutex;
-    std::string capture_status = "starting";
-    std::atomic<bool> capture_dead{false};
-    capture->SetStatusCallback([&](const std::string& message) {
+    std::mutex statusMutex;
+    std::string captureStatus = "starting";
+    std::atomic<bool> captureDead{false};
+    capture->setStatusCallback([&](const std::string& message) {
         {
-            std::lock_guard lock(status_mutex);
-            capture_status = message;
+            std::lock_guard lock(statusMutex);
+            captureStatus = message;
         }
-        capture_dead.store(true);
+        captureDead.store(true);
     });
 
-    uint32_t capture_display = 0;
+    uint32_t captureDisplay = 0;
     // The display the user chose to scope, held across stream restarts.
     // Zero means "whichever the backend lists first" - the main display.
-    uint32_t desired_display = 0;
-    const bool permission_granted = capture->RequestPermission() == CapturePermission::Granted;
-    const auto start_capture = [&]() -> bool {
-        const auto targets = capture->ListTargets();
-        if (targets.empty()) return false;
+    uint32_t desiredDisplay = 0;
+    const bool permissionGranted = capture->requestPermission() == CapturePermission::Granted;
+    const auto startCapture = [&]() -> bool {
+        const auto targets = capture->listTargets();
+        if (targets.empty()) {
+            return false;
+        }
         const CaptureTarget* target = &targets.front();
-        if (desired_display != 0) {
-            const auto wanted =
-                std::find_if(targets.begin(), targets.end(), [&](const CaptureTarget& candidate) {
-                    return candidate.display_id == desired_display;
-                });
+        if (desiredDisplay != 0) {
+            const auto wanted = std::find_if(targets.begin(), targets.end(), [&](const CaptureTarget& candidate) {
+                return candidate.displayId == desiredDisplay;
+            });
             if (wanted == targets.end()) {
                 // The chosen display is disconnected. The scopes pause on
                 // the banner rather than silently jumping to another
                 // screen; the retry loop resumes the same region the
                 // moment the display returns.
-                std::lock_guard lock(status_mutex);
-                capture_status = "display disconnected - scopes resume when it returns";
+                std::lock_guard lock(statusMutex);
+                captureStatus = "display disconnected - scopes resume when it returns";
                 return false;
             }
             target = &*wanted;
         }
-        if (!capture->Start(*target, 30, mailbox)) return false;
-        capture_display = target->display_id;
-        desired_display = target->display_id;
-        {
-            std::lock_guard lock(status_mutex);
-            capture_status = "capturing " + target->description;
+        if (!capture->start(*target, 30, mailbox)) {
+            return false;
         }
-        capture_dead.store(false);
+        captureDisplay = target->displayId;
+        desiredDisplay = target->displayId;
+        {
+            std::lock_guard lock(statusMutex);
+            captureStatus = "capturing " + target->description;
+        }
+        captureDead.store(false);
         return true;
     };
     // The display under this window's center: full-screen capture is a
     // promise about the screen the user can see the scopes on.
-    const auto display_of_window = [&]() -> std::optional<uint32_t> {
-        int window_x = 0;
-        int window_y = 0;
-        int window_width = 0;
-        int window_height = 0;
-        glfwGetWindowPos(window, &window_x, &window_y);
-        glfwGetWindowSize(window, &window_width, &window_height);
-        return DisplayAtPoint(
-            DesktopPoint{window_x + window_width / 2.0, window_y + window_height / 2.0});
+    const auto displayOfWindow = [&]() -> std::optional<uint32_t> {
+        int windowX = 0;
+        int windowY = 0;
+        int windowWidth = 0;
+        int windowHeight = 0;
+        glfwGetWindowPos(window, &windowX, &windowY);
+        glfwGetWindowSize(window, &windowWidth, &windowHeight);
+        return displayAtPoint(DesktopPoint{windowX + windowWidth / 2.0, windowY + windowHeight / 2.0});
     };
-    if (permission_granted) {
-        desired_display = display_of_window().value_or(0);
-        start_capture();
+    if (permissionGranted) {
+        desiredDisplay = displayOfWindow().value_or(0);
+        startCapture();
     } else {
-        std::lock_guard lock(status_mutex);
-        capture_status =
+        std::lock_guard lock(statusMutex);
+        captureStatus =
             "screen recording permission missing - grant it in System Settings and "
             "relaunch";
     }
 
     // --- state, seeded from preferences ---
     AnalysisSettings analysis;
-    analysis.vectorscope.gain = startup.vectorscope_gain;
-    analysis.vectorscope.sampling_stride = startup.vectorscope_stride;
+    analysis.vectorscope.gain = startup.vectorscopeGain;
+    analysis.vectorscope.samplingStride = startup.vectorscopeStride;
     analysis.vectorscope.matrix = startup.matrix;
-    analysis.vectorscope.response = startup.trace_response;
-    analysis.waveform.gain = startup.waveform_gain;
-    analysis.waveform.sampling_stride = startup.waveform_stride;
-    analysis.histogram.sampling_stride = startup.histogram_stride;
-    analysis.waveform.mode = startup.waveform_mode;
-    analysis.histogram.style =
-        startup.histogram_per_channel ? HistogramStyle::PerChannel : HistogramStyle::Combined;
-    bool analysis_dirty = true;
+    analysis.vectorscope.response = startup.traceResponse;
+    analysis.waveform.gain = startup.waveformGain;
+    analysis.waveform.samplingStride = startup.waveformStride;
+    analysis.histogram.samplingStride = startup.histogramStride;
+    analysis.waveform.mode = startup.waveformMode;
+    analysis.histogram.style = startup.histogramPerChannel ? HistogramStyle::PerChannel : HistogramStyle::Combined;
+    bool analysisDirty = true;
 
-    float vectorscope_intensity =
-        IntensityFromTraceGain(analysis.vectorscope.gain, kVectorscopeIntensityShift);
-    float waveform_intensity = IntensityFromTraceGain(analysis.waveform.gain);
-    float vectorscope_smoothing_ms = startup.vectorscope_smoothing_ms;
-    float waveform_smoothing_ms = startup.waveform_smoothing_ms;
+    float vectorscopeIntensity = intensityFromTraceGain(analysis.vectorscope.gain, VectorscopeIntensityShift);
+    float waveformIntensity = intensityFromTraceGain(analysis.waveform.gain);
+    float vectorscopeSmoothingMs = startup.vectorscopeSmoothingMs;
+    float waveformSmoothingMs = startup.waveformSmoothingMs;
     // The scopes on screen, in activation order: the pane you turned on
     // last stacks after the ones already up.
-    std::vector<ScopeGlyph> scope_stack;
-    for (const char letter : startup.scope_stack) {
-        for (const ScopeGlyph kind : kAllScopes) {
-            if (ScopeLetter(kind) == letter) scope_stack.push_back(kind);
+    std::vector<ScopeGlyph> scopeStack;
+    for (const char letter : startup.scopeStack) {
+        for (const ScopeGlyph kind : AllScopes) {
+            if (scopeLetter(kind) == letter) {
+                scopeStack.push_back(kind);
+            }
         }
     }
-    if (scope_stack.empty()) scope_stack.push_back(ScopeGlyph::Vectorscope);
-    const auto scope_shown = [&](ScopeGlyph kind) {
-        return std::find(scope_stack.begin(), scope_stack.end(), kind) != scope_stack.end();
+    if (scopeStack.empty()) {
+        scopeStack.push_back(ScopeGlyph::Vectorscope);
+    }
+    const auto scopeShown = [&](ScopeGlyph kind) {
+        return std::find(scopeStack.begin(), scopeStack.end(), kind) != scopeStack.end();
     };
-    const auto sync_enabled_scopes = [&] {
-        analysis.enabled_scopes = 0;
-        for (const ScopeGlyph kind : scope_stack) analysis.enabled_scopes |= ScopeEnableBit(kind);
+    const auto syncEnabledScopes = [&] {
+        analysis.enabledScopes = 0;
+        for (const ScopeGlyph kind : scopeStack) {
+            analysis.enabledScopes |= scopeEnableBit(kind);
+        }
     };
-    sync_enabled_scopes();
-    bool show_graticule = startup.show_graticule;
-    bool values_as_percent = startup.values_as_percent;
-    int vectorscope_zoom = startup.vectorscope_zoom;
+    syncEnabledScopes();
+    bool showGraticule = startup.showGraticule;
+    bool valuesAsPercent = startup.valuesAsPercent;
+    int vectorscopeZoom = startup.vectorscopeZoom;
     // Shortcuts come from the preferences file: the key handler acts on
     // them and the context menu displays them, resolved once here.
     const ShortcutBindings shortcuts = startup.shortcuts;
-    const auto key_for = [](const std::string& name) -> ImGuiKey {
-        if (name == "Escape") return ImGuiKey_Escape;
-        if (name.size() == 1 && name[0] >= 'A' && name[0] <= 'Z')
+    const auto keyFor = [](const std::string& name) -> ImGuiKey {
+        if (name == "Escape") {
+            return ImGuiKey_Escape;
+        }
+        if (name.size() == 1 && name[0] >= 'A' && name[0] <= 'Z') {
             return static_cast<ImGuiKey>(ImGuiKey_A + (name[0] - 'A'));
+        }
         return ImGuiKey_None;
     };
-    const auto shortcut_label = [](const std::string& name) -> std::string {
-        return name == "Escape" ? "Esc" : name;
-    };
-    bool show_settings = false;
+    const auto shortcutLabel = [](const std::string& name) -> std::string { return name == "Escape" ? "Esc" : name; };
+    bool showSettings = false;
     // Reference colors pinned on the vectorscope (session-scoped): pin a
     // corrected skin tone, then match the next photo against it.
-    std::vector<FloatColor> pinned_colors;
+    std::vector<FloatColor> pinnedColors;
     // Which pin the picker's comparator holds beside the live color;
     // -1 shows the live color alone. Session-scoped, like the pins.
-    int comparator_pin = -1;
-    int pinned_menu_index = -1;  // swatch under the management popup
-    constexpr std::size_t kMaximumPinnedColors = 8;
+    int comparatorPin = -1;
+    int pinnedMenuIndex = -1;  // swatch under the management popup
+    constexpr std::size_t MaximumPinnedColors = 8;
     // References come from two places: what the cursor reads (P), and
     // the region's average (Shift+P) - select a face, pin its skin.
-    const auto pin_reference_color = [&](const std::optional<FloatColor>& color) {
-        if (!color) return;
-        if (pinned_colors.size() >= kMaximumPinnedColors)
-            pinned_colors.erase(pinned_colors.begin());
-        pinned_colors.push_back(*color);
+    const auto pinReferenceColor = [&](const std::optional<FloatColor>& color) {
+        if (!color) {
+            return;
+        }
+        if (pinnedColors.size() >= MaximumPinnedColors) {
+            pinnedColors.erase(pinnedColors.begin());
+        }
+        pinnedColors.push_back(*color);
         // A fresh pin is the reference the user wants to compare against.
-        comparator_pin = static_cast<int>(pinned_colors.size()) - 1;
+        comparatorPin = static_cast<int>(pinnedColors.size()) - 1;
     };
 
     // Live region picking: while the overlay is up, the frame loop polls it
     // and previews the indicated region on the scopes; cancelling resets
     // to the full screen.
-    bool region_picking = false;
+    bool regionPicking = false;
     // Whether the active pick is the pin tool - the two families never
     // morph into each other - and whether its cancellation was ordered by
     // a tool switch, which must not reset the region the way a user's Esc
     // on a region pick deliberately does.
-    bool region_pick_is_pin = false;
-    bool region_pick_swallow_cancel = false;
+    bool regionPickIsPin = false;
+    bool regionPickSwallowCancel = false;
 
     // Projection-only engine instances kept in sync with the analysis
     // settings; they never accumulate, they only place overlays and markers.
-    Vectorscope projection_vectorscope;
-    Waveform projection_waveform;
+    Vectorscope projectionVectorscope;
+    Waveform projectionWaveform;
 
-    MarkerSmoother vectorscope_marker;
-    MarkerSmoother waveform_marker;
+    MarkerSmoother vectorscopeMarker;
+    MarkerSmoother waveformMarker;
 
     // Scope textures are drawn the same frame their scope becomes
     // visible, possibly before anything was ever uploaded - and a fresh
     // GPU texture holds whatever memory the driver recycled into it, so
     // every texture starts blanked to the scopes' black.
-    const auto create_blank_texture = [&](int width, int height) {
-        auto texture = graphics->CreateScopeTexture(width, height);
+    const auto createBlankTexture = [&](int width, int height) {
+        auto texture = graphics->createScopeTexture(width, height);
         ScopeImage blank;
         blank.width = width;
         blank.height = height;
         blank.rgba.assign(static_cast<std::size_t>(width) * height * 4, 0);
-        for (std::size_t i = 3; i < blank.rgba.size(); i += 4) blank.rgba[i] = 255;
-        texture->Upload(blank);
+        for (std::size_t i = 3; i < blank.rgba.size(); i += 4) {
+            blank.rgba[i] = 255;
+        }
+        texture->upload(blank);
         return texture;
     };
-    std::unique_ptr<ScopeTexture> vectorscope_texture =
-        create_blank_texture(Vectorscope::kSize, Vectorscope::kSize);
-    std::unique_ptr<ScopeTexture> waveform_texture =
-        create_blank_texture(Waveform::kColumns, Waveform::kLevels);
-    std::unique_ptr<ScopeTexture> waveform_parade_texture =
-        create_blank_texture(Waveform::kColumns, Waveform::kLevels);
-    std::unique_ptr<ScopeTexture> histogram_texture =
-        create_blank_texture(Histogram::kImageWidth, Histogram::kHeight);
+    std::unique_ptr<ScopeTexture> vectorscopeTexture = createBlankTexture(Vectorscope::Size, Vectorscope::Size);
+    std::unique_ptr<ScopeTexture> waveformTexture = createBlankTexture(Waveform::Columns, Waveform::Levels);
+    std::unique_ptr<ScopeTexture> waveformParadeTexture = createBlankTexture(Waveform::Columns, Waveform::Levels);
+    std::unique_ptr<ScopeTexture> histogramTexture = createBlankTexture(Histogram::ImageWidth, Histogram::Height);
     // Adaptive scope detail: panes are measured at draw time (stacking
     // splits the window, so the pane is what matters, not the window),
     // and desired resolutions are debounced so a live resize does not
     // thrash engine reallocation. The upload path recreates a texture
     // whenever its image changes dimensions.
-    ImVec2 pane_points[5] = {};
-    int pending_columns = 0;
-    int pending_image_height = 0;
-    int pending_vectorscope = 0;
-    int pending_hist_width = 0;
-    int pending_hist_height = 0;
-    double detail_pending_since = 0.0;
-    const auto upload_scope = [&](std::unique_ptr<ScopeTexture>& texture, const ScopeImage& image) {
-        if (image.width <= 0 || image.height <= 0) return;
-        if (image.rgba.size() <
-            static_cast<std::size_t>(image.width) * static_cast<std::size_t>(image.height) * 4)
+    ImVec2 panePoints[5] = {};
+    int pendingColumns = 0;
+    int pendingImageHeight = 0;
+    int pendingVectorscope = 0;
+    int pendingHistWidth = 0;
+    int pendingHistHeight = 0;
+    double detailPendingSince = 0.0;
+    const auto uploadScope = [&](std::unique_ptr<ScopeTexture>& texture, const ScopeImage& image) {
+        if (image.width <= 0 || image.height <= 0) {
             return;
-        if (texture->Width() != image.width || texture->Height() != image.height)
-            texture = graphics->CreateScopeTexture(image.width, image.height);
-        texture->Upload(image);
+        }
+        if (image.rgba.size() < static_cast<std::size_t>(image.width) * static_cast<std::size_t>(image.height) * 4) {
+            return;
+        }
+        if (texture->width() != image.width || texture->height() != image.height) {
+            texture = graphics->createScopeTexture(image.width, image.height);
+        }
+        texture->upload(image);
     };
 
-    worker.Start();
-    WarmFaceDetection();
+    worker.start();
+    warmFaceDetection();
 
-    uint64_t output_version = 0;
+    uint64_t outputVersion = 0;
     AnalysisWorker::Output output;
-    double last_activity = glfwGetTime();
-    double next_capture_retry = 0.0;
+    double lastActivity = glfwGetTime();
+    double nextCaptureRetry = 0.0;
 
     // Waking the display or unlocking the session can leave the stream a
     // zombie: it either stops delivering without an error, or a retry that
     // ran while the screen was locked started a stream bound to the wrong
     // session. Both look alive, so the wake signal forces a restart -
     // cheap on a screen that was just black.
-    std::atomic<bool> capture_stale{false};
-    ObserveSystemWake([&capture_stale] { capture_stale.store(true); });
-    double intensity_flash_until = 0.0;
-    double next_preferences_save = -1.0;
-    DesktopPoint last_cursor{-1.0, -1.0};
+    std::atomic<bool> captureStale{false};
+    observeSystemWake([&captureStale] { captureStale.store(true); });
+    double intensityFlashUntil = 0.0;
+    double nextPreferencesSave = -1.0;
+    DesktopPoint lastCursor{-1.0, -1.0};
+
     // The freshest cross-display sample: the async sampler's callback may
     // land on any thread, and may still be in flight at shutdown, so the
     // state it writes is shared ownership.
-    struct ScreenSample {
+    struct ScreenSample
+    {
         std::mutex mutex;
         std::optional<FloatColor> color;
     };
-    auto screen_sample = std::make_shared<ScreenSample>();
-    double next_screen_sample = 0.0;
 
-    const auto is_full_region = [&] {
-        return analysis.region.left_percent <= 0.0 && analysis.region.top_percent <= 0.0 &&
-               analysis.region.right_percent >= 100.0 && analysis.region.bottom_percent >= 100.0;
+    auto screenSample = std::make_shared<ScreenSample>();
+    double nextScreenSample = 0.0;
+
+    const auto isFullRegion = [&] {
+        return analysis.region.leftPercent <= 0.0 && analysis.region.topPercent <= 0.0 &&
+               analysis.region.rightPercent >= 100.0 && analysis.region.bottomPercent >= 100.0;
     };
-    const auto sync_region_border = [&] {
-        if (capture_display == 0) return;
-        if (is_full_region() || glfwGetWindowAttrib(window, GLFW_ICONIFIED))
-            HideRegionBorder();
-        else
-            ShowRegionBorder(capture_display, analysis.region);
+    const auto syncRegionBorder = [&] {
+        if (captureDisplay == 0) {
+            return;
+        }
+        if (isFullRegion() || glfwGetWindowAttrib(window, GLFW_ICONIFIED)) {
+            hideRegionBorder();
+        } else {
+            showRegionBorder(captureDisplay, analysis.region);
+        }
     };
     // The patch a pin-mode click samples, in interface points; the pin
     // picker uses the same span, so the chip previews what a click pins.
-    constexpr double kPinSamplePoints = 14.0;
+    constexpr double PinSamplePoints = 14.0;
     // Averages a display-percent area of the latest frame: the pin
     // modes' sample. Photographs are textured, so pins come from areas,
     // never single pixels.
-    const auto average_frame_area = [&](const RegionOfInterest& area) -> std::optional<FloatColor> {
+    const auto averageFrameArea = [&](const RegionOfInterest& area) -> std::optional<FloatColor> {
         std::optional<FloatColor> color;
-        worker.WithLatestFrame([&](const FrameView& view) {
-            const int left =
-                std::clamp(static_cast<int>(area.left_percent / 100.0 * view.width), 0, view.width);
-            const int right = std::clamp(static_cast<int>(area.right_percent / 100.0 * view.width),
-                                         0, view.width);
-            const int top = std::clamp(static_cast<int>(area.top_percent / 100.0 * view.height), 0,
-                                       view.height);
-            const int bottom = std::clamp(
-                static_cast<int>(area.bottom_percent / 100.0 * view.height), 0, view.height);
-            if (right <= left || bottom <= top) return;
+        worker.withLatestFrame([&](const FrameView& view) {
+            const int left = std::clamp(static_cast<int>(area.leftPercent / 100.0 * view.width), 0, view.width);
+            const int right = std::clamp(static_cast<int>(area.rightPercent / 100.0 * view.width), 0, view.width);
+            const int top = std::clamp(static_cast<int>(area.topPercent / 100.0 * view.height), 0, view.height);
+            const int bottom = std::clamp(static_cast<int>(area.bottomPercent / 100.0 * view.height), 0, view.height);
+            if (right <= left || bottom <= top) {
+                return;
+            }
             // A stride caps the work on huge drags; the average barely
             // moves past a hundred thousand samples.
             const long long pixels = static_cast<long long>(right - left) * (bottom - top);
-            const int stride =
-                std::max(1, static_cast<int>(std::sqrt(static_cast<double>(pixels) / 100000.0)));
-            double sum_r = 0;
-            double sum_g = 0;
-            double sum_b = 0;
+            const int stride = std::max(1, static_cast<int>(std::sqrt(static_cast<double>(pixels) / 100000.0)));
+            double sumR = 0;
+            double sumG = 0;
+            double sumB = 0;
             long long count = 0;
             for (int y = top; y < bottom; y += stride) {
                 for (int x = left; x < right; x += stride) {
-                    const uint8_t* pixel = view.PixelAt(x, y);
-                    sum_b += pixel[0];
-                    sum_g += pixel[1];
-                    sum_r += pixel[2];
+                    const uint8_t* pixel = view.pixelAt(x, y);
+                    sumB += pixel[0];
+                    sumG += pixel[1];
+                    sumR += pixel[2];
                     ++count;
                 }
             }
-            if (count == 0) return;
-            color = FloatColor{static_cast<float>(sum_r / count), static_cast<float>(sum_g / count),
-                               static_cast<float>(sum_b / count)};
+            if (count == 0) {
+                return;
+            }
+            color = FloatColor{static_cast<float>(sumR / count), static_cast<float>(sumG / count),
+                               static_cast<float>(sumB / count)};
         });
         return color;
     };
     // Resets all selection: a pending pick and the drawn region alike.
     // The border sync rides the analysis-dirty path.
-    const auto reset_region_to_full = [&] {
-        CancelRegionPick();
+    const auto resetRegionToFull = [&] {
+        cancelRegionPick();
         analysis.region = RegionOfInterest{};
-        analysis_dirty = true;
+        analysisDirty = true;
     };
     // Escape pressed while this application is active but focusless (a
     // border grab activates without focusing); consumed by the frame
     // loop like any other cross-thread signal.
-    std::atomic<bool> orphan_escape{false};
-    ObserveEscapeWithoutKeyWindow([&orphan_escape] { orphan_escape.store(true); });
-    const auto save_preferences = [&] {
+    std::atomic<bool> orphanEscape{false};
+    observeEscapeWithoutKeyWindow([&orphanEscape] { orphanEscape.store(true); });
+    const auto persistPreferences = [&] {
         Preferences preferences;
-        preferences.vectorscope_gain = analysis.vectorscope.gain;
-        preferences.waveform_gain = analysis.waveform.gain;
-        preferences.vectorscope_stride = analysis.vectorscope.sampling_stride;
-        preferences.waveform_stride = analysis.waveform.sampling_stride;
-        preferences.vectorscope_smoothing_ms = vectorscope_smoothing_ms;
-        preferences.waveform_smoothing_ms = waveform_smoothing_ms;
+        preferences.vectorscopeGain = analysis.vectorscope.gain;
+        preferences.waveformGain = analysis.waveform.gain;
+        preferences.vectorscopeStride = analysis.vectorscope.samplingStride;
+        preferences.waveformStride = analysis.waveform.samplingStride;
+        preferences.vectorscopeSmoothingMs = vectorscopeSmoothingMs;
+        preferences.waveformSmoothingMs = waveformSmoothingMs;
         preferences.matrix = analysis.vectorscope.matrix;
-        preferences.trace_response = analysis.vectorscope.response;
-        preferences.histogram_stride = analysis.histogram.sampling_stride;
-        preferences.waveform_mode = analysis.waveform.mode;
-        preferences.histogram_per_channel = analysis.histogram.style == HistogramStyle::PerChannel;
-        preferences.scope_stack.clear();
-        for (const ScopeGlyph kind : scope_stack) preferences.scope_stack += ScopeLetter(kind);
-        preferences.show_graticule = show_graticule;
-        preferences.vectorscope_zoom = vectorscope_zoom;
-        preferences.values_as_percent = values_as_percent;
+        preferences.traceResponse = analysis.vectorscope.response;
+        preferences.histogramStride = analysis.histogram.samplingStride;
+        preferences.waveformMode = analysis.waveform.mode;
+        preferences.histogramPerChannel = analysis.histogram.style == HistogramStyle::PerChannel;
+        preferences.scopeStack.clear();
+        for (const ScopeGlyph kind : scopeStack) {
+            preferences.scopeStack += scopeLetter(kind);
+        }
+        preferences.showGraticule = showGraticule;
+        preferences.vectorscopeZoom = vectorscopeZoom;
+        preferences.valuesAsPercent = valuesAsPercent;
         preferences.shortcuts = shortcuts;
-        glfwGetWindowPos(window, &preferences.window_x, &preferences.window_y);
-        glfwGetWindowSize(window, &preferences.window_width, &preferences.window_height);
-        SavePreferences(preferences, PreferencesFilePath());
+        glfwGetWindowPos(window, &preferences.windowX, &preferences.windowY);
+        glfwGetWindowSize(window, &preferences.windowWidth, &preferences.windowHeight);
+        savePreferences(preferences, preferencesFilePath());
     };
-    sync_region_border();
+    syncRegionBorder();
 
     while (!glfwWindowShouldClose(window)) {
         // Idle: with no new output, no cursor motion, and no interaction,
         // wait for events at a slow tick instead of spinning at refresh.
-        if (glfwGetTime() - last_activity > 0.5)
+        if (glfwGetTime() - lastActivity > 0.5) {
             glfwWaitEventsTimeout(0.1);
-        else
+        } else {
             glfwPollEvents();
+        }
 
         // Capture is a service that dies (lock screen, display sleep);
         // restarting it is our job.
-        if (g_face_check_requested.exchange(false)) RefreshFacePresence(worker, capture_display);
-        if (g_iconify_changed.exchange(false)) {
-            sync_region_border();
-            last_activity = glfwGetTime();
+        if (g_faceCheckRequested.exchange(false)) {
+            refreshFacePresence(worker, captureDisplay);
         }
-        if (orphan_escape.exchange(false)) {
-            reset_region_to_full();
-            last_activity = glfwGetTime();
+        if (g_iconifyChanged.exchange(false)) {
+            syncRegionBorder();
+            lastActivity = glfwGetTime();
+        }
+        if (orphanEscape.exchange(false)) {
+            resetRegionToFull();
+            lastActivity = glfwGetTime();
         }
 
-        if (capture_stale.exchange(false)) {
+        if (captureStale.exchange(false)) {
             std::fprintf(stderr, "sidescopes: restarting capture after wake or unlock\n");
-            capture_dead.store(true);
+            captureDead.store(true);
             // Give the session a moment to finish coming back.
-            next_capture_retry = glfwGetTime() + 1.0;
+            nextCaptureRetry = glfwGetTime() + 1.0;
         }
-        if (permission_granted && capture_dead.load() && glfwGetTime() > next_capture_retry) {
-            capture->Stop();
-            if (start_capture())
-                last_activity = glfwGetTime();
-            else
-                next_capture_retry = glfwGetTime() + 2.0;
+        if (permissionGranted && captureDead.load() && glfwGetTime() > nextCaptureRetry) {
+            capture->stop();
+            if (startCapture()) {
+                lastActivity = glfwGetTime();
+            } else {
+                nextCaptureRetry = glfwGetTime() + 2.0;
+            }
         }
 
         // With no region drawn, capture follows the display this window
         // sits on: the fallback stays predictable - you always scope the
         // screen you can see the scopes on. A drawn region pins capture
         // to its own display regardless of where the window goes.
-        if (permission_granted && !capture_dead.load() && !region_picking && is_full_region()) {
-            const auto home_display = display_of_window();
-            if (home_display && *home_display != capture_display) {
-                desired_display = *home_display;
-                capture->Stop();
-                if (start_capture()) {
-                    last_activity = glfwGetTime();
+        if (permissionGranted && !captureDead.load() && !regionPicking && isFullRegion()) {
+            const auto homeDisplay = displayOfWindow();
+            if (homeDisplay && *homeDisplay != captureDisplay) {
+                desiredDisplay = *homeDisplay;
+                capture->stop();
+                if (startCapture()) {
+                    lastActivity = glfwGetTime();
                 } else {
-                    capture_dead.store(true);
-                    next_capture_retry = glfwGetTime() + 2.0;
+                    captureDead.store(true);
+                    nextCaptureRetry = glfwGetTime() + 2.0;
                 }
             }
         }
 
         // The window may have moved to a monitor with a different scale.
-        const float current_scale = UiScale(window);
-        if (current_scale != ui_scale) {
-            apply_ui_scale(current_scale);
-            last_activity = glfwGetTime();
+        const float currentScale = computeUiScale(window);
+        if (currentScale != uiScale) {
+            applyUiScale(currentScale);
+            lastActivity = glfwGetTime();
         }
 
-        int framebuffer_width = 0;
-        int framebuffer_height = 0;
-        glfwGetFramebufferSize(window, &framebuffer_width, &framebuffer_height);
-        if (framebuffer_width == 0 || framebuffer_height == 0) continue;
-        if (!graphics->BeginFrame(framebuffer_width, framebuffer_height)) continue;
+        int framebufferWidth = 0;
+        int framebufferHeight = 0;
+        glfwGetFramebufferSize(window, &framebufferWidth, &framebufferHeight);
+        if (framebufferWidth == 0 || framebufferHeight == 0) {
+            continue;
+        }
+        if (!graphics->beginFrame(framebufferWidth, framebufferHeight)) {
+            continue;
+        }
 
-        if (worker.FetchOutput(output_version, output)) {
-            if (scope_shown(ScopeGlyph::Vectorscope))
-                upload_scope(vectorscope_texture, output.vectorscope_image);
-            if (scope_shown(ScopeGlyph::Waveform))
-                upload_scope(waveform_texture, output.waveform_image);
-            if (scope_shown(ScopeGlyph::WaveformParade))
-                upload_scope(waveform_parade_texture, output.waveform_parade_image);
-            if (scope_shown(ScopeGlyph::Histogram))
-                upload_scope(histogram_texture, output.histogram_image);
-            last_activity = glfwGetTime();
+        if (worker.fetchOutput(outputVersion, output)) {
+            if (scopeShown(ScopeGlyph::Vectorscope)) {
+                uploadScope(vectorscopeTexture, output.vectorscopeImage);
+            }
+            if (scopeShown(ScopeGlyph::Waveform)) {
+                uploadScope(waveformTexture, output.waveformImage);
+            }
+            if (scopeShown(ScopeGlyph::WaveformParade)) {
+                uploadScope(waveformParadeTexture, output.waveformParadeImage);
+            }
+            if (scopeShown(ScopeGlyph::Histogram)) {
+                uploadScope(histogramTexture, output.histogramImage);
+            }
+            lastActivity = glfwGetTime();
         }
 
         // Publish our own window rectangle (frame pixels, generous chrome
         // margins) so analysis masks it out of change detection.
-        const auto frame_size = worker.LatestFrameSize();
-        if (frame_size && capture_display != 0) {
-            if (const auto geometry = GeometryOfDisplay(capture_display)) {
-                int window_x = 0, window_y = 0, window_w = 0, window_h = 0;
-                glfwGetWindowPos(window, &window_x, &window_y);
-                glfwGetWindowSize(window, &window_w, &window_h);
-                const double scale_x = frame_size->width / geometry->width_points;
-                const double scale_y = frame_size->height / geometry->height_points;
+        const auto frameSize = worker.latestFrameSize();
+        if (frameSize && captureDisplay != 0) {
+            if (const auto geometry = geometryOfDisplay(captureDisplay)) {
+                int windowX = 0, windowY = 0, windowW = 0, windowH = 0;
+                glfwGetWindowPos(window, &windowX, &windowY);
+                glfwGetWindowSize(window, &windowW, &windowH);
+                const double scaleX = frameSize->width / geometry->widthPoints;
+                const double scaleY = frameSize->height / geometry->heightPoints;
                 // The chrome margins are 100%-scale units like the rest of
                 // the interface, so they grow with the monitor's scale.
-                const IntRect self_window{
-                    static_cast<int>((window_x - geometry->origin_x - 8 * ui_scale) * scale_x),
-                    static_cast<int>((window_y - geometry->origin_y - 42 * ui_scale) * scale_y),
-                    static_cast<int>((window_w + 16 * ui_scale) * scale_x),
-                    static_cast<int>((window_h + 58 * ui_scale) * scale_y)};
-                if (self_window.x != analysis.masked_window.x ||
-                    self_window.y != analysis.masked_window.y ||
-                    self_window.width != analysis.masked_window.width ||
-                    self_window.height != analysis.masked_window.height) {
-                    analysis.masked_window = self_window;
-                    analysis_dirty = true;
+                const IntRect selfWindow{static_cast<int>((windowX - geometry->originX - 8 * uiScale) * scaleX),
+                                         static_cast<int>((windowY - geometry->originY - 42 * uiScale) * scaleY),
+                                         static_cast<int>((windowW + 16 * uiScale) * scaleX),
+                                         static_cast<int>((windowH + 58 * uiScale) * scaleY)};
+                if (selfWindow.x != analysis.maskedWindow.x || selfWindow.y != analysis.maskedWindow.y ||
+                    selfWindow.width != analysis.maskedWindow.width ||
+                    selfWindow.height != analysis.maskedWindow.height) {
+                    analysis.maskedWindow = selfWindow;
+                    analysisDirty = true;
                 }
             }
         }
@@ -1115,46 +1191,43 @@ int main() {
         // other display a throttled one-shot sample keeps the readout,
         // the markers, and the picker pane alive - even while capture
         // itself is paused.
-        std::optional<FloatColor> vectorscope_color;
-        std::optional<FloatColor> waveform_color;
-        if (capture_display != 0) {
-            if (const auto cursor = GlobalCursorPosition()) {
-                if (std::abs(cursor->x - last_cursor.x) + std::abs(cursor->y - last_cursor.y) >
-                    0.5) {
-                    last_cursor = *cursor;
-                    last_activity = glfwGetTime();
+        std::optional<FloatColor> vectorscopeColor;
+        std::optional<FloatColor> waveformColor;
+        if (captureDisplay != 0) {
+            if (const auto cursor = globalCursorPosition()) {
+                if (std::abs(cursor->x - lastCursor.x) + std::abs(cursor->y - lastCursor.y) > 0.5) {
+                    lastCursor = *cursor;
+                    lastActivity = glfwGetTime();
                 }
                 std::optional<FloatColor> sampled;
-                const bool on_tracked_display =
-                    DisplayAtPoint(*cursor).value_or(0) == capture_display;
-                if (on_tracked_display && !capture_dead.load() && frame_size) {
-                    if (const auto geometry = GeometryOfDisplay(capture_display)) {
-                        const int pixel_x =
-                            static_cast<int>((cursor->x - geometry->origin_x) * frame_size->width /
-                                             geometry->width_points);
-                        const int pixel_y =
-                            static_cast<int>((cursor->y - geometry->origin_y) * frame_size->height /
-                                             geometry->height_points);
-                        sampled = worker.SampleFrameColor(pixel_x, pixel_y);
+                const bool onTrackedDisplay = displayAtPoint(*cursor).value_or(0) == captureDisplay;
+                if (onTrackedDisplay && !captureDead.load() && frameSize) {
+                    if (const auto geometry = geometryOfDisplay(captureDisplay)) {
+                        const int pixelX = static_cast<int>((cursor->x - geometry->originX) * frameSize->width /
+                                                            geometry->widthPoints);
+                        const int pixelY = static_cast<int>((cursor->y - geometry->originY) * frameSize->height /
+                                                            geometry->heightPoints);
+                        sampled = worker.sampleFrameColor(pixelX, pixelY);
                     }
                 } else {
-                    if (glfwGetTime() > next_screen_sample) {
-                        next_screen_sample = glfwGetTime() + 0.05;
-                        SampleScreenColorAsync(*cursor,
-                                               [screen_sample](std::optional<FloatColor> color) {
-                                                   if (!color) return;
-                                                   std::lock_guard lock(screen_sample->mutex);
-                                                   screen_sample->color = color;
-                                               });
+                    if (glfwGetTime() > nextScreenSample) {
+                        nextScreenSample = glfwGetTime() + 0.05;
+                        sampleScreenColorAsync(*cursor, [screenSample](std::optional<FloatColor> color) {
+                            if (!color) {
+                                return;
+                            }
+                            std::lock_guard lock(screenSample->mutex);
+                            screenSample->color = color;
+                        });
                     }
-                    std::lock_guard lock(screen_sample->mutex);
-                    sampled = screen_sample->color;
+                    std::lock_guard lock(screenSample->mutex);
+                    sampled = screenSample->color;
                 }
                 if (sampled) {
-                    vectorscope_marker.SetTimeConstant(vectorscope_smoothing_ms);
-                    waveform_marker.SetTimeConstant(waveform_smoothing_ms);
-                    vectorscope_color = vectorscope_marker.Update(*sampled, io.DeltaTime);
-                    waveform_color = waveform_marker.Update(*sampled, io.DeltaTime);
+                    vectorscopeMarker.setTimeConstant(vectorscopeSmoothingMs);
+                    waveformMarker.setTimeConstant(waveformSmoothingMs);
+                    vectorscopeColor = vectorscopeMarker.update(*sampled, io.DeltaTime);
+                    waveformColor = waveformMarker.update(*sampled, io.DeltaTime);
                 }
             }
         }
@@ -1165,81 +1238,72 @@ int main() {
         // region has pixels only spreads samples thin, and a finer
         // chroma grid than the sample count can fill reads as noise.
         {
-            int window_w = 0;
-            int window_h = 0;
-            glfwGetWindowSize(window, &window_w, &window_h);
-            const float density =
-                window_w > 0 ? static_cast<float>(framebuffer_width) / window_w : 1.0f;
+            int windowW = 0;
+            int windowH = 0;
+            glfwGetWindowSize(window, &windowW, &windowH);
+            const float density = windowW > 0 ? static_cast<float>(framebufferWidth) / windowW : 1.0f;
             const auto pane = [&](ScopeGlyph kind) {
-                const ImVec2& points = pane_points[static_cast<int>(kind)];
+                const ImVec2& points = panePoints[static_cast<int>(kind)];
                 return ImVec2(points.x * density, points.y * density);
             };
-            int region_width = 0;
-            if (frame_size) {
-                const IntRect region_pixels =
-                    analysis.region.ToPixels(frame_size->width, frame_size->height);
-                region_width = region_pixels.width;
+            int regionWidth = 0;
+            if (frameSize) {
+                const IntRect regionPixels = analysis.region.toPixels(frameSize->width, frameSize->height);
+                regionWidth = regionPixels.width;
             }
 
-            int want_columns = analysis.waveform.columns;
-            int want_height = analysis.waveform.image_height;
-            if (scope_shown(ScopeGlyph::Waveform) || scope_shown(ScopeGlyph::WaveformParade)) {
-                const float wf_width =
-                    std::max(pane(ScopeGlyph::Waveform).x, pane(ScopeGlyph::WaveformParade).x);
-                const float wf_height =
-                    std::max(pane(ScopeGlyph::Waveform).y, pane(ScopeGlyph::WaveformParade).y);
-                want_columns = wf_width >= 1400.0f ? 2048 : wf_width >= 500.0f ? 1024 : 512;
-                if (region_width > 0)
-                    want_columns = std::min(want_columns, region_width >= 2048   ? 2048
-                                                          : region_width >= 1024 ? 1024
-                                                                                 : 512);
-                want_height = wf_height >= 560.0f ? 512 : kWaveformLevels;
+            int wantColumns = analysis.waveform.columns;
+            int wantHeight = analysis.waveform.imageHeight;
+            if (scopeShown(ScopeGlyph::Waveform) || scopeShown(ScopeGlyph::WaveformParade)) {
+                const float wfWidth = std::max(pane(ScopeGlyph::Waveform).x, pane(ScopeGlyph::WaveformParade).x);
+                const float wfHeight = std::max(pane(ScopeGlyph::Waveform).y, pane(ScopeGlyph::WaveformParade).y);
+                wantColumns = wfWidth >= 1400.0f ? 2048 : wfWidth >= 500.0f ? 1024 : 512;
+                if (regionWidth > 0) {
+                    wantColumns = std::min(wantColumns, regionWidth >= 2048 ? 2048 : regionWidth >= 1024 ? 1024 : 512);
+                }
+                wantHeight = wfHeight >= 560.0f ? 512 : WaveformLevels;
             }
-            int want_hist_width = analysis.histogram.image_width;
-            int want_hist_height = analysis.histogram.image_height;
-            if (scope_shown(ScopeGlyph::Histogram)) {
+            int wantHistWidth = analysis.histogram.imageWidth;
+            int wantHistHeight = analysis.histogram.imageHeight;
+            if (scopeShown(ScopeGlyph::Histogram)) {
                 // Near one texture pixel per screen pixel keeps the
                 // outline's width even on flats and steep slopes alike.
-                const ImVec2 scope_pane = pane(ScopeGlyph::Histogram);
-                want_hist_width = scope_pane.x >= 1400.0f  ? 2048
-                                  : scope_pane.x >= 500.0f ? 1024
-                                                           : 512;
-                want_hist_height = scope_pane.y >= 560.0f ? 768 : 384;
+                const ImVec2 scopePane = pane(ScopeGlyph::Histogram);
+                wantHistWidth = scopePane.x >= 1400.0f ? 2048 : scopePane.x >= 500.0f ? 1024 : 512;
+                wantHistHeight = scopePane.y >= 560.0f ? 768 : 384;
             }
-            int want_vectorscope = analysis.vectorscope.size;
-            if (scope_shown(ScopeGlyph::Vectorscope)) {
+            int wantVectorscope = analysis.vectorscope.size;
+            if (scopeShown(ScopeGlyph::Vectorscope)) {
                 // Purely a display resolution: accumulation stays on the
                 // 256-code grid and a finer image is interpolated from
                 // it, so a sparse region costs nothing extra.
-                const ImVec2 scope_pane = pane(ScopeGlyph::Vectorscope);
-                const float extent = std::min(scope_pane.x, scope_pane.y);
-                want_vectorscope = extent >= 480.0f ? 512 : 256;
+                const ImVec2 scopePane = pane(ScopeGlyph::Vectorscope);
+                const float extent = std::min(scopePane.x, scopePane.y);
+                wantVectorscope = extent >= 480.0f ? 512 : 256;
             }
 
-            const bool differs = want_columns != analysis.waveform.columns ||
-                                 want_height != analysis.waveform.image_height ||
-                                 want_vectorscope != analysis.vectorscope.size ||
-                                 want_hist_width != analysis.histogram.image_width ||
-                                 want_hist_height != analysis.histogram.image_height;
+            const bool differs =
+                wantColumns != analysis.waveform.columns || wantHeight != analysis.waveform.imageHeight ||
+                wantVectorscope != analysis.vectorscope.size || wantHistWidth != analysis.histogram.imageWidth ||
+                wantHistHeight != analysis.histogram.imageHeight;
             if (!differs) {
-                pending_columns = 0;
-            } else if (pending_columns != want_columns || pending_image_height != want_height ||
-                       pending_vectorscope != want_vectorscope ||
-                       pending_hist_width != want_hist_width ||
-                       pending_hist_height != want_hist_height) {
-                pending_columns = want_columns;
-                pending_image_height = want_height;
-                pending_vectorscope = want_vectorscope;
-                pending_hist_width = want_hist_width;
-                pending_hist_height = want_hist_height;
-                detail_pending_since = glfwGetTime();
-            } else if (glfwGetTime() - detail_pending_since > 0.4) {
-                analysis.waveform.columns = want_columns;
-                analysis.waveform.image_height = want_height;
-                analysis.vectorscope.size = want_vectorscope;
-                analysis.histogram.image_width = want_hist_width;
-                analysis.histogram.image_height = want_hist_height;
-                analysis_dirty = true;
+                pendingColumns = 0;
+            } else if (pendingColumns != wantColumns || pendingImageHeight != wantHeight ||
+                       pendingVectorscope != wantVectorscope || pendingHistWidth != wantHistWidth ||
+                       pendingHistHeight != wantHistHeight) {
+                pendingColumns = wantColumns;
+                pendingImageHeight = wantHeight;
+                pendingVectorscope = wantVectorscope;
+                pendingHistWidth = wantHistWidth;
+                pendingHistHeight = wantHistHeight;
+                detailPendingSince = glfwGetTime();
+            } else if (glfwGetTime() - detailPendingSince > 0.4) {
+                analysis.waveform.columns = wantColumns;
+                analysis.waveform.imageHeight = wantHeight;
+                analysis.vectorscope.size = wantVectorscope;
+                analysis.histogram.imageWidth = wantHistWidth;
+                analysis.histogram.imageHeight = wantHistHeight;
+                analysisDirty = true;
             }
         }
 
@@ -1251,8 +1315,8 @@ int main() {
         ImGui::SetNextWindowSize(viewport->WorkSize);
         ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(6, 6));
         ImGui::Begin("##host", nullptr,
-                     ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |
-                         ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoSavedSettings);
+                     ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoBringToFrontOnFocus |
+                         ImGuiWindowFlags_NoSavedSettings);
 
         // Toolbar: scope toggles, region tools, cursor readout. Switching
         // is the common case, so a plain click or key shows one scope
@@ -1266,64 +1330,74 @@ int main() {
         // briefly for the recompute, so the scope's first drawn frame is
         // already current. The wait is bounded; on timeout the stale
         // image stands in until the recompute lands a frame later.
-        const auto image_for = [&](ScopeGlyph kind) -> const ScopeImage& {
+        const auto imageFor = [&](ScopeGlyph kind) -> const ScopeImage& {
             switch (kind) {
-                case ScopeGlyph::Vectorscope:
-                    return output.vectorscope_image;
-                case ScopeGlyph::Waveform:
-                    return output.waveform_image;
-                case ScopeGlyph::WaveformParade:
-                    return output.waveform_parade_image;
-                default:
-                    return output.histogram_image;
+            case ScopeGlyph::Vectorscope:
+                return output.vectorscopeImage;
+            case ScopeGlyph::Waveform:
+                return output.waveformImage;
+            case ScopeGlyph::WaveformParade:
+                return output.waveformParadeImage;
+            default:
+                return output.histogramImage;
             }
         };
-        const auto upload_visible_scopes = [&] {
-            if (scope_shown(ScopeGlyph::Vectorscope))
-                upload_scope(vectorscope_texture, output.vectorscope_image);
-            if (scope_shown(ScopeGlyph::Waveform))
-                upload_scope(waveform_texture, output.waveform_image);
-            if (scope_shown(ScopeGlyph::WaveformParade))
-                upload_scope(waveform_parade_texture, output.waveform_parade_image);
-            if (scope_shown(ScopeGlyph::Histogram))
-                upload_scope(histogram_texture, output.histogram_image);
+        const auto uploadVisibleScopes = [&] {
+            if (scopeShown(ScopeGlyph::Vectorscope)) {
+                uploadScope(vectorscopeTexture, output.vectorscopeImage);
+            }
+            if (scopeShown(ScopeGlyph::Waveform)) {
+                uploadScope(waveformTexture, output.waveformImage);
+            }
+            if (scopeShown(ScopeGlyph::WaveformParade)) {
+                uploadScope(waveformParadeTexture, output.waveformParadeImage);
+            }
+            if (scopeShown(ScopeGlyph::Histogram)) {
+                uploadScope(histogramTexture, output.histogramImage);
+            }
         };
-        const auto refresh_activated_scope = [&](ScopeGlyph kind) {
-            if (kind == ScopeGlyph::ColorPicker) return;
-            const uint64_t stale_sequence = image_for(kind).sequence;
-            worker.UpdateSettings(analysis);
+        const auto refreshActivatedScope = [&](ScopeGlyph kind) {
+            if (kind == ScopeGlyph::ColorPicker) {
+                return;
+            }
+            const uint64_t staleSequence = imageFor(kind).sequence;
+            worker.updateSettings(analysis);
             const double deadline = glfwGetTime() + 0.08;
             while (glfwGetTime() < deadline) {
-                if (worker.FetchOutput(output_version, output) &&
-                    image_for(kind).sequence != stale_sequence && image_for(kind).width > 0) {
-                    upload_visible_scopes();
+                if (worker.fetchOutput(outputVersion, output) && imageFor(kind).sequence != staleSequence &&
+                    imageFor(kind).width > 0) {
+                    uploadVisibleScopes();
                     return;
                 }
                 std::this_thread::sleep_for(std::chrono::milliseconds(2));
             }
-            upload_visible_scopes();  // timeout: a stale image beats none
+            uploadVisibleScopes();  // timeout: a stale image beats none
         };
-        const auto toggle_scope = [&](ScopeGlyph kind) {
-            const auto at = std::find(scope_stack.begin(), scope_stack.end(), kind);
-            if (at != scope_stack.end()) {
-                if (scope_stack.size() > 1) scope_stack.erase(at);
-                sync_enabled_scopes();
+        const auto toggleScope = [&](ScopeGlyph kind) {
+            const auto at = std::find(scopeStack.begin(), scopeStack.end(), kind);
+            if (at != scopeStack.end()) {
+                if (scopeStack.size() > 1) {
+                    scopeStack.erase(at);
+                }
+                syncEnabledScopes();
             } else {
-                scope_stack.push_back(kind);
-                sync_enabled_scopes();
-                refresh_activated_scope(kind);
+                scopeStack.push_back(kind);
+                syncEnabledScopes();
+                refreshActivatedScope(kind);
             }
-            analysis_dirty = true;
+            analysisDirty = true;
         };
-        const auto choose_scope = [&](ScopeGlyph kind, bool stack) {
+        const auto chooseScope = [&](ScopeGlyph kind, bool stack) {
             if (stack) {
-                toggle_scope(kind);
+                toggleScope(kind);
             } else {
-                const bool was_shown = scope_shown(kind);
-                scope_stack.assign(1, kind);
-                sync_enabled_scopes();
-                if (!was_shown) refresh_activated_scope(kind);
-                analysis_dirty = true;
+                const bool wasShown = scopeShown(kind);
+                scopeStack.assign(1, kind);
+                syncEnabledScopes();
+                if (!wasShown) {
+                    refreshActivatedScope(kind);
+                }
+                analysisDirty = true;
             }
         };
         // The stacking modifier reads the OS's live key state, not the
@@ -1331,133 +1405,153 @@ int main() {
         // modifiers on every key press and click, so a Shift key-up
         // swallowed by a system overlay (the screenshot interface) leaves
         // the cache stuck exactly when the user next switches a scope.
-        const ModifierState modifiers = CurrentModifiers();
-        const bool stack_modifier = modifiers.shift;
+        const ModifierState modifiers = currentModifiers();
+        const bool stackModifier = modifiers.shift;
         // Command, Control, and Option chords belong to the system and
         // the window - Cmd+W closes a window on macOS, it must never
         // open the waveform - so any of them silences the plain-letter
         // shortcuts. Shift alone stays meaningful: it stacks.
-        const bool system_chord = modifiers.command || modifiers.control || modifiers.option;
-        const auto scope_toggle = [&](const char* id, ScopeGlyph kind, const char* tooltip) {
-            const char letter[2] = {ScopeLetter(kind), '\0'};
-            if (ScopeToggleButton(id, letter, scope_shown(kind), tooltip))
-                choose_scope(kind, stack_modifier);
+        const bool systemChord = modifiers.command || modifiers.control || modifiers.option;
+        const auto scopeToggle = [&](const char* id, ScopeGlyph kind, const char* tooltip) {
+            const char letter[2] = {scopeLetter(kind), '\0'};
+            if (scopeToggleButton(id, letter, scopeShown(kind), tooltip)) {
+                chooseScope(kind, stackModifier);
+            }
             ImGui::SameLine(0.0f, 2.0f);
         };
         // Tooltips name the configured shortcut, not an assumed one.
         char tooltip[96];
-        const auto scope_tooltip = [&](const char* name, const std::string& binding,
-                                       const char* extra) {
-            std::snprintf(tooltip, sizeof(tooltip), "%s - %s to switch, Shift+%s to stack%s", name,
-                          binding.c_str(), binding.c_str(), extra);
+        const auto scopeTooltip = [&](const char* name, const std::string& binding, const char* extra) {
+            std::snprintf(tooltip, sizeof(tooltip), "%s - %s to switch, Shift+%s to stack%s", name, binding.c_str(),
+                          binding.c_str(), extra);
             return tooltip;
         };
-        scope_toggle("##toggle-vectorscope", ScopeGlyph::Vectorscope,
-                     scope_tooltip("Vectorscope", shortcuts.vectorscope, ""));
-        scope_toggle(
-            "##toggle-waveform", ScopeGlyph::Waveform,
-            scope_tooltip("Waveform", shortcuts.waveform, "; styles in the right-click menu"));
-        scope_toggle("##toggle-waveform-parade", ScopeGlyph::WaveformParade,
-                     scope_tooltip("RGB parade", shortcuts.parade, ""));
-        scope_toggle("##toggle-histogram", ScopeGlyph::Histogram,
-                     scope_tooltip("Histogram", shortcuts.histogram, ""));
-        scope_toggle("##toggle-color-picker", ScopeGlyph::ColorPicker,
-                     scope_tooltip("Color picker", shortcuts.color_picker, ""));
+        scopeToggle("##toggle-vectorscope", ScopeGlyph::Vectorscope,
+                    scopeTooltip("Vectorscope", shortcuts.vectorscope, ""));
+        scopeToggle("##toggle-waveform", ScopeGlyph::Waveform,
+                    scopeTooltip("Waveform", shortcuts.waveform, "; styles in the right-click menu"));
+        scopeToggle("##toggle-waveform-parade", ScopeGlyph::WaveformParade,
+                    scopeTooltip("RGB parade", shortcuts.parade, ""));
+        scopeToggle("##toggle-histogram", ScopeGlyph::Histogram, scopeTooltip("Histogram", shortcuts.histogram, ""));
+        scopeToggle("##toggle-color-picker", ScopeGlyph::ColorPicker,
+                    scopeTooltip("Color picker", shortcuts.colorPicker, ""));
         ImGui::SameLine(0.0f, 8.0f);
 
         // Keyboard shortcuts mirror the toolbar and region tools.
-        std::optional<RegionPickerMode> want_region_pick;
+        std::optional<RegionPickerMode> wantRegionPick;
         // Pins mark the vectorscope and the color picker; without either
         // on screen, the tool's button, menu entries, and shortcuts all
         // stand down together.
-        const bool pins_available = std::find(scope_stack.begin(), scope_stack.end(),
-                                              ScopeGlyph::Vectorscope) != scope_stack.end() ||
-                                    std::find(scope_stack.begin(), scope_stack.end(),
-                                              ScopeGlyph::ColorPicker) != scope_stack.end();
+        const bool pinsAvailable =
+            std::find(scopeStack.begin(), scopeStack.end(), ScopeGlyph::Vectorscope) != scopeStack.end() ||
+            std::find(scopeStack.begin(), scopeStack.end(), ScopeGlyph::ColorPicker) != scopeStack.end();
         const auto pressed = [&](const std::string& binding) {
-            const ImGuiKey key = key_for(binding);
+            const ImGuiKey key = keyFor(binding);
             return key != ImGuiKey_None && ImGui::IsKeyPressed(key, false);
         };
-        if (PlatformHidesWindowOnCommandW() && modifiers.command && !modifiers.control &&
-            !modifiers.option && !io.WantTextInput) {
+        if (platformHidesWindowOnCommandW() && modifiers.command && !modifiers.control && !modifiers.option &&
+            !io.WantTextInput) {
             // Cmd+W dismisses through the system hide - the exact
             // machinery behind Cmd+H, so the Dock click or Cmd+Tab
             // restores every window natively, the border included.
             // Hiding only the GLFW window stranded the application with
             // no visible way back.
-            if (ImGui::IsKeyPressed(ImGuiKey_W, false)) HideApplication();
+            if (ImGui::IsKeyPressed(ImGuiKey_W, false)) {
+                hideApplication();
+            }
             // Cmd+comma opens settings everywhere on macOS.
-            if (ImGui::IsKeyPressed(ImGuiKey_Comma, false)) show_settings = true;
+            if (ImGui::IsKeyPressed(ImGuiKey_Comma, false)) {
+                showSettings = true;
+            }
         }
-        if (PlatformMinimizesWindowOnControlW() && modifiers.control && !modifiers.command &&
-            !modifiers.option && !io.WantTextInput && ImGui::IsKeyPressed(ImGuiKey_W, false))
+        if (platformMinimizesWindowOnControlW() && modifiers.control && !modifiers.command && !modifiers.option &&
+            !io.WantTextInput && ImGui::IsKeyPressed(ImGuiKey_W, false)) {
             glfwIconifyWindow(window);
-        if (PlatformQuitsOnControlQ() && modifiers.control && !modifiers.command &&
-            !modifiers.option && !io.WantTextInput && ImGui::IsKeyPressed(ImGuiKey_Q, false))
+        }
+        if (platformQuitsOnControlQ() && modifiers.control && !modifiers.command && !modifiers.option &&
+            !io.WantTextInput && ImGui::IsKeyPressed(ImGuiKey_Q, false)) {
             glfwSetWindowShouldClose(window, GLFW_TRUE);
-        if (!io.WantTextInput && !system_chord) {
-            if (pressed(shortcuts.vectorscope))
-                choose_scope(ScopeGlyph::Vectorscope, stack_modifier);
-            if (pressed(shortcuts.waveform)) choose_scope(ScopeGlyph::Waveform, stack_modifier);
-            if (pressed(shortcuts.parade)) choose_scope(ScopeGlyph::WaveformParade, stack_modifier);
-            if (pressed(shortcuts.histogram)) choose_scope(ScopeGlyph::Histogram, stack_modifier);
-            if (pressed(shortcuts.color_picker))
-                choose_scope(ScopeGlyph::ColorPicker, stack_modifier);
-            if (pressed(shortcuts.pick_window)) want_region_pick = RegionPickerMode::PickWindows;
-            if (pressed(shortcuts.draw_region)) want_region_pick = RegionPickerMode::Draw;
-            if (SupportsFaceDetection() && pressed(shortcuts.pick_faces))
-                want_region_pick = RegionPickerMode::PickFaces;
-            if (pins_available && pressed(shortcuts.pin_color)) {
+        }
+        if (!io.WantTextInput && !systemChord) {
+            if (pressed(shortcuts.vectorscope)) {
+                chooseScope(ScopeGlyph::Vectorscope, stackModifier);
+            }
+            if (pressed(shortcuts.waveform)) {
+                chooseScope(ScopeGlyph::Waveform, stackModifier);
+            }
+            if (pressed(shortcuts.parade)) {
+                chooseScope(ScopeGlyph::WaveformParade, stackModifier);
+            }
+            if (pressed(shortcuts.histogram)) {
+                chooseScope(ScopeGlyph::Histogram, stackModifier);
+            }
+            if (pressed(shortcuts.colorPicker)) {
+                chooseScope(ScopeGlyph::ColorPicker, stackModifier);
+            }
+            if (pressed(shortcuts.pickWindow)) {
+                wantRegionPick = RegionPickerMode::PickWindows;
+            }
+            if (pressed(shortcuts.drawRegion)) {
+                wantRegionPick = RegionPickerMode::Draw;
+            }
+            if (supportsFaceDetection() && pressed(shortcuts.pickFaces)) {
+                wantRegionPick = RegionPickerMode::PickFaces;
+            }
+            if (pinsAvailable && pressed(shortcuts.pinColor)) {
                 // One pin tool; each click inside decides between
                 // pin-and-close and Shift's pin-and-continue. A leftover
                 // Shift on the shortcut itself changes nothing.
-                want_region_pick = RegionPickerMode::PinColor;
+                wantRegionPick = RegionPickerMode::PinColor;
             }
-            if (pressed(shortcuts.vectorscope_zoom))
-                vectorscope_zoom = vectorscope_zoom >= 4 ? 1 : vectorscope_zoom * 2;
-            if (pressed(shortcuts.full_region)) {
+            if (pressed(shortcuts.vectorscopeZoom)) {
+                vectorscopeZoom = vectorscopeZoom >= 4 ? 1 : vectorscopeZoom * 2;
+            }
+            if (pressed(shortcuts.fullRegion)) {
                 // Escape peels back one layer at a time: the settings
                 // window first, the drawn region only when nothing is
                 // stacked above it.
-                if (show_settings)
-                    show_settings = false;
-                else
-                    reset_region_to_full();
+                if (showSettings) {
+                    showSettings = false;
+                } else {
+                    resetRegionToFull();
+                }
             }
         }
 
-        std::snprintf(tooltip, sizeof(tooltip), "Draw an area (%s)", shortcuts.draw_region.c_str());
-        if (IconButton("##draw-region", RegionIcon::Crosshair, tooltip))
-            want_region_pick = RegionPickerMode::Draw;
+        std::snprintf(tooltip, sizeof(tooltip), "Draw an area (%s)", shortcuts.drawRegion.c_str());
+        if (iconButton("##draw-region", RegionIcon::Crosshair, tooltip)) {
+            wantRegionPick = RegionPickerMode::Draw;
+        }
         ImGui::SameLine(0.0f, 2.0f);
-        std::snprintf(tooltip, sizeof(tooltip), "Pick a window (%s)",
-                      shortcuts.pick_window.c_str());
-        if (IconButton("##pick-region", RegionIcon::PickHand, tooltip))
-            want_region_pick = RegionPickerMode::PickWindows;
+        std::snprintf(tooltip, sizeof(tooltip), "Pick a window (%s)", shortcuts.pickWindow.c_str());
+        if (iconButton("##pick-region", RegionIcon::PickHand, tooltip)) {
+            wantRegionPick = RegionPickerMode::PickWindows;
+        }
         ImGui::SameLine(0.0f, 2.0f);
-        if (pins_available) {
-            std::snprintf(tooltip, sizeof(tooltip),
-                          "Pin a color (%s) - Shift+click a color to pin several",
-                          shortcuts.pin_color.c_str());
-            if (IconButton("##pin-color", RegionIcon::Dropper, tooltip))
-                want_region_pick = RegionPickerMode::PinColor;
+        if (pinsAvailable) {
+            std::snprintf(tooltip, sizeof(tooltip), "Pin a color (%s) - Shift+click a color to pin several",
+                          shortcuts.pinColor.c_str());
+            if (iconButton("##pin-color", RegionIcon::Dropper, tooltip)) {
+                wantRegionPick = RegionPickerMode::PinColor;
+            }
             ImGui::SameLine(0.0f, 2.0f);
         }
         // The face button sits last among the pickers: it is the one
         // most often dimmed, and a disabled button reads best at the
         // row's edge.
-        if (SupportsFaceDetection()) {
-            const bool none_found = g_faces_on_screen.load() == 0;
-            std::snprintf(tooltip, sizeof(tooltip), "Pick a face (%s)%s",
-                          shortcuts.pick_faces.c_str(),
-                          none_found ? " - none on screen right now" : "");
-            if (IconButton("##pick-face", RegionIcon::Face, tooltip, none_found))
-                want_region_pick = RegionPickerMode::PickFaces;
+        if (supportsFaceDetection()) {
+            const bool noneFound = g_facesOnScreen.load() == 0;
+            std::snprintf(tooltip, sizeof(tooltip), "Pick a face (%s)%s", shortcuts.pickFaces.c_str(),
+                          noneFound ? " - none on screen right now" : "");
+            if (iconButton("##pick-face", RegionIcon::Face, tooltip, noneFound)) {
+                wantRegionPick = RegionPickerMode::PickFaces;
+            }
             ImGui::SameLine(0.0f, 2.0f);
         }
-        if (!is_full_region()) {
-            if (IconButton("##full-region", RegionIcon::Expand, "Reset to full screen (Esc)"))
-                reset_region_to_full();
+        if (!isFullRegion()) {
+            if (iconButton("##full-region", RegionIcon::Expand, "Reset to full screen (Esc)")) {
+                resetRegionToFull();
+            }
             ImGui::SameLine(0.0f, 2.0f);
         }
 
@@ -1465,37 +1559,34 @@ int main() {
         // would right-align on top of the toolbar buttons, and whoever
         // wants the window that small still needs the buttons - the
         // cursor color has the vectorscope marker and the context menu.
-        const float toolbar_end = ImGui::GetCursorPosX();
-        if (vectorscope_color) {
-            const FloatColor& color = *vectorscope_color;
+        const float toolbarEnd = ImGui::GetCursorPosX();
+        if (vectorscopeColor) {
+            const FloatColor& color = *vectorscopeColor;
             // The readout's geometry never follows its digits: each value
             // gets a column sized for the widest it can be and is
             // right-aligned inside it, so neither the swatch nor the
             // numbers wander as the cursor moves across the screen.
-            const float column_width = ImGui::CalcTextSize(values_as_percent ? "100%" : "255").x;
-            const float column_gap = ImGui::CalcTextSize(" ").x;
+            const float columnWidth = ImGui::CalcTextSize(valuesAsPercent ? "100%" : "255").x;
+            const float columnGap = ImGui::CalcTextSize(" ").x;
             const float swatch = ImGui::GetTextLineHeight();
-            const float text_width = 3 * column_width + 2 * column_gap;
-            const float readout_start =
-                ImGui::GetWindowContentRegionMax().x - (text_width + swatch + 6);
-            if (readout_start >= toolbar_end + 8) {
-                ImGui::SameLine(readout_start);
-                ImGui::ColorButton(
-                    "##cursor-color",
-                    ImVec4(color.r / 255.0f, color.g / 255.0f, color.b / 255.0f, 1.0f),
-                    ImGuiColorEditFlags_NoTooltip | ImGuiColorEditFlags_NoDragDrop,
-                    ImVec2(swatch, swatch));
-                const float columns_start = readout_start + swatch + 6;
+            const float textWidth = 3 * columnWidth + 2 * columnGap;
+            const float readoutStart = ImGui::GetWindowContentRegionMax().x - (textWidth + swatch + 6);
+            if (readoutStart >= toolbarEnd + 8) {
+                ImGui::SameLine(readoutStart);
+                ImGui::ColorButton("##cursor-color", ImVec4(color.r / 255.0f, color.g / 255.0f, color.b / 255.0f, 1.0f),
+                                   ImGuiColorEditFlags_NoTooltip | ImGuiColorEditFlags_NoDragDrop,
+                                   ImVec2(swatch, swatch));
+                const float columnsStart = readoutStart + swatch + 6;
                 const float channels[3] = {color.r, color.g, color.b};
                 for (int channel = 0; channel < 3; ++channel) {
                     char value[8];
-                    if (values_as_percent)
+                    if (valuesAsPercent) {
                         std::snprintf(value, sizeof(value), "%.0f%%", channels[channel] / 2.55);
-                    else
+                    } else {
                         std::snprintf(value, sizeof(value), "%.0f", channels[channel]);
-                    const float column_start =
-                        columns_start + channel * (column_width + column_gap);
-                    ImGui::SameLine(column_start + column_width - ImGui::CalcTextSize(value).x);
+                    }
+                    const float columnStart = columnsStart + channel * (columnWidth + columnGap);
+                    ImGui::SameLine(columnStart + columnWidth - ImGui::CalcTextSize(value).x);
                     ImGui::TextUnformatted(value);
                 }
             } else {
@@ -1506,25 +1597,27 @@ int main() {
         }
 
         // Scroll over a scope adjusts its intensity; double-click resets.
-        static float* flash_intensity = nullptr;
-        const auto scope_gestures = [&](const DrawnScope& scope, float& intensity, float& gain,
-                                        float default_gain, float intensity_shift = 0.0f) {
-            if (!ImGui::IsItemHovered()) return;
+        static float* flashIntensity = nullptr;
+        const auto scopeGestures = [&](const DrawnScope& scope, float& intensity, float& gain, float defaultGain,
+                                       float intensityShift = 0.0f) {
+            if (!ImGui::IsItemHovered()) {
+                return;
+            }
             if (io.MouseWheel != 0.0f) {
                 intensity = std::clamp(intensity + 2.0f * io.MouseWheel, 0.0f, 100.0f);
-                gain = TraceGainFromIntensity(intensity, intensity_shift);
-                analysis_dirty = true;
-                intensity_flash_until = glfwGetTime() + 1.2;
-                flash_intensity = &intensity;
+                gain = traceGainFromIntensity(intensity, intensityShift);
+                analysisDirty = true;
+                intensityFlashUntil = glfwGetTime() + 1.2;
+                flashIntensity = &intensity;
             }
             if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
-                gain = default_gain;
-                intensity = IntensityFromTraceGain(gain, intensity_shift);
-                analysis_dirty = true;
-                intensity_flash_until = glfwGetTime() + 1.2;
-                flash_intensity = &intensity;
+                gain = defaultGain;
+                intensity = intensityFromTraceGain(gain, intensityShift);
+                analysisDirty = true;
+                intensityFlashUntil = glfwGetTime() + 1.2;
+                flashIntensity = &intensity;
             }
-            if (glfwGetTime() < intensity_flash_until && flash_intensity == &intensity) {
+            if (glfwGetTime() < intensityFlashUntil && flashIntensity == &intensity) {
                 char text[32];
                 std::snprintf(text, sizeof(text), "intensity %.0f%%", intensity);
                 ImGui::GetWindowDrawList()->AddText(ImVec2(scope.origin.x + 8, scope.origin.y + 6),
@@ -1532,157 +1625,155 @@ int main() {
             }
         };
 
-        const auto draw_vectorscope = [&] {
-            const DrawnScope scope =
-                DrawScopeImage(*vectorscope_texture, true, static_cast<float>(vectorscope_zoom));
-            scope_gestures(scope, vectorscope_intensity, analysis.vectorscope.gain, 3.0f,
-                           kVectorscopeIntensityShift);
+        const auto drawVectorscope = [&] {
+            const DrawnScope scope = drawScopeImage(*vectorscopeTexture, true, static_cast<float>(vectorscopeZoom));
+            scopeGestures(scope, vectorscopeIntensity, analysis.vectorscope.gain, 3.0f, VectorscopeIntensityShift);
             // Zoomed overlays run past the pane; clip them to it.
             ImDrawList* draw = ImGui::GetWindowDrawList();
-            draw->PushClipRect(scope.origin,
-                               ImVec2(scope.origin.x + scope.size.x, scope.origin.y + scope.size.y),
+            draw->PushClipRect(scope.origin, ImVec2(scope.origin.x + scope.size.x, scope.origin.y + scope.size.y),
                                true);
-            if (show_graticule)
-                DrawVectorscopeOverlay(scope, BuildVectorscopeGraticule(projection_vectorscope));
-            for (const FloatColor& pinned : pinned_colors) {
-                if (const auto point = projection_vectorscope.Project(pinned))
-                    DrawPointMarker(scope, *point, IM_COL32(230, 170, 90, 230));
+            if (showGraticule) {
+                drawVectorscopeOverlay(scope, buildVectorscopeGraticule(projectionVectorscope));
             }
-            if (vectorscope_color) {
-                if (const auto point = projection_vectorscope.Project(*vectorscope_color))
-                    DrawPointMarker(scope, *point, IM_COL32(255, 255, 255, 255));
+            for (const FloatColor& pinned : pinnedColors) {
+                if (const auto point = projectionVectorscope.project(pinned)) {
+                    drawPointMarker(scope, *point, IM_COL32(230, 170, 90, 230));
+                }
+            }
+            if (vectorscopeColor) {
+                if (const auto point = projectionVectorscope.project(*vectorscopeColor)) {
+                    drawPointMarker(scope, *point, IM_COL32(255, 255, 255, 255));
+                }
             }
             draw->PopClipRect();
-            if (vectorscope_zoom > 1) {
-                char badge[4] = {static_cast<char>('0' + vectorscope_zoom), 'x', '\0'};
-                draw->AddText(ImVec2(scope.origin.x + scope.size.x - 26, scope.origin.y + 6),
-                              kGraticuleLabel, badge);
+            if (vectorscopeZoom > 1) {
+                char badge[4] = {static_cast<char>('0' + vectorscopeZoom), 'x', '\0'};
+                draw->AddText(ImVec2(scope.origin.x + scope.size.x - 26, scope.origin.y + 6), GraticuleLabel, badge);
             }
         };
         // The waveform flavors share gain and graticule; the cursor
         // markers differ - channel levels on RGB and parade, one luma
         // level on luma.
-        const auto draw_channel_markers = [&](const DrawnScope& scope) {
-            if (!waveform_color) return;
+        const auto drawChannelMarkers = [&](const DrawnScope& scope) {
+            if (!waveformColor) {
+                return;
+            }
             ChannelMarker markers[3];
-            const int count = GroupChannelMarkers(*waveform_color, markers);
-            for (int i = 0; i < count; ++i)
-                DrawLevelMarker(scope, (255.0f - markers[i].value) / 255.0f, markers[i].color);
+            const int count = groupChannelMarkers(*waveformColor, markers);
+            for (int i = 0; i < count; ++i) {
+                drawLevelMarker(scope, (255.0f - markers[i].value) / 255.0f, markers[i].color);
+            }
         };
         // The parade separates the channels into thirds, so each marker
         // stays a single color inside its own channel's column.
-        const auto draw_parade_markers = [&](const DrawnScope& scope) {
-            if (!waveform_color) return;
-            const float channels[3] = {waveform_color->r, waveform_color->g, waveform_color->b};
-            for (int channel = 0; channel < 3; ++channel)
-                DrawLevelMarker(scope, (255.0f - channels[channel]) / 255.0f,
-                                ChannelMaskColor(1 << channel), channel / 3.0f,
-                                (channel + 1) / 3.0f);
+        const auto drawParadeMarkers = [&](const DrawnScope& scope) {
+            if (!waveformColor) {
+                return;
+            }
+            const float channels[3] = {waveformColor->r, waveformColor->g, waveformColor->b};
+            for (int channel = 0; channel < 3; ++channel) {
+                drawLevelMarker(scope, (255.0f - channels[channel]) / 255.0f, channelMaskColor(1 << channel),
+                                channel / 3.0f, (channel + 1) / 3.0f);
+            }
         };
-        const auto draw_waveform = [&](ScopeGlyph kind) {
-            const ScopeTexture& texture =
-                kind == ScopeGlyph::Waveform ? *waveform_texture : *waveform_parade_texture;
-            const DrawnScope scope = DrawScopeImage(texture, false);
-            scope_gestures(scope, waveform_intensity, analysis.waveform.gain, 0.05f);
-            if (show_graticule) DrawWaveformOverlay(scope);
+        const auto drawWaveform = [&](ScopeGlyph kind) {
+            const ScopeTexture& texture = kind == ScopeGlyph::Waveform ? *waveformTexture : *waveformParadeTexture;
+            const DrawnScope scope = drawScopeImage(texture, false);
+            scopeGestures(scope, waveformIntensity, analysis.waveform.gain, 0.05f);
+            if (showGraticule) {
+                drawWaveformOverlay(scope);
+            }
             if (kind == ScopeGlyph::Waveform &&
-                (analysis.waveform.mode == WaveformMode::Luma ||
-                 analysis.waveform.mode == WaveformMode::ColoredLuma)) {
-                if (waveform_color) {
-                    if (const auto point = projection_waveform.Project(*waveform_color))
-                        DrawLevelMarker(scope, point->y, IM_COL32(255, 220, 80, 220));
+                (analysis.waveform.mode == WaveformMode::Luma || analysis.waveform.mode == WaveformMode::ColoredLuma)) {
+                if (waveformColor) {
+                    if (const auto point = projectionWaveform.project(*waveformColor)) {
+                        drawLevelMarker(scope, point->y, IM_COL32(255, 220, 80, 220));
+                    }
                 }
             } else if (kind == ScopeGlyph::Waveform) {
-                draw_channel_markers(scope);
+                drawChannelMarkers(scope);
             } else {
-                draw_parade_markers(scope);
+                drawParadeMarkers(scope);
             }
         };
 
-        const auto draw_histogram = [&] {
+        const auto drawHistogram = [&] {
             // No intensity gesture here: the histogram's scale adjusts
             // itself, the way every editor draws it.
-            const DrawnScope scope = DrawScopeImage(*histogram_texture, false);
+            const DrawnScope scope = drawScopeImage(*histogramTexture, false);
             // The curve outline strokes at display resolution over the
             // filled texture: baked into the texture it would stretch
             // anisotropically with the pane - thick on flats, thin on
             // slopes. Sampled through the same spline the fill uses, so
             // line and fill edge agree.
-            if (output.histogram_outline.size() == static_cast<std::size_t>(3) * Histogram::kBins) {
+            if (output.histogramOutline.size() == static_cast<std::size_t>(3) * Histogram::Bins) {
                 ImDrawList* draw = ImGui::GetWindowDrawList();
-                draw->PushClipRect(
-                    scope.origin,
-                    ImVec2(scope.origin.x + scope.size.x, scope.origin.y + scope.size.y), true);
+                draw->PushClipRect(scope.origin, ImVec2(scope.origin.x + scope.size.x, scope.origin.y + scope.size.y),
+                                   true);
                 const bool bands = analysis.histogram.style == HistogramStyle::PerChannel;
-                const int samples =
-                    std::clamp(static_cast<int>(scope.size.x), 128, 2 * Histogram::kBins);
+                const int samples = std::clamp(static_cast<int>(scope.size.x), 128, 2 * Histogram::Bins);
                 static std::vector<ImVec2> points;
                 for (int channel = 0; channel < 3; ++channel) {
-                    const float* plane =
-                        output.histogram_outline.data() + channel * Histogram::kBins;
-                    const float band_top =
-                        scope.origin.y + (bands ? channel * scope.size.y / 3.0f : 0.0f);
-                    const float band_height = bands ? scope.size.y / 3.0f : scope.size.y;
+                    const float* plane = output.histogramOutline.data() + channel * Histogram::Bins;
+                    const float bandTop = scope.origin.y + (bands ? channel * scope.size.y / 3.0f : 0.0f);
+                    const float bandHeight = bands ? scope.size.y / 3.0f : scope.size.y;
                     points.clear();
                     for (int sample = 0; sample < samples; ++sample) {
-                        const float bin_position =
-                            std::clamp((sample + 0.5f) * Histogram::kBins / samples - 0.5f, 0.0f,
-                                       Histogram::kBins - 1.0f);
-                        const int center = static_cast<int>(bin_position);
-                        const float t = bin_position - center;
-                        const auto at = [&](int index) {
-                            return plane[std::clamp(index, 0, Histogram::kBins - 1)];
-                        };
+                        const float binPosition = std::clamp((sample + 0.5f) * Histogram::Bins / samples - 0.5f, 0.0f,
+                                                             Histogram::Bins - 1.0f);
+                        const int center = static_cast<int>(binPosition);
+                        const float t = binPosition - center;
+                        const auto at = [&](int index) { return plane[std::clamp(index, 0, Histogram::Bins - 1)]; };
                         const float p0 = at(center - 1);
                         const float p1 = at(center);
                         const float p2 = at(center + 1);
                         const float p3 = at(center + 2);
-                        float height = p1 + 0.5f * t *
-                                                (p2 - p0 +
-                                                 t * (2.0f * p0 - 5.0f * p1 + 4.0f * p2 - p3 +
-                                                      t * (3.0f * (p1 - p2) + p3 - p0)));
-                        if (p1 <= 0.0f && p2 <= 0.0f) height = 0.0f;
+                        float height =
+                            p1 + 0.5f * t *
+                                     (p2 - p0 +
+                                      t * (2.0f * p0 - 5.0f * p1 + 4.0f * p2 - p3 + t * (3.0f * (p1 - p2) + p3 - p0)));
+                        if (p1 <= 0.0f && p2 <= 0.0f) {
+                            height = 0.0f;
+                        }
                         height = std::clamp(height, 0.0f, 1.0f);
                         // Empty stretches ride the baseline: the outline
                         // stays one continuous reading of the channel,
                         // rather than blinking away wherever the plot
                         // touches zero. Kept just inside the band so the
                         // stroke survives the clip.
-                        const float y = std::min(band_top + (1.0f - height) * band_height,
-                                                 band_top + band_height - 1.0f);
-                        points.push_back(
-                            ImVec2(scope.origin.x + (sample + 0.5f) * scope.size.x / samples, y));
+                        const float y = std::min(bandTop + (1.0f - height) * bandHeight, bandTop + bandHeight - 1.0f);
+                        points.push_back(ImVec2(scope.origin.x + (sample + 0.5f) * scope.size.x / samples, y));
                     }
-                    if (points.size() >= 2)
+                    if (points.size() >= 2) {
                         draw->AddPolyline(points.data(), static_cast<int>(points.size()),
-                                          ChannelMaskColor(1 << channel), ImDrawFlags_None, 1.6f);
+                                          channelMaskColor(1 << channel), ImDrawFlags_None, 1.6f);
+                    }
                 }
                 draw->PopClipRect();
             }
-            if (show_graticule) {
+            if (showGraticule) {
                 ImDrawList* draw = ImGui::GetWindowDrawList();
                 for (int quarter = 0; quarter <= 4; ++quarter) {
                     const float x = scope.origin.x + scope.size.x * quarter / 4.0f;
-                    draw->AddLine(ImVec2(x, scope.origin.y),
-                                  ImVec2(x, scope.origin.y + scope.size.y),
-                                  quarter % 2 == 0 ? kGraticuleMajor : kGraticuleMinor);
+                    draw->AddLine(ImVec2(x, scope.origin.y), ImVec2(x, scope.origin.y + scope.size.y),
+                                  quarter % 2 == 0 ? GraticuleMajor : GraticuleMinor);
                 }
             }
-            if (vectorscope_color) {
+            if (vectorscopeColor) {
                 if (analysis.histogram.style == HistogramStyle::PerChannel) {
                     // Each channel's marker stays a single color inside
                     // its own band.
-                    const float channels[3] = {vectorscope_color->r, vectorscope_color->g,
-                                               vectorscope_color->b};
-                    for (int channel = 0; channel < 3; ++channel)
-                        DrawValueMarker(scope, channels[channel] / 255.0f,
-                                        ChannelMaskColor(1 << channel), channel / 3.0f,
-                                        (channel + 1) / 3.0f);
+                    const float channels[3] = {vectorscopeColor->r, vectorscopeColor->g, vectorscopeColor->b};
+                    for (int channel = 0; channel < 3; ++channel) {
+                        drawValueMarker(scope, channels[channel] / 255.0f, channelMaskColor(1 << channel),
+                                        channel / 3.0f, (channel + 1) / 3.0f);
+                    }
                 } else {
                     ChannelMarker markers[3];
-                    const int count = GroupChannelMarkers(*vectorscope_color, markers);
-                    for (int i = 0; i < count; ++i)
-                        DrawValueMarker(scope, markers[i].value / 255.0f, markers[i].color);
+                    const int count = groupChannelMarkers(*vectorscopeColor, markers);
+                    for (int i = 0; i < count; ++i) {
+                        drawValueMarker(scope, markers[i].value / 255.0f, markers[i].color);
+                    }
                 }
             }
         };
@@ -1690,33 +1781,33 @@ int main() {
         // When nothing can be captured, the scope area explains why and how
         // to fix it instead of drawing empty instruments; a non-technical
         // user should never face a blank vectorscope.
-        const auto draw_capture_help = [&](const char* headline,
-                                           const std::vector<std::string>& lines,
-                                           bool offer_settings) {
+        const auto drawCaptureHelp = [&](const char* headline, const std::vector<std::string>& lines,
+                                         bool offerSettings) {
             const ImVec2 area = ImGui::GetContentRegionAvail();
-            const float line_height = ImGui::GetTextLineHeightWithSpacing();
-            const float block_height = line_height * (2.0f + static_cast<float>(lines.size())) +
-                                       (offer_settings ? line_height * 2.0f : 0.0f);
-            ImGui::Dummy(ImVec2(0.0f, std::max(0.0f, (area.y - block_height) / 2.0f)));
-            const auto centered_text = [&](const char* text) {
+            const float lineHeight = ImGui::GetTextLineHeightWithSpacing();
+            const float blockHeight =
+                lineHeight * (2.0f + static_cast<float>(lines.size())) + (offerSettings ? lineHeight * 2.0f : 0.0f);
+            ImGui::Dummy(ImVec2(0.0f, std::max(0.0f, (area.y - blockHeight) / 2.0f)));
+            const auto centeredText = [&](const char* text) {
                 const float width = ImGui::CalcTextSize(text).x;
-                ImGui::SetCursorPosX(
-                    std::max(0.0f, (ImGui::GetWindowContentRegionMax().x - width) / 2.0f));
+                ImGui::SetCursorPosX(std::max(0.0f, (ImGui::GetWindowContentRegionMax().x - width) / 2.0f));
                 ImGui::TextUnformatted(text);
             };
-            centered_text(headline);
-            ImGui::Dummy(ImVec2(0.0f, line_height * 0.4f));
+            centeredText(headline);
+            ImGui::Dummy(ImVec2(0.0f, lineHeight * 0.4f));
             ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
-            for (const std::string& line : lines) centered_text(line.c_str());
+            for (const std::string& line : lines) {
+                centeredText(line.c_str());
+            }
             ImGui::PopStyleColor();
-            if (offer_settings) {
-                ImGui::Dummy(ImVec2(0.0f, line_height * 0.6f));
+            if (offerSettings) {
+                ImGui::Dummy(ImVec2(0.0f, lineHeight * 0.6f));
                 const char* label = "Open System Settings";
-                const float width =
-                    ImGui::CalcTextSize(label).x + ImGui::GetStyle().FramePadding.x * 2.0f;
-                ImGui::SetCursorPosX(
-                    std::max(0.0f, (ImGui::GetWindowContentRegionMax().x - width) / 2.0f));
-                if (ImGui::Button(label)) OpenScreenRecordingSettings();
+                const float width = ImGui::CalcTextSize(label).x + ImGui::GetStyle().FramePadding.x * 2.0f;
+                ImGui::SetCursorPosX(std::max(0.0f, (ImGui::GetWindowContentRegionMax().x - width) / 2.0f));
+                if (ImGui::Button(label)) {
+                    openScreenRecordingSettings();
+                }
             }
         };
 
@@ -1730,39 +1821,47 @@ int main() {
         // native menu yields to this popup.
         // Hex codes render in the fixed-width font when one loaded, so
         // every code is the same width and columns anchor exactly.
-        const auto push_hex_font = [&] {
-            if (g_monospace_font) ImGui::PushFont(g_monospace_font);
+        const auto pushHexFont = [&] {
+            if (g_monospaceFont) {
+                ImGui::PushFont(g_monospaceFont);
+            }
         };
-        const auto pop_hex_font = [&] {
-            if (g_monospace_font) ImGui::PopFont();
+        const auto popHexFont = [&] {
+            if (g_monospaceFont) {
+                ImGui::PopFont();
+            }
         };
-        const auto draw_pinned_menu = [&] {
-            if (!ImGui::BeginPopup("##pinned-menu")) return;
-            if (pinned_menu_index >= 0 &&
-                pinned_menu_index < static_cast<int>(pinned_colors.size())) {
-                const std::size_t chosen = static_cast<std::size_t>(pinned_menu_index);
-                char chosen_hex[8];
-                std::snprintf(chosen_hex, sizeof(chosen_hex), "#%02X%02X%02X",
-                              static_cast<int>(std::lround(pinned_colors[chosen].r)),
-                              static_cast<int>(std::lround(pinned_colors[chosen].g)),
-                              static_cast<int>(std::lround(pinned_colors[chosen].b)));
-                if (ImGui::MenuItem(chosen_hex)) ImGui::SetClipboardText(chosen_hex);
+        const auto drawPinnedMenu = [&] {
+            if (!ImGui::BeginPopup("##pinned-menu")) {
+                return;
+            }
+            if (pinnedMenuIndex >= 0 && pinnedMenuIndex < static_cast<int>(pinnedColors.size())) {
+                const std::size_t chosen = static_cast<std::size_t>(pinnedMenuIndex);
+                char chosenHex[8];
+                std::snprintf(chosenHex, sizeof(chosenHex), "#%02X%02X%02X",
+                              static_cast<int>(std::lround(pinnedColors[chosen].r)),
+                              static_cast<int>(std::lround(pinnedColors[chosen].g)),
+                              static_cast<int>(std::lround(pinnedColors[chosen].b)));
+                if (ImGui::MenuItem(chosenHex)) {
+                    ImGui::SetClipboardText(chosenHex);
+                }
                 if (ImGui::MenuItem("Remove")) {
-                    pinned_colors.erase(pinned_colors.begin() + static_cast<long>(chosen));
-                    if (comparator_pin == pinned_menu_index)
-                        comparator_pin = -1;
-                    else if (comparator_pin > pinned_menu_index)
-                        --comparator_pin;
+                    pinnedColors.erase(pinnedColors.begin() + static_cast<long>(chosen));
+                    if (comparatorPin == pinnedMenuIndex) {
+                        comparatorPin = -1;
+                    } else if (comparatorPin > pinnedMenuIndex) {
+                        --comparatorPin;
+                    }
                 }
                 ImGui::Separator();
                 if (ImGui::MenuItem("Clear All")) {
-                    pinned_colors.clear();
-                    comparator_pin = -1;
+                    pinnedColors.clear();
+                    comparatorPin = -1;
                 }
             }
             ImGui::EndPopup();
         };
-        const auto draw_color_picker = [&] {
+        const auto drawColorPicker = [&] {
             // Three size tiers, few and spaced so resizing feels like
             // deliberate steps: a strip, a compact comparator, the full
             // reference deck. Order never changes - comparator, values,
@@ -1770,19 +1869,20 @@ int main() {
             // space runs out, pin detail goes first and the live readout
             // is the last thing standing.
             const ImVec2 area = ImGui::GetContentRegionAvail();
-            const float line_height = ImGui::GetTextLineHeightWithSpacing();
+            const float lineHeight = ImGui::GetTextLineHeightWithSpacing();
             const ImGuiStyle& style = ImGui::GetStyle();
-            if (comparator_pin >= static_cast<int>(pinned_colors.size())) comparator_pin = -1;
-            if (!vectorscope_color) {
-                ImGui::Dummy(ImVec2(0.0f, std::max(0.0f, (area.y - line_height) / 2.0f)));
+            if (comparatorPin >= static_cast<int>(pinnedColors.size())) {
+                comparatorPin = -1;
+            }
+            if (!vectorscopeColor) {
+                ImGui::Dummy(ImVec2(0.0f, std::max(0.0f, (area.y - lineHeight) / 2.0f)));
                 const char* hint = "no color under the cursor yet";
                 const float width = ImGui::CalcTextSize(hint).x;
-                ImGui::SetCursorPosX(
-                    std::max(0.0f, (ImGui::GetWindowContentRegionMax().x - width) / 2.0f));
+                ImGui::SetCursorPosX(std::max(0.0f, (ImGui::GetWindowContentRegionMax().x - width) / 2.0f));
                 ImGui::TextDisabled("%s", hint);
                 return;
             }
-            const FloatColor& color = *vectorscope_color;
+            const FloatColor& color = *vectorscopeColor;
             const int red = static_cast<int>(std::lround(std::clamp(color.r, 0.0f, 255.0f)));
             const int green = static_cast<int>(std::lround(std::clamp(color.g, 0.0f, 255.0f)));
             const int blue = static_cast<int>(std::lround(std::clamp(color.b, 0.0f, 255.0f)));
@@ -1791,24 +1891,24 @@ int main() {
             // Every value owns a column sized for its widest form and
             // right-aligns inside it - the toolbar's cure for layouts
             // that twitch as digits come and go.
-            const float value_column = ImGui::CalcTextSize(values_as_percent ? "100%" : "255").x;
-            const float delta_column = ImGui::CalcTextSize(values_as_percent ? "+100%" : "+255").x;
-            const float label_column = ImGui::CalcTextSize("R").x;
-            const float column_gap = ImGui::CalcTextSize(" ").x;
-            const auto format_value = [&](char* buffer, std::size_t size, float channel) {
-                if (values_as_percent)
+            const float valueColumn = ImGui::CalcTextSize(valuesAsPercent ? "100%" : "255").x;
+            const float deltaColumn = ImGui::CalcTextSize(valuesAsPercent ? "+100%" : "+255").x;
+            const float labelColumn = ImGui::CalcTextSize("R").x;
+            const float columnGap = ImGui::CalcTextSize(" ").x;
+            const auto formatValue = [&](char* buffer, std::size_t size, float channel) {
+                if (valuesAsPercent) {
                     std::snprintf(buffer, size, "%.0f%%", channel / 2.55f);
-                else
+                } else {
                     std::snprintf(buffer, size, "%.0f", channel);
+                }
             };
-            const auto swatch_color = [](const FloatColor& source) {
+            const auto swatchColor = [](const FloatColor& source) {
                 return ImVec4(source.r / 255.0f, source.g / 255.0f, source.b / 255.0f, 1.0f);
             };
-            const auto pin_hex_of = [&](std::size_t index, char* buffer) {
-                std::snprintf(buffer, 8, "#%02X%02X%02X",
-                              static_cast<int>(std::lround(pinned_colors[index].r)),
-                              static_cast<int>(std::lround(pinned_colors[index].g)),
-                              static_cast<int>(std::lround(pinned_colors[index].b)));
+            const auto pinHexOf = [&](std::size_t index, char* buffer) {
+                std::snprintf(buffer, 8, "#%02X%02X%02X", static_cast<int>(std::lround(pinnedColors[index].r)),
+                              static_cast<int>(std::lround(pinnedColors[index].g)),
+                              static_cast<int>(std::lround(pinnedColors[index].b)));
             };
 
             // The comparator: the live color, split against the selected
@@ -1820,105 +1920,104 @@ int main() {
             // With nothing pinned there is no deck to reserve for, and an
             // uncapped comparator absorbs the pane instead of leaving a
             // dead black field beneath the values.
-            const float deck_reserve =
-                pinned_colors.empty() ? 0.0f : (full ? 4.0f * line_height : line_height);
-            const float reserved = 2.0f * line_height + deck_reserve + style.ItemSpacing.y;
-            const float hero_cap = pinned_colors.empty() ? area.y : (full ? 220.0f : 64.0f);
-            const float hero_height =
-                tiny ? line_height * 1.5f : std::clamp(area.y - reserved, 48.0f, hero_cap);
-            const bool split = comparator_pin >= 0;
-            const float hero_width = area.x;
-            const ImVec2 hero_origin = ImGui::GetCursorScreenPos();
-            if (ImGui::ColorButton("##picker-live", swatch_color(color),
+            const float deckReserve = pinnedColors.empty() ? 0.0f : (full ? 4.0f * lineHeight : lineHeight);
+            const float reserved = 2.0f * lineHeight + deckReserve + style.ItemSpacing.y;
+            const float heroCap = pinnedColors.empty() ? area.y : (full ? 220.0f : 64.0f);
+            const float heroHeight = tiny ? lineHeight * 1.5f : std::clamp(area.y - reserved, 48.0f, heroCap);
+            const bool split = comparatorPin >= 0;
+            const float heroWidth = area.x;
+            const ImVec2 heroOrigin = ImGui::GetCursorScreenPos();
+            if (ImGui::ColorButton("##picker-live", swatchColor(color),
                                    ImGuiColorEditFlags_NoTooltip | ImGuiColorEditFlags_NoDragDrop,
-                                   ImVec2(split ? hero_width / 2.0f : hero_width, hero_height)))
+                                   ImVec2(split ? heroWidth / 2.0f : heroWidth, heroHeight))) {
                 ImGui::SetClipboardText(hex);
+            }
             ImGui::SetItemTooltip("live  %s - click to copy", hex);
             if (split) {
-                char pin_hex[8];
-                pin_hex_of(static_cast<std::size_t>(comparator_pin), pin_hex);
+                char pinHex[8];
+                pinHexOf(static_cast<std::size_t>(comparatorPin), pinHex);
                 ImGui::SameLine(0.0f, 0.0f);
-                if (ImGui::ColorButton(
-                        "##picker-reference",
-                        swatch_color(pinned_colors[static_cast<std::size_t>(comparator_pin)]),
-                        ImGuiColorEditFlags_NoTooltip | ImGuiColorEditFlags_NoDragDrop,
-                        ImVec2(hero_width / 2.0f, hero_height)))
-                    ImGui::SetClipboardText(pin_hex);
-                ImGui::SetItemTooltip("pinned  %s - click to copy", pin_hex);
+                if (ImGui::ColorButton("##picker-reference",
+                                       swatchColor(pinnedColors[static_cast<std::size_t>(comparatorPin)]),
+                                       ImGuiColorEditFlags_NoTooltip | ImGuiColorEditFlags_NoDragDrop,
+                                       ImVec2(heroWidth / 2.0f, heroHeight))) {
+                    ImGui::SetClipboardText(pinHex);
+                }
+                ImGui::SetItemTooltip("pinned  %s - click to copy", pinHex);
                 if (!tiny) {
                     // The labels take whichever ink survives their half:
                     // dark on light colors, light on dark.
-                    const auto label_ink = [](const FloatColor& under) {
-                        const float luma =
-                            (54.0f * under.r + 183.0f * under.g + 19.0f * under.b) / 256.0f;
-                        return luma > 140.0f ? IM_COL32(0, 0, 0, 170)
-                                             : IM_COL32(255, 255, 255, 180);
+                    const auto labelInk = [](const FloatColor& under) {
+                        const float luma = (54.0f * under.r + 183.0f * under.g + 19.0f * under.b) / 256.0f;
+                        return luma > 140.0f ? IM_COL32(0, 0, 0, 170) : IM_COL32(255, 255, 255, 180);
                     };
                     ImDrawList* draw = ImGui::GetWindowDrawList();
-                    draw->AddText(ImVec2(hero_origin.x + 5, hero_origin.y + 3), label_ink(color),
-                                  "LIVE");
-                    const float pin_label = ImGui::CalcTextSize("PIN").x;
-                    draw->AddText(
-                        ImVec2(hero_origin.x + hero_width - pin_label - 5, hero_origin.y + 3),
-                        label_ink(pinned_colors[static_cast<std::size_t>(comparator_pin)]), "PIN");
+                    draw->AddText(ImVec2(heroOrigin.x + 5, heroOrigin.y + 3), labelInk(color), "LIVE");
+                    const float pinLabel = ImGui::CalcTextSize("PIN").x;
+                    draw->AddText(ImVec2(heroOrigin.x + heroWidth - pinLabel - 5, heroOrigin.y + 3),
+                                  labelInk(pinnedColors[static_cast<std::size_t>(comparatorPin)]), "PIN");
                 }
             }
 
             // Live values: one notation, the preference decides which;
             // hex is the copy currency and always present.
-            const float values_start = ImGui::GetCursorPosX();
-            const float channel_stride = label_column + column_gap + value_column + 2 * column_gap;
-            const float live_channels[3] = {color.r, color.g, color.b};
-            const char* channel_labels[3] = {"R", "G", "B"};
+            const float valuesStart = ImGui::GetCursorPosX();
+            const float channelStride = labelColumn + columnGap + valueColumn + 2 * columnGap;
+            const float liveChannels[3] = {color.r, color.g, color.b};
+            const char* channelLabels[3] = {"R", "G", "B"};
             for (int channel = 0; channel < 3; ++channel) {
-                const float column_start = values_start + channel * channel_stride;
-                if (channel > 0)
-                    ImGui::SameLine(column_start);
-                else
-                    ImGui::SetCursorPosX(column_start);
-                ImGui::TextUnformatted(channel_labels[channel]);
+                const float columnStart = valuesStart + channel * channelStride;
+                if (channel > 0) {
+                    ImGui::SameLine(columnStart);
+                } else {
+                    ImGui::SetCursorPosX(columnStart);
+                }
+                ImGui::TextUnformatted(channelLabels[channel]);
                 char value[8];
-                format_value(value, sizeof(value), live_channels[channel]);
-                ImGui::SameLine(column_start + label_column + column_gap + value_column -
-                                ImGui::CalcTextSize(value).x);
+                formatValue(value, sizeof(value), liveChannels[channel]);
+                ImGui::SameLine(columnStart + labelColumn + columnGap + valueColumn - ImGui::CalcTextSize(value).x);
                 ImGui::TextUnformatted(value);
             }
             ImGui::SameLine(0.0f, 0.0f);
-            push_hex_font();
-            const float hex_width = ImGui::CalcTextSize(hex).x;
-            if (ImGui::GetContentRegionAvail().x >= hex_width + 12.0f) {
-                ImGui::SameLine(area.x - hex_width);
+            pushHexFont();
+            const float hexWidth = ImGui::CalcTextSize(hex).x;
+            if (ImGui::GetContentRegionAvail().x >= hexWidth + 12.0f) {
+                ImGui::SameLine(area.x - hexWidth);
                 ImGui::TextUnformatted(hex);
             } else {
                 ImGui::NewLine();
                 ImGui::TextUnformatted(hex);
             }
-            pop_hex_font();
-            if (ImGui::IsItemClicked()) ImGui::SetClipboardText(hex);
+            popHexFont();
+            if (ImGui::IsItemClicked()) {
+                ImGui::SetClipboardText(hex);
+            }
             ImGui::SetItemTooltip("click to copy");
 
             // The pins: a full reference deck when there is room, a chip
             // rail when there is not. Clicking loads the comparator;
             // hex copies; the right-click menu manages.
-            if (pinned_colors.empty()) return;
-            ImGui::Dummy(ImVec2(0.0f, line_height * 0.35f));
-            int remove_pin = -1;
+            if (pinnedColors.empty()) {
+                return;
+            }
+            ImGui::Dummy(ImVec2(0.0f, lineHeight * 0.35f));
+            int removePin = -1;
             if (full) {
                 ImGui::BeginChild("##pin-deck", ImVec2(0, 0));
-                for (std::size_t index = 0; index < pinned_colors.size(); ++index) {
-                    char pin_id[24];
-                    std::snprintf(pin_id, sizeof(pin_id), "##pin-%d", static_cast<int>(index));
-                    char pin_hex[8];
-                    pin_hex_of(index, pin_hex);
-                    const bool selected = static_cast<int>(index) == comparator_pin;
-                    const float row_top = ImGui::GetCursorScreenPos().y;
-                    if (ImGui::ColorButton(
-                            pin_id, swatch_color(pinned_colors[index]),
-                            ImGuiColorEditFlags_NoTooltip | ImGuiColorEditFlags_NoDragDrop,
-                            ImVec2(line_height, line_height)))
-                        comparator_pin = selected ? -1 : static_cast<int>(index);
+                for (std::size_t index = 0; index < pinnedColors.size(); ++index) {
+                    char pinId[24];
+                    std::snprintf(pinId, sizeof(pinId), "##pin-%d", static_cast<int>(index));
+                    char pinHex[8];
+                    pinHexOf(index, pinHex);
+                    const bool selected = static_cast<int>(index) == comparatorPin;
+                    const float rowTop = ImGui::GetCursorScreenPos().y;
+                    if (ImGui::ColorButton(pinId, swatchColor(pinnedColors[index]),
+                                           ImGuiColorEditFlags_NoTooltip | ImGuiColorEditFlags_NoDragDrop,
+                                           ImVec2(lineHeight, lineHeight))) {
+                        comparatorPin = selected ? -1 : static_cast<int>(index);
+                    }
                     if (ImGui::IsItemClicked(ImGuiMouseButton_Right)) {
-                        pinned_menu_index = static_cast<int>(index);
+                        pinnedMenuIndex = static_cast<int>(index);
                         ImGui::OpenPopup("##pinned-menu");
                     }
                     ImGui::SetItemTooltip(selected ? "click to unload from the comparator"
@@ -1929,42 +2028,43 @@ int main() {
                         const ImVec2 lo = ImGui::GetItemRectMin();
                         const ImVec2 hi = ImGui::GetItemRectMax();
                         ImDrawList* draw = ImGui::GetWindowDrawList();
-                        draw->AddRect(ImVec2(lo.x - 1, lo.y - 1), ImVec2(hi.x + 1, hi.y + 1),
-                                      IM_COL32(0, 0, 0, 220), 0.0f, 0, 2.0f);
+                        draw->AddRect(ImVec2(lo.x - 1, lo.y - 1), ImVec2(hi.x + 1, hi.y + 1), IM_COL32(0, 0, 0, 220),
+                                      0.0f, 0, 2.0f);
                         draw->AddRect(lo, hi, IM_COL32(235, 235, 235, 235), 0.0f, 0, 1.5f);
                     }
                     // Text centers against the taller swatch instead of
                     // hanging from the row's top edge.
-                    const float text_drop = (line_height - ImGui::GetFontSize()) / 2.0f;
+                    const float textDrop = (lineHeight - ImGui::GetFontSize()) / 2.0f;
                     ImGui::SameLine();
-                    ImGui::SetCursorPosY(ImGui::GetCursorPosY() + text_drop);
-                    push_hex_font();
-                    ImGui::TextUnformatted(pin_hex);
-                    pop_hex_font();
-                    if (ImGui::IsItemClicked()) ImGui::SetClipboardText(pin_hex);
+                    ImGui::SetCursorPosY(ImGui::GetCursorPosY() + textDrop);
+                    pushHexFont();
+                    ImGui::TextUnformatted(pinHex);
+                    popHexFont();
+                    if (ImGui::IsItemClicked()) {
+                        ImGui::SetClipboardText(pinHex);
+                    }
                     ImGui::SetItemTooltip("click to copy");
                     // The delta against the live color answers the deck's
                     // question - does the picture match the reference? -
                     // per channel, continuously, each value in a fixed
                     // column so nothing twitches as the cursor moves.
-                    push_hex_font();
-                    const float hex_column = ImGui::CalcTextSize("#DDDDDD").x;
-                    pop_hex_font();
-                    const float deltas_start = ImGui::GetCursorPosX() + line_height + column_gap +
-                                               hex_column + 2 * column_gap;
-                    const float deltas[3] = {color.r - pinned_colors[index].r,
-                                             color.g - pinned_colors[index].g,
-                                             color.b - pinned_colors[index].b};
+                    pushHexFont();
+                    const float hexColumn = ImGui::CalcTextSize("#DDDDDD").x;
+                    popHexFont();
+                    const float deltasStart =
+                        ImGui::GetCursorPosX() + lineHeight + columnGap + hexColumn + 2 * columnGap;
+                    const float deltas[3] = {color.r - pinnedColors[index].r, color.g - pinnedColors[index].g,
+                                             color.b - pinnedColors[index].b};
                     for (int channel = 0; channel < 3; ++channel) {
                         char delta[8];
-                        if (values_as_percent)
+                        if (valuesAsPercent) {
                             std::snprintf(delta, sizeof(delta), "%+.0f%%", deltas[channel] / 2.55f);
-                        else
-                            std::snprintf(delta, sizeof(delta), "%+d",
-                                          static_cast<int>(std::lround(deltas[channel])));
-                        ImGui::SameLine(deltas_start + channel * (delta_column + column_gap) +
-                                        delta_column - ImGui::CalcTextSize(delta).x);
-                        ImGui::SetCursorPosY(ImGui::GetCursorPosY() + text_drop);
+                        } else {
+                            std::snprintf(delta, sizeof(delta), "%+d", static_cast<int>(std::lround(deltas[channel])));
+                        }
+                        ImGui::SameLine(deltasStart + channel * (deltaColumn + columnGap) + deltaColumn -
+                                        ImGui::CalcTextSize(delta).x);
+                        ImGui::SetCursorPosY(ImGui::GetCursorPosY() + textDrop);
                         ImGui::TextDisabled("%s", delta);
                         ImGui::SetItemTooltip("live minus pinned, per channel");
                     }
@@ -1972,11 +2072,9 @@ int main() {
                     // on the taller row: glyphs center a couple of pixels
                     // above the row's middle, and the eye reads against
                     // the neighboring digits.
-                    const float text_center_y =
-                        (ImGui::GetItemRectMin().y + ImGui::GetItemRectMax().y) / 2.0f;
-                    char close_id[24];
-                    std::snprintf(close_id, sizeof(close_id), "##unpin-%d",
-                                  static_cast<int>(index));
+                    const float textCenterY = (ImGui::GetItemRectMin().y + ImGui::GetItemRectMax().y) / 2.0f;
+                    char closeId[24];
+                    std::snprintf(closeId, sizeof(closeId), "##unpin-%d", static_cast<int>(index));
                     // A frameless glyph, square and centered on the row:
                     // quiet gray until hovered, red at the moment of
                     // intent. A pill background fought the black pane.
@@ -1984,64 +2082,66 @@ int main() {
                     // margin instead of hugging the pane's right edge,
                     // where a narrow window pushed it over the numbers;
                     // in an extremely narrow pane it clips away instead.
-                    ImGui::SameLine(deltas_start + 3.0f * (delta_column + column_gap) +
-                                    2.0f * column_gap);
-                    ImGui::SetCursorScreenPos(ImVec2(ImGui::GetCursorScreenPos().x, row_top));
-                    if (ImGui::InvisibleButton(close_id, ImVec2(line_height, line_height)))
-                        remove_pin = static_cast<int>(index);
+                    ImGui::SameLine(deltasStart + 3.0f * (deltaColumn + columnGap) + 2.0f * columnGap);
+                    ImGui::SetCursorScreenPos(ImVec2(ImGui::GetCursorScreenPos().x, rowTop));
+                    if (ImGui::InvisibleButton(closeId, ImVec2(lineHeight, lineHeight))) {
+                        removePin = static_cast<int>(index);
+                    }
                     ImGui::SetItemTooltip("remove this pin");
                     // A drawn cross, not a text glyph: the letter's ink
                     // sits below its box's center and reads misaligned no
                     // matter how the box is placed.
-                    const ImVec2 cross_center =
-                        ImVec2((ImGui::GetItemRectMin().x + ImGui::GetItemRectMax().x) / 2.0f,
-                               text_center_y);
-                    const float arm = line_height * 0.17f;
-                    const ImU32 ink = ImGui::IsItemHovered() ? IM_COL32(235, 90, 90, 255)
-                                                             : IM_COL32(150, 150, 150, 180);
+                    const ImVec2 crossCenter =
+                        ImVec2((ImGui::GetItemRectMin().x + ImGui::GetItemRectMax().x) / 2.0f, textCenterY);
+                    const float arm = lineHeight * 0.17f;
+                    const ImU32 ink =
+                        ImGui::IsItemHovered() ? IM_COL32(235, 90, 90, 255) : IM_COL32(150, 150, 150, 180);
                     ImDrawList* cross = ImGui::GetWindowDrawList();
-                    cross->AddLine(ImVec2(cross_center.x - arm, cross_center.y - arm),
-                                   ImVec2(cross_center.x + arm, cross_center.y + arm), ink, 1.4f);
-                    cross->AddLine(ImVec2(cross_center.x - arm, cross_center.y + arm),
-                                   ImVec2(cross_center.x + arm, cross_center.y - arm), ink, 1.4f);
+                    cross->AddLine(ImVec2(crossCenter.x - arm, crossCenter.y - arm),
+                                   ImVec2(crossCenter.x + arm, crossCenter.y + arm), ink, 1.4f);
+                    cross->AddLine(ImVec2(crossCenter.x - arm, crossCenter.y + arm),
+                                   ImVec2(crossCenter.x + arm, crossCenter.y - arm), ink, 1.4f);
                 }
-                draw_pinned_menu();
+                drawPinnedMenu();
                 ImGui::EndChild();
             } else {
-                for (std::size_t index = 0; index < pinned_colors.size(); ++index) {
-                    char pin_id[24];
-                    std::snprintf(pin_id, sizeof(pin_id), "##pin-%d", static_cast<int>(index));
-                    char pin_hex[8];
-                    pin_hex_of(index, pin_hex);
-                    const bool selected = static_cast<int>(index) == comparator_pin;
-                    if (index > 0) ImGui::SameLine(0.0f, 4.0f);
-                    if (ImGui::ColorButton(
-                            pin_id, swatch_color(pinned_colors[index]),
-                            ImGuiColorEditFlags_NoTooltip | ImGuiColorEditFlags_NoDragDrop,
-                            ImVec2(line_height, line_height)))
-                        comparator_pin = selected ? -1 : static_cast<int>(index);
+                for (std::size_t index = 0; index < pinnedColors.size(); ++index) {
+                    char pinId[24];
+                    std::snprintf(pinId, sizeof(pinId), "##pin-%d", static_cast<int>(index));
+                    char pinHex[8];
+                    pinHexOf(index, pinHex);
+                    const bool selected = static_cast<int>(index) == comparatorPin;
+                    if (index > 0) {
+                        ImGui::SameLine(0.0f, 4.0f);
+                    }
+                    if (ImGui::ColorButton(pinId, swatchColor(pinnedColors[index]),
+                                           ImGuiColorEditFlags_NoTooltip | ImGuiColorEditFlags_NoDragDrop,
+                                           ImVec2(lineHeight, lineHeight))) {
+                        comparatorPin = selected ? -1 : static_cast<int>(index);
+                    }
                     if (ImGui::IsItemClicked(ImGuiMouseButton_Right)) {
-                        pinned_menu_index = static_cast<int>(index);
+                        pinnedMenuIndex = static_cast<int>(index);
                         ImGui::OpenPopup("##pinned-menu");
                     }
-                    ImGui::SetItemTooltip("%s - click to compare, right-click to manage", pin_hex);
+                    ImGui::SetItemTooltip("%s - click to compare, right-click to manage", pinHex);
                     if (selected) {
                         const ImVec2 lo = ImGui::GetItemRectMin();
                         const ImVec2 hi = ImGui::GetItemRectMax();
                         ImDrawList* draw = ImGui::GetWindowDrawList();
-                        draw->AddRect(ImVec2(lo.x - 1, lo.y - 1), ImVec2(hi.x + 1, hi.y + 1),
-                                      IM_COL32(0, 0, 0, 220), 0.0f, 0, 2.0f);
+                        draw->AddRect(ImVec2(lo.x - 1, lo.y - 1), ImVec2(hi.x + 1, hi.y + 1), IM_COL32(0, 0, 0, 220),
+                                      0.0f, 0, 2.0f);
                         draw->AddRect(lo, hi, IM_COL32(235, 235, 235, 235), 0.0f, 0, 1.5f);
                     }
                 }
-                draw_pinned_menu();
+                drawPinnedMenu();
             }
-            if (remove_pin >= 0) {
-                pinned_colors.erase(pinned_colors.begin() + remove_pin);
-                if (comparator_pin == remove_pin)
-                    comparator_pin = -1;
-                else if (comparator_pin > remove_pin)
-                    --comparator_pin;
+            if (removePin >= 0) {
+                pinnedColors.erase(pinnedColors.begin() + removePin);
+                if (comparatorPin == removePin) {
+                    comparatorPin = -1;
+                } else if (comparatorPin > removePin) {
+                    --comparatorPin;
+                }
             }
         };
 
@@ -2049,63 +2149,65 @@ int main() {
         // along its longer axis.
         // Which pane is under the cursor decides which options the
         // context menu shows; rects refresh as the panes draw.
-        ImVec4 pane_rects[5] = {};
-        const auto draw_scope = [&](ScopeGlyph kind) {
-            pane_points[static_cast<int>(kind)] = ImGui::GetContentRegionAvail();
-            const ImVec2 pane_min = ImGui::GetCursorScreenPos();
-            const ImVec2 pane_avail = ImGui::GetContentRegionAvail();
-            pane_rects[static_cast<int>(kind)] = ImVec4(
-                pane_min.x, pane_min.y, pane_min.x + pane_avail.x, pane_min.y + pane_avail.y);
-            if (kind == ScopeGlyph::Vectorscope)
-                draw_vectorscope();
-            else if (kind == ScopeGlyph::Histogram)
-                draw_histogram();
-            else if (kind == ScopeGlyph::ColorPicker)
-                draw_color_picker();
-            else
-                draw_waveform(kind);
+        ImVec4 paneRects[5] = {};
+        const auto drawScope = [&](ScopeGlyph kind) {
+            panePoints[static_cast<int>(kind)] = ImGui::GetContentRegionAvail();
+            const ImVec2 paneMin = ImGui::GetCursorScreenPos();
+            const ImVec2 paneAvail = ImGui::GetContentRegionAvail();
+            paneRects[static_cast<int>(kind)] =
+                ImVec4(paneMin.x, paneMin.y, paneMin.x + paneAvail.x, paneMin.y + paneAvail.y);
+            if (kind == ScopeGlyph::Vectorscope) {
+                drawVectorscope();
+            } else if (kind == ScopeGlyph::Histogram) {
+                drawHistogram();
+            } else if (kind == ScopeGlyph::ColorPicker) {
+                drawColorPicker();
+            } else {
+                drawWaveform(kind);
+            }
         };
-        const int pane_count = static_cast<int>(scope_stack.size());
+        const int paneCount = static_cast<int>(scopeStack.size());
         const ImVec2 area = ImGui::GetContentRegionAvail();
-        if (!permission_granted) {
-            draw_capture_help("SideScopes cannot see the screen",
-                              {
-                                  "macOS requires the Screen Recording permission.",
-                                  "",
-                                  "1. Click the button below",
-                                  "2. Turn on SideScopes in the list",
-                                  "3. Quit and reopen SideScopes",
-                              },
-                              true);
-        } else if (capture_dead.load()) {
+        if (!permissionGranted) {
+            drawCaptureHelp("SideScopes cannot see the screen",
+                            {
+                                "macOS requires the Screen Recording permission.",
+                                "",
+                                "1. Click the button below",
+                                "2. Turn on SideScopes in the list",
+                                "3. Quit and reopen SideScopes",
+                            },
+                            true);
+        } else if (captureDead.load()) {
             std::string status;
             {
-                std::lock_guard lock(status_mutex);
-                status = capture_status;
+                std::lock_guard lock(statusMutex);
+                status = captureStatus;
             }
-            draw_capture_help("Screen capture was interrupted",
-                              {status, "Reconnecting automatically..."}, false);
-        } else if (pane_count <= 1) {
-            if (pane_count == 1) draw_scope(scope_stack.front());
+            drawCaptureHelp("Screen capture was interrupted", {status, "Reconnecting automatically..."}, false);
+        } else if (paneCount <= 1) {
+            if (paneCount == 1) {
+                drawScope(scopeStack.front());
+            }
         } else {
             const bool horizontal = area.x >= area.y;
             const ImVec2 spacing = ImGui::GetStyle().ItemSpacing;
-            const ImVec2 pane_size =
-                horizontal ? ImVec2((area.x - spacing.x * (pane_count - 1)) / pane_count, area.y)
-                           : ImVec2(area.x, (area.y - spacing.y * (pane_count - 1)) / pane_count);
-            const char* pane_ids[5] = {"##pane0", "##pane1", "##pane2", "##pane3", "##pane4"};
-            for (int pane = 0; pane < pane_count; ++pane) {
-                ImGui::BeginChild(pane_ids[pane], pane_size);
-                draw_scope(scope_stack[static_cast<std::size_t>(pane)]);
+            const ImVec2 paneSize = horizontal ? ImVec2((area.x - spacing.x * (paneCount - 1)) / paneCount, area.y)
+                                               : ImVec2(area.x, (area.y - spacing.y * (paneCount - 1)) / paneCount);
+            const char* paneIds[5] = {"##pane0", "##pane1", "##pane2", "##pane3", "##pane4"};
+            for (int pane = 0; pane < paneCount; ++pane) {
+                ImGui::BeginChild(paneIds[pane], paneSize);
+                drawScope(scopeStack[static_cast<std::size_t>(pane)]);
                 ImGui::EndChild();
-                if (horizontal && pane + 1 < pane_count) ImGui::SameLine();
+                if (horizontal && pane + 1 < paneCount) {
+                    ImGui::SameLine();
+                }
             }
         }
 
         // Right-click: the native menu carries the modes and toggles.
         if (ImGui::IsMouseReleased(ImGuiMouseButton_Right) &&
-            ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows |
-                                   ImGuiHoveredFlags_AllowWhenBlockedByActiveItem) &&
+            ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows | ImGuiHoveredFlags_AllowWhenBlockedByActiveItem) &&
             !ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel)) {
             using Kind = NativeMenuItem::Kind;
             // One rule shapes the menu: ownership shows through position
@@ -2116,313 +2218,292 @@ int main() {
             // submenu named after it. Every other section keeps the same
             // order in both: scopes, region, pins, view, application.
             const ImVec2 mouse = ImGui::GetMousePos();
-            int clicked_pane = -1;
+            int clickedPane = -1;
             for (int pane = 0; pane < 5; ++pane) {
-                const ImVec4& rect = pane_rects[pane];
-                if (rect.z <= rect.x || rect.w <= rect.y) continue;
-                if (mouse.x >= rect.x && mouse.x < rect.z && mouse.y >= rect.y && mouse.y < rect.w)
-                    clicked_pane = pane;
+                const ImVec4& rect = paneRects[pane];
+                if (rect.z <= rect.x || rect.w <= rect.y) {
+                    continue;
+                }
+                if (mouse.x >= rect.x && mouse.x < rect.z && mouse.y >= rect.y && mouse.y < rect.w) {
+                    clickedPane = pane;
+                }
             }
-            const auto clicked = [&](ScopeGlyph kind) {
-                return clicked_pane == static_cast<int>(kind);
-            };
-            const auto shown_or_global = [&](ScopeGlyph kind) {
-                return clicked_pane < 0 && scope_shown(kind);
-            };
+            const auto clicked = [&](ScopeGlyph kind) { return clickedPane == static_cast<int>(kind); };
+            const auto shownOrGlobal = [&](ScopeGlyph kind) { return clickedPane < 0 && scopeShown(kind); };
 
             std::vector<NativeMenuItem> menu;
-            const auto action = [&](const char* label, int id, bool checked,
-                                    std::string shortcut = "") {
+            const auto action = [&](const char* label, int id, bool checked, std::string shortcut = "") {
                 menu.push_back({Kind::Action, label, id, checked, std::move(shortcut)});
             };
             const auto separator = [&] { menu.push_back({Kind::Separator, "", -1, false, ""}); };
-            const auto submenu = [&](const char* label) {
-                menu.push_back({Kind::SubmenuBegin, label, -1, false, ""});
-            };
-            const auto end_submenu = [&] { menu.push_back({Kind::SubmenuEnd, "", -1, false, ""}); };
+            const auto submenu = [&](const char* label) { menu.push_back({Kind::SubmenuBegin, label, -1, false, ""}); };
+            const auto endSubmenu = [&] { menu.push_back({Kind::SubmenuEnd, "", -1, false, ""}); };
 
             // Pins are a scope tool: they mark the vectorscope and the
             // color picker, so their submenu rides those scopes' own
             // sections and never appears beside a waveform.
-            const auto pin_options = [&] {
+            const auto pinOptions = [&] {
                 submenu("Pins");
-                action("Pin Colors...", kMenuPickPinColor, false,
-                       shortcut_label(shortcuts.pin_color));
-                if (!pinned_colors.empty())
-                    action("Clear Pinned Markers", kMenuClearPinnedMarkers, false);
-                end_submenu();
+                action("Pin Colors...", MenuPickPinColor, false, shortcutLabel(shortcuts.pinColor));
+                if (!pinnedColors.empty()) {
+                    action("Clear Pinned Markers", MenuClearPinnedMarkers, false);
+                }
+                endSubmenu();
             };
-            const auto vectorscope_options = [&] {
+            const auto vectorscopeOptions = [&] {
                 submenu("Matrix");
                 const bool bt601 = analysis.vectorscope.matrix == ChromaMatrix::Bt601;
-                action("BT.601", kMenuMatrixBt601, bt601);
-                action("BT.709", kMenuMatrixBt709, !bt601);
-                end_submenu();
+                action("BT.601", MenuMatrixBt601, bt601);
+                action("BT.709", MenuMatrixBt709, !bt601);
+                endSubmenu();
                 submenu("Trace Response");
-                action("Boosted", kMenuTraceBoosted,
-                       analysis.vectorscope.response == TraceResponse::Boosted);
-                action("Linear", kMenuTraceLinear,
-                       analysis.vectorscope.response == TraceResponse::Linear);
-                end_submenu();
+                action("Boosted", MenuTraceBoosted, analysis.vectorscope.response == TraceResponse::Boosted);
+                action("Linear", MenuTraceLinear, analysis.vectorscope.response == TraceResponse::Linear);
+                endSubmenu();
                 submenu("Zoom");
-                action("1x", kMenuZoom1, vectorscope_zoom == 1,
-                       shortcut_label(shortcuts.vectorscope_zoom));
-                action("2x", kMenuZoom2, vectorscope_zoom == 2,
-                       shortcut_label(shortcuts.vectorscope_zoom));
-                action("4x", kMenuZoom4, vectorscope_zoom == 4,
-                       shortcut_label(shortcuts.vectorscope_zoom));
-                end_submenu();
-                pin_options();
+                action("1x", MenuZoom1, vectorscopeZoom == 1, shortcutLabel(shortcuts.vectorscopeZoom));
+                action("2x", MenuZoom2, vectorscopeZoom == 2, shortcutLabel(shortcuts.vectorscopeZoom));
+                action("4x", MenuZoom4, vectorscopeZoom == 4, shortcutLabel(shortcuts.vectorscopeZoom));
+                endSubmenu();
+                pinOptions();
             };
-            const auto waveform_options = [&] {
-                action("RGB", kMenuWaveformStyleRgb, analysis.waveform.mode == WaveformMode::Rgb);
-                action("Luma", kMenuWaveformStyleLuma,
-                       analysis.waveform.mode == WaveformMode::Luma);
-                action("Luma (Colored)", kMenuWaveformStyleColoredLuma,
+            const auto waveformOptions = [&] {
+                action("RGB", MenuWaveformStyleRgb, analysis.waveform.mode == WaveformMode::Rgb);
+                action("Luma", MenuWaveformStyleLuma, analysis.waveform.mode == WaveformMode::Luma);
+                action("Luma (Colored)", MenuWaveformStyleColoredLuma,
                        analysis.waveform.mode == WaveformMode::ColoredLuma);
             };
-            const auto histogram_options = [&] {
-                action("Per Channel", kMenuHistogramPerChannel,
-                       analysis.histogram.style == HistogramStyle::PerChannel);
-                action("Combined", kMenuHistogramCombined,
-                       analysis.histogram.style == HistogramStyle::Combined);
+            const auto histogramOptions = [&] {
+                action("Per Channel", MenuHistogramPerChannel, analysis.histogram.style == HistogramStyle::PerChannel);
+                action("Combined", MenuHistogramCombined, analysis.histogram.style == HistogramStyle::Combined);
             };
 
             // The clicked pane's options, first and unprefixed.
             if (clicked(ScopeGlyph::Vectorscope)) {
-                vectorscope_options();
+                vectorscopeOptions();
                 separator();
             } else if (clicked(ScopeGlyph::Waveform)) {
                 submenu("Style");
-                waveform_options();
-                end_submenu();
+                waveformOptions();
+                endSubmenu();
                 separator();
             } else if (clicked(ScopeGlyph::Histogram)) {
                 submenu("Style");
-                histogram_options();
-                end_submenu();
+                histogramOptions();
+                endSubmenu();
                 separator();
             } else if (clicked(ScopeGlyph::ColorPicker)) {
-                pin_options();
+                pinOptions();
                 separator();
             }
 
             submenu("Scopes");
-            action("Vectorscope", kMenuShowVectorscope, scope_shown(ScopeGlyph::Vectorscope),
-                   shortcut_label(shortcuts.vectorscope));
-            action("Waveform", kMenuShowWaveform, scope_shown(ScopeGlyph::Waveform),
-                   shortcut_label(shortcuts.waveform));
-            action("RGB Parade", kMenuShowWaveformParade, scope_shown(ScopeGlyph::WaveformParade),
-                   shortcut_label(shortcuts.parade));
-            action("Histogram", kMenuShowHistogram, scope_shown(ScopeGlyph::Histogram),
-                   shortcut_label(shortcuts.histogram));
-            action("Color Picker", kMenuShowColorPicker, scope_shown(ScopeGlyph::ColorPicker),
-                   shortcut_label(shortcuts.color_picker));
-            end_submenu();
+            action("Vectorscope", MenuShowVectorscope, scopeShown(ScopeGlyph::Vectorscope),
+                   shortcutLabel(shortcuts.vectorscope));
+            action("Waveform", MenuShowWaveform, scopeShown(ScopeGlyph::Waveform), shortcutLabel(shortcuts.waveform));
+            action("RGB Parade", MenuShowWaveformParade, scopeShown(ScopeGlyph::WaveformParade),
+                   shortcutLabel(shortcuts.parade));
+            action("Histogram", MenuShowHistogram, scopeShown(ScopeGlyph::Histogram),
+                   shortcutLabel(shortcuts.histogram));
+            action("Color Picker", MenuShowColorPicker, scopeShown(ScopeGlyph::ColorPicker),
+                   shortcutLabel(shortcuts.colorPicker));
+            endSubmenu();
 
             // On a global click, each visible scope's options ride under
             // the scope's own name.
-            if (shown_or_global(ScopeGlyph::Vectorscope)) {
+            if (shownOrGlobal(ScopeGlyph::Vectorscope)) {
                 submenu("Vectorscope");
-                vectorscope_options();
-                end_submenu();
+                vectorscopeOptions();
+                endSubmenu();
             }
-            if (shown_or_global(ScopeGlyph::Waveform)) {
+            if (shownOrGlobal(ScopeGlyph::Waveform)) {
                 submenu("Waveform");
-                waveform_options();
-                end_submenu();
+                waveformOptions();
+                endSubmenu();
             }
-            if (shown_or_global(ScopeGlyph::Histogram)) {
+            if (shownOrGlobal(ScopeGlyph::Histogram)) {
                 submenu("Histogram");
-                histogram_options();
-                end_submenu();
+                histogramOptions();
+                endSubmenu();
             }
             // The vectorscope's section already carries the pins; when
             // only the color picker is up, they ride under its name.
-            if (shown_or_global(ScopeGlyph::ColorPicker) && !scope_shown(ScopeGlyph::Vectorscope)) {
+            if (shownOrGlobal(ScopeGlyph::ColorPicker) && !scopeShown(ScopeGlyph::Vectorscope)) {
                 submenu("Color Picker");
-                pin_options();
-                end_submenu();
+                pinOptions();
+                endSubmenu();
             }
 
             separator();
-            action("Pick Window or Photo...", kMenuSelectRegion, false,
-                   shortcut_label(shortcuts.pick_window));
-            action("Draw Area...", kMenuDrawRegion, false, shortcut_label(shortcuts.draw_region));
-            if (SupportsFaceDetection())
-                action("Find Faces...", kMenuPickFaces, false,
-                       shortcut_label(shortcuts.pick_faces));
-            action("Watch Full Screen", kMenuFullScreenRegion, is_full_region(),
-                   shortcut_label(shortcuts.full_region));
-
-            separator();
-            action("Graticule", kMenuToggleGraticule, show_graticule);
-
-            separator();
-            action("Settings...", kMenuOpenSettings, false);
-            action("Quit", kMenuQuit, false);
-
-            switch (ShowNativeContextMenu(menu)) {
-                case kMenuShowVectorscope:
-                    toggle_scope(ScopeGlyph::Vectorscope);
-                    break;
-                case kMenuShowWaveform:
-                    toggle_scope(ScopeGlyph::Waveform);
-                    break;
-                case kMenuShowWaveformParade:
-                    toggle_scope(ScopeGlyph::WaveformParade);
-                    break;
-                case kMenuWaveformStyleRgb:
-                    analysis.waveform.mode = WaveformMode::Rgb;
-                    analysis_dirty = true;
-                    break;
-                case kMenuWaveformStyleLuma:
-                    analysis.waveform.mode = WaveformMode::Luma;
-                    analysis_dirty = true;
-                    break;
-                case kMenuWaveformStyleColoredLuma:
-                    analysis.waveform.mode = WaveformMode::ColoredLuma;
-                    analysis_dirty = true;
-                    break;
-                case kMenuHistogramCombined:
-                    analysis.histogram.style = HistogramStyle::Combined;
-                    analysis_dirty = true;
-                    break;
-                case kMenuHistogramPerChannel:
-                    analysis.histogram.style = HistogramStyle::PerChannel;
-                    analysis_dirty = true;
-                    break;
-                case kMenuShowHistogram:
-                    toggle_scope(ScopeGlyph::Histogram);
-                    break;
-                case kMenuShowColorPicker:
-                    toggle_scope(ScopeGlyph::ColorPicker);
-                    break;
-                case kMenuMatrixBt601:
-                    analysis.vectorscope.matrix = ChromaMatrix::Bt601;
-                    analysis_dirty = true;
-                    break;
-                case kMenuMatrixBt709:
-                    analysis.vectorscope.matrix = ChromaMatrix::Bt709;
-                    analysis_dirty = true;
-                    break;
-                case kMenuTraceBoosted:
-                    analysis.vectorscope.response = TraceResponse::Boosted;
-                    analysis_dirty = true;
-                    break;
-                case kMenuTraceLinear:
-                    analysis.vectorscope.response = TraceResponse::Linear;
-                    analysis_dirty = true;
-                    break;
-                case kMenuSelectRegion:
-                    want_region_pick = RegionPickerMode::PickWindows;
-                    break;
-                case kMenuDrawRegion:
-                    want_region_pick = RegionPickerMode::Draw;
-                    break;
-                case kMenuPickFaces:
-                    want_region_pick = RegionPickerMode::PickFaces;
-                    break;
-                case kMenuZoom1:
-                    vectorscope_zoom = 1;
-                    break;
-                case kMenuZoom2:
-                    vectorscope_zoom = 2;
-                    break;
-                case kMenuZoom4:
-                    vectorscope_zoom = 4;
-                    break;
-                case kMenuFullScreenRegion:
-                    reset_region_to_full();
-                    break;
-                case kMenuToggleGraticule:
-                    show_graticule = !show_graticule;
-                    break;
-                case kMenuPickPinColor:
-                    want_region_pick = RegionPickerMode::PinColor;
-                    break;
-                case kMenuClearPinnedMarkers:
-                    pinned_colors.clear();
-                    break;
-                case kMenuOpenSettings:
-                    show_settings = true;
-                    break;
-                case kMenuQuit:
-                    glfwSetWindowShouldClose(window, GLFW_TRUE);
-                    break;
-                default:
-                    break;
+            action("Pick Window or Photo...", MenuSelectRegion, false, shortcutLabel(shortcuts.pickWindow));
+            action("Draw Area...", MenuDrawRegion, false, shortcutLabel(shortcuts.drawRegion));
+            if (supportsFaceDetection()) {
+                action("Find Faces...", MenuPickFaces, false, shortcutLabel(shortcuts.pickFaces));
             }
-            last_activity = glfwGetTime();
-            next_preferences_save = glfwGetTime() + 1.0;
+            action("Watch Full Screen", MenuFullScreenRegion, isFullRegion(), shortcutLabel(shortcuts.fullRegion));
+
+            separator();
+            action("Graticule", MenuToggleGraticule, showGraticule);
+
+            separator();
+            action("Settings...", MenuOpenSettings, false);
+            action("Quit", MenuQuit, false);
+
+            switch (showNativeContextMenu(menu)) {
+            case MenuShowVectorscope:
+                toggleScope(ScopeGlyph::Vectorscope);
+                break;
+            case MenuShowWaveform:
+                toggleScope(ScopeGlyph::Waveform);
+                break;
+            case MenuShowWaveformParade:
+                toggleScope(ScopeGlyph::WaveformParade);
+                break;
+            case MenuWaveformStyleRgb:
+                analysis.waveform.mode = WaveformMode::Rgb;
+                analysisDirty = true;
+                break;
+            case MenuWaveformStyleLuma:
+                analysis.waveform.mode = WaveformMode::Luma;
+                analysisDirty = true;
+                break;
+            case MenuWaveformStyleColoredLuma:
+                analysis.waveform.mode = WaveformMode::ColoredLuma;
+                analysisDirty = true;
+                break;
+            case MenuHistogramCombined:
+                analysis.histogram.style = HistogramStyle::Combined;
+                analysisDirty = true;
+                break;
+            case MenuHistogramPerChannel:
+                analysis.histogram.style = HistogramStyle::PerChannel;
+                analysisDirty = true;
+                break;
+            case MenuShowHistogram:
+                toggleScope(ScopeGlyph::Histogram);
+                break;
+            case MenuShowColorPicker:
+                toggleScope(ScopeGlyph::ColorPicker);
+                break;
+            case MenuMatrixBt601:
+                analysis.vectorscope.matrix = ChromaMatrix::Bt601;
+                analysisDirty = true;
+                break;
+            case MenuMatrixBt709:
+                analysis.vectorscope.matrix = ChromaMatrix::Bt709;
+                analysisDirty = true;
+                break;
+            case MenuTraceBoosted:
+                analysis.vectorscope.response = TraceResponse::Boosted;
+                analysisDirty = true;
+                break;
+            case MenuTraceLinear:
+                analysis.vectorscope.response = TraceResponse::Linear;
+                analysisDirty = true;
+                break;
+            case MenuSelectRegion:
+                wantRegionPick = RegionPickerMode::PickWindows;
+                break;
+            case MenuDrawRegion:
+                wantRegionPick = RegionPickerMode::Draw;
+                break;
+            case MenuPickFaces:
+                wantRegionPick = RegionPickerMode::PickFaces;
+                break;
+            case MenuZoom1:
+                vectorscopeZoom = 1;
+                break;
+            case MenuZoom2:
+                vectorscopeZoom = 2;
+                break;
+            case MenuZoom4:
+                vectorscopeZoom = 4;
+                break;
+            case MenuFullScreenRegion:
+                resetRegionToFull();
+                break;
+            case MenuToggleGraticule:
+                showGraticule = !showGraticule;
+                break;
+            case MenuPickPinColor:
+                wantRegionPick = RegionPickerMode::PinColor;
+                break;
+            case MenuClearPinnedMarkers:
+                pinnedColors.clear();
+                break;
+            case MenuOpenSettings:
+                showSettings = true;
+                break;
+            case MenuQuit:
+                glfwSetWindowShouldClose(window, GLFW_TRUE);
+                break;
+            default:
+                break;
+            }
+            lastActivity = glfwGetTime();
+            nextPreferencesSave = glfwGetTime() + 1.0;
         }
 
         ImGui::End();
         ImGui::PopStyleVar();
 
-        if (show_settings) {
+        if (showSettings) {
             ImGui::SetNextWindowSize(ImVec2(380, 0), ImGuiCond_FirstUseEver);
-            ImGui::Begin("Settings", &show_settings, ImGuiWindowFlags_NoCollapse);
+            ImGui::Begin("Settings", &showSettings, ImGuiWindowFlags_NoCollapse);
             {
-                std::lock_guard lock(status_mutex);
-                ImGui::TextWrapped("capture: %s", capture_status.c_str());
+                std::lock_guard lock(statusMutex);
+                ImGui::TextWrapped("capture: %s", captureStatus.c_str());
             }
-            ImGui::Text("analysis %.2f ms | frames %llu | ui %.0f fps",
-                        output.accumulate_milliseconds,
-                        static_cast<unsigned long long>(output.frames_processed),
-                        static_cast<double>(io.Framerate));
+            ImGui::Text("analysis %.2f ms | frames %llu | ui %.0f fps", output.accumulateMilliseconds,
+                        static_cast<unsigned long long>(output.framesProcessed), static_cast<double>(io.Framerate));
             ImGui::Separator();
             ImGui::TextDisabled("vectorscope");
-            if (ImGui::SliderFloat("intensity##v", &vectorscope_intensity, 0.0f, 100.0f,
-                                   "%.0f%%")) {
-                analysis.vectorscope.gain =
-                    TraceGainFromIntensity(vectorscope_intensity, kVectorscopeIntensityShift);
-                analysis_dirty = true;
+            if (ImGui::SliderFloat("intensity##v", &vectorscopeIntensity, 0.0f, 100.0f, "%.0f%%")) {
+                analysis.vectorscope.gain = traceGainFromIntensity(vectorscopeIntensity, VectorscopeIntensityShift);
+                analysisDirty = true;
             }
-            analysis_dirty |=
-                ImGui::SliderInt("sampling 1:N##v", &analysis.vectorscope.sampling_stride, 1, 8);
-            ImGui::SliderFloat("smoothing ms##v", &vectorscope_smoothing_ms, 0.0f, 500.0f, "%.0f");
+            analysisDirty |= ImGui::SliderInt("sampling 1:N##v", &analysis.vectorscope.samplingStride, 1, 8);
+            ImGui::SliderFloat("smoothing ms##v", &vectorscopeSmoothingMs, 0.0f, 500.0f, "%.0f");
             ImGui::TextDisabled("waveform");
-            if (ImGui::SliderFloat("intensity##w", &waveform_intensity, 0.0f, 100.0f, "%.0f%%")) {
-                analysis.waveform.gain = TraceGainFromIntensity(waveform_intensity);
-                analysis_dirty = true;
+            if (ImGui::SliderFloat("intensity##w", &waveformIntensity, 0.0f, 100.0f, "%.0f%%")) {
+                analysis.waveform.gain = traceGainFromIntensity(waveformIntensity);
+                analysisDirty = true;
             }
-            analysis_dirty |=
-                ImGui::SliderInt("sampling 1:N##w", &analysis.waveform.sampling_stride, 1, 8);
-            ImGui::SliderFloat("smoothing ms##w", &waveform_smoothing_ms, 0.0f, 500.0f, "%.0f");
+            analysisDirty |= ImGui::SliderInt("sampling 1:N##w", &analysis.waveform.samplingStride, 1, 8);
+            ImGui::SliderFloat("smoothing ms##w", &waveformSmoothingMs, 0.0f, 500.0f, "%.0f");
             ImGui::TextDisabled("modes and toggles: right-click a scope");
             ImGui::End();
         }
 
         if (ImGui::IsAnyItemActive()) {
-            last_activity = glfwGetTime();
-            next_preferences_save = glfwGetTime() + 1.0;
+            lastActivity = glfwGetTime();
+            nextPreferencesSave = glfwGetTime() + 1.0;
         }
 
         ImGui::Render();
-        graphics->EndFrame();
+        graphics->endFrame();
 
         // The blocking overlay runs after the frame is submitted; capture and
         // analysis keep flowing underneath.
-        if (region_picking && want_region_pick) {
-            const bool target_pin = *want_region_pick == RegionPickerMode::PinColor;
-            if (target_pin || region_pick_is_pin) {
+        if (regionPicking && wantRegionPick) {
+            const bool targetPin = *wantRegionPick == RegionPickerMode::PinColor;
+            if (targetPin || regionPickIsPin) {
                 // Region picking and color pinning are separate tools; a
                 // pick never morphs across that boundary. The active pick
                 // closes - with no effect on the region - and the
                 // requested tool opens fresh once it is gone.
-                region_pick_swallow_cancel = true;
-                CancelRegionPick();
+                regionPickSwallowCancel = true;
+                cancelRegionPick();
             } else {
                 // The toolbar keeps working mid-pick: choosing a region
                 // tool switches the active picker's mode instead of
                 // stacking one.
-                SetRegionPickMode(*want_region_pick);
-                want_region_pick.reset();
+                setRegionPickMode(*wantRegionPick);
+                wantRegionPick.reset();
             }
         }
-        if (!region_picking && want_region_pick && capture_display != 0) {
-            HideRegionBorder();
+        if (!regionPicking && wantRegionPick && captureDisplay != 0) {
+            hideRegionBorder();
             // The previous region's border must not leak into the analyzed
             // frame: its strokes read as rectangle edges and cut suggestions
             // short at the old region. The latest captured frame may predate
@@ -2430,20 +2511,22 @@ int main() {
             // the screen. The 60 ms floor outlasts an in-flight pre-hide
             // frame's capture-to-delivery; the 300 ms cap keeps the picker
             // responsive if the capture stream has stalled.
-            if (!is_full_region()) {
-                uint64_t stale_sequence = 0;
-                worker.WithLatestFrame(
-                    [&](const FrameView& view) { stale_sequence = view.sequence; });
-                const double hidden_at = glfwGetTime();
+            if (!isFullRegion()) {
+                uint64_t staleSequence = 0;
+                worker.withLatestFrame([&](const FrameView& view) { staleSequence = view.sequence; });
+                const double hiddenAt = glfwGetTime();
                 for (;;) {
-                    const double elapsed = glfwGetTime() - hidden_at;
-                    if (elapsed >= 0.3) break;
-                    uint64_t sequence = stale_sequence;
-                    worker.WithLatestFrame(
-                        [&](const FrameView& view) { sequence = view.sequence; });
+                    const double elapsed = glfwGetTime() - hiddenAt;
+                    if (elapsed >= 0.3) {
+                        break;
+                    }
+                    uint64_t sequence = staleSequence;
+                    worker.withLatestFrame([&](const FrameView& view) { sequence = view.sequence; });
                     // Inequality, not greater-than: a freshly switched
                     // stream counts its frames from one again.
-                    if (sequence != stale_sequence && elapsed >= 0.06) break;
+                    if (sequence != staleSequence && elapsed >= 0.06) {
+                        break;
+                    }
                     std::this_thread::sleep_for(std::chrono::milliseconds(15));
                 }
             }
@@ -2453,31 +2536,31 @@ int main() {
             // the platform detector finds in the current frame. Faces are
             // offered on the tracked display only: that is the display
             // whose pixels we hold.
-            const auto window_suggestions_for =
-                [&](uint32_t display_id) -> std::vector<SuggestedRegion> {
-                std::vector<WindowRegion> window_regions;
-                const auto geometry = GeometryOfDisplay(display_id);
+            const auto windowSuggestionsFor = [&](uint32_t displayId) -> std::vector<SuggestedRegion> {
+                std::vector<WindowRegion> windowRegions;
+                const auto geometry = geometryOfDisplay(displayId);
                 if (geometry) {
                     // Frontmost windows only, skipping ones mostly hidden behind
                     // fronter windows: the user is not scoping what they cannot
                     // see, and invisible system windows have no business here.
-                    const std::vector<DesktopWindow> on_screen = OnScreenWindows(display_id);
-                    const auto contained_fraction = [](const DesktopWindow& inner,
-                                                       const DesktopWindow& outer) {
+                    const std::vector<DesktopWindow> onScreen = onScreenWindows(displayId);
+                    const auto containedFraction = [](const DesktopWindow& inner, const DesktopWindow& outer) {
                         const double left = std::max(inner.x, outer.x);
                         const double top = std::max(inner.y, outer.y);
                         const double right = std::min(inner.x + inner.width, outer.x + outer.width);
-                        const double bottom =
-                            std::min(inner.y + inner.height, outer.y + outer.height);
-                        if (right <= left || bottom <= top) return 0.0;
+                        const double bottom = std::min(inner.y + inner.height, outer.y + outer.height);
+                        if (right <= left || bottom <= top) {
+                            return 0.0;
+                        }
                         return (right - left) * (bottom - top) / (inner.width * inner.height);
                     };
-                    std::vector<DesktopWindow> visible_windows;
-                    std::vector<DesktopWindow> auxiliary_windows;
-                    for (const DesktopWindow& candidate : on_screen) {
-                        constexpr int kMaxWindowSuggestions = 5;
-                        if (static_cast<int>(visible_windows.size()) >= kMaxWindowSuggestions)
+                    std::vector<DesktopWindow> visibleWindows;
+                    std::vector<DesktopWindow> auxiliaryWindows;
+                    for (const DesktopWindow& candidate : onScreen) {
+                        constexpr int MaxWindowSuggestions = 5;
+                        if (static_cast<int>(visibleWindows.size()) >= MaxWindowSuggestions) {
                             break;
+                        }
                         // A window living mostly inside a bigger window of the
                         // same application is an auxiliary surface - Lightroom
                         // draws its panels and its loupe info overlay as
@@ -2487,95 +2570,99 @@ int main() {
                         // spawn candidates nor interrupt the photograph's
                         // borders.
                         bool auxiliary = false;
-                        for (const DesktopWindow& other : on_screen) {
-                            if (&other == &candidate || other.application != candidate.application)
+                        for (const DesktopWindow& other : onScreen) {
+                            if (&other == &candidate || other.application != candidate.application) {
                                 continue;
-                            if (other.width * other.height <= candidate.width * candidate.height)
+                            }
+                            if (other.width * other.height <= candidate.width * candidate.height) {
                                 continue;
-                            if (contained_fraction(candidate, other) > 0.9) {
+                            }
+                            if (containedFraction(candidate, other) > 0.9) {
                                 auxiliary = true;
                                 break;
                             }
                         }
                         if (auxiliary) {
-                            auxiliary_windows.push_back(candidate);
+                            auxiliaryWindows.push_back(candidate);
                             continue;
                         }
-                        bool mostly_covered = false;
-                        for (const DesktopWindow& front : visible_windows) {
-                            if (contained_fraction(candidate, front) > 0.8) {
-                                mostly_covered = true;
+                        bool mostlyCovered = false;
+                        for (const DesktopWindow& front : visibleWindows) {
+                            if (containedFraction(candidate, front) > 0.8) {
+                                mostlyCovered = true;
                                 break;
                             }
                         }
-                        if (!mostly_covered) visible_windows.push_back(candidate);
+                        if (!mostlyCovered) {
+                            visibleWindows.push_back(candidate);
+                        }
                     }
 
-                    for (const DesktopWindow& visible : visible_windows) {
+                    for (const DesktopWindow& visible : visibleWindows) {
                         WindowRegion region;
-                        region.region.left_percent = std::clamp(
-                            (visible.x - geometry->origin_x) / geometry->width_points * 100.0, 0.0,
-                            100.0);
-                        region.region.top_percent = std::clamp(
-                            (visible.y - geometry->origin_y) / geometry->height_points * 100.0, 0.0,
-                            100.0);
-                        region.region.right_percent =
-                            std::clamp((visible.x + visible.width - geometry->origin_x) /
-                                           geometry->width_points * 100.0,
+                        region.region.leftPercent =
+                            std::clamp((visible.x - geometry->originX) / geometry->widthPoints * 100.0, 0.0, 100.0);
+                        region.region.topPercent =
+                            std::clamp((visible.y - geometry->originY) / geometry->heightPoints * 100.0, 0.0, 100.0);
+                        region.region.rightPercent =
+                            std::clamp((visible.x + visible.width - geometry->originX) / geometry->widthPoints * 100.0,
                                        0.0, 100.0);
-                        region.region.bottom_percent =
-                            std::clamp((visible.y + visible.height - geometry->origin_y) /
-                                           geometry->height_points * 100.0,
-                                       0.0, 100.0);
+                        region.region.bottomPercent = std::clamp(
+                            (visible.y + visible.height - geometry->originY) / geometry->heightPoints * 100.0, 0.0,
+                            100.0);
                         region.application = visible.application;
-                        window_regions.push_back(std::move(region));
+                        windowRegions.push_back(std::move(region));
                     }
                 }
-                return BuildRegionSuggestions(window_regions);
+                return buildRegionSuggestions(windowRegions);
             };
 
-            std::vector<SuggestedRegion> face_suggestions;
-            if (SupportsFaceDetection()) {
-                worker.WithLatestFrame([&](const FrameView& view) {
-                    const auto geometry = GeometryOfDisplay(capture_display);
-                    const float pixels_per_point =
-                        geometry ? static_cast<float>(view.width / geometry->width_points) : 1.0f;
-                    face_suggestions = BuildFaceSuggestions(DetectFaces(view, pixels_per_point),
-                                                            view.width, view.height);
-                    g_faces_on_screen.store(static_cast<int>(face_suggestions.size()));
+            std::vector<SuggestedRegion> faceSuggestions;
+            if (supportsFaceDetection()) {
+                worker.withLatestFrame([&](const FrameView& view) {
+                    const auto geometry = geometryOfDisplay(captureDisplay);
+                    const float pixelsPerPoint =
+                        geometry ? static_cast<float>(view.width / geometry->widthPoints) : 1.0f;
+                    faceSuggestions = buildFaceSuggestions(detectFaces(view, pixelsPerPoint), view.width, view.height);
+                    g_facesOnScreen.store(static_cast<int>(faceSuggestions.size()));
                 });
             }
 
-            std::vector<PickerDisplay> picker_displays;
-            for (const CaptureTarget& target : capture->ListTargets()) {
+            std::vector<PickerDisplay> pickerDisplays;
+            for (const CaptureTarget& target : capture->listTargets()) {
                 PickerDisplay entry;
-                entry.display_id = target.display_id;
-                entry.windows = window_suggestions_for(target.display_id);
-                if (target.display_id == capture_display) entry.faces = face_suggestions;
-                picker_displays.push_back(std::move(entry));
+                entry.displayId = target.displayId;
+                entry.windows = windowSuggestionsFor(target.displayId);
+                if (target.displayId == captureDisplay) {
+                    entry.faces = faceSuggestions;
+                }
+                pickerDisplays.push_back(std::move(entry));
             }
 
             // Field diagnosis: dump exactly what the pipeline saw. Enable
             // with `launchctl setenv SIDESCOPES_DEBUG_SUGGESTIONS 1`.
-            if (DebugSuggestionsRequested()) {
-                std::FILE* report = OpenDebugFile("/tmp/sidescopes-suggestions.txt", "w");
+            if (debugSuggestionsRequested()) {
+                std::FILE* report = openDebugFile("/tmp/sidescopes-suggestions.txt", "w");
                 if (report) {
-                    for (const auto& entry : picker_displays)
-                        for (const auto& suggestion : entry.windows)
-                            std::fprintf(
-                                report, "display %u suggestion '%s' %.1f,%.1f..%.1f,%.1f%%\n",
-                                entry.display_id, suggestion.label.c_str(),
-                                suggestion.region.left_percent, suggestion.region.top_percent,
-                                suggestion.region.right_percent, suggestion.region.bottom_percent);
+                    for (const auto& entry : pickerDisplays) {
+                        for (const auto& suggestion : entry.windows) {
+                            std::fprintf(report, "display %u suggestion '%s' %.1f,%.1f..%.1f,%.1f%%\n", entry.displayId,
+                                         suggestion.label.c_str(), suggestion.region.leftPercent,
+                                         suggestion.region.topPercent, suggestion.region.rightPercent,
+                                         suggestion.region.bottomPercent);
+                        }
+                    }
                     std::fclose(report);
                 }
-                worker.WithLatestFrame([&](const FrameView& view) {
-                    std::FILE* image = OpenDebugFile("/tmp/sidescopes-frame.ppm", "wb");
-                    if (!image) return;
+                worker.withLatestFrame([&](const FrameView& view) {
+                    std::FILE* image = openDebugFile("/tmp/sidescopes-frame.ppm", "wb");
+                    if (!image) {
+                        return;
+                    }
                     std::fprintf(image, "P6\n%d %d\n255\n", view.width / 2, view.height / 2);
                     for (int py = 0; py < view.height - 1; py += 2) {
                         for (int px = 0; px < view.width - 1; px += 2) {
-                            const Color color = view.ColorAt(px, py);
+                            const Color color = view.colorAt(px, py);
                             std::fputc(color.r, image);
                             std::fputc(color.g, image);
                             std::fputc(color.b, image);
@@ -2584,155 +2671,155 @@ int main() {
                     std::fclose(image);
                 });
             }
-            if (BeginRegionPick(picker_displays, *want_region_pick)) {
-                region_picking = true;
-                region_pick_is_pin = *want_region_pick == RegionPickerMode::PinColor;
+            if (beginRegionPick(pickerDisplays, *wantRegionPick)) {
+                regionPicking = true;
+                regionPickIsPin = *wantRegionPick == RegionPickerMode::PinColor;
             }
             // Consumed either way: a request that could not open (a
             // display gone mid-flight) must not retry every frame.
-            want_region_pick.reset();
-            last_activity = glfwGetTime();
+            wantRegionPick.reset();
+            lastActivity = glfwGetTime();
         }
 
         // The region border is live: dragging its edges, corners, or move
         // tab adjusts the region with the scopes following along.
-        if (!region_picking) {
-            const RegionBorderEdit edit = PollRegionBorderEdit();
+        if (!regionPicking) {
+            const RegionBorderEdit edit = pollRegionBorderEdit();
             if (edit.dismissed) {
                 // The border's own close affordances mean "stop tracking
                 // this region"; full screen is the fallback.
-                reset_region_to_full();
-                last_activity = glfwGetTime();
+                resetRegionToFull();
+                lastActivity = glfwGetTime();
             } else if (edit.region) {
                 analysis.region = *edit.region;
                 // The analysis-dirty path below syncs the border this same
                 // iteration; a second sync here would double the border
                 // work on every drag step.
-                analysis_dirty = true;
-                last_activity = glfwGetTime();
+                analysisDirty = true;
+                lastActivity = glfwGetTime();
             }
         }
 
         // While the picker is up, whatever the user indicates previews on
         // the scopes immediately; confirmation keeps it, Esc restores.
-        if (region_picking) {
-            const RegionPickPoll poll = PollRegionPick();
-            const auto apply_region = [&](const RegionOfInterest& region) {
-                if (region.left_percent == analysis.region.left_percent &&
-                    region.top_percent == analysis.region.top_percent &&
-                    region.right_percent == analysis.region.right_percent &&
-                    region.bottom_percent == analysis.region.bottom_percent)
+        if (regionPicking) {
+            const RegionPickPoll poll = pollRegionPick();
+            const auto applyRegion = [&](const RegionOfInterest& region) {
+                if (region.leftPercent == analysis.region.leftPercent &&
+                    region.topPercent == analysis.region.topPercent &&
+                    region.rightPercent == analysis.region.rightPercent &&
+                    region.bottomPercent == analysis.region.bottomPercent) {
                     return;
+                }
                 analysis.region = region;
-                analysis_dirty = true;
-                last_activity = glfwGetTime();
+                analysisDirty = true;
+                lastActivity = glfwGetTime();
             };
-            if (poll.pin_mode) {
+            if (poll.pinMode) {
                 // Color pinning never touches the region: clicks and
                 // drags deliver areas to average, and a finish - Esc, or
                 // the single flavor's one pin - just puts things back.
                 std::optional<FloatColor> chip;
-                if (const auto cursor = GlobalCursorPosition()) {
-                    if (DisplayAtPoint(*cursor).value_or(0) == capture_display &&
-                        !capture_dead.load()) {
-                        if (const auto geometry = GeometryOfDisplay(capture_display)) {
-                            const double span_x =
-                                kPinSamplePoints * ui_scale / geometry->width_points * 100.0;
-                            const double span_y =
-                                kPinSamplePoints * ui_scale / geometry->height_points * 100.0;
+                if (const auto cursor = globalCursorPosition()) {
+                    if (displayAtPoint(*cursor).value_or(0) == captureDisplay && !captureDead.load()) {
+                        if (const auto geometry = geometryOfDisplay(captureDisplay)) {
+                            const double spanX = PinSamplePoints * uiScale / geometry->widthPoints * 100.0;
+                            const double spanY = PinSamplePoints * uiScale / geometry->heightPoints * 100.0;
                             RegionOfInterest patch;
-                            patch.left_percent =
-                                (cursor->x - geometry->origin_x) / geometry->width_points * 100.0 -
-                                span_x / 2;
-                            patch.right_percent = patch.left_percent + span_x;
-                            patch.top_percent =
-                                (cursor->y - geometry->origin_y) / geometry->height_points * 100.0 -
-                                span_y / 2;
-                            patch.bottom_percent = patch.top_percent + span_y;
-                            chip = average_frame_area(patch);
+                            patch.leftPercent =
+                                (cursor->x - geometry->originX) / geometry->widthPoints * 100.0 - spanX / 2;
+                            patch.rightPercent = patch.leftPercent + spanX;
+                            patch.topPercent =
+                                (cursor->y - geometry->originY) / geometry->heightPoints * 100.0 - spanY / 2;
+                            patch.bottomPercent = patch.topPercent + spanY;
+                            chip = averageFrameArea(patch);
                         }
                     } else {
                         // Another display: the throttled one-shot sampler
                         // already tracks the cursor there.
-                        std::lock_guard lock(screen_sample->mutex);
-                        chip = screen_sample->color;
+                        std::lock_guard lock(screenSample->mutex);
+                        chip = screenSample->color;
                     }
                 }
-                SetRegionPickChipColor(chip);
+                setRegionPickChipColor(chip);
 
-                if (poll.pinned_area) {
+                if (poll.pinnedArea) {
                     std::optional<FloatColor> pinned;
-                    if (poll.display_id == capture_display && !capture_dead.load()) {
-                        pinned = average_frame_area(*poll.pinned_area);
+                    if (poll.displayId == captureDisplay && !captureDead.load()) {
+                        pinned = averageFrameArea(*poll.pinnedArea);
                     } else {
-                        std::lock_guard lock(screen_sample->mutex);
-                        pinned = screen_sample->color;
+                        std::lock_guard lock(screenSample->mutex);
+                        pinned = screenSample->color;
                     }
-                    pin_reference_color(pinned);
+                    pinReferenceColor(pinned);
                     // The click's own Shift decided: pin-and-continue
                     // stays, a plain pin ends the errand.
-                    if (!poll.pinned_keep_open) CancelRegionPick();
-                    last_activity = glfwGetTime();
+                    if (!poll.pinnedKeepOpen) {
+                        cancelRegionPick();
+                    }
+                    lastActivity = glfwGetTime();
                 }
                 if (poll.finished || !poll.active) {
-                    region_picking = false;
-                    region_pick_swallow_cancel = false;
-                    sync_region_border();
-                    last_activity = glfwGetTime();
+                    regionPicking = false;
+                    regionPickSwallowCancel = false;
+                    syncRegionBorder();
+                    lastActivity = glfwGetTime();
                 }
             } else {
                 // Live preview only for the tracked display: previewing a
                 // suggestion on another display would mean flapping the
                 // capture stream on every hover. The switch happens once,
                 // on confirmation.
-                if (poll.preview && poll.display_id == capture_display) apply_region(*poll.preview);
+                if (poll.preview && poll.displayId == captureDisplay) {
+                    applyRegion(*poll.preview);
+                }
                 if (poll.finished || !poll.active) {
-                    region_picking = false;
+                    regionPicking = false;
                     if (poll.confirmed) {
-                        if (poll.display_id != 0 && poll.display_id != capture_display) {
-                            desired_display = poll.display_id;
-                            capture->Stop();
-                            if (!start_capture()) {
-                                capture_dead.store(true);
-                                next_capture_retry = glfwGetTime() + 2.0;
+                        if (poll.displayId != 0 && poll.displayId != captureDisplay) {
+                            desiredDisplay = poll.displayId;
+                            capture->stop();
+                            if (!startCapture()) {
+                                captureDead.store(true);
+                                nextCaptureRetry = glfwGetTime() + 2.0;
                             }
                         }
-                        apply_region(*poll.confirmed);
-                    } else if (!region_pick_swallow_cancel) {
+                        applyRegion(*poll.confirmed);
+                    } else if (!regionPickSwallowCancel) {
                         // Cancelled: reset all drawing, pending and
                         // confirmed. Full region means capture snaps back
                         // to the display this window sits on. A cancel
                         // ordered by a tool switch is not the user's Esc
                         // and resets nothing.
-                        apply_region(RegionOfInterest{});
+                        applyRegion(RegionOfInterest{});
                     }
-                    region_pick_swallow_cancel = false;
-                    sync_region_border();
-                    last_activity = glfwGetTime();
+                    regionPickSwallowCancel = false;
+                    syncRegionBorder();
+                    lastActivity = glfwGetTime();
                 }
             }
         }
 
-        if (analysis_dirty) {
-            worker.UpdateSettings(analysis);
-            projection_vectorscope.Configure(analysis.vectorscope);
-            projection_waveform.Configure(analysis.waveform);
-            sync_region_border();
-            analysis_dirty = false;
-            last_activity = glfwGetTime();
-            next_preferences_save = glfwGetTime() + 1.0;
+        if (analysisDirty) {
+            worker.updateSettings(analysis);
+            projectionVectorscope.configure(analysis.vectorscope);
+            projectionWaveform.configure(analysis.waveform);
+            syncRegionBorder();
+            analysisDirty = false;
+            lastActivity = glfwGetTime();
+            nextPreferencesSave = glfwGetTime() + 1.0;
         }
-        if (next_preferences_save > 0.0 && glfwGetTime() > next_preferences_save) {
-            save_preferences();
-            next_preferences_save = -1.0;
+        if (nextPreferencesSave > 0.0 && glfwGetTime() > nextPreferencesSave) {
+            persistPreferences();
+            nextPreferencesSave = -1.0;
         }
     }
 
-    save_preferences();
-    HideRegionBorder();
-    worker.Stop();
-    capture->Stop();
-    graphics->Shutdown();
+    persistPreferences();
+    hideRegionBorder();
+    worker.stop();
+    capture->stop();
+    graphics->shutdown();
     ImGui::DestroyContext();
     glfwDestroyWindow(window);
     glfwTerminate();

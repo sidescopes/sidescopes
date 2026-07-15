@@ -10,47 +10,52 @@
 
 namespace sidescopes {
 
-enum class CapturePermission { Granted, Denied };
+enum class CapturePermission
+{
+    Granted,
+    Denied
+};
 
 // A capture target is a whole display. Arbitrary-rectangle regions are
 // always cropped app-side: the least capable backend (Linux portals, where
 // the user picks a target and the app cannot request rectangles) defines the
 // contract, and richer backends may crop at the source only as an invisible
 // optimization.
-struct CaptureTarget {
+struct CaptureTarget
+{
     std::string identifier;   // backend-specific, stable while connected
     std::string description;  // human-readable
     // The same display identity the desktop services speak
     // (GeometryOfDisplay, OnScreenWindows, the region overlays). Capture
     // backends and desktop services enumerate displays through different
     // APIs; this field is the bridge, resolved by the backend.
-    uint32_t display_id = 0;
-    int width_points = 0;
-    int height_points = 0;
+    uint32_t displayId = 0;
+    int widthPoints = 0;
+    int heightPoints = 0;
 };
 
 // Implemented per platform. Frames arrive in the mailbox from a
 // backend-owned thread. Status messages (including stream death — capture is
 // a service that can die at any time, e.g. on lock screen) arrive via the
 // callback, possibly from any thread; the application restarts on failure.
-class ScreenCaptureSource {
+class ScreenCaptureSource
+{
 public:
     using StatusCallback = std::function<void(const std::string& message)>;
 
     virtual ~ScreenCaptureSource() = default;
 
     // May prompt the user on first call.
-    virtual CapturePermission RequestPermission() = 0;
+    virtual CapturePermission requestPermission() = 0;
 
-    virtual std::vector<CaptureTarget> ListTargets() = 0;
+    virtual std::vector<CaptureTarget> listTargets() = 0;
 
-    virtual bool Start(const CaptureTarget& target, int max_frames_per_second,
-                       FrameMailbox& mailbox) = 0;
-    virtual void Stop() = 0;
+    virtual bool start(const CaptureTarget& target, int maxFramesPerSecond, FrameMailbox& mailbox) = 0;
+    virtual void stop() = 0;
 
-    virtual void SetStatusCallback(StatusCallback callback) = 0;
+    virtual void setStatusCallback(StatusCallback callback) = 0;
 };
 
-std::unique_ptr<ScreenCaptureSource> CreateScreenCaptureSource();
+std::unique_ptr<ScreenCaptureSource> createScreenCaptureSource();
 
 }  // namespace sidescopes

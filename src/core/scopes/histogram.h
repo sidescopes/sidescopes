@@ -7,7 +7,8 @@
 
 namespace sidescopes {
 
-enum class HistogramStyle {
+enum class HistogramStyle
+{
     // All three channels overlaid additively in one plot, the photo
     // editors' habit: secondary colors encode channel overlap.
     Combined,
@@ -17,16 +18,17 @@ enum class HistogramStyle {
     PerChannel,
 };
 
-struct HistogramSettings {
+struct HistogramSettings
+{
     HistogramStyle style = HistogramStyle::PerChannel;
     // Sample every Nth pixel horizontally and vertically (1..8).
-    int sampling_stride = 1;
+    int samplingStride = 1;
     // Display image resolution. Sized near the pane, the plot renders
     // close to one texture pixel per screen pixel, so the outline keeps
     // one width on flats and steep slopes alike - a fixed texture
     // stretched anisotropically turned the stroke elliptical.
-    int image_width = 2048;
-    int image_height = 768;
+    int imageWidth = 2048;
+    int imageHeight = 768;
 };
 
 // Classic RGB histogram, the way photo editors draw it: one column per
@@ -39,42 +41,50 @@ struct HistogramSettings {
 // independent of sampling stride and region size.
 //
 // Not thread-safe; a single analysis thread owns each instance.
-class Histogram {
+class Histogram
+{
 public:
-    static constexpr int kBins = 256;
+    static constexpr int Bins = 256;
     // Defaults: supersampled horizontally - several image columns per
     // bin, heights following a Catmull-Rom spline through the bin
     // centers - so the histogram reads as a plotted function rather
     // than a bar chart, without kinks at the bins.
-    static constexpr int kImageWidth = kBins * 8;
-    static constexpr int kHeight = 768;
+    static constexpr int ImageWidth = Bins * 8;
+    static constexpr int Height = 768;
 
     Histogram();
 
-    void Configure(const HistogramSettings& settings);
-    void Accumulate(const FrameView& frame, IntRect region);
-    [[nodiscard]] const ScopeImage& Image() const { return image_; }
+    void configure(const HistogramSettings& settings);
+    void accumulate(const FrameView& frame, IntRect region);
 
-    // The curve itself, three channels of kBins normalized heights in
+    [[nodiscard]] const ScopeImage& image() const
+    {
+        return m_image;
+    }
+
+    // The curve itself, three channels of Bins normalized heights in
     // [0, 1] (full scale regardless of style). The interface draws it as
     // a display-resolution line over the image: a stroke baked into the
     // texture changes apparent thickness with the pane's stretch, which
     // is anisotropic - thick on flats, thin on slopes, at any texture
     // size.
-    [[nodiscard]] const std::vector<float>& OutlineHeights() const { return outline_; }
+    [[nodiscard]] const std::vector<float>& outlineHeights() const
+    {
+        return m_outline;
+    }
 
 private:
-    void MapBinsToImage();
+    void mapBinsToImage();
 
-    void Resize(int width, int height);
+    void resize(int width, int height);
 
-    HistogramSettings settings_;
-    int width_ = kImageWidth;
-    int height_ = kHeight;
-    // Three planes of kBins counts: red, green, blue.
-    std::vector<uint32_t> bins_;
-    std::vector<float> outline_;
-    ScopeImage image_;
+    HistogramSettings m_settings;
+    int m_width = ImageWidth;
+    int m_height = Height;
+    // Three planes of Bins counts: red, green, blue.
+    std::vector<uint32_t> m_bins;
+    std::vector<float> m_outline;
+    ScopeImage m_image;
 };
 
 }  // namespace sidescopes

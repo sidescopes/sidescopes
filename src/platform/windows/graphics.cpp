@@ -33,49 +33,70 @@
 namespace sidescopes {
 namespace {
 
-class OpenGlScopeTexture final : public ScopeTexture {
+class OpenGlScopeTexture final : public ScopeTexture
+{
 public:
-    OpenGlScopeTexture(int width, int height) : width_(width), height_(height) {
-        glGenTextures(1, &texture_);
-        glBindTexture(GL_TEXTURE_2D, texture_);
+    OpenGlScopeTexture(int width, int height)
+        : m_width(width),
+          m_height(height)
+    {
+        glGenTextures(1, &m_texture);
+        glBindTexture(GL_TEXTURE_2D, m_texture);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE,
-                     nullptr);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
     }
 
-    ~OpenGlScopeTexture() override { glDeleteTextures(1, &texture_); }
+    ~OpenGlScopeTexture() override
+    {
+        glDeleteTextures(1, &m_texture);
+    }
 
-    void Upload(const ScopeImage& image) override {
+    void upload(const ScopeImage& image) override
+    {
         // A scope just toggled on can race one worker pass: the fetched
         // output predates the toggle and carries an empty image for it.
-        if (image.rgba.size() < static_cast<std::size_t>(width_) * height_ * 4) return;
-        glBindTexture(GL_TEXTURE_2D, texture_);
-        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width_, height_, GL_RGBA, GL_UNSIGNED_BYTE,
-                        image.rgba.data());
+        if (image.rgba.size() < static_cast<std::size_t>(m_width) * m_height * 4) {
+            return;
+        }
+        glBindTexture(GL_TEXTURE_2D, m_texture);
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, m_width, m_height, GL_RGBA, GL_UNSIGNED_BYTE, image.rgba.data());
     }
 
-    [[nodiscard]] ImTextureID Id() const override { return static_cast<ImTextureID>(texture_); }
+    [[nodiscard]] ImTextureID textureId() const override
+    {
+        return static_cast<ImTextureID>(m_texture);
+    }
 
-    [[nodiscard]] int Width() const override { return width_; }
-    [[nodiscard]] int Height() const override { return height_; }
+    [[nodiscard]] int width() const override
+    {
+        return m_width;
+    }
+
+    [[nodiscard]] int height() const override
+    {
+        return m_height;
+    }
 
 private:
-    int width_;
-    int height_;
-    GLuint texture_ = 0;
+    int m_width;
+    int m_height;
+    GLuint m_texture = 0;
 };
 
-class OpenGlGraphics final : public GraphicsBackend {
+class OpenGlGraphics final : public GraphicsBackend
+{
 public:
-    void SetWindowHints() override {
+    void setWindowHints() override
+    {
         glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
         glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 2);
         glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
     }
 
-    bool Init(GLFWwindow* window) override {
-        window_ = window;
+    bool init(GLFWwindow* window) override
+    {
+        m_window = window;
         glfwMakeContextCurrent(window);
         // Frame pacing comes from DwmFlush in EndFrame, not the swap
         // interval: measured on this pipeline (NVIDIA, DWM-composited
@@ -89,7 +110,9 @@ public:
         // excludes itself. Best effort: unsupported before Windows 10
         // 2004, where the analysis-side masking still applies.
         SetWindowDisplayAffinity(glfwGetWin32Window(window), WDA_EXCLUDEFROMCAPTURE);
-        if (!ImGui_ImplGlfw_InitForOpenGL(window, true)) return false;
+        if (!ImGui_ImplGlfw_InitForOpenGL(window, true)) {
+            return false;
+        }
         if (!ImGui_ImplOpenGL3_Init("#version 150")) {
             ImGui_ImplGlfw_Shutdown();
             return false;
@@ -97,29 +120,33 @@ public:
         return true;
     }
 
-    void Shutdown() override {
+    void shutdown() override
+    {
         ImGui_ImplOpenGL3_Shutdown();
         ImGui_ImplGlfw_Shutdown();
     }
 
-    std::unique_ptr<ScopeTexture> CreateScopeTexture(int width, int height) override {
+    std::unique_ptr<ScopeTexture> createScopeTexture(int width, int height) override
+    {
         return std::make_unique<OpenGlScopeTexture>(width, height);
     }
 
-    bool BeginFrame(int framebuffer_width, int framebuffer_height) override {
-        framebuffer_width_ = framebuffer_width;
-        framebuffer_height_ = framebuffer_height;
+    bool beginFrame(int framebufferWidth, int framebufferHeight) override
+    {
+        m_framebufferWidth = framebufferWidth;
+        m_framebufferHeight = framebufferHeight;
         ImGui_ImplOpenGL3_NewFrame();
         ImGui_ImplGlfw_NewFrame();
         return true;
     }
 
-    void EndFrame() override {
-        glViewport(0, 0, framebuffer_width_, framebuffer_height_);
+    void endFrame() override
+    {
+        glViewport(0, 0, m_framebufferWidth, m_framebufferHeight);
         glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT);
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
-        glfwSwapBuffers(window_);
+        glfwSwapBuffers(m_window);
         // Composition-tick pacing; see Init. Failure means the compositor
         // is gone (a remote session, say) - render unpaced rather than
         // not at all.
@@ -127,14 +154,15 @@ public:
     }
 
 private:
-    GLFWwindow* window_ = nullptr;
-    int framebuffer_width_ = 0;
-    int framebuffer_height_ = 0;
+    GLFWwindow* m_window = nullptr;
+    int m_framebufferWidth = 0;
+    int m_framebufferHeight = 0;
 };
 
 }  // namespace
 
-std::unique_ptr<GraphicsBackend> CreateGraphicsBackend() {
+std::unique_ptr<GraphicsBackend> createGraphicsBackend()
+{
     return std::make_unique<OpenGlGraphics>();
 }
 

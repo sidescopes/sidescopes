@@ -8,23 +8,24 @@
 
 namespace sidescopes {
 
-inline constexpr int kDefaultWaveformColumns = 1024;
-inline constexpr int kWaveformLevels = 256;
+inline constexpr int DefaultWaveformColumns = 1024;
+inline constexpr int WaveformLevels = 256;
 
-struct WaveformSettings {
+struct WaveformSettings
+{
     // Trace gain applied to normalized bin densities before log mapping.
     float gain = 0.05f;
     // Sample every Nth pixel horizontally and vertically (1..8).
-    int sampling_stride = 1;
+    int samplingStride = 1;
     WaveformMode mode = WaveformMode::Rgb;
     // Horizontal resolution: more columns sharpen a big pane, fewer keep
     // a narrow region's columns densely populated - there is no point
     // resolving more columns than the region has pixels.
-    int columns = kDefaultWaveformColumns;
+    int columns = DefaultWaveformColumns;
     // Rendered image height. Level data always has 256 codes; a taller
     // image samples them through a spline so magnified traces draw as
     // curves rather than stretched texels.
-    int image_height = kWaveformLevels;
+    int imageHeight = WaveformLevels;
 };
 
 // Waveform monitor: level (vertical) against image column (horizontal).
@@ -35,46 +36,52 @@ struct WaveformSettings {
 // both the sampling stride and the region size.
 //
 // Not thread-safe; a single analysis thread owns each instance.
-class Waveform {
+class Waveform
+{
 public:
-    static constexpr int kColumns = kDefaultWaveformColumns;
-    static constexpr int kLevels = kWaveformLevels;
+    static constexpr int Columns = DefaultWaveformColumns;
+    static constexpr int Levels = WaveformLevels;
 
     Waveform();
 
-    void Configure(const WaveformSettings& settings);
-    void Accumulate(const FrameView& frame, IntRect region);
-    [[nodiscard]] const ScopeImage& Image() const { return image_; }
+    void configure(const WaveformSettings& settings);
+    void accumulate(const FrameView& frame, IntRect region);
+
+    [[nodiscard]] const ScopeImage& image() const
+    {
+        return m_image;
+    }
 
     // The luma level a color sits at, as a normalized vertical position.
     // The horizontal position depends on where the color appears in the
     // image, which a bare color cannot know; x is reported as -1 and callers
     // draw a horizontal level line. Per-channel lines are trivial for
     // callers to place themselves: the level of a channel is its own value.
-    [[nodiscard]] std::optional<NormalizedPoint> Project(const FloatColor& color) const;
+    [[nodiscard]] std::optional<NormalizedPoint> project(const FloatColor& color) const;
 
 private:
-    void Resize(int columns, int image_height);
-    void MapBinsToImage(uint64_t sampled_rows);
+    void resize(int columns, int imageHeight);
+    void mapBinsToImage(uint64_t sampledRows);
 
-    [[nodiscard]] std::size_t PlaneSize() const {
-        return static_cast<std::size_t>(columns_) * kLevels;
+    [[nodiscard]] std::size_t planeSize() const
+    {
+        return static_cast<std::size_t>(m_columns) * Levels;
     }
 
-    WaveformSettings settings_;
-    int columns_ = kDefaultWaveformColumns;
-    int image_height_ = kWaveformLevels;
-    // Planes: red, green, blue, luma — each columns x kLevels, a row per
+    WaveformSettings m_settings;
+    int m_columns = DefaultWaveformColumns;
+    int m_imageHeight = WaveformLevels;
+    // Planes: red, green, blue, luma — each columns x Levels, a row per
     // level with level 255 in row zero.
-    std::vector<uint32_t> bins_;
+    std::vector<uint32_t> m_bins;
     // Parade scratch: per-channel window-maxed planes feeding the shared
     // composer.
-    std::vector<uint32_t> parade_;
+    std::vector<uint32_t> m_parade;
     // Per-plane scratch for the code-density correction: dead-code
     // reconstruction happens here before smoothing.
-    std::vector<uint32_t> corrected_;
-    std::vector<uint32_t> smoothed_;
-    ScopeImage image_;
+    std::vector<uint32_t> m_corrected;
+    std::vector<uint32_t> m_smoothed;
+    ScopeImage m_image;
 };
 
 }  // namespace sidescopes

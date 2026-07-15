@@ -9,11 +9,18 @@ namespace sidescopes {
 // and returns the chosen action id, or -1 when dismissed. Menus are the most
 // native-feeling surface an app can offer and cost one small implementation
 // per platform.
-struct NativeMenuItem {
-    enum class Kind { Action, Separator, SubmenuBegin, SubmenuEnd };
+struct NativeMenuItem
+{
+    enum class Kind
+    {
+        Action,
+        Separator,
+        SubmenuBegin,
+        SubmenuEnd
+    };
     Kind kind = Kind::Action;
     std::string label;
-    int action_id = -1;
+    int actionId = -1;
     bool checked = false;
     // Display-only keyboard shortcut, shown the platform's way: a single
     // letter, optionally prefixed "Shift+", or "Esc". The application
@@ -21,6 +28,6 @@ struct NativeMenuItem {
     std::string shortcut;
 };
 
-int ShowNativeContextMenu(const std::vector<NativeMenuItem>& items);
+int showNativeContextMenu(const std::vector<NativeMenuItem>& items);
 
 }  // namespace sidescopes

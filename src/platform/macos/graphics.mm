@@ -19,10 +19,13 @@
 namespace sidescopes {
 namespace {
 
-class MetalScopeTexture final : public ScopeTexture {
+class MetalScopeTexture final : public ScopeTexture
+{
 public:
     MetalScopeTexture(id<MTLDevice> device, int width, int height)
-        : width_(width), height_(height) {
+        : m_width(width),
+          m_height(height)
+    {
         MTLTextureDescriptor* descriptor =
             [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatRGBA8Unorm
                                                                width:width
@@ -30,134 +33,162 @@ public:
                                                            mipmapped:NO];
         descriptor.usage = MTLTextureUsageShaderRead;
         descriptor.storageMode = MTLStorageModeManaged;
-        texture_ = [device newTextureWithDescriptor:descriptor];
+        m_texture = [device newTextureWithDescriptor:descriptor];
     }
 
-    void Upload(const ScopeImage& image) override {
+    void upload(const ScopeImage& image) override
+    {
         // A scope just toggled on can race one worker pass: the fetched
         // output predates the toggle and carries an empty image for it.
         // Uploading that null buffer is a GPU-side crash; skip the frame.
-        if (image.rgba.size() < static_cast<std::size_t>(width_) * height_ * 4) return;
-        [texture_ replaceRegion:MTLRegionMake2D(0, 0, width_, height_)
-                    mipmapLevel:0
-                      withBytes:image.rgba.data()
-                    bytesPerRow:static_cast<NSUInteger>(width_) * 4];
+        if (image.rgba.size() < static_cast<std::size_t>(m_width) * m_height * 4) {
+            return;
+        }
+        [m_texture replaceRegion:MTLRegionMake2D(0, 0, m_width, m_height)
+                     mipmapLevel:0
+                       withBytes:image.rgba.data()
+                     bytesPerRow:static_cast<NSUInteger>(m_width) * 4];
     }
 
-    [[nodiscard]] ImTextureID Id() const override {
-        return reinterpret_cast<ImTextureID>((__bridge void*)texture_);
+    [[nodiscard]] ImTextureID textureId() const override
+    {
+        return reinterpret_cast<ImTextureID>((__bridge void*)m_texture);
     }
 
-    [[nodiscard]] int Width() const override { return width_; }
-    [[nodiscard]] int Height() const override { return height_; }
+    [[nodiscard]] int width() const override
+    {
+        return m_width;
+    }
+
+    [[nodiscard]] int height() const override
+    {
+        return m_height;
+    }
 
 private:
-    int width_;
-    int height_;
-    id<MTLTexture> texture_;
+    int m_width;
+    int m_height;
+    id<MTLTexture> m_texture;
 };
 
-class MetalGraphics final : public GraphicsBackend {
+class MetalGraphics final : public GraphicsBackend
+{
 public:
-    void SetWindowHints() override { glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API); }
+    void setWindowHints() override
+    {
+        glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
+    }
 
-    bool Init(GLFWwindow* window) override {
-        device_ = MTLCreateSystemDefaultDevice();
-        if (!device_) return false;
-        command_queue_ = [device_ newCommandQueue];
+    bool init(GLFWwindow* window) override
+    {
+        m_device = MTLCreateSystemDefaultDevice();
+        if (!m_device) {
+            return false;
+        }
+        m_commandQueue = [m_device newCommandQueue];
 
-        native_window_ = glfwGetCocoaWindow(window);
-        layer_ = [CAMetalLayer layer];
-        layer_.device = device_;
-        layer_.pixelFormat = MTLPixelFormatBGRA8Unorm;
-        native_window_.contentView.layer = layer_;
-        native_window_.contentView.wantsLayer = YES;
+        m_nativeWindow = glfwGetCocoaWindow(window);
+        m_layer = [CAMetalLayer layer];
+        m_layer.device = m_device;
+        m_layer.pixelFormat = MTLPixelFormatBGRA8Unorm;
+        m_nativeWindow.contentView.layer = m_layer;
+        m_nativeWindow.contentView.wantsLayer = YES;
         // During a live window resize macOS runs a modal tracking loop that
         // stalls the render loop; by default the layer stretches its last
         // frame to the new size, warping the scopes until release. Pinning
         // the contents to the top-left keeps the last frame 1:1 - blank space
         // when growing, cropped when shrinking - and the loop redraws
         // correctly the moment the drag ends.
-        layer_.contentsGravity = kCAGravityTopLeft;
+        m_layer.contentsGravity = kCAGravityTopLeft;
         // Gravity makes the contents scale meaningful: without it the Retina
         // drawable displays at double size. The stretch gravity used to hide
         // that this was never set.
-        layer_.contentsScale = native_window_.backingScaleFactor;
+        m_layer.contentsScale = m_nativeWindow.backingScaleFactor;
         // The area beyond the pinned contents during a grow shows the layer
         // and window background; both match the application's black.
-        layer_.backgroundColor = CGColorGetConstantColor(kCGColorBlack);
-        native_window_.backgroundColor = NSColor.blackColor;
+        m_layer.backgroundColor = CGColorGetConstantColor(kCGColorBlack);
+        m_nativeWindow.backgroundColor = NSColor.blackColor;
         // Above document and panel windows (Quick Look previews float higher
         // than ordinary floating windows), on every Space.
-        native_window_.level = NSStatusWindowLevel;
-        native_window_.collectionBehavior = NSWindowCollectionBehaviorCanJoinAllSpaces |
-                                            NSWindowCollectionBehaviorFullScreenAuxiliary;
+        m_nativeWindow.level = NSStatusWindowLevel;
+        m_nativeWindow.collectionBehavior =
+            NSWindowCollectionBehaviorCanJoinAllSpaces | NSWindowCollectionBehaviorFullScreenAuxiliary;
 
-        if (!ImGui_ImplGlfw_InitForOther(window, true)) return false;
-        if (!ImGui_ImplMetal_Init(device_)) {
+        if (!ImGui_ImplGlfw_InitForOther(window, true)) {
+            return false;
+        }
+        if (!ImGui_ImplMetal_Init(m_device)) {
             ImGui_ImplGlfw_Shutdown();
             return false;
         }
         return true;
     }
 
-    void Shutdown() override {
+    void shutdown() override
+    {
         ImGui_ImplMetal_Shutdown();
         ImGui_ImplGlfw_Shutdown();
     }
 
-    std::unique_ptr<ScopeTexture> CreateScopeTexture(int width, int height) override {
-        return std::make_unique<MetalScopeTexture>(device_, width, height);
+    std::unique_ptr<ScopeTexture> createScopeTexture(int width, int height) override
+    {
+        return std::make_unique<MetalScopeTexture>(m_device, width, height);
     }
 
-    bool BeginFrame(int framebuffer_width, int framebuffer_height) override {
-        layer_.drawableSize = CGSizeMake(framebuffer_width, framebuffer_height);
+    bool beginFrame(int framebufferWidth, int framebufferHeight) override
+    {
+        m_layer.drawableSize = CGSizeMake(framebufferWidth, framebufferHeight);
         // The window may have moved to a display with a different scale.
-        if (layer_.contentsScale != native_window_.backingScaleFactor)
-            layer_.contentsScale = native_window_.backingScaleFactor;
-        layer_.backgroundColor = CGColorGetConstantColor(kCGColorBlack);
-        native_window_.backgroundColor = NSColor.blackColor;
-        drawable_ = [layer_ nextDrawable];
-        if (!drawable_) return false;
+        if (m_layer.contentsScale != m_nativeWindow.backingScaleFactor) {
+            m_layer.contentsScale = m_nativeWindow.backingScaleFactor;
+        }
+        m_layer.backgroundColor = CGColorGetConstantColor(kCGColorBlack);
+        m_nativeWindow.backgroundColor = NSColor.blackColor;
+        m_drawable = [m_layer nextDrawable];
+        if (!m_drawable) {
+            return false;
+        }
 
-        pass_ = [MTLRenderPassDescriptor renderPassDescriptor];
-        pass_.colorAttachments[0].texture = drawable_.texture;
-        pass_.colorAttachments[0].loadAction = MTLLoadActionClear;
-        pass_.colorAttachments[0].storeAction = MTLStoreActionStore;
-        pass_.colorAttachments[0].clearColor = MTLClearColorMake(0, 0, 0, 1);
-        commands_ = [command_queue_ commandBuffer];
-        encoder_ = [commands_ renderCommandEncoderWithDescriptor:pass_];
+        m_pass = [MTLRenderPassDescriptor renderPassDescriptor];
+        m_pass.colorAttachments[0].texture = m_drawable.texture;
+        m_pass.colorAttachments[0].loadAction = MTLLoadActionClear;
+        m_pass.colorAttachments[0].storeAction = MTLStoreActionStore;
+        m_pass.colorAttachments[0].clearColor = MTLClearColorMake(0, 0, 0, 1);
+        m_commands = [m_commandQueue commandBuffer];
+        m_encoder = [m_commands renderCommandEncoderWithDescriptor:m_pass];
 
-        ImGui_ImplMetal_NewFrame(pass_);
+        ImGui_ImplMetal_NewFrame(m_pass);
         ImGui_ImplGlfw_NewFrame();
         return true;
     }
 
-    void EndFrame() override {
-        ImGui_ImplMetal_RenderDrawData(ImGui::GetDrawData(), commands_, encoder_);
-        [encoder_ endEncoding];
-        [commands_ presentDrawable:drawable_];
-        [commands_ commit];
-        encoder_ = nil;
-        commands_ = nil;
-        pass_ = nil;
-        drawable_ = nil;
+    void endFrame() override
+    {
+        ImGui_ImplMetal_RenderDrawData(ImGui::GetDrawData(), m_commands, m_encoder);
+        [m_encoder endEncoding];
+        [m_commands presentDrawable:m_drawable];
+        [m_commands commit];
+        m_encoder = nil;
+        m_commands = nil;
+        m_pass = nil;
+        m_drawable = nil;
     }
 
 private:
-    id<MTLDevice> device_ = nil;
-    id<MTLCommandQueue> command_queue_ = nil;
-    NSWindow* native_window_ = nil;
-    CAMetalLayer* layer_ = nil;
-    id<CAMetalDrawable> drawable_ = nil;
-    MTLRenderPassDescriptor* pass_ = nil;
-    id<MTLCommandBuffer> commands_ = nil;
-    id<MTLRenderCommandEncoder> encoder_ = nil;
+    id<MTLDevice> m_device = nil;
+    id<MTLCommandQueue> m_commandQueue = nil;
+    NSWindow* m_nativeWindow = nil;
+    CAMetalLayer* m_layer = nil;
+    id<CAMetalDrawable> m_drawable = nil;
+    MTLRenderPassDescriptor* m_pass = nil;
+    id<MTLCommandBuffer> m_commands = nil;
+    id<MTLRenderCommandEncoder> m_encoder = nil;
 };
 
 }  // namespace
 
-std::unique_ptr<GraphicsBackend> CreateGraphicsBackend() {
+std::unique_ptr<GraphicsBackend> createGraphicsBackend()
+{
     return std::make_unique<MetalGraphics>();
 }
 

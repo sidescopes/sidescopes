@@ -30,102 +30,116 @@ namespace {
 
 using Microsoft::WRL::ComPtr;
 
-class DxgiScreenCaptureSource final : public ScreenCaptureSource {
+class DxgiScreenCaptureSource final : public ScreenCaptureSource
+{
 public:
-    ~DxgiScreenCaptureSource() override { Stop(); }
+    ~DxgiScreenCaptureSource() override
+    {
+        stop();
+    }
 
-    CapturePermission RequestPermission() override {
+    CapturePermission requestPermission()
+    {
         // Reading the desktop needs no user consent on Windows.
         return CapturePermission::Granted;
     }
 
-    std::vector<CaptureTarget> ListTargets() override {
+    std::vector<CaptureTarget> listTargets()
+    {
         std::vector<CaptureTarget> targets;
         ComPtr<IDXGIFactory1> factory;
-        if (FAILED(CreateDXGIFactory1(IID_PPV_ARGS(&factory)))) return targets;
+        if (FAILED(CreateDXGIFactory1(IID_PPV_ARGS(&factory)))) {
+            return targets;
+        }
 
         ComPtr<IDXGIAdapter1> adapter;
-        for (UINT adapter_index = 0;
-             factory->EnumAdapters1(adapter_index, &adapter) != DXGI_ERROR_NOT_FOUND;
-             ++adapter_index) {
+        for (UINT adapterIndex = 0; factory->EnumAdapters1(adapterIndex, &adapter) != DXGI_ERROR_NOT_FOUND;
+             ++adapterIndex) {
             ComPtr<IDXGIOutput> output;
-            for (UINT output_index = 0;
-                 adapter->EnumOutputs(output_index, &output) != DXGI_ERROR_NOT_FOUND;
-                 ++output_index) {
+            for (UINT outputIndex = 0; adapter->EnumOutputs(outputIndex, &output) != DXGI_ERROR_NOT_FOUND;
+                 ++outputIndex) {
                 DXGI_OUTPUT_DESC description{};
-                if (FAILED(output->GetDesc(&description)) || !description.AttachedToDesktop)
+                if (FAILED(output->GetDesc(&description)) || !description.AttachedToDesktop) {
                     continue;
+                }
                 CaptureTarget target;
-                target.identifier =
-                    std::to_string(adapter_index) + ":" + std::to_string(output_index);
+                target.identifier = std::to_string(adapterIndex) + ":" + std::to_string(outputIndex);
                 char name[64];
-                const int written = WideCharToMultiByte(CP_UTF8, 0, description.DeviceName, -1,
-                                                        name, sizeof(name), nullptr, nullptr);
+                const int written =
+                    WideCharToMultiByte(CP_UTF8, 0, description.DeviceName, -1, name, sizeof(name), nullptr, nullptr);
                 target.description = written > 0 ? name : "Display";
-                target.display_id = DisplayIdFromDeviceName(description.DeviceName);
+                target.displayId = displayIdFromDeviceName(description.DeviceName);
                 const RECT& rect = description.DesktopCoordinates;
-                target.width_points = static_cast<int>(rect.right - rect.left);
-                target.height_points = static_cast<int>(rect.bottom - rect.top);
+                target.widthPoints = static_cast<int>(rect.right - rect.left);
+                target.heightPoints = static_cast<int>(rect.bottom - rect.top);
                 targets.push_back(std::move(target));
             }
         }
         return targets;
     }
 
-    bool Start(const CaptureTarget& target, int max_frames_per_second,
-               FrameMailbox& mailbox) override {
-        Stop();
-        UINT adapter_index = 0;
-        UINT output_index = 0;
+    bool start(const CaptureTarget& target, int maxFramesPerSecond, FrameMailbox& mailbox)
+    {
+        stop();
+        UINT adapterIndex = 0;
+        UINT outputIndex = 0;
         const auto separator = target.identifier.find(':');
-        if (separator == std::string::npos) return false;
-        adapter_index = static_cast<UINT>(std::strtoul(target.identifier.c_str(), nullptr, 10));
-        output_index =
-            static_cast<UINT>(std::strtoul(target.identifier.c_str() + separator + 1, nullptr, 10));
+        if (separator == std::string::npos) {
+            return false;
+        }
+        adapterIndex = static_cast<UINT>(std::strtoul(target.identifier.c_str(), nullptr, 10));
+        outputIndex = static_cast<UINT>(std::strtoul(target.identifier.c_str() + separator + 1, nullptr, 10));
 
-        stop_requested_.store(false);
-        worker_ = std::thread([this, adapter_index, output_index, max_frames_per_second, &mailbox] {
-            CaptureLoop(adapter_index, output_index, max_frames_per_second, mailbox);
+        m_stopRequested.store(false);
+        m_worker = std::thread([this, adapterIndex, outputIndex, maxFramesPerSecond, &mailbox] {
+            captureLoop(adapterIndex, outputIndex, maxFramesPerSecond, mailbox);
         });
         return true;
     }
 
-    void Stop() override {
-        stop_requested_.store(true);
-        if (worker_.joinable()) worker_.join();
+    void stop()
+    {
+        m_stopRequested.store(true);
+        if (m_worker.joinable()) {
+            m_worker.join();
+        }
     }
 
-    void SetStatusCallback(StatusCallback callback) override {
-        status_callback_ = std::move(callback);
+    void setStatusCallback(StatusCallback callback)
+    {
+        m_statusCallback = std::move(callback);
     }
 
 private:
-    void ReportStatus(const std::string& message) {
-        if (status_callback_) status_callback_(message);
+    void reportStatus(const std::string& message)
+    {
+        if (m_statusCallback) {
+            m_statusCallback(message);
+        }
     }
 
-    void CaptureLoop(UINT adapter_index, UINT output_index, int max_frames_per_second,
-                     FrameMailbox& mailbox) {
+    void captureLoop(UINT adapterIndex, UINT outputIndex, int maxFramesPerSecond, FrameMailbox& mailbox)
+    {
         ComPtr<IDXGIFactory1> factory;
         ComPtr<IDXGIAdapter1> adapter;
         ComPtr<IDXGIOutput> output;
         if (FAILED(CreateDXGIFactory1(IID_PPV_ARGS(&factory))) ||
-            FAILED(factory->EnumAdapters1(adapter_index, &adapter)) ||
-            FAILED(adapter->EnumOutputs(output_index, &output))) {
-            ReportStatus("capture target disappeared");
+            FAILED(factory->EnumAdapters1(adapterIndex, &adapter)) ||
+            FAILED(adapter->EnumOutputs(outputIndex, &output))) {
+            reportStatus("capture target disappeared");
             return;
         }
         ComPtr<IDXGIOutput1> output1;
         if (FAILED(output.As(&output1))) {
-            ReportStatus("output duplication is unavailable");
+            reportStatus("output duplication is unavailable");
             return;
         }
 
         ComPtr<ID3D11Device> device;
         ComPtr<ID3D11DeviceContext> context;
-        if (FAILED(D3D11CreateDevice(adapter.Get(), D3D_DRIVER_TYPE_UNKNOWN, nullptr, 0, nullptr, 0,
-                                     D3D11_SDK_VERSION, &device, nullptr, &context))) {
-            ReportStatus("could not create a capture device");
+        if (FAILED(D3D11CreateDevice(adapter.Get(), D3D_DRIVER_TYPE_UNKNOWN, nullptr, 0, nullptr, 0, D3D11_SDK_VERSION,
+                                     &device, nullptr, &context))) {
+            reportStatus("could not create a capture device");
             return;
         }
         // The engines assume 8-bit BGRA. On an HDR display plain
@@ -141,39 +155,41 @@ private:
             const DXGI_FORMAT formats[] = {DXGI_FORMAT_B8G8R8A8_UNORM};
             duplicated = output5->DuplicateOutput1(device.Get(), 0, 1, formats, &duplication);
         }
-        if (FAILED(duplicated)) duplicated = output1->DuplicateOutput(device.Get(), &duplication);
         if (FAILED(duplicated)) {
-            ReportStatus("could not duplicate the display");
+            duplicated = output1->DuplicateOutput(device.Get(), &duplication);
+        }
+        if (FAILED(duplicated)) {
+            reportStatus("could not duplicate the display");
             return;
         }
-        DXGI_OUTDUPL_DESC duplication_description{};
-        duplication->GetDesc(&duplication_description);
-        if (duplication_description.ModeDesc.Format != DXGI_FORMAT_B8G8R8A8_UNORM) {
-            ReportStatus("unsupported capture format (HDR display?)");
+        DXGI_OUTDUPL_DESC duplicationDescription{};
+        duplication->GetDesc(&duplicationDescription);
+        if (duplicationDescription.ModeDesc.Format != DXGI_FORMAT_B8G8R8A8_UNORM) {
+            reportStatus("unsupported capture format (HDR display?)");
             return;
         }
         // Rotated outputs deliver rotated rows: colors would survive but
         // the waveform axes and the region mapping would not.
-        if (duplication_description.Rotation != DXGI_MODE_ROTATION_IDENTITY &&
-            duplication_description.Rotation != DXGI_MODE_ROTATION_UNSPECIFIED) {
-            ReportStatus("rotated displays are not supported yet");
+        if (duplicationDescription.Rotation != DXGI_MODE_ROTATION_IDENTITY &&
+            duplicationDescription.Rotation != DXGI_MODE_ROTATION_UNSPECIFIED) {
+            reportStatus("rotated displays are not supported yet");
             return;
         }
 
         ComPtr<ID3D11Texture2D> staging;
         FrameBuffer buffer;
         uint64_t sequence = 0;
-        const auto minimum_interval = std::chrono::microseconds(
-            max_frames_per_second > 0 ? 1000000 / max_frames_per_second : 0);
-        auto last_publish = std::chrono::steady_clock::now() - minimum_interval;
+        const auto minimumInterval =
+            std::chrono::microseconds(maxFramesPerSecond > 0 ? 1000000 / maxFramesPerSecond : 0);
+        auto lastPublish = std::chrono::steady_clock::now() - minimumInterval;
 
-        while (!stop_requested_.load()) {
+        while (!m_stopRequested.load()) {
             // Pace before acquiring, not after: a frame acquired early and
             // dropped would be the freshest desktop there is, and when the
             // screen goes quiet right then, nothing else ever arrives - the
             // scopes would sit one frame stale. Sleeping first means every
             // frame actually acquired is published.
-            const auto due = last_publish + minimum_interval;
+            const auto due = lastPublish + minimumInterval;
             const auto now = std::chrono::steady_clock::now();
             if (now < due) {
                 std::this_thread::sleep_for(due - now);
@@ -183,13 +199,15 @@ private:
             DXGI_OUTDUPL_FRAME_INFO info{};
             ComPtr<IDXGIResource> resource;
             const HRESULT acquired = duplication->AcquireNextFrame(100, &info, &resource);
-            if (acquired == DXGI_ERROR_WAIT_TIMEOUT) continue;
+            if (acquired == DXGI_ERROR_WAIT_TIMEOUT) {
+                continue;
+            }
             if (acquired == DXGI_ERROR_ACCESS_LOST) {
-                ReportStatus("capture access lost");
+                reportStatus("capture access lost");
                 return;
             }
             if (FAILED(acquired)) {
-                ReportStatus("capture failed");
+                reportStatus("capture failed");
                 return;
             }
 
@@ -211,22 +229,22 @@ private:
                 // different-size frames in place; copying those into the
                 // old staging texture would misbehave silently.
                 if (staging) {
-                    D3D11_TEXTURE2D_DESC staging_current{};
-                    staging->GetDesc(&staging_current);
-                    if (staging_current.Width != description.Width ||
-                        staging_current.Height != description.Height ||
-                        staging_current.Format != description.Format)
+                    D3D11_TEXTURE2D_DESC stagingCurrent{};
+                    staging->GetDesc(&stagingCurrent);
+                    if (stagingCurrent.Width != description.Width || stagingCurrent.Height != description.Height ||
+                        stagingCurrent.Format != description.Format) {
                         staging.Reset();
+                    }
                 }
                 if (!staging) {
-                    D3D11_TEXTURE2D_DESC staging_description = description;
-                    staging_description.Usage = D3D11_USAGE_STAGING;
-                    staging_description.BindFlags = 0;
-                    staging_description.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
-                    staging_description.MiscFlags = 0;
-                    if (FAILED(device->CreateTexture2D(&staging_description, nullptr, &staging))) {
+                    D3D11_TEXTURE2D_DESC stagingDescription = description;
+                    stagingDescription.Usage = D3D11_USAGE_STAGING;
+                    stagingDescription.BindFlags = 0;
+                    stagingDescription.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+                    stagingDescription.MiscFlags = 0;
+                    if (FAILED(device->CreateTexture2D(&stagingDescription, nullptr, &staging))) {
                         duplication->ReleaseFrame();
-                        ReportStatus("could not create a staging texture");
+                        reportStatus("could not create a staging texture");
                         return;
                     }
                 }
@@ -246,27 +264,28 @@ private:
                     }
                     context->Unmap(staging.Get(), 0);
 
-                    buffer.stride_bytes = stride;
+                    buffer.strideBytes = stride;
                     buffer.width = width;
                     buffer.height = height;
-                    buffer.color_space = ColorSpaceHint::Srgb;
+                    buffer.colorSpace = ColorSpaceHint::Srgb;
                     buffer.sequence = ++sequence;
-                    buffer = mailbox.Publish(std::move(buffer));
-                    last_publish = now;
+                    buffer = mailbox.publish(std::move(buffer));
+                    lastPublish = now;
                 }
             }
             duplication->ReleaseFrame();
         }
     }
 
-    std::thread worker_;
-    std::atomic<bool> stop_requested_{false};
-    StatusCallback status_callback_;
+    std::thread m_worker;
+    std::atomic<bool> m_stopRequested{false};
+    StatusCallback m_statusCallback;
 };
 
 }  // namespace
 
-std::unique_ptr<ScreenCaptureSource> CreateScreenCaptureSource() {
+std::unique_ptr<ScreenCaptureSource> createScreenCaptureSource()
+{
     return std::make_unique<DxgiScreenCaptureSource>();
 }
 

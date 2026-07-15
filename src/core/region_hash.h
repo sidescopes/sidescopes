@@ -16,6 +16,6 @@ namespace sidescopes {
 // The hash samples every fourth row and reads those rows in full, which
 // detects any real content change at a quarter of the cost of reading every
 // pixel. FNV-1a over the sampled bytes.
-uint64_t HashRegion(const FrameView& frame, IntRect region, IntRect masked = IntRect{});
+uint64_t hashRegion(const FrameView& frame, IntRect region, IntRect masked = IntRect{});
 
 }  // namespace sidescopes

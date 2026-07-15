@@ -5,41 +5,47 @@
 
 namespace sidescopes {
 
-FloatColor AverageNeighborhood(const FrameView& frame, int px, int py, int radius) {
-    float sum_r = 0.0f, sum_g = 0.0f, sum_b = 0.0f;
+FloatColor averageNeighborhood(const FrameView& frame, int px, int py, int radius)
+{
+    float sumR = 0.0f, sumG = 0.0f, sumB = 0.0f;
     int count = 0;
     for (int dy = -radius; dy <= radius; ++dy) {
         for (int dx = -radius; dx <= radius; ++dx) {
-            const int sample_x = px + dx;
-            const int sample_y = py + dy;
-            if (sample_x < 0 || sample_x >= frame.width || sample_y < 0 || sample_y >= frame.height)
+            const int sampleX = px + dx;
+            const int sampleY = py + dy;
+            if (sampleX < 0 || sampleX >= frame.width || sampleY < 0 || sampleY >= frame.height) {
                 continue;
-            const Color color = frame.ColorAt(sample_x, sample_y);
-            sum_r += static_cast<float>(color.r);
-            sum_g += static_cast<float>(color.g);
-            sum_b += static_cast<float>(color.b);
+            }
+            const Color color = frame.colorAt(sampleX, sampleY);
+            sumR += static_cast<float>(color.r);
+            sumG += static_cast<float>(color.g);
+            sumB += static_cast<float>(color.b);
             ++count;
         }
     }
-    if (count == 0) return FloatColor{};
+    if (count == 0) {
+        return FloatColor{};
+    }
     const float scale = 1.0f / static_cast<float>(count);
-    return FloatColor{sum_r * scale, sum_g * scale, sum_b * scale};
+    return FloatColor{sumR * scale, sumG * scale, sumB * scale};
 }
 
-FloatColor MarkerSmoother::Update(const FloatColor& target, float elapsed_seconds) {
-    const float tau_seconds = time_constant_ms_ / 1000.0f;
-    const float alpha =
-        tau_seconds <= 0.0f ? 1.0f : 1.0f - std::exp(-elapsed_seconds / tau_seconds);
+FloatColor MarkerSmoother::update(const FloatColor& target, float elapsedSeconds)
+{
+    const float tauSeconds = m_timeConstantMs / 1000.0f;
+    const float alpha = tauSeconds <= 0.0f ? 1.0f : 1.0f - std::exp(-elapsedSeconds / tauSeconds);
 
-    value_.r += alpha * (target.r - value_.r);
-    value_.g += alpha * (target.g - value_.g);
-    value_.b += alpha * (target.b - value_.b);
+    m_value.r += alpha * (target.r - m_value.r);
+    m_value.g += alpha * (target.g - m_value.g);
+    m_value.b += alpha * (target.b - m_value.b);
 
-    const bool near_target = std::fabs(target.r - value_.r) < kSnapWindow &&
-                             std::fabs(target.g - value_.g) < kSnapWindow &&
-                             std::fabs(target.b - value_.b) < kSnapWindow;
-    if (near_target) value_ = target;
-    return value_;
+    const bool nearTarget = std::fabs(target.r - m_value.r) < SnapWindow &&
+                            std::fabs(target.g - m_value.g) < SnapWindow &&
+                            std::fabs(target.b - m_value.b) < SnapWindow;
+    if (nearTarget) {
+        m_value = target;
+    }
+    return m_value;
 }
 
 }  // namespace sidescopes

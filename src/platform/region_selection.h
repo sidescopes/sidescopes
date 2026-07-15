@@ -16,12 +16,19 @@ namespace sidescopes {
 // through a dim wash misleads - and the capture region is never
 // touched. Each click decides its own fate: a plain pin closes the
 // tool, a Shift+click (or Shift+drag) pins and keeps it open.
-enum class RegionPickerMode { PickWindows, Draw, PickFaces, PinColor };
+enum class RegionPickerMode
+{
+    PickWindows,
+    Draw,
+    PickFaces,
+    PinColor
+};
 
 // What the picker offers on one display. Region percentages are always
 // relative to their own display.
-struct PickerDisplay {
-    uint32_t display_id = 0;
+struct PickerDisplay
+{
+    uint32_t displayId = 0;
     std::vector<SuggestedRegion> windows;
     std::vector<SuggestedRegion> faces;
 };
@@ -32,10 +39,11 @@ struct PickerDisplay {
 // which display it belongs to. On the poll that delivers `finished`,
 // `confirmed` carries the chosen region, or nothing on cancel, and the
 // overlays are gone.
-struct RegionPickPoll {
+struct RegionPickPoll
+{
     bool active = false;
     bool finished = false;
-    uint32_t display_id = 0;
+    uint32_t displayId = 0;
     std::optional<RegionOfInterest> preview;
     std::optional<RegionOfInterest> confirmed;
     // Color pinning. `pinned_area` is the display-percent rectangle to
@@ -44,9 +52,9 @@ struct RegionPickPoll {
     // pick. `pinned_keep_open` carries the click's Shift state: the
     // user's per-pin choice to keep picking. While `pin_mode` is set the
     // caller must not treat previews or a finish as region changes.
-    std::optional<RegionOfInterest> pinned_area;
-    bool pinned_keep_open = false;
-    bool pin_mode = false;
+    std::optional<RegionOfInterest> pinnedArea;
+    bool pinnedKeepOpen = false;
+    bool pinMode = false;
 };
 
 // Screenshot-style selection spanning every display at once: each gets
@@ -63,20 +71,20 @@ struct RegionPickPoll {
 // application keeps running its frame loop (which also pumps the
 // overlays' events), and PollRegionPick is read once per frame so the
 // scopes can preview the selection before it is confirmed.
-bool BeginRegionPick(const std::vector<PickerDisplay>& displays, RegionPickerMode initial_mode);
-RegionPickPoll PollRegionPick();
+bool beginRegionPick(const std::vector<PickerDisplay>& displays, RegionPickerMode initialMode);
+RegionPickPoll pollRegionPick();
 
 // Cancels an active pick as if ESC had been pressed on the overlay.
-void CancelRegionPick();
+void cancelRegionPick();
 
 // Switches an active pick between its modes; no-op when none is active.
-void SetRegionPickMode(RegionPickerMode mode);
+void setRegionPickMode(RegionPickerMode mode);
 
 // The live color for the pin modes' cursor chip, pushed by the
 // application each frame: the sample comes from the capture frame, so
 // the chip previews exactly what a click would pin. Ignored outside the
 // pin modes.
-void SetRegionPickChipColor(const std::optional<FloatColor>& color);
+void setRegionPickChipColor(const std::optional<FloatColor>& color);
 
 // Persistent border around the monitored region so users can see what the
 // scopes are reading. Drawn OUTSIDE the region so the border itself never
@@ -85,18 +93,20 @@ void SetRegionPickChipColor(const std::optional<FloatColor>& color);
 // corners resize the region, the tab above the top edge moves it, and the
 // application polls the edit each frame so the scopes follow. Idempotent:
 // call Show again to move it.
-void ShowRegionBorder(uint32_t display_id, const RegionOfInterest& region);
-void HideRegionBorder();
+void showRegionBorder(uint32_t displayId, const RegionOfInterest& region);
+void hideRegionBorder();
 
 // The border's in-progress or just-finished adjustment, if any.
 // `dismissed` reports the border's own close affordances - the hover
 // close button and a double-click on the band - and means "stop
 // tracking this region"; the application resets to full screen.
-struct RegionBorderEdit {
+struct RegionBorderEdit
+{
     bool editing = false;
     bool dismissed = false;
     std::optional<RegionOfInterest> region;
 };
-RegionBorderEdit PollRegionBorderEdit();
+
+RegionBorderEdit pollRegionBorderEdit();
 
 }  // namespace sidescopes

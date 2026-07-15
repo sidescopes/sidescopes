@@ -12,16 +12,18 @@
 namespace sidescopes {
 
 // Owned frame storage passed between the capture and analysis threads.
-struct FrameBuffer {
+struct FrameBuffer
+{
     std::vector<uint8_t> data;
-    int stride_bytes = 0;
+    int strideBytes = 0;
     int width = 0;
     int height = 0;
-    ColorSpaceHint color_space = ColorSpaceHint::Unknown;
+    ColorSpaceHint colorSpace = ColorSpaceHint::Unknown;
     uint64_t sequence = 0;
 
-    [[nodiscard]] FrameView View() const {
-        return FrameView{data.data(), stride_bytes, width, height, color_space, sequence};
+    [[nodiscard]] FrameView view() const
+    {
+        return FrameView{data.data(), strideBytes, width, height, colorSpace, sequence};
     }
 };
 
@@ -30,54 +32,63 @@ struct FrameBuffer {
 // any frame the consumer has not taken yet — the consumer only ever sees the
 // newest frame, and nothing queues up when it falls behind. Buffers are
 // recycled in both directions so the steady state allocates nothing.
-class FrameMailbox {
+class FrameMailbox
+{
 public:
     // Publishes a filled buffer and returns storage to reuse for the next
     // frame (possibly empty on the first exchanges). If the previous frame
     // was never taken, its storage is what comes back.
-    FrameBuffer Publish(FrameBuffer&& filled) {
-        std::lock_guard lock(mutex_);
-        FrameBuffer reusable = std::move(returned_);
-        if (has_pending_) reusable = std::move(pending_);
-        pending_ = std::move(filled);
-        has_pending_ = true;
-        available_.notify_one();
+    FrameBuffer publish(FrameBuffer&& filled)
+    {
+        std::lock_guard lock(m_mutex);
+        FrameBuffer reusable = std::move(m_returned);
+        if (m_hasPending) {
+            reusable = std::move(m_pending);
+        }
+        m_pending = std::move(filled);
+        m_hasPending = true;
+        m_available.notify_one();
         return reusable;
     }
 
     // Takes the newest frame if one arrived since the last take, waiting up
     // to `timeout` for it. A nudge ends the wait early without a frame.
-    std::optional<FrameBuffer> TakeLatest(std::chrono::milliseconds timeout) {
-        std::unique_lock lock(mutex_);
-        available_.wait_for(lock, timeout, [&] { return has_pending_ || nudged_; });
-        nudged_ = false;
-        if (!has_pending_) return std::nullopt;
-        has_pending_ = false;
-        return std::move(pending_);
+    std::optional<FrameBuffer> takeLatest(std::chrono::milliseconds timeout)
+    {
+        std::unique_lock lock(m_mutex);
+        m_available.wait_for(lock, timeout, [&] { return m_hasPending || m_nudged; });
+        m_nudged = false;
+        if (!m_hasPending) {
+            return std::nullopt;
+        }
+        m_hasPending = false;
+        return std::move(m_pending);
     }
 
     // Wakes a consumer blocked in TakeLatest without publishing a frame,
     // so a settings change can recompute the frame the consumer already
     // holds instead of waiting out the take's timeout.
-    void Nudge() {
-        std::lock_guard lock(mutex_);
-        nudged_ = true;
-        available_.notify_one();
+    void nudge()
+    {
+        std::lock_guard lock(m_mutex);
+        m_nudged = true;
+        m_available.notify_one();
     }
 
     // Hands storage back for the producer to reuse.
-    void ReturnStorage(FrameBuffer&& used) {
-        std::lock_guard lock(mutex_);
-        returned_ = std::move(used);
+    void returnStorage(FrameBuffer&& used)
+    {
+        std::lock_guard lock(m_mutex);
+        m_returned = std::move(used);
     }
 
 private:
-    std::mutex mutex_;
-    std::condition_variable available_;
-    FrameBuffer pending_;
-    FrameBuffer returned_;
-    bool has_pending_ = false;
-    bool nudged_ = false;
+    std::mutex m_mutex;
+    std::condition_variable m_available;
+    FrameBuffer m_pending;
+    FrameBuffer m_returned;
+    bool m_hasPending = false;
+    bool m_nudged = false;
 };
 
 }  // namespace sidescopes
