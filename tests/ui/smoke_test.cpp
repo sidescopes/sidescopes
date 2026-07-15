@@ -24,26 +24,26 @@
 namespace {
 /// Flipped by the button's GuiFunc, asserted by the TestFunc. File scope so a
 /// captureless lambda (plain function pointer, the engine's default) can reach it.
-bool GButtonClicked = false;
+bool g_buttonClicked = false;
 
-void RegisterSmokeTest(ImGuiTestEngine* engine)
+void registerSmokeTest(ImGuiTestEngine* engine)
 {
     ImGuiTest* test = IM_REGISTER_TEST(engine, "smoke", "button_click");
 
     test->GuiFunc = [](ImGuiTestContext*) {
         ImGui::Begin("Smoke Window", nullptr, ImGuiWindowFlags_NoSavedSettings);
         if (ImGui::Button("Smoke Button")) {
-            GButtonClicked = true;
+            g_buttonClicked = true;
         }
 
         ImGui::End();
     };
 
     test->TestFunc = [](ImGuiTestContext* ctx) {
-        GButtonClicked = false;
+        g_buttonClicked = false;
         ctx->SetRef("Smoke Window");
         ctx->ItemClick("Smoke Button");
-        IM_CHECK(GButtonClicked);
+        IM_CHECK(g_buttonClicked);
     };
 }
 }  // namespace
@@ -62,14 +62,14 @@ int main()
     testIo.ConfigVerboseLevelOnError = ImGuiTestVerboseLevel_Info;
     testIo.ConfigLogToTTY = true;
 
-    RegisterSmokeTest(engine);
+    registerSmokeTest(engine);
     ImGuiTestEngine_QueueTests(engine, ImGuiTestGroup_Tests, nullptr, ImGuiTestRunFlags_RunFromCommandLine);
     ImGuiTestEngine_Start(engine, ImGui::GetCurrentContext());
 
     // Pump headless frames until the queued test finishes. The queue stays
     // non-empty for the duration of the run, so an empty queue means done; the
     // frame cap keeps a hung test from spinning forever.
-    const int MaxFrames = 1000;
+    constexpr int MaxFrames = 1000;
     int frame = 0;
     for (; frame < MaxFrames; ++frame) {
         ImGui_ImplNull_NewFrame();
