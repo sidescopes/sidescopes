@@ -62,6 +62,10 @@ public:
 private:
     void resize(int columns, int imageHeight);
     void mapBinsToImage(uint64_t sampledRows);
+    void correctBinDensities();
+    void buildParade(const uint32_t* redPlane, const uint32_t* greenPlane, const uint32_t* bluePlane);
+    void composeImage(const uint32_t* redPlane, const uint32_t* greenPlane, const uint32_t* bluePlane,
+                      const uint32_t* lumaPlane, double gain, double intensityScale);
 
     [[nodiscard]] std::size_t planeSize() const
     {
