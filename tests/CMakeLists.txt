@@ -25,6 +25,7 @@ add_executable(sidescopes_tests
     test_module_loader.cpp
     test_waveform.cpp
     test_pin_board.cpp
+    test_param_menu.cpp
     test_scope_registry.cpp
     test_scope_view.cpp
     test_capture_controller.cpp
@@ -39,6 +40,7 @@ target_include_directories(sidescopes_tests PRIVATE support)
 # link, so their sources compile directly into the test binary.
 target_sources(sidescopes_tests PRIVATE
     ${CMAKE_SOURCE_DIR}/src/app/capture_controller.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/param_menu.cpp
     ${CMAKE_SOURCE_DIR}/src/app/pin_board.cpp
     ${CMAKE_SOURCE_DIR}/src/app/scope_registry.cpp
     ${CMAKE_SOURCE_DIR}/src/app/scope_view.cpp
