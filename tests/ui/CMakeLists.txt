@@ -66,3 +66,41 @@ add_executable(sidescopes_ui_tests test_smoke.cpp)
 target_link_libraries(sidescopes_ui_tests PRIVATE sidescopes_imgui_test_engine)
 
 add_test(NAME sidescopes_ui_smoke COMMAND sidescopes_ui_tests)
+
+# Feature suites that drive the REAL scope pipeline and the real app-state
+# classes through a representative headless UI. Each links the core pipeline
+# and the scope modules exactly as the unit tests do (see tests/CMakeLists.txt),
+# plus the hooked Dear ImGui and Test Engine, and compiles the app-state
+# translation units directly - they have no Dear ImGui dependency, so they mix
+# freely with the hooked build. ui_test_harness.cpp is the shared null-backend
+# runner.
+foreach(suite IN ITEMS pipeline view)
+    add_executable(sidescopes_ui_${suite}_tests
+        test_${suite}_ui.cpp
+        ui_test_harness.cpp
+        ${CMAKE_SOURCE_DIR}/src/app/scope_view.cpp
+        ${CMAKE_SOURCE_DIR}/src/app/pin_board.cpp
+        ${CMAKE_SOURCE_DIR}/src/app/capture_controller.cpp)
+    target_include_directories(sidescopes_ui_${suite}_tests PRIVATE ${CMAKE_SOURCE_DIR}/tests/support)
+    target_link_libraries(sidescopes_ui_${suite}_tests PRIVATE
+        sidescopes_imgui_test_engine ${SIDESCOPES_MODULE_LINK_LIBS} sidescopes_core)
+    sidescopes_target_defaults(sidescopes_ui_${suite}_tests)
+    add_test(NAME sidescopes_ui_${suite} COMMAND sidescopes_ui_${suite}_tests)
+endforeach()
+
+# In the dynamic module configuration the engines live only in the loaded
+# MODULE bundles, so - as in tests/CMakeLists.txt - compile their sources in to
+# supply the symbols core's shared graticule references, and wait for the
+# bundles the worker loads at runtime.
+if(SIDESCOPES_MODULES_DYNAMIC)
+    foreach(suite IN ITEMS pipeline view)
+        target_sources(sidescopes_ui_${suite}_tests PRIVATE
+            ${CMAKE_SOURCE_DIR}/src/core/scopes/vectorscope.cpp
+            ${CMAKE_SOURCE_DIR}/src/core/scopes/waveform.cpp
+            ${CMAKE_SOURCE_DIR}/src/core/scopes/histogram.cpp)
+        add_dependencies(sidescopes_ui_${suite}_tests
+            sidescopes_module_vectorscope
+            sidescopes_module_waveform
+            sidescopes_module_histogram)
+    endforeach()
+endif()
