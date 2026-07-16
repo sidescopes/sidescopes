@@ -25,6 +25,7 @@
 #include <vector>
 
 #include "app/capture_controller.h"
+#include "app/param_menu.h"
 #include "app/pin_board.h"
 #include "app/scope_registry.h"
 #include "app/scope_view.h"
@@ -67,6 +68,9 @@ WaveformMode waveformModeFromParam(double value)
     return value >= 1.5 ? WaveformMode::ColoredLuma : value >= 0.5 ? WaveformMode::Luma : WaveformMode::Rgb;
 }
 
+// Fixed ids for the host actions. Scope parameter choices are dynamic: they
+// carry ids from ParamMenuActionBase upward, resolved through a per-open side
+// table, never through this enum.
 enum MenuAction
 {
     MenuShowVectorscope = 1,
@@ -74,16 +78,7 @@ enum MenuAction
     MenuShowWaveformParade,
     MenuShowHistogram,
     MenuShowColorPicker,
-    MenuWaveformStyleRgb = 10,
-    MenuWaveformStyleLuma,
-    MenuHistogramCombined,
-    MenuHistogramPerChannel,
-    MenuMatrixBt601 = 20,
-    MenuMatrixBt709,
-    MenuTraceBoosted,
-    MenuTraceLinear,
-    MenuWaveformStyleColoredLuma,
-    MenuDrawRegion,
+    MenuDrawRegion = 25,
     MenuPickFaces,
     MenuZoom1,
     MenuZoom2,
@@ -1700,6 +1695,12 @@ int main()
     };
 
     ScopeRegistry scopeRegistry{builtinModules()};
+    // A scope's module descriptor, or null for the host color picker; the
+    // menus, sliders, and gestures read parameter metadata through it.
+    const auto descriptorFor = [&](std::string_view id) -> const SsScopeDescriptor* {
+        const HostScope* hostScope = scopeRegistry.byId(id);
+        return hostScope != nullptr ? hostScope->descriptor : nullptr;
+    };
     ScopeView view{scopeRegistry};
     view.restoreStack(startup.scopeStack);
     view.setGraticule(startup.showGraticule);
@@ -2465,12 +2466,15 @@ int main()
         const auto drawVectorscope = [&] {
             const DrawnScope scope =
                 drawScopeImage(textureForId(VectorscopeScopeId), true, static_cast<float>(view.zoom()));
-            if (const auto adjusted =
-                    traceIntensityGesture(scope, VectorscopeScopeId, view.intensity(VectorscopeScopeId), 3.0f,
-                                          VectorscopeIntensityShift, flash)) {
-                view.setIntensity(VectorscopeScopeId, adjusted->intensity);
-                analysis.scopeParams[VectorscopeScopeId]["gain"] = adjusted->gain;
-                analysisDirty = true;
+            const SsParamInfo* gain = firstParamOfKind(descriptorFor(VectorscopeScopeId), SS_PARAM_INTENSITY);
+            if (gain != nullptr) {
+                if (const auto adjusted = traceIntensityGesture(
+                        scope, VectorscopeScopeId, view.intensity(VectorscopeScopeId),
+                        static_cast<float>(gain->default_value), static_cast<float>(gain->intensity_shift), flash)) {
+                    view.setIntensity(VectorscopeScopeId, adjusted->intensity);
+                    analysis.scopeParams[VectorscopeScopeId][gain->key] = adjusted->gain;
+                    analysisDirty = true;
+                }
             }
             // Zoomed overlays run past the pane; clip them to it.
             ImDrawList* draw = ImGui::GetWindowDrawList();
@@ -2518,11 +2522,17 @@ int main()
         };
         const auto drawWaveform = [&](std::string_view id) {
             const DrawnScope scope = drawScopeImage(textureForId(id), false);
-            if (const auto adjusted = traceIntensityGesture(scope, WaveformScopeId, view.intensity(WaveformScopeId),
-                                                            0.05f, 0.0f, flash)) {
-                view.setIntensity(WaveformScopeId, adjusted->intensity);
-                setWaveformGain(adjusted->gain);
-                analysisDirty = true;
+            // The control is the waveform's even on the parade pane: the two
+            // share one intensity, so the gesture reads the waveform descriptor.
+            const SsParamInfo* gain = firstParamOfKind(descriptorFor(WaveformScopeId), SS_PARAM_INTENSITY);
+            if (gain != nullptr) {
+                if (const auto adjusted = traceIntensityGesture(scope, WaveformScopeId, view.intensity(WaveformScopeId),
+                                                                static_cast<float>(gain->default_value),
+                                                                static_cast<float>(gain->intensity_shift), flash)) {
+                    view.setIntensity(WaveformScopeId, adjusted->intensity);
+                    setWaveformGain(adjusted->gain);
+                    analysisDirty = true;
+                }
             }
             if (view.graticule()) {
                 drawWaveformOverlay(scope);
@@ -2621,10 +2631,10 @@ int main()
                     clickedPane = static_cast<int>(pane);
                 }
             }
-            const auto clicked = [&](std::string_view id) { return clickedPane == scopeRegistry.indexOf(id); };
-            const auto shownOrGlobal = [&](std::string_view id) { return clickedPane < 0 && view.shows(id); };
-
             std::vector<NativeMenuItem> menu;
+            // The per-open side table: dynamic ids from ParamMenuActionBase up
+            // index it, so a returned choice resolves to a (scope, key, value).
+            std::vector<ParamMenuAction> paramActions;
             const auto action = [&](const char* label, int id, bool checked, std::string shortcut = "") {
                 menu.push_back({Kind::Action, label, id, checked, std::move(shortcut)});
             };
@@ -2632,9 +2642,15 @@ int main()
             const auto submenu = [&](const char* label) { menu.push_back({Kind::SubmenuBegin, label, -1, false, ""}); };
             const auto endSubmenu = [&] { menu.push_back({Kind::SubmenuEnd, "", -1, false, ""}); };
 
-            // Pins are a scope tool: they mark the vectorscope and the
-            // color picker, so their submenu rides those scopes' own
-            // sections and never appears beside a waveform.
+            // A scope's stored parameters, or an empty set when it has none.
+            const std::map<std::string, double> noParams;
+            const auto paramsOf = [&](std::string_view id) -> const std::map<std::string, double>& {
+                const auto stored = analysis.scopeParams.find(std::string{id});
+                return stored != analysis.scopeParams.end() ? stored->second : noParams;
+            };
+            // Pins are a scope tool: they mark the vectorscope and the color
+            // picker, so their submenu rides those scopes' own sections and
+            // never appears beside a waveform.
             const auto pinOptions = [&] {
                 submenu("Pins");
                 action("Pin Colors...", MenuPickPinColor, false, shortcutLabel(shortcuts.pinColor));
@@ -2643,52 +2659,49 @@ int main()
                 }
                 endSubmenu();
             };
-            const auto vectorscopeOptions = [&] {
-                submenu("Matrix");
-                const bool bt601 = currentMatrix() == ChromaMatrix::Bt601;
-                action("BT.601", MenuMatrixBt601, bt601);
-                action("BT.709", MenuMatrixBt709, !bt601);
-                endSubmenu();
-                submenu("Trace Response");
-                action("Boosted", MenuTraceBoosted, currentResponse() == TraceResponse::Boosted);
-                action("Linear", MenuTraceLinear, currentResponse() == TraceResponse::Linear);
-                endSubmenu();
+            // The vectorscope's magnify viewport is a host control, not a
+            // module parameter, so it stays hand-built beside the descriptor
+            // choices.
+            const auto zoomOptions = [&] {
                 submenu("Zoom");
                 action("1x", MenuZoom1, view.zoom() == 1, shortcutLabel(shortcuts.vectorscopeZoom));
                 action("2x", MenuZoom2, view.zoom() == 2, shortcutLabel(shortcuts.vectorscopeZoom));
                 action("4x", MenuZoom4, view.zoom() == 4, shortcutLabel(shortcuts.vectorscopeZoom));
                 endSubmenu();
-                pinOptions();
             };
-            const auto waveformOptions = [&] {
-                const WaveformMode mode = currentWaveformMode();
-                action("RGB", MenuWaveformStyleRgb, mode == WaveformMode::Rgb);
-                action("Luma", MenuWaveformStyleLuma, mode == WaveformMode::Luma);
-                action("Luma (Colored)", MenuWaveformStyleColoredLuma, mode == WaveformMode::ColoredLuma);
+            // A scope's own options: its descriptor's choice submenus, then any
+            // host sections it carries. `flatten` lets a lone choice sit
+            // directly under an enclosing scope-name submenu.
+            const auto scopeOptionsBody = [&](std::string_view id, bool flatten) {
+                const HostScope* hostScope = scopeRegistry.byId(id);
+                if (hostScope != nullptr && hostScope->descriptor != nullptr) {
+                    appendScopeChoiceMenus(*hostScope->descriptor, paramsOf(id), flatten, menu, paramActions);
+                }
+                if (id == VectorscopeScopeId) {
+                    zoomOptions();
+                    pinOptions();
+                } else if (id == ColorPickerScopeId) {
+                    pinOptions();
+                }
             };
-            const auto histogramOptions = [&] {
-                const HistogramStyle style = currentHistogramStyle();
-                action("Per Channel", MenuHistogramPerChannel, style == HistogramStyle::PerChannel);
-                action("Combined", MenuHistogramCombined, style == HistogramStyle::Combined);
+            const auto scopeHasOptions = [&](std::string_view id) {
+                if (id == VectorscopeScopeId || id == ColorPickerScopeId) {
+                    return true;  // host sections: zoom and pins
+                }
+                const HostScope* hostScope = scopeRegistry.byId(id);
+                return hostScope != nullptr && hostScope->descriptor != nullptr &&
+                       firstParamOfKind(hostScope->descriptor, SS_PARAM_CHOICE) != nullptr;
             };
 
-            // The clicked pane's options, first and unprefixed.
-            if (clicked(VectorscopeScopeId)) {
-                vectorscopeOptions();
-                separator();
-            } else if (clicked(WaveformScopeId)) {
-                submenu("Style");
-                waveformOptions();
-                endSubmenu();
-                separator();
-            } else if (clicked(HistogramScopeId)) {
-                submenu("Style");
-                histogramOptions();
-                endSubmenu();
-                separator();
-            } else if (clicked(ColorPickerScopeId)) {
-                pinOptions();
-                separator();
+            // The clicked pane's options lead, unprefixed - the click is the
+            // context. A pane with no options of its own (the parade) leads
+            // with nothing.
+            if (clickedPane >= 0) {
+                const std::string& clickedId = scopeRegistry.scopes()[static_cast<std::size_t>(clickedPane)].id;
+                if (scopeHasOptions(clickedId)) {
+                    scopeOptionsBody(clickedId, false);
+                    separator();
+                }
             }
 
             submenu("Scopes");
@@ -2701,29 +2714,25 @@ int main()
                    shortcutLabel(shortcuts.colorPicker));
             endSubmenu();
 
-            // On a global click, each visible scope's options ride under
-            // the scope's own name.
-            if (shownOrGlobal(VectorscopeScopeId)) {
-                submenu("Vectorscope");
-                vectorscopeOptions();
-                endSubmenu();
-            }
-            if (shownOrGlobal(WaveformScopeId)) {
-                submenu("Waveform");
-                waveformOptions();
-                endSubmenu();
-            }
-            if (shownOrGlobal(HistogramScopeId)) {
-                submenu("Histogram");
-                histogramOptions();
-                endSubmenu();
-            }
-            // The vectorscope's section already carries the pins; when
-            // only the color picker is up, they ride under its name.
-            if (shownOrGlobal(ColorPickerScopeId) && !view.shows(VectorscopeScopeId)) {
-                submenu("Color Picker");
-                pinOptions();
-                endSubmenu();
+            // On a background or toolbar click, each visible scope's options
+            // ride under its own name, in toolbar order.
+            if (clickedPane < 0) {
+                for (const HostScope& scope : scopeRegistry.scopes()) {
+                    if (!view.shows(scope.id)) {
+                        continue;
+                    }
+                    // The vectorscope's section already carries the pins; the
+                    // color picker shows them only when the vectorscope is gone.
+                    if (scope.id == ColorPickerScopeId && view.shows(VectorscopeScopeId)) {
+                        continue;
+                    }
+                    if (!scopeHasOptions(scope.id)) {
+                        continue;  // the parade offers no options of its own
+                    }
+                    submenu(scope.descriptor != nullptr ? scope.descriptor->name : "Color Picker");
+                    scopeOptionsBody(scope.id, true);
+                    endSubmenu();
+                }
             }
 
             separator();
@@ -2742,7 +2751,18 @@ int main()
             action("Settings...", MenuOpenSettings, false);
             action("Quit", MenuQuit, false);
 
-            switch (showNativeContextMenu(menu)) {
+            const int chosen = showNativeContextMenu(menu);
+            // A dynamic id sets one scope parameter from the side table; the
+            // fixed ids below drive the host actions.
+            if (chosen >= ParamMenuActionBase) {
+                const std::size_t index = static_cast<std::size_t>(chosen - ParamMenuActionBase);
+                if (index < paramActions.size()) {
+                    const ParamMenuAction& picked = paramActions[index];
+                    analysis.scopeParams[picked.scopeId][picked.paramKey] = picked.value;
+                    analysisDirty = true;
+                }
+            }
+            switch (chosen) {
             case MenuShowVectorscope:
                 toggleScope(VectorscopeScopeId);
                 break;
@@ -2752,47 +2772,11 @@ int main()
             case MenuShowWaveformParade:
                 toggleScope(ParadeScopeId);
                 break;
-            case MenuWaveformStyleRgb:
-                analysis.scopeParams[WaveformScopeId]["mode"] = waveformModeToParam(WaveformMode::Rgb);
-                analysisDirty = true;
-                break;
-            case MenuWaveformStyleLuma:
-                analysis.scopeParams[WaveformScopeId]["mode"] = waveformModeToParam(WaveformMode::Luma);
-                analysisDirty = true;
-                break;
-            case MenuWaveformStyleColoredLuma:
-                analysis.scopeParams[WaveformScopeId]["mode"] = waveformModeToParam(WaveformMode::ColoredLuma);
-                analysisDirty = true;
-                break;
-            case MenuHistogramCombined:
-                analysis.scopeParams[HistogramScopeId]["style"] = 1.0;
-                analysisDirty = true;
-                break;
-            case MenuHistogramPerChannel:
-                analysis.scopeParams[HistogramScopeId]["style"] = 0.0;
-                analysisDirty = true;
-                break;
             case MenuShowHistogram:
                 toggleScope(HistogramScopeId);
                 break;
             case MenuShowColorPicker:
                 toggleScope(ColorPickerScopeId);
-                break;
-            case MenuMatrixBt601:
-                analysis.scopeParams[VectorscopeScopeId]["matrix"] = 0.0;
-                analysisDirty = true;
-                break;
-            case MenuMatrixBt709:
-                analysis.scopeParams[VectorscopeScopeId]["matrix"] = 1.0;
-                analysisDirty = true;
-                break;
-            case MenuTraceBoosted:
-                analysis.scopeParams[VectorscopeScopeId]["response"] = 0.0;
-                analysisDirty = true;
-                break;
-            case MenuTraceLinear:
-                analysis.scopeParams[VectorscopeScopeId]["response"] = 1.0;
-                analysisDirty = true;
                 break;
             case MenuSelectRegion:
                 wantRegionPick = RegionPickerMode::PickWindows;
@@ -2850,32 +2834,48 @@ int main()
             ImGui::Text("analysis %.2f ms | frames %llu | ui %.0f fps", output.accumulateMilliseconds,
                         static_cast<unsigned long long>(output.framesProcessed), static_cast<double>(io.Framerate));
             ImGui::Separator();
+            // The intensity and stride sliders read their default, headroom,
+            // and range from each scope's descriptor; the smoothing slider is
+            // host state, unchanged until Phase 3. The waveform and its parade
+            // share one control, so only the waveform is shown.
+            const SsParamInfo* vectorscopeGain =
+                firstParamOfKind(descriptorFor(VectorscopeScopeId), SS_PARAM_INTENSITY);
+            const SsParamInfo* vectorscopeStrideParam =
+                firstParamOfKind(descriptorFor(VectorscopeScopeId), SS_PARAM_INT);
             ImGui::TextDisabled("vectorscope");
             float vectorscopePercent = view.intensity(VectorscopeScopeId);
             if (ImGui::SliderFloat("intensity##v", &vectorscopePercent, 0.0f, 100.0f, "%.0f%%")) {
                 view.setIntensity(VectorscopeScopeId, vectorscopePercent);
-                analysis.scopeParams[VectorscopeScopeId]["gain"] =
-                    traceGainFromIntensity(vectorscopePercent, VectorscopeIntensityShift);
+                analysis.scopeParams[VectorscopeScopeId][vectorscopeGain->key] =
+                    traceGainFromIntensity(vectorscopePercent, static_cast<float>(vectorscopeGain->intensity_shift));
                 analysisDirty = true;
             }
-            int vectorscopeStride = static_cast<int>(scopeParam(VectorscopeScopeId, "stride", 1.0));
-            if (ImGui::SliderInt("sampling 1:N##v", &vectorscopeStride, 1, 8)) {
-                analysis.scopeParams[VectorscopeScopeId]["stride"] = vectorscopeStride;
+            int vectorscopeStride = static_cast<int>(
+                scopeParam(VectorscopeScopeId, vectorscopeStrideParam->key, vectorscopeStrideParam->default_value));
+            if (ImGui::SliderInt("sampling 1:N##v", &vectorscopeStride,
+                                 static_cast<int>(vectorscopeStrideParam->min_value),
+                                 static_cast<int>(vectorscopeStrideParam->max_value))) {
+                analysis.scopeParams[VectorscopeScopeId][vectorscopeStrideParam->key] = vectorscopeStride;
                 analysisDirty = true;
             }
             float vectorscopeMs = view.smoothing(VectorscopeScopeId);
             if (ImGui::SliderFloat("smoothing ms##v", &vectorscopeMs, 0.0f, 500.0f, "%.0f")) {
                 view.setSmoothing(VectorscopeScopeId, vectorscopeMs);
             }
+            const SsParamInfo* waveformGain = firstParamOfKind(descriptorFor(WaveformScopeId), SS_PARAM_INTENSITY);
+            const SsParamInfo* waveformStrideParam = firstParamOfKind(descriptorFor(WaveformScopeId), SS_PARAM_INT);
             ImGui::TextDisabled("waveform");
             float waveformPercent = view.intensity(WaveformScopeId);
             if (ImGui::SliderFloat("intensity##w", &waveformPercent, 0.0f, 100.0f, "%.0f%%")) {
                 view.setIntensity(WaveformScopeId, waveformPercent);
-                setWaveformGain(traceGainFromIntensity(waveformPercent));
+                setWaveformGain(
+                    traceGainFromIntensity(waveformPercent, static_cast<float>(waveformGain->intensity_shift)));
                 analysisDirty = true;
             }
-            int waveformStride = static_cast<int>(scopeParam(WaveformScopeId, "stride", 1.0));
-            if (ImGui::SliderInt("sampling 1:N##w", &waveformStride, 1, 8)) {
+            int waveformStride = static_cast<int>(
+                scopeParam(WaveformScopeId, waveformStrideParam->key, waveformStrideParam->default_value));
+            if (ImGui::SliderInt("sampling 1:N##w", &waveformStride, static_cast<int>(waveformStrideParam->min_value),
+                                 static_cast<int>(waveformStrideParam->max_value))) {
                 setWaveformStride(waveformStride);
                 analysisDirty = true;
             }
