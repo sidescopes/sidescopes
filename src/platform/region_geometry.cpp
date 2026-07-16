@@ -1,9 +1,9 @@
 // The region picker's spatial math, kept free of any windowing toolkit so
-// it can be reasoned about and unit-tested on its own. The GDI+ overlay
-// and the Win32 border procedure adapt their own rectangle types to
-// LocalRect at the boundary.
+// it can be reasoned about and unit-tested on its own. Each platform's
+// overlay and border code adapts its own rectangle types to LocalRect at
+// the boundary.
 
-#include "platform/windows/region_geometry.h"
+#include "platform/region_geometry.h"
 
 #include <algorithm>
 #include <cmath>

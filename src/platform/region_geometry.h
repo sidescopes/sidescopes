@@ -5,8 +5,8 @@
 namespace sidescopes {
 
 /// Which edges a border drag adjusts; Move relocates the whole region,
-/// Close dismisses it. Shared by the geometry helpers below and the border
-/// window procedure.
+/// Close dismisses it. Shared by the geometry helpers below and each
+/// platform's border overlay.
 enum ZoneBits : unsigned
 {
     ZoneNone = 0,
@@ -19,7 +19,7 @@ enum ZoneBits : unsigned
 };
 
 /// A rectangle in overlay-local points. The region math is expressed
-/// through this toolkit-independent type - not GDI+ RectF or Win32 RECT -
+/// through this toolkit-independent type - not a native rectangle type -
 /// so it carries no windowing dependency and can be reasoned about and
 /// unit-tested on its own.
 struct LocalRect

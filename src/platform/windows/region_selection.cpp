@@ -38,7 +38,7 @@ using std::min;
 
 #include "platform/desktop.h"
 #include "platform/face_detection.h"
-#include "platform/windows/region_geometry.h"
+#include "platform/region_geometry.h"
 #include "platform/windows/wide_strings.h"
 
 namespace sidescopes {

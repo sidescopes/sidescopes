@@ -148,6 +148,7 @@ endif()
 if(APPLE)
     enable_language(OBJCXX)
     add_library(sidescopes_platform STATIC
+        src/platform/region_geometry.cpp
         src/platform/macos/desktop.mm
         src/platform/macos/face_detection.mm
         src/platform/macos/native_menu.mm
@@ -174,10 +175,10 @@ if(WIN32)
     # compiler continuously; the application target follows with the port
     # itself.
     add_library(sidescopes_platform STATIC
+        src/platform/region_geometry.cpp
         src/platform/windows/desktop.cpp
         src/platform/windows/face_detection.cpp
         src/platform/windows/native_menu.cpp
-        src/platform/windows/region_geometry.cpp
         src/platform/windows/region_selection.cpp
         src/platform/windows/screen_capture.cpp
     )

@@ -27,6 +27,7 @@ add_executable(sidescopes_tests
     test_pin_board.cpp
     test_scope_view.cpp
     test_capture_controller.cpp
+    test_region_geometry.cpp
     test_version.cpp
 )
 
@@ -41,16 +42,18 @@ target_sources(sidescopes_tests PRIVATE
     ${CMAKE_SOURCE_DIR}/src/app/scope_view.cpp
     ${CMAKE_SOURCE_DIR}/src/app/version.cpp)
 
-# The Windows platform layer's pure logic - region geometry, UTF-8/UTF-16
-# conversion, display-id parsing - is unit-tested on the Windows runner. The
-# rest of that layer (DXGI capture, GDI+ overlays, WinRT faces, enumeration)
-# needs a live desktop and is verified by running the app. region_geometry.cpp
-# compiles straight into the test binary since it needs only core, so the
-# tests never link the GUI/capture platform library.
+# The region geometry (src/platform/region_geometry.cpp) is pure,
+# cross-platform logic; its tests compile straight into the test binary on
+# every platform. It needs only core, so the tests never link the
+# GUI/capture platform library.
+target_sources(sidescopes_tests PRIVATE ${CMAKE_SOURCE_DIR}/src/platform/region_geometry.cpp)
+
+# The rest of the Windows platform layer's pure logic - UTF-8/UTF-16
+# conversion and display-id parsing - is unit-tested on the Windows runner.
+# The remainder of that layer (DXGI capture, GDI+ overlays, WinRT faces,
+# enumeration) needs a live desktop and is verified by running the app.
 if(WIN32)
-    target_sources(sidescopes_tests PRIVATE
-        test_windows_platform.cpp
-        ${CMAKE_SOURCE_DIR}/src/platform/windows/region_geometry.cpp)
+    target_sources(sidescopes_tests PRIVATE test_windows_platform.cpp)
 endif()
 
 # The engine tests (test_vectorscope/waveform/histogram/graticule) are
