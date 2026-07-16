@@ -34,8 +34,10 @@ jobs:
         run: cmake -B build
       - name: Analyze
         run: |
-          # tests/ui is the optional UI-test target, absent from the default compile database.
-          files=$(git ls-files 'src/core/*.cpp' 'src/core/**/*.cpp' 'tests/*.cpp' ':(exclude)tests/ui/*')
+          # tests/ui is the optional UI-test target; test_windows_platform.cpp
+          # includes <windows.h>. Both are absent from this Linux compile
+          # database, so clang-tidy cannot parse them here.
+          files=$(git ls-files 'src/core/*.cpp' 'src/core/**/*.cpp' 'tests/*.cpp' ':(exclude)tests/ui/*' ':(exclude)tests/test_windows_platform.cpp')
           clang-tidy-18 -p build --quiet $files
 
   test:

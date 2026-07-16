@@ -33,6 +33,18 @@ target_sources(sidescopes_tests PRIVATE
     ${CMAKE_SOURCE_DIR}/src/app/pin_board.cpp
     ${CMAKE_SOURCE_DIR}/src/app/scope_view.cpp)
 
+# The Windows platform layer's pure logic - region geometry, UTF-8/UTF-16
+# conversion, display-id parsing - is unit-tested on the Windows runner. The
+# rest of that layer (DXGI capture, GDI+ overlays, WinRT faces, enumeration)
+# needs a live desktop and is verified by running the app. region_geometry.cpp
+# compiles straight into the test binary since it needs only core, so the
+# tests never link the GUI/capture platform library.
+if(WIN32)
+    target_sources(sidescopes_tests PRIVATE
+        test_windows_platform.cpp
+        ${CMAKE_SOURCE_DIR}/src/platform/windows/region_geometry.cpp)
+endif()
+
 # The engine tests (test_vectorscope/waveform/histogram/graticule) are
 # white-box: they include the engine headers and link the engine directly,
 # which in the static build comes in through the module targets. In dynamic
