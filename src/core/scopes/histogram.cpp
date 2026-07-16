@@ -6,6 +6,27 @@
 #include "core/scopes/trace_response.h"
 
 namespace sidescopes {
+namespace {
+
+// The spline height for one channel at one column: Catmull-Rom through the
+// neighboring bins. The spline may overshoot near sharp features; the plot
+// stays within the panel, and stretches between empty bins stay empty.
+double splineHeight(const double* plane, int center, const CatmullRomWeights<double>& weights, double panelHeight)
+{
+    const auto at = [&](int index) { return plane[std::clamp(index, 0, Histogram::Bins - 1)]; };
+    const double p0 = at(center - 1);
+    const double p1 = at(center);
+    const double p2 = at(center + 1);
+    const double p3 = at(center + 2);
+    double height = weights.w0 * p0 + weights.w1 * p1 + weights.w2 * p2 + weights.w3 * p3;
+    if (p1 <= 0.0 && p2 <= 0.0) {
+        height = 0.0;
+    }
+
+    return std::clamp(height, 0.0, panelHeight);
+}
+
+}  // namespace
 
 Histogram::Histogram()
     : m_bins(static_cast<std::size_t>(Bins) * 3, 0)
@@ -147,19 +168,7 @@ void Histogram::renderFill(const std::vector<double>& heights)
         const CatmullRomWeights<double> weights = catmullRomWeights(t);
         for (int channel = 0; channel < 3; ++channel) {
             const double* plane = heights.data() + static_cast<std::ptrdiff_t>(channel) * Bins;
-            const auto at = [&](int index) { return plane[std::clamp(index, 0, Bins - 1)]; };
-            const double p0 = at(center - 1);
-            const double p1 = at(center);
-            const double p2 = at(center + 1);
-            const double p3 = at(center + 2);
-            double height = weights.w0 * p0 + weights.w1 * p1 + weights.w2 * p2 + weights.w3 * p3;
-            // The spline may overshoot near sharp features; the plot
-            // stays within the panel, and stretches between empty bins
-            // stay empty.
-            if (p1 <= 0.0 && p2 <= 0.0) {
-                height = 0.0;
-            }
-            height = std::clamp(height, 0.0, static_cast<double>(m_height));
+            double height = splineHeight(plane, center, weights, static_cast<double>(m_height));
             if (split) {
                 height /= 3.0;
             }
