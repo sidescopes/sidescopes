@@ -1,6 +1,7 @@
 #include "core/scopes/graticule.h"
 
 #include <cmath>
+#include <numbers>
 
 #include "core/scopes/vectorscope.h"
 
@@ -11,6 +12,10 @@ constexpr NormalizedPoint Center{0.5f, 0.5f};
 
 // The reference skin color whose projection anchors the skin-tone line.
 constexpr FloatColor SkinToneReference{203.0f, 171.0f, 153.0f};
+
+// Below this the skin reference projects essentially onto the neutral
+// center and has no stable direction to draw the line along.
+constexpr float SkinLineMinLength = 1e-6f;
 
 struct BarColor
 {
@@ -37,7 +42,7 @@ VectorscopeGraticule buildVectorscopeGraticule(const Vectorscope& scope)
     graticule.circles.push_back({Center, 0.25f, GraticuleStroke::Grid});
     graticule.circles.push_back({Center, 0.5f, GraticuleStroke::Grid});
     for (int tick = 0; tick < 12; ++tick) {
-        const float angle = static_cast<float>(tick) * 3.14159265f / 6.0f;
+        const float angle = static_cast<float>(tick) * std::numbers::pi_v<float> / 6.0f;
         const float dx = std::cos(angle);
         const float dy = std::sin(angle);
         graticule.lines.push_back(
@@ -58,7 +63,7 @@ VectorscopeGraticule buildVectorscopeGraticule(const Vectorscope& scope)
     const float dx = skin.x - Center.x;
     const float dy = skin.y - Center.y;
     const float length = std::sqrt(dx * dx + dy * dy);
-    if (length > 1e-6f) {
+    if (length > SkinLineMinLength) {
         const float scale = 0.5f / length;
         graticule.lines.push_back({Center, {Center.x + dx * scale, Center.y + dy * scale}, GraticuleStroke::SkinTone});
     }

@@ -14,10 +14,21 @@ inline int luma709(int r, int g, int b)
     return (54 * r + 183 * g + 19 * b) >> 8;
 }
 
+// The same weights in float, for the sub-level projection: the level marker
+// wants a fractional position, not the accumulator's truncated code.
+inline float luma709(float r, float g, float b)
+{
+    return (54.0f * r + 183.0f * g + 19.0f * b) / 256.0f;
+}
+
 // A waveform column is populated by one sample per sampled row, so densities
 // are normalized per sampled row: column brightness is then invariant to the
 // sampling stride and to the region size.
 constexpr double ReferenceRowCount = 1'000.0;
+
+// In the combined mode the luma trace rides over the RGB traces dimmed to
+// this fraction, so it reads as a distinct overlay rather than a fourth channel.
+constexpr float RgbLumaDim = 0.7f;
 
 // Which planes a mode draws: the RGB channels, the luma trace, and whether
 // luma carries the source color. Derived once and threaded through
@@ -80,11 +91,11 @@ double neighborhoodMedian(const uint64_t* global, int row)
 {
     uint64_t neighborhood[12];
     int counted = 0;
-    for (int near = row - 6; near <= row + 6; ++near) {
-        if (near == row || near < 0 || near >= WaveformLevels) {
+    for (int neighbor = row - 6; neighbor <= row + 6; ++neighbor) {
+        if (neighbor == row || neighbor < 0 || neighbor >= WaveformLevels) {
             continue;
         }
-        neighborhood[counted++] = global[near];
+        neighborhood[counted++] = global[neighbor];
     }
     // Insertion sort with explicit bounds: the array is tiny, and
     // std::sort here trips GCC's array-bounds analysis.
@@ -119,11 +130,11 @@ void computeFlattenWeights(const uint64_t* global, int lowest, int highest, uint
         // may be attenuated without limit.
         bool starvedNearby = false;
         if (expected > 0.0) {
-            for (int near = row - 4; near <= row + 4; ++near) {
-                if (near == row || near <= lowest + 1 || near >= highest - 1) {
+            for (int neighbor = row - 4; neighbor <= row + 4; ++neighbor) {
+                if (neighbor == row || neighbor <= lowest + 1 || neighbor >= highest - 1) {
                     continue;
                 }
-                if (static_cast<double>(global[near]) < expected * 0.1) {
+                if (static_cast<double>(global[neighbor]) < expected * 0.1) {
                     starvedNearby = true;
                 }
             }
@@ -160,16 +171,16 @@ void computeMixTargets(const uint64_t* global, const double* expectedOf, int low
             continue;
         }
         int above = -1;
-        for (int near = row - 1; near >= row - 3 && near >= 0; --near) {
-            if (healthy(near)) {
-                above = near;
+        for (int neighbor = row - 1; neighbor >= row - 3 && neighbor >= 0; --neighbor) {
+            if (healthy(neighbor)) {
+                above = neighbor;
                 break;
             }
         }
         int below = -1;
-        for (int near = row + 1; near <= row + 3 && near < WaveformLevels; ++near) {
-            if (healthy(near)) {
-                below = near;
+        for (int neighbor = row + 1; neighbor <= row + 3 && neighbor < WaveformLevels; ++neighbor) {
+            if (healthy(neighbor)) {
+                below = neighbor;
                 break;
             }
         }
@@ -318,7 +329,7 @@ void emitWaveformPixel(uint8_t* out, const SampleFn& sample, int column, const W
         // In the combined mode luma rides on top as a dimmer
         // white trace.
         const float luma =
-            waveformBrightness(sample(planes.luma, column), gain, intensityScale) * (flags.rgb ? 0.7f : 1.0f);
+            waveformBrightness(sample(planes.luma, column), gain, intensityScale) * (flags.rgb ? RgbLumaDim : 1.0f);
         r += luma;
         g += luma;
         b += luma;
@@ -452,7 +463,7 @@ void Waveform::accumulate(const FrameView& frame, IntRect region)
 
 NormalizedPoint Waveform::project(const FloatColor& color) const
 {
-    const float luma = (54.0f * color.r + 183.0f * color.g + 19.0f * color.b) / 256.0f;
+    const float luma = luma709(color.r, color.g, color.b);
     return NormalizedPoint{-1.0f, (255.0f - luma) / 255.0f};
 }
 

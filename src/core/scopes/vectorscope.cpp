@@ -32,6 +32,22 @@ constexpr const ChromaCoefficients& coefficientsFor(ChromaMatrix matrix)
 // to the same trace regardless of sampling stride or region size.
 constexpr double ReferenceSampleCount = 1'000'000.0;
 
+// Adaptive density estimate blend, as a fraction of the densest cell: below
+// the floor a cell renders fully from the wide estimate, above the ceiling
+// fully from its own narrow density, smoothstepped between. The wide
+// estimate is capped at this multiple of a cell's own narrow density so a
+// diffused ridge cannot paint a bright halo far above its evidence.
+constexpr float AdaptiveFullWideBelow = 0.001f;
+constexpr float AdaptiveSharpAbove = 0.02f;
+constexpr float AdaptiveWideCap = 3.0f;
+
+// Phosphor bloom: past the knee the tint desaturates toward white, at
+// different knees for the linear and boosted responses, up to this maximum
+// whiteness.
+constexpr float BloomKneeLinear = 0.72f;
+constexpr float BloomKneeBoosted = 0.88f;
+constexpr float BloomMaxWhiteness = 0.9f;
+
 // A half-strength 3x3 binomial on a square grid: half the source value plus
 // a half-weighted, normalized 1-2-1 x 1-2-1 blur. Shared by the code-grid
 // smoothing and the display-image settling pass, which differ only in their
@@ -112,6 +128,10 @@ void Vectorscope::accumulate(const FrameView& frame, IntRect region)
             // with it every marker and graticule target - reports.
             const int size = CodeGridSize;
             const int span = size * 16;
+            // Clamp to span - 17, not span - 1: the top bin index is then at
+            // most (span - 17) >> 4 == size - 2, so the +1 neighbor the
+            // bilinear splat writes (both the cb column and the cr row above)
+            // always stays inside the grid.
             for (; pixel < rowEnd; pixel += static_cast<std::ptrdiff_t>(4) * stride) {
                 const int b = pixel[0], g = pixel[1], r = pixel[2];
                 const int64_t cbRaw = matrix.cbFromR * r + matrix.cbFromG * g + matrix.cbFromB * b;
@@ -238,9 +258,10 @@ void Vectorscope::adaptiveDensityEstimate(uint64_t sampleCount)
             // uncapped blend would paint a bright halo hundreds of
             // times above the cells' own evidence. A floor of about
             // one sample's weight keeps empty tail cells glowing.
-            const float capped = std::min(wide[i], 3.0f * m_smoothed[i] + sampleFloor);
+            const float capped = std::min(wide[i], AdaptiveWideCap * m_smoothed[i] + sampleFloor);
             const float density = capped / densestNarrow;
-            const float t = std::clamp((density - 0.001f) / (0.02f - 0.001f), 0.0f, 1.0f);
+            const float t = std::clamp((density - AdaptiveFullWideBelow) / (AdaptiveSharpAbove - AdaptiveFullWideBelow),
+                                       0.0f, 1.0f);
             const float blend = t * t * (3.0f - 2.0f * t);  // smoothstep
             m_smoothed[i] = blend * m_smoothed[i] + (1.0f - blend) * capped;
         }
@@ -310,8 +331,8 @@ void Vectorscope::renderTrace(const float* densities, int densitySize, uint64_t 
     // Where the beam parks, phosphor overexposes toward white: past the
     // bloom knee the tint desaturates with density. The white-hot core
     // over neutral content doubles as an at-a-glance neutrality check.
-    const float bloomKnee = linear ? 0.72f : 0.88f;
-    const float bloomScale = 0.9f / (1.0f - bloomKnee);
+    const float bloomKnee = linear ? BloomKneeLinear : BloomKneeBoosted;
+    const float bloomScale = BloomMaxWhiteness / (1.0f - bloomKnee);
 
     uint8_t* out = m_image.rgba.data();
     const uint8_t* tint = m_tint.data();
@@ -332,7 +353,7 @@ void Vectorscope::renderTrace(const float* densities, int densitySize, uint64_t 
             const float normalized = static_cast<float>(std::log1p(static_cast<double>(count) * gain) * intensityScale);
             brightness = applyMidDensityGamma(normalized);
         }
-        const float whiteness = std::clamp((brightness - bloomKnee) * bloomScale, 0.0f, 0.9f);
+        const float whiteness = std::clamp((brightness - bloomKnee) * bloomScale, 0.0f, BloomMaxWhiteness);
         out[0] = static_cast<uint8_t>(
             (static_cast<float>(tint[0]) + (255.0f - static_cast<float>(tint[0])) * whiteness) * brightness);
         out[1] = static_cast<uint8_t>(

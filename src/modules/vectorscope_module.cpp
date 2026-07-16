@@ -170,6 +170,8 @@ void setImageSize(SsScopeInstance* instance, int32_t, int32_t height)
         self->settings.size = height;
         self->engine.configure(self->settings);
     } catch (...) {
+        // The boundary must not throw; a failed resize keeps the previous grid.
+        return;
     }
 }
 
