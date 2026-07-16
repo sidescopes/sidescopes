@@ -88,7 +88,19 @@ function(sidescopes_add_module name)
         set_target_properties(${name} PROPERTIES
             CXX_VISIBILITY_PRESET hidden
             VISIBILITY_INLINES_HIDDEN ON
-            LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/modules)
+            LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/modules
+            RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/modules)
+        # Multi-config generators (MSVC) append a per-config subdirectory to the
+        # output directory, which the loader's fixed SIDESCOPES_MODULES_DIR would
+        # then miss. Pin every config's module output to the one directory the
+        # loader scans. No-op on the single-config generators, whose
+        # CMAKE_CONFIGURATION_TYPES is empty.
+        foreach(config IN LISTS CMAKE_CONFIGURATION_TYPES)
+            string(TOUPPER "${config}" config_upper)
+            set_target_properties(${name} PROPERTIES
+                LIBRARY_OUTPUT_DIRECTORY_${config_upper} ${CMAKE_BINARY_DIR}/modules
+                RUNTIME_OUTPUT_DIRECTORY_${config_upper} ${CMAKE_BINARY_DIR}/modules)
+        endforeach()
         if(APPLE)
             # CMake gives MODULE bundles the .so suffix on macOS; the loader
             # scans for the platform-native .dylib, so match it.
