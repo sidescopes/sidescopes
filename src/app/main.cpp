@@ -1759,12 +1759,9 @@ int main()
             showRegionBorder(captureController.capturedDisplay(), analysis.region);
         }
     };
-    // The patch a pin-mode click samples, in interface points; the pin
-    // picker uses the same span, so the chip previews what a click pins.
-    constexpr double PinSamplePoints = 14.0;
-    // Averages a display-percent area of the latest frame: the pin
-    // modes' sample. Photographs are textured, so pins come from areas,
-    // never single pixels.
+    // Averages a display-percent area of the latest frame: a dragged pin's
+    // sample. A drag is the explicit request to average textured pixels; a
+    // plain click samples a point instead, matching the live readout.
     const auto averageFrameArea = [&](const RegionOfInterest& area) -> std::optional<FloatColor> {
         std::optional<FloatColor> color;
         const bool sampled = worker.withLatestFrame([&](const FrameView& view) {
@@ -2988,18 +2985,16 @@ int main()
                 std::optional<FloatColor> chip;
                 if (const auto cursor = globalCursorPosition()) {
                     if (displayAtPoint(*cursor).value_or(0) == captureController.capturedDisplay() &&
-                        !captureController.dead()) {
+                        !captureController.dead() && frameSize) {
                         if (const auto geometry = geometryOfDisplay(captureController.capturedDisplay())) {
-                            const double spanX = PinSamplePoints * uiScale / geometry->widthPoints * 100.0;
-                            const double spanY = PinSamplePoints * uiScale / geometry->heightPoints * 100.0;
-                            RegionOfInterest patch;
-                            patch.leftPercent =
-                                (cursor->x - geometry->originX) / geometry->widthPoints * 100.0 - spanX / 2;
-                            patch.rightPercent = patch.leftPercent + spanX;
-                            patch.topPercent =
-                                (cursor->y - geometry->originY) / geometry->heightPoints * 100.0 - spanY / 2;
-                            patch.bottomPercent = patch.topPercent + spanY;
-                            chip = averageFrameArea(patch);
+                            // The chip previews exactly what a click will pin:
+                            // the same point sample the live cursor readout
+                            // takes, not an averaged patch.
+                            const int pixelX = static_cast<int>((cursor->x - geometry->originX) * frameSize->width /
+                                                                geometry->widthPoints);
+                            const int pixelY = static_cast<int>((cursor->y - geometry->originY) * frameSize->height /
+                                                                geometry->heightPoints);
+                            chip = worker.sampleFrameColor(pixelX, pixelY);
                         }
                     } else {
                         // Another display: the throttled one-shot sampler
@@ -3010,10 +3005,20 @@ int main()
                 }
                 setRegionPickChipColor(chip);
 
-                if (poll.pinnedArea) {
+                if (poll.pinnedPoint || poll.pinnedArea) {
                     std::optional<FloatColor> pinned;
                     if (poll.displayId == captureController.capturedDisplay() && !captureController.dead()) {
-                        pinned = averageFrameArea(*poll.pinnedArea);
+                        if (poll.pinnedPoint && frameSize) {
+                            // A plain pin samples the frame exactly like the
+                            // live readout, so the pinned color matches what
+                            // the user was reading; only a dragged area
+                            // averages, the explicit way to ask for a swatch.
+                            const int pixelX = static_cast<int>(poll.pinnedPoint->xPercent / 100.0 * frameSize->width);
+                            const int pixelY = static_cast<int>(poll.pinnedPoint->yPercent / 100.0 * frameSize->height);
+                            pinned = worker.sampleFrameColor(pixelX, pixelY);
+                        } else if (poll.pinnedArea) {
+                            pinned = averageFrameArea(*poll.pinnedArea);
+                        }
                     } else {
                         std::lock_guard lock(screenSample->mutex);
                         pinned = screenSample->color;

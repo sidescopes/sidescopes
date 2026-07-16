@@ -230,13 +230,17 @@ struct PickerState
     int height = 0;
     bool drawMode = false;
     bool facesMode = false;
-    // Color pinning: clicks and drags report areas to average, the
-    // region is never touched, and a cursor chip previews the sample.
+    // Color pinning: a click reports a point to sample, a drag an area to
+    // average, the region is never touched, and a cursor chip previews the
+    // sample.
     bool pinMode = false;
-    // An area the application should average and pin, in overlay-local
-    // pixels, left here until the next poll collects it - with the
-    // click's Shift state, the per-pin choice to keep picking.
+    // The pending pin, in overlay-local pixels, left here until the next
+    // poll collects it - with the click's Shift state, the per-pin choice
+    // to keep picking. pinnedIsPoint says whether pinnedPoint (a click) or
+    // pinnedArea (a drag) holds it.
+    Gdiplus::PointF pinnedPoint{};
     Gdiplus::RectF pinnedArea{};
+    bool pinnedIsPoint = false;
     bool pinnedKeepOpen = false;
     bool pinnedReady = false;
     // The active suggestion list in overlay-local pixels, with labels -
@@ -270,9 +274,6 @@ std::vector<PickerState*> g_pickers;
 // frame; sampled from the capture stream so the swatch previews exactly
 // what a click would pin.
 std::optional<FloatColor> g_pinChipColor;
-
-// The sample patch a pin-mode click averages, in interface points.
-constexpr double PinSamplePoints = 14.0;
 
 // The pin cursor: crosshair and preview swatch drawn into the CURSOR
 // itself. A swatch painted into the overlay always trails the hardware
@@ -875,9 +876,8 @@ LRESULT pickerOnMouseMove(PickerState& picker, HWND window, WPARAM wParam, LPARA
     return 0;
 }
 
-// A pin-mode release: a real drag pins its rectangle, a click pins a
-// cursor-sized patch, and the click's Shift decides whether picking
-// continues.
+// A pin-mode release: a real drag pins its rectangle, a click pins the
+// point itself, and the click's Shift decides whether picking continues.
 void pickerPinUp(PickerState& picker, HWND window, WPARAM wParam, POINT point)
 {
     const double scale = uiScale(window);
@@ -886,13 +886,14 @@ void pickerPinUp(PickerState& picker, HWND window, WPARAM wParam, POINT point)
     const double minimum = 8 * scale;
     if (picker.dragging && selection.Width > minimum && selection.Height > minimum) {
         picker.pinnedArea = selection;
+        picker.pinnedIsPoint = false;
     } else {
-        // A click pins a cursor-sized patch, not a pixel:
-        // photographs are textured, and a point sample is a
-        // lottery across the vectorscope cloud.
-        const auto span = static_cast<Gdiplus::REAL>(PinSamplePoints * scale);
-        picker.pinnedArea = Gdiplus::RectF(static_cast<Gdiplus::REAL>(point.x) - span / 2,
-                                           static_cast<Gdiplus::REAL>(point.y) - span / 2, span, span);
+        // A plain click pins the point itself, so the pinned color is
+        // exactly what the live cursor readout showed; averaging a patch
+        // here would fade pins taken over a small subject. Dragging an
+        // area is the explicit way to average a swatch.
+        picker.pinnedPoint = Gdiplus::PointF(static_cast<Gdiplus::REAL>(point.x), static_cast<Gdiplus::REAL>(point.y));
+        picker.pinnedIsPoint = true;
     }
     // The click's Shift carries the per-pin decision: pin
     // and keep picking, or pin and be done.
@@ -1503,7 +1504,14 @@ void collectPinnedArea(RegionPickPoll& poll)
             continue;
         }
         picker->pinnedReady = false;
-        poll.pinnedArea = regionFromLocalRect(toLocalRect(picker->pinnedArea), picker->width, picker->height);
+        if (picker->pinnedIsPoint) {
+            // Overlay-local pixels to display percent, the same mapping
+            // regionFromLocalRect applies to a rectangle's edges.
+            poll.pinnedPoint = DisplayPoint{picker->pinnedPoint.X / static_cast<double>(picker->width) * 100.0,
+                                            picker->pinnedPoint.Y / static_cast<double>(picker->height) * 100.0};
+        } else {
+            poll.pinnedArea = regionFromLocalRect(toLocalRect(picker->pinnedArea), picker->width, picker->height);
+        }
         poll.pinnedKeepOpen = picker->pinnedKeepOpen;
         poll.displayId = picker->displayId;
         break;

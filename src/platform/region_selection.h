@@ -33,6 +33,15 @@ struct PickerDisplay
     std::vector<SuggestedRegion> faces;
 };
 
+/// A single point on a display, in that display's percentages - the same
+/// space as RegionOfInterest's edges. A plain pin click reports one so the
+/// caller can sample it exactly the way the live cursor readout does.
+struct DisplayPoint
+{
+    double xPercent = 0.0;
+    double yPercent = 0.0;
+};
+
 /// One poll of the asynchronous picker. @c preview is whatever the user is
 /// currently indicating - the hovered suggestion or the drag in progress -
 /// so the application can feed it to the scopes live; @c displayId says
@@ -46,12 +55,16 @@ struct RegionPickPoll
     uint32_t displayId = 0;
     std::optional<RegionOfInterest> preview;
     std::optional<RegionOfInterest> confirmed;
-    /// Color pinning. @c pinnedArea is the display-percent rectangle to
-    /// average and pin - a click delivers a cursor-sized patch, a drag
-    /// the dragged area - reported as it happens, without finishing the
-    /// pick. @c pinnedKeepOpen carries the click's Shift state: the
-    /// user's per-pin choice to keep picking. While @c pinMode is set the
-    /// caller must not treat previews or a finish as region changes.
+    /// Color pinning. At most one of these carries a ready pin, reported as
+    /// it happens without finishing the pick. @c pinnedPoint is a plain
+    /// click: a single display-percent point the caller samples the same
+    /// way it samples the live cursor readout, so a pin matches the color
+    /// the user was reading. @c pinnedArea is a dragged rectangle to
+    /// average - the explicit way to ask for a swatch over textured pixels.
+    /// @c pinnedKeepOpen carries the click's Shift state: the user's
+    /// per-pin choice to keep picking. While @c pinMode is set the caller
+    /// must not treat previews or a finish as region changes.
+    std::optional<DisplayPoint> pinnedPoint;
     std::optional<RegionOfInterest> pinnedArea;
     bool pinnedKeepOpen = false;
     bool pinMode = false;

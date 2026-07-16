@@ -70,9 +70,6 @@ RegionOfInterest g_borderEditRegion;
 // what a click would pin.
 std::optional<FloatColor> g_pinChipColor;
 
-// The sample patch a pin-mode click averages, in points.
-constexpr double PinSamplePoints = 14.0;
-
 // The pin cursor: crosshair and preview swatch drawn into the CURSOR
 // itself. A swatch painted into the overlay always trails the pointer
 // by a composition frame - the cursor image rides its own zero-latency
@@ -161,10 +158,13 @@ NSCursor* buildPinCursor(const std::optional<FloatColor>& color)
 @property(nonatomic, assign) BOOL drawMode;
 // In picking mode: whether the face list is active instead of windows.
 @property(nonatomic, assign) BOOL facesMode;
-// Color pinning: clicks and drags report areas to average, the region
-// is never touched, and a cursor chip previews the sample.
+// Color pinning: a click reports a point to sample, a drag an area to
+// average, the region is never touched, and a cursor chip previews the
+// sample. pinnedIsPoint says which of the two the pending pin is.
 @property(nonatomic, assign) BOOL pinMode;
+@property(nonatomic, assign) NSPoint pinnedPoint;
 @property(nonatomic, assign) NSRect pinnedArea;
+@property(nonatomic, assign) BOOL pinnedIsPoint;
 @property(nonatomic, assign) BOOL pinnedKeepOpen;
 @property(nonatomic, assign) BOOL pinnedReady;
 @property(nonatomic, assign) NSPoint dragStart;
@@ -472,13 +472,14 @@ NSCursor* buildPinCursor(const std::optional<FloatColor>& color)
         const NSRect selection = [self selectionRect];
         if (self.dragging && selection.size.width > 8 && selection.size.height > 8) {
             self.pinnedArea = selection;
+            self.pinnedIsPoint = NO;
         } else {
-            // A click pins a cursor-sized patch, not a pixel:
-            // photographs are textured, and a point sample is a lottery
-            // across the vectorscope cloud.
-            self.pinnedArea =
-                NSMakeRect(point.x - sidescopes::PinSamplePoints / 2, point.y - sidescopes::PinSamplePoints / 2,
-                           sidescopes::PinSamplePoints, sidescopes::PinSamplePoints);
+            // A plain click pins the point itself, so the pinned color is
+            // exactly what the live cursor readout showed; averaging a
+            // patch here would fade pins taken over a small subject.
+            // Dragging an area is the explicit way to average a swatch.
+            self.pinnedPoint = point;
+            self.pinnedIsPoint = YES;
         }
         // The click's Shift carries the per-pin decision: pin and keep
         // picking, or pin and be done.
@@ -1132,7 +1133,15 @@ RegionPickPoll pollRegionPick()
             continue;
         }
         overlay.view.pinnedReady = NO;
-        poll.pinnedArea = regionFromView(overlay.view.pinnedArea, overlay.size);
+        if (overlay.view.pinnedIsPoint) {
+            // The view is bottom-left origin; flip the click's Y into the
+            // shared top-left percent space, matching regionFromView.
+            const NSPoint click = overlay.view.pinnedPoint;
+            poll.pinnedPoint = DisplayPoint{click.x / overlay.size.width * 100.0,
+                                            flippedY(click.y, overlay.size.height) / overlay.size.height * 100.0};
+        } else {
+            poll.pinnedArea = regionFromView(overlay.view.pinnedArea, overlay.size);
+        }
         poll.pinnedKeepOpen = overlay.view.pinnedKeepOpen;
         poll.displayId = overlay.displayId;
         break;
