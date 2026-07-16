@@ -308,6 +308,10 @@ if(APPLE OR WIN32)
         sidescopes_target_defaults(SideScopes)
     endif()
 
+    # Application logic shared by both platforms: cohesive controllers lifted
+    # out of main.
+    target_sources(SideScopes PRIVATE src/app/pin_board.cpp)
+
     if(SIDESCOPES_MODULES_DYNAMIC)
         # Nothing links the modules in dynamic mode; make the app wait for
         # the shared objects it loads at runtime.

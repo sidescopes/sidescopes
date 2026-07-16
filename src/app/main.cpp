@@ -20,6 +20,7 @@
 #include <string>
 #include <thread>
 
+#include "app/pin_board.h"
 #include "core/analysis_worker.h"
 #include "core/frame_mailbox.h"
 #include "core/marker_smoother.h"
@@ -856,40 +857,32 @@ void popHexFont()
     }
 }
 
-void drawPinnedMenu(std::vector<FloatColor>& pinnedColors, int& comparatorPin, int& pinnedMenuIndex)
+void drawPinnedMenu(PinBoard& pins)
 {
     if (!ImGui::BeginPopup("##pinned-menu")) {
         return;
     }
-    if (pinnedMenuIndex >= 0 && pinnedMenuIndex < static_cast<int>(pinnedColors.size())) {
-        const std::size_t chosen = static_cast<std::size_t>(pinnedMenuIndex);
+    if (pins.managed() >= 0 && pins.managed() < static_cast<int>(pins.size())) {
+        const std::size_t chosen = static_cast<std::size_t>(pins.managed());
         char chosenHex[8];
-        std::snprintf(chosenHex, sizeof(chosenHex), "#%02X%02X%02X",
-                      static_cast<int>(std::lround(pinnedColors[chosen].r)),
-                      static_cast<int>(std::lround(pinnedColors[chosen].g)),
-                      static_cast<int>(std::lround(pinnedColors[chosen].b)));
+        std::snprintf(
+            chosenHex, sizeof(chosenHex), "#%02X%02X%02X", static_cast<int>(std::lround(pins.color(chosen).r)),
+            static_cast<int>(std::lround(pins.color(chosen).g)), static_cast<int>(std::lround(pins.color(chosen).b)));
         if (ImGui::MenuItem(chosenHex)) {
             ImGui::SetClipboardText(chosenHex);
         }
         if (ImGui::MenuItem("Remove")) {
-            pinnedColors.erase(pinnedColors.begin() + static_cast<long>(chosen));
-            if (comparatorPin == pinnedMenuIndex) {
-                comparatorPin = -1;
-            } else if (comparatorPin > pinnedMenuIndex) {
-                --comparatorPin;
-            }
+            pins.removeAt(chosen);
         }
         ImGui::Separator();
         if (ImGui::MenuItem("Clear All")) {
-            pinnedColors.clear();
-            comparatorPin = -1;
+            pins.clear();
         }
     }
     ImGui::EndPopup();
 }
 
-void drawColorPicker(const std::optional<FloatColor>& liveColor, std::vector<FloatColor>& pinnedColors,
-                     int& comparatorPin, int& pinnedMenuIndex, bool valuesAsPercent)
+void drawColorPicker(const std::optional<FloatColor>& liveColor, PinBoard& pins, bool valuesAsPercent)
 {
     // Three size tiers, few and spaced so resizing feels like
     // deliberate steps: a strip, a compact comparator, the full
@@ -900,8 +893,8 @@ void drawColorPicker(const std::optional<FloatColor>& liveColor, std::vector<Flo
     const ImVec2 area = ImGui::GetContentRegionAvail();
     const float lineHeight = ImGui::GetTextLineHeightWithSpacing();
     const ImGuiStyle& style = ImGui::GetStyle();
-    if (comparatorPin >= static_cast<int>(pinnedColors.size())) {
-        comparatorPin = -1;
+    if (pins.comparator() >= static_cast<int>(pins.size())) {
+        pins.selectComparator(-1);
     }
     if (!liveColor) {
         ImGui::Dummy(ImVec2(0.0f, std::max(0.0f, (area.y - lineHeight) / 2.0f)));
@@ -935,9 +928,9 @@ void drawColorPicker(const std::optional<FloatColor>& liveColor, std::vector<Flo
         return ImVec4(source.r / 255.0f, source.g / 255.0f, source.b / 255.0f, 1.0f);
     };
     const auto pinHexOf = [&](std::size_t index, char* buffer) {
-        std::snprintf(buffer, 8, "#%02X%02X%02X", static_cast<int>(std::lround(pinnedColors[index].r)),
-                      static_cast<int>(std::lround(pinnedColors[index].g)),
-                      static_cast<int>(std::lround(pinnedColors[index].b)));
+        std::snprintf(buffer, 8, "#%02X%02X%02X", static_cast<int>(std::lround(pins.color(index).r)),
+                      static_cast<int>(std::lround(pins.color(index).g)),
+                      static_cast<int>(std::lround(pins.color(index).b)));
     };
 
     // The comparator: the live color, split against the selected
@@ -949,11 +942,11 @@ void drawColorPicker(const std::optional<FloatColor>& liveColor, std::vector<Flo
     // With nothing pinned there is no deck to reserve for, and an
     // uncapped comparator absorbs the pane instead of leaving a
     // dead black field beneath the values.
-    const float deckReserve = pinnedColors.empty() ? 0.0f : (full ? 4.0f * lineHeight : lineHeight);
+    const float deckReserve = pins.empty() ? 0.0f : (full ? 4.0f * lineHeight : lineHeight);
     const float reserved = 2.0f * lineHeight + deckReserve + style.ItemSpacing.y;
-    const float heroCap = pinnedColors.empty() ? area.y : (full ? 220.0f : 64.0f);
+    const float heroCap = pins.empty() ? area.y : (full ? 220.0f : 64.0f);
     const float heroHeight = tiny ? lineHeight * 1.5f : std::clamp(area.y - reserved, 48.0f, heroCap);
-    const bool split = comparatorPin >= 0;
+    const bool split = pins.hasComparator();
     const float heroWidth = area.x;
     const ImVec2 heroOrigin = ImGui::GetCursorScreenPos();
     if (ImGui::ColorButton("##picker-live", swatchColor(color),
@@ -964,9 +957,9 @@ void drawColorPicker(const std::optional<FloatColor>& liveColor, std::vector<Flo
     ImGui::SetItemTooltip("live  %s - click to copy", hex);
     if (split) {
         char pinHex[8];
-        pinHexOf(static_cast<std::size_t>(comparatorPin), pinHex);
+        pinHexOf(static_cast<std::size_t>(pins.comparator()), pinHex);
         ImGui::SameLine(0.0f, 0.0f);
-        if (ImGui::ColorButton("##picker-reference", swatchColor(pinnedColors[static_cast<std::size_t>(comparatorPin)]),
+        if (ImGui::ColorButton("##picker-reference", swatchColor(pins.comparatorColor()),
                                ImGuiColorEditFlags_NoTooltip | ImGuiColorEditFlags_NoDragDrop,
                                ImVec2(heroWidth / 2.0f, heroHeight))) {
             ImGui::SetClipboardText(pinHex);
@@ -983,7 +976,7 @@ void drawColorPicker(const std::optional<FloatColor>& liveColor, std::vector<Flo
             draw->AddText(ImVec2(heroOrigin.x + 5, heroOrigin.y + 3), labelInk(color), "LIVE");
             const float pinLabel = ImGui::CalcTextSize("PIN").x;
             draw->AddText(ImVec2(heroOrigin.x + heroWidth - pinLabel - 5, heroOrigin.y + 3),
-                          labelInk(pinnedColors[static_cast<std::size_t>(comparatorPin)]), "PIN");
+                          labelInk(pins.comparatorColor()), "PIN");
         }
     }
 
@@ -1025,27 +1018,27 @@ void drawColorPicker(const std::optional<FloatColor>& liveColor, std::vector<Flo
     // The pins: a full reference deck when there is room, a chip
     // rail when there is not. Clicking loads the comparator;
     // hex copies; the right-click menu manages.
-    if (pinnedColors.empty()) {
+    if (pins.empty()) {
         return;
     }
     ImGui::Dummy(ImVec2(0.0f, lineHeight * 0.35f));
     int removePin = -1;
     if (full) {
         ImGui::BeginChild("##pin-deck", ImVec2(0, 0));
-        for (std::size_t index = 0; index < pinnedColors.size(); ++index) {
+        for (std::size_t index = 0; index < pins.size(); ++index) {
             char pinId[24];
             std::snprintf(pinId, sizeof(pinId), "##pin-%d", static_cast<int>(index));
             char pinHex[8];
             pinHexOf(index, pinHex);
-            const bool selected = static_cast<int>(index) == comparatorPin;
+            const bool selected = static_cast<int>(index) == pins.comparator();
             const float rowTop = ImGui::GetCursorScreenPos().y;
-            if (ImGui::ColorButton(pinId, swatchColor(pinnedColors[index]),
+            if (ImGui::ColorButton(pinId, swatchColor(pins.color(index)),
                                    ImGuiColorEditFlags_NoTooltip | ImGuiColorEditFlags_NoDragDrop,
                                    ImVec2(lineHeight, lineHeight))) {
-                comparatorPin = selected ? -1 : static_cast<int>(index);
+                pins.selectComparator(selected ? -1 : static_cast<int>(index));
             }
             if (ImGui::IsItemClicked(ImGuiMouseButton_Right)) {
-                pinnedMenuIndex = static_cast<int>(index);
+                pins.manage(static_cast<int>(index));
                 ImGui::OpenPopup("##pinned-menu");
             }
             ImGui::SetItemTooltip(selected ? "click to unload from the comparator"
@@ -1080,8 +1073,8 @@ void drawColorPicker(const std::optional<FloatColor>& liveColor, std::vector<Flo
             const float hexColumn = ImGui::CalcTextSize("#DDDDDD").x;
             popHexFont();
             const float deltasStart = ImGui::GetCursorPosX() + lineHeight + columnGap + hexColumn + 2 * columnGap;
-            const float deltas[3] = {color.r - pinnedColors[index].r, color.g - pinnedColors[index].g,
-                                     color.b - pinnedColors[index].b};
+            const float deltas[3] = {color.r - pins.color(index).r, color.g - pins.color(index).g,
+                                     color.b - pins.color(index).b};
             for (int channel = 0; channel < 3; ++channel) {
                 char delta[8];
                 if (valuesAsPercent) {
@@ -1128,25 +1121,25 @@ void drawColorPicker(const std::optional<FloatColor>& liveColor, std::vector<Flo
             cross->AddLine(ImVec2(crossCenter.x - arm, crossCenter.y + arm),
                            ImVec2(crossCenter.x + arm, crossCenter.y - arm), ink, 1.4f);
         }
-        drawPinnedMenu(pinnedColors, comparatorPin, pinnedMenuIndex);
+        drawPinnedMenu(pins);
         ImGui::EndChild();
     } else {
-        for (std::size_t index = 0; index < pinnedColors.size(); ++index) {
+        for (std::size_t index = 0; index < pins.size(); ++index) {
             char pinId[24];
             std::snprintf(pinId, sizeof(pinId), "##pin-%d", static_cast<int>(index));
             char pinHex[8];
             pinHexOf(index, pinHex);
-            const bool selected = static_cast<int>(index) == comparatorPin;
+            const bool selected = static_cast<int>(index) == pins.comparator();
             if (index > 0) {
                 ImGui::SameLine(0.0f, 4.0f);
             }
-            if (ImGui::ColorButton(pinId, swatchColor(pinnedColors[index]),
+            if (ImGui::ColorButton(pinId, swatchColor(pins.color(index)),
                                    ImGuiColorEditFlags_NoTooltip | ImGuiColorEditFlags_NoDragDrop,
                                    ImVec2(lineHeight, lineHeight))) {
-                comparatorPin = selected ? -1 : static_cast<int>(index);
+                pins.selectComparator(selected ? -1 : static_cast<int>(index));
             }
             if (ImGui::IsItemClicked(ImGuiMouseButton_Right)) {
-                pinnedMenuIndex = static_cast<int>(index);
+                pins.manage(static_cast<int>(index));
                 ImGui::OpenPopup("##pinned-menu");
             }
             ImGui::SetItemTooltip("%s - click to compare, right-click to manage", pinHex);
@@ -1159,15 +1152,10 @@ void drawColorPicker(const std::optional<FloatColor>& liveColor, std::vector<Flo
                 draw->AddRect(lo, hi, IM_COL32(235, 235, 235, 235), 0.0f, 0, 1.5f);
             }
         }
-        drawPinnedMenu(pinnedColors, comparatorPin, pinnedMenuIndex);
+        drawPinnedMenu(pins);
     }
     if (removePin >= 0) {
-        pinnedColors.erase(pinnedColors.begin() + removePin);
-        if (comparatorPin == removePin) {
-            comparatorPin = -1;
-        } else if (comparatorPin > removePin) {
-            --comparatorPin;
-        }
+        pins.removeAt(static_cast<std::size_t>(removePin));
     }
 }
 
@@ -1403,26 +1391,10 @@ int main()
     const auto shortcutLabel = [](const std::string& name) -> std::string { return name == "Escape" ? "Esc" : name; };
     bool showSettings = false;
     // Reference colors pinned on the vectorscope (session-scoped): pin a
-    // corrected skin tone, then match the next photo against it.
-    std::vector<FloatColor> pinnedColors;
-    // Which pin the picker's comparator holds beside the live color;
-    // -1 shows the live color alone. Session-scoped, like the pins.
-    int comparatorPin = -1;
-    int pinnedMenuIndex = -1;  // swatch under the management popup
-    constexpr std::size_t MaximumPinnedColors = 8;
-    // References come from two places: what the cursor reads (P), and
-    // the region's average (Shift+P) - select a face, pin its skin.
-    const auto pinReferenceColor = [&](const std::optional<FloatColor>& color) {
-        if (!color) {
-            return;
-        }
-        if (pinnedColors.size() >= MaximumPinnedColors) {
-            pinnedColors.erase(pinnedColors.begin());
-        }
-        pinnedColors.push_back(*color);
-        // A fresh pin is the reference the user wants to compare against.
-        comparatorPin = static_cast<int>(pinnedColors.size()) - 1;
-    };
+    // corrected skin tone, then match the next photo against it. References
+    // come from two places: what the cursor reads (P), and the region's
+    // average (Shift+P) - select a face, pin its skin.
+    PinBoard pins;
 
     // Live region picking: while the overlay is up, the frame loop polls it
     // and previews the indicated region on the scopes; cancelling resets
@@ -2176,7 +2148,7 @@ int main()
             if (showGraticule) {
                 drawVectorscopeOverlay(scope, buildVectorscopeGraticule(projectionVectorscope));
             }
-            for (const FloatColor& pinned : pinnedColors) {
+            for (const FloatColor& pinned : pins.colors()) {
                 if (const auto point = projectionVectorscope.project(pinned)) {
                     drawPointMarker(scope, *point, IM_COL32(230, 170, 90, 230));
                 }
@@ -2254,7 +2226,7 @@ int main()
             } else if (kind == ScopeGlyph::Histogram) {
                 drawHistogram(*histogramTexture, output, analysis.histogram.style, showGraticule, vectorscopeColor);
             } else if (kind == ScopeGlyph::ColorPicker) {
-                drawColorPicker(vectorscopeColor, pinnedColors, comparatorPin, pinnedMenuIndex, valuesAsPercent);
+                drawColorPicker(vectorscopeColor, pins, valuesAsPercent);
             } else {
                 drawWaveform(kind);
             }
@@ -2338,7 +2310,7 @@ int main()
             const auto pinOptions = [&] {
                 submenu("Pins");
                 action("Pin Colors...", MenuPickPinColor, false, shortcutLabel(shortcuts.pinColor));
-                if (!pinnedColors.empty()) {
+                if (!pins.empty()) {
                     action("Clear Pinned Markers", MenuClearPinnedMarkers, false);
                 }
                 endSubmenu();
@@ -2522,7 +2494,7 @@ int main()
                 wantRegionPick = RegionPickerMode::PinColor;
                 break;
             case MenuClearPinnedMarkers:
-                pinnedColors.clear();
+                pins.clear();
                 break;
             case MenuOpenSettings:
                 showSettings = true;
@@ -2764,7 +2736,9 @@ int main()
                         std::lock_guard lock(screenSample->mutex);
                         pinned = screenSample->color;
                     }
-                    pinReferenceColor(pinned);
+                    if (pinned) {
+                        pins.pin(*pinned);
+                    }
                     // The click's own Shift decided: pin-and-continue
                     // stays, a plain pin ends the errand.
                     if (!poll.pinnedKeepOpen) {
