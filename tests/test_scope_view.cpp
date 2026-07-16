@@ -60,7 +60,7 @@ TEST_CASE("Choosing solos a scope unless stacking")
     }
 }
 
-TEST_CASE("The enabled mask covers the stack; the color picker asks nothing")
+TEST_CASE("The enabled mask covers the whole stack")
 {
     ScopeView view;
     view.restoreStack("V");
@@ -68,8 +68,13 @@ TEST_CASE("The enabled mask covers the stack; the color picker asks nothing")
 
     view.restoreStack("VH");
     CHECK(view.enabledMask() == (ScopeVectorscope | ScopeHistogram));
+}
 
-    // The color picker reads the sampled cursor color, not worker output.
+TEST_CASE("The color picker asks nothing of the worker")
+{
+    // It reads the sampled cursor color, not worker output, so it
+    // contributes no bit to the enabled mask.
+    ScopeView view;
     view.restoreStack("C");
     CHECK(view.enabledMask() == 0u);
 }

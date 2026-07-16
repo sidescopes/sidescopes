@@ -140,7 +140,7 @@ TEST_CASE("AnalysisWorker recomputes on settings changes without a new frame")
     CHECK(output.framesProcessed == 1);                 // same frame, reanalyzed
 }
 
-TEST_CASE("AnalysisWorker samples cursor colors from the latest frame")
+TEST_CASE("AnalysisWorker samples a cursor color from the latest frame")
 {
     FrameMailbox mailbox;
     AnalysisWorker worker(mailbox);
@@ -156,9 +156,33 @@ TEST_CASE("AnalysisWorker samples cursor colors from the latest frame")
     CHECK(sampled->r == 10.0f);
     CHECK(sampled->g == 150.0f);
     CHECK(sampled->b == 200.0f);
+}
+
+TEST_CASE("AnalysisWorker rejects out-of-bounds cursor samples")
+{
+    FrameMailbox mailbox;
+    AnalysisWorker worker(mailbox);
+    worker.start();
+
+    mailbox.publish(makeSolidFrameBuffer(64, 64, Color{10, 150, 200}, 1));
+    uint64_t seen = 0;
+    AnalysisWorker::Output output;
+    REQUIRE(waitFor([&] { return worker.fetchOutput(seen, output); }));
 
     CHECK_FALSE(worker.sampleFrameColor(-1, 5).has_value());
     CHECK_FALSE(worker.sampleFrameColor(1000, 5).has_value());
+}
+
+TEST_CASE("AnalysisWorker reports the latest frame size")
+{
+    FrameMailbox mailbox;
+    AnalysisWorker worker(mailbox);
+    worker.start();
+
+    mailbox.publish(makeSolidFrameBuffer(64, 64, Color{10, 150, 200}, 1));
+    uint64_t seen = 0;
+    AnalysisWorker::Output output;
+    REQUIRE(waitFor([&] { return worker.fetchOutput(seen, output); }));
 
     const auto size = worker.latestFrameSize();
     REQUIRE(size.has_value());

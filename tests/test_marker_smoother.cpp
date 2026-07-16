@@ -8,7 +8,7 @@ namespace sidescopes {
 
 using namespace test;
 
-TEST_CASE("AverageNeighborhood averages the full window")
+TEST_CASE("averageNeighborhood averages the full window")
 {
     TestFrame frame(3, 3);
     for (int py = 0; py < 3; ++py) {
@@ -23,7 +23,7 @@ TEST_CASE("AverageNeighborhood averages the full window")
     CHECK(average.r < 101.0f);
 }
 
-TEST_CASE("AverageNeighborhood clips at frame edges")
+TEST_CASE("averageNeighborhood clips at frame edges")
 {
     TestFrame frame(2, 2);
     frame.setColor(0, 0, Color{100, 100, 100});

@@ -62,7 +62,7 @@ target_compile_definitions(sidescopes_imgui_test_engine PUBLIC
 target_link_libraries(sidescopes_imgui_test_engine PUBLIC sidescopes_imgui_te)
 
 # The headless smoke test proving the harness runs.
-add_executable(sidescopes_ui_tests smoke_test.cpp)
+add_executable(sidescopes_ui_tests test_smoke.cpp)
 target_link_libraries(sidescopes_ui_tests PRIVATE sidescopes_imgui_test_engine)
 
 add_test(NAME sidescopes_ui_smoke COMMAND sidescopes_ui_tests)

@@ -7,7 +7,7 @@ namespace sidescopes {
 
 using namespace test;
 
-TEST_CASE("HashRegion is stable for identical content")
+TEST_CASE("hashRegion is stable for identical content")
 {
     TestFrame frame(64, 64);
     frame.setPixel(10, 8, 200);
@@ -16,7 +16,7 @@ TEST_CASE("HashRegion is stable for identical content")
     CHECK(hashRegion(frame.view(), region) == hashRegion(frame.view(), region));
 }
 
-TEST_CASE("HashRegion changes when content inside the region changes")
+TEST_CASE("hashRegion changes when content inside the region changes")
 {
     TestFrame frame(64, 64);
     const IntRect region{0, 0, 64, 64};
@@ -26,7 +26,7 @@ TEST_CASE("HashRegion changes when content inside the region changes")
     CHECK(hashRegion(frame.view(), region) != before);
 }
 
-TEST_CASE("HashRegion ignores changes outside the region")
+TEST_CASE("hashRegion ignores changes outside the region")
 {
     TestFrame frame(64, 64);
     const IntRect region{0, 0, 32, 32};
@@ -36,7 +36,7 @@ TEST_CASE("HashRegion ignores changes outside the region")
     CHECK(hashRegion(frame.view(), region) == before);
 }
 
-TEST_CASE("HashRegion ignores changes inside the masked area")
+TEST_CASE("hashRegion ignores changes inside the masked area")
 {
     TestFrame frame(64, 64);
     const IntRect region{0, 0, 64, 64};
@@ -50,13 +50,13 @@ TEST_CASE("HashRegion ignores changes inside the masked area")
     CHECK(hashRegion(frame.view(), region, masked) != before);
 }
 
-TEST_CASE("HashRegion of an empty region is stable")
+TEST_CASE("hashRegion of an empty region is stable")
 {
     TestFrame frame(64, 64);
     CHECK(hashRegion(frame.view(), IntRect{200, 200, 10, 10}) == hashRegion(frame.view(), IntRect{300, 300, 10, 10}));
 }
 
-TEST_CASE("HashRegion ignores changes on unsampled rows")
+TEST_CASE("hashRegion ignores changes on unsampled rows")
 {
     // The hash samples every fourth row, so a change on a row it steps over
     // is invisible; the very next sampled row is not. This pins the sampling
@@ -72,7 +72,7 @@ TEST_CASE("HashRegion ignores changes on unsampled rows")
     CHECK(hashRegion(frame.view(), region) != before);
 }
 
-TEST_CASE("HashRegion handles a mask that overhangs the region edge")
+TEST_CASE("hashRegion handles a mask that overhangs the region edge")
 {
     // The mask extends past the region's right and bottom edges. Content it
     // covers inside the region is excluded; content left of it still votes,
