@@ -795,6 +795,203 @@ void switchPickerMode(int mode)
     }
 }
 
+LRESULT pickerOnSetCursor(PickerState& picker)
+{
+    if (picker.pinMode) {
+        SetCursor(g_pinCursor ? g_pinCursor : LoadCursorW(nullptr, IDC_CROSS));
+        return TRUE;
+    }
+    SetCursor(LoadCursorW(nullptr, picker.drawMode ? IDC_CROSS : IDC_HAND));
+    return TRUE;
+}
+
+// A pin-mode drag: the swatch rides the cursor image itself, so motion
+// alone needs no repaint - only an active selection drag does, and then
+// only its changed sliver.
+void pickerPinDrag(PickerState& picker, HWND window, WPARAM wParam, POINT point)
+{
+    // The swatch rides the cursor image itself; motion needs
+    // no repaint here, only an active drag does.
+    if ((wParam & MK_LBUTTON) == 0) {
+        return;
+    }
+    const double scale = uiScale(window);
+    const Gdiplus::RectF previous = selectionRect(picker);
+    picker.dragCurrent = point;
+    const double threshold = 4 * scale;
+    if (!picker.dragging && (std::abs(picker.dragCurrent.x - picker.dragStart.x) > threshold ||
+                             std::abs(picker.dragCurrent.y - picker.dragStart.y) > threshold)) {
+        picker.dragging = true;
+        paintPicker(picker);  // full: the banner leaves
+        return;
+    }
+    if (!picker.dragging) {
+        return;
+    }
+    Gdiplus::RectF changed = previous;
+    Gdiplus::RectF::Union(changed, changed, selectionRect(picker));
+    const auto margin = static_cast<Gdiplus::REAL>(4 * scale);
+    changed.Inflate(margin, margin);
+    paintPicker(picker, &changed);
+}
+
+// A draw-mode drag: past a few points of travel the selection becomes
+// real and repaints as a delta once it has a previous frame to reuse.
+void pickerDrawDrag(PickerState& picker, HWND window, WPARAM wParam, POINT point)
+{
+    if ((wParam & MK_LBUTTON) == 0) {
+        return;
+    }
+    picker.dragCurrent = point;
+    // A real drag only starts after a few points of travel,
+    // so a stray click never flashes a tiny selection.
+    const double scale = uiScale(window);
+    const double threshold = 4 * scale;
+    if (!picker.dragging && (std::abs(picker.dragCurrent.x - picker.dragStart.x) > threshold ||
+                             std::abs(picker.dragCurrent.y - picker.dragStart.y) > threshold)) {
+        picker.dragging = true;
+    }
+    // Nothing on screen changes until the drag is real:
+    // the pre-threshold scene is the banner one already
+    // showing.
+    if (picker.dragging) {
+        const Gdiplus::RectF selection = selectionRect(picker);
+        if (picker.selectionPainted) {
+            paintPickerSelectionDelta(picker, picker.paintedSelection, selection, scale);
+        } else {
+            paintPicker(picker);  // full: the banner leaves
+        }
+        picker.paintedSelection = selection;
+        picker.selectionPainted = true;
+    }
+}
+
+// Window/face mode without a drag: the highlight follows the smallest
+// suggestion under the cursor.
+void pickerHoverMove(PickerState& picker, POINT point)
+{
+    const int hovered = suggestionAtPoint(picker, point);
+    if (hovered != picker.hovered) {
+        picker.hovered = hovered;
+        paintPicker(picker);
+    }
+}
+
+LRESULT pickerOnMouseMove(PickerState& picker, HWND window, WPARAM wParam, LPARAM lParam)
+{
+    const POINT point{static_cast<int>(static_cast<short>(LOWORD(lParam))),
+                      static_cast<int>(static_cast<short>(HIWORD(lParam)))};
+    if (picker.pinMode) {
+        pickerPinDrag(picker, window, wParam, point);
+    } else if (picker.drawMode) {
+        pickerDrawDrag(picker, window, wParam, point);
+    } else {
+        pickerHoverMove(picker, point);
+    }
+    return 0;
+}
+
+// A pin-mode release: a real drag pins its rectangle, a click pins a
+// cursor-sized patch, and the click's Shift decides whether picking
+// continues.
+void pickerPinUp(PickerState& picker, HWND window, WPARAM wParam, POINT point)
+{
+    const double scale = uiScale(window);
+    picker.dragCurrent = point;
+    const Gdiplus::RectF selection = selectionRect(picker);
+    const double minimum = 8 * scale;
+    if (picker.dragging && selection.Width > minimum && selection.Height > minimum) {
+        picker.pinnedArea = selection;
+    } else {
+        // A click pins a cursor-sized patch, not a pixel:
+        // photographs are textured, and a point sample is a
+        // lottery across the vectorscope cloud.
+        const auto span = static_cast<Gdiplus::REAL>(PinSamplePoints * scale);
+        picker.pinnedArea = Gdiplus::RectF(static_cast<Gdiplus::REAL>(point.x) - span / 2,
+                                           static_cast<Gdiplus::REAL>(point.y) - span / 2, span, span);
+    }
+    // The click's Shift carries the per-pin decision: pin
+    // and keep picking, or pin and be done.
+    picker.pinnedKeepOpen = (wParam & MK_SHIFT) != 0;
+    picker.pinnedReady = true;
+    if (picker.dragging) {
+        picker.dragging = false;
+        paintPicker(picker);  // full: the frame leaves, the banner returns
+    }
+}
+
+// A window/face release: a hit confirms that suggestion and finishes the
+// pick; a miss keeps the picker open.
+void pickerWindowUp(PickerState& picker, POINT point)
+{
+    const int hovered = suggestionAtPoint(picker, point);
+    if (hovered < 0) {
+        return;  // a miss keeps the picker open
+    }
+    picker.picked = true;
+    picker.confirmed = picker.suggestions[static_cast<std::size_t>(hovered)].first;
+    picker.finished = true;
+}
+
+// A draw-mode release: a selection past the minimum size confirms and
+// finishes; a stray tap just repaints the banner.
+void pickerDrawUp(PickerState& picker, HWND window, POINT point)
+{
+    picker.dragCurrent = point;
+    if (picker.dragging) {
+        const Gdiplus::RectF selection = selectionRect(picker);
+        picker.dragging = false;
+        picker.selectionPainted = false;
+        const double minimum = 8 * uiScale(window);
+        if (selection.Width > minimum && selection.Height > minimum) {
+            picker.picked = true;
+            picker.confirmed = selection;
+            picker.finished = true;
+        } else {
+            paintPicker(picker);
+        }
+    }
+}
+
+LRESULT pickerOnLButtonUp(PickerState& picker, HWND window, WPARAM wParam, LPARAM lParam)
+{
+    ReleaseCapture();
+    const POINT point{static_cast<int>(static_cast<short>(LOWORD(lParam))),
+                      static_cast<int>(static_cast<short>(HIWORD(lParam)))};
+    if (picker.pinMode) {
+        pickerPinUp(picker, window, wParam, point);
+    } else if (!picker.drawMode) {
+        pickerWindowUp(picker, point);
+    } else {
+        pickerDrawUp(picker, window, point);
+    }
+    return 0;
+}
+
+LRESULT pickerOnKeyDown(PickerState& picker, WPARAM wParam)
+{
+    const int key = static_cast<int>(wParam);
+    if (key == VK_ESCAPE) {
+        picker.picked = false;
+        picker.finished = true;
+        return 0;
+    }
+    // Pinning is its own tool: while it is up, only ESC speaks.
+    if (picker.pinMode) {
+        return 0;
+    }
+    if (key == 'A') {
+        switchPickerMode(0);
+    }
+    if (key == 'D') {
+        switchPickerMode(1);
+    }
+    if (key == 'F' && supportsFaceDetection()) {
+        switchPickerMode(2);
+    }
+    return 0;
+}
+
 LRESULT CALLBACK pickerProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam)
 {
     PickerState* state = pickerForWindow(window);
@@ -804,158 +1001,19 @@ LRESULT CALLBACK pickerProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
     PickerState& picker = *state;
     switch (message) {
     case WM_SETCURSOR:
-        if (picker.pinMode) {
-            SetCursor(g_pinCursor ? g_pinCursor : LoadCursorW(nullptr, IDC_CROSS));
-            return TRUE;
-        }
-        SetCursor(LoadCursorW(nullptr, picker.drawMode ? IDC_CROSS : IDC_HAND));
-        return TRUE;
-    case WM_MOUSEMOVE: {
-        const POINT point{static_cast<int>(static_cast<short>(LOWORD(lParam))),
-                          static_cast<int>(static_cast<short>(HIWORD(lParam)))};
-        if (picker.pinMode) {
-            // The swatch rides the cursor image itself; motion needs
-            // no repaint here, only an active drag does.
-            if ((wParam & MK_LBUTTON) == 0) {
-                return 0;
-            }
-            const double scale = uiScale(window);
-            const Gdiplus::RectF previous = selectionRect(picker);
-            picker.dragCurrent = point;
-            const double threshold = 4 * scale;
-            if (!picker.dragging && (std::abs(picker.dragCurrent.x - picker.dragStart.x) > threshold ||
-                                     std::abs(picker.dragCurrent.y - picker.dragStart.y) > threshold)) {
-                picker.dragging = true;
-                paintPicker(picker);  // full: the banner leaves
-                return 0;
-            }
-            if (!picker.dragging) {
-                return 0;
-            }
-            Gdiplus::RectF changed = previous;
-            Gdiplus::RectF::Union(changed, changed, selectionRect(picker));
-            const auto margin = static_cast<Gdiplus::REAL>(4 * scale);
-            changed.Inflate(margin, margin);
-            paintPicker(picker, &changed);
-            return 0;
-        }
-        if (picker.drawMode) {
-            if ((wParam & MK_LBUTTON) != 0) {
-                picker.dragCurrent = point;
-                // A real drag only starts after a few points of travel,
-                // so a stray click never flashes a tiny selection.
-                const double scale = uiScale(window);
-                const double threshold = 4 * scale;
-                if (!picker.dragging && (std::abs(picker.dragCurrent.x - picker.dragStart.x) > threshold ||
-                                         std::abs(picker.dragCurrent.y - picker.dragStart.y) > threshold)) {
-                    picker.dragging = true;
-                }
-                // Nothing on screen changes until the drag is real:
-                // the pre-threshold scene is the banner one already
-                // showing.
-                if (picker.dragging) {
-                    const Gdiplus::RectF selection = selectionRect(picker);
-                    if (picker.selectionPainted) {
-                        paintPickerSelectionDelta(picker, picker.paintedSelection, selection, scale);
-                    } else {
-                        paintPicker(picker);  // full: the banner leaves
-                    }
-                    picker.paintedSelection = selection;
-                    picker.selectionPainted = true;
-                }
-            }
-        } else {
-            const int hovered = suggestionAtPoint(picker, point);
-            if (hovered != picker.hovered) {
-                picker.hovered = hovered;
-                paintPicker(picker);
-            }
-        }
-        return 0;
-    }
+        return pickerOnSetCursor(picker);
+    case WM_MOUSEMOVE:
+        return pickerOnMouseMove(picker, window, wParam, lParam);
     case WM_LBUTTONDOWN:
         picker.dragStart = {static_cast<int>(static_cast<short>(LOWORD(lParam))),
                             static_cast<int>(static_cast<short>(HIWORD(lParam)))};
         picker.dragCurrent = picker.dragStart;
         SetCapture(window);
         return 0;
-    case WM_LBUTTONUP: {
-        ReleaseCapture();
-        const POINT point{static_cast<int>(static_cast<short>(LOWORD(lParam))),
-                          static_cast<int>(static_cast<short>(HIWORD(lParam)))};
-        if (picker.pinMode) {
-            const double scale = uiScale(window);
-            picker.dragCurrent = point;
-            const Gdiplus::RectF selection = selectionRect(picker);
-            const double minimum = 8 * scale;
-            if (picker.dragging && selection.Width > minimum && selection.Height > minimum) {
-                picker.pinnedArea = selection;
-            } else {
-                // A click pins a cursor-sized patch, not a pixel:
-                // photographs are textured, and a point sample is a
-                // lottery across the vectorscope cloud.
-                const auto span = static_cast<Gdiplus::REAL>(PinSamplePoints * scale);
-                picker.pinnedArea = Gdiplus::RectF(static_cast<Gdiplus::REAL>(point.x) - span / 2,
-                                                   static_cast<Gdiplus::REAL>(point.y) - span / 2, span, span);
-            }
-            // The click's Shift carries the per-pin decision: pin
-            // and keep picking, or pin and be done.
-            picker.pinnedKeepOpen = (wParam & MK_SHIFT) != 0;
-            picker.pinnedReady = true;
-            if (picker.dragging) {
-                picker.dragging = false;
-                paintPicker(picker);  // full: the frame leaves, the banner returns
-            }
-            return 0;
-        }
-        if (!picker.drawMode) {
-            const int hovered = suggestionAtPoint(picker, point);
-            if (hovered < 0) {
-                return 0;  // a miss keeps the picker open
-            }
-            picker.picked = true;
-            picker.confirmed = picker.suggestions[static_cast<std::size_t>(hovered)].first;
-            picker.finished = true;
-            return 0;
-        }
-        picker.dragCurrent = point;
-        if (picker.dragging) {
-            const Gdiplus::RectF selection = selectionRect(picker);
-            picker.dragging = false;
-            picker.selectionPainted = false;
-            const double minimum = 8 * uiScale(window);
-            if (selection.Width > minimum && selection.Height > minimum) {
-                picker.picked = true;
-                picker.confirmed = selection;
-                picker.finished = true;
-            } else {
-                paintPicker(picker);
-            }
-        }
-        return 0;
-    }
-    case WM_KEYDOWN: {
-        const int key = static_cast<int>(wParam);
-        if (key == VK_ESCAPE) {
-            picker.picked = false;
-            picker.finished = true;
-            return 0;
-        }
-        // Pinning is its own tool: while it is up, only ESC speaks.
-        if (picker.pinMode) {
-            return 0;
-        }
-        if (key == 'A') {
-            switchPickerMode(0);
-        }
-        if (key == 'D') {
-            switchPickerMode(1);
-        }
-        if (key == 'F' && supportsFaceDetection()) {
-            switchPickerMode(2);
-        }
-        return 0;
-    }
+    case WM_LBUTTONUP:
+        return pickerOnLButtonUp(picker, window, wParam, lParam);
+    case WM_KEYDOWN:
+        return pickerOnKeyDown(picker, wParam);
     default:
         break;
     }
