@@ -38,6 +38,7 @@ using std::min;
 
 #include "platform/desktop.h"
 #include "platform/face_detection.h"
+#include "platform/windows/region_geometry.h"
 #include "platform/windows/wide_strings.h"
 
 namespace sidescopes {
@@ -55,10 +56,6 @@ constexpr double HandleRadius = 3.5;
 constexpr double EdgeRing = 1.0;
 constexpr double HandleMargin = HandleRadius + 2.0;
 constexpr double WindowPad = BorderPad + HandleMargin;
-// Within this distance of a region corner, a grab resizes both axes.
-constexpr double CornerZone = 22.0;
-// Half-length of the edge-midpoint handle's grab zone along its edge.
-constexpr double MidpointZone = 22.0;
 // Regions cannot shrink beyond this many points per side.
 constexpr double MinimumRegionSize = 24.0;
 // The hover-revealed close button: a badge on the band's outer corner,
@@ -69,18 +66,6 @@ constexpr double CloseRadius = 6.5;
 constexpr double CloseHitRadius = 11.0;
 constexpr double CloseCornerInset = 2.0;
 constexpr double MinimumWidthForClose = 48.0;
-
-// Which edges a border drag adjusts; Move relocates the whole region.
-enum ZoneBits : unsigned
-{
-    ZoneNone = 0,
-    ZoneLeft = 1u << 0,
-    ZoneRight = 1u << 1,
-    ZoneTop = 1u << 2,
-    ZoneBottom = 1u << 3,
-    ZoneMove = 1u << 4,
-    ZoneClose = 1u << 5,
-};
 
 bool ensureGdiplus()
 {
@@ -212,22 +197,23 @@ private:
     int m_height = 0;
 };
 
-RegionOfInterest regionFromLocalRect(const Gdiplus::RectF& rect, double width, double height)
+// The overlay works in GDI+ RectF and the border in Win32 RECT; both adapt
+// to the geometry layer's toolkit-independent LocalRect at the boundary.
+LocalRect toLocalRect(const Gdiplus::RectF& rect)
 {
-    RegionOfInterest region;
-    region.leftPercent = rect.X / width * 100.0;
-    region.topPercent = rect.Y / height * 100.0;
-    region.rightPercent = (rect.X + rect.Width) / width * 100.0;
-    region.bottomPercent = (rect.Y + rect.Height) / height * 100.0;
-    return region;
+    return {rect.X, rect.Y, rect.Width, rect.Height};
 }
 
-Gdiplus::RectF localRectFromRegion(const RegionOfInterest& region, double width, double height)
+LocalRect toLocalRect(const RECT& rect)
 {
-    return {static_cast<Gdiplus::REAL>(region.leftPercent / 100.0 * width),
-            static_cast<Gdiplus::REAL>(region.topPercent / 100.0 * height),
-            static_cast<Gdiplus::REAL>((region.rightPercent - region.leftPercent) / 100.0 * width),
-            static_cast<Gdiplus::REAL>((region.bottomPercent - region.topPercent) / 100.0 * height)};
+    return {static_cast<double>(rect.left), static_cast<double>(rect.top), static_cast<double>(rect.right - rect.left),
+            static_cast<double>(rect.bottom - rect.top)};
+}
+
+Gdiplus::RectF toRectF(const LocalRect& rect)
+{
+    return {static_cast<Gdiplus::REAL>(rect.x), static_cast<Gdiplus::REAL>(rect.y),
+            static_cast<Gdiplus::REAL>(rect.width), static_cast<Gdiplus::REAL>(rect.height)};
 }
 
 // ---------------------------------------------------------------------------
@@ -450,11 +436,9 @@ std::vector<Gdiplus::RectF> ownWindowExclusions(const PickerState& picker)
 
 Gdiplus::RectF selectionRect(const PickerState& picker)
 {
-    const auto left = static_cast<Gdiplus::REAL>(std::min(picker.dragStart.x, picker.dragCurrent.x));
-    const auto top = static_cast<Gdiplus::REAL>(std::min(picker.dragStart.y, picker.dragCurrent.y));
-    const auto width = static_cast<Gdiplus::REAL>(std::abs(picker.dragCurrent.x - picker.dragStart.x));
-    const auto height = static_cast<Gdiplus::REAL>(std::abs(picker.dragCurrent.y - picker.dragStart.y));
-    return {left, top, width, height};
+    return toRectF(
+        selectionRectFromDrag(static_cast<double>(picker.dragStart.x), static_cast<double>(picker.dragStart.y),
+                              static_cast<double>(picker.dragCurrent.x), static_cast<double>(picker.dragCurrent.y)));
 }
 
 // The smallest suggestion under the cursor wins, so a photo canvas beats
@@ -1099,46 +1083,6 @@ Gdiplus::PointF closeCenter(double scale)
             static_cast<Gdiplus::REAL>(region.Y - (BorderPad - CloseCornerInset + EdgeRing) * scale)};
 }
 
-// The corner grab zones: within CornerZone of a corner, a drag resizes
-// both axes. ZoneNone when the point is not in a corner.
-unsigned cornerZoneAt(const Gdiplus::RectF& region, double x, double y, double scale)
-{
-    const double corner = CornerZone * scale;
-    const bool nearLeft = x < region.X + corner;
-    const bool nearRight = x > region.GetRight() - corner;
-    const bool nearTop = y < region.Y + corner;
-    const bool nearBottom = y > region.GetBottom() - corner;
-    if ((nearLeft || nearRight) && (nearTop || nearBottom)) {
-        unsigned zone = ZoneNone;
-        zone |= nearLeft ? ZoneLeft : ZoneRight;
-        zone |= nearTop ? ZoneTop : ZoneBottom;
-        return zone;
-    }
-    return ZoneNone;
-}
-
-// The single-edge grab zones at each edge's midpoint; anywhere else on the
-// band moves the whole region.
-unsigned edgeOrMoveZoneAt(const Gdiplus::RectF& region, double x, double y, double scale)
-{
-    const double midpoint = MidpointZone * scale;
-    const bool midX = std::abs(x - (region.X + region.Width / 2)) <= midpoint;
-    const bool midY = std::abs(y - (region.Y + region.Height / 2)) <= midpoint;
-    if (midX && y < region.Y) {
-        return ZoneTop;
-    }
-    if (midX && y > region.GetBottom()) {
-        return ZoneBottom;
-    }
-    if (midY && x < region.X) {
-        return ZoneLeft;
-    }
-    if (midY && x > region.GetRight()) {
-        return ZoneRight;
-    }
-    return ZoneMove;
-}
-
 unsigned borderZoneAtPoint(double x, double y, double scale)
 {
     const Gdiplus::RectF region = borderRegionLocal(scale);
@@ -1154,11 +1098,12 @@ unsigned borderZoneAtPoint(double x, double y, double scale)
             return ZoneClose;
         }
     }
-    const unsigned corner = cornerZoneAt(region, x, y, scale);
+    const LocalRect local = toLocalRect(region);
+    const unsigned corner = cornerZoneAt(local, x, y, scale);
     if (corner != ZoneNone) {
         return corner;
     }
-    return edgeOrMoveZoneAt(region, x, y, scale);
+    return edgeOrMoveZoneAt(local, x, y, scale);
 }
 
 void applyBorderCursor(unsigned zone)
@@ -1378,31 +1323,6 @@ LRESULT borderOnLButtonDown(HWND window, LPARAM lParam)
     return 0;
 }
 
-// Applies a drag delta to the region rectangle: a move offsets it whole,
-// an edge or corner grab moves those edges, each clamped so the region
-// never shrinks past the minimum.
-RECT draggedRegionRect(unsigned dragZone, const RECT& start, int dx, int dy, int minimum)
-{
-    RECT rect = start;
-    if ((dragZone & ZoneMove) != 0) {
-        OffsetRect(&rect, dx, dy);
-        return rect;
-    }
-    if ((dragZone & ZoneLeft) != 0) {
-        rect.left = std::min(start.left + dx, start.right - minimum);
-    }
-    if ((dragZone & ZoneRight) != 0) {
-        rect.right = std::max(start.right + dx, start.left + minimum);
-    }
-    if ((dragZone & ZoneTop) != 0) {
-        rect.top = std::min(start.top + dy, start.bottom - minimum);
-    }
-    if ((dragZone & ZoneBottom) != 0) {
-        rect.bottom = std::max(start.bottom + dy, start.top + minimum);
-    }
-    return rect;
-}
-
 LRESULT borderOnMouseMove(HWND window)
 {
     if (g_border.dragZone == ZoneNone) {
@@ -1416,13 +1336,16 @@ LRESULT borderOnMouseMove(HWND window)
     const int dx = mouse.x - g_border.dragStartMouse.x;
     const int dy = mouse.y - g_border.dragStartMouse.y;
     const double scale = uiScale(window);
-    const auto minimum = static_cast<int>(MinimumRegionSize * scale);
-    const RECT rect = draggedRegionRect(g_border.dragZone, g_border.dragStartRegion, dx, dy, minimum);
+    // Truncated to whole pixels as the integer border rectangle always was,
+    // so the clamp lands exactly where it did before.
+    const int minimum = static_cast<int>(MinimumRegionSize * scale);
+    const LocalRect dragged =
+        draggedRegionRect(g_border.dragZone, toLocalRect(g_border.dragStartRegion), dx, dy, minimum);
     RegionOfInterest region;
-    region.leftPercent = (rect.left - g_border.displayOriginX) / g_border.displayWidth * 100.0;
-    region.topPercent = (rect.top - g_border.displayOriginY) / g_border.displayHeight * 100.0;
-    region.rightPercent = (rect.right - g_border.displayOriginX) / g_border.displayWidth * 100.0;
-    region.bottomPercent = (rect.bottom - g_border.displayOriginY) / g_border.displayHeight * 100.0;
+    region.leftPercent = (dragged.x - g_border.displayOriginX) / g_border.displayWidth * 100.0;
+    region.topPercent = (dragged.y - g_border.displayOriginY) / g_border.displayHeight * 100.0;
+    region.rightPercent = (dragged.x + dragged.width - g_border.displayOriginX) / g_border.displayWidth * 100.0;
+    region.bottomPercent = (dragged.y + dragged.height - g_border.displayOriginY) / g_border.displayHeight * 100.0;
     g_borderEditRegion = region;
     g_borderEditChanged = true;
     return 0;
@@ -1516,11 +1439,11 @@ PickerState* createPicker(const PickerDisplay& entry, bool draw, bool faces, boo
     picker->width = static_cast<int>(geometry->widthPoints);
     picker->height = static_cast<int>(geometry->heightPoints);
     for (const SuggestedRegion& suggestion : entry.windows) {
-        picker->windows.emplace_back(localRectFromRegion(suggestion.region, picker->width, picker->height),
+        picker->windows.emplace_back(toRectF(localRectFromRegion(suggestion.region, picker->width, picker->height)),
                                      wideFromUtf8(suggestion.label));
     }
     for (const SuggestedRegion& suggestion : entry.faces) {
-        picker->faces.emplace_back(localRectFromRegion(suggestion.region, picker->width, picker->height),
+        picker->faces.emplace_back(toRectF(localRectFromRegion(suggestion.region, picker->width, picker->height)),
                                    wideFromUtf8(suggestion.label));
     }
     picker->drawMode = draw;
@@ -1580,7 +1503,7 @@ void collectPinnedArea(RegionPickPoll& poll)
             continue;
         }
         picker->pinnedReady = false;
-        poll.pinnedArea = regionFromLocalRect(picker->pinnedArea, picker->width, picker->height);
+        poll.pinnedArea = regionFromLocalRect(toLocalRect(picker->pinnedArea), picker->width, picker->height);
         poll.pinnedKeepOpen = picker->pinnedKeepOpen;
         poll.displayId = picker->displayId;
         break;
@@ -1627,7 +1550,8 @@ bool finishRegionPick(RegionPickPoll& poll)
     poll.finished = true;
     poll.displayId = finishedPicker->displayId;
     if (finishedPicker->picked) {
-        poll.confirmed = regionFromLocalRect(finishedPicker->confirmed, finishedPicker->width, finishedPicker->height);
+        poll.confirmed =
+            regionFromLocalRect(toLocalRect(finishedPicker->confirmed), finishedPicker->width, finishedPicker->height);
     }
     for (PickerState* picker : g_pickers) {
         DestroyWindow(picker->window);
@@ -1651,8 +1575,9 @@ void collectRegionPreview(RegionPickPoll& poll)
         }
         if (!picker->drawMode) {
             if (picker->hovered >= 0 && picker->hovered < static_cast<int>(picker->suggestions.size())) {
-                poll.preview = regionFromLocalRect(picker->suggestions[static_cast<std::size_t>(picker->hovered)].first,
-                                                   picker->width, picker->height);
+                poll.preview = regionFromLocalRect(
+                    toLocalRect(picker->suggestions[static_cast<std::size_t>(picker->hovered)].first), picker->width,
+                    picker->height);
                 poll.displayId = picker->displayId;
                 break;
             }
@@ -1660,7 +1585,7 @@ void collectRegionPreview(RegionPickPoll& poll)
             const Gdiplus::RectF selection = selectionRect(*picker);
             const double minimum = 8 * uiScale(picker->window);
             if (selection.Width > minimum && selection.Height > minimum) {
-                poll.preview = regionFromLocalRect(selection, picker->width, picker->height);
+                poll.preview = regionFromLocalRect(toLocalRect(selection), picker->width, picker->height);
                 poll.displayId = picker->displayId;
                 break;
             }

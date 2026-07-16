@@ -174,6 +174,7 @@ if(WIN32)
         src/platform/windows/desktop.cpp
         src/platform/windows/face_detection.cpp
         src/platform/windows/native_menu.cpp
+        src/platform/windows/region_geometry.cpp
         src/platform/windows/region_selection.cpp
         src/platform/windows/screen_capture.cpp
     )
