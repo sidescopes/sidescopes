@@ -24,6 +24,83 @@ std::map<std::string, std::string, std::less<>> parseKeyValueLines(std::istream&
     return values;
 }
 
+// Folds two generations of legacy scope keys into scopeStack. The single
+// view_mode became the visible_scopes bit set, and the bit set plus the
+// stored waveform style became the ordered letter stack; the scope_stack
+// key, when present, supersedes both. Whatever the source, only known
+// letters survive, each once, in order, defaulting to the vectorscope.
+// The retired L (a separate luma waveform) becomes the waveform in its
+// Luma style, unless an RGB waveform was stacked alongside, which keeps
+// the letter.
+void migrateScopeStack(const std::map<std::string, std::string, std::less<>>& values, int storedWaveformMode,
+                       Preferences& preferences)
+{
+    const auto readInt = [&](const char* key, int& out) {
+        if (const auto found = values.find(key); found != values.end()) {
+            out = static_cast<int>(std::strtol(found->second.c_str(), nullptr, 10));
+        }
+    };
+
+    int legacyViewMode = -1;
+    readInt("view_mode", legacyViewMode);
+    int visibleScopes = 1;
+    if (legacyViewMode >= 0 && legacyViewMode <= 3) {
+        constexpr int LegacyScopes[4] = {1, 2, 3, 4};
+        visibleScopes = LegacyScopes[legacyViewMode];
+    }
+    readInt("visible_scopes", visibleScopes);
+
+    std::string stack;
+    if (visibleScopes & 1) {
+        stack += 'V';
+    }
+    if (visibleScopes & 2) {
+        switch (static_cast<WaveformMode>(storedWaveformMode)) {
+        case WaveformMode::Luma:
+            stack += 'L';
+            break;
+        case WaveformMode::RgbAndLuma:
+            stack += "WL";
+            break;
+        case WaveformMode::RgbParade:
+            stack += 'R';
+            break;
+        case WaveformMode::Rgb:
+        default:
+            stack += 'W';
+            break;
+        }
+    }
+    if (visibleScopes & 4) {
+        stack += 'H';
+    }
+    if (!stack.empty()) {
+        preferences.scopeStack = stack;
+    }
+    if (const auto found = values.find("scope_stack"); found != values.end()) {
+        preferences.scopeStack = found->second;
+    }
+
+    const bool hadWaveform = preferences.scopeStack.find('W') != std::string::npos;
+    std::string cleaned;
+    for (char letter : preferences.scopeStack) {
+        if (letter == 'L') {
+            if (hadWaveform) {
+                continue;
+            }
+            letter = 'W';
+            preferences.waveformMode = WaveformMode::Luma;
+        }
+        if (std::string_view("VWRHC").find(letter) == std::string_view::npos) {
+            continue;
+        }
+        if (cleaned.find(letter) == std::string::npos) {
+            cleaned += letter;
+        }
+    }
+    preferences.scopeStack = cleaned.empty() ? "V" : cleaned;
+}
+
 }  // namespace
 
 Preferences loadPreferences(const std::filesystem::path& file)
@@ -58,85 +135,22 @@ Preferences loadPreferences(const std::filesystem::path& file)
     readInt("histogram_stride", preferences.histogramStride);
     readFloat("vectorscope_smoothing_ms", preferences.vectorscopeSmoothingMs);
     readFloat("waveform_smoothing_ms", preferences.waveformSmoothingMs);
-    int matrix = 1;
+    int matrix = preferences.matrix == ChromaMatrix::Bt709 ? 1 : 0;
     readInt("matrix", matrix);
     preferences.matrix = matrix == 0 ? ChromaMatrix::Bt601 : ChromaMatrix::Bt709;
-    int traceResponse = 0;
+    int traceResponse = preferences.traceResponse == TraceResponse::Linear ? 1 : 0;
     readInt("trace_response", traceResponse);
     preferences.traceResponse = traceResponse == 1 ? TraceResponse::Linear : TraceResponse::Boosted;
-    int waveformStyle = static_cast<int>(preferences.waveformMode);
-    readInt("waveform_mode", waveformStyle);
-    preferences.waveformMode = waveformStyle == static_cast<int>(WaveformMode::Luma) ? WaveformMode::Luma
-                               : waveformStyle == static_cast<int>(WaveformMode::ColoredLuma)
+    // The one waveform_mode key feeds both the modern style mapping and
+    // the legacy letter migration, so read it once.
+    int storedWaveformMode = static_cast<int>(preferences.waveformMode);
+    readInt("waveform_mode", storedWaveformMode);
+    preferences.waveformMode = storedWaveformMode == static_cast<int>(WaveformMode::Luma) ? WaveformMode::Luma
+                               : storedWaveformMode == static_cast<int>(WaveformMode::ColoredLuma)
                                    ? WaveformMode::ColoredLuma
                                    : WaveformMode::Rgb;
     readBool("histogram_per_channel", preferences.histogramPerChannel);
-    // Two generations of legacy scope keys fold into the stack: the
-    // single view_mode became the visible_scopes bit set, and the bit set
-    // plus the waveform style became the ordered letter stack.
-    int legacyViewMode = -1;
-    readInt("view_mode", legacyViewMode);
-    int visibleScopes = 1;
-    if (legacyViewMode >= 0 && legacyViewMode <= 3) {
-        constexpr int LegacyScopes[4] = {1, 2, 3, 4};
-        visibleScopes = LegacyScopes[legacyViewMode];
-    }
-    readInt("visible_scopes", visibleScopes);
-    int waveformMode = static_cast<int>(WaveformMode::Rgb);
-    readInt("waveform_mode", waveformMode);
-    std::string stack;
-    if (visibleScopes & 1) {
-        stack += 'V';
-    }
-    if (visibleScopes & 2) {
-        switch (static_cast<WaveformMode>(waveformMode)) {
-        case WaveformMode::Luma:
-            stack += 'L';
-            break;
-        case WaveformMode::RgbAndLuma:
-            stack += "WL";
-            break;
-        case WaveformMode::RgbParade:
-            stack += 'R';
-            break;
-        case WaveformMode::Rgb:
-        default:
-            stack += 'W';
-            break;
-        }
-    }
-    if (visibleScopes & 4) {
-        stack += 'H';
-    }
-    if (!stack.empty()) {
-        preferences.scopeStack = stack;
-    }
-    if (const auto found = values.find("scope_stack"); found != values.end()) {
-        preferences.scopeStack = found->second;
-    }
-    // Whatever the source, keep only known letters, each once, in order;
-    // an empty result falls back to the vectorscope. The retired L (a
-    // separate luma waveform scope) becomes the waveform in its Luma
-    // style - unless an RGB waveform was stacked alongside, which wins
-    // the letter.
-    const bool hadWaveform = preferences.scopeStack.find('W') != std::string::npos;
-    std::string cleaned;
-    for (char letter : preferences.scopeStack) {
-        if (letter == 'L') {
-            if (hadWaveform) {
-                continue;
-            }
-            letter = 'W';
-            preferences.waveformMode = WaveformMode::Luma;
-        }
-        if (std::string_view("VWRHC").find(letter) == std::string_view::npos) {
-            continue;
-        }
-        if (cleaned.find(letter) == std::string::npos) {
-            cleaned += letter;
-        }
-    }
-    preferences.scopeStack = cleaned.empty() ? "V" : cleaned;
+    migrateScopeStack(values, storedWaveformMode, preferences);
     readBool("show_graticule", preferences.showGraticule);
     readInt("vectorscope_zoom", preferences.vectorscopeZoom);
     if (preferences.vectorscopeZoom != 2 && preferences.vectorscopeZoom != 4) {

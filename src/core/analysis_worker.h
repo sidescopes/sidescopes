@@ -52,10 +52,15 @@ struct AnalysisSettings
     IntRect maskedWindow;
 };
 
-// Runs the scope engines on a dedicated thread: takes the newest frame from
-// the mailbox, skips frames whose scoped content is unchanged, and publishes
-// double-buffered scope images. The UI thread pulls output when the version
-// advances and samples cursor colors from the most recent frame.
+/// Runs the scope engines on a dedicated thread: takes the newest frame from
+/// the mailbox, skips frames whose scoped content is unchanged, and publishes
+/// double-buffered scope images. The UI thread pulls output when the version
+/// advances and samples cursor colors from the most recent frame.
+///
+/// Threading: start, stop, updateSettings, fetchOutput, sampleFrameColor,
+/// latestFrameSize, withLatestFrame, and consumedFrameSequence make up the
+/// caller-thread surface and are safe to call while the worker runs. run()
+/// exclusively owns the worker thread and is never called directly.
 class AnalysisWorker
 {
 public:
@@ -102,7 +107,18 @@ public:
     // Runs `reader` on the most recent frame under the frame lock; returns
     // false when no frame has arrived yet. Intended for occasional,
     // interactive work (the picker's photo detection), not per-frame use.
+    // `reader` runs while the frame lock is held, so it must not call back
+    // into any AnalysisWorker frame accessor (sampleFrameColor,
+    // latestFrameSize, withLatestFrame) - that would self-deadlock on the
+    // non-recursive mutex - and it must return promptly, since it blocks the
+    // worker's next frame swap.
     bool withLatestFrame(const std::function<void(const FrameView&)>& reader) const;
+
+    // The sequence number of the most recent frame the worker has taken from
+    // the mailbox and stored. Lets tests await the moment a published frame
+    // has been consumed, so a negative assertion need not sleep on a wall
+    // clock to be sure the worker has caught up.
+    [[nodiscard]] uint64_t consumedFrameSequence() const;
 
 private:
     void run();
@@ -118,6 +134,7 @@ private:
     mutable std::mutex m_frameMutex;
     FrameBuffer m_latestFrame;
     bool m_hasFrame = false;
+    std::atomic<uint64_t> m_consumedSequence{0};
 
     mutable std::mutex m_outputMutex;
     Output m_output;

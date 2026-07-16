@@ -114,6 +114,11 @@ std::optional<AnalysisWorker::FrameSize> AnalysisWorker::latestFrameSize() const
     return FrameSize{m_latestFrame.width, m_latestFrame.height};
 }
 
+uint64_t AnalysisWorker::consumedFrameSequence() const
+{
+    return m_consumedSequence.load(std::memory_order_relaxed);
+}
+
 namespace {
 
 // The worker speaks to every scope through the module boundary. The
@@ -158,7 +163,7 @@ void copyImage(const SsImageView& view, ScopeImage& image)
     image.rgba.assign(view.rgba, view.rgba + bytes);
 }
 
-double choiceOfWaveformMode(WaveformMode mode)
+double paramFromWaveformMode(WaveformMode mode)
 {
     switch (mode) {
     case WaveformMode::Luma:
@@ -194,6 +199,7 @@ void AnalysisWorker::run()
             m_latestFrame = std::move(*frame);
             m_hasFrame = true;
             newFrame = true;
+            m_consumedSequence.store(m_latestFrame.sequence, std::memory_order_relaxed);
         }
 
         bool settingsChanged = false;
@@ -245,7 +251,7 @@ void AnalysisWorker::run()
             const std::vector<SsParamValue> waveformValues{
                 {"gain", settings.waveform.gain},
                 {"stride", static_cast<double>(settings.waveform.samplingStride)},
-                {"mode", choiceOfWaveformMode(settings.waveform.mode)}};
+                {"mode", paramFromWaveformMode(settings.waveform.mode)}};
             (void)waveform.instance.configure(waveformValues);
             if (waveform.adaptive) {
                 waveform.adaptive->setImageSize(waveform.instance.raw(), settings.waveform.columns,

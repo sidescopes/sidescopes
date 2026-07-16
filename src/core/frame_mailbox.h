@@ -42,6 +42,10 @@ public:
     {
         std::lock_guard lock(m_mutex);
         FrameBuffer reusable = std::move(m_returned);
+        // An untaken pending frame becomes the buffer handed back, dropping
+        // whatever the consumer returned. The two can only coexist if a
+        // publish overwrites an untaken frame before the next take hands its
+        // storage back, which the one-return-per-take cadence never does.
         if (m_hasPending) {
             reusable = std::move(m_pending);
         }

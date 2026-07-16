@@ -3,7 +3,7 @@
 #include <filesystem>
 #include <string>
 
-#include "core/analysis_worker.h"
+#include "core/scopes/scope_types.h"
 
 namespace sidescopes {
 
@@ -44,8 +44,9 @@ struct Preferences
     WaveformMode waveformMode = WaveformMode::Rgb;
     bool histogramPerChannel = true;
     // The scopes on screen, one letter each in stacking order: V
-    // vectorscope, W RGB waveform, L luma waveform, R RGB parade, H
-    // histogram. Never empty.
+    // vectorscope, W waveform, R RGB parade, H histogram, C color picker.
+    // Never empty. The retired L (a separate luma waveform) is accepted
+    // only as a legacy migration input, folded into W in its Luma style.
     std::string scopeStack = "V";
     bool showGraticule = true;
     // Magnify-view factor for the vectorscope: 1, 2, or 4.
@@ -59,7 +60,7 @@ struct Preferences
 
 // Missing or unreadable files yield the defaults; malformed lines and
 // unknown keys are skipped.
-Preferences loadPreferences(const std::filesystem::path& file);
+[[nodiscard]] Preferences loadPreferences(const std::filesystem::path& file);
 
 // Creates parent directories as needed. Returns false when writing failed.
 bool savePreferences(const Preferences& preferences, const std::filesystem::path& file);
