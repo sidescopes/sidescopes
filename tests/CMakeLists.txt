@@ -23,11 +23,14 @@ add_executable(sidescopes_tests
     test_modules.cpp
     test_waveform.cpp
     test_pin_board.cpp
+    test_scope_view.cpp
 )
 
-# PinBoard is application-level state, not part of the core library the tests
-# link, so its source compiles directly into the test binary.
-target_sources(sidescopes_tests PRIVATE ${CMAKE_SOURCE_DIR}/src/app/pin_board.cpp)
+# These are application-level state, not part of the core library the tests
+# link, so their sources compile directly into the test binary.
+target_sources(sidescopes_tests PRIVATE
+    ${CMAKE_SOURCE_DIR}/src/app/pin_board.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/scope_view.cpp)
 
 # The engine tests (test_vectorscope/waveform/histogram/graticule) are
 # white-box: they include the engine headers and link the engine directly,

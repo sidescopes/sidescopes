@@ -310,7 +310,9 @@ if(APPLE OR WIN32)
 
     # Application logic shared by both platforms: cohesive controllers lifted
     # out of main.
-    target_sources(SideScopes PRIVATE src/app/pin_board.cpp)
+    target_sources(SideScopes PRIVATE
+        src/app/pin_board.cpp
+        src/app/scope_view.cpp)
 
     if(SIDESCOPES_MODULES_DYNAMIC)
         # Nothing links the modules in dynamic mode; make the app wait for
