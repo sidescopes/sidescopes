@@ -24,32 +24,107 @@ std::map<std::string, std::string, std::less<>> parseKeyValueLines(std::istream&
     return values;
 }
 
-// Folds two generations of legacy scope keys into scopeStack. The single
-// view_mode became the visible_scopes bit set, and the bit set plus the
-// stored waveform style became the ordered letter stack; the scope_stack
-// key, when present, supersedes both. Whatever the source, only known
-// letters survive, each once, in order, defaulting to the vectorscope.
-// The retired L (a separate luma waveform) becomes the waveform in its
-// Luma style, unless an RGB waveform was stacked alongside, which keeps
-// the letter.
-void migrateScopeStack(const std::map<std::string, std::string, std::less<>>& values, int storedWaveformMode,
-                       Preferences& preferences)
+void readFloat(const std::map<std::string, std::string, std::less<>>& values, const char* key, float& out)
 {
-    const auto readInt = [&](const char* key, int& out) {
-        if (const auto found = values.find(key); found != values.end()) {
-            out = static_cast<int>(std::strtol(found->second.c_str(), nullptr, 10));
-        }
-    };
+    if (const auto found = values.find(key); found != values.end()) {
+        out = std::strtof(found->second.c_str(), nullptr);
+    }
+}
 
+void readInt(const std::map<std::string, std::string, std::less<>>& values, const char* key, int& out)
+{
+    if (const auto found = values.find(key); found != values.end()) {
+        out = static_cast<int>(std::strtol(found->second.c_str(), nullptr, 10));
+    }
+}
+
+void readBool(const std::map<std::string, std::string, std::less<>>& values, const char* key, bool& out)
+{
+    if (const auto found = values.find(key); found != values.end()) {
+        out = found->second == "1";
+    }
+}
+
+// A shortcut binding is a single letter A-Z or "Escape"; anything else is
+// left alone so the default survives.
+void readShortcut(const std::map<std::string, std::string, std::less<>>& values, const char* key, std::string& out)
+{
+    const auto found = values.find(key);
+    if (found == values.end()) {
+        return;
+    }
+    const std::string& value = found->second;
+    const bool letter = value.size() == 1 && value[0] >= 'A' && value[0] <= 'Z';
+    if (letter || value == "Escape") {
+        out = value;
+    }
+}
+
+void readShortcuts(const std::map<std::string, std::string, std::less<>>& values, ShortcutBindings& shortcuts)
+{
+    readShortcut(values, "shortcut_vectorscope", shortcuts.vectorscope);
+    readShortcut(values, "shortcut_waveform", shortcuts.waveform);
+    readShortcut(values, "shortcut_parade", shortcuts.parade);
+    readShortcut(values, "shortcut_histogram", shortcuts.histogram);
+    readShortcut(values, "shortcut_color_picker", shortcuts.colorPicker);
+    readShortcut(values, "shortcut_pick_window", shortcuts.pickWindow);
+    readShortcut(values, "shortcut_draw_region", shortcuts.drawRegion);
+    readShortcut(values, "shortcut_pick_faces", shortcuts.pickFaces);
+    readShortcut(values, "shortcut_pin_color", shortcuts.pinColor);
+    readShortcut(values, "shortcut_vectorscope_zoom", shortcuts.vectorscopeZoom);
+    readShortcut(values, "shortcut_full_region", shortcuts.fullRegion);
+}
+
+// Decodes the enum-valued and clamped fields (chroma matrix, trace
+// response, waveform style, magnify zoom). The one waveform_mode key also
+// drives the legacy scope-stack migration, so its raw value is returned to
+// be read only once.
+int readEnumFields(const std::map<std::string, std::string, std::less<>>& values, Preferences& preferences)
+{
+    int matrix = preferences.matrix == ChromaMatrix::Bt709 ? 1 : 0;
+    readInt(values, "matrix", matrix);
+    preferences.matrix = matrix == 0 ? ChromaMatrix::Bt601 : ChromaMatrix::Bt709;
+
+    int traceResponse = preferences.traceResponse == TraceResponse::Linear ? 1 : 0;
+    readInt(values, "trace_response", traceResponse);
+    preferences.traceResponse = traceResponse == 1 ? TraceResponse::Linear : TraceResponse::Boosted;
+
+    int storedWaveformMode = static_cast<int>(preferences.waveformMode);
+    readInt(values, "waveform_mode", storedWaveformMode);
+    preferences.waveformMode = storedWaveformMode == static_cast<int>(WaveformMode::Luma) ? WaveformMode::Luma
+                               : storedWaveformMode == static_cast<int>(WaveformMode::ColoredLuma)
+                                   ? WaveformMode::ColoredLuma
+                                   : WaveformMode::Rgb;
+
+    readInt(values, "vectorscope_zoom", preferences.vectorscopeZoom);
+    if (preferences.vectorscopeZoom != 2 && preferences.vectorscopeZoom != 4) {
+        preferences.vectorscopeZoom = 1;
+    }
+
+    return storedWaveformMode;
+}
+
+// The oldest builds stored a single view_mode; the next generation stored a
+// visible_scopes bit set that supersedes it. Returns the resulting bit set,
+// defaulting to the vectorscope alone.
+int legacyVisibleScopes(const std::map<std::string, std::string, std::less<>>& values)
+{
     int legacyViewMode = -1;
-    readInt("view_mode", legacyViewMode);
+    readInt(values, "view_mode", legacyViewMode);
     int visibleScopes = 1;
     if (legacyViewMode >= 0 && legacyViewMode <= 3) {
         constexpr int LegacyScopes[4] = {1, 2, 3, 4};
         visibleScopes = LegacyScopes[legacyViewMode];
     }
-    readInt("visible_scopes", visibleScopes);
+    readInt(values, "visible_scopes", visibleScopes);
 
+    return visibleScopes;
+}
+
+// Translates the legacy visible-scopes bit set into ordered stack letters,
+// mapping the waveform bit through its stored style.
+std::string legacyScopeLetters(int visibleScopes, int storedWaveformMode)
+{
     std::string stack;
     if (visibleScopes & 1) {
         stack += 'V';
@@ -74,16 +149,19 @@ void migrateScopeStack(const std::map<std::string, std::string, std::less<>>& va
     if (visibleScopes & 4) {
         stack += 'H';
     }
-    if (!stack.empty()) {
-        preferences.scopeStack = stack;
-    }
-    if (const auto found = values.find("scope_stack"); found != values.end()) {
-        preferences.scopeStack = found->second;
-    }
 
-    const bool hadWaveform = preferences.scopeStack.find('W') != std::string::npos;
+    return stack;
+}
+
+// Keeps only known scope letters, each once, in order, defaulting to the
+// vectorscope. The retired L (a separate luma waveform) becomes the
+// waveform in its Luma style, unless an RGB waveform is already stacked,
+// which keeps the letter.
+std::string cleanedScopeStack(const std::string& stack, Preferences& preferences)
+{
+    const bool hadWaveform = stack.find('W') != std::string::npos;
     std::string cleaned;
-    for (char letter : preferences.scopeStack) {
+    for (char letter : stack) {
         if (letter == 'L') {
             if (hadWaveform) {
                 continue;
@@ -98,7 +176,26 @@ void migrateScopeStack(const std::map<std::string, std::string, std::less<>>& va
             cleaned += letter;
         }
     }
-    preferences.scopeStack = cleaned.empty() ? "V" : cleaned;
+
+    return cleaned.empty() ? "V" : cleaned;
+}
+
+// Folds two generations of legacy scope keys into scopeStack: the single
+// view_mode, then the visible_scopes bit set plus the stored waveform
+// style, with the scope_stack key superseding both when present.
+void migrateScopeStack(const std::map<std::string, std::string, std::less<>>& values, int storedWaveformMode,
+                       Preferences& preferences)
+{
+    const int visibleScopes = legacyVisibleScopes(values);
+    const std::string stack = legacyScopeLetters(visibleScopes, storedWaveformMode);
+    if (!stack.empty()) {
+        preferences.scopeStack = stack;
+    }
+    if (const auto found = values.find("scope_stack"); found != values.end()) {
+        preferences.scopeStack = found->second;
+    }
+
+    preferences.scopeStack = cleanedScopeStack(preferences.scopeStack, preferences);
 }
 
 }  // namespace
@@ -112,76 +209,26 @@ Preferences loadPreferences(const std::filesystem::path& file)
     }
 
     const auto values = parseKeyValueLines(input);
-    const auto readFloat = [&](const char* key, float& out) {
-        if (const auto found = values.find(key); found != values.end()) {
-            out = std::strtof(found->second.c_str(), nullptr);
-        }
-    };
-    const auto readInt = [&](const char* key, int& out) {
-        if (const auto found = values.find(key); found != values.end()) {
-            out = static_cast<int>(std::strtol(found->second.c_str(), nullptr, 10));
-        }
-    };
-    const auto readBool = [&](const char* key, bool& out) {
-        if (const auto found = values.find(key); found != values.end()) {
-            out = found->second == "1";
-        }
-    };
+    readFloat(values, "vectorscope_gain", preferences.vectorscopeGain);
+    readFloat(values, "waveform_gain", preferences.waveformGain);
+    readInt(values, "vectorscope_stride", preferences.vectorscopeStride);
+    readInt(values, "waveform_stride", preferences.waveformStride);
+    readInt(values, "histogram_stride", preferences.histogramStride);
+    readFloat(values, "vectorscope_smoothing_ms", preferences.vectorscopeSmoothingMs);
+    readFloat(values, "waveform_smoothing_ms", preferences.waveformSmoothingMs);
 
-    readFloat("vectorscope_gain", preferences.vectorscopeGain);
-    readFloat("waveform_gain", preferences.waveformGain);
-    readInt("vectorscope_stride", preferences.vectorscopeStride);
-    readInt("waveform_stride", preferences.waveformStride);
-    readInt("histogram_stride", preferences.histogramStride);
-    readFloat("vectorscope_smoothing_ms", preferences.vectorscopeSmoothingMs);
-    readFloat("waveform_smoothing_ms", preferences.waveformSmoothingMs);
-    int matrix = preferences.matrix == ChromaMatrix::Bt709 ? 1 : 0;
-    readInt("matrix", matrix);
-    preferences.matrix = matrix == 0 ? ChromaMatrix::Bt601 : ChromaMatrix::Bt709;
-    int traceResponse = preferences.traceResponse == TraceResponse::Linear ? 1 : 0;
-    readInt("trace_response", traceResponse);
-    preferences.traceResponse = traceResponse == 1 ? TraceResponse::Linear : TraceResponse::Boosted;
-    // The one waveform_mode key feeds both the modern style mapping and
-    // the legacy letter migration, so read it once.
-    int storedWaveformMode = static_cast<int>(preferences.waveformMode);
-    readInt("waveform_mode", storedWaveformMode);
-    preferences.waveformMode = storedWaveformMode == static_cast<int>(WaveformMode::Luma) ? WaveformMode::Luma
-                               : storedWaveformMode == static_cast<int>(WaveformMode::ColoredLuma)
-                                   ? WaveformMode::ColoredLuma
-                                   : WaveformMode::Rgb;
-    readBool("histogram_per_channel", preferences.histogramPerChannel);
+    const int storedWaveformMode = readEnumFields(values, preferences);
+    readBool(values, "histogram_per_channel", preferences.histogramPerChannel);
     migrateScopeStack(values, storedWaveformMode, preferences);
-    readBool("show_graticule", preferences.showGraticule);
-    readInt("vectorscope_zoom", preferences.vectorscopeZoom);
-    if (preferences.vectorscopeZoom != 2 && preferences.vectorscopeZoom != 4) {
-        preferences.vectorscopeZoom = 1;
-    }
-    const auto readShortcut = [&](const char* key, std::string& out) {
-        const auto found = values.find(key);
-        if (found == values.end()) {
-            return;
-        }
-        const std::string& value = found->second;
-        const bool letter = value.size() == 1 && value[0] >= 'A' && value[0] <= 'Z';
-        if (letter || value == "Escape") {
-            out = value;
-        }
-    };
-    readShortcut("shortcut_vectorscope", preferences.shortcuts.vectorscope);
-    readShortcut("shortcut_waveform", preferences.shortcuts.waveform);
-    readShortcut("shortcut_parade", preferences.shortcuts.parade);
-    readShortcut("shortcut_histogram", preferences.shortcuts.histogram);
-    readShortcut("shortcut_color_picker", preferences.shortcuts.colorPicker);
-    readShortcut("shortcut_pick_window", preferences.shortcuts.pickWindow);
-    readShortcut("shortcut_draw_region", preferences.shortcuts.drawRegion);
-    readShortcut("shortcut_pick_faces", preferences.shortcuts.pickFaces);
-    readShortcut("shortcut_pin_color", preferences.shortcuts.pinColor);
-    readShortcut("shortcut_vectorscope_zoom", preferences.shortcuts.vectorscopeZoom);
-    readShortcut("shortcut_full_region", preferences.shortcuts.fullRegion);
-    readInt("window_x", preferences.windowX);
-    readInt("window_y", preferences.windowY);
-    readInt("window_width", preferences.windowWidth);
-    readInt("window_height", preferences.windowHeight);
+    readBool(values, "show_graticule", preferences.showGraticule);
+
+    readShortcuts(values, preferences.shortcuts);
+
+    readInt(values, "window_x", preferences.windowX);
+    readInt(values, "window_y", preferences.windowY);
+    readInt(values, "window_width", preferences.windowWidth);
+    readInt(values, "window_height", preferences.windowHeight);
+
     return preferences;
 }
 
