@@ -321,6 +321,7 @@ if(APPLE OR WIN32)
     target_sources(SideScopes PRIVATE
         src/app/capture_controller.cpp
         src/app/pin_board.cpp
+        src/app/scope_registry.cpp
         src/app/scope_view.cpp
         src/app/version.cpp)
 

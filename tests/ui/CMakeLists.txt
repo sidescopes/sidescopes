@@ -78,6 +78,7 @@ foreach(suite IN ITEMS pipeline view)
     add_executable(sidescopes_ui_${suite}_tests
         test_${suite}_ui.cpp
         ui_test_harness.cpp
+        ${CMAKE_SOURCE_DIR}/src/app/scope_registry.cpp
         ${CMAKE_SOURCE_DIR}/src/app/scope_view.cpp
         ${CMAKE_SOURCE_DIR}/src/app/pin_board.cpp
         ${CMAKE_SOURCE_DIR}/src/app/capture_controller.cpp)

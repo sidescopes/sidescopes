@@ -25,6 +25,7 @@ add_executable(sidescopes_tests
     test_module_loader.cpp
     test_waveform.cpp
     test_pin_board.cpp
+    test_scope_registry.cpp
     test_scope_view.cpp
     test_capture_controller.cpp
     test_region_geometry.cpp
@@ -39,6 +40,7 @@ target_include_directories(sidescopes_tests PRIVATE support)
 target_sources(sidescopes_tests PRIVATE
     ${CMAKE_SOURCE_DIR}/src/app/capture_controller.cpp
     ${CMAKE_SOURCE_DIR}/src/app/pin_board.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/scope_registry.cpp
     ${CMAKE_SOURCE_DIR}/src/app/scope_view.cpp
     ${CMAKE_SOURCE_DIR}/src/app/version.cpp)
 
