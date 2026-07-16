@@ -5,18 +5,11 @@
 
 #include "platform/desktop.h"
 #include "platform/face_detection.h"
+#include "platform/region_geometry.h"
 #include "platform/region_selection.h"
 
-// Which edges a border drag adjusts; Move relocates the whole region.
-typedef NS_OPTIONS(NSUInteger, SidescopesDragEdges) {
-    SidescopesDragEdgeNone = 0,
-    SidescopesDragEdgeLeft = 1 << 0,
-    SidescopesDragEdgeRight = 1 << 1,
-    SidescopesDragEdgeBottom = 1 << 2,
-    SidescopesDragEdgeTop = 1 << 3,
-    SidescopesDragMove = 1 << 4,
-    SidescopesDragClose = 1 << 5,
-};
+// The drag-zone bits (ZoneLeft/Right/Top/Bottom/Move/Close) come from the
+// shared region geometry; the overlay speaks them directly.
 
 namespace sidescopes {
 namespace {
@@ -34,12 +27,9 @@ constexpr double HandleRadius = 3.5;
 constexpr double EdgeRing = 1.0;
 constexpr double HandleMargin = HandleRadius + 2.0;
 constexpr double WindowPad = BorderPad + HandleMargin;
-// Within this distance of a region corner, a grab resizes; the rest of
-// the band moves the region (Shift-drag resizes a single edge).
-constexpr double CornerZone = 22.0;
-// Half-length of the edge-midpoint handle's grab zone along its edge.
-constexpr double MidpointZone = 22.0;
-// Regions cannot shrink beyond this many points per side.
+// Regions cannot shrink beyond this many points per side. The corner and
+// edge-midpoint grab-zone sizes live with the shared geometry that reads
+// them.
 constexpr double MinimumRegionSize = 24.0;
 // The hover-revealed close button: a badge on the band's outer corner,
 // diagonally off the corner handle, so it visibly belongs to the region
@@ -61,18 +51,12 @@ NSScreen* screenForDisplay(uint32_t displayId)
     return NSScreen.mainScreen;
 }
 
-RegionOfInterest regionFromScreenRect(NSRect rect, NSRect screenFrame)
+// macOS screens and views are bottom-left origin; the shared region
+// geometry is top-left. Flip a Y coordinate within a container of the given
+// height (whose top edge sits at that height).
+double flippedY(double y, double height)
 {
-    // Screen coordinates are bottom-left-origin; the region convention is
-    // top-left-origin percentages.
-    RegionOfInterest region;
-    region.leftPercent = (rect.origin.x - screenFrame.origin.x) / screenFrame.size.width * 100.0;
-    region.rightPercent = (rect.origin.x + rect.size.width - screenFrame.origin.x) / screenFrame.size.width * 100.0;
-    region.topPercent = (screenFrame.origin.y + screenFrame.size.height - (rect.origin.y + rect.size.height)) /
-                        screenFrame.size.height * 100.0;
-    region.bottomPercent =
-        (screenFrame.origin.y + screenFrame.size.height - rect.origin.y) / screenFrame.size.height * 100.0;
-    return region;
+    return height - y;
 }
 
 // Shared edit state the application polls once per frame.
@@ -237,8 +221,12 @@ NSCursor* buildPinCursor(const std::optional<FloatColor>& color)
 
 - (NSRect)selectionRect
 {
-    return NSMakeRect(std::min(self.dragStart.x, self.dragCurrent.x), std::min(self.dragStart.y, self.dragCurrent.y),
-                      std::abs(self.dragCurrent.x - self.dragStart.x), std::abs(self.dragCurrent.y - self.dragStart.y));
+    // Both drag points share the view's coordinate space, so the normalized
+    // rectangle reads the same whichever origin convention it is viewed in -
+    // no flip is needed here.
+    const sidescopes::LocalRect rect =
+        sidescopes::selectionRectFromDrag(self.dragStart.x, self.dragStart.y, self.dragCurrent.x, self.dragCurrent.y);
+    return NSMakeRect(rect.x, rect.y, rect.width, rect.height);
 }
 
 // A punched hole must keep a whisper of alpha when it should stay
@@ -582,7 +570,7 @@ NSCursor* buildPinCursor(const std::optional<FloatColor>& color)
 // come from an always-active tracking area: cursor rects only work in
 // the key window, and this window never takes key.
 @interface SidescopesBorderView : NSView
-@property(nonatomic, assign) SidescopesDragEdges dragZone;
+@property(nonatomic, assign) unsigned dragZone;       // a mask of sidescopes::ZoneBits
 @property(nonatomic, assign) NSPoint dragStartMouse;  // global screen coords
 @property(nonatomic, assign) NSRect dragStartRegion;  // global screen coords
 @property(nonatomic, assign) BOOL closePressed;
@@ -601,7 +589,7 @@ NSCursor* buildPinCursor(const std::optional<FloatColor>& color)
 - (BOOL)closeVisible
 {
     const NSRect region = [self regionRect];
-    return self.dragZone == SidescopesDragEdgeNone && region.size.width >= sidescopes::MinimumWidthForClose;
+    return self.dragZone == sidescopes::ZoneNone && region.size.width >= sidescopes::MinimumWidthForClose;
 }
 
 // On the band's outer corner, at forty-five degrees off the top-right
@@ -720,45 +708,34 @@ NSCursor* buildPinCursor(const std::optional<FloatColor>& color)
 // Eight handles, no modifier: the corners resize both axes, the edge
 // midpoints resize their edge, and the rest of the band moves. The
 // visible handles say which is which - a modifier key never could.
-- (SidescopesDragEdges)zoneAtPoint:(NSPoint)point
+- (unsigned)zoneAtPoint:(NSPoint)point
 {
     const NSRect region = [self regionRect];
     if (NSPointInRect(point, region)) {
-        return SidescopesDragEdgeNone;  // click-through anyway
+        return sidescopes::ZoneNone;  // click-through anyway
     }
     if ([self closeVisible]) {
         const NSPoint center = [self closeCenter];
         const CGFloat dx = point.x - center.x;
         const CGFloat dy = point.y - center.y;
         if (dx * dx + dy * dy <= sidescopes::CloseHitRadius * sidescopes::CloseHitRadius) {
-            return SidescopesDragClose;
+            return sidescopes::ZoneClose;
         }
     }
-    const BOOL nearLeft = point.x < NSMinX(region) + sidescopes::CornerZone;
-    const BOOL nearRight = point.x > NSMaxX(region) - sidescopes::CornerZone;
-    const BOOL nearBottom = point.y < NSMinY(region) + sidescopes::CornerZone;
-    const BOOL nearTop = point.y > NSMaxY(region) - sidescopes::CornerZone;
-    if ((nearLeft || nearRight) && (nearTop || nearBottom)) {
-        SidescopesDragEdges edges = SidescopesDragEdgeNone;
-        edges |= nearLeft ? SidescopesDragEdgeLeft : SidescopesDragEdgeRight;
-        edges |= nearBottom ? SidescopesDragEdgeBottom : SidescopesDragEdgeTop;
-        return edges;
+    // View space is bottom-left origin; the shared zone tests are top-left.
+    // Flip the region and the probe point into that space together - the
+    // resulting zones (ZoneTop is the visually-top edge, and so on) carry
+    // straight back.
+    const CGFloat height = self.bounds.size.height;
+    const sidescopes::LocalRect local{NSMinX(region), sidescopes::flippedY(NSMaxY(region), height), region.size.width,
+                                      region.size.height};
+    const double x = point.x;
+    const double y = sidescopes::flippedY(point.y, height);
+    const unsigned corner = sidescopes::cornerZoneAt(local, x, y, 1.0);
+    if (corner != sidescopes::ZoneNone) {
+        return corner;
     }
-    const BOOL midX = std::abs(point.x - NSMidX(region)) <= sidescopes::MidpointZone;
-    const BOOL midY = std::abs(point.y - NSMidY(region)) <= sidescopes::MidpointZone;
-    if (midX && point.y > NSMaxY(region)) {
-        return SidescopesDragEdgeTop;
-    }
-    if (midX && point.y < NSMinY(region)) {
-        return SidescopesDragEdgeBottom;
-    }
-    if (midY && point.x < NSMinX(region)) {
-        return SidescopesDragEdgeLeft;
-    }
-    if (midY && point.x > NSMaxX(region)) {
-        return SidescopesDragEdgeRight;
-    }
-    return SidescopesDragMove;
+    return sidescopes::edgeOrMoveZoneAt(local, x, y, 1.0);
 }
 
 - (void)updateTrackingAreas
@@ -776,25 +753,25 @@ NSCursor* buildPinCursor(const std::optional<FloatColor>& color)
     [self addTrackingArea:tracking];
 }
 
-- (void)applyCursorForZone:(SidescopesDragEdges)zone
+- (void)applyCursorForZone:(unsigned)zone
 {
-    if (zone == SidescopesDragEdgeNone) {
+    if (zone == sidescopes::ZoneNone) {
         [NSCursor.arrowCursor set];
         return;
     }
-    if (zone & SidescopesDragClose) {
+    if (zone & sidescopes::ZoneClose) {
         [NSCursor.pointingHandCursor set];
         return;
     }
-    if (zone & SidescopesDragMove) {
+    if (zone & sidescopes::ZoneMove) {
         [NSCursor.openHandCursor set];
         return;
     }
-    const BOOL horizontal = (zone & (SidescopesDragEdgeLeft | SidescopesDragEdgeRight)) != 0;
-    const BOOL vertical = (zone & (SidescopesDragEdgeTop | SidescopesDragEdgeBottom)) != 0;
+    const BOOL horizontal = (zone & (sidescopes::ZoneLeft | sidescopes::ZoneRight)) != 0;
+    const BOOL vertical = (zone & (sidescopes::ZoneTop | sidescopes::ZoneBottom)) != 0;
     if (horizontal && vertical) {
         if (@available(macOS 15.0, *)) {
-            const BOOL rising = ((zone & SidescopesDragEdgeLeft) != 0) == ((zone & SidescopesDragEdgeBottom) != 0);
+            const BOOL rising = ((zone & sidescopes::ZoneLeft) != 0) == ((zone & sidescopes::ZoneBottom) != 0);
             [[NSCursor frameResizeCursorFromPosition:rising ? NSCursorFrameResizePositionBottomLeft
                                                             : NSCursorFrameResizePositionBottomRight
                                         inDirections:NSCursorFrameResizeDirectionsAll] set];
@@ -808,7 +785,7 @@ NSCursor* buildPinCursor(const std::optional<FloatColor>& color)
 
 - (void)mouseMoved:(NSEvent*)event
 {
-    if (self.dragZone != SidescopesDragEdgeNone) {
+    if (self.dragZone != sidescopes::ZoneNone) {
         return;  // drag owns the cursor
     }
     const NSPoint local = [self convertPoint:event.locationInWindow fromView:nil];
@@ -818,7 +795,7 @@ NSCursor* buildPinCursor(const std::optional<FloatColor>& color)
 - (void)mouseExited:(NSEvent*)event
 {
     (void)event;
-    if (self.dragZone == SidescopesDragEdgeNone) {
+    if (self.dragZone == sidescopes::ZoneNone) {
         [NSCursor.arrowCursor set];
     }
 }
@@ -826,8 +803,8 @@ NSCursor* buildPinCursor(const std::optional<FloatColor>& color)
 - (void)mouseDown:(NSEvent*)event
 {
     const NSPoint local = [self convertPoint:event.locationInWindow fromView:nil];
-    const SidescopesDragEdges zone = [self zoneAtPoint:local];
-    if (zone == SidescopesDragEdgeNone) {
+    const unsigned zone = [self zoneAtPoint:local];
+    if (zone == sidescopes::ZoneNone) {
         return;
     }
     // The band is mouse-only: its borderless window can never become
@@ -851,12 +828,12 @@ NSCursor* buildPinCursor(const std::optional<FloatColor>& color)
         sidescopes::g_borderDismissed = true;
         return;
     }
-    if (zone & SidescopesDragClose) {
+    if (zone & sidescopes::ZoneClose) {
         self.closePressed = YES;
         return;
     }
     self.dragZone = zone;
-    if (self.dragZone & SidescopesDragMove) {
+    if (self.dragZone & sidescopes::ZoneMove) {
         [NSCursor.closedHandCursor set];
     }
     self.dragStartMouse = NSEvent.mouseLocation;
@@ -868,41 +845,29 @@ NSCursor* buildPinCursor(const std::optional<FloatColor>& color)
 - (void)mouseDragged:(NSEvent*)event
 {
     (void)event;
-    if (self.dragZone == SidescopesDragEdgeNone) {
+    if (self.dragZone == sidescopes::ZoneNone) {
         return;
     }
-    if (self.dragZone & SidescopesDragMove) {
+    if (self.dragZone & sidescopes::ZoneMove) {
         [NSCursor.closedHandCursor set];
     }
     const NSPoint mouse = NSEvent.mouseLocation;
     const CGFloat dx = mouse.x - self.dragStartMouse.x;
     const CGFloat dy = mouse.y - self.dragStartMouse.y;
-    NSRect rect = self.dragStartRegion;
-    if (self.dragZone & SidescopesDragMove) {
-        rect.origin.x += dx;
-        rect.origin.y += dy;
-    } else {
-        if (self.dragZone & SidescopesDragEdgeLeft) {
-            const CGFloat limit = NSMaxX(self.dragStartRegion) - sidescopes::MinimumRegionSize;
-            const CGFloat left = std::min(NSMinX(self.dragStartRegion) + dx, limit);
-            rect.size.width = NSMaxX(self.dragStartRegion) - left;
-            rect.origin.x = left;
-        }
-        if (self.dragZone & SidescopesDragEdgeRight) {
-            rect.size.width = std::max(sidescopes::MinimumRegionSize, self.dragStartRegion.size.width + dx);
-        }
-        if (self.dragZone & SidescopesDragEdgeBottom) {
-            const CGFloat limit = NSMaxY(self.dragStartRegion) - sidescopes::MinimumRegionSize;
-            const CGFloat bottom = std::min(NSMinY(self.dragStartRegion) + dy, limit);
-            rect.size.height = NSMaxY(self.dragStartRegion) - bottom;
-            rect.origin.y = bottom;
-        }
-        if (self.dragZone & SidescopesDragEdgeTop) {
-            rect.size.height = std::max(sidescopes::MinimumRegionSize, self.dragStartRegion.size.height + dy);
-        }
-    }
     NSScreen* screen = self.window.screen ? self.window.screen : NSScreen.mainScreen;
-    sidescopes::g_borderEditRegion = sidescopes::regionFromScreenRect(rect, screen.frame);
+    const NSRect screenFrame = screen.frame;
+    // Screen space is bottom-left origin; the shared clamp is top-left. Flip
+    // the drag-start region's top edge into that space and negate the
+    // vertical delta so ZoneTop/ZoneBottom move the visually-correct edges,
+    // then read the clamped rectangle straight into a region.
+    const sidescopes::LocalRect start{
+        NSMinX(self.dragStartRegion) - screenFrame.origin.x,
+        sidescopes::flippedY(NSMaxY(self.dragStartRegion) - screenFrame.origin.y, screenFrame.size.height),
+        self.dragStartRegion.size.width, self.dragStartRegion.size.height};
+    const sidescopes::LocalRect dragged =
+        sidescopes::draggedRegionRect(self.dragZone, start, dx, -dy, sidescopes::MinimumRegionSize);
+    sidescopes::g_borderEditRegion =
+        sidescopes::regionFromLocalRect(dragged, screenFrame.size.width, screenFrame.size.height);
     sidescopes::g_borderEditChanged = true;
 }
 
@@ -911,15 +876,15 @@ NSCursor* buildPinCursor(const std::optional<FloatColor>& color)
     const NSPoint local = [self convertPoint:event.locationInWindow fromView:nil];
     if (self.closePressed) {
         self.closePressed = NO;
-        if ([self zoneAtPoint:local] & SidescopesDragClose) {
+        if ([self zoneAtPoint:local] & sidescopes::ZoneClose) {
             sidescopes::g_borderDismissed = true;
             return;
         }
     }
-    if (self.dragZone & SidescopesDragMove) {
+    if (self.dragZone & sidescopes::ZoneMove) {
         [NSCursor.openHandCursor set];
     }
-    self.dragZone = SidescopesDragEdgeNone;
+    self.dragZone = sidescopes::ZoneNone;
     sidescopes::g_borderEditing = false;
     [self applyCursorForZone:[self zoneAtPoint:local]];
     self.needsDisplay = YES;
@@ -983,11 +948,10 @@ std::vector<NSRect> ownWindowExclusions(NSPoint screenOrigin)
 
 NSRect regionToViewRect(const RegionOfInterest& region, NSSize viewSize)
 {
-    // Percent (top-left origin) to view coordinates (bottom-left origin).
-    return NSMakeRect(region.leftPercent / 100.0 * viewSize.width,
-                      (100.0 - region.bottomPercent) / 100.0 * viewSize.height,
-                      (region.rightPercent - region.leftPercent) / 100.0 * viewSize.width,
-                      (region.bottomPercent - region.topPercent) / 100.0 * viewSize.height);
+    // Percent (top-left origin) to view coordinates (bottom-left origin): the
+    // shared geometry gives a top-left rect; flip its bottom edge up.
+    const LocalRect local = localRectFromRegion(region, viewSize.width, viewSize.height);
+    return NSMakeRect(local.x, flippedY(local.y + local.height, viewSize.height), local.width, local.height);
 }
 
 }  // namespace
@@ -1135,12 +1099,10 @@ RegionPickPoll pollRegionPick()
     }
 
     const auto regionFromView = [](NSRect rect, NSSize size) {
-        RegionOfInterest region;
-        region.leftPercent = rect.origin.x / size.width * 100.0;
-        region.rightPercent = (rect.origin.x + rect.size.width) / size.width * 100.0;
-        region.topPercent = (size.height - (rect.origin.y + rect.size.height)) / size.height * 100.0;
-        region.bottomPercent = (size.height - rect.origin.y) / size.height * 100.0;
-        return region;
+        // View coordinates are bottom-left origin; flip the rect's top edge
+        // into the shared geometry's top-left space, then delegate.
+        const LocalRect local{rect.origin.x, flippedY(NSMaxY(rect), size.height), rect.size.width, rect.size.height};
+        return regionFromLocalRect(local, size.width, size.height);
     };
 
     // Any overlay finishing - a confirm there, or ESC anywhere - ends the
