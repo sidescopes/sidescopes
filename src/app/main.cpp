@@ -23,6 +23,7 @@
 #include "app/pin_board.h"
 #include "app/scope_view.h"
 #include "core/analysis_worker.h"
+#include "core/color_lab.h"
 #include "core/frame_mailbox.h"
 #include "core/marker_smoother.h"
 #include "core/preferences.h"
@@ -902,12 +903,17 @@ void drawColorPicker(const std::optional<FloatColor>& liveColor, PinBoard& pins)
     // right-aligns inside it - the toolbar's cure for layouts
     // that twitch as digits come and go.
     const float labelColumn = ImGui::CalcTextSize("R").x;
-    const float codeColumn = ImGui::CalcTextSize("255").x;
     const float percentColumn = ImGui::CalcTextSize("100%").x;
     const float columnGap = ImGui::CalcTextSize(" ").x;
-    // The deck's deltas answer a matching question, so they stay in codes: at
-    // no decimals a one-code miss rounds to "+0%" and would read as a match.
-    const float deltaColumn = ImGui::CalcTextSize("+255").x;
+    // The difference labels share one column so dL, dC, dH and dE line up
+    // whichever of them a row carries.
+    const float deltaLabelColumn = std::max(std::max(ImGui::CalcTextSize("dL").x, ImGui::CalcTextSize("dC").x),
+                                            std::max(ImGui::CalcTextSize("dH").x, ImGui::CalcTextSize("dE").x));
+    const float deltaColumn = ImGui::CalcTextSize("+100.0").x;
+    const float deltaEColumn = ImGui::CalcTextSize("100.0").x;
+    // The differences are read off screen pixels in an assumed space, so every
+    // one of them says so.
+    const char* srgbCaveat = "sRGB assumed, a relative check rather than a measurement";
     const auto swatchColor = [](const FloatColor& source) {
         return ImVec4(source.r / 255.0f, source.g / 255.0f, source.b / 255.0f, 1.0f);
     };
@@ -964,41 +970,28 @@ void drawColorPicker(const std::optional<FloatColor>& liveColor, PinBoard& pins)
         }
     }
 
-    // Live values in two rows, one reading mode each: the percent a
-    // photographer reads at a glance, then the exact codes, whose notation hex
-    // shares. Both rows share one value column so the numbers line up. A tiny
-    // pane keeps only the percent row - hex is a click-to-copy button and must
-    // never be what drops.
+    // Live values in one row: the percent a photographer reads at a glance,
+    // with hex alongside for the exact code. A row of decimal codes said what
+    // hex already says.
     pushHexFont();
     const float hexWidth = ImGui::CalcTextSize(hex).x;
     popHexFont();
-    const float valueColumn = std::max(percentColumn, codeColumn);
-    const float channelStride = labelColumn + columnGap + valueColumn + 2 * columnGap;
+    const float channelStride = labelColumn + columnGap + percentColumn + 2 * columnGap;
     const float valuesStart = ImGui::GetCursorPosX();
     const float liveChannels[3] = {color.r, color.g, color.b};
     const char* channelLabels[3] = {"R", "G", "B"};
-    const auto valueRow = [&](bool asPercent) {
-        for (int channel = 0; channel < 3; ++channel) {
-            const float columnStart = valuesStart + channel * channelStride;
-            if (channel > 0) {
-                ImGui::SameLine(columnStart);
-            } else {
-                ImGui::SetCursorPosX(columnStart);
-            }
-            ImGui::TextUnformatted(channelLabels[channel]);
-            char text[8];
-            if (asPercent) {
-                std::snprintf(text, sizeof(text), "%.0f%%", liveChannels[channel] / 2.55f);
-            } else {
-                std::snprintf(text, sizeof(text), "%.0f", liveChannels[channel]);
-            }
-            ImGui::SameLine(columnStart + labelColumn + columnGap + valueColumn - ImGui::CalcTextSize(text).x);
-            ImGui::TextUnformatted(text);
+    for (int channel = 0; channel < 3; ++channel) {
+        const float columnStart = valuesStart + channel * channelStride;
+        if (channel > 0) {
+            ImGui::SameLine(columnStart);
+        } else {
+            ImGui::SetCursorPosX(columnStart);
         }
-    };
-    valueRow(true);
-    if (!tiny) {
-        valueRow(false);
+        ImGui::TextUnformatted(channelLabels[channel]);
+        char text[8];
+        std::snprintf(text, sizeof(text), "%.0f%%", liveChannels[channel] / 2.55f);
+        ImGui::SameLine(columnStart + labelColumn + columnGap + percentColumn - ImGui::CalcTextSize(text).x);
+        ImGui::TextUnformatted(text);
     }
     ImGui::SameLine(0.0f, 0.0f);
     pushHexFont();
@@ -1014,6 +1007,51 @@ void drawColorPicker(const std::optional<FloatColor>& liveColor, PinBoard& pins)
         ImGui::SetClipboardText(hex);
     }
     ImGui::SetItemTooltip("click to copy");
+
+    // Against a loaded pin, the difference a colorist names: how much lighter,
+    // how much more saturated, how far around the wheel - and last, how far
+    // apart the two colors are at all. The row is secondary, so a pane too
+    // narrow to seat the decomposition clear of dE drops it whole rather than
+    // overlap the two; the deck's own dE still says how far off every pin is.
+    const float deltaStride = deltaLabelColumn + columnGap + deltaColumn + 2 * columnGap;
+    const float deltaEStart = area.x - deltaEColumn - columnGap - deltaLabelColumn;
+    if (split && !tiny && valuesStart + 3.0f * deltaStride + columnGap <= deltaEStart) {
+        const LabColor liveLab = labFromSrgb(color);
+        const LabColor pinLab = labFromSrgb(pins.comparatorColor());
+        const ColorDifference difference = differenceFrom(pinLab, liveLab);
+        const float components[3] = {difference.lightness, difference.chroma, difference.hue};
+        const char* componentLabels[3] = {"dL", "dC", "dH"};
+        const char* componentHelp[3] = {
+            "live minus pinned lightness in CIELAB",
+            "live minus pinned chroma in CIELAB",
+            "live minus pinned hue in CIELAB, weighted by chroma",
+        };
+        for (int component = 0; component < 3; ++component) {
+            const float columnStart = valuesStart + component * deltaStride;
+            if (component > 0) {
+                ImGui::SameLine(columnStart);
+            } else {
+                ImGui::SetCursorPosX(columnStart);
+            }
+            ImGui::TextDisabled("%s", componentLabels[component]);
+            ImGui::SetItemTooltip("%s - %s", componentHelp[component], srgbCaveat);
+            char text[16];
+            std::snprintf(text, sizeof(text), "%+.1f", components[component]);
+            ImGui::SameLine(columnStart + deltaLabelColumn + columnGap + deltaColumn - ImGui::CalcTextSize(text).x);
+            ImGui::TextDisabled("%s", text);
+            ImGui::SetItemTooltip("%s - %s", componentHelp[component], srgbCaveat);
+        }
+        // The magnitude ends where hex ends, against the pane's right edge.
+        char total[16];
+        std::snprintf(total, sizeof(total), "%.1f", difference.deltaE);
+        const char* totalHelp = "how far the live color is from the pinned one, CIEDE2000";
+        ImGui::SameLine(deltaEStart);
+        ImGui::TextDisabled("dE");
+        ImGui::SetItemTooltip("%s - %s", totalHelp, srgbCaveat);
+        ImGui::SameLine(area.x - ImGui::CalcTextSize(total).x);
+        ImGui::TextDisabled("%s", total);
+        ImGui::SetItemTooltip("%s - %s", totalHelp, srgbCaveat);
+    }
 
     // The pins: a full reference deck when there is room, a chip
     // rail when there is not. Clicking loads the comparator;
@@ -1065,25 +1103,24 @@ void drawColorPicker(const std::optional<FloatColor>& liveColor, PinBoard& pins)
                 ImGui::SetClipboardText(pinHex);
             }
             ImGui::SetItemTooltip("click to copy");
-            // The delta against the live color answers the deck's
-            // question - does the picture match the reference? -
-            // per channel, continuously, each value in a fixed
-            // column so nothing twitches as the cursor moves.
+            // The deck asks which pin matches, so a row answers with one
+            // number rather than three: how far the live color is from this
+            // pin. In a fixed column, so nothing twitches as the cursor moves.
             pushHexFont();
             const float hexColumn = ImGui::CalcTextSize("#DDDDDD").x;
             popHexFont();
-            const float deltasStart = ImGui::GetCursorPosX() + lineHeight + columnGap + hexColumn + 2 * columnGap;
-            const float deltas[3] = {color.r - pins.color(index).r, color.g - pins.color(index).g,
-                                     color.b - pins.color(index).b};
-            for (int channel = 0; channel < 3; ++channel) {
-                char delta[8];
-                std::snprintf(delta, sizeof(delta), "%+d", static_cast<int>(std::lround(deltas[channel])));
-                ImGui::SameLine(deltasStart + channel * (deltaColumn + columnGap) + deltaColumn -
-                                ImGui::CalcTextSize(delta).x);
-                ImGui::SetCursorPosY(ImGui::GetCursorPosY() + textDrop);
-                ImGui::TextDisabled("%s", delta);
-                ImGui::SetItemTooltip("live minus pinned, per channel");
-            }
+            const float deltaStart = ImGui::GetCursorPosX() + lineHeight + columnGap + hexColumn + 2 * columnGap;
+            char delta[16];
+            std::snprintf(delta, sizeof(delta), "%.1f", deltaE2000(labFromSrgb(pins.color(index)), labFromSrgb(color)));
+            const char* deltaHelp = "how far the live color is from this pin, CIEDE2000";
+            ImGui::SameLine(deltaStart);
+            ImGui::SetCursorPosY(ImGui::GetCursorPosY() + textDrop);
+            ImGui::TextDisabled("dE");
+            ImGui::SetItemTooltip("%s - %s", deltaHelp, srgbCaveat);
+            ImGui::SameLine(deltaStart + deltaLabelColumn + columnGap + deltaEColumn - ImGui::CalcTextSize(delta).x);
+            ImGui::SetCursorPosY(ImGui::GetCursorPosY() + textDrop);
+            ImGui::TextDisabled("%s", delta);
+            ImGui::SetItemTooltip("%s - %s", deltaHelp, srgbCaveat);
             // The cross centers on the text it sits beside, not
             // on the taller row: glyphs center a couple of pixels
             // above the row's middle, and the eye reads against
@@ -1094,11 +1131,11 @@ void drawColorPicker(const std::optional<FloatColor>& liveColor, PinBoard& pins)
             // A frameless glyph, square and centered on the row:
             // quiet gray until hovered, red at the moment of
             // intent. A pill background fought the black pane.
-            // The remove control follows the deltas with a small
+            // The remove control follows the delta with a small
             // margin instead of hugging the pane's right edge,
             // where a narrow window pushed it over the numbers;
             // in an extremely narrow pane it clips away instead.
-            ImGui::SameLine(deltasStart + 3.0f * (deltaColumn + columnGap) + 2.0f * columnGap);
+            ImGui::SameLine(deltaStart + deltaLabelColumn + columnGap + deltaEColumn + 3.0f * columnGap);
             ImGui::SetCursorScreenPos(ImVec2(ImGui::GetCursorScreenPos().x, rowTop));
             if (ImGui::InvisibleButton(closeId, ImVec2(lineHeight, lineHeight))) {
                 removePin = static_cast<int>(index);
