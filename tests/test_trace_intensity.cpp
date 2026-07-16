@@ -32,6 +32,15 @@ TEST_CASE("Shifted scale reaches gains beyond the unshifted ceiling")
     }
 }
 
+TEST_CASE("Trace intensity reads a non-positive gain as zero")
+{
+    // The log scale has no value at or below zero gain; the readout floors
+    // there rather than returning a NaN or a negative percent.
+    CHECK(intensityFromTraceGain(0.0f) == 0.0f);
+    CHECK(intensityFromTraceGain(-1.0f) == 0.0f);
+    CHECK(intensityFromTraceGain(-100.0f, VectorscopeIntensityShift) == 0.0f);
+}
+
 TEST_CASE("Trace intensity is clamped and monotonic")
 {
     CHECK(traceGainFromIntensity(-10.0f) == traceGainFromIntensity(0.0f));

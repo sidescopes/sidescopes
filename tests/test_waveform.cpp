@@ -1,5 +1,7 @@
 #include <algorithm>
 #include <catch2/catch_test_macros.hpp>
+#include <cstddef>
+#include <cstdint>
 #include <vector>
 
 #include "core/scopes/waveform.h"
@@ -332,6 +334,67 @@ TEST_CASE("Waveform column brightness is invariant to stride and region size")
         CHECK(channelAt(strided.image(), 0, row, 1) == expected);
         CHECK(channelAt(smaller.image(), 0, row, 1) == expected);
     }
+}
+
+TEST_CASE("Waveform clamps the column and level budgets to their ranges")
+{
+    TestFrame frame(64, 64, 255);
+    frame.fill(Color{127, 127, 127});
+
+    Waveform tooLarge;
+    WaveformSettings large;
+    large.columns = 9999;
+    large.imageHeight = 9999;
+    tooLarge.configure(large);
+    tooLarge.accumulate(frame.view(), IntRect{0, 0, 64, 64});
+    CHECK(tooLarge.image().width == 2048);
+    CHECK(tooLarge.image().height == 768);
+
+    Waveform tooSmall;
+    WaveformSettings small;
+    small.columns = 10;
+    small.imageHeight = 10;
+    tooSmall.configure(small);
+    tooSmall.accumulate(frame.view(), IntRect{0, 0, 64, 64});
+    CHECK(tooSmall.image().width == 256);
+    CHECK(tooSmall.image().height == 256);
+}
+
+TEST_CASE("Waveform produces a black image for an empty region")
+{
+    TestFrame frame(64, 64, 255);
+    frame.fill(Color{127, 127, 127});
+
+    Waveform scope;
+    scope.accumulate(frame.view(), IntRect{100, 100, 8, 8});  // off the frame
+
+    const std::vector<uint8_t>& rgba = scope.image().rgba;
+    for (std::size_t i = 0; i < rgba.size(); i += 4) {
+        REQUIRE(rgba[i] + rgba[i + 1] + rgba[i + 2] == 0);
+    }
+}
+
+TEST_CASE("Colored luma waveform draws a neutral trace for a pure black region")
+{
+    // Black carries no color mass, so the value-weighted planes cannot tint
+    // the trace: the strongest-channel guard must fall back to a neutral gray
+    // rather than dividing by zero.
+    TestFrame frame(64, 64, 0);  // pure black, every channel zero
+
+    Waveform scope;
+    scope.configure(settingsFor(WaveformMode::ColoredLuma));
+    scope.accumulate(frame.view(), IntRect{0, 0, 64, 64});
+
+    const ScopeImage& image = scope.image();
+    const int row = brightestRow(image.rgba.data(), image.width, image.height, 0);
+    REQUIRE(row >= 0);
+    const int column = image.width / 2;
+    const int r = channelAt(image, column, row, 0);
+    const int g = channelAt(image, column, row, 1);
+    const int b = channelAt(image, column, row, 2);
+    REQUIRE(r > 0);
+    CHECK(r == g);  // no color mass -> equal channels, a neutral trace
+    CHECK(g == b);
 }
 
 }  // namespace sidescopes

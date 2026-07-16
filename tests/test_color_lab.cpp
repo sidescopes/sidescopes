@@ -141,6 +141,22 @@ TEST_CASE("sRGB anchors land on their CIELAB values")
     CHECK(chromaOf(midGrey) == Catch::Approx(0.0).margin(1e-3));
 }
 
+TEST_CASE("labFromSrgb clamps channels outside the display range")
+{
+    // Values past either end of 0-255 read as the clamped equivalents.
+    const LabColor high = labFromSrgb(FloatColor{300.0f, 300.0f, 300.0f});
+    const LabColor white = labFromSrgb(FloatColor{255.0f, 255.0f, 255.0f});
+    CHECK(high.lightness == white.lightness);
+    CHECK(high.a == white.a);
+    CHECK(high.b == white.b);
+
+    const LabColor low = labFromSrgb(FloatColor{-20.0f, -20.0f, -20.0f});
+    const LabColor black = labFromSrgb(FloatColor{0.0f, 0.0f, 0.0f});
+    CHECK(low.lightness == black.lightness);
+    CHECK(low.a == black.a);
+    CHECK(low.b == black.b);
+}
+
 TEST_CASE("Neutral greys carry no chroma at any level")
 {
     float previousLightness = -1.0f;

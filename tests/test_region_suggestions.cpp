@@ -55,4 +55,19 @@ TEST_CASE("Face suggestions deduplicate overlapping detections")
     CHECK(suggestions.size() == 1);
 }
 
+TEST_CASE("Face suggestions reject a degenerate frame")
+{
+    // Percentages need positive frame dimensions; a zero or negative extent
+    // yields nothing rather than dividing by it.
+    CHECK(buildFaceSuggestions({IntRect{10, 10, 40, 40}}, 0, 100).empty());
+    CHECK(buildFaceSuggestions({IntRect{10, 10, 40, 40}}, 100, 0).empty());
+    CHECK(buildFaceSuggestions({IntRect{10, 10, 40, 40}}, -100, 100).empty());
+}
+
+TEST_CASE("Face suggestions keep two well-separated faces")
+{
+    const auto suggestions = buildFaceSuggestions({IntRect{0, 0, 100, 100}, IntRect{800, 300, 120, 120}}, 1000, 500);
+    CHECK(suggestions.size() == 2);
+}
+
 }  // namespace sidescopes

@@ -1,8 +1,10 @@
 #include <algorithm>
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
+#include <cstddef>
 #include <cstdlib>
 #include <utility>
+#include <vector>
 
 #include "core/scopes/vectorscope.h"
 #include "scope_image.h"
@@ -232,9 +234,59 @@ TEST_CASE("Vectorscope produces a black image for an empty region")
     Vectorscope scope;
     scope.accumulate(frame.view(), IntRect{20, 20, 4, 4});  // outside the frame
 
-    for (std::size_t i = 0; i < scope.image().rgba.size(); i += 4) {
-        REQUIRE(scope.image().rgba[i] == 0);
+    // Every color channel of every pixel must be dark, not just the red
+    // byte the check used to read - a stray green or blue trace would slip
+    // straight past a red-only scan.
+    const std::vector<uint8_t>& rgba = scope.image().rgba;
+    for (std::size_t i = 0; i < rgba.size(); i += 4) {
+        REQUIRE(rgba[i] + rgba[i + 1] + rgba[i + 2] == 0);
     }
+}
+
+TEST_CASE("Vectorscope clamps the display size to the supported range")
+{
+    TestFrame frame(16, 16, 255);
+    frame.fill(0, 16, Color{191, 0, 0});
+
+    Vectorscope tooLarge;
+    VectorscopeSettings large;
+    large.size = 9999;
+    tooLarge.configure(large);
+    tooLarge.accumulate(frame.view(), IntRect{0, 0, 16, 16});
+    CHECK(tooLarge.image().width == 512);
+    CHECK(tooLarge.image().height == 512);
+
+    Vectorscope tooSmall;
+    VectorscopeSettings small;
+    small.size = 10;
+    tooSmall.configure(small);
+    tooSmall.accumulate(frame.view(), IntRect{0, 0, 16, 16});
+    CHECK(tooSmall.image().width == 256);
+    CHECK(tooSmall.image().height == 256);
+}
+
+TEST_CASE("Vectorscope clamps an out-of-range sampling stride to eight")
+{
+    // Stride 99 is meaningless; it must behave exactly as the maximum stride
+    // of 8. Two colors placed so stride-8 sampling still sees both give the
+    // comparison something to bite on.
+    TestFrame frame(64, 64, 255);
+    frame.fill(0, 32, Color{191, 0, 0});
+    frame.fill(32, 64, Color{0, 0, 191});
+
+    Vectorscope clamped;
+    VectorscopeSettings tooWide;
+    tooWide.samplingStride = 99;
+    clamped.configure(tooWide);
+    clamped.accumulate(frame.view(), IntRect{0, 0, 64, 64});
+
+    Vectorscope maxStride;
+    VectorscopeSettings eight;
+    eight.samplingStride = 8;
+    maxStride.configure(eight);
+    maxStride.accumulate(frame.view(), IntRect{0, 0, 64, 64});
+
+    CHECK(clamped.image().rgba == maxStride.image().rgba);
 }
 
 }  // namespace sidescopes

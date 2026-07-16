@@ -22,6 +22,7 @@ add_executable(sidescopes_tests
     test_region_suggestions.cpp
     test_vectorscope.cpp
     test_modules.cpp
+    test_module_loader.cpp
     test_waveform.cpp
     test_pin_board.cpp
     test_scope_view.cpp
@@ -65,6 +66,11 @@ if(SIDESCOPES_MODULES_DYNAMIC)
         ${CMAKE_SOURCE_DIR}/src/core/scopes/vectorscope.cpp
         ${CMAKE_SOURCE_DIR}/src/core/scopes/waveform.cpp
         ${CMAKE_SOURCE_DIR}/src/core/scopes/histogram.cpp)
+else()
+    # The module loader compiles into core only in the dynamic configuration;
+    # test_module_loader.cpp exercises it in either, so the static build
+    # compiles it straight into the test binary.
+    target_sources(sidescopes_tests PRIVATE ${CMAKE_SOURCE_DIR}/src/modules/module_loader.cpp)
 endif()
 # The module libraries link ahead of core (see the top-level comment on
 # link order). In dynamic mode SIDESCOPES_MODULE_LINK_LIBS is empty and the

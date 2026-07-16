@@ -125,4 +125,73 @@ TEST_CASE("Preferences tolerate unknown keys and malformed lines")
     CHECK(loaded.vectorscopeGain == 3.0f);
 }
 
+TEST_CASE("Preferences reject a malformed shortcut binding")
+{
+    // A binding is one letter A-Z or "Escape"; anything else keeps the
+    // default rather than storing an unusable chord.
+    const TempFile file("bad-shortcut.txt");
+    file.write("shortcut_waveform=ab\n");
+
+    const Preferences loaded = loadPreferences(file.path());
+    CHECK(loaded.shortcuts.waveform == "W");
+}
+
+TEST_CASE("Preferences clamp an out-of-range vectorscope zoom")
+{
+    // Only 1, 2, and 4 are valid magnify factors; anything else falls to 1.
+    const TempFile file("bad-zoom.txt");
+    file.write("vectorscope_zoom=3\n");
+
+    const Preferences loaded = loadPreferences(file.path());
+    CHECK(loaded.vectorscopeZoom == 1);
+}
+
+TEST_CASE("Preferences fall back to BT.709 for an unknown matrix")
+{
+    // The matrix is stored as 0 (601) or 1 (709); any other value reads as
+    // 709, the default.
+    const TempFile file("bad-matrix.txt");
+    file.write("matrix=9\n");
+
+    const Preferences loaded = loadPreferences(file.path());
+    CHECK(loaded.matrix == ChromaMatrix::Bt709);
+}
+
+TEST_CASE("Preferences round-trip the colored-luma waveform mode")
+{
+    Preferences saved;
+    saved.waveformMode = WaveformMode::ColoredLuma;
+
+    const TempFile file("colored-luma.txt");
+    REQUIRE(savePreferences(saved, file.path()));
+
+    const Preferences loaded = loadPreferences(file.path());
+    CHECK(loaded.waveformMode == WaveformMode::ColoredLuma);
+}
+
+TEST_CASE("Preferences round-trip a non-round gain within serializer precision")
+{
+    // The serializer writes floats at the stream's default six significant
+    // digits; 3.14159 already fits that, so it round-trips to the same bits.
+    Preferences saved;
+    saved.vectorscopeGain = 3.14159f;
+
+    const TempFile file("odd-gain.txt");
+    REQUIRE(savePreferences(saved, file.path()));
+
+    const Preferences loaded = loadPreferences(file.path());
+    CHECK(loaded.vectorscopeGain == 3.14159f);
+}
+
+TEST_CASE("Preferences read a non-numeric gain as zero")
+{
+    // The loader does not validate numeric fields: strtof yields 0 on text
+    // it cannot parse, and that is the value that lands in the setting.
+    const TempFile file("junk-gain.txt");
+    file.write("waveform_gain=abc\n");
+
+    const Preferences loaded = loadPreferences(file.path());
+    CHECK(loaded.waveformGain == 0.0f);
+}
+
 }  // namespace sidescopes

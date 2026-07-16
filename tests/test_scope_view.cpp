@@ -113,6 +113,30 @@ TEST_CASE("The trace flash remembers which trace was adjusted")
     CHECK_FALSE(flash.showing(TraceControl::Vectorscope, 15.0));
 }
 
+TEST_CASE("The graticule toggle round-trips")
+{
+    ScopeView view;
+    CHECK(view.graticule());  // shown by default
+    view.setGraticule(false);
+    CHECK_FALSE(view.graticule());
+    view.setGraticule(true);
+    CHECK(view.graticule());
+}
+
+TEST_CASE("The magnify zoom round-trips and is stored verbatim")
+{
+    ScopeView view;
+    CHECK(view.zoom() == 1);  // unmagnified by default
+    view.setZoom(2);
+    CHECK(view.zoom() == 2);
+    view.setZoom(4);
+    CHECK(view.zoom() == 4);
+    // setZoom does not clamp: the valid 1/2/4 set is enforced at the
+    // preferences boundary, not here, so an off-scale value is stored as is.
+    view.setZoom(3);
+    CHECK(view.zoom() == 3);
+}
+
 TEST_CASE("Intensity and smoothing are tracked per trace")
 {
     ScopeView view;

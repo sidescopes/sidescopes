@@ -1,15 +1,70 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
+#include <cstdint>
 #include <utility>
 #include <vector>
 
 #include "modules/module_registry.h"
 #include "scope_image.h"
+#include "sidescopes/module.h"
 #include "test_frame.h"
 
 namespace sidescopes {
 
 using namespace test;
+
+namespace {
+
+// Minimal module-entry pieces for the registry's rejection paths. Neither the
+// descriptor nor create is reached: registration is refused before it looks at
+// them, so they exist only to fill valid function pointers.
+bool trueInit()
+{
+    return true;
+}
+
+bool falseInit()
+{
+    return false;
+}
+
+void noopDeinit()
+{
+}
+
+uint32_t oneScope()
+{
+    return 1;
+}
+
+const SsScopeDescriptor FakeDescriptor{
+    "org.sidescopes.test.fake", "Fake", 'X', 0, 0, 0u, nullptr, 0u,
+};
+
+const SsScopeDescriptor* fakeDescriptor(uint32_t index)
+{
+    return index == 0 ? &FakeDescriptor : nullptr;
+}
+
+SsScopeInstance* nullCreate(const char*, const SsHost*)
+{
+    return nullptr;
+}
+
+// A fake instance whose destroy() records the call, so the RAII wrapper can be
+// shown to destroy exactly once across a chain of moves.
+struct CountingInstance
+{
+    SsScopeInstance vtable{};
+    int destroyed = 0;
+};
+
+void countingDestroy(SsScopeInstance* instance)
+{
+    ++static_cast<CountingInstance*>(instance->instance_data)->destroyed;
+}
+
+}  // namespace
 
 TEST_CASE("Registry serves the vectorscope through the module boundary")
 {
@@ -138,6 +193,106 @@ TEST_CASE("Registry serves the histogram through the module boundary")
     for (const SsMarker& marker : markers) {
         CHECK(marker.kind == SS_MARKER_VALUE);
     }
+}
+
+TEST_CASE("Registry rejects a module built for another ABI major")
+{
+    const SsModuleEntry entry{99u, 0u, trueInit, noopDeinit, oneScope, fakeDescriptor, nullCreate};
+    ModuleRegistry registry;
+    CHECK_FALSE(registry.registerModule(entry));
+    CHECK(registry.scopes().empty());
+}
+
+TEST_CASE("Registry rejects a module whose init fails")
+{
+    const SsModuleEntry entry{SS_ABI_MAJOR, SS_ABI_MINOR, falseInit, noopDeinit, oneScope, fakeDescriptor, nullCreate};
+    ModuleRegistry registry;
+    CHECK_FALSE(registry.registerModule(entry));
+    CHECK(registry.scopes().empty());
+}
+
+TEST_CASE("Registry reports unknown scopes and instances as absent")
+{
+    ModuleRegistry& registry = builtinModules();
+    CHECK(registry.findScope("org.sidescopes.nonesuch") == nullptr);
+    CHECK_FALSE(registry.createInstance("org.sidescopes.nonesuch").valid());
+}
+
+TEST_CASE("A scope instance reports only the extensions it implements")
+{
+    ModuleRegistry& registry = builtinModules();
+
+    const ScopeInstance vectorscope = registry.createInstance("org.sidescopes.vectorscope");
+    REQUIRE(vectorscope.valid());
+    CHECK(vectorscope.getExtension("sidescopes.not-an-extension") == nullptr);
+    CHECK(vectorscope.getExtension(OutlineExtension) == nullptr);
+    CHECK(vectorscope.getExtension(AdaptiveImageExtension) != nullptr);
+
+    const ScopeInstance waveform = registry.createInstance("org.sidescopes.waveform");
+    REQUIRE(waveform.valid());
+    CHECK(waveform.getExtension(OutlineExtension) == nullptr);
+    CHECK(waveform.getExtension(AdaptiveImageExtension) != nullptr);
+
+    const ScopeInstance histogram = registry.createInstance("org.sidescopes.histogram");
+    REQUIRE(histogram.valid());
+    CHECK(histogram.getExtension(AdaptiveImageExtension) != nullptr);
+    CHECK(histogram.getExtension(OutlineExtension) != nullptr);
+}
+
+TEST_CASE("The adaptive-image extension resizes a scope's output through the boundary")
+{
+    ModuleRegistry& registry = builtinModules();
+    ScopeInstance waveform = registry.createInstance("org.sidescopes.waveform");
+    REQUIRE(waveform.valid());
+
+    const auto* adaptive = static_cast<const SsAdaptiveImageExtension*>(waveform.getExtension(AdaptiveImageExtension));
+    REQUIRE(adaptive != nullptr);
+
+    // The waveform's default grid is 1024 columns by 256 levels.
+    CHECK(waveform.image().width == 1024);
+    CHECK(waveform.image().height == 256);
+
+    adaptive->setImageSize(waveform.raw(), 512, 512);
+    const SsImageView resized = waveform.image();
+    CHECK(resized.width == 512);
+    CHECK(resized.height == 512);
+}
+
+TEST_CASE("ScopeInstance owns its handle across moves and destroys it once")
+{
+    CountingInstance fake;
+    fake.vtable.instance_data = &fake;
+    fake.vtable.destroy = countingDestroy;
+
+    {
+        ScopeInstance first(&fake.vtable);
+        REQUIRE(first.valid());
+
+        // Move-construct: ownership transfers and the source empties.
+        ScopeInstance second(std::move(first));
+        CHECK(second.valid());
+        // Reading the moved-from state is the whole point of the check.
+        // NOLINTNEXTLINE(clang-analyzer-cplusplus.Move,bugprone-use-after-move)
+        CHECK_FALSE(first.valid());
+
+        // Move-assign into an empty instance.
+        ScopeInstance third;
+        third = std::move(second);
+        CHECK(third.valid());
+        // NOLINTNEXTLINE(clang-analyzer-cplusplus.Move,bugprone-use-after-move)
+        CHECK_FALSE(second.valid());
+
+        // Self-move must neither destroy nor invalidate the handle. The
+        // indirection dodges the compiler's self-move diagnostic while still
+        // exercising the guarded a = std::move(a) path.
+        ScopeInstance* alias = &third;
+        third = std::move(*alias);
+        CHECK(third.valid());
+
+        CHECK(fake.destroyed == 0);  // nothing destroyed while an owner is live
+    }
+
+    CHECK(fake.destroyed == 1);  // destroyed exactly once at the final scope exit
 }
 
 }  // namespace sidescopes

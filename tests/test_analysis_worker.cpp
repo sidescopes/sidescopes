@@ -1,7 +1,10 @@
+#include <algorithm>
 #include <catch2/catch_test_macros.hpp>
 #include <chrono>
+#include <cstddef>
 #include <functional>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #include "core/analysis_worker.h"
@@ -74,10 +77,19 @@ TEST_CASE("AnalysisWorker skips frames with unchanged content")
     uint64_t seen = 0;
     AnalysisWorker::Output output;
     REQUIRE(waitFor([&] { return worker.fetchOutput(seen, output); }));
+    REQUIRE(output.framesProcessed == 1);
+    const uint64_t versionAfterFirst = seen;
 
+    // A second, identical frame is taken from the mailbox but its unchanged
+    // content is not re-analyzed. Waiting for the worker to actually consume
+    // it removes the race a fixed sleep only papered over: once the frame has
+    // been taken, no new output can appear.
     mailbox.publish(makeSolidFrameBuffer(64, 64, Color{100, 100, 100}, 2));
-    std::this_thread::sleep_for(300ms);
+    REQUIRE(waitFor([&] { return worker.consumedFrameSequence() == 2; }));
+
     CHECK_FALSE(worker.fetchOutput(seen, output));
+    CHECK(seen == versionAfterFirst);    // the output version never advanced
+    CHECK(output.framesProcessed == 1);  // still the one analyzed frame
 }
 
 TEST_CASE("AnalysisWorker ignores changes inside the masked window")
@@ -94,11 +106,13 @@ TEST_CASE("AnalysisWorker ignores changes inside the masked window")
     AnalysisWorker::Output output;
     REQUIRE(waitFor([&] { return worker.fetchOutput(seen, output); }));
 
+    const uint64_t versionAfterFirst = seen;
     FrameBuffer changedInsideMask = makeSolidFrameBuffer(64, 64, Color{100, 100, 100}, 2);
     changedInsideMask.data[static_cast<std::size_t>(24 * 64 + 24) * 4] = 250;  // inside the mask
     mailbox.publish(std::move(changedInsideMask));
-    std::this_thread::sleep_for(300ms);
+    REQUIRE(waitFor([&] { return worker.consumedFrameSequence() == 2; }));
     CHECK_FALSE(worker.fetchOutput(seen, output));
+    CHECK(seen == versionAfterFirst);  // the masked change produced no output
 
     FrameBuffer changedOutsideMask = makeSolidFrameBuffer(64, 64, Color{100, 100, 100}, 3);
     changedOutsideMask.data[static_cast<std::size_t>(8 * 64 + 4) * 4] = 250;  // outside the mask
@@ -179,6 +193,68 @@ TEST_CASE("AnalysisWorker restricts analysis to the region of interest")
     // Blue's BT.709 target: Cb = 112 * 191 / 256 + 128 = 211.6,
     // Cr = -10 * 191 / 256 + 128 = 120.5 -> pixel (212, 255 - 121).
     CHECK_FALSE(pixelLit(output.vectorscopeImage, 212, 255 - 121));
+}
+
+TEST_CASE("AnalysisWorker routes every enabled scope and skips the disabled one")
+{
+    FrameMailbox mailbox;
+    AnalysisWorker worker(mailbox);
+    AnalysisSettings settings;
+    // Everything but the waveform: its output image must stay empty while
+    // the parade, histogram, and outline - never asserted before - fill.
+    settings.enabledScopes = ScopeVectorscope | ScopeWaveformParade | ScopeHistogram;
+    worker.updateSettings(settings);
+    worker.start();
+
+    mailbox.publish(makeSolidFrameBuffer(64, 64, Color{191, 0, 0}, 1));
+    uint64_t seen = 0;
+    AnalysisWorker::Output output;
+    REQUIRE(waitFor([&] { return worker.fetchOutput(seen, output); }));
+
+    // The disabled waveform is never copied out.
+    CHECK(output.waveformImage.rgba.empty());
+
+    // Every enabled scope produced a lit image.
+    CHECK(pixelLit(output.vectorscopeImage, 109, 43));  // 75% red, BT.709
+    CHECK(brightestPixel(output.waveformParadeImage) != std::pair<int, int>{-1, -1});
+    CHECK(brightestPixel(output.histogramImage) != std::pair<int, int>{-1, -1});
+
+    // The histogram outline rides alongside its image: three channels of
+    // 256 bin heights, at least one of them raised.
+    REQUIRE(output.histogramOutline.size() == static_cast<std::size_t>(3) * 256);
+    CHECK(*std::max_element(output.histogramOutline.begin(), output.histogramOutline.end()) > 0.0f);
+}
+
+TEST_CASE("AnalysisWorker sampleFrameColor honors the averaging radius")
+{
+    FrameMailbox mailbox;
+    AnalysisWorker worker(mailbox);
+    worker.start();
+
+    // A single red corner pixel on an otherwise black frame: radius 0 reads
+    // that pixel alone, radius 1 averages it with its three black neighbors.
+    FrameBuffer frame = makeSolidFrameBuffer(4, 4, Color{0, 0, 0}, 1);
+    frame.data[2] = 255;  // red at pixel (0, 0)
+    mailbox.publish(std::move(frame));
+    REQUIRE(waitFor([&] { return worker.consumedFrameSequence() == 1; }));
+
+    const auto tight = worker.sampleFrameColor(0, 0, 0);
+    const auto wide = worker.sampleFrameColor(0, 0, 1);
+    REQUIRE(tight.has_value());
+    REQUIRE(wide.has_value());
+    CHECK(tight->r == 255.0f);
+    CHECK(wide->r == 63.75f);  // one red among four clipped samples: 255 / 4
+    CHECK(wide->r < tight->r);
+}
+
+TEST_CASE("AnalysisWorker offers no frame color before one arrives")
+{
+    FrameMailbox mailbox;
+    AnalysisWorker worker(mailbox);
+    // No frame has been published, so the frame accessors stay empty rather
+    // than reading uninitialized storage.
+    CHECK_FALSE(worker.sampleFrameColor(0, 0).has_value());
+    CHECK_FALSE(worker.latestFrameSize().has_value());
 }
 
 }  // namespace sidescopes

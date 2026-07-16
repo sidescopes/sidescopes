@@ -117,4 +117,33 @@ TEST_CASE("FrameMailbox nudge ends a take without a frame")
     CHECK(elapsed < std::chrono::milliseconds(200));
 }
 
+TEST_CASE("FrameMailbox nudge does not swallow a pending frame")
+{
+    // A nudge riding alongside a real frame must still hand the frame over,
+    // not consume the wake and drop it.
+    FrameMailbox mailbox;
+    mailbox.publish(makeFrame(7));
+    mailbox.nudge();
+
+    const auto taken = mailbox.takeLatest(0ms);
+    REQUIRE(taken.has_value());
+    CHECK(taken->sequence == 7);
+}
+
+TEST_CASE("FrameMailbox spends a nudge on a single take")
+{
+    // The first take consumes the nudge; the next take, with nothing
+    // pending, must wait out its full timeout rather than return early on a
+    // stale nudge.
+    FrameMailbox mailbox;
+    mailbox.nudge();
+    CHECK_FALSE(mailbox.takeLatest(0ms).has_value());  // consumes the nudge
+
+    const auto started = std::chrono::steady_clock::now();
+    const auto taken = mailbox.takeLatest(50ms);
+    const auto elapsed = std::chrono::steady_clock::now() - started;
+    CHECK_FALSE(taken.has_value());
+    CHECK(elapsed >= 45ms);  // waited its timeout, generous margin
+}
+
 }  // namespace sidescopes

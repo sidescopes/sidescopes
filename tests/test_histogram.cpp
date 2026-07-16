@@ -210,4 +210,47 @@ TEST_CASE("Histogram exports its curve for display-resolution stroking")
     CHECK(outline[static_cast<std::size_t>(peakBin(0))] > 0.9f);
 }
 
+TEST_CASE("Histogram clamps its image dimensions to the supported range")
+{
+    TestFrame frame(32, 32, 255);
+    frame.fillColumns(0, 32, Color{80, 80, 80});
+
+    Histogram tooLarge;
+    HistogramSettings large;
+    large.imageWidth = 9999;
+    large.imageHeight = 9999;
+    tooLarge.configure(large);
+    tooLarge.accumulate(frame.view(), IntRect{0, 0, 32, 32});
+    CHECK(tooLarge.image().width == 4096);
+    CHECK(tooLarge.image().height == 1536);
+
+    Histogram tooSmall;
+    HistogramSettings small;
+    small.imageWidth = 10;
+    small.imageHeight = 10;
+    tooSmall.configure(small);
+    tooSmall.accumulate(frame.view(), IntRect{0, 0, 32, 32});
+    CHECK(tooSmall.image().width == 256);
+    CHECK(tooSmall.image().height == 192);
+}
+
+TEST_CASE("Histogram leaves a gap between two populated tones dark")
+{
+    // Two well-separated tones with nothing between them: bins in the gap
+    // stay empty rather than being bridged by the smoothing or the spline.
+    TestFrame frame(64, 32, 255);
+    frame.fillColumns(0, 32, Color{40, 40, 40});
+    frame.fillColumns(32, 64, Color{210, 210, 210});
+
+    Histogram scope;
+    HistogramSettings combined;
+    combined.style = HistogramStyle::Combined;
+    scope.configure(combined);
+    scope.accumulate(frame.view(), IntRect{0, 0, 64, 32});
+
+    CHECK(barHeight(scope.image(), 40, 1) > 0);
+    CHECK(barHeight(scope.image(), 210, 1) > 0);
+    CHECK(barHeight(scope.image(), 125, 1) == 0);  // squarely in the gap
+}
+
 }  // namespace sidescopes
