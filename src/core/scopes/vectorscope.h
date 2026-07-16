@@ -39,7 +39,7 @@ struct VectorscopeSettings
 class Vectorscope
 {
 public:
-    static constexpr int Size = DefaultVectorscopeSize;
+    static constexpr int CodeGridSize = DefaultVectorscopeSize;
 
     Vectorscope();
 
@@ -64,12 +64,16 @@ private:
     void resize(int size);
     void rebuildTintTable();
     void mapBinsToImage(uint64_t sampleCount);
+    void smoothCodeGrid();
+    void adaptiveDensityEstimate(uint64_t sampleCount);
+    [[nodiscard]] const float* upsampleToImage(int& densitySize);
+    void renderTrace(const float* densities, int densitySize, uint64_t sampleCount);
 
     VectorscopeSettings m_settings;
-    int m_size = DefaultVectorscopeSize;
-    std::vector<uint32_t> m_bins;    // always Size x Size (code grid)
+    int m_imageSize = DefaultVectorscopeSize;
+    std::vector<uint32_t> m_bins;    // always CodeGridSize x CodeGridSize (code grid)
     std::vector<float> m_smoothed;   // code grid, post-kernel densities
-    std::vector<float> m_upsampled;  // size_ x size_ when finer than Size
+    std::vector<float> m_upsampled;  // m_imageSize x m_imageSize when finer than CodeGridSize
     std::vector<uint8_t> m_tint;
     ScopeImage m_image;
 };

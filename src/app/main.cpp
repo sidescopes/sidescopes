@@ -1649,7 +1649,8 @@ int main()
         texture->upload(blank);
         return texture;
     };
-    std::unique_ptr<ScopeTexture> vectorscopeTexture = createBlankTexture(Vectorscope::Size, Vectorscope::Size);
+    std::unique_ptr<ScopeTexture> vectorscopeTexture =
+        createBlankTexture(Vectorscope::CodeGridSize, Vectorscope::CodeGridSize);
     std::unique_ptr<ScopeTexture> waveformTexture = createBlankTexture(Waveform::Columns, Waveform::Levels);
     std::unique_ptr<ScopeTexture> waveformParadeTexture = createBlankTexture(Waveform::Columns, Waveform::Levels);
     std::unique_ptr<ScopeTexture> histogramTexture = createBlankTexture(Histogram::ImageWidth, Histogram::Height);

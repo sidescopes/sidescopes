@@ -32,6 +32,29 @@ constexpr const ChromaCoefficients& coefficientsFor(ChromaMatrix matrix)
 // to the same trace regardless of sampling stride or region size.
 constexpr double ReferenceSampleCount = 1'000'000.0;
 
+// A half-strength 3x3 binomial on a square grid: half the source value plus
+// a half-weighted, normalized 1-2-1 x 1-2-1 blur. Shared by the code-grid
+// smoothing and the display-image settling pass, which differ only in their
+// source type and grid size. The full-strength variant in the adaptive
+// estimator stays separate.
+template <typename Src>
+void halfBinomial(const Src* in, int size, float* out)
+{
+    for (int py = 0; py < size; ++py) {
+        for (int px = 0; px < size; ++px) {
+            const auto at = [&](int y, int x) -> float {
+                if (y < 0 || y >= size || x < 0 || x >= size) {
+                    return 0.0f;
+                }
+                return static_cast<float>(in[static_cast<std::size_t>(y) * size + x]);
+            };
+            const auto row = [&](int y) { return at(y, px - 1) + 2.0f * at(y, px) + at(y, px + 1); };
+            out[static_cast<std::size_t>(py) * size + px] =
+                0.5f * at(py, px) + 0.5f * (row(py - 1) + 2.0f * row(py) + row(py + 1)) / 16.0f;
+        }
+    }
+}
+
 }  // namespace
 
 Vectorscope::Vectorscope()
@@ -44,8 +67,8 @@ void Vectorscope::configure(const VectorscopeSettings& settings)
     const bool matrixChanged = settings.matrix != m_settings.matrix;
     m_settings = settings;
     m_settings.samplingStride = std::clamp(m_settings.samplingStride, 1, 8);
-    m_settings.size = std::clamp(m_settings.size, Size, 512);
-    if (m_settings.size != m_size) {
+    m_settings.size = std::clamp(m_settings.size, CodeGridSize, 512);
+    if (m_settings.size != m_imageSize) {
         resize(m_settings.size);
     } else if (matrixChanged) {
         rebuildTintTable();
@@ -54,14 +77,14 @@ void Vectorscope::configure(const VectorscopeSettings& settings)
 
 void Vectorscope::resize(int size)
 {
-    m_size = size;
-    m_bins.assign(static_cast<std::size_t>(Size) * Size, 0);
-    m_smoothed.assign(static_cast<std::size_t>(Size) * Size, 0.0f);
-    m_upsampled.assign(m_size > Size ? static_cast<std::size_t>(m_size) * m_size : 0, 0.0f);
-    m_tint.assign(static_cast<std::size_t>(m_size) * m_size * 3, 0);
-    m_image.width = m_size;
-    m_image.height = m_size;
-    m_image.rgba.assign(static_cast<std::size_t>(m_size) * m_size * 4, 0);
+    m_imageSize = size;
+    m_bins.assign(static_cast<std::size_t>(CodeGridSize) * CodeGridSize, 0);
+    m_smoothed.assign(static_cast<std::size_t>(CodeGridSize) * CodeGridSize, 0.0f);
+    m_upsampled.assign(m_imageSize > CodeGridSize ? static_cast<std::size_t>(m_imageSize) * m_imageSize : 0, 0.0f);
+    m_tint.assign(static_cast<std::size_t>(m_imageSize) * m_imageSize * 3, 0);
+    m_image.width = m_imageSize;
+    m_image.height = m_imageSize;
+    m_image.rgba.assign(static_cast<std::size_t>(m_imageSize) * m_imageSize * 4, 0);
     rebuildTintTable();
 }
 
@@ -87,7 +110,7 @@ void Vectorscope::accumulate(const FrameView& frame, IntRect region)
             // lattice into texture even at 256, and parked the whole
             // cloud half a bin off the positions the projection - and
             // with it every marker and graticule target - reports.
-            const int size = Size;
+            const int size = CodeGridSize;
             const int span = size * 16;
             for (; pixel < rowEnd; pixel += static_cast<std::ptrdiff_t>(4) * stride) {
                 const int b = pixel[0], g = pixel[1], r = pixel[2];
@@ -139,13 +162,13 @@ void Vectorscope::rebuildTintTable()
     // represents, not a colorimetric reproduction, and at true saturation
     // the cloud reads as washed-out pastel.
     constexpr float SaturationBoost = 1.7f;
-    const float toChroma = 256.0f / static_cast<float>(m_size);
-    for (int py = 0; py < m_size; ++py) {
-        for (int px = 0; px < m_size; ++px) {
+    const float toChroma = 256.0f / static_cast<float>(m_imageSize);
+    for (int py = 0; py < m_imageSize; ++py) {
+        for (int px = 0; px < m_imageSize; ++px) {
             const float cb = (static_cast<float>(px) * toChroma - 128.0f) * SaturationBoost;
-            const float cr = (static_cast<float>(m_size - 1 - py) * toChroma - 128.0f) * SaturationBoost;
+            const float cr = (static_cast<float>(m_imageSize - 1 - py) * toChroma - 128.0f) * SaturationBoost;
             const auto toByte = [](float value) { return static_cast<uint8_t>(std::clamp(value, 0.0f, 255.0f)); };
-            uint8_t* tint = m_tint.data() + (static_cast<std::size_t>(py) * m_size + px) * 3;
+            uint8_t* tint = m_tint.data() + (static_cast<std::size_t>(py) * m_imageSize + px) * 3;
             tint[0] = toByte(DisplayLuma + 1.402f * cr);
             tint[1] = toByte(DisplayLuma - 0.344f * cb - 0.714f * cr);
             tint[2] = toByte(DisplayLuma + 1.772f * cb);
@@ -155,24 +178,24 @@ void Vectorscope::rebuildTintTable()
 
 void Vectorscope::mapBinsToImage(uint64_t sampleCount)
 {
+    smoothCodeGrid();
+    adaptiveDensityEstimate(sampleCount);
+    int densitySize = CodeGridSize;
+    const float* densities = upsampleToImage(densitySize);
+    renderTrace(densities, densitySize, sampleCount);
+}
+
+void Vectorscope::smoothCodeGrid()
+{
     // A half-strength 3x3 binomial takes the worst speckle out of the
     // cloud without softening it: the fractional splat already spreads
     // each sample as a tent, so a full binomial on top reads as gaussian
     // blur at large pane sizes.
-    for (int py = 0; py < Size; ++py) {
-        for (int px = 0; px < Size; ++px) {
-            const auto at = [&](int y, int x) -> float {
-                if (y < 0 || y >= Size || x < 0 || x >= Size) {
-                    return 0.0f;
-                }
-                return static_cast<float>(m_bins[static_cast<std::size_t>(y) * Size + x]);
-            };
-            const auto row = [&](int y) { return at(y, px - 1) + 2.0f * at(y, px) + at(y, px + 1); };
-            m_smoothed[static_cast<std::size_t>(py) * Size + px] =
-                0.5f * at(py, px) + 0.5f * (row(py - 1) + 2.0f * row(py) + row(py + 1)) / 16.0f;
-        }
-    }
+    halfBinomial(m_bins.data(), CodeGridSize, m_smoothed.data());
+}
 
+void Vectorscope::adaptiveDensityEstimate(uint64_t sampleCount)
+{
     // Adaptive density estimation: where the cloud is dim, counts are
     // low and the photograph's own chroma quantization shows through as
     // code-level ripple that the log display amplifies - measured on a
@@ -182,95 +205,86 @@ void Vectorscope::mapBinsToImage(uint64_t sampleCount)
     // statistics to support full sharpness and keeps it; two extra
     // binomial passes build a wide estimate, and each cell blends
     // toward it as its density falls.
-    {
-        std::vector<float> wide(m_smoothed);
-        for (int pass = 0; pass < 2; ++pass) {
-            std::vector<float> next(wide.size(), 0.0f);
-            for (int py = 0; py < Size; ++py) {
-                for (int px = 0; px < Size; ++px) {
-                    const auto at = [&](int y, int x) -> float {
-                        if (y < 0 || y >= Size || x < 0 || x >= Size) {
-                            return 0.0f;
-                        }
-                        return wide[static_cast<std::size_t>(y) * Size + x];
-                    };
-                    const auto row = [&](int y) { return at(y, px - 1) + 2.0f * at(y, px) + at(y, px + 1); };
-                    next[static_cast<std::size_t>(py) * Size + px] =
-                        (row(py - 1) + 2.0f * row(py) + row(py + 1)) / 16.0f;
-                }
+    std::vector<float> wide(m_smoothed);
+    for (int pass = 0; pass < 2; ++pass) {
+        std::vector<float> next(wide.size(), 0.0f);
+        for (int py = 0; py < CodeGridSize; ++py) {
+            for (int px = 0; px < CodeGridSize; ++px) {
+                const auto at = [&](int y, int x) -> float {
+                    if (y < 0 || y >= CodeGridSize || x < 0 || x >= CodeGridSize) {
+                        return 0.0f;
+                    }
+                    return wide[static_cast<std::size_t>(y) * CodeGridSize + x];
+                };
+                const auto row = [&](int y) { return at(y, px - 1) + 2.0f * at(y, px) + at(y, px + 1); };
+                next[static_cast<std::size_t>(py) * CodeGridSize + px] =
+                    (row(py - 1) + 2.0f * row(py) + row(py + 1)) / 16.0f;
             }
-            wide.swap(next);
         }
-        float densestNarrow = 0.0f;
-        for (const float count : m_smoothed) {
-            densestNarrow = std::max(densestNarrow, count);
-        }
-        if (densestNarrow > 0.0f) {
-            // One nominal sample's weight, scaled to the actual sample
-            // count so the trace stays invariant to the sampling stride.
-            const float sampleFloor =
-                static_cast<float>(sampleCount) * static_cast<float>(256.0 / ReferenceSampleCount);
-            for (std::size_t i = 0; i < m_smoothed.size(); ++i) {
-                // The wide estimate may redistribute, never amplify:
-                // next to the razor-thin ridges dense content forms, the
-                // binomial passes leak the ridge's mass outward, and an
-                // uncapped blend would paint a bright halo hundreds of
-                // times above the cells' own evidence. A floor of about
-                // one sample's weight keeps empty tail cells glowing.
-                const float capped = std::min(wide[i], 3.0f * m_smoothed[i] + sampleFloor);
-                const float density = capped / densestNarrow;
-                const float t = std::clamp((density - 0.001f) / (0.02f - 0.001f), 0.0f, 1.0f);
-                const float blend = t * t * (3.0f - 2.0f * t);  // smoothstep
-                m_smoothed[i] = blend * m_smoothed[i] + (1.0f - blend) * capped;
-            }
+        wide.swap(next);
+    }
+    float densestNarrow = 0.0f;
+    for (const float count : m_smoothed) {
+        densestNarrow = std::max(densestNarrow, count);
+    }
+    if (densestNarrow > 0.0f) {
+        // One nominal sample's weight, scaled to the actual sample
+        // count so the trace stays invariant to the sampling stride.
+        const float sampleFloor = static_cast<float>(sampleCount) * static_cast<float>(256.0 / ReferenceSampleCount);
+        for (std::size_t i = 0; i < m_smoothed.size(); ++i) {
+            // The wide estimate may redistribute, never amplify:
+            // next to the razor-thin ridges dense content forms, the
+            // binomial passes leak the ridge's mass outward, and an
+            // uncapped blend would paint a bright halo hundreds of
+            // times above the cells' own evidence. A floor of about
+            // one sample's weight keeps empty tail cells glowing.
+            const float capped = std::min(wide[i], 3.0f * m_smoothed[i] + sampleFloor);
+            const float density = capped / densestNarrow;
+            const float t = std::clamp((density - 0.001f) / (0.02f - 0.001f), 0.0f, 1.0f);
+            const float blend = t * t * (3.0f - 2.0f * t);  // smoothstep
+            m_smoothed[i] = blend * m_smoothed[i] + (1.0f - blend) * capped;
         }
     }
+}
 
+const float* Vectorscope::upsampleToImage(int& densitySize)
+{
     // A finer display image interpolates the code grid bilinearly and
     // settles the diamond artifacts with a light binomial at display
     // resolution: unlike a cubic, this can neither ring at density
     // cliffs nor staircase along thin diagonal ridges.
-    const float* densities = m_smoothed.data();
-    int densitySize = Size;
-    if (m_size > Size) {
-        const auto at = [&](int y, int x) -> float {
-            y = std::clamp(y, 0, Size - 1);
-            x = std::clamp(x, 0, Size - 1);
-            return m_smoothed[static_cast<std::size_t>(y) * Size + x];
-        };
-        const float step = static_cast<float>(Size) / static_cast<float>(m_size);
-        for (int py = 0; py < m_size; ++py) {
-            const float sy = (static_cast<float>(py) + 0.5f) * step - 0.5f;
-            const int baseY = static_cast<int>(std::floor(sy));
-            const float ty = sy - static_cast<float>(baseY);
-            for (int px = 0; px < m_size; ++px) {
-                const float sx = (static_cast<float>(px) + 0.5f) * step - 0.5f;
-                const int baseX = static_cast<int>(std::floor(sx));
-                const float tx = sx - static_cast<float>(baseX);
-                const float top = at(baseY, baseX) * (1.0f - tx) + at(baseY, baseX + 1) * tx;
-                const float bottom = at(baseY + 1, baseX) * (1.0f - tx) + at(baseY + 1, baseX + 1) * tx;
-                m_upsampled[static_cast<std::size_t>(py) * m_size + px] = top * (1.0f - ty) + bottom * ty;
-            }
-        }
-        std::vector<float> settled(m_upsampled.size(), 0.0f);
-        for (int py = 0; py < m_size; ++py) {
-            for (int px = 0; px < m_size; ++px) {
-                const auto up = [&](int y, int x) -> float {
-                    if (y < 0 || y >= m_size || x < 0 || x >= m_size) {
-                        return 0.0f;
-                    }
-                    return m_upsampled[static_cast<std::size_t>(y) * m_size + x];
-                };
-                const auto row = [&](int y) { return up(y, px - 1) + 2.0f * up(y, px) + up(y, px + 1); };
-                settled[static_cast<std::size_t>(py) * m_size + px] =
-                    0.5f * up(py, px) + 0.5f * (row(py - 1) + 2.0f * row(py) + row(py + 1)) / 16.0f;
-            }
-        }
-        m_upsampled.swap(settled);
-        densities = m_upsampled.data();
-        densitySize = m_size;
+    if (m_imageSize <= CodeGridSize) {
+        densitySize = CodeGridSize;
+        return m_smoothed.data();
     }
+    const auto at = [&](int y, int x) -> float {
+        y = std::clamp(y, 0, CodeGridSize - 1);
+        x = std::clamp(x, 0, CodeGridSize - 1);
+        return m_smoothed[static_cast<std::size_t>(y) * CodeGridSize + x];
+    };
+    const float step = static_cast<float>(CodeGridSize) / static_cast<float>(m_imageSize);
+    for (int py = 0; py < m_imageSize; ++py) {
+        const float sy = (static_cast<float>(py) + 0.5f) * step - 0.5f;
+        const int baseY = static_cast<int>(std::floor(sy));
+        const float ty = sy - static_cast<float>(baseY);
+        for (int px = 0; px < m_imageSize; ++px) {
+            const float sx = (static_cast<float>(px) + 0.5f) * step - 0.5f;
+            const int baseX = static_cast<int>(std::floor(sx));
+            const float tx = sx - static_cast<float>(baseX);
+            const float top = at(baseY, baseX) * (1.0f - tx) + at(baseY, baseX + 1) * tx;
+            const float bottom = at(baseY + 1, baseX) * (1.0f - tx) + at(baseY + 1, baseX + 1) * tx;
+            m_upsampled[static_cast<std::size_t>(py) * m_imageSize + px] = top * (1.0f - ty) + bottom * ty;
+        }
+    }
+    std::vector<float> settled(m_upsampled.size(), 0.0f);
+    halfBinomial(m_upsampled.data(), m_imageSize, settled.data());
+    m_upsampled.swap(settled);
+    densitySize = m_imageSize;
+    return m_upsampled.data();
+}
 
+void Vectorscope::renderTrace(const float* densities, int densitySize, uint64_t sampleCount)
+{
     float densest = 0.0f;
     const std::size_t densityCount = static_cast<std::size_t>(densitySize) * densitySize;
     for (std::size_t i = 0; i < densityCount; ++i) {
