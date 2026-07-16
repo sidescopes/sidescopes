@@ -28,7 +28,6 @@ TEST_CASE("Preferences round-trip through a file")
     saved.shortcuts.fullRegion = "Q";
     saved.scopeStack = "HWV";  // stacking order is part of the setting
     saved.showGraticule = false;
-    saved.valuesAsPercent = false;
     saved.windowX = 120;
     saved.windowWidth = 640;
 
@@ -48,7 +47,6 @@ TEST_CASE("Preferences round-trip through a file")
     CHECK(loaded.shortcuts.parade == "R");  // untouched bindings keep defaults
     CHECK(loaded.scopeStack == "HWV");
     CHECK_FALSE(loaded.showGraticule);
-    CHECK_FALSE(loaded.valuesAsPercent);
     CHECK(loaded.windowX == 120);
     CHECK(loaded.windowWidth == 640);
 

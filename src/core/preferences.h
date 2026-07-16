@@ -50,7 +50,6 @@ struct Preferences
     bool showGraticule = true;
     // Magnify-view factor for the vectorscope: 1, 2, or 4.
     int vectorscopeZoom = 1;
-    bool valuesAsPercent = true;
     int windowX = -1;  // negative: let the system place the window
     int windowY = -1;
     int windowWidth = 440;

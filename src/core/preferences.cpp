@@ -142,7 +142,6 @@ Preferences loadPreferences(const std::filesystem::path& file)
     if (preferences.vectorscopeZoom != 2 && preferences.vectorscopeZoom != 4) {
         preferences.vectorscopeZoom = 1;
     }
-    readBool("values_as_percent", preferences.valuesAsPercent);
     const auto readShortcut = [&](const char* key, std::string& out) {
         const auto found = values.find(key);
         if (found == values.end()) {
@@ -192,7 +191,6 @@ bool savePreferences(const Preferences& preferences, const std::filesystem::path
         << "histogram_per_channel=" << (preferences.histogramPerChannel ? 1 : 0) << '\n'
         << "show_graticule=" << (preferences.showGraticule ? 1 : 0) << '\n'
         << "vectorscope_zoom=" << preferences.vectorscopeZoom << '\n'
-        << "values_as_percent=" << (preferences.valuesAsPercent ? 1 : 0) << '\n'
         << "window_x=" << preferences.windowX << '\n'
         << "window_y=" << preferences.windowY << '\n'
         << "window_width=" << preferences.windowWidth << '\n'

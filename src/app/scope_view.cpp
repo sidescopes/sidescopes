@@ -92,16 +92,6 @@ void ScopeView::setGraticule(bool on)
     m_graticule = on;
 }
 
-bool ScopeView::percentValues() const
-{
-    return m_percentValues;
-}
-
-void ScopeView::setPercentValues(bool on)
-{
-    m_percentValues = on;
-}
-
 int ScopeView::zoom() const
 {
     return m_zoom;

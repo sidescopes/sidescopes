@@ -65,7 +65,6 @@ enum MenuAction
     MenuSelectRegion = 30,
     MenuFullScreenRegion,
     MenuToggleGraticule = 40,
-    MenuTogglePercentValues,
     MenuClearPinnedMarkers,
     MenuPickPinColor,
     MenuOpenSettings = 50,
@@ -871,7 +870,7 @@ void drawPinnedMenu(PinBoard& pins)
     ImGui::EndPopup();
 }
 
-void drawColorPicker(const std::optional<FloatColor>& liveColor, PinBoard& pins, bool valuesAsPercent)
+void drawColorPicker(const std::optional<FloatColor>& liveColor, PinBoard& pins)
 {
     // Three size tiers, few and spaced so resizing feels like
     // deliberate steps: a strip, a compact comparator, the full
@@ -902,17 +901,13 @@ void drawColorPicker(const std::optional<FloatColor>& liveColor, PinBoard& pins,
     // Every value owns a column sized for its widest form and
     // right-aligns inside it - the toolbar's cure for layouts
     // that twitch as digits come and go.
-    const float valueColumn = ImGui::CalcTextSize(valuesAsPercent ? "100%" : "255").x;
-    const float deltaColumn = ImGui::CalcTextSize(valuesAsPercent ? "+100%" : "+255").x;
     const float labelColumn = ImGui::CalcTextSize("R").x;
+    const float codeColumn = ImGui::CalcTextSize("255").x;
+    const float percentColumn = ImGui::CalcTextSize("100%").x;
     const float columnGap = ImGui::CalcTextSize(" ").x;
-    const auto formatValue = [&](char* buffer, std::size_t size, float channel) {
-        if (valuesAsPercent) {
-            std::snprintf(buffer, size, "%.0f%%", channel / 2.55f);
-        } else {
-            std::snprintf(buffer, size, "%.0f", channel);
-        }
-    };
+    // The deck's deltas answer a matching question, so they stay in codes: at
+    // no decimals a one-code miss rounds to "+0%" and would read as a match.
+    const float deltaColumn = ImGui::CalcTextSize("+255").x;
     const auto swatchColor = [](const FloatColor& source) {
         return ImVec4(source.r / 255.0f, source.g / 255.0f, source.b / 255.0f, 1.0f);
     };
@@ -969,10 +964,18 @@ void drawColorPicker(const std::optional<FloatColor>& liveColor, PinBoard& pins,
         }
     }
 
-    // Live values: one notation, the preference decides which;
-    // hex is the copy currency and always present.
+    // Live values: the code and the percent ride together so a reference never
+    // has to be converted in the head; hex is the copy currency and always
+    // present. When the pane narrows the code drops out first - the percent is
+    // the reading at a glance, and hex still carries the exact code.
+    pushHexFont();
+    const float hexWidth = ImGui::CalcTextSize(hex).x;
+    popHexFont();
+    const float bothStride = labelColumn + columnGap + codeColumn + columnGap + percentColumn + 2 * columnGap;
+    const float percentStride = labelColumn + columnGap + percentColumn + 2 * columnGap;
+    const bool showCodes = 3.0f * bothStride + hexWidth + 12.0f <= area.x;
+    const float channelStride = showCodes ? bothStride : percentStride;
     const float valuesStart = ImGui::GetCursorPosX();
-    const float channelStride = labelColumn + columnGap + valueColumn + 2 * columnGap;
     const float liveChannels[3] = {color.r, color.g, color.b};
     const char* channelLabels[3] = {"R", "G", "B"};
     for (int channel = 0; channel < 3; ++channel) {
@@ -983,14 +986,23 @@ void drawColorPicker(const std::optional<FloatColor>& liveColor, PinBoard& pins,
             ImGui::SetCursorPosX(columnStart);
         }
         ImGui::TextUnformatted(channelLabels[channel]);
-        char value[8];
-        formatValue(value, sizeof(value), liveChannels[channel]);
-        ImGui::SameLine(columnStart + labelColumn + columnGap + valueColumn - ImGui::CalcTextSize(value).x);
-        ImGui::TextUnformatted(value);
+        float right = columnStart + labelColumn + columnGap;
+        if (showCodes) {
+            char code[8];
+            std::snprintf(code, sizeof(code), "%.0f", liveChannels[channel]);
+            right += codeColumn;
+            ImGui::SameLine(right - ImGui::CalcTextSize(code).x);
+            ImGui::TextUnformatted(code);
+            right += columnGap;
+        }
+        char percent[8];
+        std::snprintf(percent, sizeof(percent), "%.0f%%", liveChannels[channel] / 2.55f);
+        right += percentColumn;
+        ImGui::SameLine(right - ImGui::CalcTextSize(percent).x);
+        ImGui::TextUnformatted(percent);
     }
     ImGui::SameLine(0.0f, 0.0f);
     pushHexFont();
-    const float hexWidth = ImGui::CalcTextSize(hex).x;
     if (ImGui::GetContentRegionAvail().x >= hexWidth + 12.0f) {
         ImGui::SameLine(area.x - hexWidth);
         ImGui::TextUnformatted(hex);
@@ -1066,11 +1078,7 @@ void drawColorPicker(const std::optional<FloatColor>& liveColor, PinBoard& pins,
                                      color.b - pins.color(index).b};
             for (int channel = 0; channel < 3; ++channel) {
                 char delta[8];
-                if (valuesAsPercent) {
-                    std::snprintf(delta, sizeof(delta), "%+.0f%%", deltas[channel] / 2.55f);
-                } else {
-                    std::snprintf(delta, sizeof(delta), "%+d", static_cast<int>(std::lround(deltas[channel])));
-                }
+                std::snprintf(delta, sizeof(delta), "%+d", static_cast<int>(std::lround(deltas[channel])));
                 ImGui::SameLine(deltasStart + channel * (deltaColumn + columnGap) + deltaColumn -
                                 ImGui::CalcTextSize(delta).x);
                 ImGui::SetCursorPosY(ImGui::GetCursorPosY() + textDrop);
@@ -1338,7 +1346,6 @@ int main()
     ScopeView view;
     view.restoreStack(startup.scopeStack);
     view.setGraticule(startup.showGraticule);
-    view.setPercentValues(startup.valuesAsPercent);
     view.setZoom(startup.vectorscopeZoom);
     view.setIntensity(TraceControl::Vectorscope,
                       intensityFromTraceGain(analysis.vectorscope.gain, VectorscopeIntensityShift));
@@ -1544,7 +1551,6 @@ int main()
         preferences.scopeStack = view.stackLetters();
         preferences.showGraticule = view.graticule();
         preferences.vectorscopeZoom = view.zoom();
-        preferences.valuesAsPercent = view.percentValues();
         preferences.shortcuts = shortcuts;
         glfwGetWindowPos(window, &preferences.windowX, &preferences.windowY);
         glfwGetWindowSize(window, &preferences.windowWidth, &preferences.windowHeight);
@@ -2033,7 +2039,7 @@ int main()
             // gets a column sized for the widest it can be and is
             // right-aligned inside it, so neither the swatch nor the
             // numbers wander as the cursor moves across the screen.
-            const float columnWidth = ImGui::CalcTextSize(view.percentValues() ? "100%" : "255").x;
+            const float columnWidth = ImGui::CalcTextSize("100%").x;
             const float columnGap = ImGui::CalcTextSize(" ").x;
             const float swatch = ImGui::GetTextLineHeight();
             const float textWidth = 3 * columnWidth + 2 * columnGap;
@@ -2047,11 +2053,7 @@ int main()
                 const float channels[3] = {color.r, color.g, color.b};
                 for (int channel = 0; channel < 3; ++channel) {
                     char value[8];
-                    if (view.percentValues()) {
-                        std::snprintf(value, sizeof(value), "%.0f%%", channels[channel] / 2.55);
-                    } else {
-                        std::snprintf(value, sizeof(value), "%.0f", channels[channel]);
-                    }
+                    std::snprintf(value, sizeof(value), "%.0f%%", channels[channel] / 2.55);
                     const float columnStart = columnsStart + channel * (columnWidth + columnGap);
                     ImGui::SameLine(columnStart + columnWidth - ImGui::CalcTextSize(value).x);
                     ImGui::TextUnformatted(value);
@@ -2162,7 +2164,7 @@ int main()
             } else if (kind == ScopeGlyph::Histogram) {
                 drawHistogram(*histogramTexture, output, analysis.histogram.style, view.graticule(), vectorscopeColor);
             } else if (kind == ScopeGlyph::ColorPicker) {
-                drawColorPicker(vectorscopeColor, pins, view.percentValues());
+                drawColorPicker(vectorscopeColor, pins);
             } else {
                 drawWaveform(kind);
             }

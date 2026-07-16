@@ -119,9 +119,6 @@ public:
     [[nodiscard]] bool graticule() const;
     void setGraticule(bool on);
 
-    [[nodiscard]] bool percentValues() const;
-    void setPercentValues(bool on);
-
     [[nodiscard]] int zoom() const;
     void setZoom(int level);
 
@@ -134,7 +131,6 @@ public:
 private:
     std::vector<ScopeGlyph> m_stack{ScopeGlyph::Vectorscope};
     bool m_graticule = true;
-    bool m_percentValues = false;
     int m_zoom = 1;
     float m_vectorscopeIntensity = 0.0f;
     float m_waveformIntensity = 0.0f;
