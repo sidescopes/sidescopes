@@ -4,12 +4,12 @@
 
 namespace sidescopes {
 
-// One display identity for the whole Windows layer. DXGI outputs and GDI
-// monitors are enumerated through unrelated APIs in unrelated orders, but
-// both report the same GDI device name ("\\.\DISPLAY3"); its numeric
-// suffix is the display id shared between capture targets and the desktop
-// services. Zero means the name did not parse and never matches a real
-// display.
+/// One display identity for the whole Windows layer. DXGI outputs and GDI
+/// monitors are enumerated through unrelated APIs in unrelated orders, but
+/// both report the same GDI device name ("\\.\DISPLAY3"); its numeric
+/// suffix is the display id shared between capture targets and the desktop
+/// services. Zero means the name did not parse and never matches a real
+/// display.
 inline uint32_t displayIdFromDeviceName(const wchar_t* deviceName)
 {
     uint32_t id = 0;

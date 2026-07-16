@@ -442,13 +442,13 @@ void refreshFacePresence(AnalysisWorker& worker, uint32_t displayId)
     auto pixels = std::make_shared<std::vector<uint8_t>>();
     int width = 0;
     int height = 0;
-    worker.withLatestFrame([&](const FrameView& view) {
+    const bool captured = worker.withLatestFrame([&](const FrameView& view) {
         width = view.width;
         height = view.height;
         pixels->resize(static_cast<std::size_t>(view.height) * view.strideBytes);
         std::memcpy(pixels->data(), view.bgra, pixels->size());
     });
-    if (width == 0 || height == 0) {
+    if (!captured || width == 0 || height == 0) {
         g_faceCheckRunning.store(false);
         return;
     }
@@ -1725,7 +1725,7 @@ int main()
     // never single pixels.
     const auto averageFrameArea = [&](const RegionOfInterest& area) -> std::optional<FloatColor> {
         std::optional<FloatColor> color;
-        worker.withLatestFrame([&](const FrameView& view) {
+        const bool sampled = worker.withLatestFrame([&](const FrameView& view) {
             const int left = std::clamp(static_cast<int>(area.leftPercent / 100.0 * view.width), 0, view.width);
             const int right = std::clamp(static_cast<int>(area.rightPercent / 100.0 * view.width), 0, view.width);
             const int top = std::clamp(static_cast<int>(area.topPercent / 100.0 * view.height), 0, view.height);
@@ -1756,7 +1756,7 @@ int main()
             color = FloatColor{static_cast<float>(sumR / count), static_cast<float>(sumG / count),
                                static_cast<float>(sumB / count)};
         });
-        return color;
+        return sampled ? color : std::nullopt;
     };
     // Resets all selection: a pending pick and the drawn region alike.
     // The border sync rides the analysis-dirty path.
@@ -2778,7 +2778,9 @@ int main()
             // responsive if the capture stream has stalled.
             if (!isFullRegion()) {
                 uint64_t staleSequence = 0;
-                worker.withLatestFrame([&](const FrameView& view) { staleSequence = view.sequence; });
+                // No current frame leaves the baseline at zero; the freshness
+                // check below still fires on the first frame that arrives.
+                (void)worker.withLatestFrame([&](const FrameView& view) { staleSequence = view.sequence; });
                 const double hiddenAt = glfwGetTime();
                 for (;;) {
                     const double elapsed = glfwGetTime() - hiddenAt;
@@ -2786,7 +2788,9 @@ int main()
                         break;
                     }
                     uint64_t sequence = staleSequence;
-                    worker.withLatestFrame([&](const FrameView& view) { sequence = view.sequence; });
+                    // A missing frame leaves the sequence unchanged, so the
+                    // freshness check keeps waiting.
+                    (void)worker.withLatestFrame([&](const FrameView& view) { sequence = view.sequence; });
                     // Inequality, not greater-than: a freshly switched
                     // stream counts its frames from one again.
                     if (sequence != staleSequence && elapsed >= 0.06) {
@@ -2804,7 +2808,8 @@ int main()
 
             std::vector<SuggestedRegion> faceSuggestions;
             if (supportsFaceDetection()) {
-                worker.withLatestFrame([&](const FrameView& view) {
+                // With no captured frame the face list stays empty.
+                (void)worker.withLatestFrame([&](const FrameView& view) {
                     const auto geometry = geometryOfDisplay(captureController.capturedDisplay());
                     const float pixelsPerPoint =
                         geometry ? static_cast<float>(view.width / geometry->widthPoints) : 1.0f;
@@ -2839,7 +2844,8 @@ int main()
                     }
                     std::fclose(report);
                 }
-                worker.withLatestFrame([&](const FrameView& view) {
+                // The dump is skipped when no frame is held.
+                (void)worker.withLatestFrame([&](const FrameView& view) {
                     std::FILE* image = openDebugFile("/tmp/sidescopes-frame.ppm", "wb");
                     if (!image) {
                         return;

@@ -31,17 +31,17 @@ struct GraticuleLine
 struct GraticuleCircle
 {
     NormalizedPoint center;
-    float radius = 0.0f;  // as a fraction of the scope width
+    float radius = 0.0f;  ///< As a fraction of the scope width.
     GraticuleStroke stroke = GraticuleStroke::Grid;
 };
 
-// A chroma target box: primary boxes mark 75% color bars, secondary the
-// 100% positions.
+/// A chroma target box: primary boxes mark 75% color bars, secondary the
+/// 100% positions.
 struct GraticuleTarget
 {
     NormalizedPoint center;
     bool primary = true;
-    std::string label;  // empty for the secondary boxes
+    std::string label;  ///< Empty for the secondary boxes.
 };
 
 struct VectorscopeGraticule
@@ -53,18 +53,18 @@ struct VectorscopeGraticule
 
 struct WaveformScaleLine
 {
-    float levelPercent = 0.0f;  // 0 at black, 100 at white
-    float y = 0.0f;             // normalized vertical position
+    float levelPercent = 0.0f;  ///< 0 at black, 100 at white.
+    float y = 0.0f;             ///< Normalized vertical position.
     bool major = false;
     std::string label;
 };
 
-// Builds the classic vectorscope graticule for the scope's current matrix:
-// crosshair, two rings with hour ticks, primary/secondary color targets, and
-// the skin-tone line.
-VectorscopeGraticule buildVectorscopeGraticule(const Vectorscope& scope);
+/// Builds the classic vectorscope graticule for the scope's current matrix:
+/// crosshair, two rings with hour ticks, primary/secondary color targets, and
+/// the skin-tone line.
+[[nodiscard]] VectorscopeGraticule buildVectorscopeGraticule(const Vectorscope& scope);
 
-// Horizontal scale lines every 10%, majors at 0/50/100.
-std::vector<WaveformScaleLine> buildWaveformScale();
+/// Horizontal scale lines every 10%, majors at 0/50/100.
+[[nodiscard]] std::vector<WaveformScaleLine> buildWaveformScale();
 
 }  // namespace sidescopes

@@ -11,7 +11,7 @@
 
 namespace sidescopes {
 
-// Owned frame storage passed between the capture and analysis threads.
+/// Owned frame storage passed between the capture and analysis threads.
 struct FrameBuffer
 {
     std::vector<uint8_t> data;
@@ -27,17 +27,17 @@ struct FrameBuffer
     }
 };
 
-// Single-slot mailbox between one producer (capture) and one consumer
-// (analysis). The producer always publishes without blocking and overwrites
-// any frame the consumer has not taken yet — the consumer only ever sees the
-// newest frame, and nothing queues up when it falls behind. Buffers are
-// recycled in both directions so the steady state allocates nothing.
+/// Single-slot mailbox between one producer (capture) and one consumer
+/// (analysis). The producer always publishes without blocking and overwrites
+/// any frame the consumer has not taken yet — the consumer only ever sees the
+/// newest frame, and nothing queues up when it falls behind. Buffers are
+/// recycled in both directions so the steady state allocates nothing.
 class FrameMailbox
 {
 public:
-    // Publishes a filled buffer and returns storage to reuse for the next
-    // frame (possibly empty on the first exchanges). If the previous frame
-    // was never taken, its storage is what comes back.
+    /// Publishes a filled buffer and returns storage to reuse for the next
+    /// frame (possibly empty on the first exchanges). If the previous frame
+    /// was never taken, its storage is what comes back.
     FrameBuffer publish(FrameBuffer&& filled)
     {
         std::lock_guard lock(m_mutex);
@@ -55,9 +55,9 @@ public:
         return reusable;
     }
 
-    // Takes the newest frame if one arrived since the last take, waiting up
-    // to `timeout` for it. A nudge ends the wait early without a frame.
-    std::optional<FrameBuffer> takeLatest(std::chrono::milliseconds timeout)
+    /// Takes the newest frame if one arrived since the last take, waiting up
+    /// to @p timeout for it. A nudge ends the wait early without a frame.
+    [[nodiscard]] std::optional<FrameBuffer> takeLatest(std::chrono::milliseconds timeout)
     {
         std::unique_lock lock(m_mutex);
         m_available.wait_for(lock, timeout, [&] { return m_hasPending || m_nudged; });
@@ -69,9 +69,9 @@ public:
         return std::move(m_pending);
     }
 
-    // Wakes a consumer blocked in TakeLatest without publishing a frame,
-    // so a settings change can recompute the frame the consumer already
-    // holds instead of waiting out the take's timeout.
+    /// Wakes a consumer blocked in takeLatest without publishing a frame,
+    /// so a settings change can recompute the frame the consumer already
+    /// holds instead of waiting out the take's timeout.
     void nudge()
     {
         std::lock_guard lock(m_mutex);
@@ -79,7 +79,7 @@ public:
         m_available.notify_one();
     }
 
-    // Hands storage back for the producer to reuse.
+    /// Hands storage back for the producer to reuse.
     void returnStorage(FrameBuffer&& used)
     {
         std::lock_guard lock(m_mutex);

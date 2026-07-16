@@ -12,8 +12,7 @@
 
 namespace sidescopes {
 
-// UTF-8 is the project's string convention; the Win32 API speaks UTF-16.
-
+/// Converts a UTF-8 string to the UTF-16 the Win32 API expects.
 inline std::wstring wideFromUtf8(const std::string& utf8)
 {
     if (utf8.empty()) {
@@ -25,6 +24,7 @@ inline std::wstring wideFromUtf8(const std::string& utf8)
     return wide;
 }
 
+/// Converts a UTF-16 span to the project's UTF-8 convention.
 inline std::string utf8FromWide(const wchar_t* wide, int wideLength)
 {
     if (wideLength <= 0) {

@@ -15,8 +15,8 @@ namespace sidescopes {
 // backends - so its implementations compile into the application target
 // rather than the platform library.
 
-// A texture the CPU-side scope images are uploaded into every time the
-// analysis worker publishes a new version.
+/// A texture the CPU-side scope images are uploaded into every time the
+/// analysis worker publishes a new version.
 class ScopeTexture
 {
 public:
@@ -34,30 +34,31 @@ class GraphicsBackend
 public:
     virtual ~GraphicsBackend() = default;
 
-    // Window hints the backend needs in place before glfwCreateWindow:
-    // the client API and, where one is used, the context version.
+    /// Window hints the backend needs in place before glfwCreateWindow:
+    /// the client API and, where one is used, the context version.
     virtual void setWindowHints() = 0;
 
-    // Everything after the window exists: the device, the ImGui platform
-    // and renderer backends, and the native window chrome (always-on-top
-    // level, black background, live-resize behavior). Runs after the
-    // application installed its own GLFW callbacks, so the ImGui backend
-    // chains them rather than the other way around.
-    virtual bool init(GLFWwindow* window) = 0;
+    /// Everything after the window exists: the device, the ImGui platform
+    /// and renderer backends, and the native window chrome (always-on-top
+    /// level, black background, live-resize behavior). Runs after the
+    /// application installed its own GLFW callbacks, so the ImGui backend
+    /// chains them rather than the other way around.
+    [[nodiscard]] virtual bool init(GLFWwindow* window) = 0;
 
-    // Tears down what Init built; runs before ImGui::DestroyContext.
+    /// Tears down what init() built; runs before ImGui::DestroyContext.
     virtual void shutdown() = 0;
 
     virtual std::unique_ptr<ScopeTexture> createScopeTexture(int width, int height) = 0;
 
-    // Starts a frame, including the ImGui backends' new-frame work;
-    // false skips the frame (no drawable this instant).
-    virtual bool beginFrame(int framebufferWidth, int framebufferHeight) = 0;
+    /// Starts a frame, including the ImGui backends' new-frame work;
+    /// false skips the frame (no drawable this instant).
+    [[nodiscard]] virtual bool beginFrame(int framebufferWidth, int framebufferHeight) = 0;
 
-    // Renders the finished ImGui draw data and presents it.
+    /// Renders the finished ImGui draw data and presents it.
     virtual void endFrame() = 0;
 };
 
-std::unique_ptr<GraphicsBackend> createGraphicsBackend();
+/// Creates the platform's graphics backend.
+[[nodiscard]] std::unique_ptr<GraphicsBackend> createGraphicsBackend();
 
 }  // namespace sidescopes

@@ -5,9 +5,9 @@
 
 namespace sidescopes {
 
-// What the capture backend believes about the pixel encoding it delivers.
-// The scope math currently treats everything as sRGB; the hint records what
-// actually arrived so a color-managed pipeline can build on it later.
+/// What the capture backend believes about the pixel encoding it delivers.
+/// The scope math currently treats everything as sRGB; the hint records what
+/// actually arrived so a color-managed pipeline can build on it later.
 enum class ColorSpaceHint
 {
     Unknown,
@@ -28,12 +28,12 @@ struct IntRect
         return width <= 0 || height <= 0;
     }
 
-    // Intersection with the rectangle [0, 0, frame_width, frame_height).
-    // The result may be empty; callers must handle that.
+    /// Intersection with the rectangle [0, 0, frameWidth, frameHeight). The
+    /// result may be empty; callers must handle that.
     [[nodiscard]] IntRect clampedTo(int frameWidth, int frameHeight) const;
 };
 
-// 8-bit display-encoded color, as captured.
+/// 8-bit display-encoded color, as captured.
 struct Color
 {
     uint8_t r = 0;
@@ -41,9 +41,9 @@ struct Color
     uint8_t b = 0;
 };
 
-// Floating-point RGB on the 0..255 scale. Marker and indicator paths stay in
-// floating point end to end: quantizing intermediate values makes a smoothed
-// marker dither between adjacent scope bins while it settles.
+/// Floating-point RGB on the 0..255 scale. Marker and indicator paths stay in
+/// floating point end to end: quantizing intermediate values makes a smoothed
+/// marker dither between adjacent scope bins while it settles.
 struct FloatColor
 {
     float r = 0.0f;
@@ -51,9 +51,9 @@ struct FloatColor
     float b = 0.0f;
 };
 
-// Non-owning view of one captured frame: BGRA, 8 bits per channel, rows
-// top-down. The producer guarantees the pixels stay valid for the duration
-// of the call that received the view.
+/// Non-owning view of one captured frame: BGRA, 8 bits per channel, rows
+/// top-down. The producer guarantees the pixels stay valid for the duration
+/// of the call that received the view.
 struct FrameView
 {
     const uint8_t* bgra = nullptr;

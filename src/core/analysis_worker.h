@@ -15,8 +15,8 @@
 
 namespace sidescopes {
 
-// The scoped part of the screen, as percentages of the captured frame, so a
-// selection survives capture resolution changes.
+/// The scoped part of the screen, as percentages of the captured frame, so a
+/// selection survives capture resolution changes.
 struct RegionOfInterest
 {
     double leftPercent = 0.0;
@@ -27,9 +27,9 @@ struct RegionOfInterest
     [[nodiscard]] IntRect toPixels(int frameWidth, int frameHeight) const;
 };
 
-// Which scopes the worker computes. The waveform's RGB/Luma style is a
-// setting on the one waveform scope; the parade is its own scope, since
-// stacking a luma waveform over the parade is a working combination.
+/// Which scopes the worker computes. The waveform's RGB/Luma style is a
+/// setting on the one waveform scope; the parade is its own scope, since
+/// stacking a luma waveform over the parade is a working combination.
 enum ScopeBit : uint32_t
 {
     ScopeVectorscope = 1u << 0,
@@ -41,14 +41,14 @@ enum ScopeBit : uint32_t
 struct AnalysisSettings
 {
     VectorscopeSettings vectorscope;
-    // The waveform's mode selects its style (RGB or Luma); the parade
-    // shares its gain and stride.
+    /// The waveform's mode selects its style (RGB or Luma); the parade
+    /// shares its gain and stride.
     WaveformSettings waveform;
     HistogramSettings histogram;
     uint32_t enabledScopes = ~0u;
     RegionOfInterest region;
-    // The application's own window in frame pixels, masked out of change
-    // detection so its own redraws never re-trigger analysis.
+    /// The application's own window in frame pixels, masked out of change
+    /// detection so its own redraws never re-trigger analysis.
     IntRect maskedWindow;
 };
 
@@ -70,8 +70,8 @@ public:
         ScopeImage waveformImage;
         ScopeImage waveformParadeImage;
         ScopeImage histogramImage;
-        // The histogram's curve, stroked by the interface at display
-        // resolution (three channels of normalized heights).
+        /// The histogram's curve, stroked by the interface at display
+        /// resolution (three channels of normalized heights).
         std::vector<float> histogramOutline;
         double accumulateMilliseconds = 0.0;
         uint64_t framesProcessed = 0;
@@ -89,11 +89,11 @@ public:
 
     void updateSettings(const AnalysisSettings& settings);
 
-    // Copies the latest output when it is newer than `last_seen_version`,
-    // advancing the version. Returns false when nothing new was produced.
-    bool fetchOutput(uint64_t& lastSeenVersion, Output& output) const;
+    /// Copies the latest output when it is newer than @p lastSeenVersion,
+    /// advancing the version. Returns false when nothing new was produced.
+    [[nodiscard]] bool fetchOutput(uint64_t& lastSeenVersion, Output& output) const;
 
-    // Averaged color around a pixel of the most recent frame, if any.
+    /// Averaged color around a pixel of the most recent frame, if any.
     [[nodiscard]] std::optional<FloatColor> sampleFrameColor(int px, int py, int radius = 1) const;
 
     struct FrameSize
@@ -104,20 +104,20 @@ public:
 
     [[nodiscard]] std::optional<FrameSize> latestFrameSize() const;
 
-    // Runs `reader` on the most recent frame under the frame lock; returns
-    // false when no frame has arrived yet. Intended for occasional,
-    // interactive work (the picker's photo detection), not per-frame use.
-    // `reader` runs while the frame lock is held, so it must not call back
-    // into any AnalysisWorker frame accessor (sampleFrameColor,
-    // latestFrameSize, withLatestFrame) - that would self-deadlock on the
-    // non-recursive mutex - and it must return promptly, since it blocks the
-    // worker's next frame swap.
-    bool withLatestFrame(const std::function<void(const FrameView&)>& reader) const;
+    /// Runs @p reader on the most recent frame under the frame lock; returns
+    /// false when no frame has arrived yet. Intended for occasional,
+    /// interactive work (the picker's photo detection), not per-frame use.
+    /// @p reader runs while the frame lock is held, so it must not call back
+    /// into any AnalysisWorker frame accessor (sampleFrameColor,
+    /// latestFrameSize, withLatestFrame) - that would self-deadlock on the
+    /// non-recursive mutex - and it must return promptly, since it blocks the
+    /// worker's next frame swap.
+    [[nodiscard]] bool withLatestFrame(const std::function<void(const FrameView&)>& reader) const;
 
-    // The sequence number of the most recent frame the worker has taken from
-    // the mailbox and stored. Lets tests await the moment a published frame
-    // has been consumed, so a negative assertion need not sleep on a wall
-    // clock to be sure the worker has caught up.
+    /// The sequence number of the most recent frame the worker has taken from
+    /// the mailbox and stored. Lets tests await the moment a published frame
+    /// has been consumed, so a negative assertion need not sleep on a wall
+    /// clock to be sure the worker has caught up.
     [[nodiscard]] uint64_t consumedFrameSequence() const;
 
 private:
