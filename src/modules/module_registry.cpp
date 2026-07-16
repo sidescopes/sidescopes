@@ -1,6 +1,8 @@
 #include "modules/module_registry.h"
 
+#include <algorithm>
 #include <cstdio>
+#include <string_view>
 
 #ifdef SIDESCOPES_MODULES_DYNAMIC
 #include "modules/module_loader.h"
@@ -8,6 +10,27 @@
 
 namespace sidescopes {
 namespace {
+
+// The built-in scopes in their toolbar order; every other id ranks after them.
+// A stable ordering by this rank makes the scope order identical whether the
+// modules register in link order (static) or in load order (dynamic, sorted by
+// file name), so the toolbar, letters, and stack never depend on the build.
+int canonicalRank(std::string_view id)
+{
+    static constexpr std::string_view Order[] = {
+        "org.sidescopes.vectorscope",
+        "org.sidescopes.waveform",
+        "org.sidescopes.parade",
+        "org.sidescopes.histogram",
+    };
+    for (int index = 0; index < static_cast<int>(std::size(Order)); ++index) {
+        if (Order[index] == id) {
+            return index;
+        }
+    }
+
+    return static_cast<int>(std::size(Order));
+}
 
 void hostLog(const SsHost*, uint32_t level, const char* message)
 {
@@ -64,6 +87,16 @@ bool ModuleRegistry::registerModule(const SsModuleEntry& entry)
         }
         m_scopes.push_back(RegisteredScope{descriptor, &entry});
     }
+
+    // Keep the scopes in one canonical order regardless of registration order:
+    // built-ins first in their toolbar order, then any third-party scopes in
+    // the order they registered. A stable sort preserves that trailing order,
+    // which is what the letter-collision rule (earlier registration keeps the
+    // letter) depends on.
+    std::stable_sort(m_scopes.begin(), m_scopes.end(), [](const RegisteredScope& a, const RegisteredScope& b) {
+        return canonicalRank(a.descriptor->id) < canonicalRank(b.descriptor->id);
+    });
+
     return true;
 }
 

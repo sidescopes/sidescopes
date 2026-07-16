@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 #include <cstdint>
+#include <string>
 #include <vector>
 
 #include "app/scope_registry.h"
@@ -58,6 +59,19 @@ const SsModuleEntry CollideWModuleEntry{
 };
 
 }  // namespace
+
+TEST_CASE("The module registry orders the built-ins canonically in every build")
+{
+    // Static registration keeps link order; the dynamic loader hands modules
+    // back in file-name order. The registry imposes one canonical order over
+    // both, so this holds identically in the static and dynamic configurations.
+    const std::vector<RegisteredScope>& scopes = builtinModules().scopes();
+    REQUIRE(scopes.size() == 4);
+    CHECK(std::string(scopes[0].descriptor->id) == "org.sidescopes.vectorscope");
+    CHECK(std::string(scopes[1].descriptor->id) == "org.sidescopes.waveform");
+    CHECK(std::string(scopes[2].descriptor->id) == "org.sidescopes.parade");
+    CHECK(std::string(scopes[3].descriptor->id) == "org.sidescopes.histogram");
+}
 
 TEST_CASE("The scope registry lists the built-ins then the color picker")
 {
