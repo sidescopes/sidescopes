@@ -964,42 +964,41 @@ void drawColorPicker(const std::optional<FloatColor>& liveColor, PinBoard& pins)
         }
     }
 
-    // Live values: the code and the percent ride together so a reference never
-    // has to be converted in the head; hex is the copy currency and always
-    // present. When the pane narrows the code drops out first - the percent is
-    // the reading at a glance, and hex still carries the exact code.
+    // Live values in two rows, one reading mode each: the percent a
+    // photographer reads at a glance, then the exact codes, whose notation hex
+    // shares. Both rows share one value column so the numbers line up. A tiny
+    // pane keeps only the percent row - hex is a click-to-copy button and must
+    // never be what drops.
     pushHexFont();
     const float hexWidth = ImGui::CalcTextSize(hex).x;
     popHexFont();
-    const float bothStride = labelColumn + columnGap + codeColumn + columnGap + percentColumn + 2 * columnGap;
-    const float percentStride = labelColumn + columnGap + percentColumn + 2 * columnGap;
-    const bool showCodes = 3.0f * bothStride + hexWidth + 12.0f <= area.x;
-    const float channelStride = showCodes ? bothStride : percentStride;
+    const float valueColumn = std::max(percentColumn, codeColumn);
+    const float channelStride = labelColumn + columnGap + valueColumn + 2 * columnGap;
     const float valuesStart = ImGui::GetCursorPosX();
     const float liveChannels[3] = {color.r, color.g, color.b};
     const char* channelLabels[3] = {"R", "G", "B"};
-    for (int channel = 0; channel < 3; ++channel) {
-        const float columnStart = valuesStart + channel * channelStride;
-        if (channel > 0) {
-            ImGui::SameLine(columnStart);
-        } else {
-            ImGui::SetCursorPosX(columnStart);
+    const auto valueRow = [&](bool asPercent) {
+        for (int channel = 0; channel < 3; ++channel) {
+            const float columnStart = valuesStart + channel * channelStride;
+            if (channel > 0) {
+                ImGui::SameLine(columnStart);
+            } else {
+                ImGui::SetCursorPosX(columnStart);
+            }
+            ImGui::TextUnformatted(channelLabels[channel]);
+            char text[8];
+            if (asPercent) {
+                std::snprintf(text, sizeof(text), "%.0f%%", liveChannels[channel] / 2.55f);
+            } else {
+                std::snprintf(text, sizeof(text), "%.0f", liveChannels[channel]);
+            }
+            ImGui::SameLine(columnStart + labelColumn + columnGap + valueColumn - ImGui::CalcTextSize(text).x);
+            ImGui::TextUnformatted(text);
         }
-        ImGui::TextUnformatted(channelLabels[channel]);
-        float right = columnStart + labelColumn + columnGap;
-        if (showCodes) {
-            char code[8];
-            std::snprintf(code, sizeof(code), "%.0f", liveChannels[channel]);
-            right += codeColumn;
-            ImGui::SameLine(right - ImGui::CalcTextSize(code).x);
-            ImGui::TextUnformatted(code);
-            right += columnGap;
-        }
-        char percent[8];
-        std::snprintf(percent, sizeof(percent), "%.0f%%", liveChannels[channel] / 2.55f);
-        right += percentColumn;
-        ImGui::SameLine(right - ImGui::CalcTextSize(percent).x);
-        ImGui::TextUnformatted(percent);
+    };
+    valueRow(true);
+    if (!tiny) {
+        valueRow(false);
     }
     ImGui::SameLine(0.0f, 0.0f);
     pushHexFont();
