@@ -2710,8 +2710,9 @@ int main()
         if (showAbout) {
             ImGui::SetNextWindowSize(ImVec2(320, 0), ImGuiCond_FirstUseEver);
             ImGui::Begin("About SideScopes", &showAbout, ImGuiWindowFlags_NoCollapse);
-            ImGui::TextUnformatted("SideScopes");
-            ImGui::TextUnformatted(versionInfo.display.c_str());
+            // The window title carries the name; the body leads with the
+            // version, worded the way about panels conventionally do.
+            ImGui::Text("Version %s", versionInfo.display.c_str());
             if (ImGui::IsItemClicked()) {
                 ImGui::SetClipboardText(versionInfo.display.c_str());
             }
