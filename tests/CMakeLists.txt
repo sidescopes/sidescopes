@@ -10,6 +10,7 @@ FetchContent_MakeAvailable(catch2)
 
 add_executable(sidescopes_tests
     test_frame.cpp
+    test_color_lab.cpp
     test_frame_mailbox.cpp
     test_region_hash.cpp
     test_trace_intensity.cpp
