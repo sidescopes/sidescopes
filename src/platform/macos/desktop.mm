@@ -3,6 +3,8 @@
 
 #include "platform/desktop.h"
 
+#include <cstdlib>
+
 namespace sidescopes {
 
 std::vector<DesktopWindow> onScreenWindows(uint32_t displayId)
@@ -169,6 +171,20 @@ std::vector<std::string> monospaceFontFiles()
 {
     return {"/System/Library/Fonts/SFNSMono.ttf", "/System/Library/Fonts/Menlo.ttc",
             "/System/Library/Fonts/Supplemental/Courier New.ttf"};
+}
+
+bool captureExclusionDisabled()
+{
+    static const bool disabled = std::getenv("SIDESCOPES_NO_CAPTURE_EXCLUSION") != nullptr;
+
+    return disabled;
+}
+
+float monospaceFontScale()
+{
+    // SF Mono and Menlo already sit within a few percent of the interface
+    // font's ink height at an equal em.
+    return 1.0f;
 }
 
 void observeSystemWake(std::function<void()> callback)

@@ -286,6 +286,23 @@ std::vector<std::string> monospaceFontFiles()
     return {base + "\\Fonts\\consola.ttf", base + "\\Fonts\\cour.ttf"};
 }
 
+bool captureExclusionDisabled()
+{
+    static const bool disabled = [] {
+        wchar_t value[2];
+        return GetEnvironmentVariableW(L"SIDESCOPES_NO_CAPTURE_EXCLUSION", value, 2) > 0;
+    }();
+
+    return disabled;
+}
+
+float monospaceFontScale()
+{
+    // Consolas' digit ink runs about a fifth taller than Segoe UI's at an
+    // equal em; this factor reproduces the balance of the macOS pairing.
+    return 0.866f;
+}
+
 void observeSystemWake(std::function<void()>)
 {
     // Duplication dies loudly on lock and wake (access lost) and the

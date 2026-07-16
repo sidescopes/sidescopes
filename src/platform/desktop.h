@@ -110,6 +110,17 @@ void hideApplication();
 /// whose glyphs must align - hex codes most of all.
 [[nodiscard]] std::vector<std::string> monospaceFontFiles();
 
+/// The em multiplier for the fixed-width companion font, chosen so its ink
+/// weight matches the interface font's; 1.0 where the platform's pairing is
+/// naturally balanced.
+[[nodiscard]] float monospaceFontScale();
+
+/// Whether SIDESCOPES_NO_CAPTURE_EXCLUSION is set in the environment. Test
+/// harnesses set it so screenshot-driven tooling can see this application's
+/// own windows; Windows' capture exclusion blanks them from every screenshot
+/// API otherwise. Read once at first use.
+[[nodiscard]] bool captureExclusionDisabled();
+
 /// Invokes the callback - on the platform's main-thread event context -
 /// whenever the display or the user session wakes up. Capture streams
 /// survive those transitions as zombies that look alive but deliver

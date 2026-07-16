@@ -570,8 +570,9 @@ ImFont* loadInterfaceFont(GLFWwindow* window)
         }
     }
     ImFont* monospace = nullptr;
+    const float monoSize = 13.0f * monospaceFontScale();
     for (const std::string& path : monospaceFontFiles()) {
-        if ((monospace = io.Fonts->AddFontFromFileTTF(path.c_str(), 13.0f, &config))) {
+        if ((monospace = io.Fonts->AddFontFromFileTTF(path.c_str(), monoSize, &config))) {
             break;
         }
     }
