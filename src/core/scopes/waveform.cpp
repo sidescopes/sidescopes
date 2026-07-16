@@ -19,6 +19,26 @@ inline int luma709(int r, int g, int b)
 // sampling stride and to the region size.
 constexpr double ReferenceRowCount = 1'000.0;
 
+// Which planes a mode draws: the RGB channels, the luma trace, and whether
+// luma carries the source color. Derived once and threaded through
+// accumulation, correction, and composition so the three stay in step.
+struct ModeFlags
+{
+    bool rgb;
+    bool luma;
+    bool coloredLuma;
+};
+
+ModeFlags modeFlagsFor(WaveformMode mode)
+{
+    const bool coloredLuma = mode == WaveformMode::ColoredLuma;
+    return ModeFlags{
+        mode != WaveformMode::Luma && !coloredLuma,
+        mode == WaveformMode::Luma || mode == WaveformMode::RgbAndLuma || coloredLuma,
+        coloredLuma,
+    };
+}
+
 // Sum each level's population across a plane's columns.
 void sumLevelDensities(const uint32_t* in, int columns, uint64_t* global)
 {
@@ -266,18 +286,18 @@ struct WaveformPlanes
 // active mode's color rules. sample() reads a plane at the output row's
 // level tap and is invoked only for the planes the mode draws.
 template <typename SampleFn>
-void emitWaveformPixel(uint8_t* out, const SampleFn& sample, int column, const WaveformPlanes& planes, bool wantsRgb,
-                       bool coloredLuma, bool wantsLuma, double gain, double intensityScale)
+void emitWaveformPixel(uint8_t* out, const SampleFn& sample, int column, const WaveformPlanes& planes,
+                       const ModeFlags& flags, double gain, double intensityScale)
 {
     float r = 0.0f;
     float g = 0.0f;
     float b = 0.0f;
-    if (wantsRgb) {
+    if (flags.rgb) {
         r = waveformBrightness(sample(planes.red, column), gain, intensityScale);
         g = waveformBrightness(sample(planes.green, column), gain, intensityScale);
         b = waveformBrightness(sample(planes.blue, column), gain, intensityScale);
     }
-    if (coloredLuma) {
+    if (flags.coloredLuma) {
         // Density decides how bright the trace is; the
         // value-weighted planes only decide its color, so a
         // dense shadow region draws as clearly as a dense
@@ -294,11 +314,11 @@ void emitWaveformPixel(uint8_t* out, const SampleFn& sample, int column, const W
         } else {
             r = g = b = density;
         }
-    } else if (wantsLuma) {
+    } else if (flags.luma) {
         // In the combined mode luma rides on top as a dimmer
         // white trace.
         const float luma =
-            waveformBrightness(sample(planes.luma, column), gain, intensityScale) * (wantsRgb ? 0.7f : 1.0f);
+            waveformBrightness(sample(planes.luma, column), gain, intensityScale) * (flags.rgb ? 0.7f : 1.0f);
         r += luma;
         g += luma;
         b += luma;
@@ -369,10 +389,7 @@ void Waveform::accumulate(const FrameView& frame, IntRect region)
     region = region.clampedTo(frame.width, frame.height);
     std::fill(m_bins.begin(), m_bins.end(), 0u);
 
-    const bool coloredLuma = m_settings.mode == WaveformMode::ColoredLuma;
-    const bool wantsRgb = m_settings.mode != WaveformMode::Luma && !coloredLuma;
-    const bool wantsLuma =
-        m_settings.mode == WaveformMode::Luma || m_settings.mode == WaveformMode::RgbAndLuma || coloredLuma;
+    const ModeFlags flags = modeFlagsFor(m_settings.mode);
     const std::size_t planeSize = this->planeSize();
     uint32_t* redPlane = m_bins.data();
     uint32_t* greenPlane = m_bins.data() + planeSize;
@@ -404,12 +421,12 @@ void Waveform::accumulate(const FrameView& frame, IntRect region)
                     line[column] += leftWeight;
                     line[next] += rightWeight;
                 };
-                if (wantsRgb) {
+                if (flags.rgb) {
                     splat(redPlane, r);
                     splat(greenPlane, g);
                     splat(bluePlane, b);
                 }
-                if (coloredLuma) {
+                if (flags.coloredLuma) {
                     // The luma plane carries the density; the channel
                     // planes carry value-weighted mass at the same rows,
                     // so each cell remembers the average color of the
@@ -424,7 +441,7 @@ void Waveform::accumulate(const FrameView& frame, IntRect region)
                     tintSplat(greenPlane, static_cast<uint32_t>(g));
                     tintSplat(bluePlane, static_cast<uint32_t>(b));
                     splat(lumaPlane, level);
-                } else if (wantsLuma) {
+                } else if (flags.luma) {
                     splat(lumaPlane, luma709(r, g, b));
                 }
             }
@@ -445,11 +462,8 @@ void Waveform::mapBinsToImage(uint64_t sampledRows)
     const std::vector<uint32_t>& traces = m_smoothed;
     const std::size_t planeSize = this->planeSize();
 
-    const bool coloredLuma = m_settings.mode == WaveformMode::ColoredLuma;
-    const bool wantsRgb = m_settings.mode != WaveformMode::Luma && !coloredLuma;
-    const bool wantsLuma =
-        m_settings.mode == WaveformMode::Luma || m_settings.mode == WaveformMode::RgbAndLuma || coloredLuma;
-    const uint32_t densest = peakDensity(traces, planeSize, wantsRgb, wantsLuma);
+    const ModeFlags flags = modeFlagsFor(m_settings.mode);
+    const uint32_t densest = peakDensity(traces, planeSize, flags.rgb, flags.luma);
 
     // Each sample contributes sixteen weight units (the splat's
     // sixteenths), so the per-row normalization divides them back out and
@@ -550,10 +564,7 @@ void Waveform::buildParade(const uint32_t* redPlane, const uint32_t* greenPlane,
 void Waveform::composeImage(const uint32_t* redPlane, const uint32_t* greenPlane, const uint32_t* bluePlane,
                             const uint32_t* lumaPlane, double gain, double intensityScale)
 {
-    const bool coloredLuma = m_settings.mode == WaveformMode::ColoredLuma;
-    const bool wantsRgb = m_settings.mode != WaveformMode::Luma && !coloredLuma;
-    const bool wantsLuma =
-        m_settings.mode == WaveformMode::Luma || m_settings.mode == WaveformMode::RgbAndLuma || coloredLuma;
+    const ModeFlags flags = modeFlagsFor(m_settings.mode);
     const WaveformPlanes planes{redPlane, greenPlane, bluePlane, lumaPlane};
 
     // The composer. At native height rows map one-to-one onto levels; a
@@ -578,7 +589,7 @@ void Waveform::composeImage(const uint32_t* redPlane, const uint32_t* greenPlane
                                       tap.weight2 * rowAt(tap.base + 1) + tap.weight3 * rowAt(tap.base + 2));
         };
         for (int column = 0; column < m_columns; ++column, out += 4) {
-            emitWaveformPixel(out, sample, column, planes, wantsRgb, coloredLuma, wantsLuma, gain, intensityScale);
+            emitWaveformPixel(out, sample, column, planes, flags, gain, intensityScale);
         }
     }
 }
