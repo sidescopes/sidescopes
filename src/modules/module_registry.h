@@ -10,7 +10,8 @@ namespace sidescopes {
 /// @brief RAII ownership of one module scope instance.
 ///
 /// Move-only; the wrapper calls destroy() and never lets an exception
-/// cross the boundary.
+/// cross the boundary. Every accessor dereferences the instance, so the
+/// caller must check valid() before using one that may be empty.
 class ScopeInstance
 {
 public:
@@ -50,12 +51,12 @@ public:
         return m_instance != nullptr;
     }
 
-    bool configure(const std::vector<SsParamValue>& values) const
+    [[nodiscard]] bool configure(const std::vector<SsParamValue>& values) const
     {
         return m_instance->configure(m_instance, values.data(), static_cast<uint32_t>(values.size()));
     }
 
-    bool accumulate(const SsFrameView& frame, SsRect region) const
+    [[nodiscard]] bool accumulate(const SsFrameView& frame, SsRect region) const
     {
         return m_instance->accumulate(m_instance, &frame, region);
     }
@@ -67,11 +68,11 @@ public:
 
     [[nodiscard]] std::vector<SsGraticulePrimitive> graticule() const
     {
-        std::vector<SsGraticulePrimitive> primitives(32);
-        const uint32_t needed =
-            m_instance->graticule(m_instance, primitives.data(), static_cast<uint32_t>(primitives.size()));
+        constexpr uint32_t GraticuleCapacity = 32;
+        std::vector<SsGraticulePrimitive> primitives(GraticuleCapacity);
+        const uint32_t needed = m_instance->graticule(m_instance, primitives.data(), GraticuleCapacity);
         primitives.resize(needed);
-        if (needed > 32) {
+        if (needed > GraticuleCapacity) {
             m_instance->graticule(m_instance, primitives.data(), needed);
         }
         return primitives;
@@ -79,11 +80,11 @@ public:
 
     [[nodiscard]] std::vector<SsMarker> markers(SsColor color) const
     {
-        std::vector<SsMarker> markers(8);
-        const uint32_t needed =
-            m_instance->markers(m_instance, color, markers.data(), static_cast<uint32_t>(markers.size()));
+        constexpr uint32_t MarkerCapacity = 8;
+        std::vector<SsMarker> markers(MarkerCapacity);
+        const uint32_t needed = m_instance->markers(m_instance, color, markers.data(), MarkerCapacity);
         markers.resize(needed);
-        if (needed > 8) {
+        if (needed > MarkerCapacity) {
             m_instance->markers(m_instance, color, markers.data(), needed);
         }
         return markers;
@@ -138,7 +139,7 @@ public:
     ModuleRegistry& operator=(const ModuleRegistry&) = delete;
 
     /// Registers a module; false when the ABI major differs or the module's init failed.
-    bool registerModule(const SsModuleEntry& entry);
+    [[nodiscard]] bool registerModule(const SsModuleEntry& entry);
 
     [[nodiscard]] const std::vector<RegisteredScope>& scopes() const
     {

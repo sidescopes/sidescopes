@@ -55,7 +55,14 @@ bool ModuleRegistry::registerModule(const SsModuleEntry& entry)
     m_modules.push_back(&entry);
     const uint32_t count = entry.scope_count();
     for (uint32_t index = 0; index < count; ++index) {
-        m_scopes.push_back(RegisteredScope{entry.descriptor(index), &entry});
+        const SsScopeDescriptor* descriptor = entry.descriptor(index);
+        if (!descriptor) {
+            // A misbehaving module that returns null below its own
+            // scope_count() would otherwise be dereferenced at lookup time.
+            std::fprintf(stderr, "sidescopes module: null descriptor at index %u of %u\n", index, count);
+            continue;
+        }
+        m_scopes.push_back(RegisteredScope{descriptor, &entry});
     }
     return true;
 }
@@ -86,11 +93,11 @@ ModuleRegistry& builtinModules()
 #ifdef SIDESCOPES_MODULES_DYNAMIC
         // Dev/CI: the modules are separate shared objects the build stamped
         // into this directory. The loader registers whatever it finds.
-        LoadModulesFrom(SIDESCOPES_MODULES_DIR, registry);
+        loadModulesFrom(SIDESCOPES_MODULES_DIR, registry);
 #else
-        registry.registerModule(VectorscopeModuleEntry);
-        registry.registerModule(WaveformModuleEntry);
-        registry.registerModule(HistogramModuleEntry);
+        (void)registry.registerModule(VectorscopeModuleEntry);
+        (void)registry.registerModule(WaveformModuleEntry);
+        (void)registry.registerModule(HistogramModuleEntry);
 #endif
         return true;
     }();

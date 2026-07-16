@@ -230,7 +230,10 @@ void AnalysisWorker::run()
         lastContentHash = contentHash;
 
         if (settingsChanged) {
-            vectorscope.instance.configure(
+            // The configure/accumulate results are best-effort here: a module
+            // that fails leaves its last image in place, which the UI simply
+            // stops advancing. Acknowledge the ignored result explicitly.
+            (void)vectorscope.instance.configure(
                 {{"gain", settings.vectorscope.gain},
                  {"stride", static_cast<double>(settings.vectorscope.samplingStride)},
                  {"matrix", settings.vectorscope.matrix == ChromaMatrix::Bt709 ? 1.0 : 0.0},
@@ -243,18 +246,18 @@ void AnalysisWorker::run()
                 {"gain", settings.waveform.gain},
                 {"stride", static_cast<double>(settings.waveform.samplingStride)},
                 {"mode", choiceOfWaveformMode(settings.waveform.mode)}};
-            waveform.instance.configure(waveformValues);
+            (void)waveform.instance.configure(waveformValues);
             if (waveform.adaptive) {
                 waveform.adaptive->setImageSize(waveform.instance.raw(), settings.waveform.columns,
                                                 settings.waveform.imageHeight);
             }
-            parade.instance.configure(
+            (void)parade.instance.configure(
                 {{"gain", settings.waveform.gain}, {"stride", static_cast<double>(settings.waveform.samplingStride)}});
             if (parade.adaptive) {
                 parade.adaptive->setImageSize(parade.instance.raw(), settings.waveform.columns,
                                               settings.waveform.imageHeight);
             }
-            histogram.instance.configure(
+            (void)histogram.instance.configure(
                 {{"stride", static_cast<double>(settings.histogram.samplingStride)},
                  {"style", settings.histogram.style == HistogramStyle::PerChannel ? 0.0 : 1.0}});
             if (histogram.adaptive) {
@@ -272,7 +275,7 @@ void AnalysisWorker::run()
 
         for (WorkerScope* scope : {&vectorscope, &waveform, &parade, &histogram}) {
             if ((enabled & scope->bit) && scope->instance.valid()) {
-                scope->instance.accumulate(boundaryFrame, boundaryRegion);
+                (void)scope->instance.accumulate(boundaryFrame, boundaryRegion);
             }
         }
         const double elapsedMs =

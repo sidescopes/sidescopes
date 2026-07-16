@@ -22,6 +22,6 @@ class ModuleRegistry;
 /// @param registry  Registry that each discovered module is registered with.
 /// @return True if the directory was scanned (even with zero modules
 ///         registered), false if it could not be opened.
-bool LoadModulesFrom(const std::filesystem::path& directory, ModuleRegistry& registry);
+bool loadModulesFrom(const std::filesystem::path& directory, ModuleRegistry& registry);
 
 }  // namespace sidescopes
