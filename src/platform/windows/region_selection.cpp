@@ -1317,6 +1317,138 @@ void paintBorder()
                  g_border.region.top - static_cast<int>(WindowPad * scale));
 }
 
+// The interior is the editor's, not ours; only the band takes the mouse.
+LRESULT borderHitTest(HWND window, LPARAM lParam)
+{
+    const double scale = uiScale(window);
+    RECT frame{};
+    GetWindowRect(window, &frame);
+    const double x = static_cast<short>(LOWORD(lParam)) - frame.left;
+    const double y = static_cast<short>(HIWORD(lParam)) - frame.top;
+    return borderZoneAtPoint(x, y, scale) == ZoneNone ? HTTRANSPARENT : HTCLIENT;
+}
+
+LRESULT borderUpdateCursor(HWND window)
+{
+    if (g_border.dragZone != ZoneNone) {
+        applyBorderCursor(g_border.dragZone);
+        return TRUE;
+    }
+    POINT cursor{};
+    GetCursorPos(&cursor);
+    RECT frame{};
+    GetWindowRect(window, &frame);
+    const double scale = uiScale(window);
+    applyBorderCursor(borderZoneAtPoint(cursor.x - frame.left, cursor.y - frame.top, scale));
+    return TRUE;
+}
+
+// Double-clicking anywhere on the band dismisses the region - the fast
+// path once the close button has taught the gesture's home.
+LRESULT borderOnDoubleClick(HWND window, LPARAM lParam)
+{
+    const double scale = uiScale(window);
+    const double x = static_cast<short>(LOWORD(lParam));
+    const double y = static_cast<short>(HIWORD(lParam));
+    if (borderZoneAtPoint(x, y, scale) != ZoneNone) {
+        g_borderDismissed = true;
+    }
+    return 0;
+}
+
+LRESULT borderOnLButtonDown(HWND window, LPARAM lParam)
+{
+    const double scale = uiScale(window);
+    const double x = static_cast<short>(LOWORD(lParam));
+    const double y = static_cast<short>(HIWORD(lParam));
+    const unsigned zone = borderZoneAtPoint(x, y, scale);
+    if (zone == ZoneNone) {
+        return 0;
+    }
+    if ((zone & ZoneClose) != 0) {
+        g_border.closePressed = true;
+        return 0;
+    }
+    g_border.dragZone = zone;
+    GetCursorPos(&g_border.dragStartMouse);
+    g_border.dragStartRegion = g_border.region;
+    g_borderEditing = true;
+    SetCapture(window);
+    paintBorder();  // the close button hides while dragging
+    return 0;
+}
+
+// Applies a drag delta to the region rectangle: a move offsets it whole,
+// an edge or corner grab moves those edges, each clamped so the region
+// never shrinks past the minimum.
+RECT draggedRegionRect(unsigned dragZone, const RECT& start, int dx, int dy, int minimum)
+{
+    RECT rect = start;
+    if ((dragZone & ZoneMove) != 0) {
+        OffsetRect(&rect, dx, dy);
+        return rect;
+    }
+    if ((dragZone & ZoneLeft) != 0) {
+        rect.left = std::min(start.left + dx, start.right - minimum);
+    }
+    if ((dragZone & ZoneRight) != 0) {
+        rect.right = std::max(start.right + dx, start.left + minimum);
+    }
+    if ((dragZone & ZoneTop) != 0) {
+        rect.top = std::min(start.top + dy, start.bottom - minimum);
+    }
+    if ((dragZone & ZoneBottom) != 0) {
+        rect.bottom = std::max(start.bottom + dy, start.top + minimum);
+    }
+    return rect;
+}
+
+LRESULT borderOnMouseMove(HWND window)
+{
+    if (g_border.dragZone == ZoneNone) {
+        return 0;
+    }
+    // Screen coordinates throughout: the window itself moves as
+    // the application applies each edit, so client coordinates
+    // shift under the cursor mid-drag.
+    POINT mouse{};
+    GetCursorPos(&mouse);
+    const int dx = mouse.x - g_border.dragStartMouse.x;
+    const int dy = mouse.y - g_border.dragStartMouse.y;
+    const double scale = uiScale(window);
+    const auto minimum = static_cast<int>(MinimumRegionSize * scale);
+    const RECT rect = draggedRegionRect(g_border.dragZone, g_border.dragStartRegion, dx, dy, minimum);
+    RegionOfInterest region;
+    region.leftPercent = (rect.left - g_border.displayOriginX) / g_border.displayWidth * 100.0;
+    region.topPercent = (rect.top - g_border.displayOriginY) / g_border.displayHeight * 100.0;
+    region.rightPercent = (rect.right - g_border.displayOriginX) / g_border.displayWidth * 100.0;
+    region.bottomPercent = (rect.bottom - g_border.displayOriginY) / g_border.displayHeight * 100.0;
+    g_borderEditRegion = region;
+    g_borderEditChanged = true;
+    return 0;
+}
+
+LRESULT borderOnLButtonUp(HWND window, LPARAM lParam)
+{
+    if (g_border.closePressed) {
+        g_border.closePressed = false;
+        const double scale = uiScale(window);
+        const double x = static_cast<short>(LOWORD(lParam));
+        const double y = static_cast<short>(HIWORD(lParam));
+        if ((borderZoneAtPoint(x, y, scale) & ZoneClose) != 0) {
+            g_borderDismissed = true;
+        }
+        return 0;
+    }
+    if (g_border.dragZone != ZoneNone) {
+        g_border.dragZone = ZoneNone;
+        g_borderEditing = false;
+        ReleaseCapture();
+        paintBorder();
+    }
+    return 0;
+}
+
 LRESULT CALLBACK borderProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam)
 {
     switch (message) {
@@ -1327,119 +1459,18 @@ LRESULT CALLBACK borderProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
         // keyboard - every shortcut dead until the scope window is
         // clicked again, with the band taking nothing in exchange.
         return MA_NOACTIVATE;
-    case WM_NCHITTEST: {
-        // The interior is the editor's, not ours; only the band takes
-        // the mouse.
-        const double scale = uiScale(window);
-        RECT frame{};
-        GetWindowRect(window, &frame);
-        const double x = static_cast<short>(LOWORD(lParam)) - frame.left;
-        const double y = static_cast<short>(HIWORD(lParam)) - frame.top;
-        return borderZoneAtPoint(x, y, scale) == ZoneNone ? HTTRANSPARENT : HTCLIENT;
-    }
-    case WM_SETCURSOR: {
-        if (g_border.dragZone != ZoneNone) {
-            applyBorderCursor(g_border.dragZone);
-            return TRUE;
-        }
-        POINT cursor{};
-        GetCursorPos(&cursor);
-        RECT frame{};
-        GetWindowRect(window, &frame);
-        const double scale = uiScale(window);
-        applyBorderCursor(borderZoneAtPoint(cursor.x - frame.left, cursor.y - frame.top, scale));
-        return TRUE;
-    }
-    case WM_LBUTTONDBLCLK: {
-        // Double-clicking anywhere on the band dismisses the region -
-        // the fast path once the close button has taught the
-        // gesture's home.
-        const double scale = uiScale(window);
-        const double x = static_cast<short>(LOWORD(lParam));
-        const double y = static_cast<short>(HIWORD(lParam));
-        if (borderZoneAtPoint(x, y, scale) != ZoneNone) {
-            g_borderDismissed = true;
-        }
-        return 0;
-    }
-    case WM_LBUTTONDOWN: {
-        const double scale = uiScale(window);
-        const double x = static_cast<short>(LOWORD(lParam));
-        const double y = static_cast<short>(HIWORD(lParam));
-        const unsigned zone = borderZoneAtPoint(x, y, scale);
-        if (zone == ZoneNone) {
-            return 0;
-        }
-        if ((zone & ZoneClose) != 0) {
-            g_border.closePressed = true;
-            return 0;
-        }
-        g_border.dragZone = zone;
-        GetCursorPos(&g_border.dragStartMouse);
-        g_border.dragStartRegion = g_border.region;
-        g_borderEditing = true;
-        SetCapture(window);
-        paintBorder();  // the close button hides while dragging
-        return 0;
-    }
-    case WM_MOUSEMOVE: {
-        if (g_border.dragZone == ZoneNone) {
-            return 0;
-        }
-        // Screen coordinates throughout: the window itself moves as
-        // the application applies each edit, so client coordinates
-        // shift under the cursor mid-drag.
-        POINT mouse{};
-        GetCursorPos(&mouse);
-        const int dx = mouse.x - g_border.dragStartMouse.x;
-        const int dy = mouse.y - g_border.dragStartMouse.y;
-        RECT rect = g_border.dragStartRegion;
-        const double scale = uiScale(window);
-        const auto minimum = static_cast<int>(MinimumRegionSize * scale);
-        if ((g_border.dragZone & ZoneMove) != 0) {
-            OffsetRect(&rect, dx, dy);
-        } else {
-            if ((g_border.dragZone & ZoneLeft) != 0) {
-                rect.left = std::min(g_border.dragStartRegion.left + dx, g_border.dragStartRegion.right - minimum);
-            }
-            if ((g_border.dragZone & ZoneRight) != 0) {
-                rect.right = std::max(g_border.dragStartRegion.right + dx, g_border.dragStartRegion.left + minimum);
-            }
-            if ((g_border.dragZone & ZoneTop) != 0) {
-                rect.top = std::min(g_border.dragStartRegion.top + dy, g_border.dragStartRegion.bottom - minimum);
-            }
-            if ((g_border.dragZone & ZoneBottom) != 0) {
-                rect.bottom = std::max(g_border.dragStartRegion.bottom + dy, g_border.dragStartRegion.top + minimum);
-            }
-        }
-        RegionOfInterest region;
-        region.leftPercent = (rect.left - g_border.displayOriginX) / g_border.displayWidth * 100.0;
-        region.topPercent = (rect.top - g_border.displayOriginY) / g_border.displayHeight * 100.0;
-        region.rightPercent = (rect.right - g_border.displayOriginX) / g_border.displayWidth * 100.0;
-        region.bottomPercent = (rect.bottom - g_border.displayOriginY) / g_border.displayHeight * 100.0;
-        g_borderEditRegion = region;
-        g_borderEditChanged = true;
-        return 0;
-    }
-    case WM_LBUTTONUP: {
-        if (g_border.closePressed) {
-            g_border.closePressed = false;
-            const double scale = uiScale(window);
-            const double x = static_cast<short>(LOWORD(lParam));
-            const double y = static_cast<short>(HIWORD(lParam));
-            if ((borderZoneAtPoint(x, y, scale) & ZoneClose) != 0) {
-                g_borderDismissed = true;
-            }
-            return 0;
-        }
-        if (g_border.dragZone != ZoneNone) {
-            g_border.dragZone = ZoneNone;
-            g_borderEditing = false;
-            ReleaseCapture();
-            paintBorder();
-        }
-        return 0;
-    }
+    case WM_NCHITTEST:
+        return borderHitTest(window, lParam);
+    case WM_SETCURSOR:
+        return borderUpdateCursor(window);
+    case WM_LBUTTONDBLCLK:
+        return borderOnDoubleClick(window, lParam);
+    case WM_LBUTTONDOWN:
+        return borderOnLButtonDown(window, lParam);
+    case WM_MOUSEMOVE:
+        return borderOnMouseMove(window);
+    case WM_LBUTTONUP:
+        return borderOnLButtonUp(window, lParam);
     default:
         break;
     }
