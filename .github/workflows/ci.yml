@@ -58,6 +58,22 @@ jobs:
       - name: Test
         run: ctest --test-dir build -C Release --output-on-failure --timeout 120
 
+  # The dynamic module configuration loads the built-in scopes as shared
+  # objects through the real loader instead of linking them in. Linux exercises
+  # it on every push so the loader path and the module boundary stay honest;
+  # the Windows dynamic link is verified out of band.
+  test-dynamic:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - name: Configure
+        run: cmake -B build -DSIDESCOPES_WERROR=ON -DSIDESCOPES_MODULES_DYNAMIC=ON
+      - name: Build
+        run: cmake --build build --config Release
+      - name: Test
+        run: ctest --test-dir build -C Release --output-on-failure --timeout 120
+
   # Address+UB and thread sanitizers exercise the test suite; the analysis
   # worker's lock-free frame handoff is exactly what TSan exists to audit.
   sanitize:
