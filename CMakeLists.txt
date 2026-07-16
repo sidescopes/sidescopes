@@ -313,6 +313,7 @@ if(APPLE OR WIN32)
     # Application logic shared by both platforms: cohesive controllers lifted
     # out of main.
     target_sources(SideScopes PRIVATE
+        src/app/capture_controller.cpp
         src/app/pin_board.cpp
         src/app/scope_view.cpp)
 

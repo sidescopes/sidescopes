@@ -20,6 +20,7 @@
 #include <string>
 #include <thread>
 
+#include "app/capture_controller.h"
 #include "app/pin_board.h"
 #include "app/scope_view.h"
 #include "core/analysis_worker.h"
@@ -425,7 +426,7 @@ std::atomic<bool> g_faceCheckRunning{false};
 // border sync when the iconified state flips either way.
 std::atomic<bool> g_iconifyChanged{false};
 
-void refreshFacePresence(AnalysisWorker& worker, uint32_t captureDisplay)
+void refreshFacePresence(AnalysisWorker& worker, uint32_t displayId)
 {
     if (!supportsFaceDetection()) {
         return;
@@ -449,7 +450,7 @@ void refreshFacePresence(AnalysisWorker& worker, uint32_t captureDisplay)
         return;
     }
     float pixelsPerPoint = 1.0f;
-    if (const auto geometry = geometryOfDisplay(captureDisplay)) {
+    if (const auto geometry = geometryOfDisplay(displayId)) {
         pixelsPerPoint = static_cast<float>(width / geometry->widthPoints);
     }
     std::thread([pixels, width, height, pixelsPerPoint] {
@@ -1542,55 +1543,7 @@ int main()
     AnalysisWorker worker(mailbox);
     auto capture = createScreenCaptureSource();
 
-    std::mutex statusMutex;
-    std::string captureStatus = "starting";
-    std::atomic<bool> captureDead{false};
-    capture->setStatusCallback([&](const std::string& message) {
-        {
-            std::lock_guard lock(statusMutex);
-            captureStatus = message;
-        }
-        captureDead.store(true);
-    });
-
-    uint32_t captureDisplay = 0;
-    // The display the user chose to scope, held across stream restarts.
-    // Zero means "whichever the backend lists first" - the main display.
-    uint32_t desiredDisplay = 0;
-    const bool permissionGranted = capture->requestPermission() == CapturePermission::Granted;
-    const auto startCapture = [&]() -> bool {
-        const auto targets = capture->listTargets();
-        if (targets.empty()) {
-            return false;
-        }
-        const CaptureTarget* target = &targets.front();
-        if (desiredDisplay != 0) {
-            const auto wanted = std::find_if(targets.begin(), targets.end(), [&](const CaptureTarget& candidate) {
-                return candidate.displayId == desiredDisplay;
-            });
-            if (wanted == targets.end()) {
-                // The chosen display is disconnected. The scopes pause on
-                // the banner rather than silently jumping to another
-                // screen; the retry loop resumes the same region the
-                // moment the display returns.
-                std::lock_guard lock(statusMutex);
-                captureStatus = "display disconnected - scopes resume when it returns";
-                return false;
-            }
-            target = &*wanted;
-        }
-        if (!capture->start(*target, 30, mailbox)) {
-            return false;
-        }
-        captureDisplay = target->displayId;
-        desiredDisplay = target->displayId;
-        {
-            std::lock_guard lock(statusMutex);
-            captureStatus = "capturing " + target->description;
-        }
-        captureDead.store(false);
-        return true;
-    };
+    CaptureController captureController(*capture, mailbox);
     // The display under this window's center: full-screen capture is a
     // promise about the screen the user can see the scopes on.
     const auto displayOfWindow = [&]() -> std::optional<uint32_t> {
@@ -1602,14 +1555,9 @@ int main()
         glfwGetWindowSize(window, &windowWidth, &windowHeight);
         return displayAtPoint(DesktopPoint{windowX + windowWidth / 2.0, windowY + windowHeight / 2.0});
     };
-    if (permissionGranted) {
-        desiredDisplay = displayOfWindow().value_or(0);
-        startCapture();
-    } else {
-        std::lock_guard lock(statusMutex);
-        captureStatus =
-            "screen recording permission missing - grant it in System Settings and "
-            "relaunch";
+    if (captureController.requestPermission()) {
+        captureController.requestDisplay(displayOfWindow().value_or(0));
+        captureController.start();
     }
 
     // --- state, seeded from preferences ---
@@ -1726,15 +1674,10 @@ int main()
     uint64_t outputVersion = 0;
     AnalysisWorker::Output output;
     double lastActivity = glfwGetTime();
-    double nextCaptureRetry = 0.0;
 
     // Waking the display or unlocking the session can leave the stream a
-    // zombie: it either stops delivering without an error, or a retry that
-    // ran while the screen was locked started a stream bound to the wrong
-    // session. Both look alive, so the wake signal forces a restart -
-    // cheap on a screen that was just black.
-    std::atomic<bool> captureStale{false};
-    observeSystemWake([&captureStale] { captureStale.store(true); });
+    // zombie; the wake signal forces the controller to restart it.
+    observeSystemWake([&captureController] { captureController.markStale(); });
     double nextPreferencesSave = -1.0;
     DesktopPoint lastCursor{-1.0, -1.0};
 
@@ -1755,13 +1698,13 @@ int main()
                analysis.region.rightPercent >= 100.0 && analysis.region.bottomPercent >= 100.0;
     };
     const auto syncRegionBorder = [&] {
-        if (captureDisplay == 0) {
+        if (captureController.capturedDisplay() == 0) {
             return;
         }
         if (isFullRegion() || glfwGetWindowAttrib(window, GLFW_ICONIFIED)) {
             hideRegionBorder();
         } else {
-            showRegionBorder(captureDisplay, analysis.region);
+            showRegionBorder(captureController.capturedDisplay(), analysis.region);
         }
     };
     // The patch a pin-mode click samples, in interface points; the pin
@@ -1852,7 +1795,7 @@ int main()
         // Capture is a service that dies (lock screen, display sleep);
         // restarting it is our job.
         if (g_faceCheckRequested.exchange(false)) {
-            refreshFacePresence(worker, captureDisplay);
+            refreshFacePresence(worker, captureController.capturedDisplay());
         }
         if (g_iconifyChanged.exchange(false)) {
             syncRegionBorder();
@@ -1863,35 +1806,18 @@ int main()
             lastActivity = glfwGetTime();
         }
 
-        if (captureStale.exchange(false)) {
-            std::fprintf(stderr, "sidescopes: restarting capture after wake or unlock\n");
-            captureDead.store(true);
-            // Give the session a moment to finish coming back.
-            nextCaptureRetry = glfwGetTime() + 1.0;
-        }
-        if (permissionGranted && captureDead.load() && glfwGetTime() > nextCaptureRetry) {
-            capture->stop();
-            if (startCapture()) {
-                lastActivity = glfwGetTime();
-            } else {
-                nextCaptureRetry = glfwGetTime() + 2.0;
-            }
-        }
+        captureController.service(glfwGetTime());
 
         // With no region drawn, capture follows the display this window
         // sits on: the fallback stays predictable - you always scope the
         // screen you can see the scopes on. A drawn region pins capture
         // to its own display regardless of where the window goes.
-        if (permissionGranted && !captureDead.load() && !regionPicking && isFullRegion()) {
+        if (captureController.permissionGranted() && !captureController.dead() && !regionPicking && isFullRegion()) {
             const auto homeDisplay = displayOfWindow();
-            if (homeDisplay && *homeDisplay != captureDisplay) {
-                desiredDisplay = *homeDisplay;
-                capture->stop();
-                if (startCapture()) {
+            if (homeDisplay && *homeDisplay != captureController.capturedDisplay()) {
+                captureController.requestDisplay(*homeDisplay);
+                if (captureController.start()) {
                     lastActivity = glfwGetTime();
-                } else {
-                    captureDead.store(true);
-                    nextCaptureRetry = glfwGetTime() + 2.0;
                 }
             }
         }
@@ -1932,8 +1858,8 @@ int main()
         // Publish our own window rectangle (frame pixels, generous chrome
         // margins) so analysis masks it out of change detection.
         const auto frameSize = worker.latestFrameSize();
-        if (frameSize && captureDisplay != 0) {
-            if (const auto geometry = geometryOfDisplay(captureDisplay)) {
+        if (frameSize && captureController.capturedDisplay() != 0) {
+            if (const auto geometry = geometryOfDisplay(captureController.capturedDisplay())) {
                 int windowX = 0, windowY = 0, windowW = 0, windowH = 0;
                 glfwGetWindowPos(window, &windowX, &windowY);
                 glfwGetWindowSize(window, &windowW, &windowH);
@@ -1961,16 +1887,17 @@ int main()
         // itself is paused.
         std::optional<FloatColor> vectorscopeColor;
         std::optional<FloatColor> waveformColor;
-        if (captureDisplay != 0) {
+        if (captureController.capturedDisplay() != 0) {
             if (const auto cursor = globalCursorPosition()) {
                 if (std::abs(cursor->x - lastCursor.x) + std::abs(cursor->y - lastCursor.y) > 0.5) {
                     lastCursor = *cursor;
                     lastActivity = glfwGetTime();
                 }
                 std::optional<FloatColor> sampled;
-                const bool onTrackedDisplay = displayAtPoint(*cursor).value_or(0) == captureDisplay;
-                if (onTrackedDisplay && !captureDead.load() && frameSize) {
-                    if (const auto geometry = geometryOfDisplay(captureDisplay)) {
+                const bool onTrackedDisplay =
+                    displayAtPoint(*cursor).value_or(0) == captureController.capturedDisplay();
+                if (onTrackedDisplay && !captureController.dead() && frameSize) {
+                    if (const auto geometry = geometryOfDisplay(captureController.capturedDisplay())) {
                         const int pixelX = static_cast<int>((cursor->x - geometry->originX) * frameSize->width /
                                                             geometry->widthPoints);
                         const int pixelY = static_cast<int>((cursor->y - geometry->originY) * frameSize->height /
@@ -2453,7 +2380,7 @@ int main()
         };
         const int paneCount = static_cast<int>(view.stack().size());
         const ImVec2 area = ImGui::GetContentRegionAvail();
-        if (!permissionGranted) {
+        if (!captureController.permissionGranted()) {
             drawCaptureHelp("SideScopes cannot see the screen",
                             {
                                 "macOS requires the Screen Recording permission.",
@@ -2463,12 +2390,8 @@ int main()
                                 "3. Quit and reopen SideScopes",
                             },
                             true);
-        } else if (captureDead.load()) {
-            std::string status;
-            {
-                std::lock_guard lock(statusMutex);
-                status = captureStatus;
-            }
+        } else if (captureController.dead()) {
+            const std::string status = captureController.status();
             drawCaptureHelp("Screen capture was interrupted", {status, "Reconnecting automatically..."}, false);
         } else if (paneCount <= 1) {
             if (paneCount == 1) {
@@ -2735,10 +2658,7 @@ int main()
         if (showSettings) {
             ImGui::SetNextWindowSize(ImVec2(380, 0), ImGuiCond_FirstUseEver);
             ImGui::Begin("Settings", &showSettings, ImGuiWindowFlags_NoCollapse);
-            {
-                std::lock_guard lock(statusMutex);
-                ImGui::TextWrapped("capture: %s", captureStatus.c_str());
-            }
+            ImGui::TextWrapped("capture: %s", captureController.status().c_str());
             ImGui::Text("analysis %.2f ms | frames %llu | ui %.0f fps", output.accumulateMilliseconds,
                         static_cast<unsigned long long>(output.framesProcessed), static_cast<double>(io.Framerate));
             ImGui::Separator();
@@ -2797,7 +2717,7 @@ int main()
                 wantRegionPick.reset();
             }
         }
-        if (!regionPicking && wantRegionPick && captureDisplay != 0) {
+        if (!regionPicking && wantRegionPick && captureController.capturedDisplay() != 0) {
             hideRegionBorder();
             // The previous region's border must not leak into the analyzed
             // frame: its strokes read as rectangle edges and cut suggestions
@@ -2835,7 +2755,7 @@ int main()
             std::vector<SuggestedRegion> faceSuggestions;
             if (supportsFaceDetection()) {
                 worker.withLatestFrame([&](const FrameView& view) {
-                    const auto geometry = geometryOfDisplay(captureDisplay);
+                    const auto geometry = geometryOfDisplay(captureController.capturedDisplay());
                     const float pixelsPerPoint =
                         geometry ? static_cast<float>(view.width / geometry->widthPoints) : 1.0f;
                     faceSuggestions = buildFaceSuggestions(detectFaces(view, pixelsPerPoint), view.width, view.height);
@@ -2848,7 +2768,7 @@ int main()
                 PickerDisplay entry;
                 entry.displayId = target.displayId;
                 entry.windows = windowSuggestionsFor(target.displayId);
-                if (target.displayId == captureDisplay) {
+                if (target.displayId == captureController.capturedDisplay()) {
                     entry.faces = faceSuggestions;
                 }
                 pickerDisplays.push_back(std::move(entry));
@@ -2936,8 +2856,9 @@ int main()
                 // the single flavor's one pin - just puts things back.
                 std::optional<FloatColor> chip;
                 if (const auto cursor = globalCursorPosition()) {
-                    if (displayAtPoint(*cursor).value_or(0) == captureDisplay && !captureDead.load()) {
-                        if (const auto geometry = geometryOfDisplay(captureDisplay)) {
+                    if (displayAtPoint(*cursor).value_or(0) == captureController.capturedDisplay() &&
+                        !captureController.dead()) {
+                        if (const auto geometry = geometryOfDisplay(captureController.capturedDisplay())) {
                             const double spanX = PinSamplePoints * uiScale / geometry->widthPoints * 100.0;
                             const double spanY = PinSamplePoints * uiScale / geometry->heightPoints * 100.0;
                             RegionOfInterest patch;
@@ -2960,7 +2881,7 @@ int main()
 
                 if (poll.pinnedArea) {
                     std::optional<FloatColor> pinned;
-                    if (poll.displayId == captureDisplay && !captureDead.load()) {
+                    if (poll.displayId == captureController.capturedDisplay() && !captureController.dead()) {
                         pinned = averageFrameArea(*poll.pinnedArea);
                     } else {
                         std::lock_guard lock(screenSample->mutex);
@@ -2987,19 +2908,15 @@ int main()
                 // suggestion on another display would mean flapping the
                 // capture stream on every hover. The switch happens once,
                 // on confirmation.
-                if (poll.preview && poll.displayId == captureDisplay) {
+                if (poll.preview && poll.displayId == captureController.capturedDisplay()) {
                     applyRegion(*poll.preview);
                 }
                 if (poll.finished || !poll.active) {
                     regionPicking = false;
                     if (poll.confirmed) {
-                        if (poll.displayId != 0 && poll.displayId != captureDisplay) {
-                            desiredDisplay = poll.displayId;
-                            capture->stop();
-                            if (!startCapture()) {
-                                captureDead.store(true);
-                                nextCaptureRetry = glfwGetTime() + 2.0;
-                            }
+                        if (poll.displayId != 0 && poll.displayId != captureController.capturedDisplay()) {
+                            captureController.requestDisplay(poll.displayId);
+                            captureController.start();
                         }
                         applyRegion(*poll.confirmed);
                     } else if (!regionPickSwallowCancel) {
