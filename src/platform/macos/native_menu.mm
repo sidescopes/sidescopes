@@ -73,7 +73,7 @@ int showNativeContextMenu(const std::vector<NativeMenuItem>& items)
                 if (key == "Esc") {
                     entry.keyEquivalent = @"\x1B";
                 } else if (key.size() == 1) {
-                    const char lower = static_cast<char>(std::tolower(key[0]));
+                    const char lower = static_cast<char>(std::tolower(static_cast<unsigned char>(key[0])));
                     entry.keyEquivalent = [NSString stringWithFormat:@"%c", lower];
                 }
                 entry.keyEquivalentModifierMask = modifiers;

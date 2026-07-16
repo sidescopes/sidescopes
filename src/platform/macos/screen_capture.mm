@@ -162,10 +162,7 @@ public:
     void stop() override
     {
         if (!m_running.exchange(false)) {
-            m_handler.owner = nullptr;
-            m_stream = nil;
-            m_handler = nil;
-            m_mailbox = nullptr;
+            resetStreamState();
             return;
         }
         dispatch_semaphore_t done = dispatch_semaphore_create(0);
@@ -173,10 +170,7 @@ public:
           dispatch_semaphore_signal(done);
         }];
         dispatch_semaphore_wait(done, DISPATCH_TIME_FOREVER);
-        m_handler.owner = nullptr;
-        m_stream = nil;
-        m_handler = nil;
-        m_mailbox = nullptr;
+        resetStreamState();
     }
 
     void setStatusCallback(StatusCallback callback) override
@@ -240,6 +234,17 @@ public:
     }
 
 private:
+    // Drops the stream, its handler, and the mailbox link. Shared by both
+    // stop() paths - the already-stopped early return and the normal
+    // teardown after the stream has been asked to stop.
+    void resetStreamState()
+    {
+        m_handler.owner = nullptr;
+        m_stream = nil;
+        m_handler = nil;
+        m_mailbox = nullptr;
+    }
+
     bool fail(const std::string& message)
     {
         if (m_status) {

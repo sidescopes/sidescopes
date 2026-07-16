@@ -1,8 +1,6 @@
 #import <AppKit/AppKit.h>
 #import <CoreGraphics/CoreGraphics.h>
 
-#include <cstdlib>
-
 #include "platform/desktop.h"
 
 namespace sidescopes {
@@ -101,10 +99,14 @@ std::optional<uint32_t> displayUnderCursor()
     return displayAtPoint(*cursor);
 }
 
+// sampleScreenColorAsync (declared in desktop.h) samples the screen color at
+// a point; it lives in screen_capture.mm because it uses ScreenCaptureKit.
+
 std::string preferencesFilePath()
 {
-    const char* home = std::getenv("HOME");
-    return std::string(home ? home : ".") + "/Library/Application Support/SideScopes/preferences.txt";
+    NSString* home = NSHomeDirectory();
+    const std::string base = home.length > 0 ? home.UTF8String : ".";
+    return base + "/Library/Application Support/SideScopes/preferences.txt";
 }
 
 ModifierState currentModifiers()

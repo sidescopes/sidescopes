@@ -150,12 +150,12 @@ NSCursor* buildPinCursor(const std::optional<FloatColor>& color)
 @public
     // The active suggestion list in view coordinates, with labels - the
     // windows or the faces, depending on the mode.
-    std::vector<std::pair<NSRect, std::string>> suggestions_;
-    std::vector<std::pair<NSRect, std::string>> windows_;
-    std::vector<std::pair<NSRect, std::string>> faces_;
+    std::vector<std::pair<NSRect, std::string>> m_suggestions;
+    std::vector<std::pair<NSRect, std::string>> m_windows;
+    std::vector<std::pair<NSRect, std::string>> m_faces;
     // This application's own windows, in view coordinates: undimmed and
     // truly transparent, so clicks fall through to them.
-    std::vector<NSRect> exclusions_;
+    std::vector<NSRect> m_exclusions;
 }
 // NO = suggestion picking (windows or faces), YES = drag to draw.
 @property(nonatomic, assign) BOOL drawMode;
@@ -178,21 +178,20 @@ NSCursor* buildPinCursor(const std::optional<FloatColor>& color)
 
 @implementation SidescopesPickerView
 
-// 0 = pick a window, 1 = draw, 2 = pick a face, 3 = pin colors. Face
-// mode is offered even when no face was found: the honest answer is the
-// empty overlay saying so, not a key that silently does nothing.
-- (void)switchToMode:(int)mode
+// Face mode is offered even when no face was found: the honest answer is
+// the empty overlay saying so, not a key that silently does nothing.
+- (void)switchToMode:(sidescopes::RegionPickerMode)mode
 {
-    const BOOL draw = mode == 1;
-    const BOOL faces = mode == 2;
-    const BOOL pin = mode == 3;
+    const BOOL draw = mode == sidescopes::RegionPickerMode::Draw;
+    const BOOL faces = mode == sidescopes::RegionPickerMode::PickFaces;
+    const BOOL pin = mode == sidescopes::RegionPickerMode::PinColor;
     if (self.drawMode == draw && self.facesMode == faces && self.pinMode == pin) {
         return;
     }
     self.drawMode = draw;
     self.facesMode = faces;
     self.pinMode = pin;
-    suggestions_ = faces ? faces_ : windows_;
+    m_suggestions = faces ? m_faces : m_windows;
     self.hoveredSuggestion = -1;
     self.dragging = NO;
     [self.window invalidateCursorRectsForView:self];
@@ -205,8 +204,8 @@ NSCursor* buildPinCursor(const std::optional<FloatColor>& color)
 {
     NSInteger best = -1;
     CGFloat bestArea = CGFLOAT_MAX;
-    for (NSUInteger index = 0; index < suggestions_.size(); ++index) {
-        const NSRect rect = suggestions_[index].first;
+    for (NSUInteger index = 0; index < m_suggestions.size(); ++index) {
+        const NSRect rect = m_suggestions[index].first;
         if (!NSPointInRect(point, rect)) {
             continue;
         }
@@ -269,7 +268,7 @@ NSCursor* buildPinCursor(const std::optional<FloatColor>& color)
     for (const CGFloat candidate : candidates) {
         const NSRect probe = NSMakeRect(x, candidate, width, height);
         BOOL covered = NO;
-        for (const NSRect& exclusion : exclusions_) {
+        for (const NSRect& exclusion : m_exclusions) {
             if (NSIntersectsRect(NSInsetRect(probe, -12, -12), exclusion)) {
                 covered = YES;
                 break;
@@ -329,21 +328,21 @@ NSCursor* buildPinCursor(const std::optional<FloatColor>& color)
             // up front, so the answer is visible before any hovering. The
             // hovered one still gets the full accent treatment below.
             [[NSColor colorWithWhite:1 alpha:0.85] setStroke];
-            for (NSInteger i = 0; i < static_cast<NSInteger>(suggestions_.size()); ++i) {
+            for (NSInteger i = 0; i < static_cast<NSInteger>(m_suggestions.size()); ++i) {
                 if (i == self.hoveredSuggestion) {
                     continue;
                 }
-                [self punchRect:suggestions_[i].first];
-                NSBezierPath* outline = [NSBezierPath bezierPathWithRect:suggestions_[i].first];
+                [self punchRect:m_suggestions[i].first];
+                NSBezierPath* outline = [NSBezierPath bezierPathWithRect:m_suggestions[i].first];
                 outline.lineWidth = 1.5;
                 [outline stroke];
             }
         }
-        if (self.hoveredSuggestion >= 0 && self.hoveredSuggestion < static_cast<NSInteger>(suggestions_.size())) {
+        if (self.hoveredSuggestion >= 0 && self.hoveredSuggestion < static_cast<NSInteger>(m_suggestions.size())) {
             // Only the rectangle under the cursor is shown, washed with the
             // system accent like window selection in the macOS screenshot
             // interface. Outlining every candidate at once was clutter.
-            const auto& hovered = suggestions_[self.hoveredSuggestion];
+            const auto& hovered = m_suggestions[self.hoveredSuggestion];
             [self punchRect:hovered.first];
             [[[NSColor systemBlueColor] colorWithAlphaComponent:0.25] setFill];
             NSRectFillUsingOperation(hovered.first, NSCompositingOperationSourceOver);
@@ -360,9 +359,9 @@ NSCursor* buildPinCursor(const std::optional<FloatColor>& color)
                 withAttributes:labelAttributes];
         }
         if (self.facesMode) {
-            [self drawBanner:suggestions_.empty() ? @"No faces found on this screen" : @"Click a face"
+            [self drawBanner:m_suggestions.empty() ? @"No faces found on this screen" : @"Click a face"
                    secondary:@"[A] pick a window    [D] draw    [Esc] full screen"
-                preferCenter:suggestions_.empty()];
+                preferCenter:m_suggestions.empty()];
         } else {
             [self drawBanner:@"Click a window"
                    secondary:sidescopes::supportsFaceDetection() ? @"[F] pick a face    [D] draw    [Esc] full screen"
@@ -382,9 +381,9 @@ NSCursor* buildPinCursor(const std::optional<FloatColor>& color)
         }
         if (!self.dragging) {
             NSString* secondary = @"[Esc] full screen";
-            if (!windows_.empty() && sidescopes::supportsFaceDetection()) {
+            if (!m_windows.empty() && sidescopes::supportsFaceDetection()) {
                 secondary = @"[A] pick a window    [F] pick a face    [Esc] full screen";
-            } else if (!windows_.empty()) {
+            } else if (!m_windows.empty()) {
                 secondary = @"[A] pick a window    [Esc] full screen";
             }
             [self drawBanner:@"Drag to select an area" secondary:secondary preferCenter:NO];
@@ -497,7 +496,7 @@ NSCursor* buildPinCursor(const std::optional<FloatColor>& color)
             return;  // a miss keeps the picker open
         }
         self.picked = YES;
-        self.confirmedRect = suggestions_[hovered].first;
+        self.confirmedRect = m_suggestions[hovered].first;
         self.finished = YES;
         return;
     }
@@ -1001,16 +1000,16 @@ bool beginRegionPick(const std::vector<PickerDisplay>& displays, RegionPickerMod
         view.hoveredSuggestion = -1;
         const NSSize viewSize = screen.frame.size;
         for (const SuggestedRegion& suggestion : entry.windows) {
-            view->windows_.emplace_back(regionToViewRect(suggestion.region, viewSize), suggestion.label);
+            view->m_windows.emplace_back(regionToViewRect(suggestion.region, viewSize), suggestion.label);
         }
         for (const SuggestedRegion& suggestion : entry.faces) {
-            view->faces_.emplace_back(regionToViewRect(suggestion.region, viewSize), suggestion.label);
+            view->m_faces.emplace_back(regionToViewRect(suggestion.region, viewSize), suggestion.label);
         }
         view.drawMode = draw ? YES : NO;
         view.facesMode = faces ? YES : NO;
         view.pinMode = pin ? YES : NO;
         if (!draw && !pin) {
-            view->suggestions_ = faces ? view->faces_ : view->windows_;
+            view->m_suggestions = faces ? view->m_faces : view->m_windows;
         }
         overlay.contentView = view;
         overlay.acceptsMouseMovedEvents = YES;
@@ -1042,7 +1041,7 @@ bool beginRegionPick(const std::vector<PickerDisplay>& displays, RegionPickerMod
         window.level = NSStatusWindowLevel + 2;
     }
     for (PickerOverlay& overlay : g_pickerOverlays) {
-        overlay.view->exclusions_ = ownWindowExclusions(overlay.window.frame.origin);
+        overlay.view->m_exclusions = ownWindowExclusions(overlay.window.frame.origin);
     }
 
     // Force the app frontmost so the overlays own the mouse for the whole
@@ -1089,10 +1088,10 @@ RegionPickPoll pollRegionPick()
         lastExclusionRefresh = now;
         for (PickerOverlay& overlay : g_pickerOverlays) {
             std::vector<NSRect> exclusions = ownWindowExclusions(overlay.window.frame.origin);
-            if (exclusions.size() != overlay.view->exclusions_.size() ||
-                !std::equal(exclusions.begin(), exclusions.end(), overlay.view->exclusions_.begin(),
+            if (exclusions.size() != overlay.view->m_exclusions.size() ||
+                !std::equal(exclusions.begin(), exclusions.end(), overlay.view->m_exclusions.begin(),
                             [](const NSRect& a, const NSRect& b) { return NSEqualRects(a, b); })) {
-                overlay.view->exclusions_ = std::move(exclusions);
+                overlay.view->m_exclusions = std::move(exclusions);
                 overlay.view.needsDisplay = YES;
             }
         }
@@ -1147,8 +1146,8 @@ RegionPickPoll pollRegionPick()
         }
         if (!overlay.view.drawMode) {
             const NSInteger hovered = overlay.view.hoveredSuggestion;
-            if (hovered >= 0 && hovered < static_cast<NSInteger>(overlay.view->suggestions_.size())) {
-                poll.preview = regionFromView(overlay.view->suggestions_[hovered].first, overlay.size);
+            if (hovered >= 0 && hovered < static_cast<NSInteger>(overlay.view->m_suggestions.size())) {
+                poll.preview = regionFromView(overlay.view->m_suggestions[hovered].first, overlay.size);
                 poll.displayId = overlay.displayId;
                 break;
             }
@@ -1182,10 +1181,7 @@ void setRegionPickMode(RegionPickerMode mode)
         return;
     }
     for (PickerOverlay& overlay : g_pickerOverlays) {
-        [overlay.view switchToMode:(mode == RegionPickerMode::Draw        ? 1
-                                    : mode == RegionPickerMode::PickFaces ? 2
-                                    : mode == RegionPickerMode::PinColor  ? 3
-                                                                          : 0)];
+        [overlay.view switchToMode:mode];
     }
 }
 
