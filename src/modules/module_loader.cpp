@@ -33,8 +33,15 @@ void loadOne(const std::filesystem::path& file, ModuleRegistry& registry)
 #if defined(_WIN32)
     // The wide entry point matches the rest of the platform layer; a
     // module directory is never a search path, so the plain load suffices.
+    // A file that is not a valid image can raise the system's hard-error
+    // box instead of failing the call - on a headless machine nobody can
+    // dismiss it and the load blocks forever. The thread error mode turns
+    // it into the plain null return handled below.
     const std::wstring wide = file.wstring();
+    DWORD previousMode = 0;
+    SetThreadErrorMode(SEM_FAILCRITICALERRORS | SEM_NOOPENFILEERRORBOX, &previousMode);
     HMODULE handle = LoadLibraryW(wide.c_str());
+    SetThreadErrorMode(previousMode, nullptr);
     if (!handle) {
         std::fprintf(stderr, "sidescopes loader: LoadLibrary failed for %s\n", path.c_str());
         return;
