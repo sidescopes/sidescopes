@@ -4,6 +4,8 @@
 #include <cmath>
 #include <vector>
 
+#include "core/scopes/trace_response.h"
+
 namespace sidescopes {
 namespace {
 
@@ -314,7 +316,7 @@ void Vectorscope::mapBinsToImage(uint64_t sampleCount)
             // normalizing to the densest bin pushes everything else
             // down, and a linear ramp leaves the trace dim at any gain.
             const float normalized = static_cast<float>(std::log1p(static_cast<double>(count) * gain) * intensityScale);
-            brightness = std::pow(normalized, 0.65f);
+            brightness = applyMidDensityGamma(normalized);
         }
         const float whiteness = std::clamp((brightness - bloomKnee) * bloomScale, 0.0f, 0.9f);
         out[0] = static_cast<uint8_t>(

@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <cmath>
 
+#include "core/scopes/trace_response.h"
+
 namespace sidescopes {
 
 Histogram::Histogram()
@@ -126,6 +128,7 @@ void Histogram::mapBinsToImage()
         const double binPosition = std::clamp((x + 0.5) * Bins / m_width - 0.5, 0.0, Bins - 1.0);
         const int center = static_cast<int>(binPosition);
         const double t = binPosition - center;
+        const CatmullRomWeights<double> weights = catmullRomWeights(t);
         for (int channel = 0; channel < 3; ++channel) {
             const double* plane = heights.data() + static_cast<std::ptrdiff_t>(channel) * Bins;
             const auto at = [&](int index) { return plane[std::clamp(index, 0, Bins - 1)]; };
@@ -133,8 +136,7 @@ void Histogram::mapBinsToImage()
             const double p1 = at(center);
             const double p2 = at(center + 1);
             const double p3 = at(center + 2);
-            double height =
-                p1 + 0.5 * t * (p2 - p0 + t * (2.0 * p0 - 5.0 * p1 + 4.0 * p2 - p3 + t * (3.0 * (p1 - p2) + p3 - p0)));
+            double height = weights.w0 * p0 + weights.w1 * p1 + weights.w2 * p2 + weights.w3 * p3;
             // The spline may overshoot near sharp features; the plot
             // stays within the panel, and stretches between empty bins
             // stay empty.

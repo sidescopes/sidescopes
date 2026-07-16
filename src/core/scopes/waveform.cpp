@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <cmath>
 
+#include "core/scopes/trace_response.h"
+
 namespace sidescopes {
 namespace {
 
@@ -248,7 +250,7 @@ float waveformBrightness(float count, double gain, double intensityScale)
     // on the vectorscope: normalizing to the densest bin pushes
     // everything else down, and a linear ramp reads dim at any gain.
     const double normalized = std::log1p(static_cast<double>(count) * gain) * intensityScale / 255.0;
-    return static_cast<float>(255.0 * std::pow(normalized, 0.65));
+    return static_cast<float>(255.0 * applyMidDensityGamma(normalized));
 }
 
 // The four smoothed planes the composer reads, in draw order.
@@ -325,13 +327,11 @@ LevelSample levelSampleWeights(int y, int imageHeight, bool nativeHeight)
         const float position = (static_cast<float>(y) + 0.5f) * WaveformLevels / static_cast<float>(imageHeight) - 0.5f;
         const float floored = std::floor(position);
         tap.base = static_cast<int>(floored);
-        const float t = position - floored;
-        const float t2 = t * t;
-        const float t3 = t2 * t;
-        tap.weight0 = -0.5f * t3 + t2 - 0.5f * t;
-        tap.weight1 = 1.5f * t3 - 2.5f * t2 + 1.0f;
-        tap.weight2 = -1.5f * t3 + 2.0f * t2 + 0.5f * t;
-        tap.weight3 = 0.5f * t3 - 0.5f * t2;
+        const CatmullRomWeights<float> weights = catmullRomWeights(position - floored);
+        tap.weight0 = weights.w0;
+        tap.weight1 = weights.w1;
+        tap.weight2 = weights.w2;
+        tap.weight3 = weights.w3;
     }
     return tap;
 }
