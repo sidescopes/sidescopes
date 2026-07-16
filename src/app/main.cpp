@@ -921,6 +921,27 @@ void drawColorPicker(const std::optional<FloatColor>& liveColor, PinBoard& pins)
                       static_cast<int>(std::lround(pins.color(index).g)),
                       static_cast<int>(std::lround(pins.color(index).b)));
     };
+    // Signed values read cleanly in the fixed-width font, where the plus sign
+    // sits level with the digits and the line does not jiggle as numbers change.
+    // The interface font's plus rides low against the digits; the mono font
+    // aligns them.
+    const auto monoWidth = [](const char* text) {
+        pushHexFont();
+        const float measured = ImGui::CalcTextSize(text).x;
+        popHexFont();
+
+        return measured;
+    };
+    const auto monoTextDisabled = [](const char* text) {
+        pushHexFont();
+        ImGui::TextDisabled("%s", text);
+        popHexFont();
+    };
+    const auto monoText = [](const char* text) {
+        pushHexFont();
+        ImGui::TextUnformatted(text);
+        popHexFont();
+    };
 
     // The comparator: the live color, split against the selected
     // pin when one is loaded. Touching halves make small casts
@@ -1103,21 +1124,47 @@ void drawColorPicker(const std::optional<FloatColor>& liveColor, PinBoard& pins)
         const int matchPercent = static_cast<int>(std::clamp(100.0f - difference.deltaE, 0.0f, 100.0f));
         char matchValue[8];
         std::snprintf(matchValue, sizeof(matchValue), "%d%%", matchPercent);
-        const float matchValueX = area.x - ImGui::CalcTextSize(matchValue).x;
+        const float matchValueX = area.x - monoWidth(matchValue);
         const float matchLabelX = matchValueX - columnGap - ImGui::CalcTextSize("Match").x;
         char matchHelp[192];
         std::snprintf(matchHelp, sizeof(matchHelp),
                       "similarity to the live color: 100%% is identical, 0%% is as far apart as black and white "
                       "(CIEDE2000 difference %.1f) - sRGB assumed",
                       difference.deltaE);
-        char triplet[48];
-        std::snprintf(triplet, sizeof(triplet), "L %+d \xc2\xb7 C %+d \xc2\xb7 H %+d",
-                      static_cast<int>(std::lround(difference.lightness)),
-                      static_cast<int>(std::lround(difference.chroma)), static_cast<int>(std::lround(difference.hue)));
-        if (valuesStart + ImGui::CalcTextSize(triplet).x + columnGap <= matchLabelX) {
-            ImGui::SetCursorPosX(valuesStart);
-            ImGui::TextDisabled("%s", triplet);
-            ImGui::SetItemTooltip("live minus pinned: lightness, chroma, and hue weighted by chroma - sRGB assumed");
+        // Three groups - lightness, chroma, hue - each a label in the interface
+        // font over a value in the fixed-width font. The value follows its
+        // label directly, so a short value stays beside its own letter instead
+        // of drifting toward the next one; the group starts keep fixed strides
+        // sized for the widest value, so the letters never move as the numbers
+        // change, and the fixed-width digits keep the signs level.
+        const char* diffLabels[3] = {"L", "C", "H"};
+        const float diffValues[3] = {difference.lightness, difference.chroma, difference.hue};
+        const float diffValueColumn = monoWidth("+199");
+        float tripletWidth = 0.0f;
+        for (int component = 0; component < 3; ++component) {
+            tripletWidth += ImGui::CalcTextSize(diffLabels[component]).x + columnGap + diffValueColumn;
+            if (component < 2) {
+                tripletWidth += 2.0f * columnGap;
+            }
+        }
+        const char* diffHelp = "live minus pinned: lightness, chroma, and hue weighted by chroma - sRGB assumed";
+        if (valuesStart + tripletWidth + columnGap <= matchLabelX) {
+            float groupX = valuesStart;
+            for (int component = 0; component < 3; ++component) {
+                if (component == 0) {
+                    ImGui::SetCursorPosX(groupX);
+                } else {
+                    ImGui::SameLine(groupX);
+                }
+                ImGui::TextDisabled("%s", diffLabels[component]);
+                char value[8];
+                std::snprintf(value, sizeof(value), "%+d", static_cast<int>(std::lround(diffValues[component])));
+                const float labelWidth = ImGui::CalcTextSize(diffLabels[component]).x;
+                ImGui::SameLine(groupX + labelWidth + columnGap);
+                monoTextDisabled(value);
+                ImGui::SetItemTooltip("%s", diffHelp);
+                groupX += labelWidth + columnGap + diffValueColumn + 2.0f * columnGap;
+            }
             ImGui::SameLine(matchLabelX);
         } else {
             ImGui::SetCursorPosX(matchLabelX);
@@ -1125,7 +1172,7 @@ void drawColorPicker(const std::optional<FloatColor>& liveColor, PinBoard& pins)
         ImGui::TextDisabled("Match");
         ImGui::SetItemTooltip("%s", matchHelp);
         ImGui::SameLine(matchValueX);
-        ImGui::TextUnformatted(matchValue);
+        monoText(matchValue);
         ImGui::SetItemTooltip("%s", matchHelp);
     }
 
@@ -1139,13 +1186,150 @@ void drawColorPicker(const std::optional<FloatColor>& liveColor, PinBoard& pins)
     int removePin = -1;
     if (full) {
         ImGui::BeginChild("##pin-deck", ImVec2(0, 0));
+        // Fixed left part: the remove cross at the very edge, a clear gap, the
+        // swatch, then the hex in its own column. The numeric columns follow at
+        // fixed strides. Width decisions use the child's own content region:
+        // the pane width measured outside ignores this child's scrollbar, and
+        // the difference clipped the last column under it.
+        const float deckWidth = ImGui::GetContentRegionAvail().x;
+        const float hexColumn = monoWidth("#DDDDDD");
+        const float swatchX = lineHeight + 3.0f * columnGap;
+        const float hexX = swatchX + lineHeight + columnGap;
+        const float leftPartEnd = hexX + hexColumn;
+        // Numeric columns, each sized for its widest value or its header,
+        // whichever is wider. Match reads a percentage, L/C/H the CIELAB
+        // difference, R/G/B the per-channel percentage.
+        const float matchCol = std::max(monoWidth("100%"), ImGui::CalcTextSize("Match").x);
+        const char* lchLabels[3] = {"L", "C", "H"};
+        const char* rgbLabels[3] = {"R", "G", "B"};
+        float lchCol[3];
+        float rgbCol[3];
+        for (int column = 0; column < 3; ++column) {
+            lchCol[column] = std::max(monoWidth("+199"), ImGui::CalcTextSize(lchLabels[column]).x);
+            rgbCol[column] = std::max(monoWidth("+100%"), ImGui::CalcTextSize(rgbLabels[column]).x);
+        }
+        const float lchGroupWidth = lchCol[0] + lchCol[1] + lchCol[2] + 2.0f * (2.0f * columnGap);
+        const float rgbGroupWidth = rgbCol[0] + rgbCol[1] + rgbCol[2] + 2.0f * (2.0f * columnGap);
+        // Progressive disclosure: Match first, then L/C/H, then R/G/B, each group
+        // admitted only if the whole block still clears the hex column. A group
+        // shows in every row or none, so the decision is made once here.
+        const float blockGap = 3.0f * columnGap;
+        float numericBlockWidth = 0.0f;
+        const auto admitGroup = [&](float groupWidth) {
+            const float tentative =
+                numericBlockWidth + (numericBlockWidth > 0.0f ? 3.0f * columnGap : 0.0f) + groupWidth;
+            if (leftPartEnd + blockGap + tentative <= deckWidth) {
+                numericBlockWidth = tentative;
+
+                return true;
+            }
+
+            return false;
+        };
+        const bool showMatch = admitGroup(matchCol);
+        const bool showLch = showMatch && admitGroup(lchGroupWidth);
+        const bool showRgb = showLch && admitGroup(rgbGroupWidth);
+        // Right edges of every visible column, walked left to right from the
+        // block's left edge; the header and each row share them. The block
+        // anchors just past the hex column rather than against the pane's far
+        // edge, so a wide pane keeps the table together instead of stretching
+        // a gap through its middle.
+        float matchRight = 0.0f;
+        float lchRight[3] = {0.0f, 0.0f, 0.0f};
+        float rgbRight[3] = {0.0f, 0.0f, 0.0f};
+        float walk = leftPartEnd + blockGap;
+        if (showMatch) {
+            matchRight = walk + matchCol;
+            walk = matchRight;
+        }
+        if (showLch) {
+            walk += 3.0f * columnGap;
+            for (int column = 0; column < 3; ++column) {
+                if (column > 0) {
+                    walk += 2.0f * columnGap;
+                }
+                lchRight[column] = walk + lchCol[column];
+                walk = lchRight[column];
+            }
+        }
+        if (showRgb) {
+            walk += 3.0f * columnGap;
+            for (int column = 0; column < 3; ++column) {
+                if (column > 0) {
+                    walk += 2.0f * columnGap;
+                }
+                rgbRight[column] = walk + rgbCol[column];
+                walk = rgbRight[column];
+            }
+        }
+        const char* matchTip =
+            "similarity to the live color: 100% is identical, 0% is as far apart as black and "
+            "white (CIEDE2000) - sRGB assumed";
+        const char* lchTip =
+            "lightness, chroma, and hue difference, live minus pinned - hue weighted by chroma, "
+            "sRGB assumed";
+        const char* rgbTip = "channel difference, live minus pinned";
+        // Header row: each label centers over the ink of a typical value - a
+        // sign and two digits, right-aligned - rather than over the column box,
+        // whose left slack exists only for the widest values. Nothing sits
+        // above the cross, swatch, or hex.
+        const float lchTypical = monoWidth("+34");
+        const float rgbTypical = monoWidth("+34%");
+        const float matchTypical = monoWidth("77%");
+        bool firstHeader = true;
+        const auto headerCell = [&](float colRight, float typicalWidth, const char* label, const char* tip) {
+            const float headerX = colRight - (typicalWidth + ImGui::CalcTextSize(label).x) / 2.0f;
+            if (firstHeader) {
+                ImGui::SetCursorPosX(headerX);
+                firstHeader = false;
+            } else {
+                ImGui::SameLine(headerX);
+            }
+            ImGui::TextDisabled("%s", label);
+            ImGui::SetItemTooltip("%s", tip);
+        };
+        if (showMatch) {
+            headerCell(matchRight, matchTypical, "Match", matchTip);
+        }
+        if (showLch) {
+            headerCell(lchRight[0], lchTypical, "L", lchTip);
+            headerCell(lchRight[1], lchTypical, "C", lchTip);
+            headerCell(lchRight[2], lchTypical, "H", lchTip);
+        }
+        if (showRgb) {
+            headerCell(rgbRight[0], rgbTypical, "R", rgbTip);
+            headerCell(rgbRight[1], rgbTypical, "G", rgbTip);
+            headerCell(rgbRight[2], rgbTypical, "B", rgbTip);
+        }
         for (std::size_t index = 0; index < pins.size(); ++index) {
             char pinId[24];
             std::snprintf(pinId, sizeof(pinId), "##pin-%d", static_cast<int>(index));
             char pinHex[8];
             pinHexOf(index, pinHex);
             const bool selected = static_cast<int>(index) == pins.comparator();
-            const float rowTop = ImGui::GetCursorScreenPos().y;
+            const float rowPosY = ImGui::GetCursorPosY();
+            const float textDrop = (lineHeight - ImGui::GetFontSize()) / 2.0f;
+            // The remove cross leads the row: a frameless glyph, quiet gray until
+            // hovered, red at the moment of intent, then a clear gap before the
+            // swatch so the two never trade misclicks.
+            char closeId[24];
+            std::snprintf(closeId, sizeof(closeId), "##unpin-%d", static_cast<int>(index));
+            if (ImGui::InvisibleButton(closeId, ImVec2(lineHeight, lineHeight))) {
+                removePin = static_cast<int>(index);
+            }
+            ImGui::SetItemTooltip("remove this pin");
+            const ImVec2 crossLo = ImGui::GetItemRectMin();
+            const ImVec2 crossHi = ImGui::GetItemRectMax();
+            const ImVec2 crossCenter = ImVec2((crossLo.x + crossHi.x) / 2.0f, (crossLo.y + crossHi.y) / 2.0f);
+            const float arm = lineHeight * 0.17f;
+            const ImU32 crossInk = ImGui::IsItemHovered() ? IM_COL32(235, 90, 90, 255) : IM_COL32(150, 150, 150, 180);
+            ImDrawList* cross = ImGui::GetWindowDrawList();
+            cross->AddLine(ImVec2(crossCenter.x - arm, crossCenter.y - arm),
+                           ImVec2(crossCenter.x + arm, crossCenter.y + arm), crossInk, 1.4f);
+            cross->AddLine(ImVec2(crossCenter.x - arm, crossCenter.y + arm),
+                           ImVec2(crossCenter.x + arm, crossCenter.y - arm), crossInk, 1.4f);
+            // The swatch: click loads it into the comparator, right-click manages.
+            ImGui::SameLine(swatchX);
             if (ImGui::ColorButton(pinId, swatchColor(pins.color(index)),
                                    ImGuiColorEditFlags_NoTooltip | ImGuiColorEditFlags_NoDragDrop,
                                    ImVec2(lineHeight, lineHeight))) {
@@ -1167,11 +1351,9 @@ void drawColorPicker(const std::optional<FloatColor>& liveColor, PinBoard& pins)
                                   0, 2.0f);
                 ringDraw->AddRect(lo, hi, IM_COL32(235, 235, 235, 235), 0.0f, 0, 1.5f);
             }
-            // Text centers against the taller swatch instead of
-            // hanging from the row's top edge.
-            const float textDrop = (lineHeight - ImGui::GetFontSize()) / 2.0f;
-            ImGui::SameLine();
-            ImGui::SetCursorPosY(ImGui::GetCursorPosY() + textDrop);
+            // Hex, centered against the taller swatch, click to copy.
+            ImGui::SameLine(hexX);
+            ImGui::SetCursorPosY(rowPosY + textDrop);
             pushHexFont();
             ImGui::TextUnformatted(pinHex);
             popHexFont();
@@ -1179,57 +1361,44 @@ void drawColorPicker(const std::optional<FloatColor>& liveColor, PinBoard& pins)
                 ImGui::SetClipboardText(pinHex);
             }
             ImGui::SetItemTooltip("click to copy");
-            // The deck asks which pin matches, so a row answers with the same
-            // match percentage the comparator speaks. In a fixed column, so
-            // nothing twitches as the cursor moves.
-            pushHexFont();
-            const float hexColumn = ImGui::CalcTextSize("#DDDDDD").x;
-            popHexFont();
-            const float matchStart = ImGui::GetCursorPosX() + lineHeight + columnGap + hexColumn + 2 * columnGap;
-            const float pinDeltaE = deltaE2000(labFromSrgb(pins.color(index)), labFromSrgb(color));
-            char match[8];
-            std::snprintf(match, sizeof(match), "%d%%", static_cast<int>(std::clamp(100.0f - pinDeltaE, 0.0f, 100.0f)));
-            char matchHelp[192];
-            std::snprintf(matchHelp, sizeof(matchHelp),
-                          "similarity to the live color: 100%% is identical, 0%% is as far apart as black and white "
-                          "(CIEDE2000 difference %.1f) - sRGB assumed",
-                          pinDeltaE);
-            ImGui::SameLine(matchStart + percentColumn - ImGui::CalcTextSize(match).x);
-            ImGui::SetCursorPosY(ImGui::GetCursorPosY() + textDrop);
-            ImGui::TextDisabled("%s", match);
-            ImGui::SetItemTooltip("%s", matchHelp);
-            // The cross centers on the text it sits beside, not
-            // on the taller row: glyphs center a couple of pixels
-            // above the row's middle, and the eye reads against
-            // the neighboring digits.
-            const float textCenterY = (ImGui::GetItemRectMin().y + ImGui::GetItemRectMax().y) / 2.0f;
-            char closeId[24];
-            std::snprintf(closeId, sizeof(closeId), "##unpin-%d", static_cast<int>(index));
-            // A frameless glyph, square and centered on the row:
-            // quiet gray until hovered, red at the moment of
-            // intent. A pill background fought the black pane.
-            // The remove control follows the match figure with a
-            // small margin instead of hugging the pane's right edge,
-            // where a narrow window pushed it over the numbers;
-            // in an extremely narrow pane it clips away instead.
-            ImGui::SameLine(matchStart + percentColumn + 3.0f * columnGap);
-            ImGui::SetCursorScreenPos(ImVec2(ImGui::GetCursorScreenPos().x, rowTop));
-            if (ImGui::InvisibleButton(closeId, ImVec2(lineHeight, lineHeight))) {
-                removePin = static_cast<int>(index);
+            // Numeric columns: each value right-aligned in its column and
+            // vertically centered like the hex.
+            const ColorDifference pinDiff = differenceFrom(labFromSrgb(pins.color(index)), labFromSrgb(color));
+            const auto numericCell = [&](float colRight, const char* value, const char* tip) {
+                ImGui::SameLine(colRight - monoWidth(value));
+                ImGui::SetCursorPosY(rowPosY + textDrop);
+                monoTextDisabled(value);
+                ImGui::SetItemTooltip("%s", tip);
+            };
+            if (showMatch) {
+                char match[8];
+                std::snprintf(match, sizeof(match), "%d%%",
+                              static_cast<int>(std::clamp(100.0f - pinDiff.deltaE, 0.0f, 100.0f)));
+                char matchHelp[192];
+                std::snprintf(matchHelp, sizeof(matchHelp),
+                              "similarity to the live color: 100%% is identical, 0%% is as far apart as black and "
+                              "white (CIEDE2000 difference %.1f) - sRGB assumed",
+                              pinDiff.deltaE);
+                numericCell(matchRight, match, matchHelp);
             }
-            ImGui::SetItemTooltip("remove this pin");
-            // A drawn cross, not a text glyph: the letter's ink
-            // sits below its box's center and reads misaligned no
-            // matter how the box is placed.
-            const ImVec2 crossCenter =
-                ImVec2((ImGui::GetItemRectMin().x + ImGui::GetItemRectMax().x) / 2.0f, textCenterY);
-            const float arm = lineHeight * 0.17f;
-            const ImU32 ink = ImGui::IsItemHovered() ? IM_COL32(235, 90, 90, 255) : IM_COL32(150, 150, 150, 180);
-            ImDrawList* cross = ImGui::GetWindowDrawList();
-            cross->AddLine(ImVec2(crossCenter.x - arm, crossCenter.y - arm),
-                           ImVec2(crossCenter.x + arm, crossCenter.y + arm), ink, 1.4f);
-            cross->AddLine(ImVec2(crossCenter.x - arm, crossCenter.y + arm),
-                           ImVec2(crossCenter.x + arm, crossCenter.y - arm), ink, 1.4f);
+            if (showLch) {
+                const float lchValues[3] = {pinDiff.lightness, pinDiff.chroma, pinDiff.hue};
+                for (int column = 0; column < 3; ++column) {
+                    char value[8];
+                    std::snprintf(value, sizeof(value), "%+d", static_cast<int>(std::lround(lchValues[column])));
+                    numericCell(lchRight[column], value, lchTip);
+                }
+            }
+            if (showRgb) {
+                const float pinChannels[3] = {pins.color(index).r, pins.color(index).g, pins.color(index).b};
+                const float liveChannels[3] = {color.r, color.g, color.b};
+                for (int column = 0; column < 3; ++column) {
+                    char value[8];
+                    std::snprintf(value, sizeof(value), "%+.0f%%",
+                                  (liveChannels[column] - pinChannels[column]) / 2.55f);
+                    numericCell(rgbRight[column], value, rgbTip);
+                }
+            }
         }
         drawPinnedMenu(pins);
         ImGui::EndChild();
