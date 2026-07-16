@@ -175,48 +175,153 @@ double paramFromWaveformMode(WaveformMode mode)
     }
 }
 
+// The worker's four built-in scopes, owned by the worker thread.
+struct WorkerScopes
+{
+    WorkerScope vectorscope;
+    WorkerScope waveform;
+    WorkerScope parade;
+    WorkerScope histogram;
+};
+
+// Pushes the typed settings into each module's parameter vocabulary. The
+// results are best-effort: a module that fails to configure keeps its last
+// image, which the UI simply stops advancing. Acknowledge the ignored
+// results explicitly.
+void configureScopes(WorkerScopes& scopes, const AnalysisSettings& settings)
+{
+    (void)scopes.vectorscope.instance.configure(
+        {{"gain", settings.vectorscope.gain},
+         {"stride", static_cast<double>(settings.vectorscope.samplingStride)},
+         {"matrix", settings.vectorscope.matrix == ChromaMatrix::Bt709 ? 1.0 : 0.0},
+         {"response", settings.vectorscope.response == TraceResponse::Linear ? 1.0 : 0.0}});
+    if (scopes.vectorscope.adaptive) {
+        scopes.vectorscope.adaptive->setImageSize(scopes.vectorscope.instance.raw(), settings.vectorscope.size,
+                                                  settings.vectorscope.size);
+    }
+    const std::vector<SsParamValue> waveformValues{{"gain", settings.waveform.gain},
+                                                   {"stride", static_cast<double>(settings.waveform.samplingStride)},
+                                                   {"mode", paramFromWaveformMode(settings.waveform.mode)}};
+    (void)scopes.waveform.instance.configure(waveformValues);
+    if (scopes.waveform.adaptive) {
+        scopes.waveform.adaptive->setImageSize(scopes.waveform.instance.raw(), settings.waveform.columns,
+                                               settings.waveform.imageHeight);
+    }
+    (void)scopes.parade.instance.configure(
+        {{"gain", settings.waveform.gain}, {"stride", static_cast<double>(settings.waveform.samplingStride)}});
+    if (scopes.parade.adaptive) {
+        scopes.parade.adaptive->setImageSize(scopes.parade.instance.raw(), settings.waveform.columns,
+                                             settings.waveform.imageHeight);
+    }
+    (void)scopes.histogram.instance.configure(
+        {{"stride", static_cast<double>(settings.histogram.samplingStride)},
+         {"style", settings.histogram.style == HistogramStyle::PerChannel ? 0.0 : 1.0}});
+    if (scopes.histogram.adaptive) {
+        scopes.histogram.adaptive->setImageSize(scopes.histogram.instance.raw(), settings.histogram.imageWidth,
+                                                settings.histogram.imageHeight);
+    }
+}
+
+// Runs each enabled scope over the region, returning the wall time the pass
+// took. Only the scopes on screen cost anything; a disabled scope's image
+// simply goes stale and the UI never draws it.
+double accumulateScopes(WorkerScopes& scopes, const SsFrameView& frame, const SsRect& region, uint32_t enabled)
+{
+    const auto started = std::chrono::steady_clock::now();
+    for (WorkerScope* scope : {&scopes.vectorscope, &scopes.waveform, &scopes.parade, &scopes.histogram}) {
+        if ((enabled & scope->bit) && scope->instance.valid()) {
+            (void)scope->instance.accumulate(frame, region);
+        }
+    }
+
+    return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count();
+}
+
+// Copies each enabled scope's freshly accumulated image into @p output. The
+// caller holds the output lock.
+void writeOutput(AnalysisWorker::Output& output, WorkerScopes& scopes, uint32_t enabled, double elapsedMs,
+                 uint64_t framesProcessed)
+{
+    if (enabled & ScopeVectorscope) {
+        copyImage(scopes.vectorscope.instance.image(), output.vectorscopeImage);
+    }
+    if (enabled & ScopeWaveform) {
+        copyImage(scopes.waveform.instance.image(), output.waveformImage);
+    }
+    if (enabled & ScopeWaveformParade) {
+        copyImage(scopes.parade.instance.image(), output.waveformParadeImage);
+    }
+    if (enabled & ScopeHistogram) {
+        copyImage(scopes.histogram.instance.image(), output.histogramImage);
+        if (scopes.histogram.outline) {
+            output.histogramOutline.resize(
+                scopes.histogram.outline->heights(scopes.histogram.instance.raw(), nullptr, 0));
+            scopes.histogram.outline->heights(scopes.histogram.instance.raw(), output.histogramOutline.data(),
+                                              static_cast<uint32_t>(output.histogramOutline.size()));
+        }
+    }
+
+    output.accumulateMilliseconds = elapsedMs;
+    output.framesProcessed = framesProcessed;
+    ++output.version;
+}
+
 }  // namespace
+
+bool AnalysisWorker::takeLatestFrame()
+{
+    auto frame = m_mailbox.takeLatest(std::chrono::milliseconds(100));
+    if (!frame) {
+        return false;
+    }
+
+    std::lock_guard lock(m_frameMutex);
+    if (m_hasFrame) {
+        m_mailbox.returnStorage(std::move(m_latestFrame));
+    }
+    m_latestFrame = std::move(*frame);
+    m_hasFrame = true;
+    m_consumedSequence.store(m_latestFrame.sequence, std::memory_order_relaxed);
+
+    return true;
+}
+
+bool AnalysisWorker::syncSettings(AnalysisSettings& settings, uint64_t& seenSettingsVersion)
+{
+    std::lock_guard lock(m_settingsMutex);
+    if (m_settingsVersion == seenSettingsVersion) {
+        return false;
+    }
+    settings = m_settings;
+    seenSettingsVersion = m_settingsVersion;
+
+    return true;
+}
+
+bool AnalysisWorker::hasWork(bool newFrame, bool settingsChanged) const
+{
+    std::lock_guard lock(m_frameMutex);
+
+    return m_hasFrame && (newFrame || settingsChanged);
+}
 
 void AnalysisWorker::run()
 {
     // Instances are created on this thread, which therefore owns them.
-    WorkerScope vectorscope = makeWorkerScope(ScopeVectorscope, "org.sidescopes.vectorscope");
-    WorkerScope waveform = makeWorkerScope(ScopeWaveform, "org.sidescopes.waveform");
-    WorkerScope parade = makeWorkerScope(ScopeWaveformParade, "org.sidescopes.parade");
-    WorkerScope histogram = makeWorkerScope(ScopeHistogram, "org.sidescopes.histogram");
+    WorkerScopes scopes{makeWorkerScope(ScopeVectorscope, "org.sidescopes.vectorscope"),
+                        makeWorkerScope(ScopeWaveform, "org.sidescopes.waveform"),
+                        makeWorkerScope(ScopeWaveformParade, "org.sidescopes.parade"),
+                        makeWorkerScope(ScopeHistogram, "org.sidescopes.histogram")};
     AnalysisSettings settings;
     uint64_t seenSettingsVersion = 0;
     uint64_t lastContentHash = 0;
     uint64_t framesProcessed = 0;
 
     while (!m_stopRequested.load(std::memory_order_relaxed)) {
-        bool newFrame = false;
-        if (auto frame = m_mailbox.takeLatest(std::chrono::milliseconds(100))) {
-            std::lock_guard lock(m_frameMutex);
-            if (m_hasFrame) {
-                m_mailbox.returnStorage(std::move(m_latestFrame));
-            }
-            m_latestFrame = std::move(*frame);
-            m_hasFrame = true;
-            newFrame = true;
-            m_consumedSequence.store(m_latestFrame.sequence, std::memory_order_relaxed);
-        }
-
-        bool settingsChanged = false;
-        {
-            std::lock_guard lock(m_settingsMutex);
-            if (m_settingsVersion != seenSettingsVersion) {
-                settings = m_settings;
-                seenSettingsVersion = m_settingsVersion;
-                settingsChanged = true;
-            }
-        }
-
-        {
-            std::lock_guard lock(m_frameMutex);
-            if (!m_hasFrame || (!newFrame && !settingsChanged)) {
-                continue;
-            }
+        const bool newFrame = takeLatestFrame();
+        const bool settingsChanged = syncSettings(settings, seenSettingsVersion);
+        if (!hasWork(newFrame, settingsChanged)) {
+            continue;
         }
 
         // Reading the frame without the lock is safe: this thread is the
@@ -236,81 +341,19 @@ void AnalysisWorker::run()
         lastContentHash = contentHash;
 
         if (settingsChanged) {
-            // The configure/accumulate results are best-effort here: a module
-            // that fails leaves its last image in place, which the UI simply
-            // stops advancing. Acknowledge the ignored result explicitly.
-            (void)vectorscope.instance.configure(
-                {{"gain", settings.vectorscope.gain},
-                 {"stride", static_cast<double>(settings.vectorscope.samplingStride)},
-                 {"matrix", settings.vectorscope.matrix == ChromaMatrix::Bt709 ? 1.0 : 0.0},
-                 {"response", settings.vectorscope.response == TraceResponse::Linear ? 1.0 : 0.0}});
-            if (vectorscope.adaptive) {
-                vectorscope.adaptive->setImageSize(vectorscope.instance.raw(), settings.vectorscope.size,
-                                                   settings.vectorscope.size);
-            }
-            const std::vector<SsParamValue> waveformValues{
-                {"gain", settings.waveform.gain},
-                {"stride", static_cast<double>(settings.waveform.samplingStride)},
-                {"mode", paramFromWaveformMode(settings.waveform.mode)}};
-            (void)waveform.instance.configure(waveformValues);
-            if (waveform.adaptive) {
-                waveform.adaptive->setImageSize(waveform.instance.raw(), settings.waveform.columns,
-                                                settings.waveform.imageHeight);
-            }
-            (void)parade.instance.configure(
-                {{"gain", settings.waveform.gain}, {"stride", static_cast<double>(settings.waveform.samplingStride)}});
-            if (parade.adaptive) {
-                parade.adaptive->setImageSize(parade.instance.raw(), settings.waveform.columns,
-                                              settings.waveform.imageHeight);
-            }
-            (void)histogram.instance.configure(
-                {{"stride", static_cast<double>(settings.histogram.samplingStride)},
-                 {"style", settings.histogram.style == HistogramStyle::PerChannel ? 0.0 : 1.0}});
-            if (histogram.adaptive) {
-                histogram.adaptive->setImageSize(histogram.instance.raw(), settings.histogram.imageWidth,
-                                                 settings.histogram.imageHeight);
-            }
+            configureScopes(scopes, settings);
         }
 
-        // Only the scopes on screen cost anything; a disabled scope's
-        // image simply goes stale and the UI never draws it.
         const uint32_t enabled = settings.enabledScopes;
         const SsFrameView boundaryFrame = toBoundaryFrame(view);
         const SsRect boundaryRegion{region.x, region.y, region.width, region.height};
-        const auto started = std::chrono::steady_clock::now();
-
-        for (WorkerScope* scope : {&vectorscope, &waveform, &parade, &histogram}) {
-            if ((enabled & scope->bit) && scope->instance.valid()) {
-                (void)scope->instance.accumulate(boundaryFrame, boundaryRegion);
-            }
-        }
-        const double elapsedMs =
-            std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count();
+        const double elapsedMs = accumulateScopes(scopes, boundaryFrame, boundaryRegion, enabled);
         if (newFrame) {
             ++framesProcessed;
         }
 
         std::lock_guard lock(m_outputMutex);
-        if (enabled & ScopeVectorscope) {
-            copyImage(vectorscope.instance.image(), m_output.vectorscopeImage);
-        }
-        if (enabled & ScopeWaveform) {
-            copyImage(waveform.instance.image(), m_output.waveformImage);
-        }
-        if (enabled & ScopeWaveformParade) {
-            copyImage(parade.instance.image(), m_output.waveformParadeImage);
-        }
-        if (enabled & ScopeHistogram) {
-            copyImage(histogram.instance.image(), m_output.histogramImage);
-            if (histogram.outline) {
-                m_output.histogramOutline.resize(histogram.outline->heights(histogram.instance.raw(), nullptr, 0));
-                histogram.outline->heights(histogram.instance.raw(), m_output.histogramOutline.data(),
-                                           static_cast<uint32_t>(m_output.histogramOutline.size()));
-            }
-        }
-        m_output.accumulateMilliseconds = elapsedMs;
-        m_output.framesProcessed = framesProcessed;
-        ++m_output.version;
+        writeOutput(m_output, scopes, enabled, elapsedMs, framesProcessed);
     }
 }
 

@@ -123,6 +123,18 @@ public:
 private:
     void run();
 
+    /// Takes the newest frame from the mailbox into m_latestFrame, returning
+    /// whether a frame arrived this pass. Runs only on the worker thread.
+    [[nodiscard]] bool takeLatestFrame();
+
+    /// Copies pending settings into @p settings under the settings lock,
+    /// advancing @p seenSettingsVersion and returning whether they changed.
+    [[nodiscard]] bool syncSettings(AnalysisSettings& settings, uint64_t& seenSettingsVersion);
+
+    /// Whether a frame is stored and either it or the settings just changed,
+    /// so this pass has analysis to do.
+    [[nodiscard]] bool hasWork(bool newFrame, bool settingsChanged) const;
+
     FrameMailbox& m_mailbox;
     std::thread m_thread;
     std::atomic<bool> m_stopRequested{false};
