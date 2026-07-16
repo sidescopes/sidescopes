@@ -414,27 +414,45 @@ bool iconButton(const char* id, RegionIcon icon, const char* tooltip, bool dimme
     return pressed;
 }
 
-// How many faces the platform detector saw on the captured screen at the
-// last check: -1 before any check. Refreshed in the background when the
-// application gains focus, so the face button can present itself honestly
-// - dimmed when there is currently nothing to pick. The state can go
-// stale while the user works elsewhere, so the button only dims, never
-// disables: pressing F always detects freshly.
-std::atomic<int> g_facesOnScreen{-1};
-std::atomic<bool> g_faceCheckRequested{false};
-std::atomic<bool> g_faceCheckRunning{false};
+// State the GLFW C callbacks and the background face-check worker reach
+// through the window user pointer, since C callbacks cannot capture. One
+// instance lives in main() for the whole run, so a raw pointer to it
+// outlives every callback GLFW fires and every thread main spawns. The
+// ImGui GLFW backend deliberately leaves the user pointer alone, so it is
+// ours to use.
+struct AppCallbackState
+{
+    // How many faces the platform detector saw on the captured screen at
+    // the last check: -1 before any check. Refreshed in the background
+    // when the application gains focus, so the face button can present
+    // itself honestly - dimmed when there is currently nothing to pick.
+    // The state can go stale while the user works elsewhere, so the button
+    // only dims, never disables: pressing F always detects freshly.
+    // Written by the async worker thread and read by the UI: stays atomic.
+    std::atomic<int> facesOnScreen{-1};
+    // Set by the GLFW focus callback, drained by the frame loop.
+    std::atomic<bool> faceCheckRequested{false};
+    // Guards a single in-flight async check; shared by the frame loop and
+    // the worker thread, so it stays atomic.
+    std::atomic<bool> faceCheckRunning{false};
+    // Minimizing is "get out of my way": the region border follows the
+    // window down and returns on restore. The flag wakes the frame loop's
+    // border sync when the iconified state flips either way. Set by the
+    // GLFW iconify callback.
+    std::atomic<bool> iconifyChanged{false};
+    // The fixed-width companion for values whose glyphs must align - hex
+    // codes most of all; null when no system monospace font was found, and
+    // the interface font stands in. Set once at font load, read by the
+    // picker draw code.
+    ImFont* monospaceFont{nullptr};
+};
 
-// Minimizing is "get out of my way": the region border follows the
-// window down and returns on restore. The flag wakes the frame loop's
-// border sync when the iconified state flips either way.
-std::atomic<bool> g_iconifyChanged{false};
-
-void refreshFacePresence(AnalysisWorker& worker, uint32_t displayId)
+void refreshFacePresence(AnalysisWorker& worker, uint32_t displayId, AppCallbackState& state)
 {
     if (!supportsFaceDetection()) {
         return;
     }
-    if (g_faceCheckRunning.exchange(true)) {
+    if (state.faceCheckRunning.exchange(true)) {
         return;
     }
     // Detection takes long enough to hitch a frame, so it runs on a copy
@@ -449,17 +467,22 @@ void refreshFacePresence(AnalysisWorker& worker, uint32_t displayId)
         std::memcpy(pixels->data(), view.bgra, pixels->size());
     });
     if (!captured || width == 0 || height == 0) {
-        g_faceCheckRunning.store(false);
+        state.faceCheckRunning.store(false);
         return;
     }
     float pixelsPerPoint = 1.0f;
     if (const auto geometry = geometryOfDisplay(displayId)) {
         pixelsPerPoint = static_cast<float>(width / geometry->widthPoints);
     }
-    std::thread([pixels, width, height, pixelsPerPoint] {
+    // The detached check captures a pointer to the state, valid because
+    // main() owns it and only starts checks from inside the frame loop;
+    // faceCheckRunning serializes to one in flight, and main drains that
+    // one after the loop before the state leaves scope.
+    AppCallbackState* statePtr = &state;
+    std::thread([pixels, width, height, pixelsPerPoint, statePtr] {
         const FrameView view{pixels->data(), width * 4, width, height, ColorSpaceHint::Srgb, 0};
-        g_facesOnScreen.store(static_cast<int>(detectFaces(view, pixelsPerPoint).size()));
-        g_faceCheckRunning.store(false);
+        statePtr->facesOnScreen.store(static_cast<int>(detectFaces(view, pixelsPerPoint).size()));
+        statePtr->faceCheckRunning.store(false);
     }).detach();
 }
 
@@ -525,12 +548,10 @@ void applyTheme()
     colors[ImGuiCol_TextDisabled] = ImVec4(0.50f, 0.50f, 0.53f, 1.0f);
 }
 
-// The fixed-width companion for values whose glyphs must align - hex
-// codes most of all; null when no system monospace font was found, and
-// the interface font stands in.
-ImFont* g_monospaceFont = nullptr;
-
-void loadInterfaceFont(GLFWwindow* window)
+// Loads the interface font and its fixed-width companion, returning the
+// monospace font so the picker can align hex codes with it; null when the
+// system had none and the interface font stands in.
+ImFont* loadInterfaceFont(GLFWwindow* window)
 {
     float scaleX = 2.0f;
     float scaleY = 2.0f;
@@ -545,12 +566,15 @@ void loadInterfaceFont(GLFWwindow* window)
             break;
         }
     }
+    ImFont* monospace = nullptr;
     for (const std::string& path : monospaceFontFiles()) {
-        if ((g_monospaceFont = io.Fonts->AddFontFromFileTTF(path.c_str(), 13.0f, &config))) {
+        if ((monospace = io.Fonts->AddFontFromFileTTF(path.c_str(), 13.0f, &config))) {
             break;
         }
     }
     (void)loaded;
+
+    return monospace;
 }
 
 // The interface is authored in 100%-scale units. On macOS GLFW window
@@ -745,7 +769,7 @@ std::vector<SuggestedRegion> windowSuggestionsFor(uint32_t displayId)
 // over it at display resolution, then adds the graticule and cursor-value
 // markers.
 void drawHistogram(const ScopeTexture& texture, const AnalysisWorker::Output& output, HistogramStyle style,
-                   bool showGraticule, const std::optional<FloatColor>& markerColor)
+                   bool showGraticule, const std::optional<FloatColor>& markerColor, std::vector<ImVec2>& points)
 {
     // No intensity gesture here: the histogram's scale adjusts
     // itself, the way every editor draws it.
@@ -760,7 +784,6 @@ void drawHistogram(const ScopeTexture& texture, const AnalysisWorker::Output& ou
         draw->PushClipRect(scope.origin, ImVec2(scope.origin.x + scope.size.x, scope.origin.y + scope.size.y), true);
         const bool bands = style == HistogramStyle::PerChannel;
         const int samples = std::clamp(static_cast<int>(scope.size.x), 128, 2 * Histogram::Bins);
-        static std::vector<ImVec2> points;
         for (int channel = 0; channel < 3; ++channel) {
             const float* plane = output.histogramOutline.data() + channel * Histogram::Bins;
             const float bandTop = scope.origin.y + (bands ? channel * scope.size.y / 3.0f : 0.0f);
@@ -836,20 +859,6 @@ void drawHistogram(const ScopeTexture& texture, const AnalysisWorker::Output& ou
 // native menu yields to this popup.
 // Hex codes render in the fixed-width font when one loaded, so
 // every code is the same width and columns anchor exactly.
-void pushHexFont()
-{
-    if (g_monospaceFont) {
-        ImGui::PushFont(g_monospaceFont);
-    }
-}
-
-void popHexFont()
-{
-    if (g_monospaceFont) {
-        ImGui::PopFont();
-    }
-}
-
 void drawPinnedMenu(PinBoard& pins)
 {
     if (!ImGui::BeginPopup("##pinned-menu")) {
@@ -875,8 +884,21 @@ void drawPinnedMenu(PinBoard& pins)
     ImGui::EndPopup();
 }
 
-void drawColorPicker(const std::optional<FloatColor>& liveColor, PinBoard& pins)
+void drawColorPicker(const std::optional<FloatColor>& liveColor, PinBoard& pins, ImFont* monospaceFont)
 {
+    // Hex and signed values align in the fixed-width font when the system
+    // had one; the font is pushed rather than sized by hand so global UI
+    // scale applies once. Null falls back to the interface font.
+    const auto pushHexFont = [monospaceFont] {
+        if (monospaceFont) {
+            ImGui::PushFont(monospaceFont);
+        }
+    };
+    const auto popHexFont = [monospaceFont] {
+        if (monospaceFont) {
+            ImGui::PopFont();
+        }
+    };
     // Three size tiers, few and spaced so resizing feels like
     // deliberate steps: a strip, a compact comparator, the full
     // reference deck. Order never changes - comparator, values,
@@ -929,19 +951,19 @@ void drawColorPicker(const std::optional<FloatColor>& liveColor, PinBoard& pins)
     // sits level with the digits and the line does not jiggle as numbers change.
     // The interface font's plus rides low against the digits; the mono font
     // aligns them.
-    const auto monoWidth = [](const char* text) {
+    const auto monoWidth = [&](const char* text) {
         pushHexFont();
         const float measured = ImGui::CalcTextSize(text).x;
         popHexFont();
 
         return measured;
     };
-    const auto monoTextDisabled = [](const char* text) {
+    const auto monoTextDisabled = [&](const char* text) {
         pushHexFont();
         ImGui::TextDisabled("%s", text);
         popHexFont();
     };
-    const auto monoText = [](const char* text) {
+    const auto monoText = [&](const char* text) {
         pushHexFont();
         ImGui::TextUnformatted(text);
         popHexFont();
@@ -1034,7 +1056,7 @@ void drawColorPicker(const std::optional<FloatColor>& liveColor, PinBoard& pins)
                       static_cast<int>(std::lround(std::clamp(swatch.b, 0.0f, 255.0f))));
         const float hexY = blockTop + 3.0f * rowHeight;
         const float hexX = leftHalf ? seamX - pad - hexWidth : seamX + pad;
-        swatchText(ImVec2(hexX, hexY), ink, shadow, blockHex, g_monospaceFont);
+        swatchText(ImVec2(hexX, hexY), ink, shadow, blockHex, monospaceFont);
     };
 
     // The live swatch renders but never copies: the sample follows the cursor,
@@ -1079,7 +1101,7 @@ void drawColorPicker(const std::optional<FloatColor>& liveColor, PinBoard& pins)
             const float valueX = columnStart + labelColumn + columnGap + percentColumn - ImGui::CalcTextSize(value).x;
             swatchText(ImVec2(valueX, baselineY), ink, shadow, value);
         }
-        swatchText(ImVec2(startX + 3.0f * channelStride, baselineY), ink, shadow, hex, g_monospaceFont);
+        swatchText(ImVec2(startX + 3.0f * channelStride, baselineY), ink, shadow, hex, monospaceFont);
     }
 
     // The same reading below the hero when the swatches are too small to carry
@@ -1486,6 +1508,11 @@ int main()
     const Preferences startup = loadPreferences(preferencesFilePath());
     const VersionInfo versionInfo = describeVersion(SIDESCOPES_VERSION, SIDESCOPES_GIT_DESCRIBE);
 
+    // Reached by the GLFW callbacks through the window user pointer and by
+    // the detached face-check worker through a raw pointer; outlives both
+    // by living for the whole of main().
+    AppCallbackState callbackState;
+
     std::unique_ptr<GraphicsBackend> graphics = createGraphicsBackend();
     graphics->setWindowHints();
     glfwWindowHint(GLFW_FLOATING, GLFW_TRUE);
@@ -1501,6 +1528,9 @@ int main()
         glfwTerminate();
         return 1;
     }
+    // The escape hatch for GLFW's non-capturing C callbacks: they recover
+    // the state through this pointer.
+    glfwSetWindowUserPointer(window, &callbackState);
     restoreWindowPlacement(window, startup);
     glfwShowWindow(window);
     // A development build wears its version in the title bar; a release keeps
@@ -1509,13 +1539,16 @@ int main()
         glfwSetWindowTitle(window, ("SideScopes " + versionInfo.display).c_str());
     }
     // Installed before the ImGui backend so it chains this callback
-    // instead of being replaced by it.
-    glfwSetWindowFocusCallback(window, [](GLFWwindow*, int focused) {
+    // instead of being replaced by it. The chained call carries the same
+    // window, so the state comes back through its user pointer.
+    glfwSetWindowFocusCallback(window, [](GLFWwindow* focusTarget, int focused) {
         if (focused) {
-            g_faceCheckRequested.store(true);
+            static_cast<AppCallbackState*>(glfwGetWindowUserPointer(focusTarget))->faceCheckRequested.store(true);
         }
     });
-    glfwSetWindowIconifyCallback(window, [](GLFWwindow*, int) { g_iconifyChanged.store(true); });
+    glfwSetWindowIconifyCallback(window, [](GLFWwindow* iconifyTarget, int) {
+        static_cast<AppCallbackState*>(glfwGetWindowUserPointer(iconifyTarget))->iconifyChanged.store(true);
+    });
     // The close button and Cmd+Q quit; intercepting the close to hide
     // instead swallowed BOTH, because the quit request reaches the
     // application as a window close. Dismissal belongs to Cmd+W and
@@ -1527,7 +1560,7 @@ int main()
     io.IniFilename = nullptr;  // window layout is ours to persist
     ImGui::StyleColorsDark();
     applyTheme();
-    loadInterfaceFont(window);
+    callbackState.monospaceFont = loadInterfaceFont(window);
     float uiScale = computeUiScale(window);
     const auto applyUiScale = [&uiScale](float scale) {
         uiScale = scale;
@@ -1796,6 +1829,10 @@ int main()
     };
     syncRegionBorder();
 
+    // Reused across frames for the histogram outline so the per-frame draw
+    // never reallocates; owned here rather than as a function-local static.
+    std::vector<ImVec2> histogramScratch;
+
     while (!glfwWindowShouldClose(window)) {
         // Idle: with no new output, no cursor motion, and no interaction,
         // wait for events at a slow tick instead of spinning at refresh.
@@ -1807,10 +1844,10 @@ int main()
 
         // Capture is a service that dies (lock screen, display sleep);
         // restarting it is our job.
-        if (g_faceCheckRequested.exchange(false)) {
-            refreshFacePresence(worker, captureController.capturedDisplay());
+        if (callbackState.faceCheckRequested.exchange(false)) {
+            refreshFacePresence(worker, captureController.capturedDisplay(), callbackState);
         }
-        if (g_iconifyChanged.exchange(false)) {
+        if (callbackState.iconifyChanged.exchange(false)) {
             syncRegionBorder();
             lastActivity = glfwGetTime();
         }
@@ -2235,7 +2272,7 @@ int main()
         // most often dimmed, and a disabled button reads best at the
         // row's edge.
         if (supportsFaceDetection()) {
-            const bool noneFound = g_facesOnScreen.load() == 0;
+            const bool noneFound = callbackState.facesOnScreen.load() == 0;
             std::snprintf(tooltip, sizeof(tooltip), "Pick a face (%s)%s", shortcuts.pickFaces.c_str(),
                           noneFound ? " - none on screen right now" : "");
             if (iconButton("##pick-face", RegionIcon::Face, tooltip, noneFound)) {
@@ -2378,9 +2415,10 @@ int main()
             if (kind == ScopeGlyph::Vectorscope) {
                 drawVectorscope();
             } else if (kind == ScopeGlyph::Histogram) {
-                drawHistogram(*histogramTexture, output, analysis.histogram.style, view.graticule(), vectorscopeColor);
+                drawHistogram(*histogramTexture, output, analysis.histogram.style, view.graticule(), vectorscopeColor,
+                              histogramScratch);
             } else if (kind == ScopeGlyph::ColorPicker) {
-                drawColorPicker(vectorscopeColor, pins);
+                drawColorPicker(vectorscopeColor, pins, callbackState.monospaceFont);
             } else {
                 drawWaveform(kind);
             }
@@ -2809,7 +2847,7 @@ int main()
                     const float pixelsPerPoint =
                         geometry ? static_cast<float>(view.width / geometry->widthPoints) : 1.0f;
                     faceSuggestions = buildFaceSuggestions(detectFaces(view, pixelsPerPoint), view.width, view.height);
-                    g_facesOnScreen.store(static_cast<int>(faceSuggestions.size()));
+                    callbackState.facesOnScreen.store(static_cast<int>(faceSuggestions.size()));
                 });
             }
 
@@ -2998,6 +3036,13 @@ int main()
             persistPreferences();
             nextPreferencesSave = -1.0;
         }
+    }
+
+    // No new face check starts once the loop is done, so drain the at-most
+    // one still in flight before callbackState leaves scope: its detached
+    // thread holds a pointer to it.
+    while (callbackState.faceCheckRunning.load()) {
+        std::this_thread::yield();
     }
 
     persistPreferences();
