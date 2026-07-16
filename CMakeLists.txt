@@ -318,7 +318,23 @@ if(APPLE OR WIN32)
     target_sources(SideScopes PRIVATE
         src/app/capture_controller.cpp
         src/app/pin_board.cpp
-        src/app/scope_view.cpp)
+        src/app/scope_view.cpp
+        src/app/version.cpp)
+
+    # Build-time version stamp. The custom target regenerates the header from
+    # `git describe` whenever it changes, so every build reflects the checked-
+    # out commit without relinking on a no-op build. Only the app includes it.
+    set(SIDESCOPES_VERSION_HEADER ${CMAKE_BINARY_DIR}/generated/sidescopes_version.h)
+    add_custom_target(sidescopes_version
+        BYPRODUCTS ${SIDESCOPES_VERSION_HEADER}
+        COMMAND ${CMAKE_COMMAND}
+            -DSIDESCOPES_VERSION=${PROJECT_VERSION}
+            -DSIDESCOPES_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+            -DSIDESCOPES_OUTPUT=${SIDESCOPES_VERSION_HEADER}
+            -P ${CMAKE_SOURCE_DIR}/cmake/GenerateVersion.cmake
+        COMMENT "Stamping build version")
+    add_dependencies(SideScopes sidescopes_version)
+    target_include_directories(SideScopes PRIVATE ${CMAKE_BINARY_DIR}/generated)
 
     if(SIDESCOPES_MODULES_DYNAMIC)
         # Nothing links the modules in dynamic mode; make the app wait for

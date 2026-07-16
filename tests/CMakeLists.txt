@@ -26,6 +26,7 @@ add_executable(sidescopes_tests
     test_pin_board.cpp
     test_scope_view.cpp
     test_capture_controller.cpp
+    test_version.cpp
 )
 
 # These are application-level state, not part of the core library the tests
@@ -33,7 +34,8 @@ add_executable(sidescopes_tests
 target_sources(sidescopes_tests PRIVATE
     ${CMAKE_SOURCE_DIR}/src/app/capture_controller.cpp
     ${CMAKE_SOURCE_DIR}/src/app/pin_board.cpp
-    ${CMAKE_SOURCE_DIR}/src/app/scope_view.cpp)
+    ${CMAKE_SOURCE_DIR}/src/app/scope_view.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/version.cpp)
 
 # The Windows platform layer's pure logic - region geometry, UTF-8/UTF-16
 # conversion, display-id parsing - is unit-tested on the Windows runner. The

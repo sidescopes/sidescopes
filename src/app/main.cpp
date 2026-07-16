@@ -23,6 +23,7 @@
 #include "app/capture_controller.h"
 #include "app/pin_board.h"
 #include "app/scope_view.h"
+#include "app/version.h"
 #include "core/analysis_worker.h"
 #include "core/color_lab.h"
 #include "core/frame_mailbox.h"
@@ -38,6 +39,7 @@
 #include "platform/native_menu.h"
 #include "platform/region_selection.h"
 #include "platform/screen_capture.h"
+#include "sidescopes_version.h"
 
 namespace {
 
@@ -1481,6 +1483,7 @@ int main()
     }
 
     const Preferences startup = loadPreferences(preferencesFilePath());
+    const VersionInfo versionInfo = describeVersion(SIDESCOPES_VERSION, SIDESCOPES_GIT_DESCRIBE);
 
     std::unique_ptr<GraphicsBackend> graphics = createGraphicsBackend();
     graphics->setWindowHints();
@@ -1499,6 +1502,11 @@ int main()
     }
     restoreWindowPlacement(window, startup);
     glfwShowWindow(window);
+    // A development build wears its version in the title bar; a release keeps
+    // the plain name.
+    if (versionInfo.development) {
+        glfwSetWindowTitle(window, ("SideScopes " + versionInfo.display).c_str());
+    }
     // Installed before the ImGui backend so it chains this callback
     // instead of being replaced by it.
     glfwSetWindowFocusCallback(window, [](GLFWwindow*, int focused) {
@@ -2687,6 +2695,7 @@ int main()
                 view.setSmoothing(TraceControl::Waveform, waveformMs);
             }
             ImGui::TextDisabled("modes and toggles: right-click a scope");
+            ImGui::TextDisabled("%s", versionInfo.display.c_str());
             ImGui::End();
         }
 
