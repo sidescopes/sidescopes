@@ -1099,21 +1099,10 @@ Gdiplus::PointF closeCenter(double scale)
             static_cast<Gdiplus::REAL>(region.Y - (BorderPad - CloseCornerInset + EdgeRing) * scale)};
 }
 
-unsigned borderZoneAtPoint(double x, double y, double scale)
+// The corner grab zones: within CornerZone of a corner, a drag resizes
+// both axes. ZoneNone when the point is not in a corner.
+unsigned cornerZoneAt(const Gdiplus::RectF& region, double x, double y, double scale)
 {
-    const Gdiplus::RectF region = borderRegionLocal(scale);
-    if (region.Contains(static_cast<Gdiplus::REAL>(x), static_cast<Gdiplus::REAL>(y))) {
-        return ZoneNone;  // click-through anyway
-    }
-    if (closeVisible(scale)) {
-        const Gdiplus::PointF center = closeCenter(scale);
-        const double dx = x - center.X;
-        const double dy = y - center.Y;
-        const double hit = CloseHitRadius * scale;
-        if (dx * dx + dy * dy <= hit * hit) {
-            return ZoneClose;
-        }
-    }
     const double corner = CornerZone * scale;
     const bool nearLeft = x < region.X + corner;
     const bool nearRight = x > region.GetRight() - corner;
@@ -1125,6 +1114,13 @@ unsigned borderZoneAtPoint(double x, double y, double scale)
         zone |= nearTop ? ZoneTop : ZoneBottom;
         return zone;
     }
+    return ZoneNone;
+}
+
+// The single-edge grab zones at each edge's midpoint; anywhere else on the
+// band moves the whole region.
+unsigned edgeOrMoveZoneAt(const Gdiplus::RectF& region, double x, double y, double scale)
+{
     const double midpoint = MidpointZone * scale;
     const bool midX = std::abs(x - (region.X + region.Width / 2)) <= midpoint;
     const bool midY = std::abs(y - (region.Y + region.Height / 2)) <= midpoint;
@@ -1141,6 +1137,28 @@ unsigned borderZoneAtPoint(double x, double y, double scale)
         return ZoneRight;
     }
     return ZoneMove;
+}
+
+unsigned borderZoneAtPoint(double x, double y, double scale)
+{
+    const Gdiplus::RectF region = borderRegionLocal(scale);
+    if (region.Contains(static_cast<Gdiplus::REAL>(x), static_cast<Gdiplus::REAL>(y))) {
+        return ZoneNone;  // click-through anyway
+    }
+    if (closeVisible(scale)) {
+        const Gdiplus::PointF center = closeCenter(scale);
+        const double dx = x - center.X;
+        const double dy = y - center.Y;
+        const double hit = CloseHitRadius * scale;
+        if (dx * dx + dy * dy <= hit * hit) {
+            return ZoneClose;
+        }
+    }
+    const unsigned corner = cornerZoneAt(region, x, y, scale);
+    if (corner != ZoneNone) {
+        return corner;
+    }
+    return edgeOrMoveZoneAt(region, x, y, scale);
 }
 
 void applyBorderCursor(unsigned zone)
@@ -1165,6 +1183,101 @@ void applyBorderCursor(unsigned zone)
         return;
     }
     SetCursor(LoadCursorW(nullptr, horizontal ? IDC_SIZEWE : IDC_SIZENS));
+}
+
+// The whole grab band is muted hazard tape, its own light-dark
+// alternation visible on any content. The interior is never painted
+// and therefore stays click-through.
+void paintBorderBand(Gdiplus::Graphics& canvas, const Gdiplus::RectF& region, double scale)
+{
+    const auto bandPad = static_cast<Gdiplus::REAL>(BorderPad * scale);
+    const auto ring = static_cast<Gdiplus::REAL>(EdgeRing * scale);
+    Gdiplus::RectF band(region.X - bandPad, region.Y - bandPad, region.Width + 2 * bandPad,
+                        region.Height + 2 * bandPad);
+    // The stripes stop short of the measured-edge ring: crossing it would
+    // read as the band bleeding into the measured area.
+    Gdiplus::RectF stripeHole(region.X - ring, region.Y - ring, region.Width + 2 * ring, region.Height + 2 * ring);
+    canvas.SetClip(band);
+    canvas.ExcludeClip(stripeHole);
+    if (Gdiplus::TextureBrush* stripes = stripeBrushFor(scale)) {
+        canvas.FillRectangle(stripes, band);
+    } else {
+        // Out of memory for a tile the size of a coin; the plain base
+        // keeps the band visible.
+        Gdiplus::SolidBrush bandBrush(Gdiplus::Color(115, 26, 26, 26));
+        canvas.FillRectangle(&bandBrush, band);
+    }
+    canvas.ResetClip();
+}
+
+// The measured edge is a filled ring spanning exactly from the region
+// to the stripes, with white dashes riding over the dark base so one
+// of the two tones survives any background.
+void paintBorderEdgeRing(Gdiplus::Graphics& canvas, const Gdiplus::RectF& region, double scale)
+{
+    const auto ring = static_cast<Gdiplus::REAL>(EdgeRing * scale);
+    Gdiplus::RectF stripeHole(region.X - ring, region.Y - ring, region.Width + 2 * ring, region.Height + 2 * ring);
+    canvas.SetClip(stripeHole);
+    canvas.ExcludeClip(region);
+    Gdiplus::SolidBrush ringBrush(Gdiplus::Color(217, 26, 26, 26));
+    canvas.FillRectangle(&ringBrush, stripeHole);
+    canvas.ResetClip();
+    Gdiplus::Pen dashPen(Gdiplus::Color(242, 247, 247, 247), ring);
+    const Gdiplus::REAL dashPattern[2] = {static_cast<Gdiplus::REAL>(4.0 * scale / (ring > 0 ? ring : 1)),
+                                          static_cast<Gdiplus::REAL>(4.0 * scale / (ring > 0 ? ring : 1))};
+    dashPen.SetDashPattern(dashPattern, 2);
+    canvas.DrawRectangle(
+        &dashPen, Gdiplus::RectF(region.X - ring / 2, region.Y - ring / 2, region.Width + ring, region.Height + ring));
+}
+
+// Eight handle dots - corners and edge midpoints - centered on the
+// measurement line: small gray circles straddling the selection edge.
+void paintBorderHandles(Gdiplus::Graphics& canvas, const Gdiplus::RectF& region, double scale)
+{
+    const auto radius = static_cast<Gdiplus::REAL>(HandleRadius * scale);
+    const auto handle = [&](Gdiplus::REAL x, Gdiplus::REAL y) {
+        const Gdiplus::RectF circle(x - radius, y - radius, radius * 2, radius * 2);
+        Gdiplus::SolidBrush fill(Gdiplus::Color(255, 199, 199, 199));
+        canvas.FillEllipse(&fill, circle);
+        // A dark rim beneath the near-white ring keeps the dot visible on
+        // a bright sky; the ring matches the measurement line, so the dots
+        // and the line read as one instrument.
+        Gdiplus::Pen rim(Gdiplus::Color(179, 26, 26, 26), static_cast<Gdiplus::REAL>(2.0 * scale));
+        canvas.DrawEllipse(&rim, circle);
+        Gdiplus::Pen bright(Gdiplus::Color(242, 247, 247, 247), static_cast<Gdiplus::REAL>(1.0 * scale));
+        canvas.DrawEllipse(&bright, circle);
+    };
+    handle(region.X, region.Y);
+    handle(region.X + region.Width / 2, region.Y);
+    handle(region.GetRight(), region.Y);
+    handle(region.X, region.Y + region.Height / 2);
+    handle(region.GetRight(), region.Y + region.Height / 2);
+    handle(region.X, region.GetBottom());
+    handle(region.X + region.Width / 2, region.GetBottom());
+    handle(region.GetRight(), region.GetBottom());
+}
+
+// The hover-revealed close button, in the handles' own visual
+// language: a dark disc where the dots are light, so it reads as an
+// action rather than a grip, with the same bright ring and an x.
+void paintBorderCloseButton(Gdiplus::Graphics& canvas, double scale)
+{
+    if (!closeVisible(scale)) {
+        return;
+    }
+    const Gdiplus::PointF center = closeCenter(scale);
+    const auto closeRadius = static_cast<Gdiplus::REAL>(CloseRadius * scale);
+    const Gdiplus::RectF disc(center.X - closeRadius, center.Y - closeRadius, closeRadius * 2, closeRadius * 2);
+    Gdiplus::SolidBrush discBrush(Gdiplus::Color(217, 26, 26, 26));
+    canvas.FillEllipse(&discBrush, disc);
+    Gdiplus::Pen discRing(Gdiplus::Color(242, 247, 247, 247), static_cast<Gdiplus::REAL>(1.0 * scale));
+    canvas.DrawEllipse(&discRing, disc);
+    const auto arm = static_cast<Gdiplus::REAL>((CloseRadius - 3.7) * scale);
+    Gdiplus::Pen cross(Gdiplus::Color(242, 247, 247, 247), static_cast<Gdiplus::REAL>(1.3 * scale));
+    cross.SetStartCap(Gdiplus::LineCapRound);
+    cross.SetEndCap(Gdiplus::LineCapRound);
+    canvas.DrawLine(&cross, center.X - arm, center.Y - arm, center.X + arm, center.Y + arm);
+    canvas.DrawLine(&cross, center.X - arm, center.Y + arm, center.X + arm, center.Y - arm);
 }
 
 void paintBorder()
@@ -1195,85 +1308,10 @@ void paintBorder()
     canvas.SetCompositingMode(Gdiplus::CompositingModeSourceOver);
     canvas.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
 
-    // The whole grab band is muted hazard tape, its own light-dark
-    // alternation visible on any content. The interior is never painted
-    // and therefore stays click-through.
-    const auto bandPad = static_cast<Gdiplus::REAL>(BorderPad * scale);
-    const auto ring = static_cast<Gdiplus::REAL>(EdgeRing * scale);
-    Gdiplus::RectF band(region.X - bandPad, region.Y - bandPad, region.Width + 2 * bandPad,
-                        region.Height + 2 * bandPad);
-    // The stripes stop short of the measured-edge ring: crossing it would
-    // read as the band bleeding into the measured area.
-    Gdiplus::RectF stripeHole(region.X - ring, region.Y - ring, region.Width + 2 * ring, region.Height + 2 * ring);
-    canvas.SetClip(band);
-    canvas.ExcludeClip(stripeHole);
-    if (Gdiplus::TextureBrush* stripes = stripeBrushFor(scale)) {
-        canvas.FillRectangle(stripes, band);
-    } else {
-        // Out of memory for a tile the size of a coin; the plain base
-        // keeps the band visible.
-        Gdiplus::SolidBrush bandBrush(Gdiplus::Color(115, 26, 26, 26));
-        canvas.FillRectangle(&bandBrush, band);
-    }
-    canvas.ResetClip();
-
-    // The measured edge is a filled ring spanning exactly from the region
-    // to the stripes, with white dashes riding over the dark base so one
-    // of the two tones survives any background.
-    canvas.SetClip(stripeHole);
-    canvas.ExcludeClip(region);
-    Gdiplus::SolidBrush ringBrush(Gdiplus::Color(217, 26, 26, 26));
-    canvas.FillRectangle(&ringBrush, stripeHole);
-    canvas.ResetClip();
-    Gdiplus::Pen dashPen(Gdiplus::Color(242, 247, 247, 247), ring);
-    const Gdiplus::REAL dashPattern[2] = {static_cast<Gdiplus::REAL>(4.0 * scale / (ring > 0 ? ring : 1)),
-                                          static_cast<Gdiplus::REAL>(4.0 * scale / (ring > 0 ? ring : 1))};
-    dashPen.SetDashPattern(dashPattern, 2);
-    canvas.DrawRectangle(
-        &dashPen, Gdiplus::RectF(region.X - ring / 2, region.Y - ring / 2, region.Width + ring, region.Height + ring));
-
-    // Eight handle dots - corners and edge midpoints - centered on the
-    // measurement line: small gray circles straddling the selection edge.
-    const auto radius = static_cast<Gdiplus::REAL>(HandleRadius * scale);
-    const auto handle = [&](Gdiplus::REAL x, Gdiplus::REAL y) {
-        const Gdiplus::RectF circle(x - radius, y - radius, radius * 2, radius * 2);
-        Gdiplus::SolidBrush fill(Gdiplus::Color(255, 199, 199, 199));
-        canvas.FillEllipse(&fill, circle);
-        // A dark rim beneath the near-white ring keeps the dot visible on
-        // a bright sky; the ring matches the measurement line, so the dots
-        // and the line read as one instrument.
-        Gdiplus::Pen rim(Gdiplus::Color(179, 26, 26, 26), static_cast<Gdiplus::REAL>(2.0 * scale));
-        canvas.DrawEllipse(&rim, circle);
-        Gdiplus::Pen bright(Gdiplus::Color(242, 247, 247, 247), static_cast<Gdiplus::REAL>(1.0 * scale));
-        canvas.DrawEllipse(&bright, circle);
-    };
-    handle(region.X, region.Y);
-    handle(region.X + region.Width / 2, region.Y);
-    handle(region.GetRight(), region.Y);
-    handle(region.X, region.Y + region.Height / 2);
-    handle(region.GetRight(), region.Y + region.Height / 2);
-    handle(region.X, region.GetBottom());
-    handle(region.X + region.Width / 2, region.GetBottom());
-    handle(region.GetRight(), region.GetBottom());
-
-    // The hover-revealed close button, in the handles' own visual
-    // language: a dark disc where the dots are light, so it reads as an
-    // action rather than a grip, with the same bright ring and an x.
-    if (closeVisible(scale)) {
-        const Gdiplus::PointF center = closeCenter(scale);
-        const auto closeRadius = static_cast<Gdiplus::REAL>(CloseRadius * scale);
-        const Gdiplus::RectF disc(center.X - closeRadius, center.Y - closeRadius, closeRadius * 2, closeRadius * 2);
-        Gdiplus::SolidBrush discBrush(Gdiplus::Color(217, 26, 26, 26));
-        canvas.FillEllipse(&discBrush, disc);
-        Gdiplus::Pen discRing(Gdiplus::Color(242, 247, 247, 247), static_cast<Gdiplus::REAL>(1.0 * scale));
-        canvas.DrawEllipse(&discRing, disc);
-        const auto arm = static_cast<Gdiplus::REAL>((CloseRadius - 3.7) * scale);
-        Gdiplus::Pen cross(Gdiplus::Color(242, 247, 247, 247), static_cast<Gdiplus::REAL>(1.3 * scale));
-        cross.SetStartCap(Gdiplus::LineCapRound);
-        cross.SetEndCap(Gdiplus::LineCapRound);
-        canvas.DrawLine(&cross, center.X - arm, center.Y - arm, center.X + arm, center.Y + arm);
-        canvas.DrawLine(&cross, center.X - arm, center.Y + arm, center.X + arm, center.Y - arm);
-    }
+    paintBorderBand(canvas, region, scale);
+    paintBorderEdgeRing(canvas, region, scale);
+    paintBorderHandles(canvas, region, scale);
+    paintBorderCloseButton(canvas, scale);
 
     surface.push(g_border.window, g_border.region.left - static_cast<int>(WindowPad * scale),
                  g_border.region.top - static_cast<int>(WindowPad * scale));
