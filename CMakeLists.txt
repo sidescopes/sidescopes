@@ -93,6 +93,9 @@ function(sidescopes_add_module name)
             # scans for the platform-native .dylib, so match it.
             set_target_properties(${name} PROPERTIES SUFFIX ".dylib")
         endif()
+        # Singular per-module flag that gates the module's ss_module_entry
+        # export; distinct from the plural SIDESCOPES_MODULES_DYNAMIC that
+        # switches the core registry over to the dynamic loader.
         target_compile_definitions(${name} PRIVATE SIDESCOPES_MODULE_DYNAMIC)
         # graticule.cpp (shared in core) bundles BuildVectorscopeGraticule,
         # which calls Vectorscope::Project, with the engine-agnostic

@@ -2,8 +2,7 @@
 // wraps the C++ engine in the C vtable. The engine stays idiomatic C++;
 // only this file speaks both languages, and no exception ever crosses.
 
-#include <algorithm>
-#include <cmath>
+#include <cstdio>
 #include <cstring>
 #include <string>
 
@@ -97,7 +96,7 @@ uint32_t strokeOf(GraticuleStroke stroke)
 uint32_t graticule(const SsScopeInstance* instance, SsGraticulePrimitive* primitives, uint32_t capacity)
 {
     try {
-        const VectorscopeGraticule graticule = buildVectorscopeGraticule(impl(instance)->engine);
+        const VectorscopeGraticule layout = buildVectorscopeGraticule(impl(instance)->engine);
         uint32_t needed = 0;
         const auto emit = [&](const SsGraticulePrimitive& primitive) {
             if (needed < capacity) {
@@ -105,7 +104,7 @@ uint32_t graticule(const SsScopeInstance* instance, SsGraticulePrimitive* primit
             }
             ++needed;
         };
-        for (const GraticuleLine& line : graticule.lines) {
+        for (const GraticuleLine& line : layout.lines) {
             SsGraticulePrimitive primitive{};
             primitive.kind = SS_PRIMITIVE_LINE;
             primitive.stroke = strokeOf(line.stroke);
@@ -116,7 +115,7 @@ uint32_t graticule(const SsScopeInstance* instance, SsGraticulePrimitive* primit
             emit(primitive);
         }
 
-        for (const GraticuleCircle& circle : graticule.circles) {
+        for (const GraticuleCircle& circle : layout.circles) {
             SsGraticulePrimitive primitive{};
             primitive.kind = SS_PRIMITIVE_CIRCLE;
             primitive.stroke = strokeOf(circle.stroke);
@@ -126,7 +125,7 @@ uint32_t graticule(const SsScopeInstance* instance, SsGraticulePrimitive* primit
             emit(primitive);
         }
 
-        for (const GraticuleTarget& target : graticule.targets) {
+        for (const GraticuleTarget& target : layout.targets) {
             SsGraticulePrimitive primitive{};
             primitive.kind = SS_PRIMITIVE_TARGET_BOX;
             primitive.stroke = SS_STROKE_ACCENT;
@@ -144,7 +143,7 @@ uint32_t graticule(const SsScopeInstance* instance, SsGraticulePrimitive* primit
     }
 }
 
-uint32_t markers(const SsScopeInstance* instance, SsColor color, SsMarker* markers, uint32_t capacity)
+uint32_t markers(const SsScopeInstance* instance, SsColor color, SsMarker* out, uint32_t capacity)
 {
     try {
         const auto point = impl(instance)->engine.project(FloatColor{color.r, color.g, color.b});
@@ -159,7 +158,7 @@ uint32_t markers(const SsScopeInstance* instance, SsColor color, SsMarker* marke
             marker.band_from = 0.0f;
             marker.band_to = 1.0f;
             marker.channel_mask = 0x7;
-            markers[0] = marker;
+            out[0] = marker;
         }
         return 1;
     } catch (...) {
@@ -213,16 +212,16 @@ const SsScopeDescriptor VectorscopeDescriptor{
     static_cast<uint32_t>(sizeof(Params) / sizeof(Params[0])),
 };
 
-bool moduleInit(void)
+bool moduleInit()
 {
     return true;
 }
 
-void moduleDeinit(void)
+void moduleDeinit()
 {
 }
 
-uint32_t scopeCount(void)
+uint32_t scopeCount()
 {
     return 1;
 }
@@ -240,6 +239,9 @@ SsScopeInstance* create(const char* scopeId, const SsHost*)
         }
 
         auto* self = new VectorscopeInstance;
+        // Push the constructed defaults through the engine explicitly, so the
+        // instance never relies on the engine's own ctor defaults matching.
+        self->engine.configure(self->settings);
         self->vtable.instance_data = self;
         self->vtable.configure = configure;
         self->vtable.accumulate = accumulate;

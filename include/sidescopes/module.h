@@ -21,7 +21,11 @@
  *   valid until the module's deinit.
  * - No exceptions or longjmp cross the boundary, either direction.
  * - Each side frees only what it allocated.
- * - Thread contracts are stated per function in brackets.
+ * - Thread contracts are stated per function in brackets:
+ *     [init-thread]   the single thread that calls init and deinit;
+ *     [owning-thread] the thread that created a given instance;
+ *     [any-thread]    callable from any thread, no ordering assumed;
+ *     [thread-safe]   callable concurrently from several threads.
  */
 
 #ifndef SIDESCOPES_MODULE_H
@@ -34,6 +38,9 @@
 extern "C" {
 #endif
 
+/* The host accepts a module when the majors are equal; the minor may
+ * differ, since a newer minor only adds optional, backward-compatible
+ * extensions. */
 #define SS_ABI_MAJOR 0u
 #define SS_ABI_MINOR 1u
 
@@ -42,7 +49,9 @@ extern "C" {
 #define SS_COLOR_SPACE_UNKNOWN 0u
 #define SS_COLOR_SPACE_SRGB 1u
 
-/* Host-owned; every field valid only for the duration of the call. */
+/* Host-owned; every field valid only for the duration of the call.
+ * `sequence` strictly increases per captured frame, so a scope handed the
+ * same frame twice can compare it to skip recomputation. */
 typedef struct SsFrameView
 {
     const uint8_t* bgra;
@@ -65,7 +74,10 @@ typedef struct SsColor
 } SsColor;
 
 /* Module-owned; valid until the next accumulate or destroy on the
- * instance that returned it. The host copies out what it keeps. */
+ * instance that returned it. The host copies out what it keeps and
+ * re-uploads its texture only when `sequence` changes, so a module
+ * advances `sequence` when the image content changes and leaves it as is
+ * to mean "identical to the last image". */
 typedef struct SsImageView
 {
     const uint8_t* rgba;
@@ -172,7 +184,9 @@ typedef struct SsHost
  * Single-threaded: the creating thread owns the instance. The host
  * creates one instance for analysis (worker thread) and a separate one
  * for overlays and projections (main thread), configuring both with
- * identical values whenever settings change. */
+ * identical values whenever settings change. The host destroys every
+ * instance before it calls the module's deinit, and the SsHost passed to
+ * create outlives all instances. */
 
 typedef struct SsScopeInstance SsScopeInstance;
 
@@ -185,9 +199,10 @@ struct SsScopeInstance
     bool (*configure)(SsScopeInstance* instance, const SsParamValue* values, uint32_t count);
 
     /* [owning-thread] A pure function of the frame, region, and the
-     * configured parameters: rebuilds the image from scratch. The host
-     * may skip calls arbitrarily (change detection) and call again
-     * after any number of skipped frames. */
+     * configured parameters: rebuilds the image from scratch. `region` is
+     * given in frame-buffer pixel coordinates. The host may skip calls
+     * arbitrarily (change detection) and call again after any number of
+     * skipped frames. */
     bool (*accumulate)(SsScopeInstance* instance, const SsFrameView* frame, SsRect region);
 
     /* [owning-thread] Module-owned; valid until the next accumulate or
@@ -203,7 +218,9 @@ struct SsScopeInstance
      * pattern. The host styles, merges, and smooths. */
     uint32_t (*markers)(const SsScopeInstance* instance, SsColor color, SsMarker* markers, uint32_t capacity);
 
-    /* [owning-thread] Instance extensions; same rules as the host's. */
+    /* [owning-thread] Instance extensions, queried by string id; null when
+     * unknown. The returned vtable is module-owned and valid for the
+     * instance's lifetime (not the host's). */
     const void* (*get_extension)(const SsScopeInstance* instance, const char* id);
 
     /* [owning-thread] */

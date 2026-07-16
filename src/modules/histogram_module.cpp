@@ -6,7 +6,7 @@
 
 #include <algorithm>
 #include <cstring>
-#include <string>
+#include <vector>
 
 #include "core/scopes/histogram.h"
 #include "modules/module_export.h"
@@ -104,7 +104,7 @@ uint32_t graticule(const SsScopeInstance*, SsGraticulePrimitive* primitives, uin
     }
 }
 
-uint32_t markers(const SsScopeInstance* instance, SsColor color, SsMarker* markers, uint32_t capacity)
+uint32_t markers(const SsScopeInstance* instance, SsColor color, SsMarker* out, uint32_t capacity)
 {
     try {
         const bool bands = impl(instance)->settings.style == HistogramStyle::PerChannel;
@@ -122,7 +122,7 @@ uint32_t markers(const SsScopeInstance* instance, SsColor color, SsMarker* marke
             marker.band_from = bands ? static_cast<float>(channel) / 3.0f : 0.0f;
             marker.band_to = bands ? static_cast<float>(channel + 1) / 3.0f : 1.0f;
             marker.channel_mask = 1u << channel;
-            markers[channel] = marker;
+            out[channel] = marker;
         }
         return 3;
     } catch (...) {
@@ -188,16 +188,16 @@ const SsScopeDescriptor HistogramDescriptor{
     Histogram::Height,          0u,          Params, static_cast<uint32_t>(sizeof(Params) / sizeof(Params[0])),
 };
 
-bool moduleInit(void)
+bool moduleInit()
 {
     return true;
 }
 
-void moduleDeinit(void)
+void moduleDeinit()
 {
 }
 
-uint32_t scopeCount(void)
+uint32_t scopeCount()
 {
     return 1;
 }
@@ -215,6 +215,9 @@ SsScopeInstance* create(const char* scopeId, const SsHost*)
         }
 
         auto* self = new HistogramInstance;
+        // Push the constructed defaults through the engine explicitly, so the
+        // instance never relies on the engine's own ctor defaults matching.
+        self->engine.configure(self->settings);
         self->vtable.instance_data = self;
         self->vtable.configure = configure;
         self->vtable.accumulate = accumulate;

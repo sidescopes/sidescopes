@@ -4,8 +4,7 @@
 // what it always is. The engine stays idiomatic C++; only this file
 // speaks both languages, and no exception ever crosses.
 
-#include <algorithm>
-#include <cmath>
+#include <cstdio>
 #include <cstring>
 #include <string>
 
@@ -141,7 +140,7 @@ uint32_t graticule(const SsScopeInstance*, SsGraticulePrimitive* primitives, uin
 
 // One level marker per channel at the channel's own value: the level of a
 // channel is its value, mirroring the engine's own per-channel placement.
-uint32_t channelLevels(SsColor color, SsMarker* markers, uint32_t capacity, bool parade)
+uint32_t channelLevels(SsColor color, SsMarker* out, uint32_t capacity, bool parade)
 {
     const float channels[3] = {color.r, color.g, color.b};
     for (uint32_t channel = 0; channel < 3; ++channel) {
@@ -157,17 +156,17 @@ uint32_t channelLevels(SsColor color, SsMarker* markers, uint32_t capacity, bool
         marker.band_from = parade ? static_cast<float>(channel) / 3.0f : 0.0f;
         marker.band_to = parade ? static_cast<float>(channel + 1) / 3.0f : 1.0f;
         marker.channel_mask = 1u << channel;
-        markers[channel] = marker;
+        out[channel] = marker;
     }
     return 3;
 }
 
-uint32_t markers(const SsScopeInstance* instance, SsColor color, SsMarker* markers, uint32_t capacity)
+uint32_t markers(const SsScopeInstance* instance, SsColor color, SsMarker* out, uint32_t capacity)
 {
     try {
         const WaveformInstance* self = impl(instance);
         if (self->parade) {
-            return channelLevels(color, markers, capacity, true);
+            return channelLevels(color, out, capacity, true);
         }
 
         // Luma flavors carry a single level line at the color's luma; the
@@ -184,11 +183,11 @@ uint32_t markers(const SsScopeInstance* instance, SsColor color, SsMarker* marke
                 marker.band_from = 0.0f;
                 marker.band_to = 1.0f;
                 marker.channel_mask = 0x7;
-                markers[0] = marker;
+                out[0] = marker;
             }
             return 1;
         }
-        return channelLevels(color, markers, capacity, false);
+        return channelLevels(color, out, capacity, false);
     } catch (...) {
         return 0;
     }
@@ -255,16 +254,16 @@ const SsScopeDescriptor ParadeDescriptor{
     static_cast<uint32_t>(sizeof(ParadeParams) / sizeof(ParadeParams[0])),
 };
 
-bool moduleInit(void)
+bool moduleInit()
 {
     return true;
 }
 
-void moduleDeinit(void)
+void moduleDeinit()
 {
 }
 
-uint32_t scopeCount(void)
+uint32_t scopeCount()
 {
     return 2;
 }
