@@ -8,6 +8,9 @@
 
 #include <dwmapi.h>
 #include <windows.h>
+// shellapi.h (ShellExecuteW) depends on the windows.h types above; the
+// comment keeps clang-format from sorting it ahead of them.
+#include <shellapi.h>
 
 #include <string>
 #include <vector>
@@ -253,6 +256,12 @@ void hideApplication()
 void openScreenRecordingSettings()
 {
     // Reading the desktop needs no permission on Windows.
+}
+
+void openUrl(const char* url)
+{
+    const std::wstring target = wideFromUtf8(url);
+    ShellExecuteW(nullptr, L"open", target.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
 }
 
 std::vector<std::string> interfaceFontFiles()

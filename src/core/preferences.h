@@ -63,6 +63,6 @@ struct Preferences
 [[nodiscard]] Preferences loadPreferences(const std::filesystem::path& file);
 
 // Creates parent directories as needed. Returns false when writing failed.
-bool savePreferences(const Preferences& preferences, const std::filesystem::path& file);
+[[nodiscard]] bool savePreferences(const Preferences& preferences, const std::filesystem::path& file);
 
 }  // namespace sidescopes

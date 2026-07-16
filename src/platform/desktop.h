@@ -62,6 +62,10 @@ std::string preferencesFilePath();
 // as the platform allows. A no-op where capture needs no permission.
 void openScreenRecordingSettings();
 
+// Opens a URL in the user's default browser. Fire-and-forget: there is no
+// result to report and any failure is silent.
+void openUrl(const char* url);
+
 // The keyboard modifiers as the operating system sees them right now.
 // System overlays (the macOS screenshot interface, for one) swallow
 // key-up events, leaving event-driven modifier tracking stuck; polling

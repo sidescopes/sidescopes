@@ -72,6 +72,7 @@ enum MenuAction
     MenuClearPinnedMarkers,
     MenuPickPinColor,
     MenuOpenSettings = 50,
+    MenuAbout,
     MenuQuit,
 };
 
@@ -1606,6 +1607,7 @@ int main()
     };
     const auto shortcutLabel = [](const std::string& name) -> std::string { return name == "Escape" ? "Esc" : name; };
     bool showSettings = false;
+    bool showAbout = false;
     // Reference colors pinned on the vectorscope (session-scoped): pin a
     // corrected skin tone, then match the next photo against it. References
     // come from two places: what the cursor reads (P), and the region's
@@ -1787,7 +1789,9 @@ int main()
         preferences.shortcuts = shortcuts;
         glfwGetWindowPos(window, &preferences.windowX, &preferences.windowY);
         glfwGetWindowSize(window, &preferences.windowWidth, &preferences.windowHeight);
-        savePreferences(preferences, preferencesFilePath());
+        if (!savePreferences(preferences, preferencesFilePath())) {
+            std::fprintf(stderr, "sidescopes: failed to save preferences to %s\n", preferencesFilePath().c_str());
+        }
     };
     syncRegionBorder();
 
@@ -2562,6 +2566,7 @@ int main()
             action("Graticule", MenuToggleGraticule, view.graticule());
 
             separator();
+            action("About SideScopes", MenuAbout, false);
             action("Settings...", MenuOpenSettings, false);
             action("Quit", MenuQuit, false);
 
@@ -2647,6 +2652,9 @@ int main()
             case MenuClearPinnedMarkers:
                 pins.clear();
                 break;
+            case MenuAbout:
+                showAbout = true;
+                break;
             case MenuOpenSettings:
                 showSettings = true;
                 break;
@@ -2696,6 +2704,38 @@ int main()
             }
             ImGui::TextDisabled("modes and toggles: right-click a scope");
             ImGui::TextDisabled("%s", versionInfo.display.c_str());
+            ImGui::End();
+        }
+
+        if (showAbout) {
+            ImGui::SetNextWindowSize(ImVec2(320, 0), ImGuiCond_FirstUseEver);
+            ImGui::Begin("About SideScopes", &showAbout, ImGuiWindowFlags_NoCollapse);
+            ImGui::TextUnformatted("SideScopes");
+            ImGui::TextUnformatted(versionInfo.display.c_str());
+            if (ImGui::IsItemClicked()) {
+                ImGui::SetClipboardText(versionInfo.display.c_str());
+            }
+            ImGui::SetItemTooltip("click to copy");
+            ImGui::Separator();
+            // Clickable link text in the accent color, underlined, opening the
+            // destination in the default browser; the tooltip names the URL.
+            const auto link = [](const char* text, const char* url) {
+                const ImVec4 accent = ImGui::GetStyleColorVec4(ImGuiCol_CheckMark);
+                ImGui::PushStyleColor(ImGuiCol_Text, accent);
+                ImGui::TextUnformatted(text);
+                ImGui::PopStyleColor();
+                const ImVec2 lo = ImGui::GetItemRectMin();
+                const ImVec2 hi = ImGui::GetItemRectMax();
+                ImGui::GetWindowDrawList()->AddLine(ImVec2(lo.x, hi.y), ImVec2(hi.x, hi.y), ImGui::GetColorU32(accent));
+                if (ImGui::IsItemClicked()) {
+                    openUrl(url);
+                }
+                ImGui::SetItemTooltip("%s", url);
+            };
+            link("sidescopes.org", "https://sidescopes.org");
+            link("github.com/sidescopes/sidescopes", "https://github.com/sidescopes/sidescopes");
+            ImGui::Separator();
+            ImGui::TextDisabled("GPL-3.0-or-later");
             ImGui::End();
         }
 

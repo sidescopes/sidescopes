@@ -149,6 +149,14 @@ void openScreenRecordingSettings()
     [[NSWorkspace sharedWorkspace] openURL:url];
 }
 
+void openUrl(const char* url)
+{
+    NSURL* target = [NSURL URLWithString:[NSString stringWithUTF8String:url]];
+    if (target) {
+        [[NSWorkspace sharedWorkspace] openURL:target];
+    }
+}
+
 std::vector<std::string> interfaceFontFiles()
 {
     return {"/System/Library/Fonts/HelveticaNeue.ttc", "/System/Library/Fonts/SFNS.ttf",
