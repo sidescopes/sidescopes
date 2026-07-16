@@ -1,39 +1,15 @@
-#include <algorithm>
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
-#include <cstring>
+#include <utility>
 #include <vector>
 
 #include "modules/module_registry.h"
+#include "scope_image.h"
+#include "test_frame.h"
 
 namespace sidescopes {
-namespace {
 
-// A solid 75% red frame, BGRA.
-std::vector<uint8_t> solidRed(int width, int height)
-{
-    std::vector<uint8_t> data(static_cast<std::size_t>(width) * height * 4, 0);
-    for (std::size_t pixel = 0; pixel < data.size(); pixel += 4) {
-        data[pixel + 2] = 191;
-        data[pixel + 3] = 255;
-    }
-    return data;
-}
-
-// A solid gray frame, BGRA.
-std::vector<uint8_t> solidGray(int width, int height, uint8_t level)
-{
-    std::vector<uint8_t> data(static_cast<std::size_t>(width) * height * 4, 0);
-    for (std::size_t pixel = 0; pixel < data.size(); pixel += 4) {
-        data[pixel + 0] = level;
-        data[pixel + 1] = level;
-        data[pixel + 2] = level;
-        data[pixel + 3] = 255;
-    }
-    return data;
-}
-
-}  // namespace
+using namespace test;
 
 TEST_CASE("Registry serves the vectorscope through the module boundary")
 {
@@ -48,45 +24,19 @@ TEST_CASE("Registry serves the vectorscope through the module boundary")
 
     // Defaults through the boundary must match the engine's: BT.709
     // puts 75% red at bin (109, 43).
-    const std::vector<uint8_t> pixels = solidRed(8, 8);
-    const SsFrameView frame{pixels.data(), 8 * 4, 8, 8, SS_COLOR_SPACE_SRGB, 1};
+    TestFrame red(8, 8, 0);
+    red.fill(0, 8, Color{191, 0, 0});
+    const SsFrameView frame{red.pixels.data(), 8 * 4, 8, 8, SS_COLOR_SPACE_SRGB, 1};
     REQUIRE(instance.accumulate(frame, SsRect{0, 0, 8, 8}));
     const SsImageView image = instance.image();
     REQUIRE(image.width == 256);
-    int bestX = -1, bestY = -1, best = 0;
-    for (int y = 0; y < image.height; ++y) {
-        for (int x = 0; x < image.width; ++x) {
-            const uint8_t* rgba = image.rgba + (static_cast<std::size_t>(y) * image.width + x) * 4;
-            const int sum = rgba[0] + rgba[1] + rgba[2];
-            if (sum > best) {
-                best = sum;
-                bestX = x;
-                bestY = y;
-            }
-        }
-    }
-    CHECK(bestX == 109);
-    CHECK(bestY == 43);
+    CHECK(brightestPixel(image) == std::pair<int, int>{109, 43});
 
     // Reconfigure to BT.601 through parameters: the peak moves to (100, 43).
     std::vector<SsParamValue> values{{"matrix", 0.0}};
     REQUIRE(instance.configure(values));
     REQUIRE(instance.accumulate(frame, SsRect{0, 0, 8, 8}));
-    const SsImageView after = instance.image();
-    best = 0;
-    for (int y = 0; y < after.height; ++y) {
-        for (int x = 0; x < after.width; ++x) {
-            const uint8_t* rgba = after.rgba + (static_cast<std::size_t>(y) * after.width + x) * 4;
-            const int sum = rgba[0] + rgba[1] + rgba[2];
-            if (sum > best) {
-                best = sum;
-                bestX = x;
-                bestY = y;
-            }
-        }
-    }
-    CHECK(bestX == 100);
-    CHECK(bestY == 43);
+    CHECK(brightestPixel(instance.image()) == std::pair<int, int>{100, 43});
 
     // Overlays and markers arrive as declarative data.
     CHECK(instance.graticule().size() > 8);
@@ -116,24 +66,12 @@ TEST_CASE("Registry serves the waveform through the module boundary")
     // Luma mode (choice 1): mid gray sits at luma 128, which the engine
     // plots on image row 255 - 128 = 127.
     REQUIRE(instance.configure(std::vector<SsParamValue>{{"mode", 1.0}}));
-    const std::vector<uint8_t> gray = solidGray(32, 16, 128);
-    const SsFrameView frame{gray.data(), 32 * 4, 32, 16, SS_COLOR_SPACE_SRGB, 1};
+    TestFrame gray(32, 16, 128);
+    const SsFrameView frame{gray.pixels.data(), 32 * 4, 32, 16, SS_COLOR_SPACE_SRGB, 1};
     REQUIRE(instance.accumulate(frame, SsRect{0, 0, 32, 16}));
     const SsImageView image = instance.image();
     REQUIRE(image.height == 256);
-    int bestRow = -1, best = 0;
-    for (int y = 0; y < image.height; ++y) {
-        int rowMax = 0;
-        for (int x = 0; x < image.width; ++x) {
-            rowMax =
-                std::max(rowMax, static_cast<int>(image.rgba[(static_cast<std::size_t>(y) * image.width + x) * 4]));
-        }
-        if (rowMax > best) {
-            best = rowMax;
-            bestRow = y;
-        }
-    }
-    CHECK(bestRow == 127);
+    CHECK(brightestRow(image, 0) == 127);
 
     // Luma carries a single full-width level marker.
     const std::vector<SsMarker> luma = instance.markers(SsColor{128.0f, 128.0f, 128.0f});
@@ -183,8 +121,8 @@ TEST_CASE("Registry serves the histogram through the module boundary")
     ScopeInstance instance = registry.createInstance("org.sidescopes.histogram");
     REQUIRE(instance.valid());
 
-    const std::vector<uint8_t> gray = solidGray(32, 16, 128);
-    const SsFrameView frame{gray.data(), 32 * 4, 32, 16, SS_COLOR_SPACE_SRGB, 1};
+    TestFrame gray(32, 16, 128);
+    const SsFrameView frame{gray.pixels.data(), 32 * 4, 32, 16, SS_COLOR_SPACE_SRGB, 1};
     REQUIRE(instance.accumulate(frame, SsRect{0, 0, 32, 16}));
 
     // The outline extension hands back three channels of bin heights.

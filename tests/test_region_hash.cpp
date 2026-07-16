@@ -1,36 +1,11 @@
 #include <catch2/catch_test_macros.hpp>
-#include <vector>
 
 #include "core/region_hash.h"
+#include "test_frame.h"
 
 namespace sidescopes {
-namespace {
 
-struct TestFrame
-{
-    explicit TestFrame(int width, int height)
-        : width(width),
-          height(height)
-    {
-        pixels.resize(static_cast<std::size_t>(width) * height * 4, 0);
-    }
-
-    void setPixel(int px, int py, uint8_t value)
-    {
-        pixels[(static_cast<std::size_t>(py) * width + px) * 4] = value;
-    }
-
-    [[nodiscard]] FrameView view() const
-    {
-        return FrameView{pixels.data(), width * 4, width, height, ColorSpaceHint::Srgb, 1};
-    }
-
-    std::vector<uint8_t> pixels;
-    int width;
-    int height;
-};
-
-}  // namespace
+using namespace test;
 
 TEST_CASE("HashRegion is stable for identical content")
 {

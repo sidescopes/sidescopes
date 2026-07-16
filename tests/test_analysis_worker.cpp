@@ -5,33 +5,16 @@
 #include <vector>
 
 #include "core/analysis_worker.h"
+#include "scope_image.h"
+#include "test_frame.h"
 
 namespace sidescopes {
+
+using namespace test;
+
 namespace {
 
 using namespace std::chrono_literals;
-
-FrameBuffer makeSolidFrame(int width, int height, Color color, uint64_t sequence)
-{
-    FrameBuffer frame;
-    frame.width = width;
-    frame.height = height;
-    frame.strideBytes = width * 4;
-    frame.colorSpace = ColorSpaceHint::Srgb;
-    frame.sequence = sequence;
-    frame.data.resize(static_cast<std::size_t>(frame.strideBytes) * height);
-    for (int py = 0; py < height; ++py) {
-        for (int px = 0; px < width; ++px) {
-            uint8_t* p =
-                frame.data.data() + static_cast<std::size_t>(py) * frame.strideBytes + static_cast<std::size_t>(px) * 4;
-            p[0] = color.b;
-            p[1] = color.g;
-            p[2] = color.r;
-            p[3] = 255;
-        }
-    }
-    return frame;
-}
 
 bool waitFor(const std::function<bool()>& condition, std::chrono::milliseconds timeout = 2000ms)
 {
@@ -43,12 +26,6 @@ bool waitFor(const std::function<bool()>& condition, std::chrono::milliseconds t
         std::this_thread::sleep_for(5ms);
     }
     return condition();
-}
-
-bool pixelLit(const ScopeImage& image, int px, int py)
-{
-    const uint8_t* rgba = image.rgba.data() + (static_cast<std::size_t>(py) * image.width + px) * 4;
-    return rgba[0] + rgba[1] + rgba[2] > 0;
 }
 
 }  // namespace
@@ -77,7 +54,7 @@ TEST_CASE("AnalysisWorker produces scope images from published frames")
     AnalysisWorker worker(mailbox);
     worker.start();
 
-    mailbox.publish(makeSolidFrame(64, 64, Color{191, 0, 0}, 1));
+    mailbox.publish(makeSolidFrameBuffer(64, 64, Color{191, 0, 0}, 1));
 
     uint64_t seen = 0;
     AnalysisWorker::Output output;
@@ -93,12 +70,12 @@ TEST_CASE("AnalysisWorker skips frames with unchanged content")
     AnalysisWorker worker(mailbox);
     worker.start();
 
-    mailbox.publish(makeSolidFrame(64, 64, Color{100, 100, 100}, 1));
+    mailbox.publish(makeSolidFrameBuffer(64, 64, Color{100, 100, 100}, 1));
     uint64_t seen = 0;
     AnalysisWorker::Output output;
     REQUIRE(waitFor([&] { return worker.fetchOutput(seen, output); }));
 
-    mailbox.publish(makeSolidFrame(64, 64, Color{100, 100, 100}, 2));
+    mailbox.publish(makeSolidFrameBuffer(64, 64, Color{100, 100, 100}, 2));
     std::this_thread::sleep_for(300ms);
     CHECK_FALSE(worker.fetchOutput(seen, output));
 }
@@ -112,18 +89,18 @@ TEST_CASE("AnalysisWorker ignores changes inside the masked window")
     worker.updateSettings(settings);
     worker.start();
 
-    mailbox.publish(makeSolidFrame(64, 64, Color{100, 100, 100}, 1));
+    mailbox.publish(makeSolidFrameBuffer(64, 64, Color{100, 100, 100}, 1));
     uint64_t seen = 0;
     AnalysisWorker::Output output;
     REQUIRE(waitFor([&] { return worker.fetchOutput(seen, output); }));
 
-    FrameBuffer changedInsideMask = makeSolidFrame(64, 64, Color{100, 100, 100}, 2);
+    FrameBuffer changedInsideMask = makeSolidFrameBuffer(64, 64, Color{100, 100, 100}, 2);
     changedInsideMask.data[static_cast<std::size_t>(24 * 64 + 24) * 4] = 250;  // inside the mask
     mailbox.publish(std::move(changedInsideMask));
     std::this_thread::sleep_for(300ms);
     CHECK_FALSE(worker.fetchOutput(seen, output));
 
-    FrameBuffer changedOutsideMask = makeSolidFrame(64, 64, Color{100, 100, 100}, 3);
+    FrameBuffer changedOutsideMask = makeSolidFrameBuffer(64, 64, Color{100, 100, 100}, 3);
     changedOutsideMask.data[static_cast<std::size_t>(8 * 64 + 4) * 4] = 250;  // outside the mask
     mailbox.publish(std::move(changedOutsideMask));
     CHECK(waitFor([&] { return worker.fetchOutput(seen, output); }));
@@ -135,7 +112,7 @@ TEST_CASE("AnalysisWorker recomputes on settings changes without a new frame")
     AnalysisWorker worker(mailbox);
     worker.start();
 
-    mailbox.publish(makeSolidFrame(64, 64, Color{191, 0, 0}, 1));
+    mailbox.publish(makeSolidFrameBuffer(64, 64, Color{191, 0, 0}, 1));
     uint64_t seen = 0;
     AnalysisWorker::Output output;
     REQUIRE(waitFor([&] { return worker.fetchOutput(seen, output); }));
@@ -155,7 +132,7 @@ TEST_CASE("AnalysisWorker samples cursor colors from the latest frame")
     AnalysisWorker worker(mailbox);
     worker.start();
 
-    mailbox.publish(makeSolidFrame(64, 64, Color{10, 150, 200}, 1));
+    mailbox.publish(makeSolidFrameBuffer(64, 64, Color{10, 150, 200}, 1));
     uint64_t seen = 0;
     AnalysisWorker::Output output;
     REQUIRE(waitFor([&] { return worker.fetchOutput(seen, output); }));
@@ -185,7 +162,7 @@ TEST_CASE("AnalysisWorker restricts analysis to the region of interest")
     worker.start();
 
     // Left half 75% red, right half 75% blue: only red may appear.
-    FrameBuffer frame = makeSolidFrame(64, 64, Color{191, 0, 0}, 1);
+    FrameBuffer frame = makeSolidFrameBuffer(64, 64, Color{191, 0, 0}, 1);
     for (int py = 0; py < 64; ++py) {
         for (int px = 32; px < 64; ++px) {
             uint8_t* p = frame.data.data() + (static_cast<std::size_t>(py) * 64 + px) * 4;

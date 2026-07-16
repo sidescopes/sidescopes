@@ -3,40 +3,13 @@
 #include <vector>
 
 #include "core/scopes/histogram.h"
+#include "test_frame.h"
 
 namespace sidescopes {
+
+using namespace test;
+
 namespace {
-
-struct TestFrame
-{
-    explicit TestFrame(int width, int height)
-        : width(width),
-          height(height)
-    {
-        pixels.resize(static_cast<std::size_t>(width) * height * 4, 255);
-    }
-
-    void fillColumns(int x0, int x1, Color color)
-    {
-        for (int py = 0; py < height; ++py) {
-            for (int px = x0; px < x1; ++px) {
-                uint8_t* p = pixels.data() + (static_cast<std::size_t>(py) * width + px) * 4;
-                p[0] = color.b;
-                p[1] = color.g;
-                p[2] = color.r;
-            }
-        }
-    }
-
-    [[nodiscard]] FrameView view() const
-    {
-        return FrameView{pixels.data(), width * 4, width, height, ColorSpaceHint::Srgb, 1};
-    }
-
-    std::vector<uint8_t> pixels;
-    int width;
-    int height;
-};
 
 // Plot height for a bin in one channel (0=r, 1=g, 2=b): the tallest of
 // the image columns that render that bin.
@@ -72,7 +45,7 @@ std::vector<int> litValues(const ScopeImage& image, int channel)
 
 TEST_CASE("Histogram places uniform color at its channel values")
 {
-    TestFrame frame(32, 32);
+    TestFrame frame(32, 32, 255);
     frame.fillColumns(0, 32, Color{10, 150, 240});
 
     Histogram scope;
@@ -96,7 +69,7 @@ TEST_CASE("Histogram places uniform color at its channel values")
 TEST_CASE("Histogram bar heights order by pixel population")
 {
     // Three quarters at gray 64, one quarter at gray 200.
-    TestFrame frame(64, 32);
+    TestFrame frame(64, 32, 255);
     frame.fillColumns(0, 48, Color{64, 64, 64});
     frame.fillColumns(48, 64, Color{200, 200, 200});
 
@@ -121,7 +94,7 @@ TEST_CASE("Histogram is invariant to sampling stride and region size")
 {
     // 3:1 color mix arranged so both strides and the half-width region see
     // the same ratio; per-sample normalization must yield identical images.
-    TestFrame frame(64, 64);
+    TestFrame frame(64, 64, 255);
     frame.fillColumns(0, 48, Color{64, 64, 64});
     frame.fillColumns(48, 64, Color{200, 200, 200});
 
@@ -143,7 +116,7 @@ TEST_CASE("Histogram keeps sparse tones readable under a dominant one")
     // times as populated per bin. Linear heights would draw the ramp as a
     // few pixels at the floor - the per-image-zoom complaint - while the
     // square root keeps it plainly visible.
-    TestFrame frame(256, 10);
+    TestFrame frame(256, 10, 255);
     for (int value = 0; value < 240; ++value) {
         const auto tone = static_cast<uint8_t>(value);
         frame.fillColumns(value, value + 1, Color{tone, tone, tone});
@@ -167,7 +140,7 @@ TEST_CASE("Histogram keeps sparse tones readable under a dominant one")
 
 TEST_CASE("Histogram per-channel style separates the channels into bands")
 {
-    TestFrame frame(32, 32);
+    TestFrame frame(32, 32, 255);
     frame.fillColumns(0, 32, Color{10, 150, 240});
 
     Histogram scope;
@@ -198,7 +171,7 @@ TEST_CASE("Histogram per-channel style separates the channels into bands")
 
 TEST_CASE("Histogram produces an empty plot for an empty region")
 {
-    TestFrame frame(32, 32);
+    TestFrame frame(32, 32, 255);
     frame.fillColumns(0, 32, Color{80, 80, 80});
 
     Histogram scope;
@@ -211,7 +184,7 @@ TEST_CASE("Histogram produces an empty plot for an empty region")
 
 TEST_CASE("Histogram exports its curve for display-resolution stroking")
 {
-    TestFrame frame(32, 32);
+    TestFrame frame(32, 32, 255);
     frame.fillColumns(0, 32, Color{10, 150, 240});
 
     Histogram scope;

@@ -2,66 +2,15 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <cstdlib>
-#include <vector>
+#include <utility>
 
 #include "core/scopes/vectorscope.h"
+#include "scope_image.h"
+#include "test_frame.h"
 
 namespace sidescopes {
-namespace {
 
-// Builds a tightly-packed BGRA frame filled by a per-pixel color function.
-struct TestFrame
-{
-    explicit TestFrame(int width, int height)
-        : width(width),
-          height(height)
-    {
-        pixels.resize(static_cast<std::size_t>(width) * height * 4, 255);
-    }
-
-    void fill(int x0, int x1, Color color)
-    {
-        for (int py = 0; py < height; ++py) {
-            for (int px = x0; px < x1; ++px) {
-                uint8_t* p = pixels.data() + (static_cast<std::size_t>(py) * width + px) * 4;
-                p[0] = color.b;
-                p[1] = color.g;
-                p[2] = color.r;
-            }
-        }
-    }
-
-    [[nodiscard]] FrameView view() const
-    {
-        return FrameView{pixels.data(), width * 4, width, height, ColorSpaceHint::Srgb, 1};
-    }
-
-    std::vector<uint8_t> pixels;
-    int width;
-    int height;
-};
-
-// The brightest pixel of an accumulation: smoothing spreads a
-// single-color trace over a small neighborhood, and the peak must stay
-// on the exact chroma coordinate.
-std::pair<int, int> brightestPixel(const ScopeImage& image)
-{
-    std::pair<int, int> brightest{-1, -1};
-    int best = 0;
-    for (int py = 0; py < image.height; ++py) {
-        for (int px = 0; px < image.width; ++px) {
-            const uint8_t* rgba = image.rgba.data() + (static_cast<std::size_t>(py) * image.width + px) * 4;
-            const int sum = rgba[0] + rgba[1] + rgba[2];
-            if (sum > best) {
-                best = sum;
-                brightest = {px, py};
-            }
-        }
-    }
-    return brightest;
-}
-
-}  // namespace
+using namespace test;
 
 TEST_CASE("Vectorscope places 75% red on the classic BT.601 target")
 {
@@ -70,7 +19,7 @@ TEST_CASE("Vectorscope places 75% red on the classic BT.601 target")
     // (100, 255 - 212 = 43) - where integer truncation used to floor it
     // to (99, 44), half a bin away from where the projection puts the
     // markers.
-    TestFrame frame(8, 8);
+    TestFrame frame(8, 8, 255);
     frame.fill(0, 8, Color{191, 0, 0});
 
     Vectorscope scope;
@@ -87,7 +36,7 @@ TEST_CASE("Vectorscope defaults to the BT.709 matrix")
     // Every HD-era scope measures with 709; with no configuration at all
     // 75% red must land on the 709 position (Cb 108.6 -> bin 109), not
     // the 601 one.
-    TestFrame frame(8, 8);
+    TestFrame frame(8, 8, 255);
     frame.fill(0, 8, Color{191, 0, 0});
 
     Vectorscope scope;
@@ -98,7 +47,7 @@ TEST_CASE("Vectorscope defaults to the BT.709 matrix")
 
 TEST_CASE("Vectorscope maps neutral gray to the center")
 {
-    TestFrame frame(8, 8);
+    TestFrame frame(8, 8, 255);
     frame.fill(0, 8, Color{128, 128, 128});
 
     Vectorscope scope;
@@ -122,7 +71,7 @@ TEST_CASE("Vectorscope projection agrees with accumulation")
 
 TEST_CASE("Vectorscope matrix selection moves chroma targets")
 {
-    TestFrame frame(8, 8);
+    TestFrame frame(8, 8, 255);
     frame.fill(0, 8, Color{191, 0, 0});
 
     Vectorscope scope;
@@ -141,7 +90,7 @@ TEST_CASE("Vectorscope carries real detail on a finer grid")
     // The fixed-point chroma transform holds more precision than the
     // classic 256 grid uses; the finer grid must place the same color on
     // the scaled coordinate rather than upscale the coarse one.
-    TestFrame frame(32, 32);
+    TestFrame frame(32, 32, 255);
     frame.fill(0, 32, Color{191, 0, 0});
 
     Vectorscope scope;
@@ -167,7 +116,7 @@ TEST_CASE("Vectorscope leaves no gap between adjacent chroma codes on the fine g
     // as gridded texture; the fine image must instead interpolate the
     // code grid, keeping the space between two equally-strong adjacent
     // codes as bright as the codes themselves.
-    TestFrame frame(32, 32);
+    TestFrame frame(32, 32, 255);
     frame.fill(0, 16, Color{191, 0, 0});   // Cb 99.65 -> code 100
     frame.fill(16, 32, Color{191, 0, 2});  // Cb 100.52 -> code 101
 
@@ -210,7 +159,7 @@ TEST_CASE("Vectorscope linear response keeps sparse mass faint")
     // speck into clear visibility; the phosphor-linear response must
     // leave it far dimmer than the dominant mass, the way a hardware
     // scope would.
-    TestFrame frame(64, 64);
+    TestFrame frame(64, 64, 255);
     frame.fill(0, 63, Color{191, 0, 0});
     frame.fill(63, 64, Color{0, 0, 191});
 
@@ -219,7 +168,7 @@ TEST_CASE("Vectorscope linear response keeps sparse mass faint")
         VectorscopeSettings settings;
         settings.response = response;
         scope.configure(settings);
-        TestFrame frame(64, 64);
+        TestFrame frame(64, 64, 255);
         frame.fill(0, 63, Color{191, 0, 0});
         frame.fill(63, 64, Color{0, 0, 191});
         scope.accumulate(frame.view(), IntRect{0, 0, 64, 64});
@@ -240,7 +189,7 @@ TEST_CASE("Vectorscope blooms the densest mass toward white")
     // A solid color parks all mass on one spot; the phosphor bloom must
     // desaturate that core toward white while the same tint one code
     // away from saturation stays clearly colored.
-    TestFrame frame(16, 16);
+    TestFrame frame(16, 16, 255);
     frame.fill(0, 16, Color{191, 0, 0});
 
     Vectorscope scope;
@@ -259,7 +208,7 @@ TEST_CASE("Vectorscope trace is invariant to the sampling stride")
     // Two colors in a 3:1 area ratio, chosen so the ratio is preserved under
     // stride-2 sampling. Per-sample density normalization must then produce
     // identical images at both strides.
-    TestFrame frame(64, 64);
+    TestFrame frame(64, 64, 255);
     frame.fill(0, 48, Color{191, 0, 0});
     frame.fill(48, 64, Color{0, 0, 191});
 
@@ -277,7 +226,7 @@ TEST_CASE("Vectorscope trace is invariant to the sampling stride")
 
 TEST_CASE("Vectorscope produces a black image for an empty region")
 {
-    TestFrame frame(8, 8);
+    TestFrame frame(8, 8, 255);
     frame.fill(0, 8, Color{191, 0, 0});
 
     Vectorscope scope;

@@ -3,21 +3,22 @@
 #include <thread>
 
 #include "core/frame_mailbox.h"
+#include "test_frame.h"
 
 namespace sidescopes {
+
+using namespace test;
+
 namespace {
 
 using namespace std::chrono_literals;
 
-FrameBuffer makeFrame(uint64_t sequence, std::size_t bytes = 16)
+// The mailbox only reads a frame's sequence and storage, so its frames are
+// the smallest solid buffers - a 2x2 is 16 bytes at four channels, matching
+// the sizes these tests assert on. The color is immaterial here.
+FrameBuffer makeFrame(uint64_t sequence, int side = 2)
 {
-    FrameBuffer frame;
-    frame.data.assign(bytes, static_cast<uint8_t>(sequence));
-    frame.width = 2;
-    frame.height = 2;
-    frame.strideBytes = 8;
-    frame.sequence = sequence;
-    return frame;
+    return makeSolidFrameBuffer(side, side, Color{}, sequence);
 }
 
 }  // namespace
@@ -53,8 +54,10 @@ TEST_CASE("FrameMailbox recycles storage in both directions")
 {
     FrameMailbox mailbox;
 
-    // Overwriting returns the dropped frame's storage to the producer.
-    mailbox.publish(makeFrame(1, 4096));
+    // Overwriting returns the dropped frame's storage to the producer. The
+    // 32x32 buffer is 4096 bytes; the tiny 2x2 that overwrites it inherits
+    // that larger capacity.
+    mailbox.publish(makeFrame(1, 32));
     const FrameBuffer reused = mailbox.publish(makeFrame(2));
     CHECK(reused.data.capacity() >= 4096);
 
