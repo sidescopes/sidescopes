@@ -312,6 +312,8 @@ if(APPLE OR WIN32)
     # out of main.
     target_sources(SideScopes PRIVATE
         src/app/capture_controller.cpp
+        src/app/overlay_render.cpp
+        src/app/overlay_style.cpp
         src/app/param_menu.cpp
         src/app/pin_board.cpp
         src/app/scope_registry.cpp
@@ -335,19 +337,13 @@ if(APPLE OR WIN32)
 
     if(SIDESCOPES_MODULES_DYNAMIC)
         # Nothing links the modules in dynamic mode; make the app wait for
-        # the shared objects it loads at runtime.
+        # the shared objects it loads at runtime. The app itself depends only
+        # on the module boundary and the registry - it draws every scope
+        # through a loaded instance and no longer compiles any engine source.
         add_dependencies(SideScopes
             sidescopes_module_vectorscope
             sidescopes_module_waveform
             sidescopes_module_histogram)
-        # The app still uses the engine classes directly (P1 is mid-
-        # migration to instances). With the engines only in the MODULE
-        # bundles, compile their sources into the app, as the tests do.
-        target_sources(SideScopes PRIVATE
-            src/core/scopes/vectorscope.cpp
-            src/core/scopes/vectorscope_graticule.cpp
-            src/core/scopes/waveform.cpp
-            src/core/scopes/histogram.cpp)
     endif()
 endif()
 

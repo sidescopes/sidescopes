@@ -25,6 +25,7 @@
 #include <vector>
 
 #include "app/capture_controller.h"
+#include "app/overlay_render.h"
 #include "app/param_menu.h"
 #include "app/pin_board.h"
 #include "app/scope_registry.h"
@@ -36,7 +37,6 @@
 #include "core/marker_smoother.h"
 #include "core/preferences.h"
 #include "core/region_suggestions.h"
-#include "core/scopes/graticule.h"
 #include "core/scopes/histogram.h"
 #include "core/scopes/vectorscope.h"
 #include "core/scopes/waveform.h"
@@ -97,13 +97,6 @@ enum MenuAction
 // Rendering helpers
 // ---------------------------------------------------------------------------
 
-struct DrawnScope
-{
-    ImVec2 origin;
-    ImVec2 size;
-    float zoom = 1.0f;
-};
-
 // Draws a scope image into the available space. The vectorscope keeps its
 // square aspect (it is a polar plot); the waveform stretches, because its
 // horizontal axis is arbitrary image columns. A zoom magnifies the view
@@ -129,93 +122,17 @@ DrawnScope drawScopeImage(const ScopeTexture& texture, bool keepAspect, float zo
     return DrawnScope{origin, size, zoom};
 }
 
-ImVec2 at(const DrawnScope& scope, const NormalizedPoint& point)
+// The champagne-gold graticule palette, the marker colors, and the
+// primitive/marker translation layer live in overlay_render; only the per-scope
+// pane setup below stays here. A whole-color point marker's live-cursor color is
+// white, a luma level's is gold, and pinned references are amber; the graticule
+// speaks the same gold at a handful of strengths for every scope.
+
+// The cursor color a scope's markers are queried for crosses the module
+// boundary as an SsColor.
+SsColor toSsColor(const FloatColor& color)
 {
-    const float x = (point.x - 0.5f) * scope.zoom + 0.5f;
-    const float y = (point.y - 0.5f) * scope.zoom + 0.5f;
-    return ImVec2(scope.origin.x + x * scope.size.x, scope.origin.y + y * scope.size.y);
-}
-
-// Every scope speaks with one graticule voice: the same champagne gold
-// at a handful of strengths. The scales used to be neutral gray while
-// the vectorscope wore gold, which read as two different instruments.
-constexpr ImU32 GraticuleMinor = IM_COL32(205, 172, 110, 70);
-constexpr ImU32 GraticuleMajor = IM_COL32(205, 172, 110, 130);
-constexpr ImU32 GraticuleAccent = IM_COL32(218, 175, 95, 180);
-constexpr ImU32 GraticuleLabel = IM_COL32(226, 198, 145, 200);
-constexpr ImU32 GraticuleSkinTone = IM_COL32(230, 170, 140, 160);
-
-void drawVectorscopeOverlay(const DrawnScope& scope, const VectorscopeGraticule& graticule)
-{
-    ImDrawList* draw = ImGui::GetWindowDrawList();
-    const auto strokeColor = [](GraticuleStroke stroke) -> ImU32 {
-        switch (stroke) {
-        case GraticuleStroke::GridMajor:
-            return GraticuleMajor;
-        case GraticuleStroke::Accent:
-            return GraticuleAccent;
-        case GraticuleStroke::SkinTone:
-            return GraticuleSkinTone;
-        case GraticuleStroke::Grid:
-            break;
-        }
-        return GraticuleMinor;
-    };
-
-    for (const GraticuleLine& line : graticule.lines) {
-        draw->AddLine(at(scope, line.from), at(scope, line.to), strokeColor(line.stroke),
-                      line.stroke == GraticuleStroke::GridMajor ? 1.5f : 1.0f);
-    }
-    for (const GraticuleCircle& circle : graticule.circles) {
-        draw->AddCircle(at(scope, circle.center), circle.radius * scope.size.x * scope.zoom, strokeColor(circle.stroke),
-                        64);
-    }
-    for (const GraticuleTarget& target : graticule.targets) {
-        const ImVec2 center = at(scope, target.center);
-        const float box = target.primary ? 5.0f : 3.0f;
-        draw->AddRect(ImVec2(center.x - box, center.y - box), ImVec2(center.x + box, center.y + box), GraticuleAccent);
-        if (!target.label.empty()) {
-            draw->AddText(ImVec2(center.x + 7, center.y - 7), GraticuleLabel, target.label.c_str());
-        }
-    }
-}
-
-void drawWaveformOverlay(const DrawnScope& scope)
-{
-    ImDrawList* draw = ImGui::GetWindowDrawList();
-    const bool roomy = scope.size.y >= 140.0f;
-    for (const WaveformScaleLine& line : buildWaveformScale()) {
-        const float y = scope.origin.y + line.y * scope.size.y;
-        const ImU32 color = line.major ? GraticuleMajor : GraticuleMinor;
-        draw->AddLine(ImVec2(scope.origin.x, y), ImVec2(scope.origin.x + scope.size.x, y), color);
-        if (line.major || roomy) {
-            draw->AddText(ImVec2(scope.origin.x + 4, y + 1), GraticuleLabel, line.label.c_str());
-        }
-    }
-}
-
-void drawPointMarker(const DrawnScope& scope, const NormalizedPoint& point, ImU32 color)
-{
-    ImDrawList* draw = ImGui::GetWindowDrawList();
-    const ImVec2 center = at(scope, point);
-    draw->AddCircle(center, 5.0f, color, 0, 2.0f);
-    draw->AddCircle(center, 6.5f, IM_COL32(0, 0, 0, 200), 0, 1.0f);
-}
-
-void drawLevelMarker(const DrawnScope& scope, float normalizedY, ImU32 color, float fromX = 0.0f, float toX = 1.0f)
-{
-    ImDrawList* draw = ImGui::GetWindowDrawList();
-    const float y = scope.origin.y + normalizedY * scope.size.y;
-    draw->AddLine(ImVec2(scope.origin.x + fromX * scope.size.x, y), ImVec2(scope.origin.x + toX * scope.size.x, y),
-                  color, 1.5f);
-}
-
-void drawValueMarker(const DrawnScope& scope, float normalizedX, ImU32 color, float fromY = 0.0f, float toY = 1.0f)
-{
-    ImDrawList* draw = ImGui::GetWindowDrawList();
-    const float x = scope.origin.x + normalizedX * scope.size.x;
-    draw->AddLine(ImVec2(x, scope.origin.y + fromY * scope.size.y), ImVec2(x, scope.origin.y + toY * scope.size.y),
-                  color, 1.5f);
+    return SsColor{color.r, color.g, color.b};
 }
 
 /// One trace's intensity result: scroll derives the gain from the intensity,
@@ -255,65 +172,6 @@ std::optional<TraceAdjustment> traceIntensityGesture(const DrawnScope& scope, st
     }
 
     return adjusted;
-}
-
-// Cursor markers for the three channels, merged where the values
-// coincide: lines folding into one must read as the mix - gray for all
-// three, yellow, magenta, or cyan for a pair - not as whichever channel
-// happened to draw last.
-struct ChannelMarker
-{
-    float value = 0.0f;  // 0..255
-    ImU32 color = 0;
-};
-
-ImU32 channelMaskColor(int mask)
-{
-    switch (mask) {
-    case 0b001:
-        return IM_COL32(255, 90, 90, 230);  // red
-    case 0b010:
-        return IM_COL32(90, 255, 90, 230);  // green
-    case 0b100:
-        return IM_COL32(110, 110, 255, 230);  // blue
-    case 0b011:
-        return IM_COL32(255, 235, 90, 230);  // red+green: yellow
-    case 0b101:
-        return IM_COL32(255, 90, 255, 230);  // red+blue: magenta
-    case 0b110:
-        return IM_COL32(90, 235, 255, 230);  // green+blue: cyan
-    default:
-        return IM_COL32(235, 235, 235, 230);  // all three: gray
-    }
-}
-
-int groupChannelMarkers(const FloatColor& color, ChannelMarker out[3])
-{
-    const float channels[3] = {color.r, color.g, color.b};
-    constexpr float MergeEpsilon = 2.0f;
-    bool grouped[3] = {false, false, false};
-    int count = 0;
-    for (int channel = 0; channel < 3; ++channel) {
-        if (grouped[channel]) {
-            continue;
-        }
-        int mask = 1 << channel;
-        float sum = channels[channel];
-        int members = 1;
-        for (int other = channel + 1; other < 3; ++other) {
-            if (grouped[other]) {
-                continue;
-            }
-            if (std::abs(channels[other] - channels[channel]) <= MergeEpsilon) {
-                grouped[other] = true;
-                mask |= 1 << other;
-                sum += channels[other];
-                ++members;
-            }
-        }
-        out[count++] = ChannelMarker{sum / static_cast<float>(members), channelMaskColor(mask)};
-    }
-    return count;
 }
 
 // Scope toggles are letter chips: professional tools label scopes with
@@ -785,9 +643,12 @@ std::vector<SuggestedRegion> windowSuggestionsFor(uint32_t displayId)
 
 // The histogram pane draws the filled texture, strokes each channel's curve
 // over it at display resolution, then adds the graticule and cursor-value
-// markers.
-void drawHistogram(const ScopeTexture& texture, const AnalysisWorker::Output& output, HistogramStyle style,
-                   bool showGraticule, const std::optional<FloatColor>& markerColor, std::vector<ImVec2>& points)
+// markers. The outline stroking is host display logic over the worker's
+// extension output; the graticule and markers come from the projection
+// instance's declarative primitives, like every other scope.
+void drawHistogram(const ScopeTexture& texture, const AnalysisWorker::Output& output, const ScopeInstance& instance,
+                   HistogramStyle style, bool showGraticule, const std::optional<FloatColor>& markerColor,
+                   std::vector<ImVec2>& points)
 {
     // No intensity gesture here: the histogram's scale adjusts
     // itself, the way every editor draws it.
@@ -834,36 +695,17 @@ void drawHistogram(const ScopeTexture& texture, const AnalysisWorker::Output& ou
                 points.push_back(ImVec2(scope.origin.x + (sample + 0.5f) * scope.size.x / samples, y));
             }
             if (points.size() >= 2) {
-                draw->AddPolyline(points.data(), static_cast<int>(points.size()), channelMaskColor(1 << channel),
-                                  ImDrawFlags_None, 1.6f);
+                draw->AddPolyline(points.data(), static_cast<int>(points.size()),
+                                  channelMaskColor(1u << static_cast<uint32_t>(channel)), ImDrawFlags_None, 1.6f);
             }
         }
         draw->PopClipRect();
     }
     if (showGraticule) {
-        ImDrawList* draw = ImGui::GetWindowDrawList();
-        for (int quarter = 0; quarter <= 4; ++quarter) {
-            const float x = scope.origin.x + scope.size.x * quarter / 4.0f;
-            draw->AddLine(ImVec2(x, scope.origin.y), ImVec2(x, scope.origin.y + scope.size.y),
-                          quarter % 2 == 0 ? GraticuleMajor : GraticuleMinor);
-        }
+        drawGraticule(scope, instance.graticule(), GraticuleStyle{});
     }
     if (markerColor) {
-        if (style == HistogramStyle::PerChannel) {
-            // Each channel's marker stays a single color inside
-            // its own band.
-            const float channels[3] = {markerColor->r, markerColor->g, markerColor->b};
-            for (int channel = 0; channel < 3; ++channel) {
-                drawValueMarker(scope, channels[channel] / 255.0f, channelMaskColor(1 << channel), channel / 3.0f,
-                                (channel + 1) / 3.0f);
-            }
-        } else {
-            ChannelMarker markers[3];
-            const int count = groupChannelMarkers(*markerColor, markers);
-            for (int i = 0; i < count; ++i) {
-                drawValueMarker(scope, markers[i].value / 255.0f, markers[i].color);
-            }
-        }
+        drawMarkers(scope, instance.markers(SsColor{markerColor->r, markerColor->g, markerColor->b}));
     }
 }
 
@@ -1711,34 +1553,37 @@ int main()
     view.setSmoothing(WaveformScopeId, startup.waveformSmoothingMs);
     TraceFlash flash;
     analysis.enabledScopes = view.enabledScopeIds();
-    // Typed settings for the projection-only engines, rebuilt from the
-    // settings map whenever it changes. They never accumulate; they only place
-    // overlays and markers, so they need the matrix, mode, and image size.
-    const auto vectorscopeProjectionSettings = [&] {
-        VectorscopeSettings settings;
-        settings.gain = static_cast<float>(scopeParam(VectorscopeScopeId, "gain", settings.gain));
-        settings.samplingStride = static_cast<int>(scopeParam(VectorscopeScopeId, "stride", settings.samplingStride));
-        settings.matrix = currentMatrix();
-        settings.response = currentResponse();
-        const auto size = analysis.imageSizes.find(VectorscopeScopeId);
-        if (size != analysis.imageSizes.end()) {
-            settings.size = size->second.second;
+    // Projection instances place the overlays and markers on the main thread:
+    // one module instance per scope, drawing declarative graticule primitives
+    // and cursor markers. They never accumulate. The color picker has no module
+    // instance, so it is skipped here and drawn as host state.
+    std::map<std::string, ScopeInstance> projectionInstances;
+    for (const HostScope& scope : scopeRegistry.scopes()) {
+        if (scope.descriptor != nullptr) {
+            projectionInstances.emplace(scope.id, builtinModules().createInstance(scope.id));
         }
-
-        return settings;
+    }
+    // Reconfigures every projection instance from the current settings, through
+    // the same assembleScopeParams the worker uses, so an overlay can never
+    // disagree with its trace. The graticule and markers depend only on the
+    // parameters (matrix, mode, style), never the adaptive image size, so that
+    // is left to the worker's analysis instances.
+    const auto configureProjectionInstances = [&] {
+        for (auto& [id, instance] : projectionInstances) {
+            const SsScopeDescriptor* descriptor = descriptorFor(id);
+            std::vector<SsParamValue> values;
+            const auto params = analysis.scopeParams.find(id);
+            if (params != analysis.scopeParams.end() && descriptor != nullptr) {
+                values = assembleScopeParams(params->second, *descriptor);
+            }
+            (void)instance.configure(values);
+        }
     };
-    const auto waveformProjectionSettings = [&] {
-        WaveformSettings settings;
-        settings.gain = static_cast<float>(scopeParam(WaveformScopeId, "gain", settings.gain));
-        settings.samplingStride = static_cast<int>(scopeParam(WaveformScopeId, "stride", settings.samplingStride));
-        settings.mode = currentWaveformMode();
-        const auto size = analysis.imageSizes.find(WaveformScopeId);
-        if (size != analysis.imageSizes.end()) {
-            settings.columns = size->second.first;
-            settings.imageHeight = size->second.second;
-        }
-
-        return settings;
+    // The projection instance drawing a scope's overlays, or null for the color
+    // picker; every per-scope draw reads its graticule and markers through it.
+    const auto projectionFor = [&](std::string_view id) -> const ScopeInstance* {
+        const auto at = projectionInstances.find(std::string{id});
+        return at != projectionInstances.end() ? &at->second : nullptr;
     };
     // Shortcuts come from the preferences file: the key handler acts on
     // them and the context menu displays them, resolved once here.
@@ -1771,11 +1616,6 @@ int main()
     // on a region pick deliberately does.
     bool regionPickIsPin = false;
     bool regionPickSwallowCancel = false;
-
-    // Projection-only engine instances kept in sync with the analysis
-    // settings; they never accumulate, they only place overlays and markers.
-    Vectorscope projectionVectorscope;
-    Waveform projectionWaveform;
 
     MarkerSmoother vectorscopeMarker;
     MarkerSmoother waveformMarker;
@@ -2480,14 +2320,19 @@ int main()
             ImDrawList* draw = ImGui::GetWindowDrawList();
             draw->PushClipRect(scope.origin, ImVec2(scope.origin.x + scope.size.x, scope.origin.y + scope.size.y),
                                true);
-            if (view.graticule()) {
-                drawVectorscopeOverlay(scope, buildVectorscopeGraticule(projectionVectorscope));
-            }
-            for (const FloatColor& pinned : pins.colors()) {
-                drawPointMarker(scope, projectionVectorscope.project(pinned), IM_COL32(230, 170, 90, 230));
-            }
-            if (vectorscopeColor) {
-                drawPointMarker(scope, projectionVectorscope.project(*vectorscopeColor), IM_COL32(255, 255, 255, 255));
+            const ScopeInstance* instance = projectionFor(VectorscopeScopeId);
+            if (instance != nullptr) {
+                if (view.graticule()) {
+                    drawGraticule(scope, instance->graticule(), GraticuleStyle{VectorscopeMajorLineWidth});
+                }
+                // Pinned references are host state, drawn amber over the trace;
+                // the live cursor point takes its own white default.
+                for (const FloatColor& pinned : pins.colors()) {
+                    drawMarkers(scope, instance->markers(toSsColor(pinned)), PinnedPointColor);
+                }
+                if (vectorscopeColor) {
+                    drawMarkers(scope, instance->markers(toSsColor(*vectorscopeColor)));
+                }
             }
             draw->PopClipRect();
             if (view.zoom() > 1) {
@@ -2495,31 +2340,10 @@ int main()
                 draw->AddText(ImVec2(scope.origin.x + scope.size.x - 26, scope.origin.y + 6), GraticuleLabel, badge);
             }
         };
-        // The waveform flavors share gain and graticule; the cursor
-        // markers differ - channel levels on RGB and parade, one luma
-        // level on luma.
-        const auto drawChannelMarkers = [&](const DrawnScope& scope) {
-            if (!waveformColor) {
-                return;
-            }
-            ChannelMarker markers[3];
-            const int count = groupChannelMarkers(*waveformColor, markers);
-            for (int i = 0; i < count; ++i) {
-                drawLevelMarker(scope, (255.0f - markers[i].value) / 255.0f, markers[i].color);
-            }
-        };
-        // The parade separates the channels into thirds, so each marker
-        // stays a single color inside its own channel's column.
-        const auto drawParadeMarkers = [&](const DrawnScope& scope) {
-            if (!waveformColor) {
-                return;
-            }
-            const float channels[3] = {waveformColor->r, waveformColor->g, waveformColor->b};
-            for (int channel = 0; channel < 3; ++channel) {
-                drawLevelMarker(scope, (255.0f - channels[channel]) / 255.0f, channelMaskColor(1 << channel),
-                                channel / 3.0f, (channel + 1) / 3.0f);
-            }
-        };
+        // The waveform and its parade share one intensity control; each draws its
+        // own instance's scale and cursor markers, and the module's marker layout
+        // - one gold luma level, three channel levels, or three parade thirds -
+        // already follows its configured mode, so the host needs no branch.
         const auto drawWaveform = [&](std::string_view id) {
             const DrawnScope scope = drawScopeImage(textureForId(id), false);
             // The control is the waveform's even on the parade pane: the two
@@ -2534,19 +2358,14 @@ int main()
                     analysisDirty = true;
                 }
             }
-            if (view.graticule()) {
-                drawWaveformOverlay(scope);
-            }
-            const WaveformMode waveformMode = currentWaveformMode();
-            if (id == WaveformScopeId &&
-                (waveformMode == WaveformMode::Luma || waveformMode == WaveformMode::ColoredLuma)) {
-                if (waveformColor) {
-                    drawLevelMarker(scope, projectionWaveform.project(*waveformColor).y, IM_COL32(255, 220, 80, 220));
+            const ScopeInstance* instance = projectionFor(id);
+            if (instance != nullptr) {
+                if (view.graticule()) {
+                    drawGraticule(scope, instance->graticule(), GraticuleStyle{});
                 }
-            } else if (id == WaveformScopeId) {
-                drawChannelMarkers(scope);
-            } else {
-                drawParadeMarkers(scope);
+                if (waveformColor) {
+                    drawMarkers(scope, instance->markers(toSsColor(*waveformColor)));
+                }
             }
         };
 
@@ -2566,8 +2385,11 @@ int main()
             if (id == VectorscopeScopeId) {
                 drawVectorscope();
             } else if (id == HistogramScopeId) {
-                drawHistogram(textureForId(HistogramScopeId), output, currentHistogramStyle(), view.graticule(),
-                              vectorscopeColor, histogramScratch);
+                const ScopeInstance* instance = projectionFor(HistogramScopeId);
+                if (instance != nullptr) {
+                    drawHistogram(textureForId(HistogramScopeId), output, *instance, currentHistogramStyle(),
+                                  view.graticule(), vectorscopeColor, histogramScratch);
+                }
             } else if (id == ColorPickerScopeId) {
                 drawColorPicker(vectorscopeColor, pins, callbackState.monospaceFont);
             } else {
@@ -3181,8 +3003,7 @@ int main()
 
         if (analysisDirty) {
             worker.updateSettings(analysis);
-            projectionVectorscope.configure(vectorscopeProjectionSettings());
-            projectionWaveform.configure(waveformProjectionSettings());
+            configureProjectionInstances();
             syncRegionBorder();
             analysisDirty = false;
             lastActivity = glfwGetTime();

@@ -123,6 +123,21 @@ uint64_t AnalysisWorker::consumedFrameSequence() const
     return m_consumedSequence.load(std::memory_order_relaxed);
 }
 
+std::vector<SsParamValue> assembleScopeParams(const std::map<std::string, double>& values,
+                                              const SsScopeDescriptor& descriptor)
+{
+    std::vector<SsParamValue> assembled;
+    for (uint32_t index = 0; index < descriptor.param_count; ++index) {
+        const char* key = descriptor.params[index].key;
+        const auto value = values.find(key);
+        if (value != values.end()) {
+            assembled.push_back(SsParamValue{key, value->second});
+        }
+    }
+
+    return assembled;
+}
+
 namespace {
 
 // One built-in scope the worker owns on its thread, plus the extensions the
@@ -195,13 +210,7 @@ void configureScopes(std::vector<WorkerScope>& scopes, const AnalysisSettings& s
         std::vector<SsParamValue> values;
         const auto params = settings.scopeParams.find(scope.id);
         if (params != settings.scopeParams.end() && scope.descriptor) {
-            for (uint32_t index = 0; index < scope.descriptor->param_count; ++index) {
-                const char* key = scope.descriptor->params[index].key;
-                const auto value = params->second.find(key);
-                if (value != params->second.end()) {
-                    values.push_back(SsParamValue{key, value->second});
-                }
-            }
+            values = assembleScopeParams(params->second, *scope.descriptor);
         }
         (void)scope.instance.configure(values);
 

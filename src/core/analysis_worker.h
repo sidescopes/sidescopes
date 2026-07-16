@@ -13,8 +13,18 @@
 
 #include "core/frame_mailbox.h"
 #include "core/scopes/scope_types.h"
+#include "sidescopes/module.h"
 
 namespace sidescopes {
+
+/// Assembles the parameter list a scope instance is configured with, from its
+/// stored values. Each SsParamValue borrows its key pointer from the
+/// descriptor - module-owned and stable to module deinit - never from the
+/// settings map, so the values never dangle. Only keys the descriptor declares
+/// are forwarded. The worker's analysis instances and the host's projection
+/// instances both build their parameters this way, so the two can never drift.
+[[nodiscard]] std::vector<SsParamValue> assembleScopeParams(const std::map<std::string, double>& values,
+                                                            const SsScopeDescriptor& descriptor);
 
 /// The scoped part of the screen, as percentages of the captured frame, so a
 /// selection survives capture resolution changes.
