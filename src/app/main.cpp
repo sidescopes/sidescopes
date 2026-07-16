@@ -18,10 +18,12 @@
 #include <mutex>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <thread>
 
 #include "app/capture_controller.h"
 #include "app/pin_board.h"
+#include "app/scope_registry.h"
 #include "app/scope_view.h"
 #include "app/version.h"
 #include "core/analysis_worker.h"
@@ -33,6 +35,7 @@
 #include "core/scopes/graticule.h"
 #include "core/trace_intensity.h"
 #include "imgui.h"
+#include "modules/module_registry.h"
 #include "platform/desktop.h"
 #include "platform/face_detection.h"
 #include "platform/graphics.h"
@@ -212,7 +215,7 @@ struct TraceAdjustment
 /// Scroll adjusts the trace intensity, double-click restores the default gain.
 /// Draws the intensity readout while this trace's flash is up. Returns the new
 /// values when the user changed them.
-std::optional<TraceAdjustment> traceIntensityGesture(const DrawnScope& scope, TraceControl control, float intensity,
+std::optional<TraceAdjustment> traceIntensityGesture(const DrawnScope& scope, std::string_view control, float intensity,
                                                      float defaultGain, float intensityShift, TraceFlash& flash)
 {
     if (!ImGui::IsItemHovered()) {
@@ -1615,15 +1618,15 @@ int main()
     analysis.histogram.style = startup.histogramPerChannel ? HistogramStyle::PerChannel : HistogramStyle::Combined;
     bool analysisDirty = true;
 
-    ScopeView view;
+    ScopeRegistry scopeRegistry{builtinModules()};
+    ScopeView view{scopeRegistry};
     view.restoreStack(startup.scopeStack);
     view.setGraticule(startup.showGraticule);
     view.setZoom(startup.vectorscopeZoom);
-    view.setIntensity(TraceControl::Vectorscope,
-                      intensityFromTraceGain(analysis.vectorscope.gain, VectorscopeIntensityShift));
-    view.setIntensity(TraceControl::Waveform, intensityFromTraceGain(analysis.waveform.gain));
-    view.setSmoothing(TraceControl::Vectorscope, startup.vectorscopeSmoothingMs);
-    view.setSmoothing(TraceControl::Waveform, startup.waveformSmoothingMs);
+    view.setIntensity(VectorscopeScopeId, intensityFromTraceGain(analysis.vectorscope.gain, VectorscopeIntensityShift));
+    view.setIntensity(WaveformScopeId, intensityFromTraceGain(analysis.waveform.gain));
+    view.setSmoothing(VectorscopeScopeId, startup.vectorscopeSmoothingMs);
+    view.setSmoothing(WaveformScopeId, startup.waveformSmoothingMs);
     TraceFlash flash;
     analysis.enabledScopes = view.enabledMask();
     // Shortcuts come from the preferences file: the key handler acts on
@@ -1692,7 +1695,12 @@ int main()
     // and desired resolutions are debounced so a live resize does not
     // thrash engine reallocation. The upload path recreates a texture
     // whenever its image changes dimensions.
-    ImVec2 panePoints[5] = {};
+    std::vector<ImVec2> panePoints(scopeRegistry.scopes().size());
+    // Child-window ids by stack position (not identity), built once.
+    std::vector<std::string> paneIds;
+    for (std::size_t i = 0; i < scopeRegistry.scopes().size(); ++i) {
+        paneIds.push_back("##pane" + std::to_string(i));
+    }
     int pendingColumns = 0;
     int pendingImageHeight = 0;
     int pendingVectorscope = 0;
@@ -1810,8 +1818,8 @@ int main()
         preferences.waveformGain = analysis.waveform.gain;
         preferences.vectorscopeStride = analysis.vectorscope.samplingStride;
         preferences.waveformStride = analysis.waveform.samplingStride;
-        preferences.vectorscopeSmoothingMs = view.smoothing(TraceControl::Vectorscope);
-        preferences.waveformSmoothingMs = view.smoothing(TraceControl::Waveform);
+        preferences.vectorscopeSmoothingMs = view.smoothing(VectorscopeScopeId);
+        preferences.waveformSmoothingMs = view.smoothing(WaveformScopeId);
         preferences.matrix = analysis.vectorscope.matrix;
         preferences.traceResponse = analysis.vectorscope.response;
         preferences.histogramStride = analysis.histogram.samplingStride;
@@ -1890,16 +1898,16 @@ int main()
         }
 
         if (worker.fetchOutput(outputVersion, output)) {
-            if (view.shows(ScopeGlyph::Vectorscope)) {
+            if (view.shows(VectorscopeScopeId)) {
                 uploadScope(vectorscopeTexture, output.vectorscopeImage);
             }
-            if (view.shows(ScopeGlyph::Waveform)) {
+            if (view.shows(WaveformScopeId)) {
                 uploadScope(waveformTexture, output.waveformImage);
             }
-            if (view.shows(ScopeGlyph::WaveformParade)) {
+            if (view.shows(ParadeScopeId)) {
                 uploadScope(waveformParadeTexture, output.waveformParadeImage);
             }
-            if (view.shows(ScopeGlyph::Histogram)) {
+            if (view.shows(HistogramScopeId)) {
                 uploadScope(histogramTexture, output.histogramImage);
             }
             lastActivity = glfwGetTime();
@@ -1969,8 +1977,8 @@ int main()
                     sampled = screenSample->color;
                 }
                 if (sampled) {
-                    vectorscopeMarker.setTimeConstant(view.smoothing(TraceControl::Vectorscope));
-                    waveformMarker.setTimeConstant(view.smoothing(TraceControl::Waveform));
+                    vectorscopeMarker.setTimeConstant(view.smoothing(VectorscopeScopeId));
+                    waveformMarker.setTimeConstant(view.smoothing(WaveformScopeId));
                     vectorscopeColor = vectorscopeMarker.update(*sampled, io.DeltaTime);
                     waveformColor = waveformMarker.update(*sampled, io.DeltaTime);
                 }
@@ -1987,8 +1995,8 @@ int main()
             int windowH = 0;
             glfwGetWindowSize(window, &windowW, &windowH);
             const float density = windowW > 0 ? static_cast<float>(framebufferWidth) / windowW : 1.0f;
-            const auto pane = [&](ScopeGlyph kind) {
-                const ImVec2& points = panePoints[static_cast<int>(kind)];
+            const auto pane = [&](std::string_view id) {
+                const ImVec2& points = panePoints[static_cast<std::size_t>(scopeRegistry.indexOf(id))];
                 return ImVec2(points.x * density, points.y * density);
             };
             int regionWidth = 0;
@@ -1999,9 +2007,9 @@ int main()
 
             int wantColumns = analysis.waveform.columns;
             int wantHeight = analysis.waveform.imageHeight;
-            if (view.shows(ScopeGlyph::Waveform) || view.shows(ScopeGlyph::WaveformParade)) {
-                const float wfWidth = std::max(pane(ScopeGlyph::Waveform).x, pane(ScopeGlyph::WaveformParade).x);
-                const float wfHeight = std::max(pane(ScopeGlyph::Waveform).y, pane(ScopeGlyph::WaveformParade).y);
+            if (view.shows(WaveformScopeId) || view.shows(ParadeScopeId)) {
+                const float wfWidth = std::max(pane(WaveformScopeId).x, pane(ParadeScopeId).x);
+                const float wfHeight = std::max(pane(WaveformScopeId).y, pane(ParadeScopeId).y);
                 wantColumns = wfWidth >= 1400.0f ? 2048 : wfWidth >= 500.0f ? 1024 : 512;
                 if (regionWidth > 0) {
                     wantColumns = std::min(wantColumns, regionWidth >= 2048 ? 2048 : regionWidth >= 1024 ? 1024 : 512);
@@ -2010,19 +2018,19 @@ int main()
             }
             int wantHistWidth = analysis.histogram.imageWidth;
             int wantHistHeight = analysis.histogram.imageHeight;
-            if (view.shows(ScopeGlyph::Histogram)) {
+            if (view.shows(HistogramScopeId)) {
                 // Near one texture pixel per screen pixel keeps the
                 // outline's width even on flats and steep slopes alike.
-                const ImVec2 scopePane = pane(ScopeGlyph::Histogram);
+                const ImVec2 scopePane = pane(HistogramScopeId);
                 wantHistWidth = scopePane.x >= 1400.0f ? 2048 : scopePane.x >= 500.0f ? 1024 : 512;
                 wantHistHeight = scopePane.y >= 560.0f ? 768 : 384;
             }
             int wantVectorscope = analysis.vectorscope.size;
-            if (view.shows(ScopeGlyph::Vectorscope)) {
+            if (view.shows(VectorscopeScopeId)) {
                 // Purely a display resolution: accumulation stays on the
                 // 256-code grid and a finer image is interpolated from
                 // it, so a sparse region costs nothing extra.
-                const ImVec2 scopePane = pane(ScopeGlyph::Vectorscope);
+                const ImVec2 scopePane = pane(VectorscopeScopeId);
                 const float extent = std::min(scopePane.x, scopePane.y);
                 wantVectorscope = extent >= 480.0f ? 512 : 256;
             }
@@ -2075,42 +2083,54 @@ int main()
         // briefly for the recompute, so the scope's first drawn frame is
         // already current. The wait is bounded; on timeout the stale
         // image stands in until the recompute lands a frame later.
-        const auto imageFor = [&](ScopeGlyph kind) -> const ScopeImage& {
-            switch (kind) {
-            case ScopeGlyph::Vectorscope:
+        // THROWAWAY SCAFFOLDING (Phase 2 removal): the worker still fills four
+        // named Output images and the shell owns four named textures. These
+        // adapters map a scope id onto the matching image/texture so the worker
+        // and Output stay untouched this phase; Phase 2 keys them by id.
+        const auto imageForId = [&](std::string_view id) -> const ScopeImage& {
+            if (id == VectorscopeScopeId) {
                 return output.vectorscopeImage;
-            case ScopeGlyph::Waveform:
-                return output.waveformImage;
-            case ScopeGlyph::WaveformParade:
-                return output.waveformParadeImage;
-            default:
-                return output.histogramImage;
             }
+            if (id == WaveformScopeId) {
+                return output.waveformImage;
+            }
+            if (id == ParadeScopeId) {
+                return output.waveformParadeImage;
+            }
+
+            return output.histogramImage;
+        };
+        const auto textureForId = [&](std::string_view id) -> std::unique_ptr<ScopeTexture>& {
+            if (id == VectorscopeScopeId) {
+                return vectorscopeTexture;
+            }
+            if (id == WaveformScopeId) {
+                return waveformTexture;
+            }
+            if (id == ParadeScopeId) {
+                return waveformParadeTexture;
+            }
+
+            return histogramTexture;
         };
         const auto uploadVisibleScopes = [&] {
-            if (view.shows(ScopeGlyph::Vectorscope)) {
-                uploadScope(vectorscopeTexture, output.vectorscopeImage);
-            }
-            if (view.shows(ScopeGlyph::Waveform)) {
-                uploadScope(waveformTexture, output.waveformImage);
-            }
-            if (view.shows(ScopeGlyph::WaveformParade)) {
-                uploadScope(waveformParadeTexture, output.waveformParadeImage);
-            }
-            if (view.shows(ScopeGlyph::Histogram)) {
-                uploadScope(histogramTexture, output.histogramImage);
+            for (const std::string& id : view.stack()) {
+                if (id == ColorPickerScopeId) {
+                    continue;
+                }
+                uploadScope(textureForId(id), imageForId(id));
             }
         };
-        const auto refreshActivatedScope = [&](ScopeGlyph kind) {
-            if (kind == ScopeGlyph::ColorPicker) {
+        const auto refreshActivatedScope = [&](std::string_view id) {
+            if (id == ColorPickerScopeId) {
                 return;
             }
-            const uint64_t staleSequence = imageFor(kind).sequence;
+            const uint64_t staleSequence = imageForId(id).sequence;
             worker.updateSettings(analysis);
             const double deadline = glfwGetTime() + 0.08;
             while (glfwGetTime() < deadline) {
-                if (worker.fetchOutput(outputVersion, output) && imageFor(kind).sequence != staleSequence &&
-                    imageFor(kind).width > 0) {
+                if (worker.fetchOutput(outputVersion, output) && imageForId(id).sequence != staleSequence &&
+                    imageForId(id).width > 0) {
                     uploadVisibleScopes();
                     return;
                 }
@@ -2118,19 +2138,19 @@ int main()
             }
             uploadVisibleScopes();  // timeout: a stale image beats none
         };
-        const auto toggleScope = [&](ScopeGlyph kind) {
-            const bool activated = view.toggle(kind);
+        const auto toggleScope = [&](std::string_view id) {
+            const bool activated = view.toggle(id);
             analysis.enabledScopes = view.enabledMask();
             if (activated) {
-                refreshActivatedScope(kind);
+                refreshActivatedScope(id);
             }
             analysisDirty = true;
         };
-        const auto chooseScope = [&](ScopeGlyph kind, bool stack) {
-            const bool activated = view.choose(kind, stack);
+        const auto chooseScope = [&](std::string_view id, bool stack) {
+            const bool activated = view.choose(id, stack);
             analysis.enabledScopes = view.enabledMask();
             if (activated) {
-                refreshActivatedScope(kind);
+                refreshActivatedScope(id);
             }
             analysisDirty = true;
         };
@@ -2146,12 +2166,33 @@ int main()
         // open the waveform - so any of them silences the plain-letter
         // shortcuts. Shift alone stays meaningful: it stacks.
         const bool systemChord = modifiers.command || modifiers.control || modifiers.option;
-        const auto scopeToggle = [&](const char* id, ScopeGlyph kind, const char* tooltip) {
-            const char letter[2] = {scopeLetter(kind), '\0'};
-            if (scopeToggleButton(id, letter, view.shows(kind), tooltip)) {
-                chooseScope(kind, stackModifier);
+
+        // Per-scope toolbar chrome, keyed by id: the button id, display name,
+        // shortcut binding, and tooltip suffix. Phase 2 moves the name onto
+        // the descriptor and the binding onto a data-driven table.
+        struct ScopeChrome
+        {
+            const char* buttonId;
+            const char* name;
+            const std::string* binding;
+            const char* extra;
+        };
+
+        const auto chromeFor = [&](std::string_view id) -> ScopeChrome {
+            if (id == VectorscopeScopeId) {
+                return {"##toggle-vectorscope", "Vectorscope", &shortcuts.vectorscope, ""};
             }
-            ImGui::SameLine(0.0f, 2.0f);
+            if (id == WaveformScopeId) {
+                return {"##toggle-waveform", "Waveform", &shortcuts.waveform, "; styles in the right-click menu"};
+            }
+            if (id == ParadeScopeId) {
+                return {"##toggle-waveform-parade", "RGB parade", &shortcuts.parade, ""};
+            }
+            if (id == HistogramScopeId) {
+                return {"##toggle-histogram", "Histogram", &shortcuts.histogram, ""};
+            }
+
+            return {"##toggle-color-picker", "Color picker", &shortcuts.colorPicker, ""};
         };
         // Tooltips name the configured shortcut, not an assumed one.
         char tooltip[96];
@@ -2160,15 +2201,18 @@ int main()
                           binding.c_str(), extra);
             return tooltip;
         };
-        scopeToggle("##toggle-vectorscope", ScopeGlyph::Vectorscope,
-                    scopeTooltip("Vectorscope", shortcuts.vectorscope, ""));
-        scopeToggle("##toggle-waveform", ScopeGlyph::Waveform,
-                    scopeTooltip("Waveform", shortcuts.waveform, "; styles in the right-click menu"));
-        scopeToggle("##toggle-waveform-parade", ScopeGlyph::WaveformParade,
-                    scopeTooltip("RGB parade", shortcuts.parade, ""));
-        scopeToggle("##toggle-histogram", ScopeGlyph::Histogram, scopeTooltip("Histogram", shortcuts.histogram, ""));
-        scopeToggle("##toggle-color-picker", ScopeGlyph::ColorPicker,
-                    scopeTooltip("Color picker", shortcuts.colorPicker, ""));
+        for (const HostScope& scope : scopeRegistry.scopes()) {
+            if (scope.letter == 0) {
+                continue;
+            }
+            const ScopeChrome chrome = chromeFor(scope.id);
+            const char letter[2] = {scope.letter, '\0'};
+            if (scopeToggleButton(chrome.buttonId, letter, view.shows(scope.id),
+                                  scopeTooltip(chrome.name, *chrome.binding, chrome.extra))) {
+                chooseScope(scope.id, stackModifier);
+            }
+            ImGui::SameLine(0.0f, 2.0f);
+        }
         ImGui::SameLine(0.0f, 8.0f);
 
         // Keyboard shortcuts mirror the toolbar and region tools.
@@ -2176,7 +2220,7 @@ int main()
         // Pins mark the vectorscope and the color picker; without either
         // on screen, the tool's button, menu entries, and shortcuts all
         // stand down together.
-        const bool pinsAvailable = view.shows(ScopeGlyph::Vectorscope) || view.shows(ScopeGlyph::ColorPicker);
+        const bool pinsAvailable = view.shows(VectorscopeScopeId) || view.shows(ColorPickerScopeId);
         const auto pressed = [&](const std::string& binding) {
             const ImGuiKey key = keyFor(binding);
             return key != ImGuiKey_None && ImGui::IsKeyPressed(key, false);
@@ -2206,19 +2250,19 @@ int main()
         }
         if (!io.WantTextInput && !systemChord) {
             if (pressed(shortcuts.vectorscope)) {
-                chooseScope(ScopeGlyph::Vectorscope, stackModifier);
+                chooseScope(VectorscopeScopeId, stackModifier);
             }
             if (pressed(shortcuts.waveform)) {
-                chooseScope(ScopeGlyph::Waveform, stackModifier);
+                chooseScope(WaveformScopeId, stackModifier);
             }
             if (pressed(shortcuts.parade)) {
-                chooseScope(ScopeGlyph::WaveformParade, stackModifier);
+                chooseScope(ParadeScopeId, stackModifier);
             }
             if (pressed(shortcuts.histogram)) {
-                chooseScope(ScopeGlyph::Histogram, stackModifier);
+                chooseScope(HistogramScopeId, stackModifier);
             }
             if (pressed(shortcuts.colorPicker)) {
-                chooseScope(ScopeGlyph::ColorPicker, stackModifier);
+                chooseScope(ColorPickerScopeId, stackModifier);
             }
             if (pressed(shortcuts.pickWindow)) {
                 wantRegionPick = RegionPickerMode::PickWindows;
@@ -2327,9 +2371,9 @@ int main()
         const auto drawVectorscope = [&] {
             const DrawnScope scope = drawScopeImage(*vectorscopeTexture, true, static_cast<float>(view.zoom()));
             if (const auto adjusted =
-                    traceIntensityGesture(scope, TraceControl::Vectorscope, view.intensity(TraceControl::Vectorscope),
-                                          3.0f, VectorscopeIntensityShift, flash)) {
-                view.setIntensity(TraceControl::Vectorscope, adjusted->intensity);
+                    traceIntensityGesture(scope, VectorscopeScopeId, view.intensity(VectorscopeScopeId), 3.0f,
+                                          VectorscopeIntensityShift, flash)) {
+                view.setIntensity(VectorscopeScopeId, adjusted->intensity);
                 analysis.vectorscope.gain = adjusted->gain;
                 analysisDirty = true;
             }
@@ -2377,24 +2421,23 @@ int main()
                                 channel / 3.0f, (channel + 1) / 3.0f);
             }
         };
-        const auto drawWaveform = [&](ScopeGlyph kind) {
-            const ScopeTexture& texture = kind == ScopeGlyph::Waveform ? *waveformTexture : *waveformParadeTexture;
-            const DrawnScope scope = drawScopeImage(texture, false);
-            if (const auto adjusted = traceIntensityGesture(
-                    scope, TraceControl::Waveform, view.intensity(TraceControl::Waveform), 0.05f, 0.0f, flash)) {
-                view.setIntensity(TraceControl::Waveform, adjusted->intensity);
+        const auto drawWaveform = [&](std::string_view id) {
+            const DrawnScope scope = drawScopeImage(*textureForId(id), false);
+            if (const auto adjusted = traceIntensityGesture(scope, WaveformScopeId, view.intensity(WaveformScopeId),
+                                                            0.05f, 0.0f, flash)) {
+                view.setIntensity(WaveformScopeId, adjusted->intensity);
                 analysis.waveform.gain = adjusted->gain;
                 analysisDirty = true;
             }
             if (view.graticule()) {
                 drawWaveformOverlay(scope);
             }
-            if (kind == ScopeGlyph::Waveform &&
+            if (id == WaveformScopeId &&
                 (analysis.waveform.mode == WaveformMode::Luma || analysis.waveform.mode == WaveformMode::ColoredLuma)) {
                 if (waveformColor) {
                     drawLevelMarker(scope, projectionWaveform.project(*waveformColor).y, IM_COL32(255, 220, 80, 220));
                 }
-            } else if (kind == ScopeGlyph::Waveform) {
+            } else if (id == WaveformScopeId) {
                 drawChannelMarkers(scope);
             } else {
                 drawParadeMarkers(scope);
@@ -2405,22 +2448,24 @@ int main()
         // along its longer axis.
         // Which pane is under the cursor decides which options the
         // context menu shows; rects refresh as the panes draw.
-        ImVec4 paneRects[5] = {};
-        const auto drawScope = [&](ScopeGlyph kind) {
-            panePoints[static_cast<int>(kind)] = ImGui::GetContentRegionAvail();
+        // A scope's pane point and rect live at its own identity index, so the
+        // adaptive block reads back the right pane next frame.
+        std::vector<ImVec4> paneRects(scopeRegistry.scopes().size());
+        const auto drawScope = [&](std::string_view id) {
+            const auto index = static_cast<std::size_t>(scopeRegistry.indexOf(id));
+            panePoints[index] = ImGui::GetContentRegionAvail();
             const ImVec2 paneMin = ImGui::GetCursorScreenPos();
             const ImVec2 paneAvail = ImGui::GetContentRegionAvail();
-            paneRects[static_cast<int>(kind)] =
-                ImVec4(paneMin.x, paneMin.y, paneMin.x + paneAvail.x, paneMin.y + paneAvail.y);
-            if (kind == ScopeGlyph::Vectorscope) {
+            paneRects[index] = ImVec4(paneMin.x, paneMin.y, paneMin.x + paneAvail.x, paneMin.y + paneAvail.y);
+            if (id == VectorscopeScopeId) {
                 drawVectorscope();
-            } else if (kind == ScopeGlyph::Histogram) {
+            } else if (id == HistogramScopeId) {
                 drawHistogram(*histogramTexture, output, analysis.histogram.style, view.graticule(), vectorscopeColor,
                               histogramScratch);
-            } else if (kind == ScopeGlyph::ColorPicker) {
+            } else if (id == ColorPickerScopeId) {
                 drawColorPicker(vectorscopeColor, pins, callbackState.monospaceFont);
             } else {
-                drawWaveform(kind);
+                drawWaveform(id);
             }
         };
         const int paneCount = static_cast<int>(view.stack().size());
@@ -2447,9 +2492,8 @@ int main()
             const ImVec2 spacing = ImGui::GetStyle().ItemSpacing;
             const ImVec2 paneSize = horizontal ? ImVec2((area.x - spacing.x * (paneCount - 1)) / paneCount, area.y)
                                                : ImVec2(area.x, (area.y - spacing.y * (paneCount - 1)) / paneCount);
-            const char* paneIds[5] = {"##pane0", "##pane1", "##pane2", "##pane3", "##pane4"};
             for (int pane = 0; pane < paneCount; ++pane) {
-                ImGui::BeginChild(paneIds[pane], paneSize);
+                ImGui::BeginChild(paneIds[static_cast<std::size_t>(pane)].c_str(), paneSize);
                 drawScope(view.stack()[static_cast<std::size_t>(pane)]);
                 ImGui::EndChild();
                 if (horizontal && pane + 1 < paneCount) {
@@ -2472,17 +2516,17 @@ int main()
             // order in both: scopes, region, pins, view, application.
             const ImVec2 mouse = ImGui::GetMousePos();
             int clickedPane = -1;
-            for (int pane = 0; pane < 5; ++pane) {
+            for (std::size_t pane = 0; pane < paneRects.size(); ++pane) {
                 const ImVec4& rect = paneRects[pane];
                 if (rect.z <= rect.x || rect.w <= rect.y) {
                     continue;
                 }
                 if (mouse.x >= rect.x && mouse.x < rect.z && mouse.y >= rect.y && mouse.y < rect.w) {
-                    clickedPane = pane;
+                    clickedPane = static_cast<int>(pane);
                 }
             }
-            const auto clicked = [&](ScopeGlyph kind) { return clickedPane == static_cast<int>(kind); };
-            const auto shownOrGlobal = [&](ScopeGlyph kind) { return clickedPane < 0 && view.shows(kind); };
+            const auto clicked = [&](std::string_view id) { return clickedPane == scopeRegistry.indexOf(id); };
+            const auto shownOrGlobal = [&](std::string_view id) { return clickedPane < 0 && view.shows(id); };
 
             std::vector<NativeMenuItem> menu;
             const auto action = [&](const char* label, int id, bool checked, std::string shortcut = "") {
@@ -2532,56 +2576,54 @@ int main()
             };
 
             // The clicked pane's options, first and unprefixed.
-            if (clicked(ScopeGlyph::Vectorscope)) {
+            if (clicked(VectorscopeScopeId)) {
                 vectorscopeOptions();
                 separator();
-            } else if (clicked(ScopeGlyph::Waveform)) {
+            } else if (clicked(WaveformScopeId)) {
                 submenu("Style");
                 waveformOptions();
                 endSubmenu();
                 separator();
-            } else if (clicked(ScopeGlyph::Histogram)) {
+            } else if (clicked(HistogramScopeId)) {
                 submenu("Style");
                 histogramOptions();
                 endSubmenu();
                 separator();
-            } else if (clicked(ScopeGlyph::ColorPicker)) {
+            } else if (clicked(ColorPickerScopeId)) {
                 pinOptions();
                 separator();
             }
 
             submenu("Scopes");
-            action("Vectorscope", MenuShowVectorscope, view.shows(ScopeGlyph::Vectorscope),
+            action("Vectorscope", MenuShowVectorscope, view.shows(VectorscopeScopeId),
                    shortcutLabel(shortcuts.vectorscope));
-            action("Waveform", MenuShowWaveform, view.shows(ScopeGlyph::Waveform), shortcutLabel(shortcuts.waveform));
-            action("RGB Parade", MenuShowWaveformParade, view.shows(ScopeGlyph::WaveformParade),
-                   shortcutLabel(shortcuts.parade));
-            action("Histogram", MenuShowHistogram, view.shows(ScopeGlyph::Histogram),
-                   shortcutLabel(shortcuts.histogram));
-            action("Color Picker", MenuShowColorPicker, view.shows(ScopeGlyph::ColorPicker),
+            action("Waveform", MenuShowWaveform, view.shows(WaveformScopeId), shortcutLabel(shortcuts.waveform));
+            action("RGB Parade", MenuShowWaveformParade, view.shows(ParadeScopeId), shortcutLabel(shortcuts.parade));
+            action("Histogram", MenuShowHistogram, view.shows(HistogramScopeId), shortcutLabel(shortcuts.histogram));
+            action("Color Picker", MenuShowColorPicker, view.shows(ColorPickerScopeId),
                    shortcutLabel(shortcuts.colorPicker));
             endSubmenu();
 
             // On a global click, each visible scope's options ride under
             // the scope's own name.
-            if (shownOrGlobal(ScopeGlyph::Vectorscope)) {
+            if (shownOrGlobal(VectorscopeScopeId)) {
                 submenu("Vectorscope");
                 vectorscopeOptions();
                 endSubmenu();
             }
-            if (shownOrGlobal(ScopeGlyph::Waveform)) {
+            if (shownOrGlobal(WaveformScopeId)) {
                 submenu("Waveform");
                 waveformOptions();
                 endSubmenu();
             }
-            if (shownOrGlobal(ScopeGlyph::Histogram)) {
+            if (shownOrGlobal(HistogramScopeId)) {
                 submenu("Histogram");
                 histogramOptions();
                 endSubmenu();
             }
             // The vectorscope's section already carries the pins; when
             // only the color picker is up, they ride under its name.
-            if (shownOrGlobal(ScopeGlyph::ColorPicker) && !view.shows(ScopeGlyph::Vectorscope)) {
+            if (shownOrGlobal(ColorPickerScopeId) && !view.shows(VectorscopeScopeId)) {
                 submenu("Color Picker");
                 pinOptions();
                 endSubmenu();
@@ -2605,13 +2647,13 @@ int main()
 
             switch (showNativeContextMenu(menu)) {
             case MenuShowVectorscope:
-                toggleScope(ScopeGlyph::Vectorscope);
+                toggleScope(VectorscopeScopeId);
                 break;
             case MenuShowWaveform:
-                toggleScope(ScopeGlyph::Waveform);
+                toggleScope(WaveformScopeId);
                 break;
             case MenuShowWaveformParade:
-                toggleScope(ScopeGlyph::WaveformParade);
+                toggleScope(ParadeScopeId);
                 break;
             case MenuWaveformStyleRgb:
                 analysis.waveform.mode = WaveformMode::Rgb;
@@ -2634,10 +2676,10 @@ int main()
                 analysisDirty = true;
                 break;
             case MenuShowHistogram:
-                toggleScope(ScopeGlyph::Histogram);
+                toggleScope(HistogramScopeId);
                 break;
             case MenuShowColorPicker:
-                toggleScope(ScopeGlyph::ColorPicker);
+                toggleScope(ColorPickerScopeId);
                 break;
             case MenuMatrixBt601:
                 analysis.vectorscope.matrix = ChromaMatrix::Bt601;
@@ -2712,28 +2754,28 @@ int main()
                         static_cast<unsigned long long>(output.framesProcessed), static_cast<double>(io.Framerate));
             ImGui::Separator();
             ImGui::TextDisabled("vectorscope");
-            float vectorscopePercent = view.intensity(TraceControl::Vectorscope);
+            float vectorscopePercent = view.intensity(VectorscopeScopeId);
             if (ImGui::SliderFloat("intensity##v", &vectorscopePercent, 0.0f, 100.0f, "%.0f%%")) {
-                view.setIntensity(TraceControl::Vectorscope, vectorscopePercent);
+                view.setIntensity(VectorscopeScopeId, vectorscopePercent);
                 analysis.vectorscope.gain = traceGainFromIntensity(vectorscopePercent, VectorscopeIntensityShift);
                 analysisDirty = true;
             }
             analysisDirty |= ImGui::SliderInt("sampling 1:N##v", &analysis.vectorscope.samplingStride, 1, 8);
-            float vectorscopeMs = view.smoothing(TraceControl::Vectorscope);
+            float vectorscopeMs = view.smoothing(VectorscopeScopeId);
             if (ImGui::SliderFloat("smoothing ms##v", &vectorscopeMs, 0.0f, 500.0f, "%.0f")) {
-                view.setSmoothing(TraceControl::Vectorscope, vectorscopeMs);
+                view.setSmoothing(VectorscopeScopeId, vectorscopeMs);
             }
             ImGui::TextDisabled("waveform");
-            float waveformPercent = view.intensity(TraceControl::Waveform);
+            float waveformPercent = view.intensity(WaveformScopeId);
             if (ImGui::SliderFloat("intensity##w", &waveformPercent, 0.0f, 100.0f, "%.0f%%")) {
-                view.setIntensity(TraceControl::Waveform, waveformPercent);
+                view.setIntensity(WaveformScopeId, waveformPercent);
                 analysis.waveform.gain = traceGainFromIntensity(waveformPercent);
                 analysisDirty = true;
             }
             analysisDirty |= ImGui::SliderInt("sampling 1:N##w", &analysis.waveform.samplingStride, 1, 8);
-            float waveformMs = view.smoothing(TraceControl::Waveform);
+            float waveformMs = view.smoothing(WaveformScopeId);
             if (ImGui::SliderFloat("smoothing ms##w", &waveformMs, 0.0f, 500.0f, "%.0f")) {
-                view.setSmoothing(TraceControl::Waveform, waveformMs);
+                view.setSmoothing(WaveformScopeId, waveformMs);
             }
             ImGui::TextDisabled("modes and toggles: right-click a scope");
             ImGui::TextDisabled("%s", versionInfo.display.c_str());

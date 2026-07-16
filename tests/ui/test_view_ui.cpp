@@ -19,12 +19,15 @@
 
 #define IMGUI_DEFINE_MATH_OPERATORS
 #include "app/pin_board.h"
+#include "app/scope_registry.h"
 #include "app/scope_view.h"
+#include "core/analysis_worker.h"
 #include "core/frame.h"
 #include "imgui.h"
 #include "imgui_internal.h"
 #include "imgui_test_engine/imgui_te_context.h"
 #include "imgui_test_engine/imgui_te_engine.h"
+#include "modules/module_registry.h"
 #include "ui_test_harness.h"
 
 namespace sidescopes {
@@ -34,7 +37,8 @@ namespace {
 // reachable from the engine's captureless GuiFunc/TestFunc.
 struct View
 {
-    ScopeView scopeView;
+    ScopeRegistry scopeRegistry{builtinModules()};
+    ScopeView scopeView{scopeRegistry};
     PinBoard pinBoard;
 };
 
@@ -56,10 +60,13 @@ void viewGui(ImGuiTestContext*)
 
     // Letter chips stand in for the toolbar and the keyboard shortcuts: a
     // click toggles the scope in the stack, exactly as V/W/R/H/C do.
-    for (const ScopeGlyph kind : AllScopes) {
-        const char label[2] = {scopeLetter(kind), '\0'};
+    for (const HostScope& scope : h.scopeRegistry.scopes()) {
+        if (scope.letter == 0) {
+            continue;
+        }
+        const char label[2] = {scope.letter, '\0'};
         if (ImGui::Button(label)) {
-            h.scopeView.toggle(kind);
+            h.scopeView.toggle(scope.id);
         }
         ImGui::SameLine();
     }
@@ -105,18 +112,18 @@ void scopeToggles(ImGuiTestContext* ctx)
 
     // Clicking W stacks the waveform and the enabled mask follows.
     ctx->ItemClick("W");
-    IM_CHECK(h.scopeView.shows(ScopeGlyph::Waveform));
+    IM_CHECK(h.scopeView.shows(WaveformScopeId));
     IM_CHECK(h.scopeView.stack().size() == 2);
     IM_CHECK((h.scopeView.enabledMask() & static_cast<uint32_t>(ScopeWaveform)) != 0u);
 
     // Clicking H stacks the histogram in activation order after W.
     ctx->ItemClick("H");
-    IM_CHECK(h.scopeView.shows(ScopeGlyph::Histogram));
+    IM_CHECK(h.scopeView.shows(HistogramScopeId));
     IM_CHECK(h.scopeView.stackLetters() == "VWH");
 
     // Clicking W again toggles the waveform back off.
     ctx->ItemClick("W");
-    IM_CHECK(!h.scopeView.shows(ScopeGlyph::Waveform));
+    IM_CHECK(!h.scopeView.shows(WaveformScopeId));
     IM_CHECK(h.scopeView.stackLetters() == "VH");
     IM_CHECK((h.scopeView.enabledMask() & static_cast<uint32_t>(ScopeWaveform)) == 0u);
 }

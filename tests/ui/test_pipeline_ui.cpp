@@ -23,6 +23,7 @@
 
 #define IMGUI_DEFINE_MATH_OPERATORS
 #include "app/capture_controller.h"
+#include "app/scope_registry.h"
 #include "app/scope_view.h"
 #include "core/analysis_worker.h"
 #include "core/frame_mailbox.h"
@@ -31,6 +32,7 @@
 #include "imgui_internal.h"
 #include "imgui_test_engine/imgui_te_context.h"
 #include "imgui_test_engine/imgui_te_engine.h"
+#include "modules/module_registry.h"
 #include "scope_image.h"
 #include "test_frame.h"
 #include "ui_test_harness.h"
@@ -49,7 +51,8 @@ struct Pipeline
     FakeCaptureSource source;
     CaptureController controller{source, mailbox};
     AnalysisWorker worker{mailbox};
-    ScopeView scopeView;
+    ScopeRegistry scopeRegistry{builtinModules()};
+    ScopeView scopeView{scopeRegistry};
 
     // The settings last synced into the worker; the GuiFunc keeps them in
     // step with the view and the pane size, as the app's frame loop does.
@@ -105,10 +108,13 @@ void pipelineGui(ImGuiTestContext*)
 
     // One button per stackable scope, toggling the real ScopeView exactly as
     // the app's toolbar does.
-    for (const ScopeGlyph kind : AllScopes) {
-        const char label[2] = {scopeLetter(kind), '\0'};
+    for (const HostScope& scope : h.scopeRegistry.scopes()) {
+        if (scope.letter == 0) {
+            continue;
+        }
+        const char label[2] = {scope.letter, '\0'};
         if (ImGui::Button(label)) {
-            h.scopeView.toggle(kind);
+            h.scopeView.toggle(scope.id);
         }
         ImGui::SameLine();
     }
@@ -175,7 +181,7 @@ void endToEnd(ImGuiTestContext* ctx)
     // --- UI action: clicking W adds the waveform to the real ScopeView ---
     IM_CHECK((h.scopeView.enabledMask() & static_cast<uint32_t>(ScopeWaveform)) == 0u);
     ctx->ItemClick("W");
-    IM_CHECK(h.scopeView.shows(ScopeGlyph::Waveform));
+    IM_CHECK(h.scopeView.shows(WaveformScopeId));
     IM_CHECK((h.scopeView.enabledMask() & static_cast<uint32_t>(ScopeWaveform)) != 0u);
 
     // The GuiFunc pushes the new mask on its next frame; the worker recomputes

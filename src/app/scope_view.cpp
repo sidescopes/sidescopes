@@ -2,32 +2,70 @@
 
 #include <algorithm>
 
-namespace sidescopes {
+#include "app/scope_registry.h"
+#include "core/analysis_worker.h"
 
-void TraceFlash::show(TraceControl control, double until)
+namespace sidescopes {
+namespace {
+
+/// The worker's enable bit for @p id, or zero when the scope asks nothing of
+/// the worker (the color picker reads the sampled cursor color instead).
+uint32_t scopeBit(std::string_view id)
+{
+    if (id == VectorscopeScopeId) {
+        return ScopeVectorscope;
+    }
+    if (id == WaveformScopeId) {
+        return ScopeWaveform;
+    }
+    if (id == ParadeScopeId) {
+        return ScopeWaveformParade;
+    }
+    if (id == HistogramScopeId) {
+        return ScopeHistogram;
+    }
+
+    return 0;
+}
+
+/// The control-owner id for @p id: the parade shares the waveform's intensity
+/// and smoothing, so both resolve to one control.
+std::string_view controlKey(std::string_view id)
+{
+    return id == ParadeScopeId ? std::string_view{WaveformScopeId} : id;
+}
+
+}  // namespace
+
+void TraceFlash::show(std::string_view control, double until)
 {
     m_control = control;
     m_until = until;
 }
 
-bool TraceFlash::showing(TraceControl control, double now) const
+bool TraceFlash::showing(std::string_view control, double now) const
 {
     return m_control == control && now < m_until;
 }
 
-bool ScopeView::shows(ScopeGlyph kind) const
+ScopeView::ScopeView(const ScopeRegistry& registry)
+    : m_registry(registry)
 {
-    return std::find(m_stack.begin(), m_stack.end(), kind) != m_stack.end();
 }
 
-const std::vector<ScopeGlyph>& ScopeView::stack() const
+bool ScopeView::shows(std::string_view id) const
+{
+    return std::find(m_stack.begin(), m_stack.end(), id) != m_stack.end();
+}
+
+const std::vector<std::string>& ScopeView::stack() const
 {
     return m_stack;
 }
 
-bool ScopeView::toggle(ScopeGlyph kind)
+bool ScopeView::toggle(std::string_view id)
 {
-    const auto at = std::find(m_stack.begin(), m_stack.end(), kind);
+    const auto at = std::find(m_stack.begin(), m_stack.end(), id);
     if (at != m_stack.end()) {
         // The last scope stays: the window never goes empty.
         if (m_stack.size() > 1) {
@@ -35,26 +73,29 @@ bool ScopeView::toggle(ScopeGlyph kind)
         }
         return false;
     }
-    m_stack.push_back(kind);
+    m_stack.emplace_back(id);
+
     return true;
 }
 
-bool ScopeView::choose(ScopeGlyph kind, bool stack)
+bool ScopeView::choose(std::string_view id, bool stack)
 {
     if (stack) {
-        return toggle(kind);
+        return toggle(id);
     }
-    const bool wasShown = shows(kind);
-    m_stack.assign(1, kind);
+    const bool wasShown = shows(id);
+    m_stack.assign(1, std::string{id});
+
     return !wasShown;
 }
 
 uint32_t ScopeView::enabledMask() const
 {
     uint32_t mask = 0;
-    for (const ScopeGlyph kind : m_stack) {
-        mask |= scopeEnableBit(kind);
+    for (const std::string& id : m_stack) {
+        mask |= scopeBit(id);
     }
+
     return mask;
 }
 
@@ -62,23 +103,25 @@ void ScopeView::restoreStack(const std::string& letters)
 {
     m_stack.clear();
     for (const char letter : letters) {
-        for (const ScopeGlyph kind : AllScopes) {
-            if (scopeLetter(kind) == letter) {
-                m_stack.push_back(kind);
-            }
+        if (const HostScope* scope = m_registry.byLetter(letter)) {
+            m_stack.push_back(scope->id);
         }
     }
     if (m_stack.empty()) {
-        m_stack.push_back(ScopeGlyph::Vectorscope);
+        m_stack.emplace_back(VectorscopeScopeId);
     }
 }
 
 std::string ScopeView::stackLetters() const
 {
     std::string letters;
-    for (const ScopeGlyph kind : m_stack) {
-        letters += scopeLetter(kind);
+    for (const std::string& id : m_stack) {
+        const HostScope* scope = m_registry.byId(id);
+        if (scope && scope->letter != 0) {
+            letters += scope->letter;
+        }
     }
+
     return letters;
 }
 
@@ -102,32 +145,28 @@ void ScopeView::setZoom(int level)
     m_zoom = level;
 }
 
-float ScopeView::intensity(TraceControl control) const
+float ScopeView::intensity(std::string_view id) const
 {
-    return control == TraceControl::Vectorscope ? m_vectorscopeIntensity : m_waveformIntensity;
+    const auto at = m_intensity.find(controlKey(id));
+
+    return at != m_intensity.end() ? at->second : 0.0f;
 }
 
-void ScopeView::setIntensity(TraceControl control, float percent)
+void ScopeView::setIntensity(std::string_view id, float percent)
 {
-    if (control == TraceControl::Vectorscope) {
-        m_vectorscopeIntensity = percent;
-    } else {
-        m_waveformIntensity = percent;
-    }
+    m_intensity[std::string{controlKey(id)}] = percent;
 }
 
-float ScopeView::smoothing(TraceControl control) const
+float ScopeView::smoothing(std::string_view id) const
 {
-    return control == TraceControl::Vectorscope ? m_vectorscopeSmoothing : m_waveformSmoothing;
+    const auto at = m_smoothing.find(controlKey(id));
+
+    return at != m_smoothing.end() ? at->second : 0.0f;
 }
 
-void ScopeView::setSmoothing(TraceControl control, float milliseconds)
+void ScopeView::setSmoothing(std::string_view id, float milliseconds)
 {
-    if (control == TraceControl::Vectorscope) {
-        m_vectorscopeSmoothing = milliseconds;
-    } else {
-        m_waveformSmoothing = milliseconds;
-    }
+    m_smoothing[std::string{controlKey(id)}] = milliseconds;
 }
 
 }  // namespace sidescopes
