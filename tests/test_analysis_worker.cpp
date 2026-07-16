@@ -19,6 +19,12 @@ namespace {
 
 using namespace std::chrono_literals;
 
+// The built-in module scope ids the worker keys its settings and output by.
+const std::string VectorscopeId = "org.sidescopes.vectorscope";
+const std::string WaveformId = "org.sidescopes.waveform";
+const std::string ParadeId = "org.sidescopes.parade";
+const std::string HistogramId = "org.sidescopes.histogram";
+
 bool waitFor(const std::function<bool()>& condition, std::chrono::milliseconds timeout = 2000ms)
 {
     const auto deadline = std::chrono::steady_clock::now() + timeout;
@@ -55,6 +61,9 @@ TEST_CASE("AnalysisWorker produces scope images from published frames")
 {
     FrameMailbox mailbox;
     AnalysisWorker worker(mailbox);
+    AnalysisSettings settings;
+    settings.enabledScopes = {VectorscopeId};
+    worker.updateSettings(settings);
     worker.start();
 
     mailbox.publish(makeSolidFrameBuffer(64, 64, Color{191, 0, 0}, 1));
@@ -63,7 +72,7 @@ TEST_CASE("AnalysisWorker produces scope images from published frames")
     AnalysisWorker::Output output;
     REQUIRE(waitFor([&] { return worker.fetchOutput(seen, output); }));
     // 75% red lands on the default BT.709 target (bin 109, 43).
-    CHECK(pixelLit(output.vectorscopeImage, 109, 43));
+    CHECK(pixelLit(output.images.at(VectorscopeId), 109, 43));
     CHECK(output.framesProcessed == 1);
 }
 
@@ -124,20 +133,24 @@ TEST_CASE("AnalysisWorker recomputes on settings changes without a new frame")
 {
     FrameMailbox mailbox;
     AnalysisWorker worker(mailbox);
+    AnalysisSettings settings;
+    settings.enabledScopes = {VectorscopeId};
+    worker.updateSettings(settings);
     worker.start();
 
     mailbox.publish(makeSolidFrameBuffer(64, 64, Color{191, 0, 0}, 1));
     uint64_t seen = 0;
     AnalysisWorker::Output output;
     REQUIRE(waitFor([&] { return worker.fetchOutput(seen, output); }));
-    CHECK(pixelLit(output.vectorscopeImage, 109, 43));  // default BT.709 target
+    CHECK(pixelLit(output.images.at(VectorscopeId), 109, 43));  // default BT.709 target
 
-    AnalysisSettings settings;
-    settings.vectorscope.matrix = ChromaMatrix::Bt601;
+    // Switching the vectorscope's chroma matrix to BT.601 moves 75% red's
+    // target, and the worker recomputes on the frame it already holds.
+    settings.scopeParams[VectorscopeId]["matrix"] = 0.0;
     worker.updateSettings(settings);
     REQUIRE(waitFor([&] { return worker.fetchOutput(seen, output); }));
-    CHECK(pixelLit(output.vectorscopeImage, 100, 43));  // BT.601 target
-    CHECK(output.framesProcessed == 1);                 // same frame, reanalyzed
+    CHECK(pixelLit(output.images.at(VectorscopeId), 100, 43));  // BT.601 target
+    CHECK(output.framesProcessed == 1);                         // same frame, reanalyzed
 }
 
 TEST_CASE("AnalysisWorker samples a cursor color from the latest frame")
@@ -195,6 +208,7 @@ TEST_CASE("AnalysisWorker restricts analysis to the region of interest")
     FrameMailbox mailbox;
     AnalysisWorker worker(mailbox);
     AnalysisSettings settings;
+    settings.enabledScopes = {VectorscopeId};
     settings.region = RegionOfInterest{0.0, 0.0, 50.0, 100.0};  // left half
     worker.updateSettings(settings);
     worker.start();
@@ -213,10 +227,10 @@ TEST_CASE("AnalysisWorker restricts analysis to the region of interest")
     uint64_t seen = 0;
     AnalysisWorker::Output output;
     REQUIRE(waitFor([&] { return worker.fetchOutput(seen, output); }));
-    CHECK(pixelLit(output.vectorscopeImage, 109, 43));  // red target
+    CHECK(pixelLit(output.images.at(VectorscopeId), 109, 43));  // red target
     // Blue's BT.709 target: Cb = 112 * 191 / 256 + 128 = 211.6,
     // Cr = -10 * 191 / 256 + 128 = 120.5 -> pixel (212, 255 - 121).
-    CHECK_FALSE(pixelLit(output.vectorscopeImage, 212, 255 - 121));
+    CHECK_FALSE(pixelLit(output.images.at(VectorscopeId), 212, 255 - 121));
 }
 
 TEST_CASE("AnalysisWorker routes every enabled scope and skips the disabled one")
@@ -224,9 +238,9 @@ TEST_CASE("AnalysisWorker routes every enabled scope and skips the disabled one"
     FrameMailbox mailbox;
     AnalysisWorker worker(mailbox);
     AnalysisSettings settings;
-    // Everything but the waveform: its output image must stay empty while
+    // Everything but the waveform: its output image must stay absent while
     // the parade, histogram, and outline - never asserted before - fill.
-    settings.enabledScopes = ScopeVectorscope | ScopeWaveformParade | ScopeHistogram;
+    settings.enabledScopes = {VectorscopeId, ParadeId, HistogramId};
     worker.updateSettings(settings);
     worker.start();
 
@@ -235,13 +249,13 @@ TEST_CASE("AnalysisWorker routes every enabled scope and skips the disabled one"
     AnalysisWorker::Output output;
     REQUIRE(waitFor([&] { return worker.fetchOutput(seen, output); }));
 
-    // The disabled waveform is never copied out.
-    CHECK(output.waveformImage.rgba.empty());
+    // The disabled waveform is never computed, so it has no output entry.
+    CHECK(output.images.count(WaveformId) == 0);
 
     // Every enabled scope produced a lit image.
-    CHECK(pixelLit(output.vectorscopeImage, 109, 43));  // 75% red, BT.709
-    CHECK(brightestPixel(output.waveformParadeImage) != std::pair<int, int>{-1, -1});
-    CHECK(brightestPixel(output.histogramImage) != std::pair<int, int>{-1, -1});
+    CHECK(pixelLit(output.images.at(VectorscopeId), 109, 43));  // 75% red, BT.709
+    CHECK(brightestPixel(output.images.at(ParadeId)) != std::pair<int, int>{-1, -1});
+    CHECK(brightestPixel(output.images.at(HistogramId)) != std::pair<int, int>{-1, -1});
 
     // The histogram outline rides alongside its image: three channels of
     // 256 bin heights, at least one of them raised.

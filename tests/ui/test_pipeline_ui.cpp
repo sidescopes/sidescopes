@@ -18,8 +18,12 @@
 // Dear ImGui Test Engine (c) 2018-2026 Omar Cornut / DISCO HELLO, used under
 // its Free License; fetched at build time, never vendored.
 
+#include <algorithm>
 #include <cstdint>
+#include <string>
+#include <string_view>
 #include <utility>
+#include <vector>
 
 #define IMGUI_DEFINE_MATH_OPERATORS
 #include "app/capture_controller.h"
@@ -94,6 +98,16 @@ bool imagePopulated(const ScopeImage& image)
     return brightestPixel(image) != std::pair<int, int>{-1, -1};
 }
 
+// The scope image for @p id, or an empty image when the worker has produced
+// none (a disabled scope has no output entry).
+const ScopeImage& imageFor(const AnalysisWorker::Output& output, const std::string& id)
+{
+    static const ScopeImage empty;
+    const auto at = output.images.find(id);
+
+    return at != output.images.end() ? at->second : empty;
+}
+
 // The representative UI: a scope toolbar wired to the real ScopeView, a
 // pane-size-driven adaptive settings update, and a readout of the worker's
 // output - the surface the Test Engine interacts with.
@@ -128,13 +142,16 @@ void pipelineGui(ImGuiTestContext*)
     const int imageHeight = pane.y >= 512.0f ? 512 : 256;
 
     // Sync the view's stack and the pane-derived resolution into the worker
-    // whenever either changed - the app's per-frame settings push.
-    const uint32_t mask = h.scopeView.enabledMask();
-    if (mask != h.settings.enabledScopes || columns != h.settings.waveform.columns ||
-        imageHeight != h.settings.waveform.imageHeight) {
-        h.settings.enabledScopes = mask;
-        h.settings.waveform.columns = columns;
-        h.settings.waveform.imageHeight = imageHeight;
+    // whenever either changed - the app's per-frame settings push. The
+    // waveform and its parade share one image size.
+    const std::vector<std::string> ids = h.scopeView.enabledScopeIds();
+    const std::pair<int, int> waveSize{columns, imageHeight};
+    const auto currentSize = h.settings.imageSizes.find(WaveformScopeId);
+    const bool sizeChanged = currentSize == h.settings.imageSizes.end() || currentSize->second != waveSize;
+    if (ids != h.settings.enabledScopes || sizeChanged) {
+        h.settings.enabledScopes = ids;
+        h.settings.imageSizes[WaveformScopeId] = waveSize;
+        h.settings.imageSizes[ParadeScopeId] = waveSize;
         h.worker.updateSettings(h.settings);
         ++h.settingsPushes;
     }
@@ -142,7 +159,7 @@ void pipelineGui(ImGuiTestContext*)
     // Show the worker's latest Output state, so an assertion has a UI to read.
     (void)h.worker.fetchOutput(h.displayVersion, h.displayOutput);
     ImGui::Text("frames=%llu waveform=%d", static_cast<unsigned long long>(h.displayOutput.framesProcessed),
-                imagePopulated(h.displayOutput.waveformImage) ? 1 : 0);
+                imagePopulated(imageFor(h.displayOutput, WaveformScopeId)) ? 1 : 0);
 
     ImGui::End();
 }
@@ -151,6 +168,12 @@ void endToEnd(ImGuiTestContext* ctx)
 {
     Pipeline& h = pipeline();
     ctx->SetRef("Pipeline");
+
+    const auto enables = [&](std::string_view id) {
+        const std::vector<std::string> ids = h.scopeView.enabledScopeIds();
+
+        return std::find(ids.begin(), ids.end(), id) != ids.end();
+    };
 
     // --- control plane: permission and start through the CaptureController ---
     IM_CHECK(h.controller.requestPermission());
@@ -162,8 +185,8 @@ void endToEnd(ImGuiTestContext* ctx)
     // vectorscope-only mask into the worker before any frame is analyzed.
     ctx->Yield();
     IM_CHECK(h.settingsPushes >= 1);
-    IM_CHECK(h.settings.waveform.imageHeight == 512);  // pane height flowed in
-    IM_CHECK(h.scopeView.enabledMask() == static_cast<uint32_t>(ScopeVectorscope));
+    IM_CHECK(h.settings.imageSizes.at(WaveformScopeId).second == 512);  // pane height flowed in
+    IM_CHECK(h.scopeView.enabledScopeIds() == std::vector<std::string>{VectorscopeScopeId});
 
     // --- data plane: a known input frame yields a known vectorscope output ---
     h.mailbox.publish(makeSolidFrameBuffer(64, 64, Color{191, 0, 0}, 1));
@@ -174,30 +197,31 @@ void endToEnd(ImGuiTestContext* ctx)
     AnalysisWorker::Output out;
     IM_CHECK(pumpUntil(ctx, [&] { return h.worker.fetchOutput(seen, out); }));
     // 75% red lands on the default BT.709 target (bin 109, 43).
-    IM_CHECK(pixelLit(out.vectorscopeImage, 109, 43));
+    IM_CHECK(pixelLit(imageFor(out, VectorscopeScopeId), 109, 43));
     // The waveform is off, so its image never populated.
-    IM_CHECK(out.waveformImage.rgba.empty());
+    IM_CHECK(imageFor(out, WaveformScopeId).rgba.empty());
 
     // --- UI action: clicking W adds the waveform to the real ScopeView ---
-    IM_CHECK((h.scopeView.enabledMask() & static_cast<uint32_t>(ScopeWaveform)) == 0u);
+    IM_CHECK(!enables(WaveformScopeId));
     ctx->ItemClick("W");
     IM_CHECK(h.scopeView.shows(WaveformScopeId));
-    IM_CHECK((h.scopeView.enabledMask() & static_cast<uint32_t>(ScopeWaveform)) != 0u);
+    IM_CHECK(enables(WaveformScopeId));
 
-    // The GuiFunc pushes the new mask on its next frame; the worker recomputes
+    // The GuiFunc pushes the new ids on its next frame; the worker recomputes
     // on the frame it already holds and the waveform image populates. This is
     // the full chain: click -> ScopeView -> settings -> worker -> engine image.
-    IM_CHECK(pumpUntil(ctx, [&] { return h.worker.fetchOutput(seen, out) && !out.waveformImage.rgba.empty(); }));
-    IM_CHECK(imagePopulated(out.waveformImage));
-    IM_CHECK(pixelLit(out.vectorscopeImage, 109, 43));  // vectorscope still lit
+    IM_CHECK(pumpUntil(
+        ctx, [&] { return h.worker.fetchOutput(seen, out) && !imageFor(out, WaveformScopeId).rgba.empty(); }));
+    IM_CHECK(imagePopulated(imageFor(out, WaveformScopeId)));
+    IM_CHECK(pixelLit(imageFor(out, VectorscopeScopeId), 109, 43));  // vectorscope still lit
 
     // --- a fresh frame through the seam changes the engine output ---
     // A different solid color must move the vectorscope trace off the red bin.
     h.mailbox.publish(makeSolidFrameBuffer(64, 64, Color{0, 191, 0}, 2));
     IM_CHECK(pumpUntil(ctx, [&] { return h.worker.consumedFrameSequence() >= 2; }));
     IM_CHECK(pumpUntil(ctx, [&] { return h.worker.fetchOutput(seen, out) && out.framesProcessed >= 2; }));
-    IM_CHECK(!pixelLit(out.vectorscopeImage, 109, 43));  // no longer 75% red
-    IM_CHECK(imagePopulated(out.vectorscopeImage));
+    IM_CHECK(!pixelLit(imageFor(out, VectorscopeScopeId), 109, 43));  // no longer 75% red
+    IM_CHECK(imagePopulated(imageFor(out, VectorscopeScopeId)));
 }
 
 void registerPipelineTests(ImGuiTestEngine* engine)
@@ -219,7 +243,7 @@ int main()
 
     // Start on the vectorscope alone, so the waveform is provably off until the
     // UI turns it on. The worker consumes frames on its own thread from here.
-    h.settings.enabledScopes = h.scopeView.enabledMask();
+    h.settings.enabledScopes = h.scopeView.enabledScopeIds();
     h.worker.updateSettings(h.settings);
     h.worker.start();
 

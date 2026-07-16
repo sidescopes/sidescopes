@@ -14,12 +14,15 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
 #include <string>
 #include <string_view>
 #include <thread>
+#include <utility>
+#include <vector>
 
 #include "app/capture_controller.h"
 #include "app/pin_board.h"
@@ -33,6 +36,9 @@
 #include "core/preferences.h"
 #include "core/region_suggestions.h"
 #include "core/scopes/graticule.h"
+#include "core/scopes/histogram.h"
+#include "core/scopes/vectorscope.h"
+#include "core/scopes/waveform.h"
 #include "core/trace_intensity.h"
 #include "imgui.h"
 #include "modules/module_registry.h"
@@ -47,6 +53,19 @@
 namespace {
 
 using namespace sidescopes;
+
+/// The waveform module's "mode" parameter encodes its style as a choice
+/// index: 0 RGB, 1 Luma, 2 Luma (Colored). These convert the host's typed
+/// enum across that boundary the way the module's own parser does.
+double waveformModeToParam(WaveformMode mode)
+{
+    return mode == WaveformMode::ColoredLuma ? 2.0 : mode == WaveformMode::Luma ? 1.0 : 0.0;
+}
+
+WaveformMode waveformModeFromParam(double value)
+{
+    return value >= 1.5 ? WaveformMode::ColoredLuma : value >= 0.5 ? WaveformMode::Luma : WaveformMode::Rgb;
+}
 
 enum MenuAction
 {
@@ -1607,29 +1626,119 @@ int main()
     }
 
     // --- state, seeded from preferences ---
+    // The worker is driven entirely by scope id: the typed preferences fan out
+    // into each module's declarative parameter and image-size vocabulary. The
+    // parade shares the waveform's gain and stride (its own descriptor carries
+    // no mode), so both are seeded from the one waveform preference.
     AnalysisSettings analysis;
-    analysis.vectorscope.gain = startup.vectorscopeGain;
-    analysis.vectorscope.samplingStride = startup.vectorscopeStride;
-    analysis.vectorscope.matrix = startup.matrix;
-    analysis.vectorscope.response = startup.traceResponse;
-    analysis.waveform.gain = startup.waveformGain;
-    analysis.waveform.samplingStride = startup.waveformStride;
-    analysis.histogram.samplingStride = startup.histogramStride;
-    analysis.waveform.mode = startup.waveformMode;
-    analysis.histogram.style = startup.histogramPerChannel ? HistogramStyle::PerChannel : HistogramStyle::Combined;
+    analysis.scopeParams[VectorscopeScopeId] = {
+        {"gain", startup.vectorscopeGain},
+        {"stride", static_cast<double>(startup.vectorscopeStride)},
+        {"matrix", startup.matrix == ChromaMatrix::Bt709 ? 1.0 : 0.0},
+        {"response", startup.traceResponse == TraceResponse::Linear ? 1.0 : 0.0},
+    };
+    analysis.scopeParams[WaveformScopeId] = {
+        {"gain", startup.waveformGain},
+        {"stride", static_cast<double>(startup.waveformStride)},
+        {"mode", waveformModeToParam(startup.waveformMode)},
+    };
+    analysis.scopeParams[ParadeScopeId] = {
+        {"gain", startup.waveformGain},
+        {"stride", static_cast<double>(startup.waveformStride)},
+    };
+    analysis.scopeParams[HistogramScopeId] = {
+        {"stride", static_cast<double>(startup.histogramStride)},
+        {"style", startup.histogramPerChannel ? 0.0 : 1.0},
+    };
+    // Seeded to the modules' default image resolutions so the adaptive-detail
+    // block below compares against a real current size from the first frame.
+    analysis.imageSizes[VectorscopeScopeId] = {DefaultVectorscopeSize, DefaultVectorscopeSize};
+    analysis.imageSizes[WaveformScopeId] = {DefaultWaveformColumns, WaveformLevels};
+    analysis.imageSizes[ParadeScopeId] = {DefaultWaveformColumns, WaveformLevels};
+    analysis.imageSizes[HistogramScopeId] = {Histogram::ImageWidth, Histogram::Height};
     bool analysisDirty = true;
+
+    // Reads one scope parameter from the settings map, falling back to @p
+    // fallback when the scope or key is unset.
+    const auto scopeParam = [&](std::string_view id, std::string_view key, double fallback) -> double {
+        const auto scope = analysis.scopeParams.find(std::string{id});
+        if (scope == analysis.scopeParams.end()) {
+            return fallback;
+        }
+        const auto value = scope->second.find(std::string{key});
+
+        return value != scope->second.end() ? value->second : fallback;
+    };
+    // The scope's current display image size, or {0, 0} when unset.
+    const auto currentSize = [&](std::string_view id) -> std::pair<int, int> {
+        const auto at = analysis.imageSizes.find(std::string{id});
+
+        return at != analysis.imageSizes.end() ? at->second : std::pair<int, int>{0, 0};
+    };
+    // The typed reading of the choice/enum parameters, resolved the way the
+    // modules resolve them; menus, markers, persistence, and the projection
+    // engines all read the settings map through these.
+    const auto currentMatrix = [&] {
+        return scopeParam(VectorscopeScopeId, "matrix", 1.0) < 0.5 ? ChromaMatrix::Bt601 : ChromaMatrix::Bt709;
+    };
+    const auto currentResponse = [&] {
+        return scopeParam(VectorscopeScopeId, "response", 0.0) < 0.5 ? TraceResponse::Boosted : TraceResponse::Linear;
+    };
+    const auto currentWaveformMode = [&] { return waveformModeFromParam(scopeParam(WaveformScopeId, "mode", 0.0)); };
+    const auto currentHistogramStyle = [&] {
+        return scopeParam(HistogramScopeId, "style", 0.0) < 0.5 ? HistogramStyle::PerChannel : HistogramStyle::Combined;
+    };
+    // The waveform and its parade are always configured identically; a single
+    // write keeps their shared controls in step.
+    const auto setWaveformGain = [&](double gain) {
+        analysis.scopeParams[WaveformScopeId]["gain"] = gain;
+        analysis.scopeParams[ParadeScopeId]["gain"] = gain;
+    };
+    const auto setWaveformStride = [&](int stride) {
+        analysis.scopeParams[WaveformScopeId]["stride"] = stride;
+        analysis.scopeParams[ParadeScopeId]["stride"] = stride;
+    };
 
     ScopeRegistry scopeRegistry{builtinModules()};
     ScopeView view{scopeRegistry};
     view.restoreStack(startup.scopeStack);
     view.setGraticule(startup.showGraticule);
     view.setZoom(startup.vectorscopeZoom);
-    view.setIntensity(VectorscopeScopeId, intensityFromTraceGain(analysis.vectorscope.gain, VectorscopeIntensityShift));
-    view.setIntensity(WaveformScopeId, intensityFromTraceGain(analysis.waveform.gain));
+    view.setIntensity(VectorscopeScopeId, intensityFromTraceGain(startup.vectorscopeGain, VectorscopeIntensityShift));
+    view.setIntensity(WaveformScopeId, intensityFromTraceGain(startup.waveformGain));
     view.setSmoothing(VectorscopeScopeId, startup.vectorscopeSmoothingMs);
     view.setSmoothing(WaveformScopeId, startup.waveformSmoothingMs);
     TraceFlash flash;
-    analysis.enabledScopes = view.enabledMask();
+    analysis.enabledScopes = view.enabledScopeIds();
+    // Typed settings for the projection-only engines, rebuilt from the
+    // settings map whenever it changes. They never accumulate; they only place
+    // overlays and markers, so they need the matrix, mode, and image size.
+    const auto vectorscopeProjectionSettings = [&] {
+        VectorscopeSettings settings;
+        settings.gain = static_cast<float>(scopeParam(VectorscopeScopeId, "gain", settings.gain));
+        settings.samplingStride = static_cast<int>(scopeParam(VectorscopeScopeId, "stride", settings.samplingStride));
+        settings.matrix = currentMatrix();
+        settings.response = currentResponse();
+        const auto size = analysis.imageSizes.find(VectorscopeScopeId);
+        if (size != analysis.imageSizes.end()) {
+            settings.size = size->second.second;
+        }
+
+        return settings;
+    };
+    const auto waveformProjectionSettings = [&] {
+        WaveformSettings settings;
+        settings.gain = static_cast<float>(scopeParam(WaveformScopeId, "gain", settings.gain));
+        settings.samplingStride = static_cast<int>(scopeParam(WaveformScopeId, "stride", settings.samplingStride));
+        settings.mode = currentWaveformMode();
+        const auto size = analysis.imageSizes.find(WaveformScopeId);
+        if (size != analysis.imageSizes.end()) {
+            settings.columns = size->second.first;
+            settings.imageHeight = size->second.second;
+        }
+
+        return settings;
+    };
     // Shortcuts come from the preferences file: the key handler acts on
     // them and the context menu displays them, resolved once here.
     const ShortcutBindings shortcuts = startup.shortcuts;
@@ -1686,11 +1795,19 @@ int main()
         texture->upload(blank);
         return texture;
     };
-    std::unique_ptr<ScopeTexture> vectorscopeTexture =
-        createBlankTexture(Vectorscope::CodeGridSize, Vectorscope::CodeGridSize);
-    std::unique_ptr<ScopeTexture> waveformTexture = createBlankTexture(Waveform::Columns, Waveform::Levels);
-    std::unique_ptr<ScopeTexture> waveformParadeTexture = createBlankTexture(Waveform::Columns, Waveform::Levels);
-    std::unique_ptr<ScopeTexture> histogramTexture = createBlankTexture(Histogram::ImageWidth, Histogram::Height);
+    // One texture per module scope, keyed by id and sized from its descriptor
+    // (all built-ins declare a fixed initial resolution; the upload path
+    // resizes to whatever the worker actually produces). The color picker has
+    // no descriptor and draws no texture.
+    std::map<std::string, std::unique_ptr<ScopeTexture>> scopeTextures;
+    for (const HostScope& scope : scopeRegistry.scopes()) {
+        if (!scope.descriptor) {
+            continue;
+        }
+        const int width = scope.descriptor->image_width > 0 ? scope.descriptor->image_width : DefaultVectorscopeSize;
+        const int height = scope.descriptor->image_height > 0 ? scope.descriptor->image_height : DefaultVectorscopeSize;
+        scopeTextures[scope.id] = createBlankTexture(width, height);
+    }
     // Adaptive scope detail: panes are measured at draw time (stacking
     // splits the window, so the pane is what matters, not the window),
     // and desired resolutions are debounced so a live resize does not
@@ -1727,6 +1844,67 @@ int main()
     uint64_t outputVersion = 0;
     AnalysisWorker::Output output;
     double lastActivity = glfwGetTime();
+
+    // Scope images and textures are addressed by id through the worker's
+    // output map and the texture map. A scope with no output yet reads as an
+    // empty image, which the upload path skips; the color picker has no
+    // texture and is simply passed over.
+    const auto imageForId = [&](std::string_view id) -> const ScopeImage& {
+        static const ScopeImage empty;
+        const auto at = output.images.find(std::string{id});
+
+        return at != output.images.end() ? at->second : empty;
+    };
+    const auto textureForId = [&](std::string_view id) -> ScopeTexture& { return *scopeTextures.at(std::string{id}); };
+    const auto uploadVisibleScopes = [&] {
+        for (const std::string& id : view.stack()) {
+            const auto texture = scopeTextures.find(id);
+            if (texture == scopeTextures.end()) {
+                continue;  // the color picker has no texture
+            }
+            uploadScope(texture->second, imageForId(id));
+        }
+    };
+    // A scope draws the same frame it turns on, but the worker only computes
+    // what is enabled, so a newly shown scope's image is stale - from whenever
+    // the scope was last on. Turning a scope on pushes the settings
+    // immediately (the update nudges the worker awake) and waits briefly for
+    // the recompute, so the scope's first drawn frame is already current. The
+    // wait is bounded; on timeout the stale image stands in until the
+    // recompute lands a frame later.
+    const auto refreshActivatedScope = [&](std::string_view id) {
+        if (scopeTextures.find(std::string{id}) == scopeTextures.end()) {
+            return;  // the color picker asks nothing of the worker
+        }
+        const uint64_t staleSequence = imageForId(id).sequence;
+        worker.updateSettings(analysis);
+        const double deadline = glfwGetTime() + 0.08;
+        while (glfwGetTime() < deadline) {
+            if (worker.fetchOutput(outputVersion, output) && imageForId(id).sequence != staleSequence &&
+                imageForId(id).width > 0) {
+                uploadVisibleScopes();
+                return;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(2));
+        }
+        uploadVisibleScopes();  // timeout: a stale image beats none
+    };
+    const auto toggleScope = [&](std::string_view id) {
+        const bool activated = view.toggle(id);
+        analysis.enabledScopes = view.enabledScopeIds();
+        if (activated) {
+            refreshActivatedScope(id);
+        }
+        analysisDirty = true;
+    };
+    const auto chooseScope = [&](std::string_view id, bool stack) {
+        const bool activated = view.choose(id, stack);
+        analysis.enabledScopes = view.enabledScopeIds();
+        if (activated) {
+            refreshActivatedScope(id);
+        }
+        analysisDirty = true;
+    };
 
     // Waking the display or unlocking the session can leave the stream a
     // zombie; the wake signal forces the controller to restart it.
@@ -1812,17 +1990,21 @@ int main()
     observeEscapeWithoutKeyWindow([&orphanEscape] { orphanEscape.store(true); });
     const auto persistPreferences = [&] {
         Preferences preferences;
-        preferences.vectorscopeGain = analysis.vectorscope.gain;
-        preferences.waveformGain = analysis.waveform.gain;
-        preferences.vectorscopeStride = analysis.vectorscope.samplingStride;
-        preferences.waveformStride = analysis.waveform.samplingStride;
+        preferences.vectorscopeGain =
+            static_cast<float>(scopeParam(VectorscopeScopeId, "gain", preferences.vectorscopeGain));
+        preferences.waveformGain = static_cast<float>(scopeParam(WaveformScopeId, "gain", preferences.waveformGain));
+        preferences.vectorscopeStride =
+            static_cast<int>(scopeParam(VectorscopeScopeId, "stride", preferences.vectorscopeStride));
+        preferences.waveformStride =
+            static_cast<int>(scopeParam(WaveformScopeId, "stride", preferences.waveformStride));
         preferences.vectorscopeSmoothingMs = view.smoothing(VectorscopeScopeId);
         preferences.waveformSmoothingMs = view.smoothing(WaveformScopeId);
-        preferences.matrix = analysis.vectorscope.matrix;
-        preferences.traceResponse = analysis.vectorscope.response;
-        preferences.histogramStride = analysis.histogram.samplingStride;
-        preferences.waveformMode = analysis.waveform.mode;
-        preferences.histogramPerChannel = analysis.histogram.style == HistogramStyle::PerChannel;
+        preferences.matrix = currentMatrix();
+        preferences.traceResponse = currentResponse();
+        preferences.histogramStride =
+            static_cast<int>(scopeParam(HistogramScopeId, "stride", preferences.histogramStride));
+        preferences.waveformMode = currentWaveformMode();
+        preferences.histogramPerChannel = currentHistogramStyle() == HistogramStyle::PerChannel;
         preferences.scopeStack = view.stackLetters();
         preferences.showGraticule = view.graticule();
         preferences.vectorscopeZoom = view.zoom();
@@ -1896,18 +2078,7 @@ int main()
         }
 
         if (worker.fetchOutput(outputVersion, output)) {
-            if (view.shows(VectorscopeScopeId)) {
-                uploadScope(vectorscopeTexture, output.vectorscopeImage);
-            }
-            if (view.shows(WaveformScopeId)) {
-                uploadScope(waveformTexture, output.waveformImage);
-            }
-            if (view.shows(ParadeScopeId)) {
-                uploadScope(waveformParadeTexture, output.waveformParadeImage);
-            }
-            if (view.shows(HistogramScopeId)) {
-                uploadScope(histogramTexture, output.histogramImage);
-            }
+            uploadVisibleScopes();
             lastActivity = glfwGetTime();
         }
 
@@ -2003,8 +2174,14 @@ int main()
                 regionWidth = regionPixels.width;
             }
 
-            int wantColumns = analysis.waveform.columns;
-            int wantHeight = analysis.waveform.imageHeight;
+            const std::pair<int, int> waveSize = currentSize(WaveformScopeId);
+            const std::pair<int, int> histSize = currentSize(HistogramScopeId);
+            // The vectorscope resizes on a single value; its module reads the
+            // height slot, so both slots carry it.
+            const std::pair<int, int> vecSize = currentSize(VectorscopeScopeId);
+
+            int wantColumns = waveSize.first;
+            int wantHeight = waveSize.second;
             if (view.shows(WaveformScopeId) || view.shows(ParadeScopeId)) {
                 const float wfWidth = std::max(pane(WaveformScopeId).x, pane(ParadeScopeId).x);
                 const float wfHeight = std::max(pane(WaveformScopeId).y, pane(ParadeScopeId).y);
@@ -2014,8 +2191,8 @@ int main()
                 }
                 wantHeight = wfHeight >= 560.0f ? 512 : WaveformLevels;
             }
-            int wantHistWidth = analysis.histogram.imageWidth;
-            int wantHistHeight = analysis.histogram.imageHeight;
+            int wantHistWidth = histSize.first;
+            int wantHistHeight = histSize.second;
             if (view.shows(HistogramScopeId)) {
                 // Near one texture pixel per screen pixel keeps the
                 // outline's width even on flats and steep slopes alike.
@@ -2023,7 +2200,7 @@ int main()
                 wantHistWidth = scopePane.x >= 1400.0f ? 2048 : scopePane.x >= 500.0f ? 1024 : 512;
                 wantHistHeight = scopePane.y >= 560.0f ? 768 : 384;
             }
-            int wantVectorscope = analysis.vectorscope.size;
+            int wantVectorscope = vecSize.second;
             if (view.shows(VectorscopeScopeId)) {
                 // Purely a display resolution: accumulation stays on the
                 // 256-code grid and a finer image is interpolated from
@@ -2033,10 +2210,9 @@ int main()
                 wantVectorscope = extent >= 480.0f ? 512 : 256;
             }
 
-            const bool differs =
-                wantColumns != analysis.waveform.columns || wantHeight != analysis.waveform.imageHeight ||
-                wantVectorscope != analysis.vectorscope.size || wantHistWidth != analysis.histogram.imageWidth ||
-                wantHistHeight != analysis.histogram.imageHeight;
+            const bool differs = wantColumns != waveSize.first || wantHeight != waveSize.second ||
+                                 wantVectorscope != vecSize.second || wantHistWidth != histSize.first ||
+                                 wantHistHeight != histSize.second;
             if (!differs) {
                 pendingColumns = 0;
             } else if (pendingColumns != wantColumns || pendingImageHeight != wantHeight ||
@@ -2049,11 +2225,10 @@ int main()
                 pendingHistHeight = wantHistHeight;
                 detailPendingSince = glfwGetTime();
             } else if (glfwGetTime() - detailPendingSince > 0.4) {
-                analysis.waveform.columns = wantColumns;
-                analysis.waveform.imageHeight = wantHeight;
-                analysis.vectorscope.size = wantVectorscope;
-                analysis.histogram.imageWidth = wantHistWidth;
-                analysis.histogram.imageHeight = wantHistHeight;
+                analysis.imageSizes[WaveformScopeId] = {wantColumns, wantHeight};
+                analysis.imageSizes[ParadeScopeId] = {wantColumns, wantHeight};
+                analysis.imageSizes[VectorscopeScopeId] = {wantVectorscope, wantVectorscope};
+                analysis.imageSizes[HistogramScopeId] = {wantHistWidth, wantHistHeight};
                 analysisDirty = true;
             }
         }
@@ -2073,85 +2248,6 @@ int main()
         // is the common case, so a plain click or key shows one scope
         // alone; Shift stacks and unstacks, and the last scope on refuses
         // to turn off, so the window never goes empty.
-        // A scope draws the same frame it turns on, but the worker only
-        // computes what is enabled, so a newly shown scope's image is
-        // stale - from whenever the scope was last on, of whatever was on
-        // screen then. Turning a scope on therefore pushes the settings
-        // immediately (the update nudges the worker awake) and waits
-        // briefly for the recompute, so the scope's first drawn frame is
-        // already current. The wait is bounded; on timeout the stale
-        // image stands in until the recompute lands a frame later.
-        // THROWAWAY SCAFFOLDING (Phase 2 removal): the worker still fills four
-        // named Output images and the shell owns four named textures. These
-        // adapters map a scope id onto the matching image/texture so the worker
-        // and Output stay untouched this phase; Phase 2 keys them by id.
-        const auto imageForId = [&](std::string_view id) -> const ScopeImage& {
-            if (id == VectorscopeScopeId) {
-                return output.vectorscopeImage;
-            }
-            if (id == WaveformScopeId) {
-                return output.waveformImage;
-            }
-            if (id == ParadeScopeId) {
-                return output.waveformParadeImage;
-            }
-
-            return output.histogramImage;
-        };
-        const auto textureForId = [&](std::string_view id) -> std::unique_ptr<ScopeTexture>& {
-            if (id == VectorscopeScopeId) {
-                return vectorscopeTexture;
-            }
-            if (id == WaveformScopeId) {
-                return waveformTexture;
-            }
-            if (id == ParadeScopeId) {
-                return waveformParadeTexture;
-            }
-
-            return histogramTexture;
-        };
-        const auto uploadVisibleScopes = [&] {
-            for (const std::string& id : view.stack()) {
-                if (id == ColorPickerScopeId) {
-                    continue;
-                }
-                uploadScope(textureForId(id), imageForId(id));
-            }
-        };
-        const auto refreshActivatedScope = [&](std::string_view id) {
-            if (id == ColorPickerScopeId) {
-                return;
-            }
-            const uint64_t staleSequence = imageForId(id).sequence;
-            worker.updateSettings(analysis);
-            const double deadline = glfwGetTime() + 0.08;
-            while (glfwGetTime() < deadline) {
-                if (worker.fetchOutput(outputVersion, output) && imageForId(id).sequence != staleSequence &&
-                    imageForId(id).width > 0) {
-                    uploadVisibleScopes();
-                    return;
-                }
-                std::this_thread::sleep_for(std::chrono::milliseconds(2));
-            }
-            uploadVisibleScopes();  // timeout: a stale image beats none
-        };
-        const auto toggleScope = [&](std::string_view id) {
-            const bool activated = view.toggle(id);
-            analysis.enabledScopes = view.enabledMask();
-            if (activated) {
-                refreshActivatedScope(id);
-            }
-            analysisDirty = true;
-        };
-        const auto chooseScope = [&](std::string_view id, bool stack) {
-            const bool activated = view.choose(id, stack);
-            analysis.enabledScopes = view.enabledMask();
-            if (activated) {
-                refreshActivatedScope(id);
-            }
-            analysisDirty = true;
-        };
         // The stacking modifier reads the OS's live key state, not the
         // event-tracked one: ImGui's backend re-injects GLFW's cached
         // modifiers on every key press and click, so a Shift key-up
@@ -2367,12 +2463,13 @@ int main()
         }
 
         const auto drawVectorscope = [&] {
-            const DrawnScope scope = drawScopeImage(*vectorscopeTexture, true, static_cast<float>(view.zoom()));
+            const DrawnScope scope =
+                drawScopeImage(textureForId(VectorscopeScopeId), true, static_cast<float>(view.zoom()));
             if (const auto adjusted =
                     traceIntensityGesture(scope, VectorscopeScopeId, view.intensity(VectorscopeScopeId), 3.0f,
                                           VectorscopeIntensityShift, flash)) {
                 view.setIntensity(VectorscopeScopeId, adjusted->intensity);
-                analysis.vectorscope.gain = adjusted->gain;
+                analysis.scopeParams[VectorscopeScopeId]["gain"] = adjusted->gain;
                 analysisDirty = true;
             }
             // Zoomed overlays run past the pane; clip them to it.
@@ -2420,18 +2517,19 @@ int main()
             }
         };
         const auto drawWaveform = [&](std::string_view id) {
-            const DrawnScope scope = drawScopeImage(*textureForId(id), false);
+            const DrawnScope scope = drawScopeImage(textureForId(id), false);
             if (const auto adjusted = traceIntensityGesture(scope, WaveformScopeId, view.intensity(WaveformScopeId),
                                                             0.05f, 0.0f, flash)) {
                 view.setIntensity(WaveformScopeId, adjusted->intensity);
-                analysis.waveform.gain = adjusted->gain;
+                setWaveformGain(adjusted->gain);
                 analysisDirty = true;
             }
             if (view.graticule()) {
                 drawWaveformOverlay(scope);
             }
+            const WaveformMode waveformMode = currentWaveformMode();
             if (id == WaveformScopeId &&
-                (analysis.waveform.mode == WaveformMode::Luma || analysis.waveform.mode == WaveformMode::ColoredLuma)) {
+                (waveformMode == WaveformMode::Luma || waveformMode == WaveformMode::ColoredLuma)) {
                 if (waveformColor) {
                     drawLevelMarker(scope, projectionWaveform.project(*waveformColor).y, IM_COL32(255, 220, 80, 220));
                 }
@@ -2458,8 +2556,8 @@ int main()
             if (id == VectorscopeScopeId) {
                 drawVectorscope();
             } else if (id == HistogramScopeId) {
-                drawHistogram(*histogramTexture, output, analysis.histogram.style, view.graticule(), vectorscopeColor,
-                              histogramScratch);
+                drawHistogram(textureForId(HistogramScopeId), output, currentHistogramStyle(), view.graticule(),
+                              vectorscopeColor, histogramScratch);
             } else if (id == ColorPickerScopeId) {
                 drawColorPicker(vectorscopeColor, pins, callbackState.monospaceFont);
             } else {
@@ -2547,13 +2645,13 @@ int main()
             };
             const auto vectorscopeOptions = [&] {
                 submenu("Matrix");
-                const bool bt601 = analysis.vectorscope.matrix == ChromaMatrix::Bt601;
+                const bool bt601 = currentMatrix() == ChromaMatrix::Bt601;
                 action("BT.601", MenuMatrixBt601, bt601);
                 action("BT.709", MenuMatrixBt709, !bt601);
                 endSubmenu();
                 submenu("Trace Response");
-                action("Boosted", MenuTraceBoosted, analysis.vectorscope.response == TraceResponse::Boosted);
-                action("Linear", MenuTraceLinear, analysis.vectorscope.response == TraceResponse::Linear);
+                action("Boosted", MenuTraceBoosted, currentResponse() == TraceResponse::Boosted);
+                action("Linear", MenuTraceLinear, currentResponse() == TraceResponse::Linear);
                 endSubmenu();
                 submenu("Zoom");
                 action("1x", MenuZoom1, view.zoom() == 1, shortcutLabel(shortcuts.vectorscopeZoom));
@@ -2563,14 +2661,15 @@ int main()
                 pinOptions();
             };
             const auto waveformOptions = [&] {
-                action("RGB", MenuWaveformStyleRgb, analysis.waveform.mode == WaveformMode::Rgb);
-                action("Luma", MenuWaveformStyleLuma, analysis.waveform.mode == WaveformMode::Luma);
-                action("Luma (Colored)", MenuWaveformStyleColoredLuma,
-                       analysis.waveform.mode == WaveformMode::ColoredLuma);
+                const WaveformMode mode = currentWaveformMode();
+                action("RGB", MenuWaveformStyleRgb, mode == WaveformMode::Rgb);
+                action("Luma", MenuWaveformStyleLuma, mode == WaveformMode::Luma);
+                action("Luma (Colored)", MenuWaveformStyleColoredLuma, mode == WaveformMode::ColoredLuma);
             };
             const auto histogramOptions = [&] {
-                action("Per Channel", MenuHistogramPerChannel, analysis.histogram.style == HistogramStyle::PerChannel);
-                action("Combined", MenuHistogramCombined, analysis.histogram.style == HistogramStyle::Combined);
+                const HistogramStyle style = currentHistogramStyle();
+                action("Per Channel", MenuHistogramPerChannel, style == HistogramStyle::PerChannel);
+                action("Combined", MenuHistogramCombined, style == HistogramStyle::Combined);
             };
 
             // The clicked pane's options, first and unprefixed.
@@ -2654,23 +2753,23 @@ int main()
                 toggleScope(ParadeScopeId);
                 break;
             case MenuWaveformStyleRgb:
-                analysis.waveform.mode = WaveformMode::Rgb;
+                analysis.scopeParams[WaveformScopeId]["mode"] = waveformModeToParam(WaveformMode::Rgb);
                 analysisDirty = true;
                 break;
             case MenuWaveformStyleLuma:
-                analysis.waveform.mode = WaveformMode::Luma;
+                analysis.scopeParams[WaveformScopeId]["mode"] = waveformModeToParam(WaveformMode::Luma);
                 analysisDirty = true;
                 break;
             case MenuWaveformStyleColoredLuma:
-                analysis.waveform.mode = WaveformMode::ColoredLuma;
+                analysis.scopeParams[WaveformScopeId]["mode"] = waveformModeToParam(WaveformMode::ColoredLuma);
                 analysisDirty = true;
                 break;
             case MenuHistogramCombined:
-                analysis.histogram.style = HistogramStyle::Combined;
+                analysis.scopeParams[HistogramScopeId]["style"] = 1.0;
                 analysisDirty = true;
                 break;
             case MenuHistogramPerChannel:
-                analysis.histogram.style = HistogramStyle::PerChannel;
+                analysis.scopeParams[HistogramScopeId]["style"] = 0.0;
                 analysisDirty = true;
                 break;
             case MenuShowHistogram:
@@ -2680,19 +2779,19 @@ int main()
                 toggleScope(ColorPickerScopeId);
                 break;
             case MenuMatrixBt601:
-                analysis.vectorscope.matrix = ChromaMatrix::Bt601;
+                analysis.scopeParams[VectorscopeScopeId]["matrix"] = 0.0;
                 analysisDirty = true;
                 break;
             case MenuMatrixBt709:
-                analysis.vectorscope.matrix = ChromaMatrix::Bt709;
+                analysis.scopeParams[VectorscopeScopeId]["matrix"] = 1.0;
                 analysisDirty = true;
                 break;
             case MenuTraceBoosted:
-                analysis.vectorscope.response = TraceResponse::Boosted;
+                analysis.scopeParams[VectorscopeScopeId]["response"] = 0.0;
                 analysisDirty = true;
                 break;
             case MenuTraceLinear:
-                analysis.vectorscope.response = TraceResponse::Linear;
+                analysis.scopeParams[VectorscopeScopeId]["response"] = 1.0;
                 analysisDirty = true;
                 break;
             case MenuSelectRegion:
@@ -2755,10 +2854,15 @@ int main()
             float vectorscopePercent = view.intensity(VectorscopeScopeId);
             if (ImGui::SliderFloat("intensity##v", &vectorscopePercent, 0.0f, 100.0f, "%.0f%%")) {
                 view.setIntensity(VectorscopeScopeId, vectorscopePercent);
-                analysis.vectorscope.gain = traceGainFromIntensity(vectorscopePercent, VectorscopeIntensityShift);
+                analysis.scopeParams[VectorscopeScopeId]["gain"] =
+                    traceGainFromIntensity(vectorscopePercent, VectorscopeIntensityShift);
                 analysisDirty = true;
             }
-            analysisDirty |= ImGui::SliderInt("sampling 1:N##v", &analysis.vectorscope.samplingStride, 1, 8);
+            int vectorscopeStride = static_cast<int>(scopeParam(VectorscopeScopeId, "stride", 1.0));
+            if (ImGui::SliderInt("sampling 1:N##v", &vectorscopeStride, 1, 8)) {
+                analysis.scopeParams[VectorscopeScopeId]["stride"] = vectorscopeStride;
+                analysisDirty = true;
+            }
             float vectorscopeMs = view.smoothing(VectorscopeScopeId);
             if (ImGui::SliderFloat("smoothing ms##v", &vectorscopeMs, 0.0f, 500.0f, "%.0f")) {
                 view.setSmoothing(VectorscopeScopeId, vectorscopeMs);
@@ -2767,10 +2871,14 @@ int main()
             float waveformPercent = view.intensity(WaveformScopeId);
             if (ImGui::SliderFloat("intensity##w", &waveformPercent, 0.0f, 100.0f, "%.0f%%")) {
                 view.setIntensity(WaveformScopeId, waveformPercent);
-                analysis.waveform.gain = traceGainFromIntensity(waveformPercent);
+                setWaveformGain(traceGainFromIntensity(waveformPercent));
                 analysisDirty = true;
             }
-            analysisDirty |= ImGui::SliderInt("sampling 1:N##w", &analysis.waveform.samplingStride, 1, 8);
+            int waveformStride = static_cast<int>(scopeParam(WaveformScopeId, "stride", 1.0));
+            if (ImGui::SliderInt("sampling 1:N##w", &waveformStride, 1, 8)) {
+                setWaveformStride(waveformStride);
+                analysisDirty = true;
+            }
             float waveformMs = view.smoothing(WaveformScopeId);
             if (ImGui::SliderFloat("smoothing ms##w", &waveformMs, 0.0f, 500.0f, "%.0f")) {
                 view.setSmoothing(WaveformScopeId, waveformMs);
@@ -3073,8 +3181,8 @@ int main()
 
         if (analysisDirty) {
             worker.updateSettings(analysis);
-            projectionVectorscope.configure(analysis.vectorscope);
-            projectionWaveform.configure(analysis.waveform);
+            projectionVectorscope.configure(vectorscopeProjectionSettings());
+            projectionWaveform.configure(waveformProjectionSettings());
             syncRegionBorder();
             analysisDirty = false;
             lastActivity = glfwGetTime();

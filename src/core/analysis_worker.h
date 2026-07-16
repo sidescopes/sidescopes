@@ -3,15 +3,16 @@
 #include <atomic>
 #include <cstdint>
 #include <functional>
+#include <map>
 #include <mutex>
 #include <optional>
+#include <string>
 #include <thread>
+#include <utility>
+#include <vector>
 
 #include "core/frame_mailbox.h"
-#include "core/scopes/histogram.h"
 #include "core/scopes/scope_types.h"
-#include "core/scopes/vectorscope.h"
-#include "core/scopes/waveform.h"
 
 namespace sidescopes {
 
@@ -27,25 +28,21 @@ struct RegionOfInterest
     [[nodiscard]] IntRect toPixels(int frameWidth, int frameHeight) const;
 };
 
-/// Which scopes the worker computes. The waveform's RGB/Luma style is a
-/// setting on the one waveform scope; the parade is its own scope, since
-/// stacking a luma waveform over the parade is a working combination.
-enum ScopeBit : uint32_t
-{
-    ScopeVectorscope = 1u << 0,
-    ScopeWaveform = 1u << 1,
-    ScopeWaveformParade = 1u << 2,
-    ScopeHistogram = 1u << 3,
-};
-
+/// What the worker runs, keyed entirely by module scope id. Parameters and
+/// display image sizes are the modules' own declarative vocabulary, so the
+/// worker special-cases no scope; the host translates its typed preferences
+/// into this map and back.
 struct AnalysisSettings
 {
-    VectorscopeSettings vectorscope;
-    /// The waveform's mode selects its style (RGB or Luma); the parade
-    /// shares its gain and stride.
-    WaveformSettings waveform;
-    HistogramSettings histogram;
-    uint32_t enabledScopes = ~0u;
+    /// Per-scope parameter values: scope id -> parameter key -> value. Keys
+    /// that a scope's descriptor does not declare are ignored.
+    std::map<std::string, std::map<std::string, double>> scopeParams;
+    /// Per-scope display image size: scope id -> {width, height}. A scope
+    /// without an entry keeps its module's default resolution.
+    std::map<std::string, std::pair<int, int>> imageSizes;
+    /// The scope ids to compute this pass; an empty list computes nothing (the
+    /// color-picker-only view asks nothing of the worker).
+    std::vector<std::string> enabledScopes;
     RegionOfInterest region;
     /// The application's own window in frame pixels, masked out of change
     /// detection so its own redraws never re-trigger analysis.
@@ -66,12 +63,13 @@ class AnalysisWorker
 public:
     struct Output
     {
-        ScopeImage vectorscopeImage;
-        ScopeImage waveformImage;
-        ScopeImage waveformParadeImage;
-        ScopeImage histogramImage;
-        /// The histogram's curve, stroked by the interface at display
-        /// resolution (three channels of normalized heights).
+        /// Each computed scope's image, keyed by scope id. The map is kept
+        /// stable across frames: a disabled scope's entry simply stops
+        /// advancing rather than being cleared.
+        std::map<std::string, ScopeImage> images;
+        /// The outline-carrying scope's curve, stroked by the interface at
+        /// display resolution (three channels of normalized heights). Only
+        /// the histogram exports the outline extension today.
         std::vector<float> histogramOutline;
         double accumulateMilliseconds = 0.0;
         uint64_t framesProcessed = 0;

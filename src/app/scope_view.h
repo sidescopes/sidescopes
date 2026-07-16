@@ -11,9 +11,9 @@ namespace sidescopes {
 
 class ScopeRegistry;
 
-/// Well-known module scope ids the host special-cases: the enabled-mask bit
-/// table, the parade-to-waveform control alias, and the default stack. Every
-/// other identity flows through the registry by string.
+/// Well-known module scope ids the host special-cases: the parade-to-waveform
+/// control alias and the default stack. Every other identity flows through the
+/// registry by string.
 inline constexpr char VectorscopeScopeId[] = "org.sidescopes.vectorscope";
 inline constexpr char WaveformScopeId[] = "org.sidescopes.waveform";
 inline constexpr char ParadeScopeId[] = "org.sidescopes.parade";
@@ -60,8 +60,11 @@ public:
     /// @return Whether @p id became newly visible.
     bool choose(std::string_view id, bool stack);
 
-    /// @return The worker's enabled-scopes mask for what is on screen.
-    [[nodiscard]] uint32_t enabledMask() const;
+    /// @return The scope ids the worker should compute for what is on screen:
+    ///         the visible scopes minus the host-only ones (the color picker
+    ///         reads the sampled cursor color, so it asks nothing of the
+    ///         worker), in activation order.
+    [[nodiscard]] std::vector<std::string> enabledScopeIds() const;
 
     /// Restores the stack from a preference letter string, falling back to the
     /// vectorscope when it names nothing valid.

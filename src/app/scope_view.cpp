@@ -3,30 +3,9 @@
 #include <algorithm>
 
 #include "app/scope_registry.h"
-#include "core/analysis_worker.h"
 
 namespace sidescopes {
 namespace {
-
-/// The worker's enable bit for @p id, or zero when the scope asks nothing of
-/// the worker (the color picker reads the sampled cursor color instead).
-uint32_t scopeBit(std::string_view id)
-{
-    if (id == VectorscopeScopeId) {
-        return ScopeVectorscope;
-    }
-    if (id == WaveformScopeId) {
-        return ScopeWaveform;
-    }
-    if (id == ParadeScopeId) {
-        return ScopeWaveformParade;
-    }
-    if (id == HistogramScopeId) {
-        return ScopeHistogram;
-    }
-
-    return 0;
-}
 
 /// The control-owner id for @p id: the parade shares the waveform's intensity
 /// and smoothing, so both resolve to one control.
@@ -89,14 +68,17 @@ bool ScopeView::choose(std::string_view id, bool stack)
     return !wasShown;
 }
 
-uint32_t ScopeView::enabledMask() const
+std::vector<std::string> ScopeView::enabledScopeIds() const
 {
-    uint32_t mask = 0;
+    std::vector<std::string> ids;
     for (const std::string& id : m_stack) {
-        mask |= scopeBit(id);
+        const HostScope* scope = m_registry.byId(id);
+        if (scope && !scope->host) {
+            ids.push_back(id);
+        }
     }
 
-    return mask;
+    return ids;
 }
 
 void ScopeView::restoreStack(const std::string& letters)

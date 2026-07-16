@@ -1,8 +1,9 @@
 #include <catch2/catch_test_macros.hpp>
+#include <string>
+#include <vector>
 
 #include "app/scope_registry.h"
 #include "app/scope_view.h"
-#include "core/analysis_worker.h"
 #include "modules/module_registry.h"
 
 namespace sidescopes {
@@ -75,23 +76,23 @@ TEST_CASE("Choosing solos a scope unless stacking")
     }
 }
 
-TEST_CASE("The enabled mask covers the whole stack")
+TEST_CASE("The enabled ids cover the whole stack")
 {
     ScopeView view{registry()};
     view.restoreStack("V");
-    CHECK(view.enabledMask() == ScopeVectorscope);
+    CHECK(view.enabledScopeIds() == std::vector<std::string>{VectorscopeScopeId});
 
     view.restoreStack("VH");
-    CHECK(view.enabledMask() == (ScopeVectorscope | ScopeHistogram));
+    CHECK(view.enabledScopeIds() == std::vector<std::string>{VectorscopeScopeId, HistogramScopeId});
 }
 
 TEST_CASE("The color picker asks nothing of the worker")
 {
     // It reads the sampled cursor color, not worker output, so it
-    // contributes no bit to the enabled mask.
+    // contributes no id to the enabled set.
     ScopeView view{registry()};
     view.restoreStack("C");
-    CHECK(view.enabledMask() == 0u);
+    CHECK(view.enabledScopeIds().empty());
 }
 
 TEST_CASE("The stack round-trips through preference letters")

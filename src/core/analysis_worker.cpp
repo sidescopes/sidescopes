@@ -3,6 +3,10 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <set>
+#include <string>
+#include <utility>
+#include <vector>
 
 #include "core/marker_smoother.h"
 #include "core/region_hash.h"
@@ -121,27 +125,37 @@ uint64_t AnalysisWorker::consumedFrameSequence() const
 
 namespace {
 
-// The worker speaks to every scope through the module boundary. The
-// bridge below translates the typed settings structs into the modules'
-// parameter vocabulary; it collapses when the registry replaces the
-// settings structs in the next phase.
+// One built-in scope the worker owns on its thread, plus the extensions the
+// host drives it through. Identity is the module id; nothing about a scope's
+// meaning is special-cased here.
 struct WorkerScope
 {
-    uint32_t bit;
+    std::string id;
+    const SsScopeDescriptor* descriptor = nullptr;
     ScopeInstance instance;
     const SsAdaptiveImageExtension* adaptive = nullptr;
     const SsOutlineExtension* outline = nullptr;
 };
 
-WorkerScope makeWorkerScope(uint32_t bit, const char* id)
+// One instance of every registered built-in scope, created on the calling
+// (worker) thread, which therefore owns them.
+std::vector<WorkerScope> makeWorkerScopes()
 {
-    WorkerScope scope{bit, builtinModules().createInstance(id)};
-    if (scope.instance.valid()) {
-        scope.adaptive =
-            static_cast<const SsAdaptiveImageExtension*>(scope.instance.getExtension(AdaptiveImageExtension));
-        scope.outline = static_cast<const SsOutlineExtension*>(scope.instance.getExtension(OutlineExtension));
+    std::vector<WorkerScope> scopes;
+    const ModuleRegistry& registry = builtinModules();
+    for (const RegisteredScope& registered : registry.scopes()) {
+        WorkerScope scope;
+        scope.id = registered.descriptor->id;
+        scope.descriptor = registered.descriptor;
+        scope.instance = registry.createInstance(scope.id);
+        if (scope.instance.valid()) {
+            scope.adaptive =
+                static_cast<const SsAdaptiveImageExtension*>(scope.instance.getExtension(AdaptiveImageExtension));
+            scope.outline = static_cast<const SsOutlineExtension*>(scope.instance.getExtension(OutlineExtension));
+        }
+        scopes.push_back(std::move(scope));
     }
-    return scope;
+    return scopes;
 }
 
 SsFrameView toBoundaryFrame(const FrameView& view)
@@ -163,101 +177,74 @@ void copyImage(const SsImageView& view, ScopeImage& image)
     image.rgba.assign(view.rgba, view.rgba + bytes);
 }
 
-double paramFromWaveformMode(WaveformMode mode)
+// Pushes each scope's parameters and display size from the settings map into
+// its module instance. A value is applied only when the settings name a key
+// the scope's descriptor declares, and each SsParamValue borrows the
+// descriptor's key pointer - module-owned and stable to deinit - never a
+// std::string from the settings map. Results are best-effort: a module that
+// fails to configure keeps its last image, which the UI simply stops
+// advancing. Runs only on a settings change, so the temporary key lookups
+// never touch the per-frame path.
+void configureScopes(std::vector<WorkerScope>& scopes, const AnalysisSettings& settings)
 {
-    switch (mode) {
-    case WaveformMode::Luma:
-        return 1.0;
-    case WaveformMode::ColoredLuma:
-        return 2.0;
-    default:
-        return 0.0;  // Rgb; legacy combined modes read as RGB
-    }
-}
+    for (WorkerScope& scope : scopes) {
+        if (!scope.instance.valid()) {
+            continue;
+        }
 
-// The worker's four built-in scopes, owned by the worker thread.
-struct WorkerScopes
-{
-    WorkerScope vectorscope;
-    WorkerScope waveform;
-    WorkerScope parade;
-    WorkerScope histogram;
-};
+        std::vector<SsParamValue> values;
+        const auto params = settings.scopeParams.find(scope.id);
+        if (params != settings.scopeParams.end() && scope.descriptor) {
+            for (uint32_t index = 0; index < scope.descriptor->param_count; ++index) {
+                const char* key = scope.descriptor->params[index].key;
+                const auto value = params->second.find(key);
+                if (value != params->second.end()) {
+                    values.push_back(SsParamValue{key, value->second});
+                }
+            }
+        }
+        (void)scope.instance.configure(values);
 
-// Pushes the typed settings into each module's parameter vocabulary. The
-// results are best-effort: a module that fails to configure keeps its last
-// image, which the UI simply stops advancing. Acknowledge the ignored
-// results explicitly.
-void configureScopes(WorkerScopes& scopes, const AnalysisSettings& settings)
-{
-    (void)scopes.vectorscope.instance.configure(
-        {{"gain", settings.vectorscope.gain},
-         {"stride", static_cast<double>(settings.vectorscope.samplingStride)},
-         {"matrix", settings.vectorscope.matrix == ChromaMatrix::Bt709 ? 1.0 : 0.0},
-         {"response", settings.vectorscope.response == TraceResponse::Linear ? 1.0 : 0.0}});
-    if (scopes.vectorscope.adaptive) {
-        scopes.vectorscope.adaptive->setImageSize(scopes.vectorscope.instance.raw(), settings.vectorscope.size,
-                                                  settings.vectorscope.size);
-    }
-    const std::vector<SsParamValue> waveformValues{{"gain", settings.waveform.gain},
-                                                   {"stride", static_cast<double>(settings.waveform.samplingStride)},
-                                                   {"mode", paramFromWaveformMode(settings.waveform.mode)}};
-    (void)scopes.waveform.instance.configure(waveformValues);
-    if (scopes.waveform.adaptive) {
-        scopes.waveform.adaptive->setImageSize(scopes.waveform.instance.raw(), settings.waveform.columns,
-                                               settings.waveform.imageHeight);
-    }
-    (void)scopes.parade.instance.configure(
-        {{"gain", settings.waveform.gain}, {"stride", static_cast<double>(settings.waveform.samplingStride)}});
-    if (scopes.parade.adaptive) {
-        scopes.parade.adaptive->setImageSize(scopes.parade.instance.raw(), settings.waveform.columns,
-                                             settings.waveform.imageHeight);
-    }
-    (void)scopes.histogram.instance.configure(
-        {{"stride", static_cast<double>(settings.histogram.samplingStride)},
-         {"style", settings.histogram.style == HistogramStyle::PerChannel ? 0.0 : 1.0}});
-    if (scopes.histogram.adaptive) {
-        scopes.histogram.adaptive->setImageSize(scopes.histogram.instance.raw(), settings.histogram.imageWidth,
-                                                settings.histogram.imageHeight);
+        const auto size = settings.imageSizes.find(scope.id);
+        if (scope.adaptive && size != settings.imageSizes.end()) {
+            scope.adaptive->setImageSize(scope.instance.raw(), size->second.first, size->second.second);
+        }
     }
 }
 
 // Runs each enabled scope over the region, returning the wall time the pass
 // took. Only the scopes on screen cost anything; a disabled scope's image
 // simply goes stale and the UI never draws it.
-double accumulateScopes(WorkerScopes& scopes, const SsFrameView& frame, const SsRect& region, uint32_t enabled)
+double accumulateScopes(std::vector<WorkerScope>& scopes, const SsFrameView& frame, const SsRect& region,
+                        const std::set<std::string>& enabled)
 {
     const auto started = std::chrono::steady_clock::now();
-    for (WorkerScope* scope : {&scopes.vectorscope, &scopes.waveform, &scopes.parade, &scopes.histogram}) {
-        if ((enabled & scope->bit) && scope->instance.valid()) {
-            (void)scope->instance.accumulate(frame, region);
+    for (WorkerScope& scope : scopes) {
+        if (scope.instance.valid() && enabled.count(scope.id) != 0) {
+            (void)scope.instance.accumulate(frame, region);
         }
     }
 
     return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count();
 }
 
-// Copies each enabled scope's freshly accumulated image into @p output. The
-// caller holds the output lock.
-void writeOutput(AnalysisWorker::Output& output, WorkerScopes& scopes, uint32_t enabled, double elapsedMs,
-                 uint64_t framesProcessed)
+// Copies each enabled scope's freshly accumulated image into @p output, keyed
+// by id, plus the outline of whichever scope exports one. The image map is
+// never cleared: an existing entry reuses its rgba buffer, so the steady
+// state allocates nothing. The caller holds the output lock.
+void writeOutput(AnalysisWorker::Output& output, std::vector<WorkerScope>& scopes, const std::set<std::string>& enabled,
+                 double elapsedMs, uint64_t framesProcessed)
 {
-    if (enabled & ScopeVectorscope) {
-        copyImage(scopes.vectorscope.instance.image(), output.vectorscopeImage);
-    }
-    if (enabled & ScopeWaveform) {
-        copyImage(scopes.waveform.instance.image(), output.waveformImage);
-    }
-    if (enabled & ScopeWaveformParade) {
-        copyImage(scopes.parade.instance.image(), output.waveformParadeImage);
-    }
-    if (enabled & ScopeHistogram) {
-        copyImage(scopes.histogram.instance.image(), output.histogramImage);
-        if (scopes.histogram.outline) {
-            output.histogramOutline.resize(
-                scopes.histogram.outline->heights(scopes.histogram.instance.raw(), nullptr, 0));
-            scopes.histogram.outline->heights(scopes.histogram.instance.raw(), output.histogramOutline.data(),
-                                              static_cast<uint32_t>(output.histogramOutline.size()));
+    for (WorkerScope& scope : scopes) {
+        if (!scope.instance.valid() || enabled.count(scope.id) == 0) {
+            continue;
+        }
+
+        copyImage(scope.instance.image(), output.images[scope.id]);
+        if (scope.outline) {
+            output.histogramOutline.resize(scope.outline->heights(scope.instance.raw(), nullptr, 0));
+            scope.outline->heights(scope.instance.raw(), output.histogramOutline.data(),
+                                   static_cast<uint32_t>(output.histogramOutline.size()));
         }
     }
 
@@ -308,10 +295,8 @@ bool AnalysisWorker::hasWork(bool newFrame, bool settingsChanged) const
 void AnalysisWorker::run()
 {
     // Instances are created on this thread, which therefore owns them.
-    WorkerScopes scopes{makeWorkerScope(ScopeVectorscope, "org.sidescopes.vectorscope"),
-                        makeWorkerScope(ScopeWaveform, "org.sidescopes.waveform"),
-                        makeWorkerScope(ScopeWaveformParade, "org.sidescopes.parade"),
-                        makeWorkerScope(ScopeHistogram, "org.sidescopes.histogram")};
+    std::vector<WorkerScope> scopes = makeWorkerScopes();
+    std::set<std::string> enabledScopes;
     AnalysisSettings settings;
     uint64_t seenSettingsVersion = 0;
     uint64_t lastContentHash = 0;
@@ -342,18 +327,20 @@ void AnalysisWorker::run()
 
         if (settingsChanged) {
             configureScopes(scopes, settings);
+            // Rebuild the enabled-id lookup once per settings change, not per
+            // scope per pass.
+            enabledScopes = std::set<std::string>(settings.enabledScopes.begin(), settings.enabledScopes.end());
         }
 
-        const uint32_t enabled = settings.enabledScopes;
         const SsFrameView boundaryFrame = toBoundaryFrame(view);
         const SsRect boundaryRegion{region.x, region.y, region.width, region.height};
-        const double elapsedMs = accumulateScopes(scopes, boundaryFrame, boundaryRegion, enabled);
+        const double elapsedMs = accumulateScopes(scopes, boundaryFrame, boundaryRegion, enabledScopes);
         if (newFrame) {
             ++framesProcessed;
         }
 
         std::lock_guard lock(m_outputMutex);
-        writeOutput(m_output, scopes, enabled, elapsedMs, framesProcessed);
+        writeOutput(m_output, scopes, enabledScopes, elapsedMs, framesProcessed);
     }
 }
 

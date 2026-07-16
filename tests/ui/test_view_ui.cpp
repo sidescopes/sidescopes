@@ -15,13 +15,16 @@
 // Dear ImGui Test Engine (c) 2018-2026 Omar Cornut / DISCO HELLO, used under
 // its Free License; fetched at build time, never vendored.
 
+#include <algorithm>
 #include <cstdint>
+#include <string>
+#include <string_view>
+#include <vector>
 
 #define IMGUI_DEFINE_MATH_OPERATORS
 #include "app/pin_board.h"
 #include "app/scope_registry.h"
 #include "app/scope_view.h"
-#include "core/analysis_worker.h"
 #include "core/frame.h"
 #include "imgui.h"
 #include "imgui_internal.h"
@@ -110,11 +113,17 @@ void scopeToggles(ImGuiTestContext* ctx)
     h.scopeView.restoreStack("V");  // known starting stack
     ctx->SetRef("View");
 
-    // Clicking W stacks the waveform and the enabled mask follows.
+    const auto enables = [&](std::string_view id) {
+        const std::vector<std::string> ids = h.scopeView.enabledScopeIds();
+
+        return std::find(ids.begin(), ids.end(), id) != ids.end();
+    };
+
+    // Clicking W stacks the waveform and the enabled ids follow.
     ctx->ItemClick("W");
     IM_CHECK(h.scopeView.shows(WaveformScopeId));
     IM_CHECK(h.scopeView.stack().size() == 2);
-    IM_CHECK((h.scopeView.enabledMask() & static_cast<uint32_t>(ScopeWaveform)) != 0u);
+    IM_CHECK(enables(WaveformScopeId));
 
     // Clicking H stacks the histogram in activation order after W.
     ctx->ItemClick("H");
@@ -125,7 +134,7 @@ void scopeToggles(ImGuiTestContext* ctx)
     ctx->ItemClick("W");
     IM_CHECK(!h.scopeView.shows(WaveformScopeId));
     IM_CHECK(h.scopeView.stackLetters() == "VH");
-    IM_CHECK((h.scopeView.enabledMask() & static_cast<uint32_t>(ScopeWaveform)) == 0u);
+    IM_CHECK(!enables(WaveformScopeId));
 }
 
 void pinAddRemove(ImGuiTestContext* ctx)
