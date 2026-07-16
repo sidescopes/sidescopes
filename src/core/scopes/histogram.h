@@ -79,6 +79,9 @@ public:
 
 private:
     void mapBinsToImage();
+    [[nodiscard]] std::vector<double> computeHeights() const;
+    void exportOutline(const std::vector<double>& heights);
+    void renderFill(const std::vector<double>& heights);
 
     void resize(int width, int height);
 

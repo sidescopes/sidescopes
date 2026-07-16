@@ -59,6 +59,14 @@ void Histogram::accumulate(const FrameView& frame, IntRect region)
 
 void Histogram::mapBinsToImage()
 {
+    const std::vector<double> heights = computeHeights();
+    exportOutline(heights);
+    renderFill(heights);
+    ++m_image.sequence;
+}
+
+std::vector<double> Histogram::computeHeights() const
+{
     // A gaussian-ish 1-4-6-4-1 kernel against bin-to-bin comb: real
     // photographs produce ragged neighboring counts that read as noise at
     // this size.
@@ -90,9 +98,6 @@ void Histogram::mapBinsToImage()
         return std::max(1.0, std::sqrt(count / densest) * m_height);
     };
 
-    // Bin heights once, then the filled area under a Catmull-Rom spline
-    // through them, evaluated per image column with a fractional-coverage
-    // top pixel: a plotted function with no kinks at the bins.
     std::vector<double> heights(static_cast<std::size_t>(Bins) * 3);
     for (int channel = 0; channel < 3; ++channel) {
         for (int value = 0; value < Bins; ++value) {
@@ -100,7 +105,11 @@ void Histogram::mapBinsToImage()
                 barHeight(smoothed[static_cast<std::size_t>(channel) * Bins + value]);
         }
     }
+    return heights;
+}
 
+void Histogram::exportOutline(const std::vector<double>& heights)
+{
     // The curve, exported for the interface to stroke at display
     // resolution; full scale in both styles, the drawing side handles
     // the bands.
@@ -111,7 +120,14 @@ void Histogram::mapBinsToImage()
                 static_cast<float>(heights[static_cast<std::size_t>(channel) * Bins + value] / m_height);
         }
     }
+}
 
+void Histogram::renderFill(const std::vector<double>& heights)
+{
+    // The filled area under a Catmull-Rom spline through the bin heights,
+    // evaluated per image column with a fractional-coverage top pixel: a
+    // plotted function with no kinks at the bins.
+    //
     // Combined: three channels overlaid over the full height. Per
     // channel: three stacked bands, each holding one channel's plot.
     // The texture carries only the dim solid fill - overlaps sum per
@@ -171,7 +187,6 @@ void Histogram::mapBinsToImage()
             m_image.rgba[(static_cast<std::size_t>(row) * m_width + x) * 4 + 3] = 255;
         }
     }
-    ++m_image.sequence;
 }
 
 }  // namespace sidescopes
