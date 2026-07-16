@@ -18,6 +18,7 @@ if(NOT CMAKE_BUILD_TYPE)
 endif()
 
 option(SIDESCOPES_BUILD_TESTS "Build the test suite" ON)
+option(SIDESCOPES_BENCH "Build the opt-in benchmark suite" OFF)
 option(SIDESCOPES_WERROR "Treat compiler warnings as errors" OFF)
 option(SIDESCOPES_MODULES_DYNAMIC "Load built-in scope modules dynamically" OFF)
 option(SIDESCOPES_UI_TESTS "Build the Dear ImGui Test Engine UI-test target" OFF)
@@ -358,6 +359,12 @@ endif()
 if(SIDESCOPES_BUILD_TESTS)
     enable_testing()
     add_subdirectory(tests)
+endif()
+
+# Opt-in Catch2 micro-benchmarks. Everything the suite needs is reached only
+# here, so the default build fetches and configures nothing extra.
+if(SIDESCOPES_BENCH)
+    add_subdirectory(bench)
 endif()
 
 # Opt-in UI tests on the Dear ImGui Test Engine. Everything the engine needs

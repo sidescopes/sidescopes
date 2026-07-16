@@ -4,6 +4,7 @@ build-*/
 cmake-build-*/
 out/
 CMakeUserPresets.json
+bench-results/
 
 # Tooling caches
 .cache/
