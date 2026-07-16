@@ -23,6 +23,7 @@
 
 #include "imgui_impl_glfw.h"
 #include "imgui_impl_opengl3.h"
+#include "platform/desktop.h"
 #include "platform/graphics.h"
 
 // Windows 10 2004; absent from older SDKs.
@@ -109,7 +110,9 @@ public:
         // has no application-level capture exclusion, so the window
         // excludes itself. Best effort: unsupported before Windows 10
         // 2004, where the analysis-side masking still applies.
-        SetWindowDisplayAffinity(glfwGetWin32Window(window), WDA_EXCLUDEFROMCAPTURE);
+        if (!captureExclusionDisabled()) {
+            SetWindowDisplayAffinity(glfwGetWin32Window(window), WDA_EXCLUDEFROMCAPTURE);
+        }
         if (!ImGui_ImplGlfw_InitForOpenGL(window, true)) {
             return false;
         }

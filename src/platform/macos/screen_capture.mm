@@ -115,7 +115,9 @@ public:
                 break;
             }
         }
-        SCContentFilter* filter = selfApplication
+        // Test harnesses lift the self-exclusion so captures include this
+        // application's own windows.
+        SCContentFilter* filter = (selfApplication && !captureExclusionDisabled())
                                       ? [[SCContentFilter alloc] initWithDisplay:display
                                                            excludingApplications:@[ selfApplication ]
                                                                 exceptingWindows:@[]]
@@ -322,10 +324,11 @@ void sampleScreenColorAsync(DesktopPoint point, std::function<void(std::optional
             break;
         }
     }
-    SCContentFilter* filter = selfApplication ? [[SCContentFilter alloc] initWithDisplay:display
-                                                                   excludingApplications:@[ selfApplication ]
-                                                                        exceptingWindows:@[]]
-                                              : [[SCContentFilter alloc] initWithDisplay:display excludingWindows:@[]];
+    SCContentFilter* filter = (selfApplication && !captureExclusionDisabled())
+                                  ? [[SCContentFilter alloc] initWithDisplay:display
+                                                       excludingApplications:@[ selfApplication ]
+                                                            exceptingWindows:@[]]
+                                  : [[SCContentFilter alloc] initWithDisplay:display excludingWindows:@[]];
 
     // A small neighborhood around the point, clamped inside the display,
     // in the display's own point coordinates.

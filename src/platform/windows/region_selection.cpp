@@ -1417,7 +1417,9 @@ HWND createOverlayWindow(const wchar_t* className, WNDPROC procedure, DWORD exSt
     // application-level exclusion, so each window excludes itself. Best
     // effort: unsupported before Windows 10 2004.
     if (window) {
-        SetWindowDisplayAffinity(window, WDA_EXCLUDEFROMCAPTURE);
+        if (!captureExclusionDisabled()) {
+            SetWindowDisplayAffinity(window, WDA_EXCLUDEFROMCAPTURE);
+        }
     }
     return window;
 }
