@@ -71,6 +71,7 @@ endif()
 if(SIDESCOPES_MODULES_DYNAMIC)
     target_sources(sidescopes_tests PRIVATE
         ${CMAKE_SOURCE_DIR}/src/core/scopes/vectorscope.cpp
+        ${CMAKE_SOURCE_DIR}/src/core/scopes/vectorscope_graticule.cpp
         ${CMAKE_SOURCE_DIR}/src/core/scopes/waveform.cpp
         ${CMAKE_SOURCE_DIR}/src/core/scopes/histogram.cpp)
 else()

@@ -98,25 +98,17 @@ function(sidescopes_add_module name)
         # export; distinct from the plural SIDESCOPES_MODULES_DYNAMIC that
         # switches the core registry over to the dynamic loader.
         target_compile_definitions(${name} PRIVATE SIDESCOPES_MODULE_DYNAMIC)
-        # graticule.cpp (shared in core) bundles BuildVectorscopeGraticule,
-        # which calls Vectorscope::Project, with the engine-agnostic
-        # BuildWaveformScale. A module that uses only the latter still pulls
-        # the whole object and so references Project, whose definition lives
-        # only in the vectorscope module. In the static build the final link
-        # supplies it; a MODULE bundle instead defers that symbol to load
-        # time. The path is never reached in a module that lacks the
-        # vectorscope engine, so it is dead, not a runtime dependency.
-        if(APPLE)
-            target_link_options(${name} PRIVATE -Wl,-undefined,dynamic_lookup)
-        else()
-            target_link_options(${name} PRIVATE -Wl,--allow-shlib-undefined)
-        endif()
     endif()
 endfunction()
 
+# BuildVectorscopeGraticule projects colors through the vectorscope engine, so
+# it ships in the vectorscope module beside that engine. Every module then links
+# self-contained: none references a symbol defined only in another, which is
+# what lets the MODULE bundles link on toolchains without lazy symbol binding.
 sidescopes_add_module(sidescopes_module_vectorscope
     src/modules/vectorscope_module.cpp
-    src/core/scopes/vectorscope.cpp)
+    src/core/scopes/vectorscope.cpp
+    src/core/scopes/vectorscope_graticule.cpp)
 sidescopes_add_module(sidescopes_module_waveform
     src/modules/waveform_module.cpp
     src/core/scopes/waveform.cpp)
@@ -353,6 +345,7 @@ if(APPLE OR WIN32)
         # bundles, compile their sources into the app, as the tests do.
         target_sources(SideScopes PRIVATE
             src/core/scopes/vectorscope.cpp
+            src/core/scopes/vectorscope_graticule.cpp
             src/core/scopes/waveform.cpp
             src/core/scopes/histogram.cpp)
     endif()
