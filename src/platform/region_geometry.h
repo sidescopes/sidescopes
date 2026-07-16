@@ -1,5 +1,9 @@
 #pragma once
 
+#include <cstddef>
+#include <optional>
+#include <vector>
+
 #include "core/analysis_worker.h"  // RegionOfInterest
 
 namespace sidescopes {
@@ -50,5 +54,37 @@ unsigned edgeOrMoveZoneAt(const LocalRect& region, double x, double y, double sc
 /// within the minimum of its opposite. Move offsets the whole rectangle; an
 /// edge or corner zone moves only those sides.
 LocalRect draggedRegionRect(unsigned dragZone, const LocalRect& start, double dx, double dy, double minimum);
+
+/// The least share of itself a window must still show to be offered as a pick
+/// candidate. At 0.15 a window peeking out from behind the editor stays
+/// pickable, while one hidden down to a sliver drops out: low enough not to
+/// lose a genuinely reachable window, high enough that a click meant for it
+/// would not as readily land on whatever covers it.
+inline constexpr double MinimumVisibleFraction = 0.15;
+
+/// The visible fraction of each window: the share of its area not hidden under
+/// the union of the windows in front of it. @p windows is front-to-back
+/// (frontmost first), matching the window server's order, so window i is
+/// covered only by windows [0, i). A degenerate (zero-area) window reports 0;
+/// every fraction lies in [0, 1].
+/// @param windows the on-screen windows, frontmost first.
+/// @return one visible fraction per window, in the same order.
+[[nodiscard]] std::vector<double> visibleFractions(const std::vector<LocalRect>& windows);
+
+/// The frontmost window whose unoccluded region contains the point. @p windows
+/// is front-to-back; the first window that contains the point wins, since
+/// nothing in front of it covers that point.
+/// @param windows the on-screen windows, frontmost first.
+/// @return the index of the topmost visible window at the point, or no value
+/// when the point lies over bare desktop or only over hidden parts of windows.
+[[nodiscard]] std::optional<std::size_t> topmostVisibleWindowAt(const std::vector<LocalRect>& windows, double x,
+                                                                double y);
+
+/// The windows worth offering as pick candidates: those at least
+/// MinimumVisibleFraction visible. Fully hidden windows never appear, so the
+/// picker stops proposing windows the user cannot see behind the ones on top.
+/// @param windows the on-screen windows, frontmost first.
+/// @return candidate indices into @p windows, frontmost first.
+[[nodiscard]] std::vector<std::size_t> meaningfulPickCandidates(const std::vector<LocalRect>& windows);
 
 }  // namespace sidescopes

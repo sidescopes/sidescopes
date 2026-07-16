@@ -7,6 +7,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
+#include <vector>
 
 namespace sidescopes {
 namespace {
@@ -15,6 +17,71 @@ namespace {
 constexpr double CornerZone = 22.0;
 // Half-length of the edge-midpoint handle's grab zone along its edge.
 constexpr double MidpointZone = 22.0;
+
+double rectArea(const LocalRect& rect)
+{
+    return std::max(0.0, rect.width) * std::max(0.0, rect.height);
+}
+
+// Half-open on the right and bottom edges, so abutting rectangles neither
+// double-count a shared border nor let a zero-area rectangle contain anything.
+bool containsPoint(const LocalRect& rect, double x, double y)
+{
+    return x >= rect.x && x < rect.x + rect.width && y >= rect.y && y < rect.y + rect.height;
+}
+
+bool pointCovered(const std::vector<LocalRect>& occluders, double x, double y)
+{
+    for (const LocalRect& occluder : occluders) {
+        if (containsPoint(occluder, x, y)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+// The area of `target` left uncovered by the union of `occluders`. The
+// coordinate grid is compressed to the target's bounds: every cell there lies
+// wholly inside or outside each rectangle, so its center decides the whole
+// cell. Exact for axis-aligned rectangles. `target` must have positive area.
+double unoccludedArea(const LocalRect& target, const std::vector<LocalRect>& occluders)
+{
+    const double right = target.x + target.width;
+    const double bottom = target.y + target.height;
+    std::vector<double> xs{target.x, right};
+    std::vector<double> ys{target.y, bottom};
+    for (const LocalRect& occluder : occluders) {
+        xs.push_back(std::clamp(occluder.x, target.x, right));
+        xs.push_back(std::clamp(occluder.x + occluder.width, target.x, right));
+        ys.push_back(std::clamp(occluder.y, target.y, bottom));
+        ys.push_back(std::clamp(occluder.y + occluder.height, target.y, bottom));
+    }
+
+    std::sort(xs.begin(), xs.end());
+    xs.erase(std::unique(xs.begin(), xs.end()), xs.end());
+    std::sort(ys.begin(), ys.end());
+    ys.erase(std::unique(ys.begin(), ys.end()), ys.end());
+
+    double visible = 0.0;
+    for (std::size_t xi = 0; xi + 1 < xs.size(); ++xi) {
+        for (std::size_t yi = 0; yi + 1 < ys.size(); ++yi) {
+            const double cellWidth = xs[xi + 1] - xs[xi];
+            const double cellHeight = ys[yi + 1] - ys[yi];
+            if (cellWidth <= 0.0 || cellHeight <= 0.0) {
+                continue;
+            }
+
+            const double centerX = (xs[xi] + xs[xi + 1]) / 2.0;
+            const double centerY = (ys[yi] + ys[yi + 1]) / 2.0;
+            if (!pointCovered(occluders, centerX, centerY)) {
+                visible += cellWidth * cellHeight;
+            }
+        }
+    }
+
+    return visible;
+}
 
 }  // namespace
 
@@ -107,6 +174,48 @@ LocalRect draggedRegionRect(unsigned dragZone, const LocalRect& start, double dx
         }
     }
     return {left, top, right - left, bottom - top};
+}
+
+std::vector<double> visibleFractions(const std::vector<LocalRect>& windows)
+{
+    std::vector<double> fractions(windows.size(), 0.0);
+    std::vector<LocalRect> occludersAbove;
+    occludersAbove.reserve(windows.size());
+    for (std::size_t index = 0; index < windows.size(); ++index) {
+        const LocalRect& window = windows[index];
+        const double area = rectArea(window);
+        if (area > 0.0) {
+            fractions[index] = unoccludedArea(window, occludersAbove) / area;
+        }
+
+        occludersAbove.push_back(window);
+    }
+
+    return fractions;
+}
+
+std::optional<std::size_t> topmostVisibleWindowAt(const std::vector<LocalRect>& windows, double x, double y)
+{
+    for (std::size_t index = 0; index < windows.size(); ++index) {
+        if (containsPoint(windows[index], x, y)) {
+            return index;
+        }
+    }
+
+    return std::nullopt;
+}
+
+std::vector<std::size_t> meaningfulPickCandidates(const std::vector<LocalRect>& windows)
+{
+    const std::vector<double> fractions = visibleFractions(windows);
+    std::vector<std::size_t> candidates;
+    for (std::size_t index = 0; index < windows.size(); ++index) {
+        if (fractions[index] >= MinimumVisibleFraction) {
+            candidates.push_back(index);
+        }
+    }
+
+    return candidates;
 }
 
 }  // namespace sidescopes
