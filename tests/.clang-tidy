@@ -1,5 +1,9 @@
 # Tests inherit the repository configuration, minus the unchecked-optional
 # check: it cannot see through Catch2's REQUIRE, so every guarded *optional
-# in a test reads as unchecked.
+# in a test reads as unchecked. The function-size limits stay out too: a
+# table-driven TEST_CASE is one behavior however many lines its table takes.
 InheritParentConfig: true
-Checks: '-bugprone-unchecked-optional-access'
+Checks: >
+  -bugprone-unchecked-optional-access,
+  -readability-function-size,
+  -readability-function-cognitive-complexity

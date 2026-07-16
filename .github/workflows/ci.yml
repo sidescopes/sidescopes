@@ -37,7 +37,9 @@ jobs:
           # tests/ui is the optional UI-test target; test_windows_platform.cpp
           # includes <windows.h>. Both are absent from this Linux compile
           # database, so clang-tidy cannot parse them here.
-          files=$(git ls-files 'src/core/*.cpp' 'src/core/**/*.cpp' 'tests/*.cpp' ':(exclude)tests/ui/*' ':(exclude)tests/test_windows_platform.cpp')
+          # module_loader.cpp compiles only in the dynamic configuration, so it
+          # is absent from this build's compile database.
+          files=$(git ls-files 'src/core/*.cpp' 'src/core/**/*.cpp' 'src/modules/*.cpp' 'tests/*.cpp' ':(exclude)tests/ui/*' ':(exclude)tests/test_windows_platform.cpp' ':(exclude)src/modules/module_loader.cpp')
           clang-tidy-18 -p build --quiet $files
 
   test:

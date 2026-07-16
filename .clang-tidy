@@ -27,7 +27,9 @@ Checks: >
   modernize-use-override,
   misc-unused-using-decls,
   misc-redundant-expression,
-  readability-identifier-naming
+  readability-identifier-naming,
+  readability-function-size,
+  readability-function-cognitive-complexity
 WarningsAsErrors: '*'
 HeaderFilterRegex: 'src/(core|platform)/.*\.h$'
 CheckOptions:
@@ -71,3 +73,9 @@ CheckOptions:
     value: CamelCase
   - key: readability-identifier-naming.ClassConstantCase
     value: CamelCase
+  - key: readability-function-size.LineThreshold
+    value: '90'
+  - key: readability-function-size.ParameterThreshold
+    value: '8'
+  - key: readability-function-cognitive-complexity.Threshold
+    value: '25'
