@@ -2304,14 +2304,10 @@ int main()
                 drawVectorscopeOverlay(scope, buildVectorscopeGraticule(projectionVectorscope));
             }
             for (const FloatColor& pinned : pins.colors()) {
-                if (const auto point = projectionVectorscope.project(pinned)) {
-                    drawPointMarker(scope, *point, IM_COL32(230, 170, 90, 230));
-                }
+                drawPointMarker(scope, projectionVectorscope.project(pinned), IM_COL32(230, 170, 90, 230));
             }
             if (vectorscopeColor) {
-                if (const auto point = projectionVectorscope.project(*vectorscopeColor)) {
-                    drawPointMarker(scope, *point, IM_COL32(255, 255, 255, 255));
-                }
+                drawPointMarker(scope, projectionVectorscope.project(*vectorscopeColor), IM_COL32(255, 255, 255, 255));
             }
             draw->PopClipRect();
             if (view.zoom() > 1) {
@@ -2359,9 +2355,7 @@ int main()
             if (kind == ScopeGlyph::Waveform &&
                 (analysis.waveform.mode == WaveformMode::Luma || analysis.waveform.mode == WaveformMode::ColoredLuma)) {
                 if (waveformColor) {
-                    if (const auto point = projectionWaveform.project(*waveformColor)) {
-                        drawLevelMarker(scope, point->y, IM_COL32(255, 220, 80, 220));
-                    }
+                    drawLevelMarker(scope, projectionWaveform.project(*waveformColor).y, IM_COL32(255, 220, 80, 220));
                 }
             } else if (kind == ScopeGlyph::Waveform) {
                 drawChannelMarkers(scope);

@@ -172,14 +172,11 @@ uint32_t markers(const SsScopeInstance* instance, SsColor color, SsMarker* out, 
         // Luma flavors carry a single level line at the color's luma; the
         // RGB overlay carries one line per channel.
         if (self->settings.mode == WaveformMode::Luma || self->settings.mode == WaveformMode::ColoredLuma) {
-            const auto point = self->engine.project(FloatColor{color.r, color.g, color.b});
-            if (!point) {
-                return 0;
-            }
+            const NormalizedPoint point = self->engine.project(FloatColor{color.r, color.g, color.b});
             if (capacity >= 1) {
                 SsMarker marker{};
                 marker.kind = SS_MARKER_LEVEL;
-                marker.y = point->y;
+                marker.y = point.y;
                 marker.band_from = 0.0f;
                 marker.band_to = 1.0f;
                 marker.channel_mask = 0x7;

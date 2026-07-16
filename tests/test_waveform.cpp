@@ -139,11 +139,10 @@ TEST_CASE("Waveform parade preserves horizontal position within each third")
 TEST_CASE("Waveform projection reports the luma level")
 {
     Waveform scope;
-    const auto point = scope.project(FloatColor{128.0f, 128.0f, 128.0f});
-    REQUIRE(point.has_value());
-    CHECK(point->x < 0.0f);  // horizontal position is the caller's problem
-    CHECK(point->y > 0.49f);
-    CHECK(point->y < 0.51f);
+    const NormalizedPoint point = scope.project(FloatColor{128.0f, 128.0f, 128.0f});
+    CHECK(point.x < 0.0f);  // horizontal position is the caller's problem
+    CHECK(point.y > 0.49f);
+    CHECK(point.y < 0.51f);
 }
 
 TEST_CASE("Waveform fills a missing level between populated neighbors")

@@ -4,6 +4,7 @@
 #include <cmath>
 
 #include "core/scopes/graticule.h"
+#include "core/scopes/vectorscope.h"
 
 namespace sidescopes {
 
@@ -18,13 +19,12 @@ TEST_CASE("Vectorscope graticule targets sit exactly on the projections")
     CHECK(primaries == 6);
     CHECK(graticule.targets.size() == 12);
 
-    const auto red75 = scope.project(FloatColor{191.0f, 0.0f, 0.0f});
-    REQUIRE(red75.has_value());
+    const NormalizedPoint red75 = scope.project(FloatColor{191.0f, 0.0f, 0.0f});
     const auto redTarget =
         std::find_if(graticule.targets.begin(), graticule.targets.end(), [](const auto& t) { return t.label == "R"; });
     REQUIRE(redTarget != graticule.targets.end());
-    CHECK(redTarget->center.x == red75->x);
-    CHECK(redTarget->center.y == red75->y);
+    CHECK(redTarget->center.x == red75.x);
+    CHECK(redTarget->center.y == red75.y);
 }
 
 TEST_CASE("Vectorscope graticule targets follow the matrix")
@@ -64,9 +64,8 @@ TEST_CASE("Vectorscope graticule includes the skin-tone line on the ring")
     CHECK(std::sqrt(dx * dx + dy * dy) == Catch::Approx(0.5).margin(1e-4));
 
     // And it points through the projected reference skin tone.
-    const auto skin = scope.project(FloatColor{203.0f, 171.0f, 153.0f});
-    REQUIRE(skin.has_value());
-    const float cross = dx * (skin->y - 0.5f) - dy * (skin->x - 0.5f);
+    const NormalizedPoint skin = scope.project(FloatColor{203.0f, 171.0f, 153.0f});
+    const float cross = dx * (skin.y - 0.5f) - dy * (skin.x - 0.5f);
     CHECK(cross == Catch::Approx(0.0).margin(1e-4));
 }
 

@@ -450,7 +450,7 @@ void Waveform::accumulate(const FrameView& frame, IntRect region)
     mapBinsToImage(sampledRows);
 }
 
-std::optional<NormalizedPoint> Waveform::project(const FloatColor& color) const
+NormalizedPoint Waveform::project(const FloatColor& color) const
 {
     const float luma = (54.0f * color.r + 183.0f * color.g + 19.0f * color.b) / 256.0f;
     return NormalizedPoint{-1.0f, (255.0f - luma) / 255.0f};

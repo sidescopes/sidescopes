@@ -4,9 +4,10 @@
 #include <vector>
 
 #include "core/scopes/scope_types.h"
-#include "core/scopes/vectorscope.h"
 
 namespace sidescopes {
+
+class Vectorscope;
 
 // Graticule geometry as plain data in normalized scope coordinates, built
 // from the same projection the engines use — which is what makes it

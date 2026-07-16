@@ -2,6 +2,8 @@
 
 #include <cmath>
 
+#include "core/scopes/vectorscope.h"
+
 namespace sidescopes {
 namespace {
 
@@ -44,27 +46,21 @@ VectorscopeGraticule buildVectorscopeGraticule(const Vectorscope& scope)
 
     // Color targets at 75% (primary, labeled) and 100% (secondary).
     for (const BarColor& bar : BarColors) {
-        if (const auto at75 = scope.project(bar.color)) {
-            graticule.targets.push_back({*at75, true, bar.label});
-        }
+        graticule.targets.push_back({scope.project(bar.color), true, bar.label});
         const FloatColor full{bar.color.r > 0.0f ? 255.0f : 0.0f, bar.color.g > 0.0f ? 255.0f : 0.0f,
                               bar.color.b > 0.0f ? 255.0f : 0.0f};
-        if (const auto at100 = scope.project(full)) {
-            graticule.targets.push_back({*at100, false, ""});
-        }
+        graticule.targets.push_back({scope.project(full), false, ""});
     }
 
     // Skin-tone line: from the center through the reference skin color's
     // projection, extended to the ring.
-    if (const auto skin = scope.project(SkinToneReference)) {
-        const float dx = skin->x - Center.x;
-        const float dy = skin->y - Center.y;
-        const float length = std::sqrt(dx * dx + dy * dy);
-        if (length > 1e-6f) {
-            const float scale = 0.5f / length;
-            graticule.lines.push_back(
-                {Center, {Center.x + dx * scale, Center.y + dy * scale}, GraticuleStroke::SkinTone});
-        }
+    const NormalizedPoint skin = scope.project(SkinToneReference);
+    const float dx = skin.x - Center.x;
+    const float dy = skin.y - Center.y;
+    const float length = std::sqrt(dx * dx + dy * dy);
+    if (length > 1e-6f) {
+        const float scale = 0.5f / length;
+        graticule.lines.push_back({Center, {Center.x + dx * scale, Center.y + dy * scale}, GraticuleStroke::SkinTone});
     }
     return graticule;
 }

@@ -64,11 +64,10 @@ TEST_CASE("Vectorscope projection agrees with accumulation")
     VectorscopeSettings settings;
     settings.matrix = ChromaMatrix::Bt601;
     scope.configure(settings);
-    const auto point = scope.project(FloatColor{191.0f, 0.0f, 0.0f});
-    REQUIRE(point.has_value());
+    const NormalizedPoint point = scope.project(FloatColor{191.0f, 0.0f, 0.0f});
     // Floating-point chroma for 75% red: Cb = 99.65, Cr = 211.56.
-    CHECK(point->x == Catch::Approx(99.65 / 255.0).margin(0.005));
-    CHECK(point->y == Catch::Approx((255.0 - 211.56) / 255.0).margin(0.005));
+    CHECK(point.x == Catch::Approx(99.65 / 255.0).margin(0.005));
+    CHECK(point.y == Catch::Approx((255.0 - 211.56) / 255.0).margin(0.005));
 }
 
 TEST_CASE("Vectorscope matrix selection moves chroma targets")

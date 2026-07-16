@@ -137,7 +137,7 @@ void Vectorscope::accumulate(const FrameView& frame, IntRect region)
     mapBinsToImage(sampleCount);
 }
 
-std::optional<NormalizedPoint> Vectorscope::project(const FloatColor& color) const
+NormalizedPoint Vectorscope::project(const FloatColor& color) const
 {
     // Floating point throughout: markers need sub-bin positions.
     const ChromaCoefficients& matrix = coefficientsFor(m_settings.matrix);

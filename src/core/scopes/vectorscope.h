@@ -1,7 +1,6 @@
 #pragma once
 
-#include <array>
-#include <optional>
+#include <cstdint>
 #include <vector>
 
 #include "core/frame.h"
@@ -58,7 +57,7 @@ public:
     /// Where a color lands on the scope, in normalized image coordinates.
     /// Graticule targets, the cursor marker, and any future indicators all go
     /// through this projection, which guarantees overlays agree with the data.
-    [[nodiscard]] std::optional<NormalizedPoint> project(const FloatColor& color) const;
+    [[nodiscard]] NormalizedPoint project(const FloatColor& color) const;
 
 private:
     void resize(int size);

@@ -146,15 +146,12 @@ uint32_t graticule(const SsScopeInstance* instance, SsGraticulePrimitive* primit
 uint32_t markers(const SsScopeInstance* instance, SsColor color, SsMarker* out, uint32_t capacity)
 {
     try {
-        const auto point = impl(instance)->engine.project(FloatColor{color.r, color.g, color.b});
-        if (!point) {
-            return 0;
-        }
+        const NormalizedPoint point = impl(instance)->engine.project(FloatColor{color.r, color.g, color.b});
         if (capacity >= 1) {
             SsMarker marker{};
             marker.kind = SS_MARKER_POINT;
-            marker.x = point->x;
-            marker.y = point->y;
+            marker.x = point.x;
+            marker.y = point.y;
             marker.band_from = 0.0f;
             marker.band_to = 1.0f;
             marker.channel_mask = 0x7;
