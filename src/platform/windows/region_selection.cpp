@@ -553,6 +553,107 @@ void punchRect(Gdiplus::Graphics& canvas, const Gdiplus::RectF& rect)
     canvas.SetCompositingMode(previous);
 }
 
+// The pin tool's overlay: the live selection frame during a drag, the
+// instruction otherwise, over a wash too faint to tint the sampled color.
+void paintPinScene(PickerState& picker, Gdiplus::Graphics& canvas, double scale, const Gdiplus::RectF& bounds)
+{
+    // No dim at all: judging a color through even a light wash
+    // misleads. The single count of alpha is load-bearing and truly
+    // invisible - fully transparent layered pixels are click-through
+    // and any other value hit-tests, and pin clicks belong to the
+    // overlay.
+    canvas.SetCompositingMode(Gdiplus::CompositingModeSourceCopy);
+    Gdiplus::SolidBrush whisper(Gdiplus::Color(1, 0, 0, 0));
+    canvas.FillRectangle(&whisper, bounds);
+    canvas.SetCompositingMode(Gdiplus::CompositingModeSourceOver);
+    if (picker.dragging) {
+        // A two-tone frame: the white line rides a dark halo so one
+        // of the tones survives any undimmed background.
+        const Gdiplus::RectF selection = selectionRect(picker);
+        Gdiplus::Pen halo(Gdiplus::Color(179, 26, 26, 26), static_cast<Gdiplus::REAL>(3.0 * scale));
+        canvas.DrawRectangle(&halo, selection);
+        Gdiplus::Pen line(Gdiplus::Color(255, 255, 255, 255), static_cast<Gdiplus::REAL>(1.0 * scale));
+        canvas.DrawRectangle(&line, selection);
+    }
+    if (!picker.dragging) {
+        // Pinning is its own tool: no mode keys here and none of the
+        // region modes lead back - crossing over midway would blur
+        // what a click means.
+        drawBanner(canvas, picker, L"Click or drag to pin a color", L"[Shift+click] pin and continue    [Esc] done",
+                   false, scale);
+    }
+}
+
+// The window- and face-picking overlay: a dim wash, every face outlined
+// up front, and the suggestion under the cursor accented with its label.
+void paintSuggestionScene(PickerState& picker, Gdiplus::Graphics& canvas, double scale, const Gdiplus::RectF& bounds)
+{
+    Gdiplus::SolidBrush dim(Gdiplus::Color(51, 0, 0, 0));
+    canvas.FillRectangle(&dim, bounds);
+    if (picker.facesMode) {
+        // Faces are few and easy to miss: every found face is outlined
+        // up front, so the answer is visible before any hovering. The
+        // hovered one still gets the full accent treatment below.
+        Gdiplus::Pen outline(Gdiplus::Color(217, 255, 255, 255), static_cast<Gdiplus::REAL>(1.5 * scale));
+        for (int i = 0; i < static_cast<int>(picker.suggestions.size()); ++i) {
+            if (i == picker.hovered) {
+                continue;
+            }
+            punchRect(canvas, picker.suggestions[static_cast<std::size_t>(i)].first);
+            canvas.DrawRectangle(&outline, picker.suggestions[static_cast<std::size_t>(i)].first);
+        }
+    }
+    if (picker.hovered >= 0 && picker.hovered < static_cast<int>(picker.suggestions.size())) {
+        // Only the rectangle under the cursor is shown, washed with an
+        // accent like window selection in the screenshot interfaces.
+        const auto& hovered = picker.suggestions[static_cast<std::size_t>(picker.hovered)];
+        punchRect(canvas, hovered.first);
+        Gdiplus::SolidBrush wash(Gdiplus::Color(64, 0, 122, 255));
+        canvas.FillRectangle(&wash, hovered.first);
+        Gdiplus::Pen frame(Gdiplus::Color(255, 255, 255, 255), static_cast<Gdiplus::REAL>(2.0 * scale));
+        canvas.DrawRectangle(&frame, hovered.first);
+        const Gdiplus::FontFamily family(L"Segoe UI");
+        const Gdiplus::Font font(&family, static_cast<Gdiplus::REAL>(12 * scale), Gdiplus::FontStyleRegular,
+                                 Gdiplus::UnitPixel);
+        Gdiplus::SolidBrush text(Gdiplus::Color(255, 255, 255, 255));
+        canvas.DrawString(hovered.second.c_str(), -1, &font,
+                          Gdiplus::PointF(hovered.first.X + static_cast<Gdiplus::REAL>(6 * scale),
+                                          hovered.first.Y + static_cast<Gdiplus::REAL>(6 * scale)),
+                          &text);
+    }
+    if (picker.facesMode) {
+        drawBanner(canvas, picker, picker.suggestions.empty() ? L"No faces found on this screen" : L"Click a face",
+                   L"[A] pick a window    [D] draw    [Esc] full screen", picker.suggestions.empty(), scale);
+    } else {
+        drawBanner(canvas, picker, L"Click a window",
+                   supportsFaceDetection() ? L"[F] pick a face    [D] draw    [Esc] full screen"
+                                           : L"[D] draw    [Esc] full screen",
+                   false, scale);
+    }
+}
+
+// The draw overlay: a dim wash with either the live selection punched
+// through it or the instruction to start dragging.
+void paintDrawScene(PickerState& picker, Gdiplus::Graphics& canvas, double scale, const Gdiplus::RectF& bounds)
+{
+    Gdiplus::SolidBrush dim(Gdiplus::Color(89, 0, 0, 0));
+    canvas.FillRectangle(&dim, bounds);
+    if (picker.dragging) {
+        const Gdiplus::RectF selection = selectionRect(picker);
+        punchRect(canvas, selection);
+        Gdiplus::Pen frame(Gdiplus::Color(255, 255, 255, 255), static_cast<Gdiplus::REAL>(1.5 * scale));
+        canvas.DrawRectangle(&frame, selection);
+    } else {
+        const wchar_t* secondary = L"[Esc] full screen";
+        if (!picker.windows.empty() && supportsFaceDetection()) {
+            secondary = L"[A] pick a window    [F] pick a face    [Esc] full screen";
+        } else if (!picker.windows.empty()) {
+            secondary = L"[A] pick a window    [Esc] full screen";
+        }
+        drawBanner(canvas, picker, L"Drag to select an area", secondary, false, scale);
+    }
+}
+
 // The overlay scene proper, described in full every time: the caller
 // owns the surface, the clip that limits what actually rasterizes, and
 // the push to the compositor.
@@ -561,93 +662,11 @@ void paintPickerScene(PickerState& picker, Gdiplus::Graphics& canvas, double sca
     const Gdiplus::RectF bounds(0, 0, static_cast<Gdiplus::REAL>(picker.width),
                                 static_cast<Gdiplus::REAL>(picker.height));
     if (picker.pinMode) {
-        // No dim at all: judging a color through even a light wash
-        // misleads. The single count of alpha is load-bearing and truly
-        // invisible - fully transparent layered pixels are click-through
-        // and any other value hit-tests, and pin clicks belong to the
-        // overlay.
-        canvas.SetCompositingMode(Gdiplus::CompositingModeSourceCopy);
-        Gdiplus::SolidBrush whisper(Gdiplus::Color(1, 0, 0, 0));
-        canvas.FillRectangle(&whisper, bounds);
-        canvas.SetCompositingMode(Gdiplus::CompositingModeSourceOver);
-        if (picker.dragging) {
-            // A two-tone frame: the white line rides a dark halo so one
-            // of the tones survives any undimmed background.
-            const Gdiplus::RectF selection = selectionRect(picker);
-            Gdiplus::Pen halo(Gdiplus::Color(179, 26, 26, 26), static_cast<Gdiplus::REAL>(3.0 * scale));
-            canvas.DrawRectangle(&halo, selection);
-            Gdiplus::Pen line(Gdiplus::Color(255, 255, 255, 255), static_cast<Gdiplus::REAL>(1.0 * scale));
-            canvas.DrawRectangle(&line, selection);
-        }
-        if (!picker.dragging) {
-            // Pinning is its own tool: no mode keys here and none of the
-            // region modes lead back - crossing over midway would blur
-            // what a click means.
-            drawBanner(canvas, picker, L"Click or drag to pin a color", L"[Shift+click] pin and continue    [Esc] done",
-                       false, scale);
-        }
-        return;
-    }
-    if (!picker.drawMode) {
-        Gdiplus::SolidBrush dim(Gdiplus::Color(51, 0, 0, 0));
-        canvas.FillRectangle(&dim, bounds);
-        if (picker.facesMode) {
-            // Faces are few and easy to miss: every found face is outlined
-            // up front, so the answer is visible before any hovering. The
-            // hovered one still gets the full accent treatment below.
-            Gdiplus::Pen outline(Gdiplus::Color(217, 255, 255, 255), static_cast<Gdiplus::REAL>(1.5 * scale));
-            for (int i = 0; i < static_cast<int>(picker.suggestions.size()); ++i) {
-                if (i == picker.hovered) {
-                    continue;
-                }
-                punchRect(canvas, picker.suggestions[static_cast<std::size_t>(i)].first);
-                canvas.DrawRectangle(&outline, picker.suggestions[static_cast<std::size_t>(i)].first);
-            }
-        }
-        if (picker.hovered >= 0 && picker.hovered < static_cast<int>(picker.suggestions.size())) {
-            // Only the rectangle under the cursor is shown, washed with an
-            // accent like window selection in the screenshot interfaces.
-            const auto& hovered = picker.suggestions[static_cast<std::size_t>(picker.hovered)];
-            punchRect(canvas, hovered.first);
-            Gdiplus::SolidBrush wash(Gdiplus::Color(64, 0, 122, 255));
-            canvas.FillRectangle(&wash, hovered.first);
-            Gdiplus::Pen frame(Gdiplus::Color(255, 255, 255, 255), static_cast<Gdiplus::REAL>(2.0 * scale));
-            canvas.DrawRectangle(&frame, hovered.first);
-            const Gdiplus::FontFamily family(L"Segoe UI");
-            const Gdiplus::Font font(&family, static_cast<Gdiplus::REAL>(12 * scale), Gdiplus::FontStyleRegular,
-                                     Gdiplus::UnitPixel);
-            Gdiplus::SolidBrush text(Gdiplus::Color(255, 255, 255, 255));
-            canvas.DrawString(hovered.second.c_str(), -1, &font,
-                              Gdiplus::PointF(hovered.first.X + static_cast<Gdiplus::REAL>(6 * scale),
-                                              hovered.first.Y + static_cast<Gdiplus::REAL>(6 * scale)),
-                              &text);
-        }
-        if (picker.facesMode) {
-            drawBanner(canvas, picker, picker.suggestions.empty() ? L"No faces found on this screen" : L"Click a face",
-                       L"[A] pick a window    [D] draw    [Esc] full screen", picker.suggestions.empty(), scale);
-        } else {
-            drawBanner(canvas, picker, L"Click a window",
-                       supportsFaceDetection() ? L"[F] pick a face    [D] draw    [Esc] full screen"
-                                               : L"[D] draw    [Esc] full screen",
-                       false, scale);
-        }
+        paintPinScene(picker, canvas, scale, bounds);
+    } else if (!picker.drawMode) {
+        paintSuggestionScene(picker, canvas, scale, bounds);
     } else {
-        Gdiplus::SolidBrush dim(Gdiplus::Color(89, 0, 0, 0));
-        canvas.FillRectangle(&dim, bounds);
-        if (picker.dragging) {
-            const Gdiplus::RectF selection = selectionRect(picker);
-            punchRect(canvas, selection);
-            Gdiplus::Pen frame(Gdiplus::Color(255, 255, 255, 255), static_cast<Gdiplus::REAL>(1.5 * scale));
-            canvas.DrawRectangle(&frame, selection);
-        } else {
-            const wchar_t* secondary = L"[Esc] full screen";
-            if (!picker.windows.empty() && supportsFaceDetection()) {
-                secondary = L"[A] pick a window    [F] pick a face    [Esc] full screen";
-            } else if (!picker.windows.empty()) {
-                secondary = L"[A] pick a window    [Esc] full screen";
-            }
-            drawBanner(canvas, picker, L"Drag to select an area", secondary, false, scale);
-        }
+        paintDrawScene(picker, canvas, scale, bounds);
     }
 }
 
