@@ -31,6 +31,7 @@ add_executable(sidescopes_tests
     test_scope_view.cpp
     test_capture_controller.cpp
     test_region_geometry.cpp
+    test_window_suggestions.cpp
     test_version.cpp
 )
 
@@ -46,7 +47,8 @@ target_sources(sidescopes_tests PRIVATE
     ${CMAKE_SOURCE_DIR}/src/app/pin_board.cpp
     ${CMAKE_SOURCE_DIR}/src/app/scope_registry.cpp
     ${CMAKE_SOURCE_DIR}/src/app/scope_view.cpp
-    ${CMAKE_SOURCE_DIR}/src/app/version.cpp)
+    ${CMAKE_SOURCE_DIR}/src/app/version.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/window_suggestions.cpp)
 
 # The region geometry (src/platform/region_geometry.cpp) is pure,
 # cross-platform logic; its tests compile straight into the test binary on

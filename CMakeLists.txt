@@ -330,7 +330,8 @@ if(APPLE OR WIN32)
         src/app/pin_board.cpp
         src/app/scope_registry.cpp
         src/app/scope_view.cpp
-        src/app/version.cpp)
+        src/app/version.cpp
+        src/app/window_suggestions.cpp)
 
     # Build-time version stamp. The custom target regenerates the header from
     # `git describe` whenever it changes, so every build reflects the checked-
