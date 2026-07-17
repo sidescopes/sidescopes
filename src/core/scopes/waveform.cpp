@@ -10,9 +10,11 @@
 namespace sidescopes {
 namespace {
 
-// Sampled rows below this per chunk keep the accumulate single-threaded: a
-// small region's scatter finishes before spawned threads would pay off.
+// Below this many sampled rows (accumulate) or image rows (compose) per chunk,
+// the pass stays single-threaded: the work finishes before spawned threads
+// would pay off.
 constexpr int AccumulateRowsPerChunk = 64;
+constexpr int ComposeRowsPerChunk = 16;
 
 // Rec.709 luma weights, fixed-point x256, applied to display-encoded values.
 inline int luma709(int r, int g, int b)
@@ -608,28 +610,34 @@ void Waveform::composeImage(const uint32_t* redPlane, const uint32_t* greenPlane
     // The composer. At native height rows map one-to-one onto levels; a
     // taller image samples the level axis through a Catmull-Rom spline -
     // the histogram's technique - so a magnified trace draws as a curve
-    // instead of stretched texels.
+    // instead of stretched texels. Output rows are independent, so a band of
+    // them runs per thread: about half the waveform's cost is this pass.
     const bool nativeHeight = m_imageHeight == Levels;
-    uint8_t* out = m_image.rgba.data();
-    for (int y = 0; y < m_imageHeight; ++y) {
-        const LevelSample tap = levelSampleWeights(y, m_imageHeight, nativeHeight);
-        const auto sample = [&](const uint32_t* plane, int column) -> float {
-            const auto rowAt = [&](int level) -> float {
-                if (level < 0 || level >= Levels) {
-                    return 0.0f;
+    const auto composeRows = [&](int yBegin, int yEnd) {
+        uint8_t* out = m_image.rgba.data() + static_cast<std::size_t>(yBegin) * m_columns * 4;
+        for (int y = yBegin; y < yEnd; ++y) {
+            const LevelSample tap = levelSampleWeights(y, m_imageHeight, nativeHeight);
+            const auto sample = [&](const uint32_t* plane, int column) -> float {
+                const auto rowAt = [&](int level) -> float {
+                    if (level < 0 || level >= Levels) {
+                        return 0.0f;
+                    }
+                    return static_cast<float>(plane[static_cast<std::size_t>(level) * m_columns + column]);
+                };
+                if (nativeHeight) {
+                    return rowAt(tap.base);
                 }
-                return static_cast<float>(plane[static_cast<std::size_t>(level) * m_columns + column]);
+                return std::max(0.0f, tap.weight0 * rowAt(tap.base - 1) + tap.weight1 * rowAt(tap.base) +
+                                          tap.weight2 * rowAt(tap.base + 1) + tap.weight3 * rowAt(tap.base + 2));
             };
-            if (nativeHeight) {
-                return rowAt(tap.base);
+            for (int column = 0; column < m_columns; ++column, out += 4) {
+                emitWaveformPixel(out, sample, column, planes, flags, gain, intensityScale);
             }
-            return std::max(0.0f, tap.weight0 * rowAt(tap.base - 1) + tap.weight1 * rowAt(tap.base) +
-                                      tap.weight2 * rowAt(tap.base + 1) + tap.weight3 * rowAt(tap.base + 2));
-        };
-        for (int column = 0; column < m_columns; ++column, out += 4) {
-            emitWaveformPixel(out, sample, column, planes, flags, gain, intensityScale);
         }
-    }
+    };
+
+    const int chunks = parallelChunkCount(m_imageHeight, ComposeRowsPerChunk);
+    runParallelChunks(chunks, m_imageHeight, [&](int, int begin, int end) { composeRows(begin, end); });
 }
 
 }  // namespace sidescopes
