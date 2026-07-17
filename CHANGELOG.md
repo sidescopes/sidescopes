@@ -4,6 +4,44 @@ All notable changes to this project are documented in this file. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-07-17
+
+### Added
+
+- A scope-module architecture: every scope, the built-ins included, sits
+  behind a C plugin boundary and describes its own menu options, sliders,
+  gestures, graticules, and markers. An optional dynamic configuration
+  loads scope modules from a directory at startup on every platform.
+- Color values on the picker swatches as code, percent, and hex, and
+  perceptual comparison of pinned colors: each pin shows its CIELAB
+  difference from the live color in a labeled comparison table.
+- An About window leading with the version; development builds append
+  the git commit they were built from, a dirty tree marked with an
+  asterisk.
+
+### Changed
+
+- Analysis runs in parallel across cores: the vectorscope and waveform
+  passes complete two to four times faster, most visibly on modest
+  hardware, with results identical to the single-threaded ones.
+- Window picking respects stacking: windows buried under the ones above
+  them are no longer offered, and where windows overlap the pick goes
+  to the one actually visible under the cursor.
+- Pinning a color matches what the live readout shows: a click pins the
+  cursor sample, a drag still pins the average of the dragged area.
+- Preferences moved to scope-scoped keys. Old files load unchanged;
+  after the first save an older build falls back to defaults for scope
+  settings while keeping the scope stack.
+
+### Fixed
+
+- Windows: fixed-width values sized to match the interface font instead
+  of towering over their labels.
+- A corrupt scope-module file no longer hangs the dynamic configuration
+  on load; the file is skipped and logged.
+- Setting SIDESCOPES_NO_CAPTURE_EXCLUSION lets screenshot tools capture
+  the application's own windows for documentation.
+
 ## [0.1.0] - 2026-07-13
 
 ### Added
