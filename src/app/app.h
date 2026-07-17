@@ -237,6 +237,10 @@ private:
     void handleLetterShortcuts(const ModifierState& modifiers, bool systemChord);
     void handleViewShortcuts();
     bool triggerShortcut(const std::string& key, bool shift);
+    void handlePresetShortcuts(const ModifierState& modifiers);
+    void loadLayoutPreset(int slot);
+    void saveLayoutPreset(int slot);
+    [[nodiscard]] std::map<std::string, double> currentStackWeights() const;
     void drawRegionToolIcons();
     void drawCursorReadout();
     void drawScopePanes();
@@ -249,6 +253,8 @@ private:
     void drawScopeById(std::string_view id);
     void drawVectorscopePane();
     void drawWaveformPane(std::string_view id);
+    void drawStatusMessage();
+    void setStatus(std::string message);
     void drawSettingsWindow();
     void drawVectorscopeSettings();
     void drawWaveformSettings();
@@ -265,6 +271,7 @@ private:
     void appendScopesSubmenu(std::vector<NativeMenuItem>& menu);
     void appendPerScopeOptions(std::vector<NativeMenuItem>& menu, std::vector<ParamMenuAction>& paramActions);
     void appendLayoutSubmenu(std::vector<NativeMenuItem>& menu);
+    void appendPresetsSubmenu(std::vector<NativeMenuItem>& menu);
     void appendRegionAndAppSection(std::vector<NativeMenuItem>& menu);
     void buildContextMenu(int clickedPane, std::vector<NativeMenuItem>& menu,
                           std::vector<ParamMenuAction>& paramActions);
@@ -386,6 +393,10 @@ private:
 
     MarkerSmoother m_vectorscopeMarker;
     MarkerSmoother m_waveformMarker;
+
+    std::array<LayoutPreset, LayoutPresetSlots> m_layoutPresets;
+    std::string m_statusMessage;
+    double m_statusUntil = 0.0;
 
     std::map<std::string, std::unique_ptr<ScopeTexture>> m_scopeTextures;
     std::vector<ImVec2> m_panePoints;

@@ -1,10 +1,26 @@
 #pragma once
 
+#include <array>
 #include <filesystem>
 #include <map>
 #include <string>
 
 namespace sidescopes {
+
+/// How many quick-access layout preset slots the app offers, bound to the
+/// number keys 1-9.
+inline constexpr int LayoutPresetSlots = 9;
+
+/// One saved layout slot: the scope stack, its split orientation, and the
+/// per-scope pane weights. An empty @ref stack marks an unused slot, which
+/// loading treats as a no-op. Weights are keyed by scope id; a scope absent
+/// from the map keeps the default weight of 1.
+struct LayoutPreset
+{
+    std::string stack;                      ///< Stack tokens, the scopeStack format; empty = unused.
+    int orientation = 0;                    ///< 0 automatic, 1 vertical, 2 horizontal.
+    std::map<std::string, double> weights;  ///< Scope id to pane weight.
+};
 
 /// Keyboard bindings for the non-scope actions the application offers, editable
 /// in the preferences file. Each is a single letter A-Z or "Escape"; anything
@@ -58,6 +74,8 @@ struct Preferences
     /// Live per-scope pane weights, keyed by scope id; a scope absent from the
     /// map weighs 1. Equal weights reproduce the original even split.
     std::map<std::string, double> layoutWeights;
+    /// Saved layout slots 1-9 (index 0 is slot 1); an empty stack marks unused.
+    std::array<LayoutPreset, LayoutPresetSlots> layoutPresets;
     int windowX = -1;  ///< Negative lets the system place the window.
     int windowY = -1;
     int windowWidth = 440;

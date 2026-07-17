@@ -433,6 +433,9 @@ TEST_CASE("Preferences default the layout to automatic with no weights")
     const Preferences loaded = loadPreferences(file.path());
     CHECK(loaded.layoutOrientation == 0);  // automatic: the historical split
     CHECK(loaded.layoutWeights.empty());
+    for (const LayoutPreset& preset : loaded.layoutPresets) {
+        CHECK(preset.stack.empty());  // every slot starts unused
+    }
 }
 
 TEST_CASE("Preferences clamp an out-of-range layout orientation")
@@ -444,16 +447,57 @@ TEST_CASE("Preferences clamp an out-of-range layout orientation")
     CHECK(loaded.layoutOrientation == 0);
 }
 
-TEST_CASE("Preferences drop malformed live weight pairs")
+TEST_CASE("Preferences round-trip a saved layout preset")
+{
+    Preferences saved;
+    saved.layoutPresets[0].stack = "VWH";
+    saved.layoutPresets[0].orientation = 1;  // vertical
+    saved.layoutPresets[0].weights[VectorscopeId] = 3.0;
+    saved.layoutPresets[0].weights[HistogramId] = 0.75;
+    saved.layoutPresets[4].stack = "C";  // slot 5, another used slot
+
+    const TempFile file("layout-presets.txt");
+    REQUIRE(savePreferences(saved, file.path()));
+
+    const Preferences loaded = loadPreferences(file.path());
+    CHECK(loaded.layoutPresets[0].stack == "VWH");
+    CHECK(loaded.layoutPresets[0].orientation == 1);
+    CHECK(loaded.layoutPresets[0].weights.at(VectorscopeId) == 3.0);
+    CHECK(loaded.layoutPresets[0].weights.at(HistogramId) == 0.75);
+    CHECK(loaded.layoutPresets[4].stack == "C");
+    // Unused slots write nothing and reload empty.
+    CHECK(loaded.layoutPresets[1].stack.empty());
+    CHECK(loaded.layoutPresets[8].stack.empty());
+}
+
+TEST_CASE("Preferences skip empty preset slots in the file")
+{
+    Preferences saved;
+    saved.layoutPresets[2].stack = "VH";  // only slot 3 is used
+
+    const TempFile file("layout-sparse.txt");
+    REQUIRE(savePreferences(saved, file.path()));
+
+    std::ifstream text(file.path());
+    std::string contents((std::istreambuf_iterator<char>(text)), std::istreambuf_iterator<char>());
+    CHECK(contents.find("layout.preset3.stack=VH") != std::string::npos);
+    CHECK(contents.find("layout.preset1.stack") == std::string::npos);
+    CHECK(contents.find("layout.preset2.stack") == std::string::npos);
+}
+
+TEST_CASE("Preferences drop malformed preset weight pairs")
 {
     // The weights list is id:weight pairs; a pair without a colon, and any
     // non-positive weight, is discarded while the valid pairs survive.
     const TempFile file("layout-bad-weights.txt");
-    file.write("layout_weights=org.sidescopes.vectorscope:2,garbage,org.sidescopes.waveform:-1\n");
+    file.write(
+        "layout.preset1.stack=VW\n"
+        "layout.preset1.weights=org.sidescopes.vectorscope:2,garbage,org.sidescopes.waveform:-1\n");
 
     const Preferences loaded = loadPreferences(file.path());
-    CHECK(loaded.layoutWeights.size() == 1);
-    CHECK(loaded.layoutWeights.at(VectorscopeId) == 2.0);
+    CHECK(loaded.layoutPresets[0].stack == "VW");
+    CHECK(loaded.layoutPresets[0].weights.size() == 1);
+    CHECK(loaded.layoutPresets[0].weights.at(VectorscopeId) == 2.0);
 }
 
 }  // namespace sidescopes

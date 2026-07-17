@@ -261,6 +261,24 @@ void readLiveLayout(const std::map<std::string, std::string, std::less<>>& value
     }
 }
 
+// The saved layout slots, one prefixed group each: layout.presetN.stack,
+// .orientation, and .weights. An absent stack leaves the slot unused.
+void readLayoutPresets(const std::map<std::string, std::string, std::less<>>& values, Preferences& preferences)
+{
+    for (int slot = 0; slot < LayoutPresetSlots; ++slot) {
+        const std::string prefix = "layout.preset" + std::to_string(slot + 1) + '.';
+        LayoutPreset& preset = preferences.layoutPresets[static_cast<std::size_t>(slot)];
+        if (const auto found = values.find(prefix + "stack"); found != values.end()) {
+            preset.stack = found->second;
+        }
+        readInt(values, (prefix + "orientation").c_str(), preset.orientation);
+        preset.orientation = cleanedOrientation(preset.orientation);
+        if (const auto found = values.find(prefix + "weights"); found != values.end()) {
+            preset.weights = decodeWeights(found->second);
+        }
+    }
+}
+
 // The oldest builds stored a single view_mode; the next generation stored a
 // visible_scopes bit set that supersedes it. Returns the resulting bit set,
 // defaulting to the vectorscope alone.
@@ -369,11 +387,22 @@ void migrateScopeStack(const std::map<std::string, std::string, std::less<>>& va
     preferences.scopeStack = cleanedScopeStack(preferences.scopeStack, preferences);
 }
 
-// Writes the live layout state: the split orientation and the pane weights.
+// Writes the live layout state and every used preset slot. Unused slots (an
+// empty stack) write nothing, so the file stays terse.
 void writeLayout(std::ostream& out, const Preferences& preferences)
 {
     out << "layout_orientation=" << preferences.layoutOrientation << '\n'
         << "layout_weights=" << encodeWeights(preferences.layoutWeights) << '\n';
+    for (int slot = 0; slot < LayoutPresetSlots; ++slot) {
+        const LayoutPreset& preset = preferences.layoutPresets[static_cast<std::size_t>(slot)];
+        if (preset.stack.empty()) {
+            continue;
+        }
+        const std::string prefix = "layout.preset" + std::to_string(slot + 1) + '.';
+        out << prefix << "stack=" << preset.stack << '\n'
+            << prefix << "orientation=" << preset.orientation << '\n'
+            << prefix << "weights=" << encodeWeights(preset.weights) << '\n';
+    }
 }
 
 }  // namespace
@@ -404,6 +433,7 @@ Preferences loadPreferences(const std::filesystem::path& file)
     }
 
     readLiveLayout(values, preferences);
+    readLayoutPresets(values, preferences);
 
     readShortcuts(values, preferences.shortcuts);
     readScopeShortcuts(values, preferences);

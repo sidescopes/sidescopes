@@ -92,6 +92,10 @@ enum MenuAction
     MenuLayoutAuto = 60,
     MenuLayoutVertical,
     MenuLayoutHorizontal,
+    // Preset load ids are MenuLoadPresetBase + slot (1-9); save ids are
+    // MenuSavePresetBase + slot. Both ranges stay clear of ParamMenuActionBase.
+    MenuLoadPresetBase = 70,
+    MenuSavePresetBase = 80,
 };
 
 // ---------------------------------------------------------------------------
@@ -1383,6 +1387,32 @@ void menuEndSubmenu(std::vector<NativeMenuItem>& menu)
     menu.push_back({NativeMenuItem::Kind::SubmenuEnd, "", -1, false, ""});
 }
 
+// The lowercase orientation word for a menu summary line.
+const char* orientationName(LayoutOrientation orientation)
+{
+    switch (orientation) {
+    case LayoutOrientation::Vertical:
+        return "vertical";
+    case LayoutOrientation::Horizontal:
+        return "horizontal";
+    case LayoutOrientation::Automatic:
+    default:
+        return "auto";
+    }
+}
+
+// The Presets submenu entry text: "N - empty" for an unused slot, otherwise a
+// short summary like "1 - VWH horizontal" built from the saved stack tokens.
+std::string presetLabel(int slot, const LayoutPreset& preset)
+{
+    const std::string number = std::to_string(slot);
+    if (preset.stack.empty()) {
+        return number + " - empty";
+    }
+
+    return number + " - " + preset.stack + ' ' + orientationName(orientationFromInt(preset.orientation));
+}
+
 // Per-scope toolbar chrome, keyed by id: the button id, display name, and
 // tooltip suffix. The shortcut is resolved by id through bindingFor.
 struct ScopeChrome
@@ -1679,6 +1709,7 @@ void App::setupView(const Preferences& startup)
     m_view.setZoom(startup.vectorscopeZoom);
     m_view.setOrientation(orientationFromInt(startup.layoutOrientation));
     m_view.setWeights(startup.layoutWeights);
+    m_layoutPresets = startup.layoutPresets;
     // The intensity control is derived from each trace's saved gain; smoothing
     // is the host's own per-scope value, read straight from the preferences.
     const auto startupSmoothing = [&](std::string_view id, double fallback) -> float {
@@ -2606,6 +2637,7 @@ void App::persistPreferences()
     preferences.vectorscopeZoom = m_view.zoom();
     preferences.layoutOrientation = orientationToInt(m_view.orientation());
     preferences.layoutWeights = m_view.weightsSnapshot();
+    preferences.layoutPresets = m_layoutPresets;
     preferences.shortcuts = m_shortcuts;
     preferences.scopeShortcuts = m_scopeShortcuts;
     glfwGetWindowPos(m_window, &preferences.windowX, &preferences.windowY);
@@ -2939,6 +2971,7 @@ void App::drawFrameUi()
     drawRegionToolIcons();
     drawCursorReadout();
     drawScopePanes();
+    drawStatusMessage();
     handleContextMenu();
 
     ImGui::End();
@@ -3051,6 +3084,7 @@ void App::handleLetterShortcuts(const ModifierState& modifiers, bool systemChord
         }
     }
     handleViewShortcuts();
+    handlePresetShortcuts(modifiers);
 }
 
 // The single map from a shortcut key to its action, shared by the ImGui
@@ -3084,6 +3118,63 @@ bool App::triggerShortcut(const std::string& key, bool shift)
     }
 
     return true;
+}
+
+void App::handlePresetShortcuts(const ModifierState& modifiers)
+{
+    // Digit N loads preset slot N; Shift+N saves the current layout into it. The
+    // guard against text input and system chords is the caller's, shared with
+    // the letter shortcuts.
+    for (int slot = 1; slot <= LayoutPresetSlots; ++slot) {
+        const auto key = static_cast<ImGuiKey>(ImGuiKey_0 + slot);
+        if (!ImGui::IsKeyPressed(key, false)) {
+            continue;
+        }
+        if (modifiers.shift) {
+            saveLayoutPreset(slot);
+        } else {
+            loadLayoutPreset(slot);
+        }
+    }
+}
+
+std::map<std::string, double> App::currentStackWeights() const
+{
+    // A self-contained snapshot: every scope on screen with its current weight,
+    // so a loaded preset reproduces the exact split even for scopes left at the
+    // default weight.
+    std::map<std::string, double> weights;
+    for (const std::string& id : m_view.stack()) {
+        weights[id] = m_view.weight(id);
+    }
+
+    return weights;
+}
+
+void App::saveLayoutPreset(int slot)
+{
+    LayoutPreset& preset = m_layoutPresets[static_cast<std::size_t>(slot - 1)];
+    preset.stack = m_view.stackTokens();
+    preset.orientation = orientationToInt(m_view.orientation());
+    preset.weights = currentStackWeights();
+    setStatus("layout saved to " + std::to_string(slot));
+    m_nextPreferencesSave = glfwGetTime() + 1.0;
+}
+
+void App::loadLayoutPreset(int slot)
+{
+    const LayoutPreset& preset = m_layoutPresets[static_cast<std::size_t>(slot - 1)];
+    if (preset.stack.empty()) {
+        setStatus("preset " + std::to_string(slot) + " is empty");
+
+        return;
+    }
+    m_view.restoreStack(preset.stack);
+    m_view.setOrientation(orientationFromInt(preset.orientation));
+    m_view.setWeights(preset.weights);
+    m_analysis.enabledScopes = m_view.enabledScopeIds();
+    m_analysisDirty = true;
+    setStatus("preset " + std::to_string(slot) + " loaded");
 }
 
 void App::handleViewShortcuts()
@@ -3204,6 +3295,33 @@ void App::drawCursorReadout()
         ImGui::SameLine(columnStart + columnWidth - ImGui::CalcTextSize(value).x);
         ImGui::TextUnformatted(value);
     }
+}
+
+void App::setStatus(std::string message)
+{
+    m_statusMessage = std::move(message);
+    m_statusUntil = glfwGetTime() + 2.0;
+    m_lastActivity = glfwGetTime();
+}
+
+void App::drawStatusMessage()
+{
+    // A transient line at the host window's lower-left, over a dim backing so it
+    // reads on any trace; it fades out on its own once the deadline passes. The
+    // foreground draw list keeps it above the pane children, whose full-bleed
+    // images (waveform, parade) otherwise cover the host window's own list.
+    if (m_statusMessage.empty() || glfwGetTime() > m_statusUntil) {
+        return;
+    }
+    ImDrawList* statusDraw = ImGui::GetForegroundDrawList();
+    const ImVec2 origin = ImGui::GetWindowPos();
+    const ImVec2 size = ImGui::GetWindowSize();
+    const float pad = 8.0f * m_uiScale;
+    const ImVec2 textSize = ImGui::CalcTextSize(m_statusMessage.c_str());
+    const ImVec2 at(origin.x + pad, origin.y + size.y - textSize.y - pad);
+    statusDraw->AddRectFilled(ImVec2(at.x - 4.0f, at.y - 2.0f),
+                              ImVec2(at.x + textSize.x + 4.0f, at.y + textSize.y + 2.0f), IM_COL32(0, 0, 0, 150), 3.0f);
+    statusDraw->AddText(at, IM_COL32(235, 235, 240, 235), m_statusMessage.c_str());
 }
 
 void App::drawScopePanes()
@@ -3667,6 +3785,25 @@ void App::appendLayoutSubmenu(std::vector<NativeMenuItem>& menu)
     menuEndSubmenu(menu);
 }
 
+void App::appendPresetsSubmenu(std::vector<NativeMenuItem>& menu)
+{
+    // Each slot lists its saved summary or "empty"; the digit hint teaches the
+    // load shortcut. Saving rides a nested submenu with the Shift+digit hint.
+    menuSubmenu(menu, "Presets");
+    for (int slot = 1; slot <= LayoutPresetSlots; ++slot) {
+        const LayoutPreset& preset = m_layoutPresets[static_cast<std::size_t>(slot - 1)];
+        menuAction(menu, presetLabel(slot, preset).c_str(), MenuLoadPresetBase + slot, false, std::to_string(slot));
+    }
+    menuSeparator(menu);
+    menuSubmenu(menu, "Save Current To");
+    for (int slot = 1; slot <= LayoutPresetSlots; ++slot) {
+        menuAction(menu, std::to_string(slot).c_str(), MenuSavePresetBase + slot, false,
+                   "Shift+" + std::to_string(slot));
+    }
+    menuEndSubmenu(menu);
+    menuEndSubmenu(menu);
+}
+
 void App::appendRegionAndAppSection(std::vector<NativeMenuItem>& menu)
 {
     menuSeparator(menu);
@@ -3725,6 +3862,7 @@ void App::buildContextMenu(int clickedPane, std::vector<NativeMenuItem>& menu,
         appendPerScopeOptions(menu, paramActions);
     }
     appendLayoutSubmenu(menu);
+    appendPresetsSubmenu(menu);
     appendRegionAndAppSection(menu);
 }
 
@@ -3864,19 +4002,28 @@ void App::dispatchViewMenu(int chosen)
 
 void App::dispatchLayoutMenu(int chosen)
 {
-    // Orientation is a direct set; persistence rides dispatchMenuChoice's tail.
+    // Orientation is a direct set; the preset ranges each map their id back to a
+    // slot. Persistence rides dispatchMenuChoice's tail.
     switch (chosen) {
     case MenuLayoutAuto:
         m_view.setOrientation(LayoutOrientation::Automatic);
-        break;
+
+        return;
     case MenuLayoutVertical:
         m_view.setOrientation(LayoutOrientation::Vertical);
-        break;
+
+        return;
     case MenuLayoutHorizontal:
         m_view.setOrientation(LayoutOrientation::Horizontal);
-        break;
+
+        return;
     default:
         break;
+    }
+    if (chosen > MenuLoadPresetBase && chosen <= MenuLoadPresetBase + LayoutPresetSlots) {
+        loadLayoutPreset(chosen - MenuLoadPresetBase);
+    } else if (chosen > MenuSavePresetBase && chosen <= MenuSavePresetBase + LayoutPresetSlots) {
+        saveLayoutPreset(chosen - MenuSavePresetBase);
     }
 }
 
