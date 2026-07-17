@@ -55,19 +55,6 @@ namespace {
 
 using namespace sidescopes;
 
-/// The waveform module's "mode" parameter encodes its style as a choice
-/// index: 0 RGB, 1 Luma, 2 Luma (Colored). These convert the host's typed
-/// enum across that boundary the way the module's own parser does.
-double waveformModeToParam(WaveformMode mode)
-{
-    return mode == WaveformMode::ColoredLuma ? 2.0 : mode == WaveformMode::Luma ? 1.0 : 0.0;
-}
-
-WaveformMode waveformModeFromParam(double value)
-{
-    return value >= 1.5 ? WaveformMode::ColoredLuma : value >= 0.5 ? WaveformMode::Luma : WaveformMode::Rgb;
-}
-
 // Fixed ids for the host actions. Scope parameter choices are dynamic: they
 // carry ids from ParamMenuActionBase upward, resolved through a per-open side
 // table, never through this enum.
@@ -1463,30 +1450,23 @@ int main()
     }
 
     // --- state, seeded from preferences ---
-    // The worker is driven entirely by scope id: the typed preferences fan out
-    // into each module's declarative parameter and image-size vocabulary. The
-    // parade shares the waveform's gain and stride (its own descriptor carries
-    // no mode), so both are seeded from the one waveform preference.
+    // The worker is driven entirely by scope id: each scope's saved parameters
+    // fan out by key straight from the preference map into the module's
+    // declarative vocabulary. The per-scope smoothing control rides the same
+    // map under smoothing_ms but belongs to the host, so it is left for the
+    // view below rather than handed to the worker. The parade shares the
+    // waveform's gain and stride (its own descriptor carries no mode), so both
+    // are re-seeded from the waveform.
     AnalysisSettings analysis;
-    analysis.scopeParams[VectorscopeScopeId] = {
-        {"gain", startup.vectorscopeGain},
-        {"stride", static_cast<double>(startup.vectorscopeStride)},
-        {"matrix", startup.matrix == ChromaMatrix::Bt709 ? 1.0 : 0.0},
-        {"response", startup.traceResponse == TraceResponse::Linear ? 1.0 : 0.0},
-    };
-    analysis.scopeParams[WaveformScopeId] = {
-        {"gain", startup.waveformGain},
-        {"stride", static_cast<double>(startup.waveformStride)},
-        {"mode", waveformModeToParam(startup.waveformMode)},
-    };
-    analysis.scopeParams[ParadeScopeId] = {
-        {"gain", startup.waveformGain},
-        {"stride", static_cast<double>(startup.waveformStride)},
-    };
-    analysis.scopeParams[HistogramScopeId] = {
-        {"stride", static_cast<double>(startup.histogramStride)},
-        {"style", startup.histogramPerChannel ? 0.0 : 1.0},
-    };
+    for (const auto& [id, params] : startup.scopeParams) {
+        for (const auto& [key, value] : params) {
+            if (key != "smoothing_ms") {
+                analysis.scopeParams[id][key] = value;
+            }
+        }
+    }
+    analysis.scopeParams[ParadeScopeId]["gain"] = analysis.scopeParams[WaveformScopeId]["gain"];
+    analysis.scopeParams[ParadeScopeId]["stride"] = analysis.scopeParams[WaveformScopeId]["stride"];
     // Seeded to the modules' default image resolutions so the adaptive-detail
     // block below compares against a real current size from the first frame.
     analysis.imageSizes[VectorscopeScopeId] = {DefaultVectorscopeSize, DefaultVectorscopeSize};
@@ -1512,16 +1492,8 @@ int main()
 
         return at != analysis.imageSizes.end() ? at->second : std::pair<int, int>{0, 0};
     };
-    // The typed reading of the choice/enum parameters, resolved the way the
-    // modules resolve them; menus, markers, persistence, and the projection
-    // engines all read the settings map through these.
-    const auto currentMatrix = [&] {
-        return scopeParam(VectorscopeScopeId, "matrix", 1.0) < 0.5 ? ChromaMatrix::Bt601 : ChromaMatrix::Bt709;
-    };
-    const auto currentResponse = [&] {
-        return scopeParam(VectorscopeScopeId, "response", 0.0) < 0.5 ? TraceResponse::Boosted : TraceResponse::Linear;
-    };
-    const auto currentWaveformMode = [&] { return waveformModeFromParam(scopeParam(WaveformScopeId, "mode", 0.0)); };
+    // The histogram draw reads its style choice back as the host enum the way
+    // the module resolves it: choice 0 is per-channel, choice 1 is combined.
     const auto currentHistogramStyle = [&] {
         return scopeParam(HistogramScopeId, "style", 0.0) < 0.5 ? HistogramStyle::PerChannel : HistogramStyle::Combined;
     };
@@ -1547,10 +1519,25 @@ int main()
     view.restoreStack(startup.scopeStack);
     view.setGraticule(startup.showGraticule);
     view.setZoom(startup.vectorscopeZoom);
-    view.setIntensity(VectorscopeScopeId, intensityFromTraceGain(startup.vectorscopeGain, VectorscopeIntensityShift));
-    view.setIntensity(WaveformScopeId, intensityFromTraceGain(startup.waveformGain));
-    view.setSmoothing(VectorscopeScopeId, startup.vectorscopeSmoothingMs);
-    view.setSmoothing(WaveformScopeId, startup.waveformSmoothingMs);
+    // The intensity control is derived from each trace's saved gain; smoothing
+    // is the host's own per-scope value, kept out of the worker map and read
+    // straight from the preferences under its smoothing_ms key.
+    const auto startupSmoothing = [&](std::string_view id, double fallback) -> float {
+        const auto scope = startup.scopeParams.find(std::string{id});
+        if (scope == startup.scopeParams.end()) {
+            return static_cast<float>(fallback);
+        }
+        const auto value = scope->second.find("smoothing_ms");
+
+        return value != scope->second.end() ? static_cast<float>(value->second) : static_cast<float>(fallback);
+    };
+    view.setIntensity(VectorscopeScopeId,
+                      intensityFromTraceGain(static_cast<float>(scopeParam(VectorscopeScopeId, "gain", 3.0)),
+                                             VectorscopeIntensityShift));
+    view.setIntensity(WaveformScopeId,
+                      intensityFromTraceGain(static_cast<float>(scopeParam(WaveformScopeId, "gain", 0.05))));
+    view.setSmoothing(VectorscopeScopeId, startupSmoothing(VectorscopeScopeId, 75.0));
+    view.setSmoothing(WaveformScopeId, startupSmoothing(WaveformScopeId, 100.0));
     TraceFlash flash;
     analysis.enabledScopes = view.enabledScopeIds();
     // Projection instances place the overlays and markers on the main thread:
@@ -1831,21 +1818,13 @@ int main()
     observeEscapeWithoutKeyWindow([&orphanEscape] { orphanEscape.store(true); });
     const auto persistPreferences = [&] {
         Preferences preferences;
-        preferences.vectorscopeGain =
-            static_cast<float>(scopeParam(VectorscopeScopeId, "gain", preferences.vectorscopeGain));
-        preferences.waveformGain = static_cast<float>(scopeParam(WaveformScopeId, "gain", preferences.waveformGain));
-        preferences.vectorscopeStride =
-            static_cast<int>(scopeParam(VectorscopeScopeId, "stride", preferences.vectorscopeStride));
-        preferences.waveformStride =
-            static_cast<int>(scopeParam(WaveformScopeId, "stride", preferences.waveformStride));
-        preferences.vectorscopeSmoothingMs = view.smoothing(VectorscopeScopeId);
-        preferences.waveformSmoothingMs = view.smoothing(WaveformScopeId);
-        preferences.matrix = currentMatrix();
-        preferences.traceResponse = currentResponse();
-        preferences.histogramStride =
-            static_cast<int>(scopeParam(HistogramScopeId, "stride", preferences.histogramStride));
-        preferences.waveformMode = currentWaveformMode();
-        preferences.histogramPerChannel = currentHistogramStyle() == HistogramStyle::PerChannel;
+        // The worker's parameter map is the persisted state directly; only the
+        // host-owned smoothing control is folded back in, under smoothing_ms.
+        // The parade is dropped: it mirrors the waveform and re-seeds on load.
+        preferences.scopeParams = analysis.scopeParams;
+        preferences.scopeParams.erase(ParadeScopeId);
+        preferences.scopeParams[VectorscopeScopeId]["smoothing_ms"] = view.smoothing(VectorscopeScopeId);
+        preferences.scopeParams[WaveformScopeId]["smoothing_ms"] = view.smoothing(WaveformScopeId);
         preferences.scopeStack = view.stackLetters();
         preferences.showGraticule = view.graticule();
         preferences.vectorscopeZoom = view.zoom();

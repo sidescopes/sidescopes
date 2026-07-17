@@ -1,9 +1,8 @@
 #pragma once
 
 #include <filesystem>
+#include <map>
 #include <string>
-
-#include "core/scopes/scope_types.h"
 
 namespace sidescopes {
 
@@ -29,20 +28,24 @@ struct ShortcutBindings
 /// Everything worth remembering between sessions. Serialized as a small
 /// key=value text file: trivially diffable, no dependency, and unknown keys
 /// are ignored so older builds tolerate newer files.
+///
+/// Every scope's parameters live under a generic `scopeId.paramKey` scheme in
+/// @ref scopeParams, so a scope persists its settings without the host naming
+/// each one. Values are the module descriptors' own numbers (gains verbatim,
+/// choice parameters as their index); the host smoothing controls ride the
+/// same map under the `smoothing_ms` key.
 struct Preferences
 {
-    float vectorscopeGain = 3.0f;
-    float waveformGain = 0.05f;
-    int vectorscopeStride = 1;
-    int waveformStride = 1;
-    int histogramStride = 1;
-    float vectorscopeSmoothingMs = 75.0f;
-    float waveformSmoothingMs = 100.0f;
-    ChromaMatrix matrix = ChromaMatrix::Bt709;
-    TraceResponse traceResponse = TraceResponse::Boosted;
-    /// The waveform scope's style; the parade is its own scope.
-    WaveformMode waveformMode = WaveformMode::Rgb;
-    bool histogramPerChannel = true;
+    /// Scope id to parameter key to value. Seeded to the built-in defaults so a
+    /// missing file or key yields the shipped live state. The parade is not
+    /// held here on save: it mirrors the waveform, and is re-seeded from it on
+    /// load.
+    std::map<std::string, std::map<std::string, double>> scopeParams{
+        {"org.sidescopes.vectorscope",
+         {{"gain", 3.0}, {"stride", 1.0}, {"matrix", 1.0}, {"response", 0.0}, {"smoothing_ms", 75.0}}},
+        {"org.sidescopes.waveform", {{"gain", 0.05}, {"stride", 1.0}, {"mode", 0.0}, {"smoothing_ms", 100.0}}},
+        {"org.sidescopes.histogram", {{"stride", 1.0}, {"style", 0.0}}},
+    };
     /// The scopes on screen, one letter each in stacking order: V
     /// vectorscope, W waveform, R RGB parade, H histogram, C color picker.
     /// Never empty. The retired L (a separate luma waveform) is accepted

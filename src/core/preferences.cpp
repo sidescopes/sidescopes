@@ -7,8 +7,17 @@
 #include <string>
 #include <string_view>
 
+#include "core/scopes/scope_types.h"
+
 namespace sidescopes {
 namespace {
+
+// The built-in scope ids the file format knows for legacy migration; new files
+// carry them as generic scopeId.paramKey keys the loader parses blind.
+constexpr char VectorscopeId[] = "org.sidescopes.vectorscope";
+constexpr char WaveformId[] = "org.sidescopes.waveform";
+constexpr char ParadeId[] = "org.sidescopes.parade";
+constexpr char HistogramId[] = "org.sidescopes.histogram";
 
 std::map<std::string, std::string, std::less<>> parseKeyValueLines(std::istream& input)
 {
@@ -24,13 +33,6 @@ std::map<std::string, std::string, std::less<>> parseKeyValueLines(std::istream&
     return values;
 }
 
-void readFloat(const std::map<std::string, std::string, std::less<>>& values, const char* key, float& out)
-{
-    if (const auto found = values.find(key); found != values.end()) {
-        out = std::strtof(found->second.c_str(), nullptr);
-    }
-}
-
 void readInt(const std::map<std::string, std::string, std::less<>>& values, const char* key, int& out)
 {
     if (const auto found = values.find(key); found != values.end()) {
@@ -42,6 +44,16 @@ void readBool(const std::map<std::string, std::string, std::less<>>& values, con
 {
     if (const auto found = values.find(key); found != values.end()) {
         out = found->second == "1";
+    }
+}
+
+// Reads a legacy numeric key straight into a scope parameter slot, leaving the
+// slot's default when the key is absent.
+void readLegacyDouble(const std::map<std::string, std::string, std::less<>>& values, const char* key,
+                      std::map<std::string, double>& params, const char* paramKey)
+{
+    if (const auto found = values.find(key); found != values.end()) {
+        params[paramKey] = std::strtod(found->second.c_str(), nullptr);
     }
 }
 
@@ -75,33 +87,90 @@ void readShortcuts(const std::map<std::string, std::string, std::less<>>& values
     readShortcut(values, "shortcut_full_region", shortcuts.fullRegion);
 }
 
-// Decodes the enum-valued and clamped fields (chroma matrix, trace
-// response, waveform style, magnify zoom). The one waveform_mode key also
-// drives the legacy scope-stack migration, so its raw value is returned to
-// be read only once.
-int readEnumFields(const std::map<std::string, std::string, std::less<>>& values, Preferences& preferences)
+// The retired waveform_mode enum int maps to the waveform module's style
+// choice: 0 RGB, 1 Luma, 2 Luma (Colored). Only Luma and ColoredLuma had
+// dedicated codes; every other mode read as RGB.
+double waveformModeChoice(long storedMode)
 {
-    int matrix = preferences.matrix == ChromaMatrix::Bt709 ? 1 : 0;
-    readInt(values, "matrix", matrix);
-    preferences.matrix = matrix == 0 ? ChromaMatrix::Bt601 : ChromaMatrix::Bt709;
-
-    int traceResponse = preferences.traceResponse == TraceResponse::Linear ? 1 : 0;
-    readInt(values, "trace_response", traceResponse);
-    preferences.traceResponse = traceResponse == 1 ? TraceResponse::Linear : TraceResponse::Boosted;
-
-    int storedWaveformMode = static_cast<int>(preferences.waveformMode);
-    readInt(values, "waveform_mode", storedWaveformMode);
-    preferences.waveformMode = storedWaveformMode == static_cast<int>(WaveformMode::Luma) ? WaveformMode::Luma
-                               : storedWaveformMode == static_cast<int>(WaveformMode::ColoredLuma)
-                                   ? WaveformMode::ColoredLuma
-                                   : WaveformMode::Rgb;
-
-    readInt(values, "vectorscope_zoom", preferences.vectorscopeZoom);
-    if (preferences.vectorscopeZoom != 2 && preferences.vectorscopeZoom != 4) {
-        preferences.vectorscopeZoom = 1;
+    if (storedMode == static_cast<int>(WaveformMode::Luma)) {
+        return 1.0;
+    }
+    if (storedMode == static_cast<int>(WaveformMode::ColoredLuma)) {
+        return 2.0;
     }
 
-    return storedWaveformMode;
+    return 0.0;
+}
+
+// Folds the retired per-scope keys into the generic map. A matching generic
+// key read afterwards supersedes any value set here.
+void readLegacyScopeParams(const std::map<std::string, std::string, std::less<>>& values, Preferences& preferences)
+{
+    std::map<std::string, double>& vectorscope = preferences.scopeParams[VectorscopeId];
+    std::map<std::string, double>& waveform = preferences.scopeParams[WaveformId];
+    std::map<std::string, double>& histogram = preferences.scopeParams[HistogramId];
+
+    readLegacyDouble(values, "vectorscope_gain", vectorscope, "gain");
+    readLegacyDouble(values, "vectorscope_stride", vectorscope, "stride");
+    readLegacyDouble(values, "vectorscope_smoothing_ms", vectorscope, "smoothing_ms");
+    readLegacyDouble(values, "waveform_gain", waveform, "gain");
+    readLegacyDouble(values, "waveform_stride", waveform, "stride");
+    readLegacyDouble(values, "waveform_smoothing_ms", waveform, "smoothing_ms");
+    readLegacyDouble(values, "histogram_stride", histogram, "stride");
+
+    // matrix: 0 was BT.601 (choice 0); any other value was BT.709 (choice 1).
+    if (const auto found = values.find("matrix"); found != values.end()) {
+        vectorscope["matrix"] = std::strtol(found->second.c_str(), nullptr, 10) == 0 ? 0.0 : 1.0;
+    }
+    // trace_response: 1 was Linear (choice 1); any other value was Boosted (0).
+    if (const auto found = values.find("trace_response"); found != values.end()) {
+        vectorscope["response"] = std::strtol(found->second.c_str(), nullptr, 10) == 1 ? 1.0 : 0.0;
+    }
+    if (const auto found = values.find("waveform_mode"); found != values.end()) {
+        waveform["mode"] = waveformModeChoice(std::strtol(found->second.c_str(), nullptr, 10));
+    }
+    // histogram_per_channel inverts into the style choice: per-channel was the
+    // default and is choice 0, combined is choice 1.
+    if (const auto found = values.find("histogram_per_channel"); found != values.end()) {
+        histogram["style"] = found->second == "1" ? 0.0 : 1.0;
+    }
+}
+
+// Reads every generic scopeId.paramKey key into the map, superseding the legacy
+// values. Ids are reverse-DNS, so a key opening with the org. prefix splits at
+// its last dot; this is how a third-party or letterless scope persists params
+// the host never names.
+void readGenericScopeParams(const std::map<std::string, std::string, std::less<>>& values, Preferences& preferences)
+{
+    for (const auto& [key, value] : values) {
+        if (key.rfind("org.", 0) != 0) {
+            continue;
+        }
+        const auto dot = key.rfind('.');
+        if (dot == std::string::npos || dot == 0 || dot + 1 >= key.size()) {
+            continue;
+        }
+        preferences.scopeParams[key.substr(0, dot)][key.substr(dot + 1)] = std::strtod(value.c_str(), nullptr);
+    }
+}
+
+// The parade owns no persisted gain or stride: it mirrors the waveform. Seed
+// its slots from whatever the waveform resolved to, unless a generic parade key
+// already set them.
+void seedParadeFromWaveform(Preferences& preferences)
+{
+    const auto waveform = preferences.scopeParams.find(WaveformId);
+    if (waveform == preferences.scopeParams.end()) {
+        return;
+    }
+    std::map<std::string, double>& parade = preferences.scopeParams[ParadeId];
+    for (const char* key : {"gain", "stride"}) {
+        if (parade.find(key) == parade.end()) {
+            if (const auto source = waveform->second.find(key); source != waveform->second.end()) {
+                parade[key] = source->second;
+            }
+        }
+    }
 }
 
 // The oldest builds stored a single view_mode; the next generation stored a
@@ -167,7 +236,7 @@ std::string cleanedScopeStack(const std::string& stack, Preferences& preferences
                 continue;
             }
             letter = 'W';
-            preferences.waveformMode = WaveformMode::Luma;
+            preferences.scopeParams[WaveformId]["mode"] = 1.0;
         }
         if (std::string_view("VWRHC").find(letter) == std::string_view::npos) {
             continue;
@@ -209,18 +278,21 @@ Preferences loadPreferences(const std::filesystem::path& file)
     }
 
     const auto values = parseKeyValueLines(input);
-    readFloat(values, "vectorscope_gain", preferences.vectorscopeGain);
-    readFloat(values, "waveform_gain", preferences.waveformGain);
-    readInt(values, "vectorscope_stride", preferences.vectorscopeStride);
-    readInt(values, "waveform_stride", preferences.waveformStride);
-    readInt(values, "histogram_stride", preferences.histogramStride);
-    readFloat(values, "vectorscope_smoothing_ms", preferences.vectorscopeSmoothingMs);
-    readFloat(values, "waveform_smoothing_ms", preferences.waveformSmoothingMs);
+    readLegacyScopeParams(values, preferences);
+    readGenericScopeParams(values, preferences);
+    seedParadeFromWaveform(preferences);
 
-    const int storedWaveformMode = readEnumFields(values, preferences);
-    readBool(values, "histogram_per_channel", preferences.histogramPerChannel);
+    // The retired waveform_mode value also selects the legacy stack letters, so
+    // it is read once here and handed to the migration.
+    int storedWaveformMode = static_cast<int>(WaveformMode::Rgb);
+    readInt(values, "waveform_mode", storedWaveformMode);
     migrateScopeStack(values, storedWaveformMode, preferences);
+
     readBool(values, "show_graticule", preferences.showGraticule);
+    readInt(values, "vectorscope_zoom", preferences.vectorscopeZoom);
+    if (preferences.vectorscopeZoom != 2 && preferences.vectorscopeZoom != 4) {
+        preferences.vectorscopeZoom = 1;
+    }
 
     readShortcuts(values, preferences.shortcuts);
 
@@ -238,18 +310,17 @@ bool savePreferences(const Preferences& preferences, const std::filesystem::path
     std::filesystem::create_directories(file.parent_path(), error);
 
     std::ostringstream out;
-    out << "vectorscope_gain=" << preferences.vectorscopeGain << '\n'
-        << "waveform_gain=" << preferences.waveformGain << '\n'
-        << "vectorscope_stride=" << preferences.vectorscopeStride << '\n'
-        << "waveform_stride=" << preferences.waveformStride << '\n'
-        << "histogram_stride=" << preferences.histogramStride << '\n'
-        << "vectorscope_smoothing_ms=" << preferences.vectorscopeSmoothingMs << '\n'
-        << "waveform_smoothing_ms=" << preferences.waveformSmoothingMs << '\n'
-        << "matrix=" << (preferences.matrix == ChromaMatrix::Bt709 ? 1 : 0) << '\n'
-        << "trace_response=" << (preferences.traceResponse == TraceResponse::Linear ? 1 : 0) << '\n'
-        << "scope_stack=" << preferences.scopeStack << '\n'
-        << "waveform_mode=" << static_cast<int>(preferences.waveformMode) << '\n'
-        << "histogram_per_channel=" << (preferences.histogramPerChannel ? 1 : 0) << '\n'
+    // Generic scope parameters: scopeId.paramKey=value. The parade is never
+    // written; it mirrors the waveform and re-seeds from it on load.
+    for (const auto& [id, params] : preferences.scopeParams) {
+        if (id == ParadeId) {
+            continue;
+        }
+        for (const auto& [key, value] : params) {
+            out << id << '.' << key << '=' << value << '\n';
+        }
+    }
+    out << "scope_stack=" << preferences.scopeStack << '\n'
         << "show_graticule=" << (preferences.showGraticule ? 1 : 0) << '\n'
         << "vectorscope_zoom=" << preferences.vectorscopeZoom << '\n'
         << "window_x=" << preferences.windowX << '\n'
