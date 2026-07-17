@@ -256,6 +256,11 @@ if(APPLE OR WIN32)
             target_link_libraries(sidescopes_spike_settings PRIVATE "-framework OpenGL")
         else()
             target_link_libraries(sidescopes_spike_settings PRIVATE opengl32)
+            # A console subsystem binary drags a console window along with
+            # the GUI; the GUI subsystem with the console entry point keeps
+            # plain main() and no console.
+            set_target_properties(sidescopes_spike_settings PROPERTIES WIN32_EXECUTABLE TRUE)
+            target_link_options(sidescopes_spike_settings PRIVATE "/ENTRY:mainCRTStartup")
         endif()
         sidescopes_target_defaults(sidescopes_spike_settings)
     endif()
