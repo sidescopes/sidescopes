@@ -74,7 +74,7 @@ CheckOptions:
   - key: readability-identifier-naming.ClassConstantCase
     value: CamelCase
   - key: readability-function-size.LineThreshold
-    value: '90'
+    value: '60'
   - key: readability-function-size.ParameterThreshold
     value: '8'
   - key: readability-function-cognitive-complexity.Threshold

@@ -23,6 +23,13 @@ jobs:
         run: |
           files=$(git ls-files '*.h' '*.cpp' '*.mm')
           clang-format-18 --dry-run --Werror $files
+      - name: Install lizard
+        run: pipx install lizard
+      - name: Check complexity
+        # Every function in src stays within cyclomatic complexity 15 and 60
+        # lines; -w exits non-zero on any function that exceeds either. tests/
+        # is excluded because the Catch2 macros inflate the numbers.
+        run: lizard src -C 15 -L 60 -w
 
   tidy:
     runs-on: ubuntu-latest
