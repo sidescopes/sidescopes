@@ -323,6 +323,7 @@ if(APPLE OR WIN32)
     # Application logic shared by both platforms: cohesive controllers lifted
     # out of main.
     target_sources(SideScopes PRIVATE
+        src/app/app.cpp
         src/app/capture_controller.cpp
         src/app/overlay_render.cpp
         src/app/overlay_style.cpp
