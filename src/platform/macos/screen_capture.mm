@@ -50,6 +50,83 @@ SCShareableContent* fetchShareableContent()
     return result;
 }
 
+SCDisplay* findCaptureDisplay(SCShareableContent* content, const std::string& identifier)
+{
+    SCDisplay* display = nil;
+    for (SCDisplay* candidate in content.displays) {
+        if (std::to_string(candidate.displayID) == identifier) {
+            display = candidate;
+        }
+    }
+
+    return display;
+}
+
+// The content filter for a display, excluding this application's own windows.
+// Test harnesses lift the self-exclusion so captures include them.
+SCContentFilter* buildContentFilter(SCShareableContent* content, SCDisplay* display)
+{
+    SCRunningApplication* selfApplication = nil;
+    for (SCRunningApplication* application in content.applications) {
+        if (application.processID == NSProcessInfo.processInfo.processIdentifier) {
+            selfApplication = application;
+            break;
+        }
+    }
+    if (selfApplication && !captureExclusionDisabled()) {
+        return [[SCContentFilter alloc] initWithDisplay:display
+                                  excludingApplications:@[ selfApplication ]
+                                       exceptingWindows:@[]];
+    }
+
+    return [[SCContentFilter alloc] initWithDisplay:display excludingWindows:@[]];
+}
+
+SCStreamConfiguration* makeStreamConfiguration(SCDisplay* display, SCContentFilter* filter, int maxFramesPerSecond)
+{
+    SCStreamConfiguration* configuration = [[SCStreamConfiguration alloc] init];
+    const CGFloat scale = filter.pointPixelScale > 0 ? filter.pointPixelScale : 2.0;
+    configuration.width = static_cast<size_t>(display.width * scale);
+    configuration.height = static_cast<size_t>(display.height * scale);
+    configuration.pixelFormat = kCVPixelFormatType_32BGRA;
+    configuration.minimumFrameInterval = CMTimeMake(1, maxFramesPerSecond);
+    configuration.showsCursor = NO;
+    configuration.queueDepth = 5;
+    configuration.colorSpaceName = kCGColorSpaceSRGB;
+
+    return configuration;
+}
+
+// Redrawing into a known-layout bitmap sidesteps whatever byte order the
+// capture returned, then averages the tiny neighborhood to one color.
+std::optional<FloatColor> averageCapturedImage(CGImageRef image)
+{
+    constexpr size_t Pixels = 8;
+    uint8_t pixels[Pixels * Pixels * 4] = {};
+    CGColorSpaceRef srgb = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
+    CGContextRef context = CGBitmapContextCreate(
+        pixels, Pixels, Pixels, 8, Pixels * 4, srgb,
+        static_cast<uint32_t>(kCGImageAlphaPremultipliedLast) | static_cast<uint32_t>(kCGBitmapByteOrder32Big));
+    CGColorSpaceRelease(srgb);
+    if (!context) {
+        return std::nullopt;
+    }
+    CGContextDrawImage(context, CGRectMake(0, 0, Pixels, Pixels), image);
+    CGContextRelease(context);
+    double sumR = 0;
+    double sumG = 0;
+    double sumB = 0;
+    for (size_t index = 0; index < Pixels * Pixels; ++index) {
+        sumR += pixels[index * 4 + 0];
+        sumG += pixels[index * 4 + 1];
+        sumB += pixels[index * 4 + 2];
+    }
+    constexpr double Count = static_cast<double>(Pixels * Pixels);
+
+    return FloatColor{static_cast<float>(sumR / Count), static_cast<float>(sumG / Count),
+                      static_cast<float>(sumB / Count)};
+}
+
 }  // namespace
 
 class SckScreenCaptureSource final : public ScreenCaptureSource
@@ -98,40 +175,13 @@ public:
         if (!content) {
             return fail("shareable content unavailable (permission?)");
         }
-        SCDisplay* display = nil;
-        for (SCDisplay* candidate in content.displays) {
-            if (std::to_string(candidate.displayID) == target.identifier) {
-                display = candidate;
-            }
-        }
+        SCDisplay* display = findCaptureDisplay(content, target.identifier);
         if (!display) {
             return fail("capture target no longer present");
         }
 
-        SCRunningApplication* selfApplication = nil;
-        for (SCRunningApplication* application in content.applications) {
-            if (application.processID == NSProcessInfo.processInfo.processIdentifier) {
-                selfApplication = application;
-                break;
-            }
-        }
-        // Test harnesses lift the self-exclusion so captures include this
-        // application's own windows.
-        SCContentFilter* filter = (selfApplication && !captureExclusionDisabled())
-                                      ? [[SCContentFilter alloc] initWithDisplay:display
-                                                           excludingApplications:@[ selfApplication ]
-                                                                exceptingWindows:@[]]
-                                      : [[SCContentFilter alloc] initWithDisplay:display excludingWindows:@[]];
-
-        SCStreamConfiguration* configuration = [[SCStreamConfiguration alloc] init];
-        const CGFloat scale = filter.pointPixelScale > 0 ? filter.pointPixelScale : 2.0;
-        configuration.width = static_cast<size_t>(display.width * scale);
-        configuration.height = static_cast<size_t>(display.height * scale);
-        configuration.pixelFormat = kCVPixelFormatType_32BGRA;
-        configuration.minimumFrameInterval = CMTimeMake(1, maxFramesPerSecond);
-        configuration.showsCursor = NO;
-        configuration.queueDepth = 5;
-        configuration.colorSpaceName = kCGColorSpaceSRGB;
+        SCContentFilter* filter = buildContentFilter(content, display);
+        SCStreamConfiguration* configuration = makeStreamConfiguration(display, filter, maxFramesPerSecond);
 
         m_handler = [[SidescopesStreamHandler alloc] init];
         m_handler.owner = this;
@@ -317,18 +367,7 @@ void sampleScreenColorAsync(DesktopPoint point, std::function<void(std::optional
         callback(std::nullopt);
         return;
     }
-    SCRunningApplication* selfApplication = nil;
-    for (SCRunningApplication* application in g_samplerContent.applications) {
-        if (application.processID == NSProcessInfo.processInfo.processIdentifier) {
-            selfApplication = application;
-            break;
-        }
-    }
-    SCContentFilter* filter = (selfApplication && !captureExclusionDisabled())
-                                  ? [[SCContentFilter alloc] initWithDisplay:display
-                                                       excludingApplications:@[ selfApplication ]
-                                                            exceptingWindows:@[]]
-                                  : [[SCContentFilter alloc] initWithDisplay:display excludingWindows:@[]];
+    SCContentFilter* filter = buildContentFilter(g_samplerContent, display);
 
     // A small neighborhood around the point, clamped inside the display,
     // in the display's own point coordinates.
@@ -354,32 +393,7 @@ void sampleScreenColorAsync(DesktopPoint point, std::function<void(std::optional
                                     (*shared)(std::nullopt);
                                     return;
                                 }
-                                // Redrawing into a known-layout bitmap sidesteps whatever
-                                // byte order the capture returned.
-                                uint8_t pixels[Pixels * Pixels * 4] = {};
-                                CGColorSpaceRef srgb = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
-                                CGContextRef context =
-                                    CGBitmapContextCreate(pixels, Pixels, Pixels, 8, Pixels * 4, srgb,
-                                                          static_cast<uint32_t>(kCGImageAlphaPremultipliedLast) |
-                                                              static_cast<uint32_t>(kCGBitmapByteOrder32Big));
-                                CGColorSpaceRelease(srgb);
-                                if (!context) {
-                                    (*shared)(std::nullopt);
-                                    return;
-                                }
-                                CGContextDrawImage(context, CGRectMake(0, 0, Pixels, Pixels), image);
-                                CGContextRelease(context);
-                                double sumR = 0;
-                                double sumG = 0;
-                                double sumB = 0;
-                                for (size_t index = 0; index < Pixels * Pixels; ++index) {
-                                    sumR += pixels[index * 4 + 0];
-                                    sumG += pixels[index * 4 + 1];
-                                    sumB += pixels[index * 4 + 2];
-                                }
-                                constexpr double Count = static_cast<double>(Pixels * Pixels);
-                                (*shared)(FloatColor{static_cast<float>(sumR / Count), static_cast<float>(sumG / Count),
-                                                     static_cast<float>(sumB / Count)});
+                                (*shared)(averageCapturedImage(image));
                               }];
 }
 

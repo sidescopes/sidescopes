@@ -100,6 +100,47 @@ double wrapHueDifference(double degrees)
     return degrees;
 }
 
+/// The CIEDE2000 hue terms: the weighted hue difference and the mean hue angle.
+struct HueTerms
+{
+    double deltaCapitalHPrime;
+    double meanHuePrime;
+};
+
+// The hue difference and the mean hue turn on one question: do the two hues sit
+// more than half a turn apart as plain numbers, so that the arc between them
+// crosses the 0/360 seam? Both rules key off that single fact, so deriving them
+// from one answer stops them ever disagreeing. Either chroma at zero leaves the
+// hue angle indeterminate, so the difference is defined as zero and the mean as
+// the sum - the surviving colour's own hue - rather than whatever atan2 returns.
+HueTerms computeHueTerms(double chromaPrime1, double chromaPrime2, double huePrime1, double huePrime2)
+{
+    const double chromaPrimeProduct = chromaPrime1 * chromaPrime2;
+    const double hueSpread = huePrime2 - huePrime1;
+    const bool crossesSeam = std::abs(hueSpread) > DegreesPerHalfTurn + HueTieTolerance;
+    const bool bothHaveChroma = chromaPrimeProduct != 0.0;
+    double deltaHuePrime = 0.0;
+    if (bothHaveChroma) {
+        deltaHuePrime = hueSpread;
+        if (crossesSeam) {
+            deltaHuePrime += hueSpread > 0.0 ? -DegreesPerTurn : DegreesPerTurn;
+        }
+    }
+    const double hueSum = huePrime1 + huePrime2;
+    double meanHuePrime = hueSum;
+    if (bothHaveChroma) {
+        if (!crossesSeam) {
+            meanHuePrime = hueSum / 2.0;
+        } else if (hueSum < DegreesPerTurn) {
+            meanHuePrime = (hueSum + DegreesPerTurn) / 2.0;
+        } else {
+            meanHuePrime = (hueSum - DegreesPerTurn) / 2.0;
+        }
+    }
+
+    return {2.0 * std::sqrt(chromaPrimeProduct) * std::sin(toRadians(deltaHuePrime) / 2.0), meanHuePrime};
+}
+
 }  // namespace
 
 LabColor labFromSrgb(const FloatColor& srgb)
@@ -174,44 +215,12 @@ float deltaE2000(const LabColor& first, const LabColor& second)
     const double aPrime2 = (1.0 + g) * a2;
     const double chromaPrime1 = std::hypot(aPrime1, b1);
     const double chromaPrime2 = std::hypot(aPrime2, b2);
-    const double chromaPrimeProduct = chromaPrime1 * chromaPrime2;
     const double huePrime1 = hueAngleDegrees(aPrime1, b1);
     const double huePrime2 = hueAngleDegrees(aPrime2, b2);
 
-    // The hue difference and the mean hue turn on one question: do the two
-    // hues sit more than half a turn apart as plain numbers, so that the arc
-    // between them crosses the 0/360 seam? The formula keys both rules off
-    // that single fact, and deriving both from one answer stops them ever
-    // disagreeing about it.
-    const double hueSpread = huePrime2 - huePrime1;
-    const bool crossesSeam = std::abs(hueSpread) > DegreesPerHalfTurn + HueTieTolerance;
-
-    // Either chroma at zero leaves the hue angle indeterminate, so the hue
-    // difference is defined as zero and the mean hue as the sum, which is the
-    // surviving colour's own hue. Reading the angle atan2 happens to return
-    // there instead is the classic way to get a wrong dE against a neutral.
-    const bool bothHaveChroma = chromaPrimeProduct != 0.0;
-    double deltaHuePrime = 0.0;
-    if (bothHaveChroma) {
-        deltaHuePrime = hueSpread;
-        if (crossesSeam) {
-            deltaHuePrime += hueSpread > 0.0 ? -DegreesPerTurn : DegreesPerTurn;
-        }
-    }
-
-    const double deltaCapitalHPrime = 2.0 * std::sqrt(chromaPrimeProduct) * std::sin(toRadians(deltaHuePrime) / 2.0);
-
-    const double hueSum = huePrime1 + huePrime2;
-    double meanHuePrime = hueSum;
-    if (bothHaveChroma) {
-        if (!crossesSeam) {
-            meanHuePrime = hueSum / 2.0;
-        } else if (hueSum < DegreesPerTurn) {
-            meanHuePrime = (hueSum + DegreesPerTurn) / 2.0;
-        } else {
-            meanHuePrime = (hueSum - DegreesPerTurn) / 2.0;
-        }
-    }
+    const HueTerms hue = computeHueTerms(chromaPrime1, chromaPrime2, huePrime1, huePrime2);
+    const double deltaCapitalHPrime = hue.deltaCapitalHPrime;
+    const double meanHuePrime = hue.meanHuePrime;
 
     const double meanLightness = (lightness1 + lightness2) / 2.0;
     const double meanChromaPrime = (chromaPrime1 + chromaPrime2) / 2.0;

@@ -295,106 +295,117 @@ NSCursor* buildPinCursor(const std::optional<FloatColor>& color)
             withAttributes:secondaryAttributes];
 }
 
+// No dim at all - judging a color through even a light wash misleads. Nothing
+// is painted over the screen; pin-mode windows set ignoresMouseEvents
+// explicitly, so the overlay still owns its clicks.
+- (void)drawPinModeOverlay
+{
+    if (self.dragging) {
+        // A two-tone frame: the white line rides a dark halo so one of the
+        // tones survives any undimmed background.
+        const NSRect selection = [self selectionRect];
+        NSBezierPath* halo = [NSBezierPath bezierPathWithRect:selection];
+        halo.lineWidth = 3.0;
+        [[NSColor colorWithWhite:0.1 alpha:0.7] setStroke];
+        [halo stroke];
+        NSBezierPath* line = [NSBezierPath bezierPathWithRect:selection];
+        line.lineWidth = 1.0;
+        [[NSColor whiteColor] setStroke];
+        [line stroke];
+    }
+    if (!self.dragging) {
+        // Pinning is its own tool: no mode keys here and none of the region
+        // modes lead back - crossing over midway would blur what a click means.
+        [self drawBanner:@"Click or drag to pin a color"
+               secondary:@"[Shift+click] pin and continue    [Esc] done"
+            preferCenter:NO];
+    }
+}
+
+// Window or face picking: the screen is dimmed and the candidate under the
+// cursor washed with the system accent, the way the macOS screenshot interface
+// highlights a window.
+- (void)drawPickModeOverlay
+{
+    [[NSColor colorWithWhite:0 alpha:0.2] setFill];
+    NSRectFillUsingOperation(self.bounds, NSCompositingOperationSourceOver);
+    if (self.facesMode) {
+        // Faces are few and easy to miss: every found face is outlined up
+        // front, so the answer is visible before any hovering. The hovered one
+        // still gets the full accent treatment below.
+        [[NSColor colorWithWhite:1 alpha:0.85] setStroke];
+        for (NSInteger i = 0; i < static_cast<NSInteger>(m_suggestions.size()); ++i) {
+            if (i == self.hoveredSuggestion) {
+                continue;
+            }
+            [self punchRect:m_suggestions[i].first];
+            NSBezierPath* outline = [NSBezierPath bezierPathWithRect:m_suggestions[i].first];
+            outline.lineWidth = 1.5;
+            [outline stroke];
+        }
+    }
+    if (self.hoveredSuggestion >= 0 && self.hoveredSuggestion < static_cast<NSInteger>(m_suggestions.size())) {
+        const auto& hovered = m_suggestions[self.hoveredSuggestion];
+        [self punchRect:hovered.first];
+        [[[NSColor systemBlueColor] colorWithAlphaComponent:0.25] setFill];
+        NSRectFillUsingOperation(hovered.first, NSCompositingOperationSourceOver);
+        [[NSColor whiteColor] setStroke];
+        NSBezierPath* border = [NSBezierPath bezierPathWithRect:hovered.first];
+        border.lineWidth = 2.0;
+        [border stroke];
+        NSString* label = [NSString stringWithUTF8String:hovered.second.c_str()];
+        NSDictionary* labelAttributes = @{
+            NSForegroundColorAttributeName : [NSColor whiteColor],
+            NSFontAttributeName : [NSFont systemFontOfSize:12 weight:NSFontWeightMedium],
+        };
+        [label drawAtPoint:NSMakePoint(hovered.first.origin.x + 6, NSMaxY(hovered.first) - 20)
+            withAttributes:labelAttributes];
+    }
+    if (self.facesMode) {
+        [self drawBanner:m_suggestions.empty() ? @"No faces found on this screen" : @"Click a face"
+               secondary:@"[A] pick a window    [D] draw    [Esc] full screen"
+            preferCenter:m_suggestions.empty()];
+    } else {
+        [self drawBanner:@"Click a window"
+               secondary:sidescopes::supportsFaceDetection() ? @"[F] pick a face    [D] draw    [Esc] full screen"
+                                                             : @"[D] draw    [Esc] full screen"
+            preferCenter:NO];
+    }
+}
+
+// Freeform drawing: a heavier dim, and the dragged rectangle punched clear.
+- (void)drawDrawModeOverlay
+{
+    [[NSColor colorWithWhite:0 alpha:0.35] setFill];
+    NSRectFillUsingOperation(self.bounds, NSCompositingOperationSourceOver);
+    if (self.dragging) {
+        const NSRect selection = [self selectionRect];
+        [self punchRect:selection];
+        [[NSColor whiteColor] setStroke];
+        NSBezierPath* border = [NSBezierPath bezierPathWithRect:selection];
+        border.lineWidth = 1.5;
+        [border stroke];
+    }
+    if (!self.dragging) {
+        NSString* secondary = @"[Esc] full screen";
+        if (!m_windows.empty() && sidescopes::supportsFaceDetection()) {
+            secondary = @"[A] pick a window    [F] pick a face    [Esc] full screen";
+        } else if (!m_windows.empty()) {
+            secondary = @"[A] pick a window    [Esc] full screen";
+        }
+        [self drawBanner:@"Drag to select an area" secondary:secondary preferCenter:NO];
+    }
+}
+
 - (void)drawRect:(NSRect)dirty
 {
     (void)dirty;
     if (self.pinMode) {
-        // No dim at all - judging a color through even a light wash
-        // misleads. Nothing is painted over the screen; the overlay owns
-        // its clicks because pin-mode windows set ignoresMouseEvents
-        // explicitly, which switches the window server off its per-pixel
-        // transparency hit-testing.
-        if (self.dragging) {
-            // A two-tone frame: the white line rides a dark halo so one
-            // of the tones survives any undimmed background.
-            const NSRect selection = [self selectionRect];
-            NSBezierPath* halo = [NSBezierPath bezierPathWithRect:selection];
-            halo.lineWidth = 3.0;
-            [[NSColor colorWithWhite:0.1 alpha:0.7] setStroke];
-            [halo stroke];
-            NSBezierPath* line = [NSBezierPath bezierPathWithRect:selection];
-            line.lineWidth = 1.0;
-            [[NSColor whiteColor] setStroke];
-            [line stroke];
-        }
-        if (!self.dragging) {
-            // Pinning is its own tool: no mode keys here and none of the
-            // region modes lead back - crossing over midway would blur
-            // what a click means.
-            [self drawBanner:@"Click or drag to pin a color"
-                   secondary:@"[Shift+click] pin and continue    [Esc] done"
-                preferCenter:NO];
-        }
-        return;
-    }
-    if (!self.drawMode) {
-        [[NSColor colorWithWhite:0 alpha:0.2] setFill];
-        NSRectFillUsingOperation(self.bounds, NSCompositingOperationSourceOver);
-        if (self.facesMode) {
-            // Faces are few and easy to miss: every found face is outlined
-            // up front, so the answer is visible before any hovering. The
-            // hovered one still gets the full accent treatment below.
-            [[NSColor colorWithWhite:1 alpha:0.85] setStroke];
-            for (NSInteger i = 0; i < static_cast<NSInteger>(m_suggestions.size()); ++i) {
-                if (i == self.hoveredSuggestion) {
-                    continue;
-                }
-                [self punchRect:m_suggestions[i].first];
-                NSBezierPath* outline = [NSBezierPath bezierPathWithRect:m_suggestions[i].first];
-                outline.lineWidth = 1.5;
-                [outline stroke];
-            }
-        }
-        if (self.hoveredSuggestion >= 0 && self.hoveredSuggestion < static_cast<NSInteger>(m_suggestions.size())) {
-            // Only the rectangle under the cursor is shown, washed with the
-            // system accent like window selection in the macOS screenshot
-            // interface. Outlining every candidate at once was clutter.
-            const auto& hovered = m_suggestions[self.hoveredSuggestion];
-            [self punchRect:hovered.first];
-            [[[NSColor systemBlueColor] colorWithAlphaComponent:0.25] setFill];
-            NSRectFillUsingOperation(hovered.first, NSCompositingOperationSourceOver);
-            [[NSColor whiteColor] setStroke];
-            NSBezierPath* border = [NSBezierPath bezierPathWithRect:hovered.first];
-            border.lineWidth = 2.0;
-            [border stroke];
-            NSString* label = [NSString stringWithUTF8String:hovered.second.c_str()];
-            NSDictionary* labelAttributes = @{
-                NSForegroundColorAttributeName : [NSColor whiteColor],
-                NSFontAttributeName : [NSFont systemFontOfSize:12 weight:NSFontWeightMedium],
-            };
-            [label drawAtPoint:NSMakePoint(hovered.first.origin.x + 6, NSMaxY(hovered.first) - 20)
-                withAttributes:labelAttributes];
-        }
-        if (self.facesMode) {
-            [self drawBanner:m_suggestions.empty() ? @"No faces found on this screen" : @"Click a face"
-                   secondary:@"[A] pick a window    [D] draw    [Esc] full screen"
-                preferCenter:m_suggestions.empty()];
-        } else {
-            [self drawBanner:@"Click a window"
-                   secondary:sidescopes::supportsFaceDetection() ? @"[F] pick a face    [D] draw    [Esc] full screen"
-                                                                 : @"[D] draw    [Esc] full screen"
-                preferCenter:NO];
-        }
+        [self drawPinModeOverlay];
+    } else if (!self.drawMode) {
+        [self drawPickModeOverlay];
     } else {
-        [[NSColor colorWithWhite:0 alpha:0.35] setFill];
-        NSRectFillUsingOperation(self.bounds, NSCompositingOperationSourceOver);
-        if (self.dragging) {
-            const NSRect selection = [self selectionRect];
-            [self punchRect:selection];
-            [[NSColor whiteColor] setStroke];
-            NSBezierPath* border = [NSBezierPath bezierPathWithRect:selection];
-            border.lineWidth = 1.5;
-            [border stroke];
-        }
-        if (!self.dragging) {
-            NSString* secondary = @"[Esc] full screen";
-            if (!m_windows.empty() && sidescopes::supportsFaceDetection()) {
-                secondary = @"[A] pick a window    [F] pick a face    [Esc] full screen";
-            } else if (!m_windows.empty()) {
-                secondary = @"[A] pick a window    [Esc] full screen";
-            }
-            [self drawBanner:@"Drag to select an area" secondary:secondary preferCenter:NO];
-        }
+        [self drawDrawModeOverlay];
     }
 }
 
@@ -608,18 +619,14 @@ NSCursor* buildPinCursor(const std::optional<FloatColor>& color)
                        NSMaxY(region) + sidescopes::BorderPad - sidescopes::CloseCornerInset + sidescopes::EdgeRing);
 }
 
-- (void)drawRect:(NSRect)dirty
+// The whole grab band is the hazard tape, muted so it stays calm beside the
+// photograph while its own light-dark alternation keeps it visible on any
+// content. The interior is never painted and therefore stays click-through.
+- (void)drawHazardBand:(NSRect)region
 {
-    (void)dirty;
-    const NSRect region = [self regionRect];
-
-    // The whole grab band is the hazard tape, muted so it stays calm
-    // beside the photograph while its own light-dark alternation keeps it
-    // visible on any content. The interior is never painted and therefore
-    // stays click-through.
     const NSRect band = NSInsetRect(region, -sidescopes::BorderPad, -sidescopes::BorderPad);
-    // The stripes stop short of the measured-edge ring: crossing it
-    // would read as the band bleeding into the measured area.
+    // The stripes stop short of the measured-edge ring: crossing it would read
+    // as the band bleeding into the measured area.
     const NSRect stripeHole = NSInsetRect(region, -sidescopes::EdgeRing, -sidescopes::EdgeRing);
     NSBezierPath* ringClip = [NSBezierPath bezierPathWithRect:band];
     [ringClip appendBezierPathWithRect:stripeHole];
@@ -638,12 +645,15 @@ NSCursor* buildPinCursor(const std::optional<FloatColor>& color)
     [[NSColor colorWithWhite:0.9 alpha:0.45] setStroke];
     [stripes stroke];
     [NSGraphicsContext restoreGraphicsState];
+}
 
-    // The measured edge is a filled ring, not a stroked line: it spans
-    // exactly from the region to the stripes with no geometry of its own
-    // to disagree. White dashes ride over the dark ring, so one of the
-    // two tones survives any background - the screenshot tools'
-    // marching-ants idea, standing still.
+// The measured edge is a filled ring, not a stroked line: it spans exactly from
+// the region to the stripes with no geometry of its own to disagree. White
+// dashes ride over the dark ring, so one tone survives any background - the
+// screenshot tools' marching-ants idea, standing still.
+- (void)drawMeasuredEdge:(NSRect)region
+{
+    const NSRect stripeHole = NSInsetRect(region, -sidescopes::EdgeRing, -sidescopes::EdgeRing);
     NSBezierPath* edgeRing = [NSBezierPath bezierPathWithRect:stripeHole];
     [edgeRing appendBezierPathWithRect:region];
     edgeRing.windingRule = NSWindingRuleEvenOdd;
@@ -656,11 +666,13 @@ NSCursor* buildPinCursor(const std::optional<FloatColor>& color)
     [dashes setLineDash:dash count:2 phase:0];
     [[NSColor colorWithWhite:0.97 alpha:0.95] setStroke];
     [dashes stroke];
+}
 
-    // Eight handle dots - corners and edge midpoints - centered on the
-    // measurement line, the way the macOS screenshot selection wears
-    // them: small gray circles straddling the selection edge. Round and
-    // muted, they cost only a few pixels of the sample's rim.
+// Eight handle dots - corners and edge midpoints - centered on the measurement
+// line, the way the macOS screenshot selection wears them: small gray circles
+// straddling the selection edge, costing only a few pixels of the sample's rim.
+- (void)drawHandles:(NSRect)region
+{
     const NSRect lane = region;
     const auto handle = [&](CGFloat x, CGFloat y) {
         const NSRect circle = NSMakeRect(x - sidescopes::HandleRadius, y - sidescopes::HandleRadius,
@@ -668,9 +680,8 @@ NSCursor* buildPinCursor(const std::optional<FloatColor>& color)
         NSBezierPath* dot = [NSBezierPath bezierPathWithOvalInRect:circle];
         [[NSColor colorWithWhite:0.78 alpha:1.0] setFill];
         [dot fill];
-        // A dark rim beneath the near-white ring keeps the dot visible on
-        // a bright sky; the ring matches the measurement line, so the
-        // dots and the line read as one instrument.
+        // A dark rim beneath the near-white ring keeps the dot visible on a
+        // bright sky; the ring matches the measurement line.
         [[NSColor colorWithWhite:0.1 alpha:0.7] setStroke];
         dot.lineWidth = 2.0;
         [dot stroke];
@@ -686,29 +697,42 @@ NSCursor* buildPinCursor(const std::optional<FloatColor>& color)
     handle(NSMinX(lane), NSMaxY(lane));
     handle(NSMidX(lane), NSMaxY(lane));
     handle(NSMaxX(lane), NSMaxY(lane));
+}
 
-    // The hover-revealed close button, in the handles' own visual
-    // language: a dark disc where the dots are light, so it reads as an
-    // action rather than a grip, with the same bright ring and an x.
+// The hover-revealed close button, in the handles' own visual language: a dark
+// disc where the dots are light, so it reads as an action rather than a grip,
+// with the same bright ring and an x.
+- (void)drawCloseButton
+{
+    const NSPoint center = [self closeCenter];
+    const NSRect disc = NSMakeRect(center.x - sidescopes::CloseRadius, center.y - sidescopes::CloseRadius,
+                                   sidescopes::CloseRadius * 2, sidescopes::CloseRadius * 2);
+    NSBezierPath* button = [NSBezierPath bezierPathWithOvalInRect:disc];
+    [[NSColor colorWithWhite:0.1 alpha:0.85] setFill];
+    [button fill];
+    [[NSColor colorWithWhite:0.97 alpha:0.95] setStroke];
+    button.lineWidth = 1.0;
+    [button stroke];
+    const CGFloat arm = sidescopes::CloseRadius - 3.7;
+    NSBezierPath* cross = [NSBezierPath bezierPath];
+    cross.lineWidth = 1.3;
+    cross.lineCapStyle = NSLineCapStyleRound;
+    [cross moveToPoint:NSMakePoint(center.x - arm, center.y - arm)];
+    [cross lineToPoint:NSMakePoint(center.x + arm, center.y + arm)];
+    [cross moveToPoint:NSMakePoint(center.x - arm, center.y + arm)];
+    [cross lineToPoint:NSMakePoint(center.x + arm, center.y - arm)];
+    [cross stroke];
+}
+
+- (void)drawRect:(NSRect)dirty
+{
+    (void)dirty;
+    const NSRect region = [self regionRect];
+    [self drawHazardBand:region];
+    [self drawMeasuredEdge:region];
+    [self drawHandles:region];
     if ([self closeVisible]) {
-        const NSPoint center = [self closeCenter];
-        const NSRect disc = NSMakeRect(center.x - sidescopes::CloseRadius, center.y - sidescopes::CloseRadius,
-                                       sidescopes::CloseRadius * 2, sidescopes::CloseRadius * 2);
-        NSBezierPath* button = [NSBezierPath bezierPathWithOvalInRect:disc];
-        [[NSColor colorWithWhite:0.1 alpha:0.85] setFill];
-        [button fill];
-        [[NSColor colorWithWhite:0.97 alpha:0.95] setStroke];
-        button.lineWidth = 1.0;
-        [button stroke];
-        const CGFloat arm = sidescopes::CloseRadius - 3.7;
-        NSBezierPath* cross = [NSBezierPath bezierPath];
-        cross.lineWidth = 1.3;
-        cross.lineCapStyle = NSLineCapStyleRound;
-        [cross moveToPoint:NSMakePoint(center.x - arm, center.y - arm)];
-        [cross lineToPoint:NSMakePoint(center.x + arm, center.y + arm)];
-        [cross moveToPoint:NSMakePoint(center.x - arm, center.y + arm)];
-        [cross lineToPoint:NSMakePoint(center.x + arm, center.y - arm)];
-        [cross stroke];
+        [self drawCloseButton];
     }
 }
 
@@ -961,17 +985,27 @@ NSRect regionToViewRect(const RegionOfInterest& region, NSSize viewSize)
     return NSMakeRect(local.x, flippedY(local.y + local.height, viewSize.height), local.width, local.height);
 }
 
-}  // namespace
-
-bool beginRegionPick(const std::vector<PickerDisplay>& displays, RegionPickerMode initialMode)
+// View coordinates are bottom-left origin; flip the rect's top edge into the
+// shared geometry's top-left space, then delegate.
+RegionOfInterest regionPercentFromViewRect(NSRect rect, NSSize size)
 {
-    if (!g_pickerOverlays.empty()) {
-        return false;  // one picker at a time
-    }
+    const LocalRect local{rect.origin.x, flippedY(NSMaxY(rect), size.height), rect.size.width, rect.size.height};
 
-    // Window suggestions may be empty everywhere; a window pick with
-    // nothing to pick opens as drawing, like before, but the decision is
-    // global so every display shows the same mode.
+    return regionFromLocalRect(local, size.width, size.height);
+}
+
+// The initial tool decides every overlay's mode: a window pick with nothing to
+// pick anywhere opens as drawing, and the decision is global so every display
+// shows the same mode.
+struct PickerModes
+{
+    bool pin;
+    bool draw;
+    bool faces;
+};
+
+PickerModes computePickerModes(const std::vector<PickerDisplay>& displays, RegionPickerMode initialMode)
+{
     bool anyWindows = false;
     for (const PickerDisplay& entry : displays) {
         anyWindows |= !entry.windows.empty();
@@ -981,66 +1015,65 @@ bool beginRegionPick(const std::vector<PickerDisplay>& displays, RegionPickerMod
                                (initialMode == RegionPickerMode::PickWindows && !anyWindows));
     const bool faces = initialMode == RegionPickerMode::PickFaces;
 
-    for (const PickerDisplay& entry : displays) {
-        NSScreen* screen = nil;
-        for (NSScreen* candidate in NSScreen.screens) {
-            NSNumber* number = candidate.deviceDescription[@"NSScreenNumber"];
-            if (number && number.unsignedIntValue == entry.displayId) {
-                screen = candidate;
-            }
-        }
-        if (!screen) {
-            continue;  // gone between enumeration and now
-        }
+    return {pin, draw, faces};
+}
 
-        SidescopesPickerWindow* overlay =
-            [[SidescopesPickerWindow alloc] initWithContentRect:screen.frame
-                                                      styleMask:NSWindowStyleMaskBorderless
-                                                        backing:NSBackingStoreBuffered
-                                                          defer:NO];
-        overlay.backgroundColor = NSColor.clearColor;
-        overlay.opaque = NO;
-        overlay.level = NSStatusWindowLevel + 1;
-        overlay.collectionBehavior =
-            NSWindowCollectionBehaviorCanJoinAllSpaces | NSWindowCollectionBehaviorFullScreenAuxiliary;
-
-        SidescopesPickerView* view = [[SidescopesPickerView alloc] initWithFrame:overlay.contentView.bounds];
-        view.hoveredSuggestion = -1;
-        const NSSize viewSize = screen.frame.size;
-        for (const SuggestedRegion& suggestion : entry.windows) {
-            view->m_windows.emplace_back(regionToViewRect(suggestion.region, viewSize), suggestion.label);
+void addPickerOverlay(const PickerDisplay& entry, PickerModes modes)
+{
+    NSScreen* screen = nil;
+    for (NSScreen* candidate in NSScreen.screens) {
+        NSNumber* number = candidate.deviceDescription[@"NSScreenNumber"];
+        if (number && number.unsignedIntValue == entry.displayId) {
+            screen = candidate;
         }
-        for (const SuggestedRegion& suggestion : entry.faces) {
-            view->m_faces.emplace_back(regionToViewRect(suggestion.region, viewSize), suggestion.label);
-        }
-        view.drawMode = draw ? YES : NO;
-        view.facesMode = faces ? YES : NO;
-        view.pinMode = pin ? YES : NO;
-        if (!draw && !pin) {
-            view->m_suggestions = faces ? view->m_faces : view->m_windows;
-        }
-        overlay.contentView = view;
-        overlay.acceptsMouseMovedEvents = YES;
-        // Pin mode paints nothing over the screen, and an all-transparent
-        // window would be click-through: the explicit assignment - even
-        // to NO - switches the window server off its per-pixel
-        // transparency hit-testing, so the overlay owns every click. The
-        // region border must never do this; the picker wants exactly it.
-        if (pin) {
-            overlay.ignoresMouseEvents = NO;
-        }
-
-        g_pickerOverlays.push_back(PickerOverlay{overlay, view, entry.displayId, viewSize});
     }
-    if (g_pickerOverlays.empty()) {
-        return false;
+    if (!screen) {
+        return;  // gone between enumeration and now
     }
 
-    // This application's own visible windows float above the overlays for
-    // the duration: they stay undimmed and clickable by ordinary window
-    // compositing, corners and all, and follow their own movement with no
-    // repainting on our side. The rectangles still feed the banner
-    // placement, which avoids sitting beneath them.
+    SidescopesPickerWindow* overlay = [[SidescopesPickerWindow alloc] initWithContentRect:screen.frame
+                                                                                styleMask:NSWindowStyleMaskBorderless
+                                                                                  backing:NSBackingStoreBuffered
+                                                                                    defer:NO];
+    overlay.backgroundColor = NSColor.clearColor;
+    overlay.opaque = NO;
+    overlay.level = NSStatusWindowLevel + 1;
+    overlay.collectionBehavior =
+        NSWindowCollectionBehaviorCanJoinAllSpaces | NSWindowCollectionBehaviorFullScreenAuxiliary;
+
+    SidescopesPickerView* view = [[SidescopesPickerView alloc] initWithFrame:overlay.contentView.bounds];
+    view.hoveredSuggestion = -1;
+    const NSSize viewSize = screen.frame.size;
+    for (const SuggestedRegion& suggestion : entry.windows) {
+        view->m_windows.emplace_back(regionToViewRect(suggestion.region, viewSize), suggestion.label);
+    }
+    for (const SuggestedRegion& suggestion : entry.faces) {
+        view->m_faces.emplace_back(regionToViewRect(suggestion.region, viewSize), suggestion.label);
+    }
+    view.drawMode = modes.draw ? YES : NO;
+    view.facesMode = modes.faces ? YES : NO;
+    view.pinMode = modes.pin ? YES : NO;
+    if (!modes.draw && !modes.pin) {
+        view->m_suggestions = modes.faces ? view->m_faces : view->m_windows;
+    }
+    overlay.contentView = view;
+    overlay.acceptsMouseMovedEvents = YES;
+    // Pin mode paints nothing over the screen, and an all-transparent window
+    // would be click-through: the explicit assignment - even to NO - switches
+    // the window server off its per-pixel transparency hit-testing, so the
+    // overlay owns every click. The region border must never do this.
+    if (modes.pin) {
+        overlay.ignoresMouseEvents = NO;
+    }
+
+    g_pickerOverlays.push_back(PickerOverlay{overlay, view, entry.displayId, viewSize});
+}
+
+// This application's own visible windows float above the overlays for the
+// duration: they stay undimmed and clickable by ordinary window compositing,
+// and follow their own movement with no repainting on our side.
+void raiseOwnWindows()
+{
     for (NSWindow* window in NSApp.windows) {
         if (isPickerOverlayWindow(window) || window == g_borderWindow || !window.isVisible) {
             continue;
@@ -1048,13 +1081,13 @@ bool beginRegionPick(const std::vector<PickerDisplay>& displays, RegionPickerMod
         g_raisedWindows.emplace_back(window, window.level);
         window.level = NSStatusWindowLevel + 2;
     }
-    for (PickerOverlay& overlay : g_pickerOverlays) {
-        overlay.view->m_exclusions = ownWindowExclusions(overlay.window.frame.origin);
-    }
+}
 
-    // Force the app frontmost so the overlays own the mouse for the whole
-    // interaction; the keyboard starts on the display under the cursor -
-    // that is where the user's attention is - and follows clicks after.
+// Force the app frontmost so the overlays own the mouse for the whole
+// interaction; the keyboard starts on the display under the cursor and follows
+// clicks after.
+void presentPickerOverlays()
+{
     [NSApp activateIgnoringOtherApps:YES];
     const uint32_t cursorDisplay = displayUnderCursor().value_or(0);
     PickerOverlay* keyOverlay = &g_pickerOverlays.front();
@@ -1071,49 +1104,33 @@ bool beginRegionPick(const std::vector<PickerDisplay>& displays, RegionPickerMod
     }
     [keyOverlay->window makeKeyAndOrderFront:nil];
     [keyOverlay->window makeFirstResponder:keyOverlay->view];
-    return true;
 }
 
-RegionPickPoll pollRegionPick()
+// The banner dodges this application's own windows; their rectangles refresh on
+// a gentle cadence, since nothing visual tracks them per-frame anymore.
+void refreshPickerExclusions()
 {
-    RegionPickPoll poll;
-    if (g_pickerOverlays.empty()) {
-        return poll;
-    }
-    poll.active = true;
-    // Mode flags come first: the finishing poll returns early below, and
-    // the caller needs them to know a pin-mode finish never means a
-    // region change. The overlays switch modes in lockstep; the front
-    // one speaks for all.
-    poll.pinMode = g_pickerOverlays.front().view.pinMode;
-
-    // The banner dodges this application's own windows; their rectangles
-    // refresh on a gentle cadence - nothing visual tracks them anymore,
-    // so per-frame repaints would be waste.
     static double lastExclusionRefresh = 0.0;
     const double now = CFAbsoluteTimeGetCurrent();
-    if (now - lastExclusionRefresh > 0.2) {
-        lastExclusionRefresh = now;
-        for (PickerOverlay& overlay : g_pickerOverlays) {
-            std::vector<NSRect> exclusions = ownWindowExclusions(overlay.window.frame.origin);
-            if (exclusions.size() != overlay.view->m_exclusions.size() ||
-                !std::equal(exclusions.begin(), exclusions.end(), overlay.view->m_exclusions.begin(),
-                            [](const NSRect& a, const NSRect& b) { return NSEqualRects(a, b); })) {
-                overlay.view->m_exclusions = std::move(exclusions);
-                overlay.view.needsDisplay = YES;
-            }
+    if (now - lastExclusionRefresh <= 0.2) {
+        return;
+    }
+    lastExclusionRefresh = now;
+    for (PickerOverlay& overlay : g_pickerOverlays) {
+        std::vector<NSRect> exclusions = ownWindowExclusions(overlay.window.frame.origin);
+        if (exclusions.size() != overlay.view->m_exclusions.size() ||
+            !std::equal(exclusions.begin(), exclusions.end(), overlay.view->m_exclusions.begin(),
+                        [](const NSRect& a, const NSRect& b) { return NSEqualRects(a, b); })) {
+            overlay.view->m_exclusions = std::move(exclusions);
+            overlay.view.needsDisplay = YES;
         }
     }
+}
 
-    const auto regionFromView = [](NSRect rect, NSSize size) {
-        // View coordinates are bottom-left origin; flip the rect's top edge
-        // into the shared geometry's top-left space, then delegate.
-        const LocalRect local{rect.origin.x, flippedY(NSMaxY(rect), size.height), rect.size.width, rect.size.height};
-        return regionFromLocalRect(local, size.width, size.height);
-    };
-
-    // Any overlay finishing - a confirm there, or ESC anywhere - ends the
-    // pick on every display.
+// Any overlay finishing - a confirm there, or ESC anywhere - ends the pick on
+// every display, tearing every overlay down. @return whether the pick finished.
+bool pollPickerFinish(RegionPickPoll& poll)
+{
     for (PickerOverlay& overlay : g_pickerOverlays) {
         if (!overlay.view.finished) {
             continue;
@@ -1121,7 +1138,7 @@ RegionPickPoll pollRegionPick()
         poll.finished = true;
         poll.displayId = overlay.displayId;
         if (overlay.view.picked) {
-            poll.confirmed = regionFromView(overlay.view.confirmedRect, overlay.size);
+            poll.confirmed = regionPercentFromViewRect(overlay.view.confirmedRect, overlay.size);
         }
         for (const auto& [window, level] : g_raisedWindows) {
             window.level = level;
@@ -1132,30 +1149,39 @@ RegionPickPoll pollRegionPick()
         }
         g_pickerOverlays.clear();
         g_pinCursor = nil;
-        return poll;
+
+        return true;
     }
 
+    return false;
+}
+
+void collectPinnedResult(RegionPickPoll& poll)
+{
     for (PickerOverlay& overlay : g_pickerOverlays) {
         if (!overlay.view.pinnedReady) {
             continue;
         }
         overlay.view.pinnedReady = NO;
         if (overlay.view.pinnedIsPoint) {
-            // The view is bottom-left origin; flip the click's Y into the
-            // shared top-left percent space, matching regionFromView.
+            // The view is bottom-left origin; flip the click's Y into the shared
+            // top-left percent space, matching regionPercentFromViewRect.
             const NSPoint click = overlay.view.pinnedPoint;
             poll.pinnedPoint = DisplayPoint{click.x / overlay.size.width * 100.0,
                                             flippedY(click.y, overlay.size.height) / overlay.size.height * 100.0};
         } else {
-            poll.pinnedArea = regionFromView(overlay.view.pinnedArea, overlay.size);
+            poll.pinnedArea = regionPercentFromViewRect(overlay.view.pinnedArea, overlay.size);
         }
         poll.pinnedKeepOpen = overlay.view.pinnedKeepOpen;
         poll.displayId = overlay.displayId;
         break;
     }
+}
 
-    // The cursor is only ever on one display, so at most one overlay has
-    // something to preview.
+// The cursor is only ever on one display, so at most one overlay has something
+// to preview.
+void collectPreview(RegionPickPoll& poll)
+{
     for (PickerOverlay& overlay : g_pickerOverlays) {
         if (overlay.view.pinMode) {
             break;  // pin modes never preview a region
@@ -1163,19 +1189,65 @@ RegionPickPoll pollRegionPick()
         if (!overlay.view.drawMode) {
             const NSInteger hovered = overlay.view.hoveredSuggestion;
             if (hovered >= 0 && hovered < static_cast<NSInteger>(overlay.view->m_suggestions.size())) {
-                poll.preview = regionFromView(overlay.view->m_suggestions[hovered].first, overlay.size);
+                poll.preview = regionPercentFromViewRect(overlay.view->m_suggestions[hovered].first, overlay.size);
                 poll.displayId = overlay.displayId;
                 break;
             }
         } else if (overlay.view.dragging) {
             const NSRect selection = [overlay.view selectionRect];
             if (selection.size.width > 8 && selection.size.height > 8) {
-                poll.preview = regionFromView(selection, overlay.size);
+                poll.preview = regionPercentFromViewRect(selection, overlay.size);
                 poll.displayId = overlay.displayId;
                 break;
             }
         }
     }
+}
+
+}  // namespace
+
+bool beginRegionPick(const std::vector<PickerDisplay>& displays, RegionPickerMode initialMode)
+{
+    if (!g_pickerOverlays.empty()) {
+        return false;  // one picker at a time
+    }
+
+    const PickerModes modes = computePickerModes(displays, initialMode);
+    for (const PickerDisplay& entry : displays) {
+        addPickerOverlay(entry, modes);
+    }
+    if (g_pickerOverlays.empty()) {
+        return false;
+    }
+
+    raiseOwnWindows();
+    for (PickerOverlay& overlay : g_pickerOverlays) {
+        overlay.view->m_exclusions = ownWindowExclusions(overlay.window.frame.origin);
+    }
+    presentPickerOverlays();
+
+    return true;
+}
+
+RegionPickPoll pollRegionPick()
+{
+    RegionPickPoll poll;
+    if (g_pickerOverlays.empty()) {
+        return poll;
+    }
+    poll.active = true;
+    // Mode flags come first: the finishing poll returns early below, and the
+    // caller needs them to know a pin-mode finish never means a region change.
+    // The overlays switch modes in lockstep; the front one speaks for all.
+    poll.pinMode = g_pickerOverlays.front().view.pinMode;
+
+    refreshPickerExclusions();
+    if (pollPickerFinish(poll)) {
+        return poll;
+    }
+    collectPinnedResult(poll);
+    collectPreview(poll);
+
     return poll;
 }
 

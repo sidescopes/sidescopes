@@ -200,6 +200,74 @@ enum class RegionIcon
     Expand
 };
 
+// A simplified pointing hand, the shape of the pick-mode cursor. Traced from
+// the classic cursor-hand outline: tall index left of center, three knuckle
+// stubs descending to the right, the thumb web sweeping down-left, a flat cuff.
+void drawPickHandIcon(ImDrawList* draw, const ImVec2& center, ImU32 color)
+{
+    const ImVec2 outline[] = {
+        {-2.8f, 7.5f},  {-5.6f, 1.8f},  {-6.0f, 0.4f},  {-5.6f, -0.4f}, {-4.6f, -0.6f}, {-2.7f, 0.6f},
+        {-2.7f, -6.6f}, {-2.2f, -7.5f}, {-1.1f, -7.5f}, {-0.6f, -6.6f}, {-0.6f, -2.8f}, {0.1f, -3.3f},
+        {1.1f, -3.3f},  {1.5f, -2.6f},  {1.7f, -2.4f},  {2.4f, -2.5f},  {2.9f, -1.8f},  {3.2f, -1.6f},
+        {4.0f, -1.5f},  {4.5f, -0.8f},  {4.5f, 6.3f},   {3.9f, 7.5f},
+    };
+    ImVec2 points[std::size(outline)];
+    for (std::size_t i = 0; i < std::size(outline); ++i) {
+        points[i] = ImVec2(center.x + outline[i].x, center.y + outline[i].y);
+    }
+    draw->AddPolyline(points, static_cast<int>(std::size(outline)), color, ImDrawFlags_Closed, 1.4f);
+}
+
+// The draw-mode crosshair: long thin beams, small center gap.
+void drawCrosshairIcon(ImDrawList* draw, const ImVec2& center, ImU32 color)
+{
+    const auto beam = [&](float dx, float dy) {
+        draw->AddLine(ImVec2(center.x + dx * 1.25f, center.y + dy * 1.25f),
+                      ImVec2(center.x + dx * 7.5f, center.y + dy * 7.5f), color, 1.4f);
+    };
+    beam(0.0f, -1.0f);
+    beam(0.0f, 1.0f);
+    beam(-1.0f, 0.0f);
+    beam(1.0f, 0.0f);
+}
+
+// A face: head outline, two eyes, a smile arc.
+void drawFaceIcon(ImDrawList* draw, const ImVec2& center, ImU32 color)
+{
+    draw->AddCircle(center, 7.5f, color, 0, 1.4f);
+    draw->AddCircleFilled(ImVec2(center.x - 2.8f, center.y - 2.0f), 1.1f, color);
+    draw->AddCircleFilled(ImVec2(center.x + 2.8f, center.y - 2.0f), 1.1f, color);
+    ImVec2 smile[5];
+    for (int i = 0; i < 5; ++i) {
+        const float angle = (0.30f + 0.10f * i) * 3.14159265f;
+        smile[i] = ImVec2(center.x + 3.3f * std::cos(angle), center.y + 3.3f * std::sin(angle));
+    }
+    draw->AddPolyline(smile, 5, color, ImDrawFlags_None, 1.4f);
+}
+
+// The classic pipette silhouette, filled so it reads at chip size: round bulb, a
+// wider collar band, a long tapering tip, and a drop fallen just past it.
+void drawDropperIcon(ImDrawList* draw, const ImVec2& center, ImU32 color)
+{
+    draw->AddCircleFilled(ImVec2(center.x + 4.4f, center.y - 4.4f), 2.4f, color);
+    draw->AddLine(ImVec2(center.x + 1.7f, center.y - 1.7f), ImVec2(center.x + 3.0f, center.y - 3.0f), color, 4.2f);
+    draw->AddTriangleFilled(ImVec2(center.x - 5.3f, center.y + 5.3f), ImVec2(center.x + 1.3f, center.y + 0.7f),
+                            ImVec2(center.x - 0.7f, center.y - 1.3f), color);
+    draw->AddCircleFilled(ImVec2(center.x - 6.6f, center.y + 6.6f), 1.0f, color);
+}
+
+// Two arrows expanding to opposite corners, the fullscreen idiom.
+void drawExpandIcon(ImDrawList* draw, const ImVec2& center, const ImVec2& a, const ImVec2& b, ImU32 color, float stroke)
+{
+    const auto arrow = [&](ImVec2 from, ImVec2 to, float headX, float headY) {
+        draw->AddLine(from, to, color, stroke);
+        draw->AddLine(to, ImVec2(to.x + headX * 3.5f, to.y), color, stroke);
+        draw->AddLine(to, ImVec2(to.x, to.y + headY * 3.5f), color, stroke);
+    };
+    arrow(ImVec2(center.x - 1.5f, center.y + 1.5f), ImVec2(a.x + 0.5f, b.y - 0.5f), 1, -1);
+    arrow(ImVec2(center.x + 1.5f, center.y - 1.5f), ImVec2(b.x - 0.5f, a.y + 0.5f), -1, 1);
+}
+
 bool iconButton(const char* id, RegionIcon icon, const char* tooltip, bool dimmed = false)
 {
     const float height = ImGui::GetTextLineHeight() + 4.0f;
@@ -217,65 +285,18 @@ bool iconButton(const char* id, RegionIcon icon, const char* tooltip, bool dimme
     const ImU32 color = ImGui::GetColorU32(ImGuiCol_Text, dimmed ? 0.4f : 1.0f);
     const float stroke = 1.5f;
     if (icon == RegionIcon::PickHand) {
-        // A simplified pointing hand: index finger up, palm with knuckle
-        // notches, the shape of the pick-mode cursor.
-        (void)a;
-        // Traced from the classic cursor-hand outline: tall index left of
-        // center, three knuckle stubs descending to the right, the thumb
-        // web sweeping diagonally down-left, and a flat cuff. Outlined,
-        // like the rest of the icon row.
-        const ImVec2 outline[] = {
-            {-2.8f, 7.5f},  {-5.6f, 1.8f},  {-6.0f, 0.4f},  {-5.6f, -0.4f}, {-4.6f, -0.6f}, {-2.7f, 0.6f},
-            {-2.7f, -6.6f}, {-2.2f, -7.5f}, {-1.1f, -7.5f}, {-0.6f, -6.6f}, {-0.6f, -2.8f}, {0.1f, -3.3f},
-            {1.1f, -3.3f},  {1.5f, -2.6f},  {1.7f, -2.4f},  {2.4f, -2.5f},  {2.9f, -1.8f},  {3.2f, -1.6f},
-            {4.0f, -1.5f},  {4.5f, -0.8f},  {4.5f, 6.3f},   {3.9f, 7.5f},
-        };
-        ImVec2 points[std::size(outline)];
-        for (std::size_t i = 0; i < std::size(outline); ++i) {
-            points[i] = ImVec2(center.x + outline[i].x, center.y + outline[i].y);
-        }
-        draw->AddPolyline(points, static_cast<int>(std::size(outline)), color, ImDrawFlags_Closed, 1.4f);
+        drawPickHandIcon(draw, center, color);
     } else if (icon == RegionIcon::Crosshair) {
-        // The draw-mode crosshair: long thin beams, small center gap.
-        const auto beam = [&](float dx, float dy) {
-            draw->AddLine(ImVec2(center.x + dx * 1.25f, center.y + dy * 1.25f),
-                          ImVec2(center.x + dx * 7.5f, center.y + dy * 7.5f), color, 1.4f);
-        };
-        beam(0.0f, -1.0f);
-        beam(0.0f, 1.0f);
-        beam(-1.0f, 0.0f);
-        beam(1.0f, 0.0f);
+        drawCrosshairIcon(draw, center, color);
     } else if (icon == RegionIcon::Face) {
-        // A face: head outline, two eyes, a smile arc.
-        draw->AddCircle(center, 7.5f, color, 0, 1.4f);
-        draw->AddCircleFilled(ImVec2(center.x - 2.8f, center.y - 2.0f), 1.1f, color);
-        draw->AddCircleFilled(ImVec2(center.x + 2.8f, center.y - 2.0f), 1.1f, color);
-        ImVec2 smile[5];
-        for (int i = 0; i < 5; ++i) {
-            const float angle = (0.30f + 0.10f * i) * 3.14159265f;
-            smile[i] = ImVec2(center.x + 3.3f * std::cos(angle), center.y + 3.3f * std::sin(angle));
-        }
-        draw->AddPolyline(smile, 5, color, ImDrawFlags_None, 1.4f);
+        drawFaceIcon(draw, center, color);
     } else if (icon == RegionIcon::Dropper) {
-        // The classic pipette silhouette, filled so it reads at chip
-        // size: round bulb, a separate wider collar band, a long
-        // tapering tip, and a drop fallen just past it.
-        draw->AddCircleFilled(ImVec2(center.x + 4.4f, center.y - 4.4f), 2.4f, color);
-        draw->AddLine(ImVec2(center.x + 1.7f, center.y - 1.7f), ImVec2(center.x + 3.0f, center.y - 3.0f), color, 4.2f);
-        draw->AddTriangleFilled(ImVec2(center.x - 5.3f, center.y + 5.3f), ImVec2(center.x + 1.3f, center.y + 0.7f),
-                                ImVec2(center.x - 0.7f, center.y - 1.3f), color);
-        draw->AddCircleFilled(ImVec2(center.x - 6.6f, center.y + 6.6f), 1.0f, color);
+        drawDropperIcon(draw, center, color);
     } else {
-        // Two arrows expanding to opposite corners, the fullscreen idiom.
-        const auto arrow = [&](ImVec2 from, ImVec2 to, float headX, float headY) {
-            draw->AddLine(from, to, color, stroke);
-            draw->AddLine(to, ImVec2(to.x + headX * 3.5f, to.y), color, stroke);
-            draw->AddLine(to, ImVec2(to.x, to.y + headY * 3.5f), color, stroke);
-        };
-        arrow(ImVec2(center.x - 1.5f, center.y + 1.5f), ImVec2(a.x + 0.5f, b.y - 0.5f), 1, -1);
-        arrow(ImVec2(center.x + 1.5f, center.y - 1.5f), ImVec2(b.x - 0.5f, a.y + 0.5f), -1, 1);
+        drawExpandIcon(draw, center, a, b, color, stroke);
     }
     ImGui::SetItemTooltip("%s", tooltip);
+
     return pressed;
 }
 
@@ -445,32 +466,18 @@ float computeUiScale(GLFWwindow* window)
 // mostly lies on. A window that starts beyond the desktop edge shows
 // its never-composited strip as white while a drag holds the frame
 // loop; a window that never starts off screen has no such strip.
-void restoreWindowPlacement(GLFWwindow* window, const Preferences& startup)
+struct MonitorWorkArea
 {
-    if (startup.windowX >= 0) {
-        glfwSetWindowPos(window, startup.windowX, startup.windowY);
-        glfwSetWindowSize(window, startup.windowWidth, startup.windowHeight);
-    }
+    int x;
+    int y;
+    int width;
+    int height;
+};
 
-    int monitorCount = 0;
-    GLFWmonitor** monitors = glfwGetMonitors(&monitorCount);
-    if (!monitors || monitorCount == 0) {
-        return;
-    }
-
-    int x = 0;
-    int y = 0;
-    int width = 0;
-    int height = 0;
-    glfwGetWindowPos(window, &x, &y);
-    glfwGetWindowSize(window, &width, &height);
-    int frameLeft = 0;
-    int frameTop = 0;
-    int frameRight = 0;
-    int frameBottom = 0;
-    glfwGetWindowFrameSize(window, &frameLeft, &frameTop, &frameRight, &frameBottom);
-
-    // The monitor carrying most of the window; the primary when none is.
+// The work area of the monitor carrying most of the window; the primary when
+// the window overlaps none.
+MonitorWorkArea monitorMostlyContaining(GLFWmonitor** monitors, int monitorCount, int x, int y, int width, int height)
+{
     int workX = 0;
     int workY = 0;
     int workWidth = 0;
@@ -496,14 +503,43 @@ void restoreWindowPlacement(GLFWwindow* window, const Preferences& startup)
         }
     }
 
-    const int availableWidth = std::max(1, workWidth - frameLeft - frameRight);
-    const int availableHeight = std::max(1, workHeight - frameTop - frameBottom);
+    return {workX, workY, workWidth, workHeight};
+}
+
+void restoreWindowPlacement(GLFWwindow* window, const Preferences& startup)
+{
+    if (startup.windowX >= 0) {
+        glfwSetWindowPos(window, startup.windowX, startup.windowY);
+        glfwSetWindowSize(window, startup.windowWidth, startup.windowHeight);
+    }
+
+    int monitorCount = 0;
+    GLFWmonitor** monitors = glfwGetMonitors(&monitorCount);
+    if (!monitors || monitorCount == 0) {
+        return;
+    }
+
+    int x = 0;
+    int y = 0;
+    int width = 0;
+    int height = 0;
+    glfwGetWindowPos(window, &x, &y);
+    glfwGetWindowSize(window, &width, &height);
+    int frameLeft = 0;
+    int frameTop = 0;
+    int frameRight = 0;
+    int frameBottom = 0;
+    glfwGetWindowFrameSize(window, &frameLeft, &frameTop, &frameRight, &frameBottom);
+
+    const MonitorWorkArea work = monitorMostlyContaining(monitors, monitorCount, x, y, width, height);
+    const int availableWidth = std::max(1, work.width - frameLeft - frameRight);
+    const int availableHeight = std::max(1, work.height - frameTop - frameBottom);
     const int clampedWidth = std::min(width, availableWidth);
     const int clampedHeight = std::min(height, availableHeight);
-    const int minX = workX + frameLeft;
-    const int maxX = workX + workWidth - frameRight - clampedWidth;
-    const int minY = workY + frameTop;
-    const int maxY = workY + workHeight - frameBottom - clampedHeight;
+    const int minX = work.x + frameLeft;
+    const int maxX = work.x + work.width - frameRight - clampedWidth;
+    const int minY = work.y + frameTop;
+    const int maxY = work.y + work.height - frameBottom - clampedHeight;
     const int clampedX = std::max(minX, std::min(x, maxX));
     const int clampedY = std::max(minY, std::min(y, maxY));
     if (clampedWidth != width || clampedHeight != height) {
@@ -536,6 +572,56 @@ std::vector<SuggestedRegion> windowSuggestionsFor(uint32_t displayId)
 // markers. The outline stroking is host display logic over the worker's
 // extension output; the graticule and markers come from the projection
 // instance's declarative primitives, like every other scope.
+// The curve outline strokes at display resolution over the filled texture:
+// baked into the texture it would stretch anisotropically with the pane - thick
+// on flats, thin on slopes. Sampled through the same spline the fill uses, so
+// line and fill edge agree.
+void strokeHistogramOutline(const DrawnScope& scope, const AnalysisWorker::Output& output, HistogramStyle style,
+                            std::vector<ImVec2>& points)
+{
+    if (output.histogramOutline.size() != static_cast<std::size_t>(3) * Histogram::Bins) {
+        return;
+    }
+    ImDrawList* draw = ImGui::GetWindowDrawList();
+    draw->PushClipRect(scope.origin, ImVec2(scope.origin.x + scope.size.x, scope.origin.y + scope.size.y), true);
+    const bool bands = style == HistogramStyle::PerChannel;
+    const int samples = std::clamp(static_cast<int>(scope.size.x), 128, 2 * Histogram::Bins);
+    for (int channel = 0; channel < 3; ++channel) {
+        const float* plane = output.histogramOutline.data() + channel * Histogram::Bins;
+        const float bandTop = scope.origin.y + (bands ? channel * scope.size.y / 3.0f : 0.0f);
+        const float bandHeight = bands ? scope.size.y / 3.0f : scope.size.y;
+        points.clear();
+        for (int sample = 0; sample < samples; ++sample) {
+            const float binPosition =
+                std::clamp((sample + 0.5f) * Histogram::Bins / samples - 0.5f, 0.0f, Histogram::Bins - 1.0f);
+            const int center = static_cast<int>(binPosition);
+            const float t = binPosition - center;
+            const auto at = [&](int index) { return plane[std::clamp(index, 0, Histogram::Bins - 1)]; };
+            const float p0 = at(center - 1);
+            const float p1 = at(center);
+            const float p2 = at(center + 1);
+            const float p3 = at(center + 2);
+            float height =
+                p1 +
+                0.5f * t * (p2 - p0 + t * (2.0f * p0 - 5.0f * p1 + 4.0f * p2 - p3 + t * (3.0f * (p1 - p2) + p3 - p0)));
+            if (p1 <= 0.0f && p2 <= 0.0f) {
+                height = 0.0f;
+            }
+            height = std::clamp(height, 0.0f, 1.0f);
+            // Empty stretches ride the baseline: the outline stays one continuous
+            // reading of the channel. Kept just inside the band so the stroke
+            // survives the clip.
+            const float y = std::min(bandTop + (1.0f - height) * bandHeight, bandTop + bandHeight - 1.0f);
+            points.push_back(ImVec2(scope.origin.x + (sample + 0.5f) * scope.size.x / samples, y));
+        }
+        if (points.size() >= 2) {
+            draw->AddPolyline(points.data(), static_cast<int>(points.size()),
+                              channelMaskColor(1u << static_cast<uint32_t>(channel)), ImDrawFlags_None, 1.6f);
+        }
+    }
+    draw->PopClipRect();
+}
+
 void drawHistogram(const ScopeTexture& texture, const AnalysisWorker::Output& output, const ScopeInstance& instance,
                    HistogramStyle style, bool showGraticule, const std::optional<FloatColor>& markerColor,
                    std::vector<ImVec2>& points)
@@ -543,54 +629,7 @@ void drawHistogram(const ScopeTexture& texture, const AnalysisWorker::Output& ou
     // No intensity gesture here: the histogram's scale adjusts
     // itself, the way every editor draws it.
     const DrawnScope scope = drawScopeImage(texture, false);
-    // The curve outline strokes at display resolution over the
-    // filled texture: baked into the texture it would stretch
-    // anisotropically with the pane - thick on flats, thin on
-    // slopes. Sampled through the same spline the fill uses, so
-    // line and fill edge agree.
-    if (output.histogramOutline.size() == static_cast<std::size_t>(3) * Histogram::Bins) {
-        ImDrawList* draw = ImGui::GetWindowDrawList();
-        draw->PushClipRect(scope.origin, ImVec2(scope.origin.x + scope.size.x, scope.origin.y + scope.size.y), true);
-        const bool bands = style == HistogramStyle::PerChannel;
-        const int samples = std::clamp(static_cast<int>(scope.size.x), 128, 2 * Histogram::Bins);
-        for (int channel = 0; channel < 3; ++channel) {
-            const float* plane = output.histogramOutline.data() + channel * Histogram::Bins;
-            const float bandTop = scope.origin.y + (bands ? channel * scope.size.y / 3.0f : 0.0f);
-            const float bandHeight = bands ? scope.size.y / 3.0f : scope.size.y;
-            points.clear();
-            for (int sample = 0; sample < samples; ++sample) {
-                const float binPosition =
-                    std::clamp((sample + 0.5f) * Histogram::Bins / samples - 0.5f, 0.0f, Histogram::Bins - 1.0f);
-                const int center = static_cast<int>(binPosition);
-                const float t = binPosition - center;
-                const auto at = [&](int index) { return plane[std::clamp(index, 0, Histogram::Bins - 1)]; };
-                const float p0 = at(center - 1);
-                const float p1 = at(center);
-                const float p2 = at(center + 1);
-                const float p3 = at(center + 2);
-                float height =
-                    p1 +
-                    0.5f * t *
-                        (p2 - p0 + t * (2.0f * p0 - 5.0f * p1 + 4.0f * p2 - p3 + t * (3.0f * (p1 - p2) + p3 - p0)));
-                if (p1 <= 0.0f && p2 <= 0.0f) {
-                    height = 0.0f;
-                }
-                height = std::clamp(height, 0.0f, 1.0f);
-                // Empty stretches ride the baseline: the outline
-                // stays one continuous reading of the channel,
-                // rather than blinking away wherever the plot
-                // touches zero. Kept just inside the band so the
-                // stroke survives the clip.
-                const float y = std::min(bandTop + (1.0f - height) * bandHeight, bandTop + bandHeight - 1.0f);
-                points.push_back(ImVec2(scope.origin.x + (sample + 0.5f) * scope.size.x / samples, y));
-            }
-            if (points.size() >= 2) {
-                draw->AddPolyline(points.data(), static_cast<int>(points.size()),
-                                  channelMaskColor(1u << static_cast<uint32_t>(channel)), ImDrawFlags_None, 1.6f);
-            }
-        }
-        draw->PopClipRect();
-    }
+    strokeHistogramOutline(scope, output, style, points);
     if (showGraticule) {
         drawGraticule(scope, instance.graticule(), GraticuleStyle{});
     }

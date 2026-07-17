@@ -21,6 +21,40 @@
 
 namespace sidescopes {
 
+namespace {
+
+// Adds one action row, resolving its shortcut into a key equivalent. The key
+// renders right-aligned the way every macOS menu draws shortcuts; a zeroed
+// modifier mask shows the bare key, and the application's own key handling
+// stays the single source of behavior.
+void addMenuAction(NSMenu* current, SidescopesMenuTarget* target, const NativeMenuItem& item)
+{
+    NSMenuItem* entry = [[NSMenuItem alloc] initWithTitle:[NSString stringWithUTF8String:item.label.c_str()]
+                                                   action:@selector(pick:)
+                                            keyEquivalent:@""];
+    entry.target = target;
+    entry.tag = item.actionId;
+    entry.state = item.checked ? NSControlStateValueOn : NSControlStateValueOff;
+    if (!item.shortcut.empty()) {
+        std::string key = item.shortcut;
+        NSEventModifierFlags modifiers = 0;
+        if (key.rfind("Shift+", 0) == 0) {
+            modifiers = NSEventModifierFlagShift;
+            key = key.substr(6);
+        }
+        if (key == "Esc") {
+            entry.keyEquivalent = @"\x1B";
+        } else if (key.size() == 1) {
+            const char lower = static_cast<char>(std::tolower(static_cast<unsigned char>(key[0])));
+            entry.keyEquivalent = [NSString stringWithFormat:@"%c", lower];
+        }
+        entry.keyEquivalentModifierMask = modifiers;
+    }
+    [current addItem:entry];
+}
+
+}  // namespace
+
 int showNativeContextMenu(const std::vector<NativeMenuItem>& items)
 {
     SidescopesMenuTarget* target = [[SidescopesMenuTarget alloc] init];
@@ -52,35 +86,9 @@ int showNativeContextMenu(const std::vector<NativeMenuItem>& items)
                 [stack removeLastObject];
             }
             break;
-        case NativeMenuItem::Kind::Action: {
-            NSMenuItem* entry = [[NSMenuItem alloc] initWithTitle:[NSString stringWithUTF8String:item.label.c_str()]
-                                                           action:@selector(pick:)
-                                                    keyEquivalent:@""];
-            entry.target = target;
-            entry.tag = item.actionId;
-            entry.state = item.checked ? NSControlStateValueOn : NSControlStateValueOff;
-            if (!item.shortcut.empty()) {
-                // The key equivalent renders right-aligned the way
-                // every macOS menu draws shortcuts. A zeroed modifier
-                // mask shows the bare key; the application's own key
-                // handling stays the single source of behavior.
-                std::string key = item.shortcut;
-                NSEventModifierFlags modifiers = 0;
-                if (key.rfind("Shift+", 0) == 0) {
-                    modifiers = NSEventModifierFlagShift;
-                    key = key.substr(6);
-                }
-                if (key == "Esc") {
-                    entry.keyEquivalent = @"\x1B";
-                } else if (key.size() == 1) {
-                    const char lower = static_cast<char>(std::tolower(static_cast<unsigned char>(key[0])));
-                    entry.keyEquivalent = [NSString stringWithFormat:@"%c", lower];
-                }
-                entry.keyEquivalentModifierMask = modifiers;
-            }
-            [current addItem:entry];
+        case NativeMenuItem::Kind::Action:
+            addMenuAction(current, target, item);
             break;
-        }
         }
     }
 
