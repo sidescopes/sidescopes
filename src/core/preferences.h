@@ -52,6 +52,12 @@ struct Preferences
     bool showGraticule = true;
     /// Magnify-view factor for the vectorscope: 1, 2, or 4.
     int vectorscopeZoom = 1;
+    /// Live layout split orientation: 0 automatic (the historical longer-axis
+    /// split), 1 vertical (stacked), 2 horizontal (side by side).
+    int layoutOrientation = 0;
+    /// Live per-scope pane weights, keyed by scope id; a scope absent from the
+    /// map weighs 1. Equal weights reproduce the original even split.
+    std::map<std::string, double> layoutWeights;
     int windowX = -1;  ///< Negative lets the system place the window.
     int windowY = -1;
     int windowWidth = 440;

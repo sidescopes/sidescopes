@@ -29,6 +29,7 @@ add_executable(sidescopes_tests
     test_pin_board.cpp
     test_param_menu.cpp
     test_overlay_style.cpp
+    test_scope_layout.cpp
     test_scope_registry.cpp
     test_scope_view.cpp
     test_capture_controller.cpp
@@ -53,6 +54,7 @@ target_sources(sidescopes_tests PRIVATE
     ${CMAKE_SOURCE_DIR}/src/app/overlay_style.cpp
     ${CMAKE_SOURCE_DIR}/src/app/param_menu.cpp
     ${CMAKE_SOURCE_DIR}/src/app/pin_board.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/scope_layout.cpp
     ${CMAKE_SOURCE_DIR}/src/app/scope_registry.cpp
     ${CMAKE_SOURCE_DIR}/src/app/scope_view.cpp
     ${CMAKE_SOURCE_DIR}/src/app/version.cpp

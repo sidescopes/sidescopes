@@ -240,6 +240,12 @@ private:
     void drawRegionToolIcons();
     void drawCursorReadout();
     void drawScopePanes();
+    void drawScopeStack();
+    void drawPaneDivider(int leftPane, bool sideBySide, float thickness, const ImVec2& area,
+                         const std::vector<float>& lengths);
+    void paintDivider(bool sideBySide, bool highlighted);
+    void adjustDividerWeights(int leftPane, float deltaPixels, const std::vector<float>& lengths);
+    void equalizeDividerWeights(int leftPane);
     void drawScopeById(std::string_view id);
     void drawVectorscopePane();
     void drawWaveformPane(std::string_view id);
@@ -258,6 +264,7 @@ private:
                             std::vector<ParamMenuAction>& paramActions);
     void appendScopesSubmenu(std::vector<NativeMenuItem>& menu);
     void appendPerScopeOptions(std::vector<NativeMenuItem>& menu, std::vector<ParamMenuAction>& paramActions);
+    void appendLayoutSubmenu(std::vector<NativeMenuItem>& menu);
     void appendRegionAndAppSection(std::vector<NativeMenuItem>& menu);
     void buildContextMenu(int clickedPane, std::vector<NativeMenuItem>& menu,
                           std::vector<ParamMenuAction>& paramActions);
@@ -265,6 +272,7 @@ private:
     void dispatchScopeToggleMenu(int chosen);
     void dispatchRegionMenu(int chosen);
     void dispatchViewMenu(int chosen);
+    void dispatchLayoutMenu(int chosen);
 
     // --- post-render region handling ---
     void handleRegionPicking();
@@ -382,6 +390,7 @@ private:
     std::map<std::string, std::unique_ptr<ScopeTexture>> m_scopeTextures;
     std::vector<ImVec2> m_panePoints;
     std::vector<std::string> m_paneIds;
+    std::vector<std::string> m_dividerIds;
     int m_pendingColumns = 0;
     int m_pendingImageHeight = 0;
     int m_pendingVectorscope = 0;

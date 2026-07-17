@@ -30,6 +30,7 @@
 #include "app/overlay_render.h"
 #include "app/param_menu.h"
 #include "app/pin_board.h"
+#include "app/scope_layout.h"
 #include "app/scope_registry.h"
 #include "app/scope_view.h"
 #include "app/version.h"
@@ -88,6 +89,9 @@ enum MenuAction
     MenuOpenSettings = 50,
     MenuAbout,
     MenuQuit,
+    MenuLayoutAuto = 60,
+    MenuLayoutVertical,
+    MenuLayoutHorizontal,
 };
 
 // ---------------------------------------------------------------------------
@@ -1673,6 +1677,8 @@ void App::setupView(const Preferences& startup)
     m_view.restoreStack(startup.scopeStack);
     m_view.setGraticule(startup.showGraticule);
     m_view.setZoom(startup.vectorscopeZoom);
+    m_view.setOrientation(orientationFromInt(startup.layoutOrientation));
+    m_view.setWeights(startup.layoutWeights);
     // The intensity control is derived from each trace's saved gain; smoothing
     // is the host's own per-scope value, read straight from the preferences.
     const auto startupSmoothing = [&](std::string_view id, double fallback) -> float {
@@ -1738,6 +1744,7 @@ void App::createScopeTextures()
     m_panePoints.assign(m_scopeRegistry.scopes().size(), ImVec2());
     for (std::size_t i = 0; i < m_scopeRegistry.scopes().size(); ++i) {
         m_paneIds.push_back("##pane" + std::to_string(i));
+        m_dividerIds.push_back("##divider" + std::to_string(i));
     }
 }
 
@@ -2597,6 +2604,8 @@ void App::persistPreferences()
     preferences.scopeStack = m_view.stackTokens();
     preferences.showGraticule = m_view.graticule();
     preferences.vectorscopeZoom = m_view.zoom();
+    preferences.layoutOrientation = orientationToInt(m_view.orientation());
+    preferences.layoutWeights = m_view.weightsSnapshot();
     preferences.shortcuts = m_shortcuts;
     preferences.scopeShortcuts = m_scopeShortcuts;
     glfwGetWindowPos(m_window, &preferences.windowX, &preferences.windowY);
@@ -3199,12 +3208,11 @@ void App::drawCursorReadout()
 
 void App::drawScopePanes()
 {
-    // The enabled scopes stack in a fixed order, splitting the window along its
-    // longer axis. A scope's pane point and rect live at its own identity index,
-    // so the adaptive block and the context menu read back the right pane.
+    // The enabled scopes stack in activation order along the chosen axis, each
+    // pane sized by its weight. A scope's pane point and rect live at its own
+    // identity index, so the adaptive block and the context menu read back the
+    // right pane.
     m_paneRects.assign(m_scopeRegistry.scopes().size(), ImVec4());
-    const int paneCount = static_cast<int>(m_view.stack().size());
-    const ImVec2 area = ImGui::GetContentRegionAvail();
     if (!m_captureController->permissionGranted()) {
         drawCaptureHelp("SideScopes cannot see the screen",
                         {
@@ -3215,27 +3223,119 @@ void App::drawScopePanes()
                             "3. Quit and reopen SideScopes",
                         },
                         true);
-    } else if (m_captureController->dead()) {
+
+        return;
+    }
+    if (m_captureController->dead()) {
         const std::string status = m_captureController->status();
         drawCaptureHelp("Screen capture was interrupted", {status, "Reconnecting automatically..."}, false);
-    } else if (paneCount <= 1) {
-        if (paneCount == 1) {
-            drawScopeById(m_view.stack().front());
-        }
-    } else {
-        const bool horizontal = area.x >= area.y;
-        const ImVec2 spacing = ImGui::GetStyle().ItemSpacing;
-        const ImVec2 paneSize = horizontal ? ImVec2((area.x - spacing.x * (paneCount - 1)) / paneCount, area.y)
-                                           : ImVec2(area.x, (area.y - spacing.y * (paneCount - 1)) / paneCount);
-        for (int pane = 0; pane < paneCount; ++pane) {
-            ImGui::BeginChild(m_paneIds[static_cast<std::size_t>(pane)].c_str(), paneSize);
-            drawScopeById(m_view.stack()[static_cast<std::size_t>(pane)]);
-            ImGui::EndChild();
-            if (horizontal && pane + 1 < paneCount) {
+
+        return;
+    }
+    const std::vector<std::string>& stack = m_view.stack();
+    if (stack.size() == 1) {
+        drawScopeById(stack.front());
+    } else if (stack.size() > 1) {
+        drawScopeStack();
+    }
+}
+
+void App::drawScopeStack()
+{
+    // Weights split the axis; a divider between each neighboring pair is a thin
+    // grab strip that resizes them. Item spacing is zeroed so panes and dividers
+    // tile the area exactly, and restored inside each pane so scope contents
+    // keep their normal breathing room.
+    const ImVec2 area = ImGui::GetContentRegionAvail();
+    const int count = static_cast<int>(m_view.stack().size());
+    const bool sideBySide = resolveSplitDirection(m_view.orientation(), area.x, area.y) == SplitDirection::SideBySide;
+    const float divider = DividerThickness * m_uiScale;
+    const float axisLength = (sideBySide ? area.x : area.y) - divider * static_cast<float>(count - 1);
+    const std::vector<float> lengths = paneLengths(m_view.stackWeights(), axisLength, MinPaneLength * m_uiScale);
+    const ImVec2 spacing = ImGui::GetStyle().ItemSpacing;
+
+    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0.0f, 0.0f));
+    for (int pane = 0; pane < count; ++pane) {
+        const auto index = static_cast<std::size_t>(pane);
+        const ImVec2 paneSize = sideBySide ? ImVec2(lengths[index], area.y) : ImVec2(area.x, lengths[index]);
+        ImGui::BeginChild(m_paneIds[index].c_str(), paneSize);
+        ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, spacing);
+        drawScopeById(m_view.stack()[index]);
+        ImGui::PopStyleVar();
+        ImGui::EndChild();
+        if (pane + 1 < count) {
+            if (sideBySide) {
+                ImGui::SameLine();
+            }
+            drawPaneDivider(pane, sideBySide, divider, area, lengths);
+            if (sideBySide) {
                 ImGui::SameLine();
             }
         }
     }
+    ImGui::PopStyleVar();
+}
+
+void App::drawPaneDivider(int leftPane, bool sideBySide, float thickness, const ImVec2& area,
+                          const std::vector<float>& lengths)
+{
+    const ImVec2 size = sideBySide ? ImVec2(thickness, area.y) : ImVec2(area.x, thickness);
+    ImGui::InvisibleButton(m_dividerIds[static_cast<std::size_t>(leftPane)].c_str(), size);
+    const bool active = ImGui::IsItemActive();
+    const bool hovered = ImGui::IsItemHovered();
+    if (hovered || active) {
+        ImGui::SetMouseCursor(sideBySide ? ImGuiMouseCursor_ResizeEW : ImGuiMouseCursor_ResizeNS);
+    }
+    paintDivider(sideBySide, hovered || active);
+    if (active) {
+        adjustDividerWeights(leftPane, sideBySide ? ImGui::GetIO().MouseDelta.x : ImGui::GetIO().MouseDelta.y, lengths);
+    }
+    if (hovered && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
+        equalizeDividerWeights(leftPane);
+    }
+}
+
+void App::paintDivider(bool sideBySide, bool highlighted)
+{
+    const ImVec2 min = ImGui::GetItemRectMin();
+    const ImVec2 max = ImGui::GetItemRectMax();
+    ImDrawList* dividerDraw = ImGui::GetWindowDrawList();
+    const ImU32 color = ImGui::GetColorU32(highlighted ? ImGuiCol_SeparatorActive : ImGuiCol_Separator);
+    if (sideBySide) {
+        const float mid = (min.x + max.x) * 0.5f;
+        dividerDraw->AddLine(ImVec2(mid, min.y + 2.0f), ImVec2(mid, max.y - 2.0f), color, 1.0f);
+    } else {
+        const float mid = (min.y + max.y) * 0.5f;
+        dividerDraw->AddLine(ImVec2(min.x + 2.0f, mid), ImVec2(max.x - 2.0f, mid), color, 1.0f);
+    }
+}
+
+void App::adjustDividerWeights(int leftPane, float deltaPixels, const std::vector<float>& lengths)
+{
+    if (deltaPixels == 0.0f) {
+        return;
+    }
+    const auto left = static_cast<std::size_t>(leftPane);
+    const std::string& leftId = m_view.stack()[left];
+    const std::string& rightId = m_view.stack()[left + 1];
+    const auto [newLeft, newRight] = dragDividerWeights(m_view.weight(leftId), m_view.weight(rightId), lengths[left],
+                                                        lengths[left + 1], deltaPixels, MinPaneLength * m_uiScale);
+    m_view.setWeight(leftId, newLeft);
+    m_view.setWeight(rightId, newRight);
+}
+
+void App::equalizeDividerWeights(int leftPane)
+{
+    // Double-click reset: the two neighbors share their combined weight evenly,
+    // leaving every other pane untouched.
+    const auto left = static_cast<std::size_t>(leftPane);
+    const std::string& leftId = m_view.stack()[left];
+    const std::string& rightId = m_view.stack()[left + 1];
+    const float average = (m_view.weight(leftId) + m_view.weight(rightId)) * 0.5f;
+    m_view.setWeight(leftId, average);
+    m_view.setWeight(rightId, average);
+    m_nextPreferencesSave = glfwGetTime() + 1.0;
+    m_lastActivity = glfwGetTime();
 }
 
 void App::drawScopeById(std::string_view id)
@@ -3557,6 +3657,16 @@ void App::appendPerScopeOptions(std::vector<NativeMenuItem>& menu, std::vector<P
     }
 }
 
+void App::appendLayoutSubmenu(std::vector<NativeMenuItem>& menu)
+{
+    const LayoutOrientation current = m_view.orientation();
+    menuSubmenu(menu, "Layout");
+    menuAction(menu, "Automatic", MenuLayoutAuto, current == LayoutOrientation::Automatic);
+    menuAction(menu, "Vertical (stacked)", MenuLayoutVertical, current == LayoutOrientation::Vertical);
+    menuAction(menu, "Horizontal (side by side)", MenuLayoutHorizontal, current == LayoutOrientation::Horizontal);
+    menuEndSubmenu(menu);
+}
+
 void App::appendRegionAndAppSection(std::vector<NativeMenuItem>& menu)
 {
     menuSeparator(menu);
@@ -3614,6 +3724,7 @@ void App::buildContextMenu(int clickedPane, std::vector<NativeMenuItem>& menu,
     if (clickedPane < 0) {
         appendPerScopeOptions(menu, paramActions);
     }
+    appendLayoutSubmenu(menu);
     appendRegionAndAppSection(menu);
 }
 
@@ -3632,6 +3743,7 @@ void App::dispatchMenuChoice(int chosen, const std::vector<ParamMenuAction>& par
     dispatchScopeToggleMenu(chosen);
     dispatchRegionMenu(chosen);
     dispatchViewMenu(chosen);
+    dispatchLayoutMenu(chosen);
     m_lastActivity = glfwGetTime();
     m_nextPreferencesSave = glfwGetTime() + 1.0;
 }
@@ -3744,6 +3856,24 @@ void App::dispatchViewMenu(int chosen)
         break;
     case MenuQuit:
         glfwSetWindowShouldClose(m_window, GLFW_TRUE);
+        break;
+    default:
+        break;
+    }
+}
+
+void App::dispatchLayoutMenu(int chosen)
+{
+    // Orientation is a direct set; persistence rides dispatchMenuChoice's tail.
+    switch (chosen) {
+    case MenuLayoutAuto:
+        m_view.setOrientation(LayoutOrientation::Automatic);
+        break;
+    case MenuLayoutVertical:
+        m_view.setOrientation(LayoutOrientation::Vertical);
+        break;
+    case MenuLayoutHorizontal:
+        m_view.setOrientation(LayoutOrientation::Horizontal);
         break;
     default:
         break;

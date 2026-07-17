@@ -143,6 +143,57 @@ void ScopeView::setZoom(int level)
     m_zoom = level;
 }
 
+LayoutOrientation ScopeView::orientation() const
+{
+    return m_orientation;
+}
+
+void ScopeView::setOrientation(LayoutOrientation orientation)
+{
+    m_orientation = orientation;
+}
+
+float ScopeView::weight(std::string_view id) const
+{
+    const auto at = m_weights.find(id);
+
+    return at != m_weights.end() ? at->second : 1.0f;
+}
+
+void ScopeView::setWeight(std::string_view id, float value)
+{
+    m_weights[std::string{id}] = value;
+}
+
+std::vector<float> ScopeView::stackWeights() const
+{
+    std::vector<float> weights;
+    weights.reserve(m_stack.size());
+    for (const std::string& id : m_stack) {
+        weights.push_back(weight(id));
+    }
+
+    return weights;
+}
+
+void ScopeView::setWeights(const std::map<std::string, double>& weights)
+{
+    m_weights.clear();
+    for (const auto& [id, value] : weights) {
+        m_weights[id] = static_cast<float>(value);
+    }
+}
+
+std::map<std::string, double> ScopeView::weightsSnapshot() const
+{
+    std::map<std::string, double> weights;
+    for (const auto& [id, value] : m_weights) {
+        weights[id] = value;
+    }
+
+    return weights;
+}
+
 float ScopeView::intensity(std::string_view id) const
 {
     const auto at = m_intensity.find(controlKey(id));

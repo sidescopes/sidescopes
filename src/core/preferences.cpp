@@ -202,6 +202,65 @@ void seedParadeFromWaveform(Preferences& preferences)
     }
 }
 
+// Per-scope pane weights serialize on one line as id:weight pairs joined by
+// commas; scope ids never carry a colon or a comma, so the split is
+// unambiguous.
+std::string encodeWeights(const std::map<std::string, double>& weights)
+{
+    std::ostringstream out;
+    bool first = true;
+    for (const auto& [id, weight] : weights) {
+        if (!first) {
+            out << ',';
+        }
+        out << id << ':' << weight;
+        first = false;
+    }
+
+    return out.str();
+}
+
+// Parses the id:weight,id:weight form back into a map, dropping malformed pairs
+// and any non-positive weight.
+std::map<std::string, double> decodeWeights(const std::string& encoded)
+{
+    std::map<std::string, double> weights;
+    std::size_t at = 0;
+    while (at < encoded.size()) {
+        const auto comma = encoded.find(',', at);
+        const std::string pair = encoded.substr(at, comma == std::string::npos ? std::string::npos : comma - at);
+        if (const auto colon = pair.find(':'); colon != std::string::npos && colon > 0) {
+            const double weight = std::strtod(pair.c_str() + colon + 1, nullptr);
+            if (weight > 0.0) {
+                weights[pair.substr(0, colon)] = weight;
+            }
+        }
+        if (comma == std::string::npos) {
+            break;
+        }
+        at = comma + 1;
+    }
+
+    return weights;
+}
+
+// An orientation is 0 automatic, 1 vertical, or 2 horizontal; anything else
+// falls back to automatic, so a corrupt value never wedges the layout.
+int cleanedOrientation(int value)
+{
+    return value >= 0 && value <= 2 ? value : 0;
+}
+
+// The live layout state: the split orientation and the current pane weights.
+void readLiveLayout(const std::map<std::string, std::string, std::less<>>& values, Preferences& preferences)
+{
+    readInt(values, "layout_orientation", preferences.layoutOrientation);
+    preferences.layoutOrientation = cleanedOrientation(preferences.layoutOrientation);
+    if (const auto found = values.find("layout_weights"); found != values.end()) {
+        preferences.layoutWeights = decodeWeights(found->second);
+    }
+}
+
 // The oldest builds stored a single view_mode; the next generation stored a
 // visible_scopes bit set that supersedes it. Returns the resulting bit set,
 // defaulting to the vectorscope alone.
@@ -310,6 +369,13 @@ void migrateScopeStack(const std::map<std::string, std::string, std::less<>>& va
     preferences.scopeStack = cleanedScopeStack(preferences.scopeStack, preferences);
 }
 
+// Writes the live layout state: the split orientation and the pane weights.
+void writeLayout(std::ostream& out, const Preferences& preferences)
+{
+    out << "layout_orientation=" << preferences.layoutOrientation << '\n'
+        << "layout_weights=" << encodeWeights(preferences.layoutWeights) << '\n';
+}
+
 }  // namespace
 
 Preferences loadPreferences(const std::filesystem::path& file)
@@ -336,6 +402,8 @@ Preferences loadPreferences(const std::filesystem::path& file)
     if (preferences.vectorscopeZoom != 2 && preferences.vectorscopeZoom != 4) {
         preferences.vectorscopeZoom = 1;
     }
+
+    readLiveLayout(values, preferences);
 
     readShortcuts(values, preferences.shortcuts);
     readScopeShortcuts(values, preferences);
@@ -382,6 +450,7 @@ bool savePreferences(const Preferences& preferences, const std::filesystem::path
     for (const auto& [id, letter] : preferences.scopeShortcuts) {
         out << "shortcut_" << id << '=' << letter << '\n';
     }
+    writeLayout(out, preferences);
 
     std::ofstream output(file, std::ios::trunc);
     if (!output) {

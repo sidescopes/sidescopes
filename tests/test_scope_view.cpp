@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 #include <cstdint>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -237,6 +238,62 @@ TEST_CASE("The magnify zoom round-trips and is stored verbatim")
     // preferences boundary, not here, so an off-scale value is stored as is.
     view.setZoom(3);
     CHECK(view.zoom() == 3);
+}
+
+TEST_CASE("The layout orientation round-trips and starts automatic")
+{
+    ScopeView view{registry()};
+    CHECK(view.orientation() == LayoutOrientation::Automatic);  // the historical split
+    view.setOrientation(LayoutOrientation::Horizontal);
+    CHECK(view.orientation() == LayoutOrientation::Horizontal);
+    view.setOrientation(LayoutOrientation::Vertical);
+    CHECK(view.orientation() == LayoutOrientation::Vertical);
+}
+
+TEST_CASE("Pane weights default to one and are tracked per scope")
+{
+    ScopeView view{registry()};
+    // An untouched scope weighs 1, so equal weights reproduce the even split.
+    CHECK(view.weight(VectorscopeScopeId) == 1.0f);
+    view.setWeight(VectorscopeScopeId, 2.5f);
+    view.setWeight(HistogramScopeId, 0.5f);
+    CHECK(view.weight(VectorscopeScopeId) == 2.5f);
+    CHECK(view.weight(HistogramScopeId) == 0.5f);
+    // A scope never resized keeps the default.
+    CHECK(view.weight(WaveformScopeId) == 1.0f);
+}
+
+TEST_CASE("Stack weights follow the visible order")
+{
+    ScopeView view{registry()};
+    view.restoreStack("VWH");
+    view.setWeight(VectorscopeScopeId, 3.0f);
+    view.setWeight(HistogramScopeId, 0.5f);
+    // The waveform is untouched, so it reports the default weight in position.
+    CHECK(view.stackWeights() == std::vector<float>{3.0f, 1.0f, 0.5f});
+}
+
+TEST_CASE("Setting weights in bulk replaces every stored weight")
+{
+    ScopeView view{registry()};
+    view.setWeight(VectorscopeScopeId, 4.0f);
+    view.setWeights({{WaveformScopeId, 2.0}, {HistogramScopeId, 0.25}});
+    // The prior vectorscope weight is gone (back to the default); the new ones
+    // apply. This is how a loaded preset takes over the layout.
+    CHECK(view.weight(VectorscopeScopeId) == 1.0f);
+    CHECK(view.weight(WaveformScopeId) == 2.0f);
+    CHECK(view.weight(HistogramScopeId) == 0.25f);
+}
+
+TEST_CASE("The weights snapshot carries only the stored entries")
+{
+    ScopeView view{registry()};
+    view.setWeight(VectorscopeScopeId, 1.5f);
+    view.setWeight(WaveformScopeId, 0.5f);
+    const std::map<std::string, double> snapshot = view.weightsSnapshot();
+    CHECK(snapshot.size() == 2);
+    CHECK(snapshot.at(VectorscopeScopeId) == 1.5);
+    CHECK(snapshot.at(WaveformScopeId) == 0.5);
 }
 
 TEST_CASE("Intensity and smoothing are tracked per trace")

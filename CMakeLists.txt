@@ -350,6 +350,7 @@ if(APPLE OR WIN32)
         src/app/overlay_style.cpp
         src/app/param_menu.cpp
         src/app/pin_board.cpp
+        src/app/scope_layout.cpp
         src/app/scope_registry.cpp
         src/app/scope_view.cpp
         src/app/version.cpp

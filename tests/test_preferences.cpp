@@ -411,4 +411,49 @@ TEST_CASE("Preferences read a non-numeric gain as zero")
     CHECK(param(loaded, WaveformId, "gain") == 0.0);
 }
 
+TEST_CASE("Preferences round-trip the live layout orientation and weights")
+{
+    Preferences saved;
+    saved.layoutOrientation = 2;  // horizontal
+    saved.layoutWeights[VectorscopeId] = 2.5;
+    saved.layoutWeights[HistogramId] = 0.5;
+
+    const TempFile file("layout-live.txt");
+    REQUIRE(savePreferences(saved, file.path()));
+
+    const Preferences loaded = loadPreferences(file.path());
+    CHECK(loaded.layoutOrientation == 2);
+    CHECK(loaded.layoutWeights.at(VectorscopeId) == 2.5);
+    CHECK(loaded.layoutWeights.at(HistogramId) == 0.5);
+}
+
+TEST_CASE("Preferences default the layout to automatic with no weights")
+{
+    const TempFile file("layout-missing.txt");
+    const Preferences loaded = loadPreferences(file.path());
+    CHECK(loaded.layoutOrientation == 0);  // automatic: the historical split
+    CHECK(loaded.layoutWeights.empty());
+}
+
+TEST_CASE("Preferences clamp an out-of-range layout orientation")
+{
+    const TempFile file("layout-bad-orientation.txt");
+    file.write("layout_orientation=7\n");
+
+    const Preferences loaded = loadPreferences(file.path());
+    CHECK(loaded.layoutOrientation == 0);
+}
+
+TEST_CASE("Preferences drop malformed live weight pairs")
+{
+    // The weights list is id:weight pairs; a pair without a colon, and any
+    // non-positive weight, is discarded while the valid pairs survive.
+    const TempFile file("layout-bad-weights.txt");
+    file.write("layout_weights=org.sidescopes.vectorscope:2,garbage,org.sidescopes.waveform:-1\n");
+
+    const Preferences loaded = loadPreferences(file.path());
+    CHECK(loaded.layoutWeights.size() == 1);
+    CHECK(loaded.layoutWeights.at(VectorscopeId) == 2.0);
+}
+
 }  // namespace sidescopes
