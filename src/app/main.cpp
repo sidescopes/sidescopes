@@ -1573,8 +1573,19 @@ int main()
         return at != projectionInstances.end() ? &at->second : nullptr;
     };
     // Shortcuts come from the preferences file: the key handler acts on
-    // them and the context menu displays them, resolved once here.
+    // them and the context menu displays them, resolved once here. Scope-toggle
+    // bindings are keyed by scope id; the file names only overrides, so every
+    // other scope resolves to its registry letter.
     const ShortcutBindings shortcuts = startup.shortcuts;
+    const std::map<std::string, std::string> scopeShortcuts = startup.scopeShortcuts;
+    const auto bindingFor = [&](std::string_view id) -> std::string {
+        if (const auto custom = scopeShortcuts.find(std::string{id}); custom != scopeShortcuts.end()) {
+            return custom->second;
+        }
+        const HostScope* scope = scopeRegistry.byId(id);
+
+        return scope != nullptr && scope->letter != 0 ? std::string(1, scope->letter) : std::string{};
+    };
     const auto keyFor = [](const std::string& name) -> ImGuiKey {
         if (name == "Escape") {
             return ImGuiKey_Escape;
@@ -1825,10 +1836,11 @@ int main()
         preferences.scopeParams.erase(ParadeScopeId);
         preferences.scopeParams[VectorscopeScopeId]["smoothing_ms"] = view.smoothing(VectorscopeScopeId);
         preferences.scopeParams[WaveformScopeId]["smoothing_ms"] = view.smoothing(WaveformScopeId);
-        preferences.scopeStack = view.stackLetters();
+        preferences.scopeStack = view.stackTokens();
         preferences.showGraticule = view.graticule();
         preferences.vectorscopeZoom = view.zoom();
         preferences.shortcuts = shortcuts;
+        preferences.scopeShortcuts = scopeShortcuts;
         glfwGetWindowPos(window, &preferences.windowX, &preferences.windowY);
         glfwGetWindowSize(window, &preferences.windowWidth, &preferences.windowHeight);
         if (!savePreferences(preferences, preferencesFilePath())) {
@@ -2082,31 +2094,30 @@ int main()
         const bool systemChord = modifiers.command || modifiers.control || modifiers.option;
 
         // Per-scope toolbar chrome, keyed by id: the button id, display name,
-        // shortcut binding, and tooltip suffix. Phase 2 moves the name onto
-        // the descriptor and the binding onto a data-driven table.
+        // and tooltip suffix. The shortcut is resolved by id through bindingFor.
+        // Phase 2 moves the name onto the descriptor.
         struct ScopeChrome
         {
             const char* buttonId;
             const char* name;
-            const std::string* binding;
             const char* extra;
         };
 
         const auto chromeFor = [&](std::string_view id) -> ScopeChrome {
             if (id == VectorscopeScopeId) {
-                return {"##toggle-vectorscope", "Vectorscope", &shortcuts.vectorscope, ""};
+                return {"##toggle-vectorscope", "Vectorscope", ""};
             }
             if (id == WaveformScopeId) {
-                return {"##toggle-waveform", "Waveform", &shortcuts.waveform, "; styles in the right-click menu"};
+                return {"##toggle-waveform", "Waveform", "; styles in the right-click menu"};
             }
             if (id == ParadeScopeId) {
-                return {"##toggle-waveform-parade", "RGB parade", &shortcuts.parade, ""};
+                return {"##toggle-waveform-parade", "RGB parade", ""};
             }
             if (id == HistogramScopeId) {
-                return {"##toggle-histogram", "Histogram", &shortcuts.histogram, ""};
+                return {"##toggle-histogram", "Histogram", ""};
             }
 
-            return {"##toggle-color-picker", "Color picker", &shortcuts.colorPicker, ""};
+            return {"##toggle-color-picker", "Color picker", ""};
         };
         // Tooltips name the configured shortcut, not an assumed one.
         char tooltip[96];
@@ -2122,7 +2133,7 @@ int main()
             const ScopeChrome chrome = chromeFor(scope.id);
             const char letter[2] = {scope.letter, '\0'};
             if (scopeToggleButton(chrome.buttonId, letter, view.shows(scope.id),
-                                  scopeTooltip(chrome.name, *chrome.binding, chrome.extra))) {
+                                  scopeTooltip(chrome.name, bindingFor(scope.id), chrome.extra))) {
                 chooseScope(scope.id, stackModifier);
             }
             ImGui::SameLine(0.0f, 2.0f);
@@ -2163,20 +2174,12 @@ int main()
             glfwSetWindowShouldClose(window, GLFW_TRUE);
         }
         if (!io.WantTextInput && !systemChord) {
-            if (pressed(shortcuts.vectorscope)) {
-                chooseScope(VectorscopeScopeId, stackModifier);
-            }
-            if (pressed(shortcuts.waveform)) {
-                chooseScope(WaveformScopeId, stackModifier);
-            }
-            if (pressed(shortcuts.parade)) {
-                chooseScope(ParadeScopeId, stackModifier);
-            }
-            if (pressed(shortcuts.histogram)) {
-                chooseScope(HistogramScopeId, stackModifier);
-            }
-            if (pressed(shortcuts.colorPicker)) {
-                chooseScope(ColorPickerScopeId, stackModifier);
+            // Each scope's toggle key is resolved by id; a letterless scope has
+            // an empty binding, which never matches a press.
+            for (const HostScope& scope : scopeRegistry.scopes()) {
+                if (pressed(bindingFor(scope.id))) {
+                    chooseScope(scope.id, stackModifier);
+                }
             }
             if (pressed(shortcuts.pickWindow)) {
                 wantRegionPick = RegionPickerMode::PickWindows;
@@ -2507,12 +2510,15 @@ int main()
 
             submenu("Scopes");
             action("Vectorscope", MenuShowVectorscope, view.shows(VectorscopeScopeId),
-                   shortcutLabel(shortcuts.vectorscope));
-            action("Waveform", MenuShowWaveform, view.shows(WaveformScopeId), shortcutLabel(shortcuts.waveform));
-            action("RGB Parade", MenuShowWaveformParade, view.shows(ParadeScopeId), shortcutLabel(shortcuts.parade));
-            action("Histogram", MenuShowHistogram, view.shows(HistogramScopeId), shortcutLabel(shortcuts.histogram));
+                   shortcutLabel(bindingFor(VectorscopeScopeId)));
+            action("Waveform", MenuShowWaveform, view.shows(WaveformScopeId),
+                   shortcutLabel(bindingFor(WaveformScopeId)));
+            action("RGB Parade", MenuShowWaveformParade, view.shows(ParadeScopeId),
+                   shortcutLabel(bindingFor(ParadeScopeId)));
+            action("Histogram", MenuShowHistogram, view.shows(HistogramScopeId),
+                   shortcutLabel(bindingFor(HistogramScopeId)));
             action("Color Picker", MenuShowColorPicker, view.shows(ColorPickerScopeId),
-                   shortcutLabel(shortcuts.colorPicker));
+                   shortcutLabel(bindingFor(ColorPickerScopeId)));
             endSubmenu();
 
             // On a background or toolbar click, each visible scope's options

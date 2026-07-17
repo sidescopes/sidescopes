@@ -217,6 +217,18 @@ TEST_CASE("Preferences keep the color picker in the stack")
     CHECK(loaded.scopeStack == "CV");
 }
 
+TEST_CASE("Preferences carry bracketed id tokens through the stack")
+{
+    // A letterless scope rides the stack as [id]; the file cleaner passes the
+    // token through untouched for the registry to resolve, deduplicating whole
+    // tokens and mixing freely with legacy letters.
+    const TempFile file("id-token-stack.txt");
+    file.write("scope_stack=V[org.sidescopes.test.custom]V[org.sidescopes.test.custom]H\n");
+
+    const Preferences loaded = loadPreferences(file.path());
+    CHECK(loaded.scopeStack == "V[org.sidescopes.test.custom]H");
+}
+
 TEST_CASE("Preferences tolerate unknown keys and malformed lines")
 {
     const TempFile file("forward-compat.txt");
@@ -230,15 +242,115 @@ TEST_CASE("Preferences tolerate unknown keys and malformed lines")
     CHECK(param(loaded, VectorscopeId, "gain") == 3.0);
 }
 
-TEST_CASE("Preferences reject a malformed shortcut binding")
+TEST_CASE("Preferences load a whole legacy file to the same live state")
+{
+    // A realistic file written by the last typed build: legacy per-scope keys,
+    // a letter stack, the inverted per-channel flag, a per-name shortcut. Every
+    // value must land exactly where the new build reads it, or the owner loses
+    // settings silently on the first launch.
+    const TempFile file("legacy-whole.txt");
+    file.write(
+        "vectorscope_gain=5.0\n"
+        "vectorscope_stride=2\n"
+        "vectorscope_smoothing_ms=90\n"
+        "waveform_gain=0.08\n"
+        "waveform_stride=1\n"
+        "waveform_smoothing_ms=110\n"
+        "histogram_stride=3\n"
+        "matrix=0\n"
+        "trace_response=1\n"
+        "waveform_mode=4\n"
+        "histogram_per_channel=1\n"
+        "scope_stack=VWH\n"
+        "show_graticule=0\n"
+        "vectorscope_zoom=2\n"
+        "window_x=100\n"
+        "window_width=500\n"
+        "shortcut_waveform=X\n");
+
+    const Preferences loaded = loadPreferences(file.path());
+
+    CHECK(param(loaded, VectorscopeId, "gain") == 5.0);
+    CHECK(param(loaded, VectorscopeId, "stride") == 2.0);
+    CHECK(param(loaded, VectorscopeId, "smoothing_ms") == 90.0);
+    CHECK(param(loaded, VectorscopeId, "matrix") == 0.0);    // BT.601
+    CHECK(param(loaded, VectorscopeId, "response") == 1.0);  // Linear
+    CHECK(param(loaded, WaveformId, "gain") == 0.08);
+    CHECK(param(loaded, WaveformId, "stride") == 1.0);
+    CHECK(param(loaded, WaveformId, "smoothing_ms") == 110.0);
+    CHECK(param(loaded, WaveformId, "mode") == 2.0);  // ColoredLuma
+    CHECK(param(loaded, ParadeId, "gain") == 0.08);   // mirrors the waveform
+    CHECK(param(loaded, ParadeId, "stride") == 1.0);
+    CHECK(param(loaded, HistogramId, "stride") == 3.0);
+    CHECK(param(loaded, HistogramId, "style") == 0.0);  // per-channel inverts to choice 0
+    CHECK(loaded.scopeStack == "VWH");
+    CHECK_FALSE(loaded.showGraticule);
+    CHECK(loaded.vectorscopeZoom == 2);
+    CHECK(loaded.windowX == 100);
+    CHECK(loaded.windowWidth == 500);
+    const auto binding = loaded.scopeShortcuts.find(WaveformId);
+    REQUIRE(binding != loaded.scopeShortcuts.end());
+    CHECK(binding->second == "X");
+}
+
+TEST_CASE("Preferences reject a malformed action shortcut binding")
 {
     // A binding is one letter A-Z or "Escape"; anything else keeps the
     // default rather than storing an unusable chord.
     const TempFile file("bad-shortcut.txt");
-    file.write("shortcut_waveform=ab\n");
+    file.write("shortcut_draw_region=ab\n");
 
     const Preferences loaded = loadPreferences(file.path());
-    CHECK(loaded.shortcuts.waveform == "W");
+    CHECK(loaded.shortcuts.drawRegion == "D");
+}
+
+TEST_CASE("Preferences rekey a legacy scope shortcut to its id")
+{
+    // The retired shortcut_<name> key folds onto the scope id, so a hand-set
+    // binding survives the move to id-keyed bindings.
+    const TempFile file("legacy-shortcut.txt");
+    file.write("shortcut_waveform=X\n");
+
+    const Preferences loaded = loadPreferences(file.path());
+    const auto binding = loaded.scopeShortcuts.find(WaveformId);
+    REQUIRE(binding != loaded.scopeShortcuts.end());
+    CHECK(binding->second == "X");
+    // A malformed legacy binding is rejected, leaving the scope unbound so the
+    // host falls back to its letter.
+    CHECK(loaded.scopeShortcuts.find(VectorscopeId) == loaded.scopeShortcuts.end());
+}
+
+TEST_CASE("Preferences let a new scope shortcut win over its legacy name")
+{
+    // Both keys name the waveform's binding; the id-keyed key supersedes.
+    const TempFile file("shortcut-supersede.txt");
+    file.write("shortcut_waveform=X\nshortcut_org.sidescopes.waveform=Y\n");
+
+    const Preferences loaded = loadPreferences(file.path());
+    const auto binding = loaded.scopeShortcuts.find(WaveformId);
+    REQUIRE(binding != loaded.scopeShortcuts.end());
+    CHECK(binding->second == "Y");
+}
+
+TEST_CASE("Preferences write scope shortcuts under their id")
+{
+    // A saved override round-trips, and the file names it by id, not by the
+    // retired per-name key.
+    Preferences saved;
+    saved.scopeShortcuts[WaveformId] = "Y";
+
+    const TempFile file("shortcut-roundtrip.txt");
+    REQUIRE(savePreferences(saved, file.path()));
+
+    std::ifstream text(file.path());
+    std::string contents((std::istreambuf_iterator<char>(text)), std::istreambuf_iterator<char>());
+    CHECK(contents.find("shortcut_org.sidescopes.waveform=Y") != std::string::npos);
+    CHECK(contents.find("shortcut_waveform=") == std::string::npos);
+
+    const Preferences loaded = loadPreferences(file.path());
+    const auto binding = loaded.scopeShortcuts.find(WaveformId);
+    REQUIRE(binding != loaded.scopeShortcuts.end());
+    CHECK(binding->second == "Y");
 }
 
 TEST_CASE("Preferences clamp an out-of-range vectorscope zoom")

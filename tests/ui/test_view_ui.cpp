@@ -101,7 +101,7 @@ void viewGui(ImGuiTestContext*)
         h.pinBoard.clear();
     }
 
-    ImGui::Text("stack=%s pins=%d comparator=%d", h.scopeView.stackLetters().c_str(),
+    ImGui::Text("stack=%s pins=%d comparator=%d", h.scopeView.stackTokens().c_str(),
                 static_cast<int>(h.pinBoard.size()), h.pinBoard.comparator());
 
     ImGui::End();
@@ -128,12 +128,12 @@ void scopeToggles(ImGuiTestContext* ctx)
     // Clicking H stacks the histogram in activation order after W.
     ctx->ItemClick("H");
     IM_CHECK(h.scopeView.shows(HistogramScopeId));
-    IM_CHECK(h.scopeView.stackLetters() == "VWH");
+    IM_CHECK(h.scopeView.stackTokens() == "VWH");
 
     // Clicking W again toggles the waveform back off.
     ctx->ItemClick("W");
     IM_CHECK(!h.scopeView.shows(WaveformScopeId));
-    IM_CHECK(h.scopeView.stackLetters() == "VH");
+    IM_CHECK(h.scopeView.stackTokens() == "VH");
     IM_CHECK(!enables(WaveformScopeId));
 }
 

@@ -81,11 +81,23 @@ std::vector<std::string> ScopeView::enabledScopeIds() const
     return ids;
 }
 
-void ScopeView::restoreStack(const std::string& letters)
+void ScopeView::restoreStack(const std::string& tokens)
 {
     m_stack.clear();
-    for (const char letter : letters) {
-        if (const HostScope* scope = m_registry.byLetter(letter)) {
+    for (std::size_t at = 0; at < tokens.size();) {
+        const HostScope* scope = nullptr;
+        if (tokens[at] == '[') {
+            const auto close = tokens.find(']', at);
+            if (close == std::string::npos) {
+                break;
+            }
+            scope = m_registry.byId(tokens.substr(at + 1, close - at - 1));
+            at = close + 1;
+        } else {
+            scope = m_registry.byLetter(tokens[at]);
+            ++at;
+        }
+        if (scope != nullptr && !shows(scope->id)) {
             m_stack.push_back(scope->id);
         }
     }
@@ -94,17 +106,21 @@ void ScopeView::restoreStack(const std::string& letters)
     }
 }
 
-std::string ScopeView::stackLetters() const
+std::string ScopeView::stackTokens() const
 {
-    std::string letters;
+    std::string tokens;
     for (const std::string& id : m_stack) {
         const HostScope* scope = m_registry.byId(id);
-        if (scope && scope->letter != 0) {
-            letters += scope->letter;
+        if (scope != nullptr && scope->letter != 0) {
+            tokens += scope->letter;
+        } else {
+            tokens += '[';
+            tokens += id;
+            tokens += ']';
         }
     }
 
-    return letters;
+    return tokens;
 }
 
 bool ScopeView::graticule() const

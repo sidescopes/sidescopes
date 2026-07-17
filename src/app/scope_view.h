@@ -66,13 +66,16 @@ public:
     ///         worker), in activation order.
     [[nodiscard]] std::vector<std::string> enabledScopeIds() const;
 
-    /// Restores the stack from a preference letter string, falling back to the
-    /// vectorscope when it names nothing valid.
-    void restoreStack(const std::string& letters);
+    /// Restores the stack from a preference token string, falling back to the
+    /// vectorscope when it names nothing valid. A token is a bracketed `[id]`
+    /// resolved by id, or a bare letter resolved through the registry; a token
+    /// the registry does not know is dropped, and duplicates collapse.
+    void restoreStack(const std::string& tokens);
 
-    /// @return The stack as a preference letter string; letterless scopes emit
-    ///         nothing.
-    [[nodiscard]] std::string stackLetters() const;
+    /// @return The stack as a preference token string: one token per scope, a
+    ///         bracketed `[id]` for a letterless scope and its letter otherwise,
+    ///         so a letterless scope survives a save.
+    [[nodiscard]] std::string stackTokens() const;
 
     [[nodiscard]] bool graticule() const;
     void setGraticule(bool on);

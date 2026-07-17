@@ -18,6 +18,7 @@ constexpr char VectorscopeId[] = "org.sidescopes.vectorscope";
 constexpr char WaveformId[] = "org.sidescopes.waveform";
 constexpr char ParadeId[] = "org.sidescopes.parade";
 constexpr char HistogramId[] = "org.sidescopes.histogram";
+constexpr char ColorPickerId[] = "org.sidescopes.colorpicker";
 
 std::map<std::string, std::string, std::less<>> parseKeyValueLines(std::istream& input)
 {
@@ -58,33 +59,61 @@ void readLegacyDouble(const std::map<std::string, std::string, std::less<>>& val
 }
 
 // A shortcut binding is a single letter A-Z or "Escape"; anything else is
-// left alone so the default survives.
+// rejected so an unusable chord never lands in a binding.
+bool validBinding(const std::string& value)
+{
+    const bool letter = value.size() == 1 && value[0] >= 'A' && value[0] <= 'Z';
+
+    return letter || value == "Escape";
+}
+
+// Reads a validated binding, leaving the default when the key is absent or the
+// value is not a usable chord.
 void readShortcut(const std::map<std::string, std::string, std::less<>>& values, const char* key, std::string& out)
 {
-    const auto found = values.find(key);
-    if (found == values.end()) {
-        return;
-    }
-    const std::string& value = found->second;
-    const bool letter = value.size() == 1 && value[0] >= 'A' && value[0] <= 'Z';
-    if (letter || value == "Escape") {
-        out = value;
+    if (const auto found = values.find(key); found != values.end() && validBinding(found->second)) {
+        out = found->second;
     }
 }
 
+// The action bindings, keyed by their own names; the scope-toggle bindings are
+// keyed by scope id and read separately into the map.
 void readShortcuts(const std::map<std::string, std::string, std::less<>>& values, ShortcutBindings& shortcuts)
 {
-    readShortcut(values, "shortcut_vectorscope", shortcuts.vectorscope);
-    readShortcut(values, "shortcut_waveform", shortcuts.waveform);
-    readShortcut(values, "shortcut_parade", shortcuts.parade);
-    readShortcut(values, "shortcut_histogram", shortcuts.histogram);
-    readShortcut(values, "shortcut_color_picker", shortcuts.colorPicker);
     readShortcut(values, "shortcut_pick_window", shortcuts.pickWindow);
     readShortcut(values, "shortcut_draw_region", shortcuts.drawRegion);
     readShortcut(values, "shortcut_pick_faces", shortcuts.pickFaces);
     readShortcut(values, "shortcut_pin_color", shortcuts.pinColor);
     readShortcut(values, "shortcut_vectorscope_zoom", shortcuts.vectorscopeZoom);
     readShortcut(values, "shortcut_full_region", shortcuts.fullRegion);
+}
+
+// Reads the scope-toggle bindings into the map keyed by scope id. Each retired
+// per-name key folds onto its scope id first; a validated new shortcut_<id> key
+// supersedes it. Only overrides are stored; every other scope defaults to its
+// letter, which the host resolves.
+void readScopeShortcuts(const std::map<std::string, std::string, std::less<>>& values, Preferences& preferences)
+{
+    constexpr std::pair<const char*, const char*> Legacy[] = {
+        {"shortcut_vectorscope", VectorscopeId},
+        {"shortcut_waveform", WaveformId},
+        {"shortcut_parade", ParadeId},
+        {"shortcut_histogram", HistogramId},
+        {"shortcut_color_picker", ColorPickerId},
+    };
+    for (const auto& [key, id] : Legacy) {
+        if (const auto found = values.find(key); found != values.end() && validBinding(found->second)) {
+            preferences.scopeShortcuts[id] = found->second;
+        }
+    }
+
+    constexpr std::string_view NewPrefix = "shortcut_org.";
+    constexpr std::string_view KeyPrefix = "shortcut_";
+    for (const auto& [key, value] : values) {
+        if (key.rfind(NewPrefix, 0) == 0 && validBinding(value)) {
+            preferences.scopeShortcuts[key.substr(KeyPrefix.size())] = value;
+        }
+    }
 }
 
 // The retired waveform_mode enum int maps to the waveform module's style
@@ -222,27 +251,41 @@ std::string legacyScopeLetters(int visibleScopes, int storedWaveformMode)
     return stack;
 }
 
-// Keeps only known scope letters, each once, in order, defaulting to the
-// vectorscope. The retired L (a separate luma waveform) becomes the
-// waveform in its Luma style, unless an RGB waveform is already stacked,
-// which keeps the letter.
+// Cleans a stack token string, each token once, in order, defaulting to the
+// vectorscope. A bracketed `[id]` token passes through untouched for the
+// registry to resolve; a bare letter is kept only when it names a built-in.
+// The retired L (a separate luma waveform) becomes the waveform in its Luma
+// style, unless an RGB waveform is already stacked, which keeps the letter.
 std::string cleanedScopeStack(const std::string& stack, Preferences& preferences)
 {
     const bool hadWaveform = stack.find('W') != std::string::npos;
     std::string cleaned;
-    for (char letter : stack) {
-        if (letter == 'L') {
-            if (hadWaveform) {
+    for (std::size_t at = 0; at < stack.size();) {
+        std::string token;
+        if (stack[at] == '[') {
+            const auto close = stack.find(']', at);
+            if (close == std::string::npos) {
+                break;
+            }
+            token = stack.substr(at, close - at + 1);
+            at = close + 1;
+        } else {
+            char letter = stack[at];
+            ++at;
+            if (letter == 'L') {
+                if (hadWaveform) {
+                    continue;
+                }
+                letter = 'W';
+                preferences.scopeParams[WaveformId]["mode"] = 1.0;
+            }
+            if (std::string_view("VWRHC").find(letter) == std::string_view::npos) {
                 continue;
             }
-            letter = 'W';
-            preferences.scopeParams[WaveformId]["mode"] = 1.0;
+            token = std::string(1, letter);
         }
-        if (std::string_view("VWRHC").find(letter) == std::string_view::npos) {
-            continue;
-        }
-        if (cleaned.find(letter) == std::string::npos) {
-            cleaned += letter;
+        if (cleaned.find(token) == std::string::npos) {
+            cleaned += token;
         }
     }
 
@@ -295,6 +338,7 @@ Preferences loadPreferences(const std::filesystem::path& file)
     }
 
     readShortcuts(values, preferences.shortcuts);
+    readScopeShortcuts(values, preferences);
 
     readInt(values, "window_x", preferences.windowX);
     readInt(values, "window_y", preferences.windowY);
@@ -327,17 +371,17 @@ bool savePreferences(const Preferences& preferences, const std::filesystem::path
         << "window_y=" << preferences.windowY << '\n'
         << "window_width=" << preferences.windowWidth << '\n'
         << "window_height=" << preferences.windowHeight << '\n'
-        << "shortcut_vectorscope=" << preferences.shortcuts.vectorscope << '\n'
-        << "shortcut_waveform=" << preferences.shortcuts.waveform << '\n'
-        << "shortcut_parade=" << preferences.shortcuts.parade << '\n'
-        << "shortcut_histogram=" << preferences.shortcuts.histogram << '\n'
-        << "shortcut_color_picker=" << preferences.shortcuts.colorPicker << '\n'
         << "shortcut_pick_window=" << preferences.shortcuts.pickWindow << '\n'
         << "shortcut_draw_region=" << preferences.shortcuts.drawRegion << '\n'
         << "shortcut_pick_faces=" << preferences.shortcuts.pickFaces << '\n'
         << "shortcut_pin_color=" << preferences.shortcuts.pinColor << '\n'
         << "shortcut_vectorscope_zoom=" << preferences.shortcuts.vectorscopeZoom << '\n'
         << "shortcut_full_region=" << preferences.shortcuts.fullRegion << '\n';
+    // Scope-toggle bindings keyed by scope id: only overrides are written, each
+    // as shortcut_<id>, so a scope at its default letter needs no line.
+    for (const auto& [id, letter] : preferences.scopeShortcuts) {
+        out << "shortcut_" << id << '=' << letter << '\n';
+    }
 
     std::ofstream output(file, std::ios::trunc);
     if (!output) {

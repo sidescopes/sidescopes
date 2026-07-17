@@ -6,17 +6,13 @@
 
 namespace sidescopes {
 
-/// Keyboard bindings for every shortcut the application offers, editable
-/// in the preferences file. Each is a single letter A-Z or "Escape";
-/// anything else falls back to the default. Shift composes where an
-/// action documents it (stacking scopes, pinning the region average).
+/// Keyboard bindings for the non-scope actions the application offers, editable
+/// in the preferences file. Each is a single letter A-Z or "Escape"; anything
+/// else falls back to the default. Shift composes where an action documents it
+/// (pinning the region average). Scope-toggle bindings are keyed by scope id in
+/// @ref Preferences::scopeShortcuts, not here.
 struct ShortcutBindings
 {
-    std::string vectorscope = "V";
-    std::string waveform = "W";
-    std::string parade = "R";
-    std::string histogram = "H";
-    std::string colorPicker = "C";
     std::string pickWindow = "A";
     std::string drawRegion = "D";
     std::string pickFaces = "F";
@@ -46,10 +42,12 @@ struct Preferences
         {"org.sidescopes.waveform", {{"gain", 0.05}, {"stride", 1.0}, {"mode", 0.0}, {"smoothing_ms", 100.0}}},
         {"org.sidescopes.histogram", {{"stride", 1.0}, {"style", 0.0}}},
     };
-    /// The scopes on screen, one letter each in stacking order: V
-    /// vectorscope, W waveform, R RGB parade, H histogram, C color picker.
-    /// Never empty. The retired L (a separate luma waveform) is accepted
-    /// only as a legacy migration input, folded into W in its Luma style.
+    /// The scopes on screen in stacking order. New files store one token per
+    /// scope: a bracketed `[id]` for a letterless scope, otherwise the scope's
+    /// letter. Legacy files store bare letters (V vectorscope, W waveform, R
+    /// RGB parade, H histogram, C color picker); the retired L (a separate luma
+    /// waveform) is accepted only as a migration input, folded into W in its
+    /// Luma style. Never empty.
     std::string scopeStack = "V";
     bool showGraticule = true;
     /// Magnify-view factor for the vectorscope: 1, 2, or 4.
@@ -59,6 +57,11 @@ struct Preferences
     int windowWidth = 440;
     int windowHeight = 500;
     ShortcutBindings shortcuts;
+    /// Per-scope toggle bindings, keyed by scope id, holding only the overrides
+    /// a file names; every other scope defaults to its descriptor letter, which
+    /// the host supplies. A custom binding is a file edit away without a host UI
+    /// that assigns one.
+    std::map<std::string, std::string> scopeShortcuts;
 };
 
 /// Missing or unreadable files yield the defaults; malformed lines and

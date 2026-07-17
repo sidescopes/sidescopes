@@ -1,10 +1,12 @@
 #include <catch2/catch_test_macros.hpp>
+#include <cstdint>
 #include <string>
 #include <vector>
 
 #include "app/scope_registry.h"
 #include "app/scope_view.h"
 #include "modules/module_registry.h"
+#include "sidescopes/module.h"
 
 namespace sidescopes {
 namespace {
@@ -16,6 +18,52 @@ const ScopeRegistry& registry()
     static const ScopeRegistry instance{builtinModules()};
 
     return instance;
+}
+
+// A scope whose requested letter is the host-reserved 'C', so the registry
+// registers it letterless: the only way it can appear in the stack is by id.
+constexpr char LetterlessId[] = "org.sidescopes.test.letterless";
+
+bool trueInit()
+{
+    return true;
+}
+
+void noopDeinit()
+{
+}
+
+uint32_t oneScope()
+{
+    return 1;
+}
+
+SsScopeInstance* nullCreate(const char*, const SsHost*)
+{
+    return nullptr;
+}
+
+const SsScopeDescriptor LetterlessDescriptor{
+    LetterlessId, "Letterless", 'C', 0, 0, 0u, nullptr, 0u,
+};
+
+const SsScopeDescriptor* letterlessDescriptor(uint32_t index)
+{
+    return index == 0 ? &LetterlessDescriptor : nullptr;
+}
+
+const SsModuleEntry LetterlessModuleEntry{
+    SS_ABI_MAJOR, SS_ABI_MINOR, trueInit, noopDeinit, oneScope, letterlessDescriptor, nullCreate,
+};
+
+// A registry whose one module scope is letterless, alongside the appended host
+// color picker; a letterless scope can only ride the stack as an id token.
+ScopeRegistry letterlessRegistry()
+{
+    ModuleRegistry modules;
+    (void)modules.registerModule(LetterlessModuleEntry);
+
+    return ScopeRegistry{modules};
 }
 
 }  // namespace
@@ -99,22 +147,55 @@ TEST_CASE("The stack round-trips through preference letters")
 {
     ScopeView view{registry()};
     view.restoreStack("VWRHC");
-    CHECK(view.stackLetters() == "VWRHC");
+    CHECK(view.stackTokens() == "VWRHC");
     CHECK(view.stack().size() == 5);
 
     SECTION("unknown letters are ignored")
     {
         view.restoreStack("VxH");
-        CHECK(view.stackLetters() == "VH");
+        CHECK(view.stackTokens() == "VH");
     }
 
     SECTION("naming nothing valid falls back to the vectorscope")
     {
         view.restoreStack("zzz");
-        CHECK(view.stackLetters() == "V");
+        CHECK(view.stackTokens() == "V");
         view.restoreStack("");
-        CHECK(view.stackLetters() == "V");
+        CHECK(view.stackTokens() == "V");
     }
+}
+
+TEST_CASE("The stack reads scopes by bracketed id token")
+{
+    ScopeView view{registry()};
+    view.restoreStack("[org.sidescopes.histogram][org.sidescopes.waveform]");
+    CHECK(view.stack() == std::vector<std::string>{HistogramScopeId, WaveformScopeId});
+    // These built-ins carry letters, so they persist back as bare letters.
+    CHECK(view.stackTokens() == "HW");
+}
+
+TEST_CASE("A stack drops a letter the registry rejects but keeps a known id")
+{
+    // R11: letter validation runs through the registry, never a fixed string,
+    // so an unknown letter falls out while a valid id token is kept.
+    ScopeView view{registry()};
+    view.restoreStack("Q[org.sidescopes.histogram]");
+    CHECK(view.stack() == std::vector<std::string>{HistogramScopeId});
+}
+
+TEST_CASE("A letterless scope survives a save as an id token")
+{
+    // The only carrier for a letterless scope is its id: it must both restore
+    // from and persist back to a bracketed token, or it is silently dropped.
+    const ScopeRegistry letterless = letterlessRegistry();
+    const HostScope* scope = letterless.byId(LetterlessId);
+    REQUIRE(scope != nullptr);
+    REQUIRE(scope->letter == 0);
+
+    ScopeView view{letterless};
+    view.restoreStack(std::string("[") + LetterlessId + "]");
+    REQUIRE(view.stack() == std::vector<std::string>{LetterlessId});
+    CHECK(view.stackTokens() == std::string("[") + LetterlessId + "]");
 }
 
 TEST_CASE("The trace flash remembers which trace was adjusted")
