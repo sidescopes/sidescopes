@@ -198,8 +198,10 @@ NSCursor* buildPinCursor(const std::optional<FloatColor>& color)
     self.needsDisplay = YES;
 }
 
-// The smallest suggestion under the cursor wins, so a photo canvas beats
-// the window that contains it.
+// The suggestion under the cursor. Windows are front-to-back, so the first
+// one containing the point is the topmost there: the window that actually
+// shows at that point wins over any window peeking out from behind it. Faces
+// carry no depth, so the smallest box under the cursor wins for them instead.
 - (NSInteger)suggestionAtPoint:(NSPoint)point
 {
     NSInteger best = -1;
@@ -209,12 +211,17 @@ NSCursor* buildPinCursor(const std::optional<FloatColor>& color)
         if (!NSPointInRect(point, rect)) {
             continue;
         }
+        if (!self.facesMode) {
+            return static_cast<NSInteger>(index);
+        }
+
         const CGFloat area = rect.size.width * rect.size.height;
         if (area < bestArea) {
             bestArea = area;
             best = static_cast<NSInteger>(index);
         }
     }
+
     return best;
 }
 

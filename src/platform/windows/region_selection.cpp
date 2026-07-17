@@ -442,8 +442,10 @@ Gdiplus::RectF selectionRect(const PickerState& picker)
                               static_cast<double>(picker.dragCurrent.x), static_cast<double>(picker.dragCurrent.y)));
 }
 
-// The smallest suggestion under the cursor wins, so a photo canvas beats
-// the window that contains it.
+// The suggestion under the cursor. Windows are front-to-back, so the first one
+// containing the point is the topmost there: the window that actually shows at
+// that point wins over any window peeking out from behind it. Faces carry no
+// depth, so the smallest box under the cursor wins for them instead.
 int suggestionAtPoint(const PickerState& picker, POINT point)
 {
     int best = -1;
@@ -453,12 +455,17 @@ int suggestionAtPoint(const PickerState& picker, POINT point)
         if (!rect.Contains(static_cast<Gdiplus::REAL>(point.x), static_cast<Gdiplus::REAL>(point.y))) {
             continue;
         }
+        if (!picker.facesMode) {
+            return static_cast<int>(index);
+        }
+
         const float area = rect.Width * rect.Height;
         if (area < bestArea) {
             bestArea = area;
             best = static_cast<int>(index);
         }
     }
+
     return best;
 }
 
@@ -851,8 +858,8 @@ void pickerDrawDrag(PickerState& picker, HWND window, WPARAM wParam, POINT point
     }
 }
 
-// Window/face mode without a drag: the highlight follows the smallest
-// suggestion under the cursor.
+// Window/face mode without a drag: the highlight follows the suggestion under
+// the cursor.
 void pickerHoverMove(PickerState& picker, POINT point)
 {
     const int hovered = suggestionAtPoint(picker, point);
