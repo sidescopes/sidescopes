@@ -22,6 +22,7 @@ option(SIDESCOPES_BENCH "Build the opt-in benchmark suite" OFF)
 option(SIDESCOPES_WERROR "Treat compiler warnings as errors" OFF)
 option(SIDESCOPES_MODULES_DYNAMIC "Load built-in scope modules dynamically" OFF)
 option(SIDESCOPES_UI_TESTS "Build the Dear ImGui Test Engine UI-test target" OFF)
+option(SIDESCOPES_SPIKE_SETTINGS "Build the throwaway settings-window look-check spike" OFF)
 set(SIDESCOPES_SANITIZE "" CACHE STRING
     "Comma-separated sanitizers to build and link with (e.g. address,undefined or thread)")
 
@@ -239,6 +240,24 @@ if(APPLE OR WIN32)
             PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
     else()
         target_sources(imgui PRIVATE ${imgui_SOURCE_DIR}/backends/imgui_impl_opengl3.cpp)
+    endif()
+
+    # Throwaway settings-window look-check spike (opt-in, OFF by default). It
+    # reuses the fetched Dear ImGui and GLFW but renders through OpenGL on both
+    # platforms for identical pixels, so it needs the GL3 backend the shared
+    # imgui library only compiles on Windows; on macOS (Metal backend) the spike
+    # compiles it in itself and links the deprecated-but-adequate GL framework.
+    if(SIDESCOPES_SPIKE_SETTINGS)
+        add_executable(sidescopes_spike_settings spike/settings_window.cpp)
+        target_link_libraries(sidescopes_spike_settings PRIVATE imgui glfw)
+        if(APPLE)
+            target_sources(sidescopes_spike_settings PRIVATE
+                ${imgui_SOURCE_DIR}/backends/imgui_impl_opengl3.cpp)
+            target_link_libraries(sidescopes_spike_settings PRIVATE "-framework OpenGL")
+        else()
+            target_link_libraries(sidescopes_spike_settings PRIVATE opengl32)
+        endif()
+        sidescopes_target_defaults(sidescopes_spike_settings)
     endif()
 
     # The graphics backends live with the platform code but compile into
