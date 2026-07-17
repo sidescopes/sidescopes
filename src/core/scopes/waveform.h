@@ -65,6 +65,7 @@ public:
 
 private:
     void resize(int columns, int imageHeight);
+    void scatterRows(const FrameView& frame, IntRect region, int rowBegin, int rowEnd, uint32_t* bins) const;
     void mapBinsToImage(uint64_t sampledRows);
     void correctBinDensities();
     void buildParade(const uint32_t* redPlane, const uint32_t* greenPlane, const uint32_t* bluePlane);
@@ -82,6 +83,9 @@ private:
     // Planes: red, green, blue, luma — each columns x Levels, a row per
     // level with level 255 in row zero.
     std::vector<uint32_t> m_bins;
+    // Per-chunk private plane sets for the parallel accumulate, merged into
+    // m_bins by integer addition.
+    std::vector<uint32_t> m_threadBins;
     // Parade scratch: per-channel window-maxed planes feeding the shared
     // composer.
     std::vector<uint32_t> m_parade;

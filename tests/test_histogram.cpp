@@ -66,6 +66,26 @@ TEST_CASE("Histogram places uniform color at its channel values")
     CHECK(barHeight(scope.image(), 150, 0) == 0);
 }
 
+TEST_CASE("Histogram bins a tall region the same when it splits across threads")
+{
+    // A region tall enough to split across worker threads must bin each
+    // channel at its value exactly as the single-threaded path: the privatized
+    // per-thread bins merge back by integer addition.
+    TestFrame frame(32, 1024, 255);
+    frame.fillColumns(0, 32, Color{10, 150, 240});
+
+    Histogram scope;
+    HistogramSettings combined;
+    combined.style = HistogramStyle::Combined;
+    scope.configure(combined);
+    scope.accumulate(frame.view(), IntRect{0, 0, 32, 1024});
+
+    CHECK(barHeight(scope.image(), 10, 0) >= Histogram::Height - 20);
+    CHECK(barHeight(scope.image(), 150, 1) >= Histogram::Height - 20);
+    CHECK(barHeight(scope.image(), 240, 2) >= Histogram::Height - 20);
+    CHECK(barHeight(scope.image(), 150, 0) == 0);
+}
+
 TEST_CASE("Histogram bar heights order by pixel population")
 {
     // Three quarters at gray 64, one quarter at gray 200.

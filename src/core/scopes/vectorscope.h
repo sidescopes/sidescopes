@@ -62,6 +62,7 @@ public:
 private:
     void resize(int size);
     void rebuildTintTable();
+    void scatterRows(const FrameView& frame, IntRect region, int rowBegin, int rowEnd, uint32_t* bins) const;
     void mapBinsToImage(uint64_t sampleCount);
     void smoothCodeGrid();
     void adaptiveDensityEstimate(uint64_t sampleCount);
@@ -70,9 +71,10 @@ private:
 
     VectorscopeSettings m_settings;
     int m_imageSize = DefaultVectorscopeSize;
-    std::vector<uint32_t> m_bins;    // always CodeGridSize x CodeGridSize (code grid)
-    std::vector<float> m_smoothed;   // code grid, post-kernel densities
-    std::vector<float> m_upsampled;  // m_imageSize x m_imageSize when finer than CodeGridSize
+    std::vector<uint32_t> m_bins;        // always CodeGridSize x CodeGridSize (code grid)
+    std::vector<uint32_t> m_threadBins;  // per-chunk private code grids for the parallel accumulate
+    std::vector<float> m_smoothed;       // code grid, post-kernel densities
+    std::vector<float> m_upsampled;      // m_imageSize x m_imageSize when finer than CodeGridSize
     std::vector<uint8_t> m_tint;
     ScopeImage m_image;
 };

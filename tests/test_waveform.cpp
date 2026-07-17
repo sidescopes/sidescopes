@@ -51,6 +51,22 @@ TEST_CASE("Waveform in rgb mode plots each channel at its own level")
     CHECK(peakRows(scope.image(), 2) == std::vector<int>{255 - 240});
 }
 
+TEST_CASE("Waveform plots the same levels when a tall region splits across threads")
+{
+    // A region tall enough to split across worker threads must plot each
+    // channel on its own level exactly as the single-threaded path: the
+    // privatized per-thread planes merge back by integer addition.
+    TestFrame frame(32, 1024, 255);
+    frame.fill(Color{10, 150, 240});
+
+    Waveform scope;
+    scope.accumulate(frame.view(), IntRect{0, 0, 32, 1024});  // RGB is the default
+
+    CHECK(peakRows(scope.image(), 0) == std::vector<int>{255 - 10});
+    CHECK(peakRows(scope.image(), 1) == std::vector<int>{255 - 150});
+    CHECK(peakRows(scope.image(), 2) == std::vector<int>{255 - 240});
+}
+
 TEST_CASE("Waveform combined mode adds a white luma trace over rgb")
 {
     // Luma of (10, 150, 240) is (54*10 + 183*150 + 19*240) >> 8 = 127.

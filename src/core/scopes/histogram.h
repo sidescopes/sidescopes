@@ -79,6 +79,7 @@ public:
     }
 
 private:
+    void scatterRows(const FrameView& frame, IntRect region, int rowBegin, int rowEnd, uint32_t* bins) const;
     void mapBinsToImage();
     [[nodiscard]] std::vector<double> computeHeights() const;
     void exportOutline(const std::vector<double>& heights);
@@ -91,6 +92,9 @@ private:
     int m_height = Height;
     // Three planes of Bins counts: red, green, blue.
     std::vector<uint32_t> m_bins;
+    // Per-chunk private bin sets for the parallel accumulate, merged into
+    // m_bins by integer addition.
+    std::vector<uint32_t> m_threadBins;
     std::vector<float> m_outline;
     ScopeImage m_image;
 };

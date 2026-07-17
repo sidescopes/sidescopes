@@ -33,6 +33,24 @@ TEST_CASE("Vectorscope places 75% red on the classic BT.601 target")
     CHECK(brightestPixel(scope.image()) == std::pair<int, int>{100, 43});
 }
 
+TEST_CASE("Vectorscope folds a tall region across threads onto the same bin")
+{
+    // A region tall enough to split across worker threads must land 75% red on
+    // the same BT.601 bin the single-threaded 8x8 case does: each thread
+    // scatters into its own code grid, and integer addition merges them
+    // order-independently.
+    TestFrame frame(8, 1024, 255);
+    frame.fill(0, 8, Color{191, 0, 0});
+
+    Vectorscope scope;
+    VectorscopeSettings settings;
+    settings.matrix = ChromaMatrix::Bt601;
+    scope.configure(settings);
+    scope.accumulate(frame.view(), IntRect{0, 0, 8, 1024});
+
+    CHECK(brightestPixel(scope.image()) == std::pair<int, int>{100, 43});
+}
+
 TEST_CASE("Vectorscope defaults to the BT.709 matrix")
 {
     // Every HD-era scope measures with 709; with no configuration at all

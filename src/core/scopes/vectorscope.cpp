@@ -2,12 +2,18 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
 #include <vector>
 
+#include "core/parallel_for.h"
 #include "core/scopes/trace_response.h"
 
 namespace sidescopes {
 namespace {
+
+// Sampled rows below this per chunk keep the accumulate single-threaded: a
+// small region's scatter finishes before spawned threads would pay off.
+constexpr int AccumulateRowsPerChunk = 64;
 
 // Fixed-point (x256) full-range RGB -> Cb/Cr coefficients from the BT.601
 // and BT.709 specifications. Chroma lands in [0, 255] with neutral at 128.
@@ -104,56 +110,78 @@ void Vectorscope::resize(int size)
     rebuildTintTable();
 }
 
+void Vectorscope::scatterRows(const FrameView& frame, IntRect region, int rowBegin, int rowEnd, uint32_t* bins) const
+{
+    // Accumulation always uses the 256-code grid: 8-bit content quantizes its
+    // chroma to those codes (and piles unevenly onto fixed sub-code positions,
+    // measured at 45% of a grass frame on a single one), so a finer
+    // accumulation grid renders quantization as gridded texture. Samples splat
+    // bilinearly across the four bins they straddle, in sixteenths per axis:
+    // truncation used to alias the code lattice into texture even at 256, and
+    // parked the whole cloud half a bin off the positions the projection - and
+    // with it every marker and graticule target - reports.
+    const ChromaCoefficients& matrix = coefficientsFor(m_settings.matrix);
+    const int stride = m_settings.samplingStride;
+    const int size = CodeGridSize;
+    const int span = size * 16;
+    for (int i = rowBegin; i < rowEnd; ++i) {
+        const int py = region.y + i * stride;
+        const uint8_t* pixel = frame.pixelAt(region.x, py);
+        const uint8_t* pixelRowEnd = frame.pixelAt(region.x + region.width, py);
+        // Clamp to span - 17, not span - 1: the top bin index is then at most
+        // (span - 17) >> 4 == size - 2, so the +1 neighbor the bilinear splat
+        // writes (both the cb column and the cr row above) stays in the grid.
+        for (; pixel < pixelRowEnd; pixel += static_cast<std::ptrdiff_t>(4) * stride) {
+            const int b = pixel[0], g = pixel[1], r = pixel[2];
+            const int64_t cbRaw = matrix.cbFromR * r + matrix.cbFromG * g + matrix.cbFromB * b;
+            const int64_t crRaw = matrix.crFromR * r + matrix.crFromG * g + matrix.crFromB * b;
+            const int cbPosition = std::clamp(static_cast<int>(cbRaw * span >> 16) + span / 2, 0, span - 17);
+            const int crPosition = std::clamp(static_cast<int>(crRaw * span >> 16) + span / 2, 0, span - 17);
+            const int cbBin = cbPosition >> 4;
+            const int crBin = crPosition >> 4;
+            const uint32_t cbHigh = static_cast<uint32_t>(cbPosition & 15);
+            const uint32_t crHigh = static_cast<uint32_t>(crPosition & 15);
+            const uint32_t cbLow = 16 - cbHigh;
+            const uint32_t crLow = 16 - crHigh;
+            uint32_t* upper = bins + static_cast<std::size_t>(size - 1 - crBin) * size + cbBin;
+            uint32_t* above = upper - size;  // cr_bin + 1 is one row up
+            upper[0] += cbLow * crLow;
+            upper[1] += cbHigh * crLow;
+            above[0] += cbLow * crHigh;
+            above[1] += cbHigh * crHigh;
+        }
+    }
+}
+
 void Vectorscope::accumulate(const FrameView& frame, IntRect region)
 {
     region = region.clampedTo(frame.width, frame.height);
-    std::fill(m_bins.begin(), m_bins.end(), 0u);
+    const int stride = m_settings.samplingStride;
+    const int rowCount = region.empty() ? 0 : (region.height + stride - 1) / stride;
+    const int pixelsPerRow = region.empty() ? 0 : (region.width + stride - 1) / stride;
+    // The scatter counts one sample per sampled pixel; the count is a plain
+    // product, so it stays identical however the rows split across threads and
+    // the per-sample density normalization stays bit-exact.
+    const uint64_t sampleCount = static_cast<uint64_t>(rowCount) * static_cast<uint64_t>(pixelsPerRow);
 
-    uint64_t sampleCount = 0;
-    if (!region.empty()) {
-        const ChromaCoefficients& matrix = coefficientsFor(m_settings.matrix);
-        const int stride = m_settings.samplingStride;
-        for (int py = region.y; py < region.y + region.height; py += stride) {
-            const uint8_t* pixel = frame.pixelAt(region.x, py);
-            const uint8_t* rowEnd = frame.pixelAt(region.x + region.width, py);
-            // Accumulation always uses the 256-code grid: 8-bit content
-            // quantizes its chroma to those codes (and piles unevenly
-            // onto fixed sub-code positions, measured at 45% of a grass
-            // frame on a single one), so a finer accumulation grid
-            // renders quantization as gridded texture. Samples splat
-            // bilinearly across the four bins they straddle, in
-            // sixteenths per axis: truncation used to alias the code
-            // lattice into texture even at 256, and parked the whole
-            // cloud half a bin off the positions the projection - and
-            // with it every marker and graticule target - reports.
-            const int size = CodeGridSize;
-            const int span = size * 16;
-            // Clamp to span - 17, not span - 1: the top bin index is then at
-            // most (span - 17) >> 4 == size - 2, so the +1 neighbor the
-            // bilinear splat writes (both the cb column and the cr row above)
-            // always stays inside the grid.
-            for (; pixel < rowEnd; pixel += static_cast<std::ptrdiff_t>(4) * stride) {
-                const int b = pixel[0], g = pixel[1], r = pixel[2];
-                const int64_t cbRaw = matrix.cbFromR * r + matrix.cbFromG * g + matrix.cbFromB * b;
-                const int64_t crRaw = matrix.crFromR * r + matrix.crFromG * g + matrix.crFromB * b;
-                const int cbPosition = std::clamp(static_cast<int>(cbRaw * span >> 16) + span / 2, 0, span - 17);
-                const int crPosition = std::clamp(static_cast<int>(crRaw * span >> 16) + span / 2, 0, span - 17);
-                const int cbBin = cbPosition >> 4;
-                const int crBin = crPosition >> 4;
-                const uint32_t cbHigh = static_cast<uint32_t>(cbPosition & 15);
-                const uint32_t crHigh = static_cast<uint32_t>(crPosition & 15);
-                const uint32_t cbLow = 16 - cbHigh;
-                const uint32_t crLow = 16 - crHigh;
-                uint32_t* upper = m_bins.data() + static_cast<std::size_t>(size - 1 - crBin) * size + cbBin;
-                uint32_t* above = upper - size;  // cr_bin + 1 is one row up
-                upper[0] += cbLow * crLow;
-                upper[1] += cbHigh * crLow;
-                above[0] += cbLow * crHigh;
-                above[1] += cbHigh * crHigh;
-                ++sampleCount;
-            }
-        }
+    const int chunks = parallelChunkCount(rowCount, AccumulateRowsPerChunk);
+    if (chunks <= 1) {
+        std::fill(m_bins.begin(), m_bins.end(), 0u);
+        scatterRows(frame, region, 0, rowCount, m_bins.data());
+    } else {
+        // Each chunk owns a private code grid it clears and scatters into, so
+        // no two threads write the same bin; integer addition then merges them
+        // back to a bit-exact total.
+        const std::size_t binCount = m_bins.size();
+        m_threadBins.resize(binCount * static_cast<std::size_t>(chunks));
+        runParallelChunks(chunks, rowCount, [&](int chunk, int begin, int end) {
+            uint32_t* bins = m_threadBins.data() + static_cast<std::size_t>(chunk) * binCount;
+            std::fill_n(bins, binCount, uint32_t{0});
+            scatterRows(frame, region, begin, end, bins);
+        });
+        mergeBins(m_threadBins.data(), binCount, chunks, m_bins.data());
     }
+
     mapBinsToImage(sampleCount);
 }
 

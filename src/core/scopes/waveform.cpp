@@ -2,11 +2,17 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
 
+#include "core/parallel_for.h"
 #include "core/scopes/trace_response.h"
 
 namespace sidescopes {
 namespace {
+
+// Sampled rows below this per chunk keep the accumulate single-threaded: a
+// small region's scatter finishes before spawned threads would pay off.
+constexpr int AccumulateRowsPerChunk = 64;
 
 // Rec.709 luma weights, fixed-point x256, applied to display-encoded values.
 inline int luma709(int r, int g, int b)
@@ -395,70 +401,91 @@ void Waveform::resize(int columns, int imageHeight)
     m_image.rgba.assign(static_cast<std::size_t>(m_columns) * m_imageHeight * 4, 0);
 }
 
-void Waveform::accumulate(const FrameView& frame, IntRect region)
+void Waveform::scatterRows(const FrameView& frame, IntRect region, int rowBegin, int rowEnd, uint32_t* bins) const
 {
-    region = region.clampedTo(frame.width, frame.height);
-    std::fill(m_bins.begin(), m_bins.end(), 0u);
-
     const ModeFlags flags = modeFlagsFor(m_settings.mode);
     const std::size_t planeSize = this->planeSize();
-    uint32_t* redPlane = m_bins.data();
-    uint32_t* greenPlane = m_bins.data() + planeSize;
-    uint32_t* bluePlane = m_bins.data() + 2 * planeSize;
-    uint32_t* lumaPlane = m_bins.data() + 3 * planeSize;
+    uint32_t* redPlane = bins;
+    uint32_t* greenPlane = bins + planeSize;
+    uint32_t* bluePlane = bins + 2 * planeSize;
+    uint32_t* lumaPlane = bins + 3 * planeSize;
 
-    uint64_t sampledRows = 0;
-    if (!region.empty()) {
-        const int stride = m_settings.samplingStride;
-        for (int py = region.y; py < region.y + region.height; py += stride) {
-            ++sampledRows;
-            const uint8_t* row = frame.pixelAt(region.x, py);
-            for (int px = 0; px < region.width; px += stride) {
-                const uint8_t* pixel = row + static_cast<std::size_t>(px) * 4;
-                const int b = pixel[0], g = pixel[1], r = pixel[2];
-                // Samples splat fractionally across the two columns they
-                // straddle, in sixteenths. Integer bucketing made columns
-                // aggregate alternately two and three image columns at
-                // typical region widths - a density comb that rendered as
-                // fine vertical striping on large panes.
-                const auto position =
-                    static_cast<std::size_t>(static_cast<int64_t>(px) * m_columns * 16 / region.width);
-                const std::size_t column = position >> 4;
-                const uint32_t rightWeight = position & 15u;
-                const uint32_t leftWeight = 16u - rightWeight;
-                const std::size_t next = column + 1 < static_cast<std::size_t>(m_columns) ? column + 1 : column;
-                const auto splat = [&](uint32_t* plane, int value) {
-                    uint32_t* line = plane + static_cast<std::size_t>(255 - value) * m_columns;
-                    line[column] += leftWeight;
-                    line[next] += rightWeight;
+    const int stride = m_settings.samplingStride;
+    for (int i = rowBegin; i < rowEnd; ++i) {
+        const int py = region.y + i * stride;
+        const uint8_t* row = frame.pixelAt(region.x, py);
+        for (int px = 0; px < region.width; px += stride) {
+            const uint8_t* pixel = row + static_cast<std::size_t>(px) * 4;
+            const int b = pixel[0], g = pixel[1], r = pixel[2];
+            // Samples splat fractionally across the two columns they
+            // straddle, in sixteenths. Integer bucketing made columns
+            // aggregate alternately two and three image columns at
+            // typical region widths - a density comb that rendered as
+            // fine vertical striping on large panes.
+            const auto position = static_cast<std::size_t>(static_cast<int64_t>(px) * m_columns * 16 / region.width);
+            const std::size_t column = position >> 4;
+            const uint32_t rightWeight = position & 15u;
+            const uint32_t leftWeight = 16u - rightWeight;
+            const std::size_t next = column + 1 < static_cast<std::size_t>(m_columns) ? column + 1 : column;
+            const auto splat = [&](uint32_t* plane, int value) {
+                uint32_t* line = plane + static_cast<std::size_t>(255 - value) * m_columns;
+                line[column] += leftWeight;
+                line[next] += rightWeight;
+            };
+            if (flags.rgb) {
+                splat(redPlane, r);
+                splat(greenPlane, g);
+                splat(bluePlane, b);
+            }
+            if (flags.coloredLuma) {
+                // The luma plane carries the density; the channel
+                // planes carry value-weighted mass at the same rows,
+                // so each cell remembers the average color of the
+                // pixels that landed on it.
+                const int level = luma709(r, g, b);
+                const auto tintSplat = [&](uint32_t* plane, uint32_t value) {
+                    uint32_t* line = plane + static_cast<std::size_t>(255 - level) * m_columns;
+                    line[column] += leftWeight * value;
+                    line[next] += rightWeight * value;
                 };
-                if (flags.rgb) {
-                    splat(redPlane, r);
-                    splat(greenPlane, g);
-                    splat(bluePlane, b);
-                }
-                if (flags.coloredLuma) {
-                    // The luma plane carries the density; the channel
-                    // planes carry value-weighted mass at the same rows,
-                    // so each cell remembers the average color of the
-                    // pixels that landed on it.
-                    const int level = luma709(r, g, b);
-                    const auto tintSplat = [&](uint32_t* plane, uint32_t value) {
-                        uint32_t* line = plane + static_cast<std::size_t>(255 - level) * m_columns;
-                        line[column] += leftWeight * value;
-                        line[next] += rightWeight * value;
-                    };
-                    tintSplat(redPlane, static_cast<uint32_t>(r));
-                    tintSplat(greenPlane, static_cast<uint32_t>(g));
-                    tintSplat(bluePlane, static_cast<uint32_t>(b));
-                    splat(lumaPlane, level);
-                } else if (flags.luma) {
-                    splat(lumaPlane, luma709(r, g, b));
-                }
+                tintSplat(redPlane, static_cast<uint32_t>(r));
+                tintSplat(greenPlane, static_cast<uint32_t>(g));
+                tintSplat(bluePlane, static_cast<uint32_t>(b));
+                splat(lumaPlane, level);
+            } else if (flags.luma) {
+                splat(lumaPlane, luma709(r, g, b));
             }
         }
     }
-    mapBinsToImage(sampledRows);
+}
+
+void Waveform::accumulate(const FrameView& frame, IntRect region)
+{
+    region = region.clampedTo(frame.width, frame.height);
+    const int stride = m_settings.samplingStride;
+    const int rowCount = region.empty() ? 0 : (region.height + stride - 1) / stride;
+
+    const int chunks = parallelChunkCount(rowCount, AccumulateRowsPerChunk);
+    if (chunks <= 1) {
+        std::fill(m_bins.begin(), m_bins.end(), 0u);
+        scatterRows(frame, region, 0, rowCount, m_bins.data());
+    } else {
+        // Each chunk owns a private plane set it clears and scatters into;
+        // integer addition then merges them back to a bit-exact total.
+        const std::size_t binCount = m_bins.size();
+        m_threadBins.resize(binCount * static_cast<std::size_t>(chunks));
+        runParallelChunks(chunks, rowCount, [&](int chunk, int begin, int end) {
+            uint32_t* bins = m_threadBins.data() + static_cast<std::size_t>(chunk) * binCount;
+            std::fill_n(bins, binCount, uint32_t{0});
+            scatterRows(frame, region, begin, end, bins);
+        });
+        mergeBins(m_threadBins.data(), binCount, chunks, m_bins.data());
+    }
+
+    // A column receives one sample per sampled row, so the sampled-row count
+    // that normalizes column brightness is a plain quotient - identical
+    // however the rows split across threads.
+    mapBinsToImage(static_cast<uint64_t>(rowCount));
 }
 
 NormalizedPoint Waveform::project(const FloatColor& color) const
