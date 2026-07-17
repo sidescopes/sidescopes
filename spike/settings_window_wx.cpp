@@ -69,6 +69,9 @@ wxDECLARE_APP(SpikeApp);
 SettingsFrame::SettingsFrame()
     : wxFrame(nullptr, wxID_ANY, "Settings", wxDefaultPosition, wxSize(720, 520))
 {
+    const wxColour surface = wxSystemSettings::GetColour(wxSYS_COLOUR_WINDOW);
+    SetBackgroundColour(surface);
+
     auto* root = new wxBoxSizer(wxVERTICAL);
     auto* content = new wxBoxSizer(wxHORIZONTAL);
 
@@ -77,7 +80,12 @@ SettingsFrame::SettingsFrame()
     sections.Add("Scopes");
     sections.Add("Shortcuts");
     sections.Add("About");
-    m_sidebar = new wxListBox(this, wxID_ANY, wxDefaultPosition, wxSize(150, -1), sections, wxLB_SINGLE);
+    m_sidebar = new wxListBox(this, wxID_ANY, wxDefaultPosition, wxDefaultSize, sections, wxLB_SINGLE | wxNO_BORDER);
+    m_sidebar->SetBackgroundColour(surface);
+    wxFont sidebarFont = m_sidebar->GetFont();
+    sidebarFont.SetPointSize(sidebarFont.GetPointSize() + 1);
+    m_sidebar->SetFont(sidebarFont);
+    m_sidebar->SetMinSize(wxSize(180, -1));
     m_sidebar->SetSelection(0);
     m_sidebar->Bind(wxEVT_LISTBOX, &SettingsFrame::onSidebar, this);
 
@@ -87,16 +95,19 @@ SettingsFrame::SettingsFrame()
     m_shortcutsPage = buildShortcutsPage(m_book);
     m_book->AddPage(m_shortcutsPage, "Shortcuts");
     m_book->AddPage(buildAboutPage(m_book), "About");
+    for (std::size_t i = 0; i < m_book->GetPageCount(); ++i) {
+        m_book->GetPage(i)->SetBackgroundColour(surface);
+    }
 
-    content->Add(m_sidebar, 0, wxEXPAND | wxALL, 8);
-    content->Add(m_book, 1, wxEXPAND | wxTOP | wxBOTTOM | wxRIGHT, 8);
+    content->Add(m_sidebar, 0, wxEXPAND | wxALL, 12);
+    content->Add(m_book, 1, wxEXPAND | wxTOP | wxBOTTOM | wxRIGHT, 12);
 
     root->Add(content, 1, wxEXPAND);
     root->Add(new wxStaticLine(this), 0, wxEXPAND);
 
     auto* footer = new wxStaticText(this, wxID_ANY, "SideScopes 0.2.0");
     footer->SetForegroundColour(wxSystemSettings::GetColour(wxSYS_COLOUR_GRAYTEXT));
-    root->Add(footer, 0, wxALL, 8);
+    root->Add(footer, 0, wxALL, 12);
 
     SetSizer(root);
     SetMinSize(wxSize(640, 460));
