@@ -22,6 +22,7 @@ option(SIDESCOPES_BENCH "Build the opt-in benchmark suite" OFF)
 option(SIDESCOPES_WERROR "Treat compiler warnings as errors" OFF)
 option(SIDESCOPES_MODULES_DYNAMIC "Load built-in scope modules dynamically" OFF)
 option(SIDESCOPES_UI_TESTS "Build the Dear ImGui Test Engine UI-test target" OFF)
+option(SIDESCOPES_SPIKE_SETTINGS_WX "Build the wxWidgets settings-window look-check spike" OFF)
 set(SIDESCOPES_SANITIZE "" CACHE STRING
     "Comma-separated sanitizers to build and link with (e.g. address,undefined or thread)")
 
@@ -383,4 +384,49 @@ if(SIDESCOPES_UI_TESTS)
     endif()
     enable_testing()
     add_subdirectory(tests/ui)
+endif()
+
+# Opt-in wxWidgets look-check spike: a standalone settings window drawn with
+# native controls, built beside the ImGui spike for a side-by-side comparison.
+# wxWidgets is fetched only when this is on; the default build is untouched.
+if(SIDESCOPES_SPIKE_SETTINGS_WX)
+    include(FetchContent)
+    set(wxBUILD_SHARED OFF CACHE BOOL "" FORCE)
+    set(wxBUILD_SAMPLES OFF CACHE BOOL "" FORCE)
+    set(wxBUILD_TESTS OFF CACHE BOOL "" FORCE)
+    set(wxBUILD_DEMOS OFF CACHE BOOL "" FORCE)
+    set(wxBUILD_BENCHMARKS OFF CACHE BOOL "" FORCE)
+    # Base and core cover the whole sample window; drop every optional library.
+    set(wxUSE_AUI OFF CACHE BOOL "" FORCE)
+    set(wxUSE_HTML OFF CACHE BOOL "" FORCE)
+    set(wxUSE_WXHTML_HELP OFF CACHE BOOL "" FORCE)
+    set(wxUSE_HELP OFF CACHE BOOL "" FORCE)
+    set(wxUSE_WEBVIEW OFF CACHE BOOL "" FORCE)
+    set(wxUSE_MEDIACTRL OFF CACHE BOOL "" FORCE)
+    set(wxUSE_STC OFF CACHE BOOL "" FORCE)
+    set(wxUSE_PROPGRID OFF CACHE BOOL "" FORCE)
+    set(wxUSE_RIBBON OFF CACHE BOOL "" FORCE)
+    set(wxUSE_RICHTEXT OFF CACHE BOOL "" FORCE)
+    set(wxUSE_XRC OFF CACHE BOOL "" FORCE)
+    set(wxUSE_XML OFF CACHE BOOL "" FORCE)
+    set(wxUSE_GLCANVAS OFF CACHE BOOL "" FORCE)
+    set(wxUSE_QA OFF CACHE BOOL "" FORCE)
+    FetchContent_Declare(
+        wxwidgets
+        GIT_REPOSITORY https://github.com/wxWidgets/wxWidgets.git
+        GIT_TAG v3.3.3
+        GIT_SHALLOW TRUE
+    )
+    FetchContent_MakeAvailable(wxwidgets)
+
+    add_executable(sidescopes_spike_settings_wx WIN32 MACOSX_BUNDLE spike/settings_window_wx.cpp)
+    if(WIN32)
+        # A wxWidgets executable fetched as a subproject does not inherit the
+        # common-controls and DPI manifest, so the native theme and HiDPI
+        # scaling need it attached explicitly.
+        target_sources(sidescopes_spike_settings_wx PRIVATE spike/settings_window_wx.manifest)
+    endif()
+    target_link_libraries(sidescopes_spike_settings_wx PRIVATE wx::core wx::base)
+    # The spike deliberately skips sidescopes_target_defaults: the strict
+    # warning set is for our sources, not the third-party wxWidgets headers.
 endif()
