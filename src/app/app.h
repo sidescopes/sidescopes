@@ -185,6 +185,7 @@ private:
     void handleControlChords(const ModifierState& modifiers);
     void handleLetterShortcuts(const ModifierState& modifiers, bool systemChord);
     void handleViewShortcuts();
+    bool triggerShortcut(const std::string& key, bool shift);
     void drawRegionToolIcons();
     void drawCursorReadout();
     void drawScopePanes();

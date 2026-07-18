@@ -63,6 +63,7 @@ double flippedY(double y, double height)
 }
 
 // Shared edit state the application polls once per frame.
+std::vector<BorderKeyPress> g_borderKeyPresses;
 bool g_borderEditing = false;
 bool g_borderEditChanged = false;
 bool g_borderDismissed = false;
@@ -625,6 +626,20 @@ NSCursor* buildPinCursor(const std::optional<FloatColor>& color)
 // transparent, so the editor underneath keeps receiving clicks. Cursors
 // come from an always-active tracking area: cursor rects only work in
 // the key window, and this window never takes key.
+// Borderless panels refuse key status unless overridden; the border takes
+// the keyboard on click - without activating the application - so Escape
+// and the letter shortcuts work right after a border interaction.
+@interface SidescopesBorderPanel : NSPanel
+@end
+@implementation SidescopesBorderPanel
+
+- (BOOL)canBecomeKeyWindow
+{
+    return YES;
+}
+
+@end
+
 @interface SidescopesBorderView : NSView
 @property(nonatomic, assign) unsigned dragZone;       // a mask of sidescopes::ZoneBits
 @property(nonatomic, assign) NSPoint dragStartMouse;  // global screen coords
@@ -639,6 +654,28 @@ NSCursor* buildPinCursor(const std::optional<FloatColor>& color)
 @property(nonatomic, assign) CGFloat labelBand;
 @end
 @implementation SidescopesBorderView
+
+// The border panel holds the keyboard after a click (key without
+// activation); its keys route through the application's own shortcut map.
+- (BOOL)acceptsFirstResponder
+{
+    return YES;
+}
+
+- (void)keyDown:(NSEvent*)event
+{
+    if (event.keyCode == 53) {
+        sidescopes::g_borderKeyPresses.push_back({std::string(), false, true});
+        return;
+    }
+    NSString* characters = event.charactersIgnoringModifiers.uppercaseString;
+    if (characters.length == 0) {
+        [super keyDown:event];
+        return;
+    }
+    const bool shift = (event.modifierFlags & NSEventModifierFlagShift) != 0;
+    sidescopes::g_borderKeyPresses.push_back({std::string(characters.UTF8String), shift, false});
+}
 
 // The region rectangle in view coordinates.
 - (NSRect)regionRect
@@ -949,6 +986,11 @@ NSCursor* buildPinCursor(const std::optional<FloatColor>& color)
     if (self.dragZone & sidescopes::ZoneMove) {
         [NSCursor.closedHandCursor set];
     }
+    // Key without activation: the click focuses the region, so Escape and
+    // the letter shortcuts work right after a border interaction, and the
+    // cursor becomes ours to shape - while the editor's window order and
+    // menu bar stay untouched.
+    [self.window makeKeyWindow];
     self.dragStartMouse = NSEvent.mouseLocation;
     NSRect startRegion = NSInsetRect(self.window.frame, sidescopes::WindowPad, sidescopes::WindowPad);
     // The label strip rides above the band: the window is that much taller
@@ -1425,17 +1467,17 @@ void setRegionPickChipColor(const std::optional<FloatColor>& color)
 }
 
 // A NON-ACTIVATING panel: grabbing the border delivers the whole mouse
-// sequence without activating this application, so the keyboard truly never
-// leaves the editor and the focus-routed region logic never sees the grab as
-// a switch to SideScopes - the macOS twin of the Windows border's
-// WS_EX_NOACTIVATE.
+// sequence without activating this application - the macOS twin of the
+// Windows border's WS_EX_NOACTIVATE - while a click still gives the panel
+// KEY status, so the region owns the keyboard and the cursor exactly while
+// the user works the border.
 NSWindow* makeBorderWindow(NSRect rect)
 {
-    NSPanel* window =
-        [[NSPanel alloc] initWithContentRect:rect
-                                   styleMask:NSWindowStyleMaskBorderless | NSWindowStyleMaskNonactivatingPanel
-                                     backing:NSBackingStoreBuffered
-                                       defer:NO];
+    SidescopesBorderPanel* window = [[SidescopesBorderPanel alloc]
+        initWithContentRect:rect
+                  styleMask:NSWindowStyleMaskBorderless | NSWindowStyleMaskNonactivatingPanel
+                    backing:NSBackingStoreBuffered
+                      defer:NO];
     window.backgroundColor = NSColor.clearColor;
     window.opaque = NO;
     window.hasShadow = NO;
@@ -1451,6 +1493,12 @@ NSWindow* makeBorderWindow(NSRect rect)
     window.collectionBehavior = NSWindowCollectionBehaviorCanJoinAllSpaces |
                                 NSWindowCollectionBehaviorFullScreenAuxiliary | NSWindowCollectionBehaviorStationary;
     window.contentView = [[SidescopesBorderView alloc] initWithFrame:NSZeroRect];
+    [window makeFirstResponder:window.contentView];
+    // One cursor owner only: with key status possible, AppKit's cursor-rect
+    // machinery would re-assert the arrow after every zone cursor the view
+    // sets - a visible fight. The view's mouse-move handler is the sole
+    // authority.
+    [window disableCursorRects];
 
     return window;
 }
@@ -1496,13 +1544,20 @@ void showRegionBorder(uint32_t displayId, const RegionOfInterest& region, const 
     }
     view.labelBand = label.length > 0 ? LabelBand : 0;
     [g_borderWindow setFrame:labelled display:YES];
-    [g_borderWindow invalidateCursorRectsForView:g_borderWindow.contentView];
     [g_borderWindow orderFrontRegardless];
 }
 
 void hideRegionBorder()
 {
     [g_borderWindow orderOut:nil];
+}
+
+std::vector<BorderKeyPress> drainBorderKeyPresses()
+{
+    std::vector<BorderKeyPress> presses;
+    presses.swap(g_borderKeyPresses);
+
+    return presses;
 }
 
 void showAttachedEditDim(uint32_t displayId, const RegionOfInterest& windowRegion)

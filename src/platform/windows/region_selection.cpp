@@ -1938,6 +1938,13 @@ void hideAttachedEditDim()
     }
 }
 
+std::vector<BorderKeyPress> drainBorderKeyPresses()
+{
+    // The Windows border never takes the keyboard (WS_EX_NOACTIVATE); the
+    // editor keeps every key.
+    return {};
+}
+
 RegionBorderEdit pollRegionBorderEdit()
 {
     RegionBorderEdit edit;

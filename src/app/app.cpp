@@ -2444,6 +2444,16 @@ void App::drainAsyncSignals()
         resetRegionToFull();
         m_lastActivity = glfwGetTime();
     }
+    // Keys the border panel took while it held the keyboard: Escape and the
+    // shortcuts keep working right after a border interaction.
+    for (const BorderKeyPress& press : drainBorderKeyPresses()) {
+        if (press.escape) {
+            resetRegionToFull();
+        } else {
+            triggerShortcut(press.key, press.shift);
+        }
+        m_lastActivity = glfwGetTime();
+    }
 }
 
 void App::followWindowDisplay()
@@ -2774,25 +2784,50 @@ void App::handleLetterShortcuts(const ModifierState& modifiers, bool systemChord
             chooseScope(scope.id, modifiers.shift);
         }
     }
-    if (shortcutPressed(m_shortcuts.pickWindow)) {
-        m_wantRegionPick = RegionPickerMode::PickWindows;
+    for (const std::string& binding :
+         {m_shortcuts.pickWindow, m_shortcuts.drawRegion, m_shortcuts.pickFaces, m_shortcuts.pinColor}) {
+        if (shortcutPressed(binding)) {
+            triggerShortcut(binding, modifiers.shift);
+        }
     }
-    if (shortcutPressed(m_shortcuts.drawRegion)) {
+    handleViewShortcuts();
+}
+
+// The single map from a shortcut key to its action, shared by the ImGui
+// press detection above and the border panel's forwarded keys.
+// @return Whether the key matched anything.
+bool App::triggerShortcut(const std::string& key, bool shift)
+{
+    for (const HostScope& scope : m_scopeRegistry.scopes()) {
+        if (!bindingFor(scope.id).empty() && bindingFor(scope.id) == key) {
+            chooseScope(scope.id, shift);
+
+            return true;
+        }
+    }
+    if (key == m_shortcuts.pickWindow) {
+        m_wantRegionPick = RegionPickerMode::PickWindows;
+    } else if (key == m_shortcuts.drawRegion) {
         // Plain draw sets the global region; with Shift the draw is
         // constrained to - and attaches to - the last external window (the
         // one focused before SideScopes was).
         m_wantRegionPick = RegionPickerMode::Draw;
-        m_wantAttachedDraw = modifiers.shift;
-    }
-    if (supportsFaceDetection() && shortcutPressed(m_shortcuts.pickFaces)) {
+        m_wantAttachedDraw = shift;
+    } else if (key == m_shortcuts.pickFaces && supportsFaceDetection()) {
         m_wantRegionPick = RegionPickerMode::PickFaces;
-    }
-    if (pinsAvailable() && shortcutPressed(m_shortcuts.pinColor)) {
+    } else if (key == m_shortcuts.pinColor && pinsAvailable()) {
         // One pin tool; each click inside decides between pin-and-close and
         // Shift's pin-and-continue.
         m_wantRegionPick = RegionPickerMode::PinColor;
+    } else if (key == m_shortcuts.vectorscopeZoom) {
+        m_view.setZoom(m_view.zoom() >= 4 ? 1 : m_view.zoom() * 2);
+    } else if (key == m_shortcuts.fullRegion) {
+        resetRegionToFull();
+    } else {
+        return false;
     }
-    handleViewShortcuts();
+
+    return true;
 }
 
 void App::handleViewShortcuts()

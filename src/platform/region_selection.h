@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <vector>
 
 #include "core/analysis_worker.h"
 #include "core/region_suggestions.h"
@@ -140,6 +141,21 @@ struct RegionBorderEdit
 };
 
 RegionBorderEdit pollRegionBorderEdit();
+
+/// A key pressed while the region border held the keyboard. On macOS the
+/// border panel can take key status WITHOUT activating the application
+/// (clicking it focuses the region, Spotlight-style), so its keys are
+/// forwarded here for the application to route through its own shortcut
+/// map - Escape and the letter shortcuts keep working right after a border
+/// interaction. Empty on Windows, whose border never takes the keyboard.
+struct BorderKeyPress
+{
+    std::string key;
+    bool shift = false;
+    bool escape = false;
+};
+
+[[nodiscard]] std::vector<BorderKeyPress> drainBorderKeyPresses();
 
 /// A click-through spotlight while an attached border is being edited:
 /// everything on @p displayId outside @p windowRegion (the tracked window's
