@@ -1,6 +1,7 @@
 #include "app/attach_controller.h"
 
 #include <algorithm>
+#include <cmath>
 #include <utility>
 
 namespace sidescopes {
@@ -55,7 +56,7 @@ RegionOfInterest AttachController::attach(uint64_t identity, int64_t ownerPid, s
     }
     window->ownerPid = ownerPid;
     window->applicationName = std::move(applicationName);
-    setRelativeFromAbsolute(*window, absoluteRegion, windowRect, display);
+    setStoredFromAbsolute(*window, absoluteRegion, windowRect, display);
     m_activeIdentity = identity;
 
     return toAbsolute(*window, windowRect, display);
@@ -69,7 +70,7 @@ RegionOfInterest AttachController::editRegion(const RegionOfInterest& newAbsolut
         return newAbsoluteRegion;
     }
 
-    setRelativeFromAbsolute(*active, newAbsoluteRegion, windowRect, display);
+    setStoredFromAbsolute(*active, newAbsoluteRegion, windowRect, display);
 
     return toAbsolute(*active, windowRect, display);
 }
@@ -90,6 +91,8 @@ AttachDecision AttachController::observe(const std::vector<TrackedWindowObservat
         return decision;
     }
 
+    updateTracked(windows);
+    updateTracked(windows);
     m_activeIdentity = focusedWindow && find(*focusedWindow) ? *focusedWindow : 0;
     updateRegion(windows, decision);
 
@@ -133,27 +136,77 @@ const AttachController::TrackedWindow* AttachController::find(uint64_t identity)
     return nullptr;
 }
 
-void AttachController::setRelativeFromAbsolute(TrackedWindow& window, const RegionOfInterest& absoluteRegion,
-                                               const AttachWindowRect& windowRect, const AttachDisplayRect& display)
+void AttachController::setStoredFromAbsolute(TrackedWindow& window, const RegionOfInterest& absoluteRegion,
+                                             const AttachWindowRect& windowRect, const AttachDisplayRect& display)
 {
+    window.lastWindowRect = windowRect;
+    window.observedOnce = true;
     if (windowRect.width <= 0.0 || windowRect.height <= 0.0 || display.width <= 0.0 || display.height <= 0.0) {
-        window.relativeLeft = 0.0;
-        window.relativeTop = 0.0;
-        window.relativeRight = 1.0;
-        window.relativeBottom = 1.0;
+        window.left = windowRect.x;
+        window.top = windowRect.y;
+        window.right = windowRect.x + windowRect.width;
+        window.bottom = windowRect.y + windowRect.height;
 
         return;
     }
 
-    const double leftDesktop = display.originX + absoluteRegion.leftPercent / 100.0 * display.width;
-    const double topDesktop = display.originY + absoluteRegion.topPercent / 100.0 * display.height;
-    const double rightDesktop = display.originX + absoluteRegion.rightPercent / 100.0 * display.width;
-    const double bottomDesktop = display.originY + absoluteRegion.bottomPercent / 100.0 * display.height;
+    // The stored region lives inside its window.
+    window.left = std::clamp(display.originX + absoluteRegion.leftPercent / 100.0 * display.width, windowRect.x,
+                             windowRect.x + windowRect.width);
+    window.right = std::clamp(display.originX + absoluteRegion.rightPercent / 100.0 * display.width, windowRect.x,
+                              windowRect.x + windowRect.width);
+    window.top = std::clamp(display.originY + absoluteRegion.topPercent / 100.0 * display.height, windowRect.y,
+                            windowRect.y + windowRect.height);
+    window.bottom = std::clamp(display.originY + absoluteRegion.bottomPercent / 100.0 * display.height, windowRect.y,
+                               windowRect.y + windowRect.height);
+}
 
-    window.relativeLeft = std::clamp((leftDesktop - windowRect.x) / windowRect.width, 0.0, 1.0);
-    window.relativeTop = std::clamp((topDesktop - windowRect.y) / windowRect.height, 0.0, 1.0);
-    window.relativeRight = std::clamp((rightDesktop - windowRect.x) / windowRect.width, 0.0, 1.0);
-    window.relativeBottom = std::clamp((bottomDesktop - windowRect.y) / windowRect.height, 0.0, 1.0);
+void AttachController::bindStoredToWindow(TrackedWindow& window, const AttachWindowRect& windowRect)
+{
+    if (!window.observedOnce) {
+        window.lastWindowRect = windowRect;
+        window.observedOnce = true;
+
+        return;
+    }
+    const AttachWindowRect& last = window.lastWindowRect;
+    const bool sameSize =
+        std::abs(windowRect.width - last.width) < 0.5 && std::abs(windowRect.height - last.height) < 0.5;
+    if (sameSize) {
+        // A move: the region rides along exactly.
+        const double dx = windowRect.x - last.x;
+        const double dy = windowRect.y - last.y;
+        window.left += dx;
+        window.right += dx;
+        window.top += dy;
+        window.bottom += dy;
+    } else {
+        // A resize: the region stays glued to the screen; an arriving edge
+        // pushes it just enough to stay inside, per axis, permanently. The
+        // push never changes the stored size - a window smaller than the
+        // region only clips the emitted mapping, elastically.
+        const double width = window.right - window.left;
+        const double height = window.bottom - window.top;
+        const double pushableWidth = std::min(width, windowRect.width);
+        const double pushableHeight = std::min(height, windowRect.height);
+        const double newLeft = std::clamp(window.left, windowRect.x, windowRect.x + windowRect.width - pushableWidth);
+        const double newTop = std::clamp(window.top, windowRect.y, windowRect.y + windowRect.height - pushableHeight);
+        window.left = newLeft;
+        window.right = newLeft + width;
+        window.top = newTop;
+        window.bottom = newTop + height;
+    }
+    window.lastWindowRect = windowRect;
+}
+
+void AttachController::updateTracked(const std::vector<TrackedWindowObservation>& windows)
+{
+    for (const TrackedWindowObservation& observation : windows) {
+        TrackedWindow* window = find(observation.identity);
+        if (window && observation.windowRect && !observation.minimized) {
+            bindStoredToWindow(*window, *observation.windowRect);
+        }
+    }
 }
 
 RegionOfInterest AttachController::toAbsolute(const TrackedWindow& window, const AttachWindowRect& windowRect,
@@ -164,15 +217,17 @@ RegionOfInterest AttachController::toAbsolute(const TrackedWindow& window, const
         return region;
     }
 
-    const double leftDesktop = windowRect.x + window.relativeLeft * windowRect.width;
-    const double topDesktop = windowRect.y + window.relativeTop * windowRect.height;
-    const double rightDesktop = windowRect.x + window.relativeRight * windowRect.width;
-    const double bottomDesktop = windowRect.y + window.relativeBottom * windowRect.height;
+    // Elastic clip: only the emitted mapping is bounded by the window, so a
+    // squeezed region re-expands when the window grows back.
+    const double left = std::max(window.left, windowRect.x);
+    const double right = std::min(window.right, windowRect.x + windowRect.width);
+    const double top = std::max(window.top, windowRect.y);
+    const double bottom = std::min(window.bottom, windowRect.y + windowRect.height);
 
-    region.leftPercent = std::clamp((leftDesktop - display.originX) / display.width * 100.0, 0.0, 100.0);
-    region.topPercent = std::clamp((topDesktop - display.originY) / display.height * 100.0, 0.0, 100.0);
-    region.rightPercent = std::clamp((rightDesktop - display.originX) / display.width * 100.0, 0.0, 100.0);
-    region.bottomPercent = std::clamp((bottomDesktop - display.originY) / display.height * 100.0, 0.0, 100.0);
+    region.leftPercent = std::clamp((left - display.originX) / display.width * 100.0, 0.0, 100.0);
+    region.topPercent = std::clamp((top - display.originY) / display.height * 100.0, 0.0, 100.0);
+    region.rightPercent = std::clamp((right - display.originX) / display.width * 100.0, 0.0, 100.0);
+    region.bottomPercent = std::clamp((bottom - display.originY) / display.height * 100.0, 0.0, 100.0);
 
     return region;
 }

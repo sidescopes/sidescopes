@@ -96,16 +96,83 @@ TEST_CASE("A moved window carries the region")
     checkRegion(*decision.region, 20.0, 10.0, 60.0, 50.0);
 }
 
-TEST_CASE("A resized window carries the region")
+TEST_CASE("A resized window leaves the region glued to the screen")
 {
     AttachController controller;
     controller.attach(42, EditorPid, "Editor", EditorWindow, PrimaryDisplay, WholeEditor);
 
+    // The window doubles in width: the region does not budge - a resize is
+    // not a move, and no edge reached it.
     const AttachWindowRect wider{100.0, 100.0, 800.0, 400.0};
     const AttachDecision decision = controller.observe({visibleWindow(42, wider)}, 42);
 
     REQUIRE(decision.region.has_value());
-    checkRegion(*decision.region, 10.0, 10.0, 90.0, 50.0);
+    checkRegion(*decision.region, 10.0, 10.0, 50.0, 50.0);
+}
+
+TEST_CASE("A face-sized region ignores a resize that never reaches it")
+{
+    AttachController controller;
+    controller.attach(42, EditorPid, "Editor", EditorWindow, PrimaryDisplay, WholeEditor);
+
+    // The face: desktop 200..300 on both axes.
+    const RegionOfInterest face{20.0, 20.0, 30.0, 30.0};
+    controller.editRegion(face, EditorWindow, PrimaryDisplay);
+
+    // The window grows to the right by 400: the face on screen did not
+    // move, and neither does the region.
+    const AttachWindowRect wider{100.0, 100.0, 800.0, 400.0};
+    const AttachDecision grown = controller.observe({visibleWindow(42, wider)}, 42);
+    REQUIRE(grown.region.has_value());
+    checkRegion(*grown.region, 20.0, 20.0, 30.0, 30.0);
+
+    // Moving the grown window still carries the region exactly.
+    const AttachWindowRect movedWider{200.0, 100.0, 800.0, 400.0};
+    const AttachDecision moved = controller.observe({visibleWindow(42, movedWider)}, 42);
+    REQUIRE(moved.region.has_value());
+    checkRegion(*moved.region, 30.0, 20.0, 40.0, 30.0);
+}
+
+TEST_CASE("An arriving window edge pushes the region, permanently")
+{
+    AttachController controller;
+    controller.attach(42, EditorPid, "Editor", EditorWindow, PrimaryDisplay, WholeEditor);
+    const RegionOfInterest face{20.0, 20.0, 30.0, 30.0};
+    controller.editRegion(face, EditorWindow, PrimaryDisplay);
+
+    // The left edge drags right past the region's place: the region gets
+    // pushed along, keeping its size.
+    const AttachWindowRect narrowed{250.0, 100.0, 250.0, 400.0};
+    const AttachDecision pushed = controller.observe({visibleWindow(42, narrowed)}, 42);
+    REQUIRE(pushed.region.has_value());
+    checkRegion(*pushed.region, 25.0, 20.0, 35.0, 30.0);
+
+    // The edge retreats: pushed means pushed - the region stays where the
+    // edge left it, like an object on glass.
+    const AttachDecision retreated = controller.observe({visibleWindow(42, EditorWindow)}, 42);
+    REQUIRE(retreated.region.has_value());
+    checkRegion(*retreated.region, 25.0, 20.0, 35.0, 30.0);
+}
+
+TEST_CASE("Walls smaller than the region squeeze it elastically")
+{
+    AttachController controller;
+    controller.attach(42, EditorPid, "Editor", EditorWindow, PrimaryDisplay, WholeEditor);
+    const RegionOfInterest face{20.0, 20.0, 30.0, 30.0};
+    controller.editRegion(face, EditorWindow, PrimaryDisplay);
+
+    // The window shrinks below the region's size: the region is pushed to
+    // the surviving corner and the emitted mapping clips.
+    const AttachWindowRect tiny{100.0, 100.0, 80.0, 80.0};
+    const AttachDecision squeezed = controller.observe({visibleWindow(42, tiny)}, 42);
+    REQUIRE(squeezed.region.has_value());
+    checkRegion(*squeezed.region, 10.0, 10.0, 18.0, 18.0);
+
+    // The walls part: the size re-expands (the clip was elastic), from the
+    // pushed position (the push was not).
+    const AttachDecision expanded = controller.observe({visibleWindow(42, EditorWindow)}, 42);
+    REQUIRE(expanded.region.has_value());
+    checkRegion(*expanded.region, 10.0, 10.0, 20.0, 20.0);
 }
 
 TEST_CASE("A focused tracked window always carries its mapping")

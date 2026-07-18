@@ -72,9 +72,16 @@ struct AttachDecision
 };
 
 /// The window-tracking brain behind attached regions. Pure logic: it holds a
-/// set of tracked windows - each with its own region stored as a fraction of
-/// that window - consumes per-frame observations the host gathers from the
-/// desktop seams, and emits region decisions. An attached region is effective
+/// set of tracked windows - each with its region as an ABSOLUTE screen
+/// rectangle, mechanically bound to its window: a window MOVE translates the
+/// region exactly; a window RESIZE leaves it glued to the screen, with an
+/// arriving window edge pushing it (position, permanently) and walls closing
+/// below its size squeezing it (elastically - the size returns when the
+/// window grows back). Nothing else ever moves or rescales a region, which
+/// is the owner-chosen answer to fit-to-window content not scaling with the
+/// window: what the region does is always visible mechanics, never a model.
+/// The controller consumes per-frame observations the host gathers from the
+/// desktop seams and emits region decisions. An attached region is effective
 /// exactly while ITS window is the focused one: the active window is the
 /// focused tracked window, switching focus between tracked windows switches
 /// the analyzed region, and any other focus (SideScopes itself, an untracked
@@ -153,23 +160,41 @@ private:
         uint64_t identity = 0;
         int64_t ownerPid = 0;
         std::string applicationName;
-        // The region as a fraction (0..1) of this window's rectangle.
-        double relativeLeft = 0.0;
-        double relativeTop = 0.0;
-        double relativeRight = 1.0;
-        double relativeBottom = 1.0;
+        // The region as an absolute desktop rectangle. Its size only ever
+        // changes by the user's hand: window edges push its position, and
+        // only the emitted mapping clips, so a squeezed region re-expands
+        // when the window grows back.
+        double left = 0.0;
+        double top = 0.0;
+        double right = 0.0;
+        double bottom = 0.0;
+        // The window rectangle at the last observation, telling a move (same
+        // size: the region rides along) from a resize (the region stays
+        // screen-glued and only edges push it).
+        AttachWindowRect lastWindowRect;
+        bool observedOnce = false;
     };
 
     [[nodiscard]] TrackedWindow* find(uint64_t identity);
     [[nodiscard]] const TrackedWindow* find(uint64_t identity) const;
 
-    /// Stores @p window's fraction from an absolute display-percent region
-    /// against its rectangle, clamped to the window's bounds.
-    static void setRelativeFromAbsolute(TrackedWindow& window, const RegionOfInterest& absoluteRegion,
-                                        const AttachWindowRect& windowRect, const AttachDisplayRect& display);
+    /// Stores @p window's absolute rectangle from a display-percent region,
+    /// clamped into the window, and remembers the window rectangle it was
+    /// set against.
+    static void setStoredFromAbsolute(TrackedWindow& window, const RegionOfInterest& absoluteRegion,
+                                      const AttachWindowRect& windowRect, const AttachDisplayRect& display);
 
-    /// @p window's stored fraction mapped back to an absolute display-percent
-    /// region on @p display, clamped to the display.
+    /// Applies one window observation to the stored rectangle: a move (same
+    /// size) translates it; a resize leaves it screen-glued and pushes its
+    /// position just enough to keep it inside (permanently), per axis.
+    static void bindStoredToWindow(TrackedWindow& window, const AttachWindowRect& windowRect);
+
+    /// Advances every tracked window's stored rectangle from this frame's
+    /// observations; minimized and closed windows are left untouched.
+    void updateTracked(const std::vector<TrackedWindowObservation>& windows);
+
+    /// @p window's stored rectangle clipped to the window - elastically, the
+    /// stored size survives - as display percentages on @p display.
     [[nodiscard]] static RegionOfInterest toAbsolute(const TrackedWindow& window, const AttachWindowRect& windowRect,
                                                      const AttachDisplayRect& display);
 
