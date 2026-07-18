@@ -950,7 +950,12 @@ NSCursor* buildPinCursor(const std::optional<FloatColor>& color)
         [NSCursor.closedHandCursor set];
     }
     self.dragStartMouse = NSEvent.mouseLocation;
-    self.dragStartRegion = NSInsetRect(self.window.frame, sidescopes::WindowPad, sidescopes::WindowPad);
+    NSRect startRegion = NSInsetRect(self.window.frame, sidescopes::WindowPad, sidescopes::WindowPad);
+    // The label strip rides above the band: the window is that much taller
+    // than the symmetric padding says, and reading the strip as region grew
+    // every attached edit upward by its height.
+    startRegion.size.height -= self.labelBand;
+    self.dragStartRegion = startRegion;
     sidescopes::g_borderEditing = true;
     self.needsDisplay = YES;  // the close button hides while dragging
 }
