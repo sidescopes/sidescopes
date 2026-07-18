@@ -32,6 +32,7 @@ add_executable(sidescopes_tests
     test_scope_view.cpp
     test_capture_controller.cpp
     test_attach_controller.cpp
+    test_face_pin.cpp
     test_region_geometry.cpp
     test_window_suggestions.cpp
     test_version.cpp
@@ -45,6 +46,7 @@ target_include_directories(sidescopes_tests PRIVATE support)
 target_sources(sidescopes_tests PRIVATE
     ${CMAKE_SOURCE_DIR}/src/app/attach_controller.cpp
     ${CMAKE_SOURCE_DIR}/src/app/capture_controller.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/face_pin.cpp
     ${CMAKE_SOURCE_DIR}/src/app/overlay_style.cpp
     ${CMAKE_SOURCE_DIR}/src/app/param_menu.cpp
     ${CMAKE_SOURCE_DIR}/src/app/pin_board.cpp

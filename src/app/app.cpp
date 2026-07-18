@@ -369,6 +369,21 @@ std::FILE* openDebugFile(const char* path, const char* mode)
 #endif
 }
 
+bool facePinLogRequested()
+{
+#ifdef _MSC_VER
+    char* value = nullptr;
+    std::size_t size = 0;
+    if (_dupenv_s(&value, &size, "SIDESCOPES_FACEPIN_LOG") != 0 || value == nullptr) {
+        return false;
+    }
+    std::free(value);
+    return true;
+#else
+    return std::getenv("SIDESCOPES_FACEPIN_LOG") != nullptr;
+#endif
+}
+
 void applyTheme()
 {
     ImGuiStyle& style = ImGui::GetStyle();
@@ -1515,6 +1530,44 @@ namespace {
 // grip released - what keeps a slow drag's sparse updates from flickering it.
 constexpr double AttachMotionSettleSeconds = 0.2;
 
+/// The face-pin probe cadence. The pin adopts only positions two
+/// consecutive probes agree on, so this bounds how long the settle snap
+/// trails the end of a pan or zoom; the ROI stays small enough that the
+/// reference laptop shrugs it off.
+constexpr double FacePinProbeSeconds = 0.3;
+
+/// The probe's reach around the last adopted anchor, in anchor widths:
+/// covers the decision gates' proximity radius plus the face's own extent.
+constexpr double FacePinRoiWidths = 2.5;
+
+/// The content-stability probe: mean absolute per-byte difference of the
+/// region's sample grid that counts as "the content changed", and how long
+/// the content must sit still before the border may show again. The
+/// threshold sits just above capture noise: a pan over smooth skin moves
+/// pixels only a little, and the border must hide on it instantly too.
+constexpr double ContentChangeThreshold = 2.5;
+constexpr double ContentSettleSeconds = 0.45;
+
+bool sameRegionRect(const RegionOfInterest& a, const RegionOfInterest& b)
+{
+    return std::abs(a.leftPercent - b.leftPercent) < 0.01 && std::abs(a.topPercent - b.topPercent) < 0.01 &&
+           std::abs(a.rightPercent - b.rightPercent) < 0.01 && std::abs(a.bottomPercent - b.bottomPercent) < 0.01;
+}
+
+// Maps a display-percent region onto a frame's pixel grid, where the face
+// pin does its geometry, and back.
+PinRect pinRectFromPercent(const RegionOfInterest& region, int frameWidth, int frameHeight)
+{
+    return PinRect{region.leftPercent / 100.0 * frameWidth, region.topPercent / 100.0 * frameHeight,
+                   region.rightPercent / 100.0 * frameWidth, region.bottomPercent / 100.0 * frameHeight};
+}
+
+RegionOfInterest percentFromPinRect(const PinRect& rect, int frameWidth, int frameHeight)
+{
+    return RegionOfInterest{rect.left * 100.0 / frameWidth, rect.top * 100.0 / frameHeight,
+                            rect.right * 100.0 / frameWidth, rect.bottom * 100.0 / frameHeight};
+}
+
 // The border label wears the window title (the filename, usually), capped so
 // a pathological title cannot dwarf the region. Cut at a UTF-8 code point
 // boundary, never inside a character.
@@ -1596,10 +1649,10 @@ void App::run()
 
 void App::shutdown()
 {
-    // No new face check starts once the loop is done, so drain the at-most one
-    // still in flight before m_callbackState leaves scope: its detached thread
-    // holds a pointer to it.
-    while (m_callbackState.faceCheckRunning.load()) {
+    // No new face check or pin probe starts once the loop is done, so drain
+    // any still in flight before their targets leave scope: the detached
+    // threads hold pointers into this object.
+    while (m_callbackState.faceCheckRunning.load() || m_facePinProbe.running.load()) {
         std::this_thread::yield();
     }
 
@@ -1984,8 +2037,8 @@ void App::syncRegionBorder()
     // attached region on the focused tracked window (label and warm dress),
     // else the plain global one. Called every frame; the platform side makes
     // the unchanged case free.
-    if (m_regionPicking || isFullRegion() || applicationHidden() || m_attachedWindowMoving ||
-        glfwGetWindowAttrib(m_window, GLFW_ICONIFIED)) {
+    if (m_regionPicking || isFullRegion() || applicationHidden() || m_attachedWindowMoving || m_facePinHunting ||
+        regionContentUnsettled() || glfwGetWindowAttrib(m_window, GLFW_ICONIFIED)) {
         hideRegionBorder();
     } else {
         showRegionBorder(m_captureController->capturedDisplay(), m_analysis.region,
@@ -2199,6 +2252,20 @@ void App::onWindowMotion(WindowMotionSignal signal)
     }
 }
 
+// The label prefers the window's live title - the filename in most editors
+// - and follows it when the window's content changes; a pinned window says
+// so.
+void App::refreshAttachedLabel(const AttachDecision& decision)
+{
+    if (decision.activeIdentity == 0) {
+        return;
+    }
+    m_attachActiveLabel = borderLabelFrom(decision.activeTitle, m_attach.activeApplicationName());
+    if (m_facePins.contains(decision.activeIdentity)) {
+        m_attachActiveLabel = "face - " + m_attachActiveLabel;
+    }
+}
+
 // One follow step: observes every tracked window, lets the controller pick
 // the active one and map its region, and applies the verdict. Runs twice per
 // frame - once before the frame, and again right after the swap so the
@@ -2231,11 +2298,7 @@ void App::followAttachedWindow()
     if (activeWindowMoved(decision)) {
         onWindowMotion(WindowMotionSignal::Moved);
     }
-    if (decision.activeIdentity != 0) {
-        // The label prefers the window's live title - the filename in most
-        // editors - and follows it when the window's content changes.
-        m_attachActiveLabel = borderLabelFrom(decision.activeTitle, m_attach.activeApplicationName());
-    }
+    refreshAttachedLabel(decision);
     if (decision.activeIdentity != m_attachActiveWatched) {
         // The active window switched: the motion watch moves with it and the
         // border, no longer mid-anything, follows the routing right away.
@@ -2252,6 +2315,7 @@ void App::followAttachedWindow()
     m_attachLastSeenRect = decision.activeRect;
     applyAttachDecision(decision);
     captureActiveDisplay(decision);
+    updateFacePin(decision);
     if (decision.closedCount > 0) {
         m_lastActivity = glfwGetTime();
     }
@@ -2262,6 +2326,291 @@ void App::followAttachedWindow()
         m_attachedWindowMoving = false;
     }
     syncRegionBorder();
+}
+
+// The probe's region of interest, in frame pixels: FacePinRoiWidths anchor
+// widths around the last adopted anchor, clipped to the tracked window and
+// the frame - a neighbouring window's faces are structurally out of reach.
+// A pin that has lost its face searches the whole tracked window instead.
+IntRect facePinRoi(const FacePinState& pin, const AttachWindowRect& window, const DisplayGeometry& geometry,
+                   int frameWidth, int frameHeight)
+{
+    const double scale = frameWidth / geometry.widthPoints;
+    double left = (window.x - geometry.originX) * scale;
+    double top = (window.y - geometry.originY) * scale;
+    double right = left + window.width * scale;
+    double bottom = top + window.height * scale;
+    if (!face_pin::searchingWide(pin)) {
+        const double reach = FacePinRoiWidths * pin.lastAnchor.width;
+        left = std::max(left, pin.lastAnchor.centerX - reach);
+        top = std::max(top, pin.lastAnchor.centerY - reach);
+        right = std::min(right, pin.lastAnchor.centerX + reach);
+        bottom = std::min(bottom, pin.lastAnchor.centerY + reach);
+    }
+    left = std::max(left, 0.0);
+    top = std::max(top, 0.0);
+    right = std::min(right, static_cast<double>(frameWidth));
+    bottom = std::min(bottom, static_cast<double>(frameHeight));
+
+    return IntRect{static_cast<int>(left), static_cast<int>(top), static_cast<int>(right - left),
+                   static_cast<int>(bottom - top)};
+}
+
+// A window translation carries the face with it, so the anchors ride along
+// and the probe keeps searching where the face actually is. A resize
+// re-lays the content out unpredictably, so the anchors stay put and the
+// probes re-find the face instead.
+void App::trackPinWindowRect(AppFacePin& pin, const AttachWindowRect& rect)
+{
+    if (!pin.windowRect) {
+        pin.windowRect = rect;
+
+        return;
+    }
+    const bool sameSize =
+        std::abs(rect.width - pin.windowRect->width) < 0.5 && std::abs(rect.height - pin.windowRect->height) < 0.5;
+    const double dx = rect.x - pin.windowRect->x;
+    const double dy = rect.y - pin.windowRect->y;
+    if (sameSize && (dx != 0.0 || dy != 0.0) && m_frameSize) {
+        if (const auto geometry = geometryOfDisplay(m_captureController->capturedDisplay())) {
+            const double scale = m_frameSize->width / geometry->widthPoints;
+            face_pin::translate(pin.state, dx * scale, dy * scale);
+        }
+    }
+    pin.windowRect = rect;
+}
+
+// A cheap content-stability probe over the pinned region: a sparse grid of
+// pixels compared frame to frame. Any considerable change - a pan, a zoom,
+// even a develop-slider drag - hides the border until the content settles;
+// the scopes keep analyzing the region throughout. A region rectangle we
+// moved ourselves only refreshes the baseline.
+void App::probeRegionContentChange()
+{
+    constexpr int GridSide = 16;
+
+    if (!m_frameSize) {
+        return;
+    }
+    const RegionOfInterest region = m_analysis.region;
+    std::vector<uint8_t> samples;
+    samples.reserve(static_cast<std::size_t>(GridSide) * GridSide * 3);
+    const bool sampled = m_worker.withLatestFrame([&](const FrameView& view) {
+        const double left = region.leftPercent / 100.0 * view.width;
+        const double top = region.topPercent / 100.0 * view.height;
+        const double width = (region.rightPercent - region.leftPercent) / 100.0 * view.width;
+        const double height = (region.bottomPercent - region.topPercent) / 100.0 * view.height;
+        for (int gridY = 0; gridY < GridSide; ++gridY) {
+            for (int gridX = 0; gridX < GridSide; ++gridX) {
+                const int px = std::clamp(static_cast<int>(left + (gridX + 0.5) * width / GridSide), 0, view.width - 1);
+                const int py =
+                    std::clamp(static_cast<int>(top + (gridY + 0.5) * height / GridSide), 0, view.height - 1);
+                const uint8_t* pixel = view.pixelAt(px, py);
+                samples.push_back(pixel[0]);
+                samples.push_back(pixel[1]);
+                samples.push_back(pixel[2]);
+            }
+        }
+    });
+    if (!sampled || samples.empty()) {
+        return;
+    }
+    if (sameRegionRect(region, m_regionContentRect) && samples.size() == m_regionContentSamples.size()) {
+        long long total = 0;
+        for (std::size_t index = 0; index < samples.size(); ++index) {
+            total += std::abs(static_cast<int>(samples[index]) - static_cast<int>(m_regionContentSamples[index]));
+        }
+        if (static_cast<double>(total) / static_cast<double>(samples.size()) > ContentChangeThreshold) {
+            m_regionContentChangedAt = glfwGetTime();
+        }
+    }
+    m_regionContentRect = region;
+    m_regionContentSamples = std::move(samples);
+}
+
+bool App::regionContentUnsettled() const
+{
+    return m_regionContentChangedAt >= 0.0 && glfwGetTime() - m_regionContentChangedAt < ContentSettleSeconds;
+}
+
+// The per-frame face-pin step: prunes pins whose windows are gone, drains a
+// finished probe, and starts the next one when the active window's pin is
+// due. All adopt-or-hold judgement lives in face_pin::decide; this only
+// moves data between the threads.
+void App::updateFacePin(const AttachDecision& decision)
+{
+    std::erase_if(m_facePins, [this](const auto& entry) { return !m_attach.tracks(entry.first); });
+    if (m_facePinProbe.ready.load()) {
+        consumeFacePinProbe(decision);
+    }
+    const auto pinned = m_facePins.find(decision.activeIdentity);
+    if (decision.activeIdentity == 0 || pinned == m_facePins.end()) {
+        m_facePinHunting = false;
+        m_regionContentChangedAt = -1.0;
+
+        return;
+    }
+    if (decision.activeRect) {
+        trackPinWindowRect(pinned->second, *decision.activeRect);
+    }
+    probeRegionContentChange();
+    // The probe never runs against a mid-gesture window: the user's drag
+    // wins, and the pin catches up once things settle.
+    if (m_attachBorderEditing || m_attachedWindowMoving || m_attachGripActive) {
+        return;
+    }
+    const double now = glfwGetTime();
+    if (m_facePinProbe.running.load() || now < m_nextFacePinProbe) {
+        return;
+    }
+    m_nextFacePinProbe = now + FacePinProbeSeconds;
+    launchFacePinProbe(decision, pinned->second.state);
+}
+
+// Copies the probe's region of interest out of the latest frame and hands
+// it to a detached detection thread, so detection never hitches a frame.
+void App::launchFacePinProbe(const AttachDecision& decision, const FacePinState& pin)
+{
+    const auto geometry = geometryOfDisplay(m_captureController->capturedDisplay());
+    if (!geometry || !decision.activeRect) {
+        return;
+    }
+    auto pixels = std::make_shared<std::vector<uint8_t>>();
+    IntRect roi;
+    float pixelsPerPoint = 1.0f;
+    const bool copied = m_worker.withLatestFrame([&](const FrameView& view) {
+        roi = facePinRoi(pin, *decision.activeRect, *geometry, view.width, view.height);
+        if (roi.width <= 0 || roi.height <= 0) {
+            return;
+        }
+        pixelsPerPoint = static_cast<float>(view.width / geometry->widthPoints);
+        const std::size_t rowBytes = static_cast<std::size_t>(roi.width) * 4;
+        pixels->resize(rowBytes * static_cast<std::size_t>(roi.height));
+        for (int row = 0; row < roi.height; ++row) {
+            std::memcpy(pixels->data() + rowBytes * static_cast<std::size_t>(row),
+                        view.bgra + static_cast<std::size_t>(roi.y + row) * view.strideBytes +
+                            static_cast<std::size_t>(roi.x) * 4,
+                        rowBytes);
+        }
+    });
+    if (!copied || pixels->empty()) {
+        return;
+    }
+    m_facePinProbe.forWindow = decision.activeIdentity;
+    m_facePinProbe.roi = roi;
+    m_facePinProbe.running.store(true);
+    FacePinProbe* probe = &m_facePinProbe;
+    std::thread([probe, pixels, roi, pixelsPerPoint] {
+        FrameView view;
+        view.bgra = pixels->data();
+        view.strideBytes = roi.width * 4;
+        view.width = roi.width;
+        view.height = roi.height;
+        std::vector<IntRect> faces = detectFaces(view, pixelsPerPoint);
+        for (IntRect& box : faces) {
+            box.x += roi.x;
+            box.y += roi.y;
+        }
+        {
+            std::lock_guard lock(probe->mutex);
+            probe->faces = std::move(faces);
+        }
+        probe->ready.store(true);
+        probe->running.store(false);
+        glfwPostEmptyEvent();
+    }).detach();
+}
+
+// Drains the finished probe and lets the pure core judge it against the
+// gates. Every verdict is logged for grading; only an adoption touches the
+// region.
+void App::consumeFacePinProbe(const AttachDecision& decision)
+{
+    std::vector<IntRect> boxes;
+    {
+        std::lock_guard lock(m_facePinProbe.mutex);
+        boxes = std::move(m_facePinProbe.faces);
+        m_facePinProbe.faces.clear();
+    }
+    m_facePinProbe.ready.store(false);
+    const auto pin = m_facePins.find(m_facePinProbe.forWindow);
+    if (pin == m_facePins.end() || m_facePinProbe.forWindow != decision.activeIdentity) {
+        return;
+    }
+    const PinRect bounds{static_cast<double>(m_facePinProbe.roi.x), static_cast<double>(m_facePinProbe.roi.y),
+                         static_cast<double>(m_facePinProbe.roi.x + m_facePinProbe.roi.width),
+                         static_cast<double>(m_facePinProbe.roi.y + m_facePinProbe.roi.height)};
+    std::vector<FaceAnchor> candidates;
+    candidates.reserve(boxes.size());
+    std::size_t edgeDropped = 0;
+    for (const IntRect& box : boxes) {
+        const PinRect boxRect{static_cast<double>(box.x), static_cast<double>(box.y),
+                              static_cast<double>(box.x + box.width), static_cast<double>(box.y + box.height)};
+        if (!face_pin::trustworthyBox(boxRect, bounds)) {
+            ++edgeDropped;
+
+            continue;
+        }
+        candidates.push_back(
+            FaceAnchor{box.x + box.width / 2.0, box.y + box.height / 2.0, static_cast<double>(box.width)});
+    }
+    const bool wide = face_pin::searchingWide(pin->second.state);
+    const FacePinDecision verdict = face_pin::decide(pin->second.state, candidates);
+    logFacePin((verdict.adopt ? "adopt: " : "hold: ") + verdict.reason + (wide ? " [wide]" : "") + " (" +
+               std::to_string(candidates.size()) + " candidates" +
+               (edgeDropped != 0 ? ", edge-dropped " + std::to_string(edgeDropped) : "") + "), anchor " +
+               std::to_string(pin->second.state.lastAnchor.centerX) + "," +
+               std::to_string(pin->second.state.lastAnchor.centerY));
+    m_facePinHunting = verdict.hunting;
+    if (face_pin::givenUp(pin->second.state)) {
+        logFacePin("gave up - removing region");
+        removeLostFacePin(m_facePinProbe.forWindow);
+
+        return;
+    }
+    if (verdict.adopt) {
+        applyFacePinRegion(pin->second.state);
+    }
+}
+
+// The face could not be found for several seconds: the region dissolves
+// instead of sitting somewhere wrong, and the user re-picks when ready.
+void App::removeLostFacePin(uint64_t identity)
+{
+    m_facePins.erase(identity);
+    m_facePinHunting = false;
+    m_regionContentChangedAt = -1.0;
+    m_attach.remove(identity);
+    if (m_attachActiveWatched == identity) {
+        unwatchWindowMotion();
+        m_attachActiveWatched = 0;
+    }
+    m_attachDetachNotice = "face lost - region removed";
+    m_attachNoticeUntil = glfwGetTime() + 5.0;
+    setRegion(m_globalRegion);
+    syncRegionBorder();
+    m_lastActivity = glfwGetTime();
+}
+
+// The adopted anchor's region, applied through the same path as a border
+// edit: the controller re-derives the stored screen-glued rectangle and the
+// analysis region follows.
+void App::applyFacePinRegion(const FacePinState& pin)
+{
+    if (!m_frameSize || m_frameSize->width <= 0 || m_frameSize->height <= 0) {
+        return;
+    }
+    const auto geometry = geometryOfDisplay(m_captureController->capturedDisplay());
+    const auto windowGeom = windowGeometry(m_attachActiveWatched);
+    if (!geometry || !windowGeom || windowGeom->minimized) {
+        return;
+    }
+    const PinRect target = face_pin::mapRegion(pin, pin.lastAnchor);
+    const RegionOfInterest edited = percentFromPinRect(target, m_frameSize->width, m_frameSize->height);
+    m_analysis.region = m_attach.editRegion(
+        edited, AttachWindowRect{windowGeom->x, windowGeom->y, windowGeom->width, windowGeom->height},
+        AttachDisplayRect{geometry->originX, geometry->originY, geometry->widthPoints, geometry->heightPoints});
+    m_analysisDirty = true;
 }
 
 // The idle tick, in slices, while windows are tracked: a programmatic window
@@ -2295,6 +2644,14 @@ void App::idleWaitWatchingAttachedWindow()
             onWindowMotion(WindowMotionSignal::Moved);
 
             return;
+        }
+        // A pinned region's content churn - a pan under an idle loop -
+        // takes the border down within a slice, not a whole tick.
+        if (m_facePins.contains(m_attachActiveWatched)) {
+            probeRegionContentChange();
+            if (regionContentUnsettled()) {
+                hideRegionBorder();
+            }
         }
     }
 }
@@ -3557,12 +3914,20 @@ std::vector<PickerDisplay> App::buildPickerDisplays()
     // plus, behind their own key, the faces the platform detector finds in the
     // current frame. Faces are offered on the tracked display only.
     std::vector<SuggestedRegion> faceSuggestions;
+    m_pickableFaces.clear();
     if (supportsFaceDetection()) {
         (void)m_worker.withLatestFrame([&](const FrameView& view) {
             const auto geometry = geometryOfDisplay(m_captureController->capturedDisplay());
             const float pixelsPerPoint = geometry ? static_cast<float>(view.width / geometry->widthPoints) : 1.0f;
-            faceSuggestions = buildFaceSuggestions(detectFaces(view, pixelsPerPoint), view.width, view.height);
+            const std::vector<IntRect> faces = detectFaces(view, pixelsPerPoint);
+            faceSuggestions = buildFaceSuggestions(faces, view.width, view.height);
             m_callbackState.facesOnScreen.store(static_cast<int>(faceSuggestions.size()));
+            // The raw boxes are remembered too: a confirmed face pick
+            // anchors its pin on the detector's box, not the inset offer.
+            for (const IntRect& box : faces) {
+                m_pickableFaces.push_back({faceSuggestionRegion(box, view.width, view.height), box,
+                                           m_captureController->capturedDisplay(), view.width, view.height});
+            }
         });
     }
 
@@ -3728,6 +4093,13 @@ void App::applyBorderEdit(const RegionOfInterest& edited)
         applied = m_attach.editRegion(
             edited, AttachWindowRect{windowGeom->x, windowGeom->y, windowGeom->width, windowGeom->height},
             AttachDisplayRect{geometry->originX, geometry->originY, geometry->widthPoints, geometry->heightPoints});
+        // A pinned window's edit re-teaches the pin: the new rectangle
+        // becomes the crop the face carries from here on.
+        const auto pin = m_facePins.find(m_attachBorderEditTarget);
+        if (pin != m_facePins.end() && m_frameSize) {
+            face_pin::rebindCrop(pin->second.state,
+                                 pinRectFromPercent(applied, m_frameSize->width, m_frameSize->height));
+        }
     } else {
         m_globalRegion = edited;
     }
@@ -3862,6 +4234,8 @@ void App::pollRegionPreview(const RegionPickPoll& poll)
 void App::adoptAttachedPick(uint64_t identity, int64_t ownerPid, const RegionOfInterest& region)
 {
     m_globalRegion = RegionOfInterest{};
+    // A manual pick or draw replaces whatever pin the window wore.
+    m_facePins.erase(identity);
     m_attachedWindowMoving = false;
     m_attachGripActive = false;
     m_attachRegionMovedAt = -1.0;
@@ -3888,6 +4262,10 @@ void App::confirmPickedRegion(const RegionPickPoll& poll)
                           m_attach.attach(picked->identity, picked->ownerPid, picked->application, picked->windowRect,
                                           *display, confirmed));
 
+        return;
+    }
+    // A confirmed face suggestion pins to the window under it.
+    if (adoptFacePick(poll.displayId, confirmed)) {
         return;
     }
     if (m_attachedDrawTarget && display) {
@@ -3918,6 +4296,94 @@ void App::confirmPickedRegion(const RegionPickPoll& poll)
     }
     m_globalRegion = confirmed;
     setRegion(m_globalRegion);
+}
+
+// Recovers which offered face a confirmed region names, by the same
+// near-exact comparison the window match uses.
+const App::PickableFace* App::matchPickedFace(uint32_t displayId, const RegionOfInterest& region) const
+{
+    constexpr double MatchTolerance = 1.0;
+
+    for (const PickableFace& candidate : m_pickableFaces) {
+        if (candidate.displayId != displayId) {
+            continue;
+        }
+        const double delta = std::abs(candidate.region.leftPercent - region.leftPercent) +
+                             std::abs(candidate.region.topPercent - region.topPercent) +
+                             std::abs(candidate.region.rightPercent - region.rightPercent) +
+                             std::abs(candidate.region.bottomPercent - region.bottomPercent);
+        if (delta <= MatchTolerance) {
+            return &candidate;
+        }
+    }
+
+    return nullptr;
+}
+
+// The frontmost offered window under a region's centre: the window a face
+// pick pins to.
+const App::PickableWindow* App::windowContaining(uint32_t displayId, const RegionOfInterest& region) const
+{
+    const double centerX = (region.leftPercent + region.rightPercent) / 2.0;
+    const double centerY = (region.topPercent + region.bottomPercent) / 2.0;
+    for (const PickableWindow& candidate : m_pickableWindows) {
+        if (candidate.displayId != displayId) {
+            continue;
+        }
+        if (centerX >= candidate.region.leftPercent && centerX <= candidate.region.rightPercent &&
+            centerY >= candidate.region.topPercent && centerY <= candidate.region.bottomPercent) {
+            return &candidate;
+        }
+    }
+
+    return nullptr;
+}
+
+// A confirmed face suggestion becomes a pinned attachment on the window
+// under it: the window's tracking carries the region between focus changes,
+// and the pin follows the face within it. A face over no offered window
+// falls through to the plain global path.
+bool App::adoptFacePick(uint32_t displayId, const RegionOfInterest& confirmed)
+{
+    const PickableFace* face = matchPickedFace(displayId, confirmed);
+    if (face == nullptr) {
+        return false;
+    }
+    const PickableWindow* host = windowContaining(displayId, confirmed);
+    const auto geometry = geometryOfDisplay(displayId);
+    if (host == nullptr || !geometry) {
+        return false;
+    }
+    const RegionOfInterest mapped = m_attach.attach(
+        host->identity, host->ownerPid, host->application, host->windowRect,
+        AttachDisplayRect{geometry->originX, geometry->originY, geometry->widthPoints, geometry->heightPoints},
+        confirmed);
+    adoptAttachedPick(host->identity, host->ownerPid, mapped);
+    const FaceAnchor anchor{face->box.x + face->box.width / 2.0, face->box.y + face->box.height / 2.0,
+                            static_cast<double>(face->box.width)};
+    m_facePins[host->identity] =
+        AppFacePin{face_pin::makePin(anchor, pinRectFromPercent(confirmed, face->frameWidth, face->frameHeight)),
+                   host->windowRect};
+    logFacePin("pinned to '" + host->application + "', anchor " + std::to_string(anchor.centerX) + "," +
+               std::to_string(anchor.centerY) + " width " + std::to_string(anchor.width));
+
+    return true;
+}
+
+// The spike's decision log, appended when SIDESCOPES_FACEPIN_LOG is set in
+// the environment: every probe verdict, for grading the gates against real
+// editing sessions.
+void App::logFacePin(const std::string& line)
+{
+    static const bool enabled = facePinLogRequested();
+    if (!enabled) {
+        return;
+    }
+    std::FILE* file = openDebugFile("/tmp/sidescopes-facepin.txt", "a");
+    if (file != nullptr) {
+        std::fprintf(file, "%9.2f %s\n", glfwGetTime(), line.c_str());
+        std::fclose(file);
+    }
 }
 
 void App::commitAnalysisChanges()

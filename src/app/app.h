@@ -13,6 +13,7 @@
 
 #include "app/attach_controller.h"
 #include "app/capture_controller.h"
+#include "app/face_pin.h"
 #include "app/param_menu.h"
 #include "app/pin_board.h"
 #include "app/scope_registry.h"
@@ -135,6 +136,7 @@ private:
     [[nodiscard]] bool activeWindowMoved(const AttachDecision& decision) const;
     void captureActiveDisplay(const AttachDecision& decision);
     void applyAttachDecision(const AttachDecision& decision);
+    void refreshAttachedLabel(const AttachDecision& decision);
     void onWindowMotion(WindowMotionSignal signal);
     void idleWaitWatchingAttachedWindow();
     [[nodiscard]] std::optional<PickConstraint> makeAttachedDrawConstraint();
@@ -145,6 +147,26 @@ private:
     void adoptAttachedPick(uint64_t identity, int64_t ownerPid, const RegionOfInterest& region);
     void dismissEditedBorder();
     void applyBorderEdit(const RegionOfInterest& edited);
+
+    // --- face pins ---
+    /// A pin plus the window rectangle it last saw: a same-size window
+    /// move translates the pin's anchors along with the face.
+    struct AppFacePin
+    {
+        FacePinState state;
+        std::optional<AttachWindowRect> windowRect;
+    };
+
+    void updateFacePin(const AttachDecision& decision);
+    void launchFacePinProbe(const AttachDecision& decision, const FacePinState& pin);
+    void consumeFacePinProbe(const AttachDecision& decision);
+    void applyFacePinRegion(const FacePinState& pin);
+    void trackPinWindowRect(AppFacePin& pin, const AttachWindowRect& rect);
+    void removeLostFacePin(uint64_t identity);
+    void probeRegionContentChange();
+    [[nodiscard]] bool regionContentUnsettled() const;
+    bool adoptFacePick(uint32_t displayId, const RegionOfInterest& confirmed);
+    void logFacePin(const std::string& line);
 
     /// A window the picker offered, remembered with its identity so a
     /// confirmed window pick can be turned into an attachment.
@@ -159,6 +181,21 @@ private:
     };
 
     [[nodiscard]] const PickableWindow* matchPickedWindow(uint32_t displayId, const RegionOfInterest& region) const;
+
+    /// A face the picker offered, remembered with its detector box and the
+    /// frame it was measured on so a confirmed face pick can be turned into
+    /// a pinned attachment.
+    struct PickableFace
+    {
+        RegionOfInterest region;
+        IntRect box;
+        uint32_t displayId = 0;
+        int frameWidth = 0;
+        int frameHeight = 0;
+    };
+
+    [[nodiscard]] const PickableFace* matchPickedFace(uint32_t displayId, const RegionOfInterest& region) const;
+    [[nodiscard]] const PickableWindow* windowContaining(uint32_t displayId, const RegionOfInterest& region) const;
     [[nodiscard]] std::optional<FloatColor> averageFrameArea(const RegionOfInterest& area) const;
     void resetRegionToFull();
     void persistPreferences();
@@ -286,6 +323,31 @@ private:
 
     std::optional<AttachedDrawTarget> m_attachedDrawTarget;
     std::vector<PickableWindow> m_pickableWindows;
+    std::vector<PickableFace> m_pickableFaces;
+
+    /// The face-probe mailbox: a detached detection thread fills it, the
+    /// main loop drains it; at most one probe is in flight.
+    struct FacePinProbe
+    {
+        std::atomic<bool> running{false};
+        std::atomic<bool> ready{false};
+        std::mutex mutex;
+        std::vector<IntRect> faces;  ///< detector boxes, full-frame pixels
+        uint64_t forWindow = 0;
+        IntRect roi;  ///< the searched area, for judging edge-clipped boxes
+    };
+
+    std::map<uint64_t, AppFacePin> m_facePins;
+    FacePinProbe m_facePinProbe;
+    double m_nextFacePinProbe = 0.0;
+    /// True while the active pin's face is not confirmed where the region
+    /// sits; the border hides instead of outlining stale content.
+    bool m_facePinHunting = false;
+    /// The content-stability probe over the pinned region: a sparse pixel
+    /// grid compared frame to frame; the border shows only settled content.
+    std::vector<uint8_t> m_regionContentSamples;
+    RegionOfInterest m_regionContentRect;
+    double m_regionContentChangedAt = -1.0;
     uint64_t m_lastExternalWindowId = 0;
     int64_t m_lastExternalOwnerPid = 0;
     double m_nextExternalWindowProbe = 0.0;

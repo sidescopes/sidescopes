@@ -30,6 +30,10 @@ struct WindowRegion
 /// Face rectangles (frame pixels) as picker suggestions. The detector's box
 /// is shrunk inward: scoping a face means judging skin, and edge pixels are
 /// hair and background that skew the vectorscope's skin cluster.
+/// The offered crop for one detected face box: the box shrunk inward enough
+/// to shed hair and background at the edges without losing the cheeks.
+[[nodiscard]] RegionOfInterest faceSuggestionRegion(const IntRect& face, int frameWidth, int frameHeight);
+
 [[nodiscard]] std::vector<SuggestedRegion> buildFaceSuggestions(const std::vector<IntRect>& faces, int frameWidth,
                                                                 int frameHeight);
 

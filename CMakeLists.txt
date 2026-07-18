@@ -326,6 +326,7 @@ if(APPLE OR WIN32)
         src/app/app.cpp
         src/app/attach_controller.cpp
         src/app/capture_controller.cpp
+        src/app/face_pin.cpp
         src/app/overlay_render.cpp
         src/app/overlay_style.cpp
         src/app/param_menu.cpp

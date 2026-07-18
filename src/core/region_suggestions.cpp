@@ -41,24 +41,32 @@ std::vector<SuggestedRegion> buildRegionSuggestions(const std::vector<WindowRegi
     return suggestions;
 }
 
-std::vector<SuggestedRegion> buildFaceSuggestions(const std::vector<IntRect>& faces, int frameWidth, int frameHeight)
+RegionOfInterest faceSuggestionRegion(const IntRect& face, int frameWidth, int frameHeight)
 {
     // The inward shrink per side: enough to shed hair and background at
     // the box edges without losing the cheeks.
     constexpr double InsetFraction = 0.1;
 
+    const double insetX = face.width * InsetFraction;
+    const double insetY = face.height * InsetFraction;
+    RegionOfInterest region;
+    region.leftPercent = (face.x + insetX) * 100.0 / frameWidth;
+    region.topPercent = (face.y + insetY) * 100.0 / frameHeight;
+    region.rightPercent = (face.x + face.width - insetX) * 100.0 / frameWidth;
+    region.bottomPercent = (face.y + face.height - insetY) * 100.0 / frameHeight;
+
+    return region;
+}
+
+std::vector<SuggestedRegion> buildFaceSuggestions(const std::vector<IntRect>& faces, int frameWidth, int frameHeight)
+{
     std::vector<SuggestedRegion> suggestions;
     if (frameWidth <= 0 || frameHeight <= 0) {
         return suggestions;
     }
     for (const IntRect& face : faces) {
-        const double insetX = face.width * InsetFraction;
-        const double insetY = face.height * InsetFraction;
         SuggestedRegion suggestion;
-        suggestion.region.leftPercent = (face.x + insetX) * 100.0 / frameWidth;
-        suggestion.region.topPercent = (face.y + insetY) * 100.0 / frameHeight;
-        suggestion.region.rightPercent = (face.x + face.width - insetX) * 100.0 / frameWidth;
-        suggestion.region.bottomPercent = (face.y + face.height - insetY) * 100.0 / frameHeight;
+        suggestion.region = faceSuggestionRegion(face, frameWidth, frameHeight);
         suggestion.label = "Face";
         bool duplicate = false;
         for (const SuggestedRegion& existing : suggestions) {
