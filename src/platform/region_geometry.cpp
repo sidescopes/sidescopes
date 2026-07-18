@@ -110,10 +110,10 @@ LocalRect selectionRectFromDrag(double startX, double startY, double currentX, d
 
 unsigned cornerZoneAt(const LocalRect& region, double x, double y, double scale)
 {
-    // A small region must keep a grabbable move band: the corner reach never
-    // eats more than a quarter of either side, so resizing cannot crowd out
-    // moving.
-    const double corner = std::min({CornerZone * scale, region.width / 4, region.height / 4});
+    // A small region must keep a generous move band - face-sized regions
+    // are the product's bread and butter: the corner reach never eats more
+    // than a sixth of either side, so resizing cannot crowd out moving.
+    const double corner = std::min({CornerZone * scale, region.width / 6, region.height / 6});
     const bool nearLeft = x < region.x + corner;
     const bool nearRight = x > region.x + region.width - corner;
     const bool nearTop = y < region.y + corner;
@@ -130,10 +130,10 @@ unsigned cornerZoneAt(const LocalRect& region, double x, double y, double scale)
 unsigned edgeOrMoveZoneAt(const LocalRect& region, double x, double y, double scale)
 {
     // The same courtesy as the corners: an edge-midpoint zone never spans
-    // more than a quarter of its edge, leaving move gaps beside it however
-    // small the region gets.
-    const double midpointX = std::min(MidpointZone * scale, region.width / 8);
-    const double midpointY = std::min(MidpointZone * scale, region.height / 8);
+    // more than a sixth of its edge, leaving roughly half of every edge as
+    // move band however small the region gets.
+    const double midpointX = std::min(MidpointZone * scale, region.width / 12);
+    const double midpointY = std::min(MidpointZone * scale, region.height / 12);
     const bool midX = std::abs(x - (region.x + region.width / 2)) <= midpointX;
     const bool midY = std::abs(y - (region.y + region.height / 2)) <= midpointY;
     if (midX && y < region.y) {

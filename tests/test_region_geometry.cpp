@@ -118,14 +118,16 @@ TEST_CASE("The scale factor grows the corner zone")
 TEST_CASE("A small region keeps a grabbable move band between the zones")
 {
     // 40x40: uncapped 22-point corners would cover every band point twice
-    // over. Capped to a quarter per side, the corners reach 10 points and
-    // the edge midpoints span 5 to either side of center, leaving move gaps.
+    // over. Capped to a sixth per side, the corners reach about 6.7 points
+    // and the edge midpoints span about 3.3 to either side of center,
+    // leaving roughly half of every edge as move band.
     const LocalRect region{100.0, 100.0, 40.0, 40.0};
 
     CHECK(cornerZoneAt(region, 105.0, 105.0, 1.0) == (ZoneLeft | ZoneTop));
-    CHECK(cornerZoneAt(region, 118.0, 118.0, 1.0) == ZoneNone);     // past the capped corner
+    CHECK(cornerZoneAt(region, 110.0, 110.0, 1.0) == ZoneNone);     // past the capped corner
     CHECK(edgeOrMoveZoneAt(region, 120.0, 95.0, 1.0) == ZoneTop);   // edge midpoint above
     CHECK(edgeOrMoveZoneAt(region, 113.0, 95.0, 1.0) == ZoneMove);  // the gap corner-to-midpoint
+    CHECK(edgeOrMoveZoneAt(region, 127.0, 95.0, 1.0) == ZoneMove);  // the gap midpoint-to-corner
 }
 
 // ---------------------------------------------------------------------------
