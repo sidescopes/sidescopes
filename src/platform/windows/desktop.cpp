@@ -12,6 +12,7 @@
 // comment keeps clang-format from sorting it ahead of them.
 #include <shellapi.h>
 
+#include <algorithm>
 #include <string>
 #include <vector>
 
@@ -131,8 +132,19 @@ BOOL CALLBACK collectWindow(HWND window, LPARAM context)
     entry.width = width;
     entry.height = height;
     entry.application = applicationNameOfWindow(window);
+    entry.windowIdentity = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(window));
+    entry.ownerPid = static_cast<int64_t>(processId);
     collector->windows->push_back(std::move(entry));
     return TRUE;
+}
+
+// The main application window, remembered so hideApplication can target it:
+// Windows has no application-wide hide.
+HWND g_mainWindow = nullptr;
+
+HWND windowFromIdentity(uint64_t identity)
+{
+    return reinterpret_cast<HWND>(static_cast<uintptr_t>(identity));
 }
 
 }  // namespace
@@ -153,6 +165,29 @@ std::vector<DesktopWindow> onScreenWindows(uint32_t displayId)
     // matching the contract.
     EnumWindows(collectWindow, reinterpret_cast<LPARAM>(&collector));
     return windows;
+}
+
+std::optional<WindowGeometry> windowGeometry(uint64_t identity)
+{
+    HWND window = windowFromIdentity(identity);
+    if (!IsWindow(window)) {
+        return std::nullopt;
+    }
+
+    WindowGeometry geometry;
+    geometry.minimized = IsIconic(window) != 0;
+    RECT frame{};
+    // The extended frame bounds match onScreenWindows; the plain window rect is
+    // the fallback where the compositor cannot answer.
+    if (FAILED(DwmGetWindowAttribute(window, DWMWA_EXTENDED_FRAME_BOUNDS, &frame, sizeof(frame)))) {
+        GetWindowRect(window, &frame);
+    }
+    geometry.x = static_cast<double>(frame.left);
+    geometry.y = static_cast<double>(frame.top);
+    geometry.width = static_cast<double>(frame.right) - frame.left;
+    geometry.height = static_cast<double>(frame.bottom) - frame.top;
+
+    return geometry;
 }
 
 std::optional<DesktopPoint> globalCursorPosition()
@@ -249,8 +284,143 @@ bool platformQuitsOnControlQ()
 
 void hideApplication()
 {
-    // Windows dismisses through minimize; there is no application-wide
-    // hide to invoke.
+    // No application-wide hide exists here, so this hides the remembered
+    // main window. The platform's own dismissal chord (Ctrl+W) goes through
+    // minimize instead and never reaches this.
+    if (g_mainWindow) {
+        ShowWindow(g_mainWindow, SW_HIDE);
+    }
+}
+
+bool applicationHidden()
+{
+    // Dismissal is minimizing here; the caller reads the iconified state off
+    // its own window.
+    return false;
+}
+
+namespace {
+
+std::function<void()> g_foregroundCallback;
+
+void CALLBACK foregroundWinEvent(HWINEVENTHOOK, DWORD, HWND, LONG, LONG, DWORD, DWORD)
+{
+    if (g_foregroundCallback) {
+        g_foregroundCallback();
+    }
+}
+
+}  // namespace
+
+void observeForegroundChanges(std::function<void()> callback)
+{
+    g_foregroundCallback = std::move(callback);
+    SetWinEventHook(EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND, nullptr, foregroundWinEvent, 0, 0,
+                    WINEVENT_OUTOFCONTEXT);
+}
+
+namespace {
+
+HWINEVENTHOOK g_motionMoveSizeHook = nullptr;
+HWINEVENTHOOK g_motionLocationHook = nullptr;
+HWND g_motionWindow = nullptr;
+std::function<void(WindowMotionSignal)> g_motionCallback;
+
+void CALLBACK motionWinEvent(HWINEVENTHOOK, DWORD event, HWND hwnd, LONG idObject, LONG, DWORD, DWORD)
+{
+    if (hwnd != g_motionWindow || idObject != OBJID_WINDOW || !g_motionCallback) {
+        return;
+    }
+    if (event == EVENT_SYSTEM_MOVESIZESTART) {
+        g_motionCallback(WindowMotionSignal::GripDown);
+        g_motionCallback(WindowMotionSignal::MotionImminent);
+    } else if (event == EVENT_SYSTEM_MOVESIZEEND) {
+        g_motionCallback(WindowMotionSignal::GripUp);
+    } else if (event == EVENT_OBJECT_LOCATIONCHANGE) {
+        g_motionCallback(WindowMotionSignal::Moved);
+    }
+}
+
+}  // namespace
+
+void watchWindowMotion(uint64_t identity, int64_t ownerPid, std::function<void(WindowMotionSignal)> callback)
+{
+    unwatchWindowMotion();
+    g_motionWindow = windowFromIdentity(identity);
+    g_motionCallback = std::move(callback);
+    // Out-of-context hooks scoped to the owning process deliver on this
+    // thread whenever it pumps messages - the idle wait included, so the
+    // border reacts to the grab, not to the next frame. The move-size pair
+    // brackets the user's drag loop; location changes also cover
+    // programmatic moves the loop never sees.
+    const DWORD process = static_cast<DWORD>(ownerPid);
+    g_motionMoveSizeHook = SetWinEventHook(EVENT_SYSTEM_MOVESIZESTART, EVENT_SYSTEM_MOVESIZEEND, nullptr,
+                                           motionWinEvent, process, 0, WINEVENT_OUTOFCONTEXT);
+    g_motionLocationHook = SetWinEventHook(EVENT_OBJECT_LOCATIONCHANGE, EVENT_OBJECT_LOCATIONCHANGE, nullptr,
+                                           motionWinEvent, process, 0, WINEVENT_OUTOFCONTEXT);
+}
+
+void unwatchWindowMotion()
+{
+    if (g_motionMoveSizeHook) {
+        UnhookWinEvent(g_motionMoveSizeHook);
+        g_motionMoveSizeHook = nullptr;
+    }
+    if (g_motionLocationHook) {
+        UnhookWinEvent(g_motionLocationHook);
+        g_motionLocationHook = nullptr;
+    }
+    g_motionWindow = nullptr;
+    g_motionCallback = nullptr;
+}
+
+std::optional<uint64_t> frontmostWindowOfApplication(int64_t ownerPid)
+{
+    // The caller asks about the foreground application, whose focused window
+    // the system names directly.
+    HWND foreground = GetForegroundWindow();
+    if (!foreground) {
+        return std::nullopt;
+    }
+    DWORD processId = 0;
+    GetWindowThreadProcessId(foreground, &processId);
+    if (static_cast<int64_t>(processId) != ownerPid) {
+        return std::nullopt;
+    }
+
+    return static_cast<uint64_t>(reinterpret_cast<uintptr_t>(foreground));
+}
+
+void raiseWindow(uint64_t identity, int64_t)
+{
+    HWND window = windowFromIdentity(identity);
+    // The picker holds the foreground when this runs, so the system honors
+    // handing it to the picked window directly.
+    if (IsWindow(window)) {
+        SetForegroundWindow(window);
+    }
+}
+
+void rememberApplicationWindow(void* nativeWindow)
+{
+    g_mainWindow = static_cast<HWND>(nativeWindow);
+}
+
+int64_t ownApplicationPid()
+{
+    return static_cast<int64_t>(GetCurrentProcessId());
+}
+
+int64_t foregroundApplicationPid()
+{
+    HWND foreground = GetForegroundWindow();
+    if (!foreground) {
+        return 0;
+    }
+    DWORD processId = 0;
+    GetWindowThreadProcessId(foreground, &processId);
+
+    return static_cast<int64_t>(processId);
 }
 
 void openScreenRecordingSettings()

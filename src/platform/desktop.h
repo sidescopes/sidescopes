@@ -36,11 +36,37 @@ struct DesktopWindow
     double width = 0.0;
     double height = 0.0;
     std::string application;
+    /// The window's platform identity, stable for its lifetime: the
+    /// kCGWindowNumber on macOS, the HWND (as a uintptr_t) on Windows. Window
+    /// attach binds to it and follows it through windowGeometry.
+    uint64_t windowIdentity = 0;
+    /// The process id of the application that owns the window, so the attach
+    /// visibility rule can tell that application's own child windows from a
+    /// switch to a different application.
+    int64_t ownerPid = 0;
+};
+
+/// A window's current on-screen rectangle plus whether it is minimized, in the
+/// same global desktop points (top-left origin) onScreenWindows reports.
+struct WindowGeometry
+{
+    double x = 0.0;
+    double y = 0.0;
+    double width = 0.0;
+    double height = 0.0;
+    bool minimized = false;
 };
 
 /// Windows currently visible on the given display, frontmost first. Window
 /// geometry comes from the window server and needs no capture permission.
 [[nodiscard]] std::vector<DesktopWindow> onScreenWindows(uint32_t displayId);
+
+/// The current geometry of the window with @p identity (a DesktopWindow's
+/// windowIdentity), or nothing when it no longer exists - the caller reads
+/// that as the window having closed. A minimized window is still reported,
+/// flagged, so the attach coupling can hide the scopes rather than crop the
+/// desktop behind it.
+[[nodiscard]] std::optional<WindowGeometry> windowGeometry(uint64_t identity);
 
 /// Global cursor position in desktop points. Reading the position requires no
 /// special permission on any supported platform.
@@ -99,8 +125,89 @@ struct ModifierState
 
 /// Hides the whole application the platform's way (macOS: the same
 /// system hide as Cmd+H, so the Dock click restores every window
-/// natively). A no-op where no such concept exists.
+/// natively). Windows, which has no application-wide hide, hides the main
+/// window remembered through rememberApplicationWindow.
 void hideApplication();
+
+/// Whether the application is currently hidden the hideApplication way
+/// (macOS Cmd+W/Cmd+H). The region border must not be drawn while the
+/// application itself is out of sight. Always false where hiding is
+/// minimizing instead - the caller checks the window's iconified state
+/// separately.
+[[nodiscard]] bool applicationHidden();
+
+/// A signal from watchWindowMotion about the watched window. The grip pair
+/// brackets a possible user drag; the motion pair means the border must react
+/// this instant, not at the next frame.
+enum class WindowMotionSignal
+{
+    /// The primary button went down inside the window - a drag may follow.
+    GripDown,
+    /// The grip landed on the window's chrome (title strip, resize edge on
+    /// macOS; the system move-size loop on Windows): a move or resize is
+    /// starting, before any geometry has changed.
+    MotionImminent,
+    /// The window's rectangle actually changed.
+    Moved,
+    /// The primary button released (macOS) or the move-size loop ended
+    /// (Windows).
+    GripUp,
+};
+
+/// Watches the window with @p identity, owned by the application with
+/// @p ownerPid, for user moves and resizes, invoking @p callback on the main
+/// thread the moment a signal happens - including while the event loop sits
+/// in an idle wait, which is what polling can never do: the region border can
+/// leave the screen before the first stale frame is composited, on any
+/// machine speed. macOS listens to global mouse events (permission-free for
+/// mouse); Windows hooks the move-size loop and window location changes.
+/// Replaces any previous watch. Call from the main thread.
+void watchWindowMotion(uint64_t identity, int64_t ownerPid, std::function<void(WindowMotionSignal)> callback);
+
+/// Stops watching and drops the callback. Safe to call when nothing is
+/// watched. Call from the main thread.
+void unwatchWindowMotion();
+
+/// Invokes the callback on the main thread whenever the foreground
+/// application changes (macOS: the workspace activation notification;
+/// Windows: a global foreground win-event hook), so the focus-routed region
+/// logic reroutes immediately instead of waiting out an idle tick - a
+/// Cmd+Tab must not leave the old border on screen for a beat. Install
+/// once, from the main thread.
+void observeForegroundChanges(std::function<void()> callback);
+
+/// The frontmost ordinary window belonging to the application with
+/// @p ownerPid, or nothing when it has none on screen. For the foreground
+/// application this is the focused window, which is what the border's focus
+/// rule needs: a tracked window is only "the focused window" if no untracked
+/// sibling of the same application sits above it.
+[[nodiscard]] std::optional<uint64_t> frontmostWindowOfApplication(int64_t ownerPid);
+
+/// Raises the window with @p identity, owned by the application with
+/// @p ownerPid, after the user picked it: a partially obstructed pick would
+/// otherwise wear a border around pixels that belong to whatever obstructs
+/// it. Windows raises the exact window. macOS activates the owning
+/// application with all windows brought forward - the picked window rises
+/// above other applications, though not above a sibling of its own
+/// application (no public per-window raise exists). Call while this
+/// application is frontmost: activation hand-off is only honored then.
+void raiseWindow(uint64_t identity, int64_t ownerPid);
+
+/// Records this application's main window so the visibility seams can target
+/// it. macOS drives hide and show application-wide and ignores @p nativeWindow;
+/// Windows keeps the HWND. Called once, after the window and its graphics
+/// backend exist.
+void rememberApplicationWindow(void* nativeWindow);
+
+/// This application's own process id, for the attach self-focus exception
+/// (focusing SideScopes must never hide it). A seam because getpid is spelled
+/// differently, and deprecated under /WX, on Windows.
+[[nodiscard]] int64_t ownApplicationPid();
+
+/// The process id of the frontmost application, so the attach coupling can
+/// compare it against the attached window's owner and this application's own
+/// pid. Zero when no application is frontmost.
+[[nodiscard]] int64_t foregroundApplicationPid();
 
 /// Absolute paths of system fonts suitable for the interface, best first;
 /// the application loads the first one that exists.

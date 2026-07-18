@@ -324,6 +324,7 @@ if(APPLE OR WIN32)
     # out of main.
     target_sources(SideScopes PRIVATE
         src/app/app.cpp
+        src/app/attach_controller.cpp
         src/app/capture_controller.cpp
         src/app/overlay_render.cpp
         src/app/overlay_style.cpp

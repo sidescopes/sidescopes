@@ -31,6 +31,7 @@ add_executable(sidescopes_tests
     test_scope_registry.cpp
     test_scope_view.cpp
     test_capture_controller.cpp
+    test_attach_controller.cpp
     test_region_geometry.cpp
     test_window_suggestions.cpp
     test_version.cpp
@@ -42,6 +43,7 @@ target_include_directories(sidescopes_tests PRIVATE support)
 # These are application-level state, not part of the core library the tests
 # link, so their sources compile directly into the test binary.
 target_sources(sidescopes_tests PRIVATE
+    ${CMAKE_SOURCE_DIR}/src/app/attach_controller.cpp
     ${CMAKE_SOURCE_DIR}/src/app/capture_controller.cpp
     ${CMAKE_SOURCE_DIR}/src/app/overlay_style.cpp
     ${CMAKE_SOURCE_DIR}/src/app/param_menu.cpp
