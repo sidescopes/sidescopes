@@ -2445,10 +2445,12 @@ void App::drainAsyncSignals()
         m_lastActivity = glfwGetTime();
     }
     // Keys the border panel took while it held the keyboard: Escape and the
-    // shortcuts keep working right after a border interaction.
+    // shortcuts keep working right after a border interaction. Escape on the
+    // border dismisses only the region it outlines - like its close button -
+    // while Escape in the main window stays the full reset.
     for (const BorderKeyPress& press : drainBorderKeyPresses()) {
         if (press.escape) {
-            resetRegionToFull();
+            dismissEditedBorder();
         } else {
             triggerShortcut(press.key, press.shift);
         }
