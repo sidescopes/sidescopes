@@ -156,6 +156,11 @@ public:
         DwmFlush();
     }
 
+    void* nativeWindowHandle() const override
+    {
+        return glfwGetWin32Window(m_window);
+    }
+
 private:
     GLFWwindow* m_window = nullptr;
     int m_framebufferWidth = 0;

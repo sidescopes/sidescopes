@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <optional>
+#include <string>
 
 #include "core/analysis_worker.h"
 #include "core/region_suggestions.h"
@@ -70,6 +71,18 @@ struct RegionPickPoll
     bool pinMode = false;
 };
 
+/// Constrains a Draw pick to one window - the attached-region gesture
+/// (Shift+D): only @c region, the target window's rectangle in
+/// @c displayId's percentages, stays bright and draggable; everything else
+/// dims hard, and the drawn region binds to that window. @c label names the
+/// window's application on the overlay banner.
+struct PickConstraint
+{
+    uint32_t displayId = 0;
+    RegionOfInterest region;
+    std::string label;
+};
+
 /// Screenshot-style selection spanning every display at once: each gets
 /// its own dimmed overlay, and a pick anywhere is a pick there. Pick mode
 /// highlights the application window under the cursor with the system
@@ -84,7 +97,8 @@ struct RegionPickPoll
 /// returns, the application keeps running its frame loop (which also pumps
 /// the overlays' events), and pollRegionPick is read once per frame so the
 /// scopes can preview the selection before it is confirmed.
-[[nodiscard]] bool beginRegionPick(const std::vector<PickerDisplay>& displays, RegionPickerMode initialMode);
+[[nodiscard]] bool beginRegionPick(const std::vector<PickerDisplay>& displays, RegionPickerMode initialMode,
+                                   const std::optional<PickConstraint>& constraint = std::nullopt);
 RegionPickPoll pollRegionPick();
 
 /// Cancels an active pick as if ESC had been pressed on the overlay.
@@ -104,9 +118,14 @@ void setRegionPickChipColor(const std::optional<FloatColor>& color);
 /// enters the scoped pixels, and its interior stays click-through - the
 /// editor underneath keeps working. The border itself is live: edges and
 /// corners resize the region, the tab above the top edge moves it, and the
-/// application polls the edit each frame so the scopes follow. Idempotent:
-/// call showRegionBorder again to move it.
-void showRegionBorder(uint32_t displayId, const RegionOfInterest& region);
+/// application polls the edit each frame so the scopes follow.
+/// @p attachedLabel distinguishes the two region kinds: empty is the global
+/// region in its plain dress; non-empty is a window-attached region, whose
+/// measurement dashes take a warm tint and whose band wears the label (the
+/// tracked window's application) above the top edge. Idempotent AND cheap to
+/// repeat: an unchanged rectangle, label, and visibility is a no-op, so the
+/// host may reconcile every frame instead of chasing edges.
+void showRegionBorder(uint32_t displayId, const RegionOfInterest& region, const std::string& attachedLabel);
 void hideRegionBorder();
 
 /// The border's in-progress or just-finished adjustment, if any.
@@ -121,5 +140,13 @@ struct RegionBorderEdit
 };
 
 RegionBorderEdit pollRegionBorderEdit();
+
+/// A click-through spotlight while an attached border is being edited:
+/// everything on @p displayId outside @p windowRegion (the tracked window's
+/// rectangle, in display percentages) dims hard, in the attached draw's
+/// dress, so the resize limit is visible while dragging. Idempotent and
+/// cheap when unchanged; hideAttachedEditDim takes it down.
+void showAttachedEditDim(uint32_t displayId, const RegionOfInterest& windowRegion);
+void hideAttachedEditDim();
 
 }  // namespace sidescopes

@@ -62,6 +62,9 @@ constexpr double MinimumRegionSize = 24.0;
 // diagonally off the corner handle, so it visibly belongs to the region
 // as a whole. Pulled inward a touch so the disc mostly rides the band;
 // tiny regions still yield it to the resize zones.
+// Extra window height above the band when the attached label is worn, so
+// the name tab clears the handles instead of crowding the top-center one.
+constexpr double LabelBand = 20.0;
 constexpr double CloseRadius = 6.5;
 constexpr double CloseHitRadius = 11.0;
 constexpr double CloseCornerInset = 2.0;
@@ -230,6 +233,12 @@ struct PickerState
     int height = 0;
     bool drawMode = false;
     bool facesMode = false;
+    // The attached-draw constraint: with constrained set, the drag cannot
+    // leave constraintRect (overlay-local pixels) and everything outside it
+    // dims hard; the label names the target window's application.
+    bool constrained = false;
+    Gdiplus::RectF constraintRect{};
+    std::wstring constraintLabel;
     // Color pinning: a click reports a point to sample, a drag an area to
     // average, the region is never touched, and a cursor chip previews the
     // sample.
@@ -376,6 +385,11 @@ struct BorderState
     int paintedWidth = 0;
     int paintedHeight = 0;
     double paintedScale = 0.0;
+    // Non-empty for a window-attached region: the tracked application's
+    // name, worn above the band, with the measurement dashes taking a warm
+    // tint - the subtle tell that this region belongs to a window.
+    std::wstring attachedLabel;
+    std::wstring paintedLabel;
 };
 
 BorderState g_border;
@@ -437,9 +451,18 @@ std::vector<Gdiplus::RectF> ownWindowExclusions(const PickerState& picker)
 
 Gdiplus::RectF selectionRect(const PickerState& picker)
 {
-    return toRectF(
+    Gdiplus::RectF selection = toRectF(
         selectionRectFromDrag(static_cast<double>(picker.dragStart.x), static_cast<double>(picker.dragStart.y),
                               static_cast<double>(picker.dragCurrent.x), static_cast<double>(picker.dragCurrent.y)));
+    if (picker.constrained) {
+        // The attached draw cannot leave its window.
+        Gdiplus::RectF clamped;
+        if (!Gdiplus::RectF::Intersect(clamped, selection, picker.constraintRect)) {
+            clamped = Gdiplus::RectF(picker.constraintRect.X, picker.constraintRect.Y, 0, 0);
+        }
+        selection = clamped;
+    }
+    return selection;
 }
 
 // The suggestion under the cursor. Windows are front-to-back, so the first one
@@ -628,13 +651,25 @@ void paintSuggestionScene(PickerState& picker, Gdiplus::Graphics& canvas, double
 // through it or the instruction to start dragging.
 void paintDrawScene(PickerState& picker, Gdiplus::Graphics& canvas, double scale, const Gdiplus::RectF& bounds)
 {
-    Gdiplus::SolidBrush dim(Gdiplus::Color(89, 0, 0, 0));
+    // Constrained (attached) drawing spotlights the target window: a hard
+    // dim everywhere else, the window under the usual light veil, rimmed in
+    // the attached regions' warm tone.
+    Gdiplus::SolidBrush dim(Gdiplus::Color(picker.constrained ? 140 : 89, 0, 0, 0));
     canvas.FillRectangle(&dim, bounds);
+    if (picker.constrained) {
+        punchRect(canvas, picker.constraintRect);
+        Gdiplus::Pen spotlight(Gdiplus::Color(230, 255, 214, 140), static_cast<Gdiplus::REAL>(1.5 * scale));
+        canvas.DrawRectangle(&spotlight, picker.constraintRect);
+    }
     if (picker.dragging) {
         const Gdiplus::RectF selection = selectionRect(picker);
         punchRect(canvas, selection);
         Gdiplus::Pen frame(Gdiplus::Color(255, 255, 255, 255), static_cast<Gdiplus::REAL>(1.5 * scale));
         canvas.DrawRectangle(&frame, selection);
+    } else if (picker.constrained) {
+        const std::wstring primary = picker.constraintLabel.empty() ? std::wstring(L"Draw a region in the window")
+                                                                    : L"Draw a region in " + picker.constraintLabel;
+        drawBanner(canvas, picker, primary.c_str(), L"[Esc] cancel", false, scale);
     } else {
         const wchar_t* secondary = L"[Esc] full screen";
         if (!picker.windows.empty() && supportsFaceDetection()) {
@@ -1062,11 +1097,13 @@ Gdiplus::TextureBrush* stripeBrushFor(double scale)
     return g_stripeTile.brush.get();
 }
 
-// The region rectangle in border-window-local pixels.
+// The region rectangle in border-window-local pixels. The label strip, when
+// worn, rides above the band and shifts the region down within the window.
 Gdiplus::RectF borderRegionLocal(double scale)
 {
     const auto pad = static_cast<Gdiplus::REAL>(WindowPad * scale);
-    return {pad, pad, static_cast<Gdiplus::REAL>(g_border.region.right - g_border.region.left),
+    const auto strip = static_cast<Gdiplus::REAL>(g_border.attachedLabel.empty() ? 0.0 : LabelBand * scale);
+    return {pad, pad + strip, static_cast<Gdiplus::REAL>(g_border.region.right - g_border.region.left),
             static_cast<Gdiplus::REAL>(g_border.region.bottom - g_border.region.top)};
 }
 
@@ -1175,7 +1212,11 @@ void paintBorderEdgeRing(Gdiplus::Graphics& canvas, const Gdiplus::RectF& region
     Gdiplus::SolidBrush ringBrush(Gdiplus::Color(217, 26, 26, 26));
     canvas.FillRectangle(&ringBrush, stripeHole);
     canvas.ResetClip();
-    Gdiplus::Pen dashPen(Gdiplus::Color(242, 247, 247, 247), ring);
+    // The attached region's dashes take a warm tint - enough to tell the two
+    // region kinds apart at a glance, calm enough beside a photograph.
+    const Gdiplus::Color dashTone =
+        g_border.attachedLabel.empty() ? Gdiplus::Color(242, 247, 247, 247) : Gdiplus::Color(242, 255, 214, 140);
+    Gdiplus::Pen dashPen(dashTone, ring);
     const Gdiplus::REAL dashPattern[2] = {static_cast<Gdiplus::REAL>(4.0 * scale / (ring > 0 ? ring : 1)),
                                           static_cast<Gdiplus::REAL>(4.0 * scale / (ring > 0 ? ring : 1))};
     dashPen.SetDashPattern(dashPattern, 2);
@@ -1213,6 +1254,31 @@ void paintBorderHandles(Gdiplus::Graphics& canvas, const Gdiplus::RectF& region,
 // The hover-revealed close button, in the handles' own visual
 // language: a dark disc where the dots are light, so it reads as an
 // action rather than a grip, with the same bright ring and an x.
+// The tracked window's name rides the band above the top edge: the attached
+// region carries its own identification instead of the main window's toolbar
+// doing it at a distance.
+void paintBorderLabel(Gdiplus::Graphics& canvas, const Gdiplus::RectF& region, double scale)
+{
+    if (g_border.attachedLabel.empty()) {
+        return;
+    }
+    Gdiplus::Font font(L"Segoe UI", static_cast<Gdiplus::REAL>(10.0 * scale));
+    Gdiplus::RectF measured;
+    canvas.MeasureString(g_border.attachedLabel.c_str(), -1, &font, Gdiplus::PointF(0, 0), &measured);
+    const auto padX = static_cast<Gdiplus::REAL>(6.0 * scale);
+    const auto padY = static_cast<Gdiplus::REAL>(2.0 * scale);
+    const Gdiplus::PointF centre(region.X + region.Width / 2,
+                                 region.Y - static_cast<Gdiplus::REAL>((WindowPad + LabelBand / 2) * scale));
+    const Gdiplus::RectF tab(centre.X - measured.Width / 2 - padX, centre.Y - measured.Height / 2 - padY,
+                             measured.Width + 2 * padX, measured.Height + 2 * padY);
+    Gdiplus::SolidBrush plate(Gdiplus::Color(217, 26, 26, 26));
+    canvas.FillRectangle(&plate, tab);
+    Gdiplus::Pen rim(Gdiplus::Color(153, 255, 214, 140), static_cast<Gdiplus::REAL>(1.0 * scale));
+    canvas.DrawRectangle(&rim, tab);
+    Gdiplus::SolidBrush ink(Gdiplus::Color(242, 247, 247, 247));
+    canvas.DrawString(g_border.attachedLabel.c_str(), -1, &font, Gdiplus::PointF(tab.X + padX, tab.Y + padY), &ink);
+}
+
 void paintBorderCloseButton(Gdiplus::Graphics& canvas, double scale)
 {
     if (!closeVisible(scale)) {
@@ -1240,9 +1306,10 @@ void paintBorder()
     }
     const double scale = uiScale(g_border.window);
     const auto pad = static_cast<Gdiplus::REAL>(WindowPad * scale);
+    const auto strip = static_cast<int>(g_border.attachedLabel.empty() ? 0.0 : LabelBand * scale);
     const Gdiplus::RectF region = borderRegionLocal(scale);
     const int width = static_cast<int>(region.Width + 2 * pad);
-    const int height = static_cast<int>(region.Height + 2 * pad);
+    const int height = static_cast<int>(region.Height + 2 * pad) + strip;
     if (!g_border.surface || g_border.surface->width() != width || g_border.surface->height() != height) {
         g_border.surface = std::make_unique<LayeredSurface>(width, height);
     }
@@ -1264,10 +1331,12 @@ void paintBorder()
     paintBorderBand(canvas, region, scale);
     paintBorderEdgeRing(canvas, region, scale);
     paintBorderHandles(canvas, region, scale);
+    paintBorderLabel(canvas, region, scale);
     paintBorderCloseButton(canvas, scale);
+    g_border.paintedLabel = g_border.attachedLabel;
 
     surface.push(g_border.window, g_border.region.left - static_cast<int>(WindowPad * scale),
-                 g_border.region.top - static_cast<int>(WindowPad * scale));
+                 g_border.region.top - static_cast<int>(WindowPad * scale) - strip);
 }
 
 // The interior is the editor's, not ours; only the band takes the mouse.
@@ -1612,7 +1681,8 @@ void collectRegionPreview(RegionPickPoll& poll)
 
 }  // namespace
 
-bool beginRegionPick(const std::vector<PickerDisplay>& displays, RegionPickerMode initialMode)
+bool beginRegionPick(const std::vector<PickerDisplay>& displays, RegionPickerMode initialMode,
+                     const std::optional<PickConstraint>& constraint)
 {
     if (!g_pickers.empty()) {
         return false;  // one picker at a time
@@ -1632,6 +1702,12 @@ bool beginRegionPick(const std::vector<PickerDisplay>& displays, RegionPickerMod
 
     for (const PickerDisplay& entry : displays) {
         if (PickerState* picker = createPicker(entry, draw, faces, pin)) {
+            if (constraint && constraint->displayId == entry.displayId) {
+                picker->constrained = true;
+                picker->constraintRect =
+                    toRectF(localRectFromRegion(constraint->region, picker->width, picker->height));
+                picker->constraintLabel = wideFromUtf8(constraint->label.c_str());
+            }
             g_pickers.push_back(picker);
         }
     }
@@ -1716,12 +1792,13 @@ void setRegionPickChipColor(const std::optional<FloatColor>& color)
     }
 }
 
-void showRegionBorder(uint32_t displayId, const RegionOfInterest& region)
+void showRegionBorder(uint32_t displayId, const RegionOfInterest& region, const std::string& attachedLabel)
 {
     const auto geometry = geometryOfDisplay(displayId);
     if (!geometry) {
         return;
     }
+    const std::wstring label = wideFromUtf8(attachedLabel.c_str());
 
     if (!g_border.window) {
         // CS_DBLCLKS so the band can take the double-click dismissal.
@@ -1733,15 +1810,22 @@ void showRegionBorder(uint32_t displayId, const RegionOfInterest& region)
         }
     }
 
+    RECT wanted{};
+    wanted.left = static_cast<int>(geometry->originX + region.leftPercent / 100.0 * geometry->widthPoints);
+    wanted.top = static_cast<int>(geometry->originY + region.topPercent / 100.0 * geometry->heightPoints);
+    wanted.right = static_cast<int>(geometry->originX + region.rightPercent / 100.0 * geometry->widthPoints);
+    wanted.bottom = static_cast<int>(geometry->originY + region.bottomPercent / 100.0 * geometry->heightPoints);
+    // The host reconciles every frame; an unchanged border must cost nothing.
+    if (IsWindowVisible(g_border.window) && EqualRect(&wanted, &g_border.region) && label == g_border.attachedLabel) {
+        return;
+    }
+
     g_border.displayOriginX = geometry->originX;
     g_border.displayOriginY = geometry->originY;
     g_border.displayWidth = geometry->widthPoints;
     g_border.displayHeight = geometry->heightPoints;
-    g_border.region.left = static_cast<int>(geometry->originX + region.leftPercent / 100.0 * geometry->widthPoints);
-    g_border.region.top = static_cast<int>(geometry->originY + region.topPercent / 100.0 * geometry->heightPoints);
-    g_border.region.right = static_cast<int>(geometry->originX + region.rightPercent / 100.0 * geometry->widthPoints);
-    g_border.region.bottom =
-        static_cast<int>(geometry->originY + region.bottomPercent / 100.0 * geometry->heightPoints);
+    g_border.region = wanted;
+    g_border.attachedLabel = label;
 
     const double scale = uiScale(g_border.window);
     const auto pad = static_cast<int>(WindowPad * scale);
@@ -1752,14 +1836,16 @@ void showRegionBorder(uint32_t displayId, const RegionOfInterest& region)
     if (!own.empty()) {
         insertAfter = own.front();
     }
+    const int strip = static_cast<int>(g_border.attachedLabel.empty() ? 0.0 : LabelBand * scale);
     const int width = (g_border.region.right - g_border.region.left) + 2 * pad;
-    const int height = (g_border.region.bottom - g_border.region.top) + 2 * pad;
-    SetWindowPos(g_border.window, insertAfter, g_border.region.left - pad, g_border.region.top - pad, width, height,
-                 SWP_NOACTIVATE | SWP_SHOWWINDOW);
+    const int height = (g_border.region.bottom - g_border.region.top) + 2 * pad + strip;
+    SetWindowPos(g_border.window, insertAfter, g_border.region.left - pad, g_border.region.top - pad - strip, width,
+                 height, SWP_NOACTIVATE | SWP_SHOWWINDOW);
     // The surface only shows size and scale; while the region is dragged
     // around whole - or this sync fires for an unrelated settings change -
     // moving the window above is the entire job.
-    if (width != g_border.paintedWidth || height != g_border.paintedHeight || scale != g_border.paintedScale) {
+    if (width != g_border.paintedWidth || height != g_border.paintedHeight || scale != g_border.paintedScale ||
+        label != g_border.paintedLabel) {
         paintBorder();
     }
 }
@@ -1768,6 +1854,87 @@ void hideRegionBorder()
 {
     if (g_border.window) {
         ShowWindow(g_border.window, SW_HIDE);
+    }
+}
+
+namespace {
+
+// The attached-edit spotlight: a click-through veil that dims everything
+// outside the tracked window while its border is dragged.
+HWND g_editDimWindow = nullptr;
+RECT g_editDimHole{};
+uint32_t g_editDimDisplay = 0;
+
+LRESULT CALLBACK editDimProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam)
+{
+    return DefWindowProcW(window, message, wParam, lParam);
+}
+
+}  // namespace
+
+void showAttachedEditDim(uint32_t displayId, const RegionOfInterest& windowRegion)
+{
+    const auto geometry = geometryOfDisplay(displayId);
+    if (!geometry || !ensureGdiplus()) {
+        return;
+    }
+
+    RECT hole{};
+    hole.left = static_cast<int>(geometry->originX + windowRegion.leftPercent / 100.0 * geometry->widthPoints);
+    hole.top = static_cast<int>(geometry->originY + windowRegion.topPercent / 100.0 * geometry->heightPoints);
+    hole.right = static_cast<int>(geometry->originX + windowRegion.rightPercent / 100.0 * geometry->widthPoints);
+    hole.bottom = static_cast<int>(geometry->originY + windowRegion.bottomPercent / 100.0 * geometry->heightPoints);
+    if (g_editDimWindow && IsWindowVisible(g_editDimWindow) && EqualRect(&hole, &g_editDimHole) &&
+        displayId == g_editDimDisplay) {
+        return;
+    }
+
+    if (!g_editDimWindow) {
+        // Mouse-transparent as well as no-activate: the veil informs, the
+        // border and the editor keep every event.
+        g_editDimWindow = createOverlayWindow(
+            L"SidescopesEditDim", editDimProc,
+            WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TRANSPARENT, 0);
+        if (!g_editDimWindow) {
+            return;
+        }
+    }
+    g_editDimHole = hole;
+    g_editDimDisplay = displayId;
+
+    const int width = static_cast<int>(geometry->widthPoints);
+    const int height = static_cast<int>(geometry->heightPoints);
+    LayeredSurface surface(width, height);
+    if (!surface.valid()) {
+        return;
+    }
+    Gdiplus::Graphics canvas(surface.dc());
+    canvas.SetCompositingMode(Gdiplus::CompositingModeSourceCopy);
+    Gdiplus::SolidBrush veil(Gdiplus::Color(115, 0, 0, 0));
+    canvas.FillRectangle(&veil,
+                         Gdiplus::RectF(0, 0, static_cast<Gdiplus::REAL>(width), static_cast<Gdiplus::REAL>(height)));
+    const Gdiplus::RectF holeLocal(static_cast<Gdiplus::REAL>(hole.left - geometry->originX),
+                                   static_cast<Gdiplus::REAL>(hole.top - geometry->originY),
+                                   static_cast<Gdiplus::REAL>(hole.right - hole.left),
+                                   static_cast<Gdiplus::REAL>(hole.bottom - hole.top));
+    Gdiplus::SolidBrush clear(Gdiplus::Color(0, 0, 0, 0));
+    canvas.FillRectangle(&clear, holeLocal);
+    canvas.SetCompositingMode(Gdiplus::CompositingModeSourceOver);
+    Gdiplus::Pen rim(Gdiplus::Color(230, 255, 214, 140), 1.5f);
+    canvas.DrawRectangle(&rim, holeLocal);
+
+    // Below the border in the topmost band: the veil must never cover the
+    // handles.
+    HWND insertAfter = g_border.window ? g_border.window : HWND_TOPMOST;
+    SetWindowPos(g_editDimWindow, insertAfter, static_cast<int>(geometry->originX), static_cast<int>(geometry->originY),
+                 width, height, SWP_NOACTIVATE | SWP_SHOWWINDOW);
+    surface.push(g_editDimWindow, static_cast<int>(geometry->originX), static_cast<int>(geometry->originY));
+}
+
+void hideAttachedEditDim()
+{
+    if (g_editDimWindow) {
+        ShowWindow(g_editDimWindow, SW_HIDE);
     }
 }
 

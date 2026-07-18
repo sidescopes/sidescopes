@@ -35,6 +35,9 @@ constexpr double MinimumRegionSize = 24.0;
 // diagonally off the corner handle, so it visibly belongs to the region
 // as a whole. Pulled inward a touch so the disc mostly rides the band;
 // tiny regions still yield it to the resize zones.
+// Extra window height above the band when the attached label is worn, so
+// the name tab clears the handles instead of crowding the top-center one.
+constexpr double LabelBand = 20.0;
 constexpr double CloseRadius = 6.5;
 constexpr double CloseHitRadius = 11.0;
 constexpr double CloseCornerInset = 2.0;
@@ -156,6 +159,11 @@ NSCursor* buildPinCursor(const std::optional<FloatColor>& color)
 }
 // NO = suggestion picking (windows or faces), YES = drag to draw.
 @property(nonatomic, assign) BOOL drawMode;
+// The attached-draw constraint: an empty rect means unconstrained. The drag
+// cannot leave the rect and everything outside it dims hard; the label
+// names the target window's application on the banner.
+@property(nonatomic, assign) NSRect constraintRect;
+@property(nonatomic, copy) NSString* constraintLabel;
 // In picking mode: whether the face list is active instead of windows.
 @property(nonatomic, assign) BOOL facesMode;
 // Color pinning: a click reports a point to sample, a drag an area to
@@ -232,7 +240,12 @@ NSCursor* buildPinCursor(const std::optional<FloatColor>& color)
     // no flip is needed here.
     const sidescopes::LocalRect rect =
         sidescopes::selectionRectFromDrag(self.dragStart.x, self.dragStart.y, self.dragCurrent.x, self.dragCurrent.y);
-    return NSMakeRect(rect.x, rect.y, rect.width, rect.height);
+    NSRect selection = NSMakeRect(rect.x, rect.y, rect.width, rect.height);
+    if (!NSIsEmptyRect(self.constraintRect)) {
+        // The attached draw cannot leave its window.
+        selection = NSIntersectionRect(selection, self.constraintRect);
+    }
+    return selection;
 }
 
 // A punched hole must keep a whisper of alpha when it should stay
@@ -374,10 +387,21 @@ NSCursor* buildPinCursor(const std::optional<FloatColor>& color)
 }
 
 // Freeform drawing: a heavier dim, and the dragged rectangle punched clear.
+// A constraint (the attached draw) spotlights the target window instead: a
+// hard dim everywhere else, the window itself under the usual light veil,
+// rimmed in the attached regions' warm tone.
 - (void)drawDrawModeOverlay
 {
-    [[NSColor colorWithWhite:0 alpha:0.35] setFill];
+    const BOOL constrained = !NSIsEmptyRect(self.constraintRect);
+    [[NSColor colorWithWhite:0 alpha:constrained ? 0.55 : 0.35] setFill];
     NSRectFillUsingOperation(self.bounds, NSCompositingOperationSourceOver);
+    if (constrained) {
+        [self punchRect:self.constraintRect];
+        [[NSColor colorWithSRGBRed:1.0 green:0.84 blue:0.55 alpha:0.9] setStroke];
+        NSBezierPath* spotlight = [NSBezierPath bezierPathWithRect:self.constraintRect];
+        spotlight.lineWidth = 1.5;
+        [spotlight stroke];
+    }
     if (self.dragging) {
         const NSRect selection = [self selectionRect];
         [self punchRect:selection];
@@ -387,14 +411,28 @@ NSCursor* buildPinCursor(const std::optional<FloatColor>& color)
         [border stroke];
     }
     if (!self.dragging) {
-        NSString* secondary = @"[Esc] full screen";
-        if (!m_windows.empty() && sidescopes::supportsFaceDetection()) {
-            secondary = @"[A] pick a window    [F] pick a face    [Esc] full screen";
-        } else if (!m_windows.empty()) {
-            secondary = @"[A] pick a window    [Esc] full screen";
-        }
-        [self drawBanner:@"Drag to select an area" secondary:secondary preferCenter:NO];
+        [self drawDrawModeBanner];
     }
+}
+
+// The draw overlay's instruction, with the attached draw naming its window.
+- (void)drawDrawModeBanner
+{
+    if (!NSIsEmptyRect(self.constraintRect)) {
+        NSString* primary = self.constraintLabel.length > 0
+                                ? [NSString stringWithFormat:@"Draw a region in %@", self.constraintLabel]
+                                : @"Draw a region in the window";
+        [self drawBanner:primary secondary:@"[Esc] cancel" preferCenter:NO];
+
+        return;
+    }
+    NSString* secondary = @"[Esc] full screen";
+    if (!m_windows.empty() && sidescopes::supportsFaceDetection()) {
+        secondary = @"[A] pick a window    [F] pick a face    [Esc] full screen";
+    } else if (!m_windows.empty()) {
+        secondary = @"[A] pick a window    [Esc] full screen";
+    }
+    [self drawBanner:@"Drag to select an area" secondary:secondary preferCenter:NO];
 }
 
 - (void)drawRect:(NSRect)dirty
@@ -592,13 +630,24 @@ NSCursor* buildPinCursor(const std::optional<FloatColor>& color)
 @property(nonatomic, assign) NSPoint dragStartMouse;  // global screen coords
 @property(nonatomic, assign) NSRect dragStartRegion;  // global screen coords
 @property(nonatomic, assign) BOOL closePressed;
+// Non-empty for a window-attached region: the tracked application's name,
+// worn as a small tab above the band, with the measurement dashes taking a
+// warm tint - the subtle tell that this region belongs to a window.
+@property(nonatomic, copy) NSString* attachedLabel;
+// Extra top strip carrying the attached label, zero when unattached; the
+// region math below subtracts it so every zone stays anchored to the band.
+@property(nonatomic, assign) CGFloat labelBand;
 @end
 @implementation SidescopesBorderView
 
 // The region rectangle in view coordinates.
 - (NSRect)regionRect
 {
-    return NSInsetRect(self.bounds, sidescopes::WindowPad, sidescopes::WindowPad);
+    NSRect rect = NSInsetRect(self.bounds, sidescopes::WindowPad, sidescopes::WindowPad);
+    // The label strip rides above the band; the region keeps its bottom
+    // anchor and every zone stays put.
+    rect.size.height -= self.labelBand;
+    return rect;
 }
 
 // Always visible while the border is up - hover-revealing it flickered
@@ -664,8 +713,40 @@ NSCursor* buildPinCursor(const std::optional<FloatColor>& color)
     dashes.lineWidth = sidescopes::EdgeRing;
     const CGFloat dash[2] = {4.0, 4.0};
     [dashes setLineDash:dash count:2 phase:0];
-    [[NSColor colorWithWhite:0.97 alpha:0.95] setStroke];
+    // The attached region's dashes take a warm tint - enough to tell the two
+    // region kinds apart at a glance, calm enough to sit beside a photograph.
+    if (self.attachedLabel.length > 0) {
+        [[NSColor colorWithSRGBRed:1.0 green:0.84 blue:0.55 alpha:0.95] setStroke];
+    } else {
+        [[NSColor colorWithWhite:0.97 alpha:0.95] setStroke];
+    }
     [dashes stroke];
+}
+
+// The tracked window's name rides a tab above the band: the attached region
+// carries its own identification instead of the main window's toolbar doing
+// it at a distance. The label strip the window grew makes room for it clear
+// of the handles.
+- (void)drawAttachedLabel:(NSRect)region
+{
+    if (self.attachedLabel.length == 0) {
+        return;
+    }
+    NSDictionary* attributes = @{
+        NSFontAttributeName : [NSFont systemFontOfSize:10],
+        NSForegroundColorAttributeName : [NSColor colorWithWhite:0.97 alpha:0.95],
+    };
+    const NSSize textSize = [self.attachedLabel sizeWithAttributes:attributes];
+    const NSPoint tabCentre = NSMakePoint(NSMidX(region), NSMaxY(region) + sidescopes::WindowPad + self.labelBand / 2);
+    const NSRect tab = NSMakeRect(tabCentre.x - textSize.width / 2 - 6, tabCentre.y - textSize.height / 2 - 2,
+                                  textSize.width + 12, textSize.height + 4);
+    NSBezierPath* plate = [NSBezierPath bezierPathWithRoundedRect:tab xRadius:4 yRadius:4];
+    [[NSColor colorWithWhite:0.1 alpha:0.85] setFill];
+    [plate fill];
+    [[NSColor colorWithSRGBRed:1.0 green:0.84 blue:0.55 alpha:0.6] setStroke];
+    plate.lineWidth = 1.0;
+    [plate stroke];
+    [self.attachedLabel drawAtPoint:NSMakePoint(tab.origin.x + 6, tab.origin.y + 2) withAttributes:attributes];
 }
 
 // Eight handle dots - corners and edge midpoints - centered on the measurement
@@ -730,6 +811,7 @@ NSCursor* buildPinCursor(const std::optional<FloatColor>& color)
     const NSRect region = [self regionRect];
     [self drawHazardBand:region];
     [self drawMeasuredEdge:region];
+    [self drawAttachedLabel:region];
     [self drawHandles:region];
     if ([self closeVisible]) {
         [self drawCloseButton];
@@ -931,8 +1013,34 @@ NSCursor* buildPinCursor(const std::optional<FloatColor>& color)
 
 @end
 
+// The attached-edit spotlight: a click-through veil that dims everything
+// outside the tracked window while its border is being dragged, so the
+// resize limit is visible - the attached draw's dress, without a picker.
+@interface SidescopesEditDimView : NSView
+@property(nonatomic, assign) NSRect holeRect;
+@end
+@implementation SidescopesEditDimView
+
+- (void)drawRect:(NSRect)dirty
+{
+    (void)dirty;
+    NSBezierPath* veil = [NSBezierPath bezierPathWithRect:self.bounds];
+    [veil appendBezierPathWithRect:self.holeRect];
+    veil.windingRule = NSWindingRuleEvenOdd;
+    [[NSColor colorWithWhite:0 alpha:0.45] setFill];
+    [veil fill];
+    [[NSColor colorWithSRGBRed:1.0 green:0.84 blue:0.55 alpha:0.9] setStroke];
+    NSBezierPath* rim = [NSBezierPath bezierPathWithRect:self.holeRect];
+    rim.lineWidth = 1.5;
+    [rim stroke];
+}
+
+@end
+
 namespace sidescopes {
 namespace {
+
+NSWindow* g_editDimWindow = nil;
 
 NSWindow* g_borderWindow = nil;
 
@@ -1018,7 +1126,18 @@ PickerModes computePickerModes(const std::vector<PickerDisplay>& displays, Regio
     return {pin, draw, faces};
 }
 
-void addPickerOverlay(const PickerDisplay& entry, PickerModes modes)
+// Hands the attached draw's spotlight to the overlay covering its display.
+void applyPickConstraint(SidescopesPickerView* view, uint32_t displayId,
+                         const std::optional<PickConstraint>& constraint, NSSize viewSize)
+{
+    if (!constraint || constraint->displayId != displayId) {
+        return;
+    }
+    view.constraintRect = regionToViewRect(constraint->region, viewSize);
+    view.constraintLabel = [NSString stringWithUTF8String:constraint->label.c_str()];
+}
+
+void addPickerOverlay(const PickerDisplay& entry, PickerModes modes, const std::optional<PickConstraint>& constraint)
 {
     NSScreen* screen = nil;
     for (NSScreen* candidate in NSScreen.screens) {
@@ -1053,6 +1172,7 @@ void addPickerOverlay(const PickerDisplay& entry, PickerModes modes)
     view.drawMode = modes.draw ? YES : NO;
     view.facesMode = modes.faces ? YES : NO;
     view.pinMode = modes.pin ? YES : NO;
+    applyPickConstraint(view, entry.displayId, constraint, viewSize);
     if (!modes.draw && !modes.pin) {
         view->m_suggestions = modes.faces ? view->m_faces : view->m_windows;
     }
@@ -1206,7 +1326,8 @@ void collectPreview(RegionPickPoll& poll)
 
 }  // namespace
 
-bool beginRegionPick(const std::vector<PickerDisplay>& displays, RegionPickerMode initialMode)
+bool beginRegionPick(const std::vector<PickerDisplay>& displays, RegionPickerMode initialMode,
+                     const std::optional<PickConstraint>& constraint)
 {
     if (!g_pickerOverlays.empty()) {
         return false;  // one picker at a time
@@ -1214,7 +1335,7 @@ bool beginRegionPick(const std::vector<PickerDisplay>& displays, RegionPickerMod
 
     const PickerModes modes = computePickerModes(displays, initialMode);
     for (const PickerDisplay& entry : displays) {
-        addPickerOverlay(entry, modes);
+        addPickerOverlay(entry, modes, constraint);
     }
     if (g_pickerOverlays.empty()) {
         return false;
@@ -1298,7 +1419,38 @@ void setRegionPickChipColor(const std::optional<FloatColor>& color)
     }
 }
 
-void showRegionBorder(uint32_t displayId, const RegionOfInterest& region)
+// A NON-ACTIVATING panel: grabbing the border delivers the whole mouse
+// sequence without activating this application, so the keyboard truly never
+// leaves the editor and the focus-routed region logic never sees the grab as
+// a switch to SideScopes - the macOS twin of the Windows border's
+// WS_EX_NOACTIVATE.
+NSWindow* makeBorderWindow(NSRect rect)
+{
+    NSPanel* window =
+        [[NSPanel alloc] initWithContentRect:rect
+                                   styleMask:NSWindowStyleMaskBorderless | NSWindowStyleMaskNonactivatingPanel
+                                     backing:NSBackingStoreBuffered
+                                       defer:NO];
+    window.backgroundColor = NSColor.clearColor;
+    window.opaque = NO;
+    window.hasShadow = NO;
+    // The interior is truly transparent and therefore click-through; only
+    // the grab ring and tab take the mouse. ignoresMouseEvents is
+    // deliberately never set: an explicit assignment - even to NO - switches
+    // AppKit off its per-pixel alpha hit-testing, and the whole window
+    // starts swallowing clicks.
+    // One level below the scope window: both float above Quick Look, but the
+    // border must never cover the scopes. Sharing a level would leave their
+    // order to whoever ordered front last.
+    window.level = NSStatusWindowLevel - 1;
+    window.collectionBehavior = NSWindowCollectionBehaviorCanJoinAllSpaces |
+                                NSWindowCollectionBehaviorFullScreenAuxiliary | NSWindowCollectionBehaviorStationary;
+    window.contentView = [[SidescopesBorderView alloc] initWithFrame:NSZeroRect];
+
+    return window;
+}
+
+void showRegionBorder(uint32_t displayId, const RegionOfInterest& region, const std::string& attachedLabel)
 {
     NSScreen* screen = screenForDisplay(displayId);
     const NSRect frame = screen.frame;
@@ -1309,30 +1461,36 @@ void showRegionBorder(uint32_t displayId, const RegionOfInterest& region)
     const double top = frame.origin.y + (100.0 - region.topPercent) / 100.0 * frame.size.height;
     const NSRect rect = NSMakeRect(left - WindowPad, bottom - WindowPad, (right - left) + 2 * WindowPad,
                                    (top - bottom) + 2 * WindowPad);
+    NSString* label = attachedLabel.empty() ? @"" : [NSString stringWithUTF8String:attachedLabel.c_str()];
+    NSRect labelled = rect;
+    if (label.length > 0) {
+        labelled.size.height += LabelBand;
+    }
+
+    // The host reconciles every frame; an unchanged border must cost nothing.
+    if (g_borderWindow && g_borderWindow.visible && NSEqualRects(g_borderWindow.frame, labelled)) {
+        SidescopesBorderView* view = (SidescopesBorderView*)g_borderWindow.contentView;
+        NSString* current = view.attachedLabel ? view.attachedLabel : @"";
+        if ([current isEqualToString:label]) {
+            return;
+        }
+        view.attachedLabel = label;
+        view.needsDisplay = YES;
+
+        return;
+    }
 
     if (!g_borderWindow) {
-        g_borderWindow = [[NSWindow alloc] initWithContentRect:rect
-                                                     styleMask:NSWindowStyleMaskBorderless
-                                                       backing:NSBackingStoreBuffered
-                                                         defer:NO];
-        g_borderWindow.backgroundColor = NSColor.clearColor;
-        g_borderWindow.opaque = NO;
-        g_borderWindow.hasShadow = NO;
-        // The interior is truly transparent and therefore click-through;
-        // only the grab ring and tab take the mouse. ignoresMouseEvents is
-        // deliberately never set: an explicit assignment - even to NO -
-        // switches AppKit off its per-pixel alpha hit-testing, and the
-        // whole window starts swallowing clicks.
-        // One level below the scope window: both float above Quick Look,
-        // but the border must never cover the scopes. Sharing a level would
-        // leave their order to whoever ordered front last.
-        g_borderWindow.level = NSStatusWindowLevel - 1;
-        g_borderWindow.collectionBehavior = NSWindowCollectionBehaviorCanJoinAllSpaces |
-                                            NSWindowCollectionBehaviorFullScreenAuxiliary |
-                                            NSWindowCollectionBehaviorStationary;
-        g_borderWindow.contentView = [[SidescopesBorderView alloc] initWithFrame:NSZeroRect];
+        g_borderWindow = makeBorderWindow(rect);
     }
-    [g_borderWindow setFrame:rect display:YES];
+    SidescopesBorderView* view = (SidescopesBorderView*)g_borderWindow.contentView;
+    NSString* current = view.attachedLabel ? view.attachedLabel : @"";
+    if (![current isEqualToString:label]) {
+        view.attachedLabel = label;
+        view.needsDisplay = YES;
+    }
+    view.labelBand = label.length > 0 ? LabelBand : 0;
+    [g_borderWindow setFrame:labelled display:YES];
     [g_borderWindow invalidateCursorRectsForView:g_borderWindow.contentView];
     [g_borderWindow orderFrontRegardless];
 }
@@ -1340,6 +1498,51 @@ void showRegionBorder(uint32_t displayId, const RegionOfInterest& region)
 void hideRegionBorder()
 {
     [g_borderWindow orderOut:nil];
+}
+
+void showAttachedEditDim(uint32_t displayId, const RegionOfInterest& windowRegion)
+{
+    NSScreen* screen = screenForDisplay(displayId);
+    const NSRect frame = screen.frame;
+    const double left = windowRegion.leftPercent / 100.0 * frame.size.width;
+    const double right = windowRegion.rightPercent / 100.0 * frame.size.width;
+    const double bottom = (100.0 - windowRegion.bottomPercent) / 100.0 * frame.size.height;
+    const double top = (100.0 - windowRegion.topPercent) / 100.0 * frame.size.height;
+    const NSRect hole = NSMakeRect(left, bottom, right - left, top - bottom);
+
+    if (!g_editDimWindow) {
+        // Non-activating and mouse-transparent: the veil informs, the border
+        // and the editor keep every event.
+        g_editDimWindow =
+            [[NSPanel alloc] initWithContentRect:frame
+                                       styleMask:NSWindowStyleMaskBorderless | NSWindowStyleMaskNonactivatingPanel
+                                         backing:NSBackingStoreBuffered
+                                           defer:NO];
+        g_editDimWindow.backgroundColor = NSColor.clearColor;
+        g_editDimWindow.opaque = NO;
+        g_editDimWindow.hasShadow = NO;
+        g_editDimWindow.ignoresMouseEvents = YES;
+        // One level below the border: the veil must never cover the handles.
+        g_editDimWindow.level = NSStatusWindowLevel - 2;
+        g_editDimWindow.collectionBehavior = NSWindowCollectionBehaviorCanJoinAllSpaces |
+                                             NSWindowCollectionBehaviorFullScreenAuxiliary |
+                                             NSWindowCollectionBehaviorStationary;
+        g_editDimWindow.contentView = [[SidescopesEditDimView alloc] initWithFrame:NSZeroRect];
+    }
+
+    SidescopesEditDimView* view = (SidescopesEditDimView*)g_editDimWindow.contentView;
+    if (g_editDimWindow.visible && NSEqualRects(g_editDimWindow.frame, frame) && NSEqualRects(view.holeRect, hole)) {
+        return;
+    }
+    view.holeRect = hole;
+    view.needsDisplay = YES;
+    [g_editDimWindow setFrame:frame display:YES];
+    [g_editDimWindow orderFrontRegardless];
+}
+
+void hideAttachedEditDim()
+{
+    [g_editDimWindow orderOut:nil];
 }
 
 RegionBorderEdit pollRegionBorderEdit()

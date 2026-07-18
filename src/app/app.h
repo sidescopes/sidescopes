@@ -11,6 +11,7 @@
 #include <utility>
 #include <vector>
 
+#include "app/attach_controller.h"
 #include "app/capture_controller.h"
 #include "app/param_menu.h"
 #include "app/pin_board.h"
@@ -125,6 +126,38 @@ private:
     void chooseScope(std::string_view id, bool stack);
     [[nodiscard]] bool isFullRegion() const;
     void syncRegionBorder();
+    void setRegion(const RegionOfInterest& region);
+
+    // --- attached regions ---
+    void probeExternalWindow();
+    void followAttachedWindow();
+    [[nodiscard]] std::vector<TrackedWindowObservation> gatherTrackedObservations() const;
+    [[nodiscard]] bool activeWindowMoved(const AttachDecision& decision) const;
+    void captureActiveDisplay(const AttachDecision& decision);
+    void applyAttachDecision(const AttachDecision& decision);
+    void onWindowMotion(WindowMotionSignal signal);
+    void idleWaitWatchingAttachedWindow();
+    [[nodiscard]] std::optional<PickConstraint> makeAttachedDrawConstraint();
+    [[nodiscard]] static RegionOfInterest displayPercentRect(const WindowGeometry& windowGeom,
+                                                             const DisplayGeometry& display);
+    void stopTrackingActiveWindow();
+    void confirmPickedRegion(const RegionPickPoll& poll);
+    void dismissEditedBorder();
+    void applyBorderEdit(const RegionOfInterest& edited);
+
+    /// A window the picker offered, remembered with its identity so a
+    /// confirmed window pick can be turned into an attachment.
+    struct PickableWindow
+    {
+        uint64_t identity = 0;
+        int64_t ownerPid = 0;
+        std::string application;
+        AttachWindowRect windowRect;
+        RegionOfInterest region;
+        uint32_t displayId = 0;
+    };
+
+    [[nodiscard]] const PickableWindow* matchPickedWindow(uint32_t displayId, const RegionOfInterest& region) const;
     [[nodiscard]] std::optional<FloatColor> averageFrameArea(const RegionOfInterest& area) const;
     void resetRegionToFull();
     void persistPreferences();
@@ -216,6 +249,49 @@ private:
 
     AnalysisSettings m_analysis;
     bool m_analysisDirty = true;
+
+    // Attached regions: the tracked-window set and the single global region
+    // the analysis falls back to whenever the focused window has no region
+    // of its own. The border hides the instant the active window moves - a
+    // polled border trails a fast drag - and returns once the window has sat
+    // still for the settle time; the motion watch delivers the grab itself,
+    // so the hide precedes the first stale composite at any frame rate.
+    AttachController m_attach;
+    RegionOfInterest m_globalRegion;
+    bool m_attachedWindowMoving = false;
+    bool m_attachGripActive = false;
+    double m_attachRegionMovedAt = -1.0;
+    // The active window the motion watch is bound to (0 = none), its last
+    // seen rectangle, and the label its border wears.
+    uint64_t m_attachActiveWatched = 0;
+    std::optional<AttachWindowRect> m_attachLastSeenRect;
+    std::string m_attachActiveLabel;
+    // Which region the border edit in flight started on (0 = the global
+    // one), latched at the drag's first frame: no focus race can reroute a
+    // grabbed border, and an attached edit can never convert to global.
+    bool m_attachBorderEditing = false;
+    uint64_t m_attachBorderEditTarget = 0;
+
+    // The attached-draw gesture (Shift+D): the externally focused window
+    // SideScopes last stole focus from, and the target carried from the
+    // pick's opening to its confirm.
+    struct AttachedDrawTarget
+    {
+        uint64_t identity = 0;
+        int64_t ownerPid = 0;
+        std::string application;
+    };
+
+    std::optional<AttachedDrawTarget> m_attachedDrawTarget;
+    std::vector<PickableWindow> m_pickableWindows;
+    uint64_t m_lastExternalWindowId = 0;
+    int64_t m_lastExternalOwnerPid = 0;
+    double m_nextExternalWindowProbe = 0.0;
+    bool m_wantAttachedDraw = false;
+    // A short-lived toolbar note after a tracked window closed.
+    std::string m_attachDetachNotice;
+    double m_attachNoticeUntil = 0.0;
+    int64_t m_ownPid = 0;
 
     ScopeRegistry m_scopeRegistry;
     ScopeView m_view;

@@ -174,6 +174,11 @@ public:
         m_drawable = nil;
     }
 
+    void* nativeWindowHandle() const override
+    {
+        return (__bridge void*)m_nativeWindow;
+    }
+
 private:
     id<MTLDevice> m_device = nil;
     id<MTLCommandQueue> m_commandQueue = nil;

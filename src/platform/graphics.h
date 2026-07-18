@@ -56,6 +56,13 @@ public:
 
     /// Renders the finished ImGui draw data and presents it.
     virtual void endFrame() = 0;
+
+    /// The platform's native handle for the main window (macOS: the NSWindow*,
+    /// Windows: the HWND), so the application can hand it to
+    /// rememberApplicationWindow for the window-attach visibility seams. Only
+    /// the backend reaches through GLFW for native handles, keeping the shell
+    /// platform-neutral. Valid after init().
+    [[nodiscard]] virtual void* nativeWindowHandle() const = 0;
 };
 
 /// Creates the platform's graphics backend.
