@@ -769,21 +769,36 @@ NSCursor* buildPinCursor(const std::optional<FloatColor>& color)
     if (self.attachedLabel.length == 0) {
         return;
     }
+    // The tab hugs the text but never leaves the window: a title wider than
+    // the region truncates at its tail, Preview-style, instead of being
+    // clipped sharply at both ends by the window bounds.
+    NSMutableParagraphStyle* style = [[NSMutableParagraphStyle alloc] init];
+    style.lineBreakMode = NSLineBreakByTruncatingTail;
     NSDictionary* attributes = @{
         NSFontAttributeName : [NSFont systemFontOfSize:10],
         NSForegroundColorAttributeName : [NSColor colorWithWhite:0.97 alpha:0.95],
+        NSParagraphStyleAttributeName : style,
     };
+    const CGFloat margin = 2.0;
+    const CGFloat padX = 6.0;
+    const CGFloat padY = 2.0;
     const NSSize textSize = [self.attachedLabel sizeWithAttributes:attributes];
-    const NSPoint tabCentre = NSMakePoint(NSMidX(region), NSMaxY(region) + sidescopes::WindowPad + self.labelBand / 2);
-    const NSRect tab = NSMakeRect(tabCentre.x - textSize.width / 2 - 6, tabCentre.y - textSize.height / 2 - 2,
-                                  textSize.width + 12, textSize.height + 4);
+    const CGFloat maxTextWidth = self.bounds.size.width - 2 * margin - 2 * padX;
+    if (maxTextWidth < 16) {
+        return;  // a region too small for any legible label
+    }
+    const CGFloat textWidth = std::min(textSize.width, maxTextWidth);
+    const CGFloat tabWidth = textWidth + 2 * padX;
+    const CGFloat tabX = std::clamp(NSMidX(region) - tabWidth / 2, margin, self.bounds.size.width - margin - tabWidth);
+    const CGFloat centreY = NSMaxY(region) + sidescopes::WindowPad + self.labelBand / 2;
+    const NSRect tab = NSMakeRect(tabX, centreY - textSize.height / 2 - padY, tabWidth, textSize.height + 2 * padY);
     NSBezierPath* plate = [NSBezierPath bezierPathWithRoundedRect:tab xRadius:4 yRadius:4];
     [[NSColor colorWithWhite:0.1 alpha:0.85] setFill];
     [plate fill];
     [[NSColor colorWithSRGBRed:1.0 green:0.84 blue:0.55 alpha:0.6] setStroke];
     plate.lineWidth = 1.0;
     [plate stroke];
-    [self.attachedLabel drawAtPoint:NSMakePoint(tab.origin.x + 6, tab.origin.y + 2) withAttributes:attributes];
+    [self.attachedLabel drawInRect:NSInsetRect(tab, padX, padY) withAttributes:attributes];
 }
 
 // Eight handle dots - corners and edge midpoints - centered on the measurement

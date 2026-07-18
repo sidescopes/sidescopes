@@ -48,6 +48,10 @@ struct DesktopWindow
 
 /// A window's current on-screen rectangle plus whether it is minimized, in the
 /// same global desktop points (top-left origin) onScreenWindows reports.
+/// @c title is the window's current title - the filename in most editors -
+/// refreshed on every query so a label wearing it stays honest; empty when
+/// the window has none (macOS also requires the screen-recording permission
+/// this application already holds).
 struct WindowGeometry
 {
     double x = 0.0;
@@ -55,6 +59,7 @@ struct WindowGeometry
     double width = 0.0;
     double height = 0.0;
     bool minimized = false;
+    std::string title;
 };
 
 /// Windows currently visible on the given display, frontmost first. Window

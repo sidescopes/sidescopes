@@ -207,6 +207,7 @@ void AttachController::updateRegion(const std::vector<TrackedWindowObservation>&
         decision.activeOwnerPid = active->ownerPid;
         decision.activeDisplayId = observation.displayId;
         decision.activeRect = observation.windowRect;
+        decision.activeTitle = observation.title;
         decision.region = toAbsolute(*active, *observation.windowRect, observation.display);
 
         return;

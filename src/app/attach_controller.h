@@ -43,6 +43,8 @@ struct TrackedWindowObservation
     bool minimized = false;
     uint32_t displayId = 0;
     AttachDisplayRect display;
+    /// The window's current title, for the border's label; may be empty.
+    std::string title;
 };
 
 /// The per-frame verdict: the active window's mapped region (present exactly
@@ -59,6 +61,9 @@ struct AttachDecision
     int64_t activeOwnerPid = 0;
     uint32_t activeDisplayId = 0;
     std::optional<AttachWindowRect> activeRect;
+    /// The active window's current title, or empty; the host prefers it over
+    /// the application name for the border's label.
+    std::string activeTitle;
     /// Tracked windows that closed and were pruned this frame.
     std::size_t closedCount = 0;
     /// The closures emptied the tracked set; the host tells the user and the

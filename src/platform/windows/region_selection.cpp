@@ -1262,21 +1262,38 @@ void paintBorderLabel(Gdiplus::Graphics& canvas, const Gdiplus::RectF& region, d
     if (g_border.attachedLabel.empty()) {
         return;
     }
+    // The tab hugs the text but never leaves the window: a title wider than
+    // the region truncates at its tail, Preview-style, instead of being
+    // clipped sharply at both ends by the surface bounds.
     Gdiplus::Font font(L"Segoe UI", static_cast<Gdiplus::REAL>(10.0 * scale));
     Gdiplus::RectF measured;
     canvas.MeasureString(g_border.attachedLabel.c_str(), -1, &font, Gdiplus::PointF(0, 0), &measured);
+    const auto margin = static_cast<Gdiplus::REAL>(2.0 * scale);
     const auto padX = static_cast<Gdiplus::REAL>(6.0 * scale);
     const auto padY = static_cast<Gdiplus::REAL>(2.0 * scale);
-    const Gdiplus::PointF centre(region.X + region.Width / 2,
-                                 region.Y - static_cast<Gdiplus::REAL>((WindowPad + LabelBand / 2) * scale));
-    const Gdiplus::RectF tab(centre.X - measured.Width / 2 - padX, centre.Y - measured.Height / 2 - padY,
-                             measured.Width + 2 * padX, measured.Height + 2 * padY);
+    const auto pad = static_cast<Gdiplus::REAL>(WindowPad * scale);
+    const Gdiplus::REAL surfaceWidth = region.Width + 2 * pad;
+    const Gdiplus::REAL maxTextWidth = surfaceWidth - 2 * margin - 2 * padX;
+    if (maxTextWidth < static_cast<Gdiplus::REAL>(16.0 * scale)) {
+        return;  // a region too small for any legible label
+    }
+    const Gdiplus::REAL textWidth = std::min(measured.Width, maxTextWidth);
+    const Gdiplus::REAL tabWidth = textWidth + 2 * padX;
+    const Gdiplus::REAL minX = region.X - pad + margin;
+    const Gdiplus::REAL tabX =
+        std::clamp(region.X + region.Width / 2 - tabWidth / 2, minX, minX + surfaceWidth - 2 * margin - tabWidth);
+    const Gdiplus::REAL centreY = region.Y - static_cast<Gdiplus::REAL>((WindowPad + LabelBand / 2) * scale);
+    const Gdiplus::RectF tab(tabX, centreY - measured.Height / 2 - padY, tabWidth, measured.Height + 2 * padY);
     Gdiplus::SolidBrush plate(Gdiplus::Color(217, 26, 26, 26));
     canvas.FillRectangle(&plate, tab);
     Gdiplus::Pen rim(Gdiplus::Color(153, 255, 214, 140), static_cast<Gdiplus::REAL>(1.0 * scale));
     canvas.DrawRectangle(&rim, tab);
+    Gdiplus::StringFormat format;
+    format.SetFormatFlags(Gdiplus::StringFormatFlagsNoWrap);
+    format.SetTrimming(Gdiplus::StringTrimmingEllipsisCharacter);
     Gdiplus::SolidBrush ink(Gdiplus::Color(242, 247, 247, 247));
-    canvas.DrawString(g_border.attachedLabel.c_str(), -1, &font, Gdiplus::PointF(tab.X + padX, tab.Y + padY), &ink);
+    const Gdiplus::RectF textRect(tab.X + padX, tab.Y + padY, textWidth, measured.Height);
+    canvas.DrawString(g_border.attachedLabel.c_str(), -1, &font, textRect, &format, &ink);
 }
 
 void paintBorderCloseButton(Gdiplus::Graphics& canvas, double scale)

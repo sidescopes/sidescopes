@@ -100,6 +100,8 @@ std::optional<WindowGeometry> windowGeometry(uint64_t identity)
         // other-space) window reads.
         NSNumber* onscreen = info[(__bridge NSString*)kCGWindowIsOnscreen];
         result.minimized = onscreen == nil || !onscreen.boolValue;
+        NSString* title = info[(__bridge NSString*)kCGWindowName];
+        result.title = title ? title.UTF8String : "";
         geometry = result;
     }
     CFRelease(list);

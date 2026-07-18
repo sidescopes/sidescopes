@@ -186,6 +186,11 @@ std::optional<WindowGeometry> windowGeometry(uint64_t identity)
     geometry.y = static_cast<double>(frame.top);
     geometry.width = static_cast<double>(frame.right) - frame.left;
     geometry.height = static_cast<double>(frame.bottom) - frame.top;
+    wchar_t title[256];
+    const int titleLength = GetWindowTextW(window, title, 256);
+    if (titleLength > 0) {
+        geometry.title = utf8FromWide(title, titleLength);
+    }
 
     return geometry;
 }

@@ -1515,6 +1515,25 @@ namespace {
 // grip released - what keeps a slow drag's sparse updates from flickering it.
 constexpr double AttachMotionSettleSeconds = 0.2;
 
+// The border label wears the window title (the filename, usually), capped so
+// a pathological title cannot dwarf the region. Cut at a UTF-8 code point
+// boundary, never inside a character.
+std::string borderLabelFrom(const std::string& title, const std::string& fallback)
+{
+    const std::string& label = title.empty() ? fallback : title;
+    // A sanity bound only: the platform draw truncates visually to fit.
+    constexpr std::size_t MaxLabelBytes = 96;
+    if (label.size() <= MaxLabelBytes) {
+        return label;
+    }
+    std::size_t cut = MaxLabelBytes;
+    while (cut > 0 && (static_cast<unsigned char>(label[cut]) & 0xC0) == 0x80) {
+        --cut;
+    }
+
+    return label.substr(0, cut) + "...";
+}
+
 }  // namespace
 
 bool App::init()
@@ -2079,6 +2098,7 @@ std::vector<TrackedWindowObservation> App::gatherTrackedObservations() const
             observation.windowRect =
                 AttachWindowRect{windowGeom->x, windowGeom->y, windowGeom->width, windowGeom->height};
             observation.minimized = windowGeom->minimized;
+            observation.title = windowGeom->title;
             if (!windowGeom->minimized) {
                 const DesktopPoint centre{windowGeom->x + windowGeom->width / 2.0,
                                           windowGeom->y + windowGeom->height / 2.0};
@@ -2211,11 +2231,15 @@ void App::followAttachedWindow()
     if (activeWindowMoved(decision)) {
         onWindowMotion(WindowMotionSignal::Moved);
     }
+    if (decision.activeIdentity != 0) {
+        // The label prefers the window's live title - the filename in most
+        // editors - and follows it when the window's content changes.
+        m_attachActiveLabel = borderLabelFrom(decision.activeTitle, m_attach.activeApplicationName());
+    }
     if (decision.activeIdentity != m_attachActiveWatched) {
         // The active window switched: the motion watch moves with it and the
         // border, no longer mid-anything, follows the routing right away.
         m_attachActiveWatched = decision.activeIdentity;
-        m_attachActiveLabel = m_attach.activeApplicationName();
         m_attachGripActive = false;
         m_attachedWindowMoving = false;
         unwatchWindowMotion();
@@ -2318,12 +2342,14 @@ std::optional<PickConstraint> App::makeAttachedDrawConstraint()
     PickConstraint constraint;
     constraint.displayId = *displayId;
     constraint.region = displayPercentRect(*windowGeom, *display);
+    std::string application;
     for (const DesktopWindow& candidate : onScreenWindows(*displayId)) {
         if (candidate.windowIdentity == m_lastExternalWindowId) {
-            constraint.label = candidate.application;
+            application = candidate.application;
             break;
         }
     }
+    constraint.label = borderLabelFrom(windowGeom->title, application);
     m_attachedDrawTarget = AttachedDrawTarget{m_lastExternalWindowId, m_lastExternalOwnerPid, constraint.label};
 
     return constraint;
@@ -3550,7 +3576,7 @@ std::vector<PickerDisplay> App::buildPickerDisplays()
         entry.windows = windowSuggestionsFor(target.displayId);
         if (const auto geometry = geometryOfDisplay(target.displayId)) {
             for (const DesktopWindow& pickable : onScreenWindows(target.displayId)) {
-                const WindowGeometry rect{pickable.x, pickable.y, pickable.width, pickable.height, false};
+                const WindowGeometry rect{pickable.x, pickable.y, pickable.width, pickable.height, false, {}};
                 m_pickableWindows.push_back({pickable.windowIdentity, pickable.ownerPid, pickable.application,
                                              AttachWindowRect{pickable.x, pickable.y, pickable.width, pickable.height},
                                              displayPercentRect(rect, *geometry), target.displayId});
