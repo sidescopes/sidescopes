@@ -1,4 +1,5 @@
 #import <AppKit/AppKit.h>
+#import <QuartzCore/QuartzCore.h>
 
 #include <algorithm>
 #include <cmath>
@@ -1106,6 +1107,49 @@ NSWindow* g_editDimWindow = nil;
 
 NSWindow* g_borderWindow = nil;
 
+/// The border's entrance: a short fade with a slight outward settle onto
+/// its place. Hiding stays instant - a stale border is wrong the moment it
+/// is stale. The position never tweens - a moved target snaps.
+/// g_borderTarget is the rect the border is heading to (the live frame
+/// lags it mid-animation). The settle inset is absolute points, capped for
+/// tiny regions, so the motion reads the same at every region size.
+constexpr double BorderAppearSeconds = 0.12;
+constexpr double BorderSettlePoints = 16.0;
+NSRect g_borderTarget = {{0, 0}, {0, 0}};
+
+void cancelBorderFade()
+{
+    [NSAnimationContext
+        runAnimationGroup:^(NSAnimationContext* context) {
+          context.duration = 0;
+          g_borderWindow.animator.alphaValue = 1.0;
+        }
+        completionHandler:nil];
+}
+
+void animateBorderAppear(NSRect labelled)
+{
+    g_borderTarget = labelled;
+    const double inset = std::min({BorderSettlePoints, labelled.size.width / 6.0, labelled.size.height / 6.0});
+    const NSRect start = NSInsetRect(labelled, inset, inset);
+    [NSAnimationContext
+        runAnimationGroup:^(NSAnimationContext* context) {
+          context.duration = 0;
+          g_borderWindow.animator.alphaValue = 0.0;
+        }
+        completionHandler:nil];
+    [g_borderWindow setFrame:start display:YES];
+    [g_borderWindow orderFrontRegardless];
+    [NSAnimationContext
+        runAnimationGroup:^(NSAnimationContext* context) {
+          context.duration = BorderAppearSeconds;
+          context.timingFunction = [CAMediaTimingFunction functionWithName:kCAMediaTimingFunctionEaseOut];
+          [g_borderWindow.animator setFrame:labelled display:YES];
+          g_borderWindow.animator.alphaValue = 1.0;
+        }
+        completionHandler:nil];
+}
+
 // One overlay per display; a pick anywhere is a pick there.
 struct PickerOverlay
 {
@@ -1535,8 +1579,10 @@ void showRegionBorder(uint32_t displayId, const RegionOfInterest& region, const 
         labelled.size.height += LabelBand;
     }
 
-    // The host reconciles every frame; an unchanged border must cost nothing.
-    if (g_borderWindow && g_borderWindow.visible && NSEqualRects(g_borderWindow.frame, labelled)) {
+    // The host reconciles every frame; an unchanged border must cost
+    // nothing. Mid-animation the live frame lags the target, so the
+    // comparison is against the target.
+    if (g_borderWindow && g_borderWindow.visible && NSEqualRects(g_borderTarget, labelled)) {
         SidescopesBorderView* view = (SidescopesBorderView*)g_borderWindow.contentView;
         NSString* current = view.attachedLabel ? view.attachedLabel : @"";
         if ([current isEqualToString:label]) {
@@ -1558,13 +1604,21 @@ void showRegionBorder(uint32_t displayId, const RegionOfInterest& region, const 
         view.needsDisplay = YES;
     }
     view.labelBand = label.length > 0 ? LabelBand : 0;
-    [g_borderWindow setFrame:labelled display:YES];
-    [g_borderWindow orderFrontRegardless];
+    if (g_borderWindow.visible) {
+        // Already shown at another place: snap, never tween position.
+        cancelBorderFade();
+        [g_borderWindow setFrame:labelled display:YES];
+        g_borderTarget = labelled;
+
+        return;
+    }
+    animateBorderAppear(labelled);
 }
 
 void hideRegionBorder()
 {
     [g_borderWindow orderOut:nil];
+    g_borderTarget = NSMakeRect(0, 0, 0, 0);
 }
 
 std::vector<BorderKeyPress> drainBorderKeyPresses()

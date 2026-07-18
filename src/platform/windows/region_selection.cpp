@@ -65,6 +65,15 @@ constexpr double MinimumRegionSize = 24.0;
 // Extra window height above the band when the attached label is worn, so
 // the name tab clears the handles instead of crowding the top-center one.
 constexpr double LabelBand = 20.0;
+
+/// The border's entrance: a short fade with a slight outward settle onto
+/// its place, mirroring the macOS constants exactly. Hiding stays instant
+/// - a stale border is wrong the moment it is stale. The settle inset is
+/// absolute DIPs, capped for tiny regions, so the motion reads the same at
+/// every region size.
+constexpr double BorderAppearSeconds = 0.12;
+constexpr double BorderSettlePoints = 16.0;
+constexpr UINT_PTR BorderAppearTimer = 1;
 constexpr double CloseRadius = 6.5;
 constexpr double CloseHitRadius = 11.0;
 constexpr double CloseCornerInset = 2.0;
@@ -155,12 +164,12 @@ public:
         return m_height;
     }
 
-    void push(HWND window, int screenX, int screenY)
+    void push(HWND window, int screenX, int screenY, BYTE alpha = 255)
     {
         POINT position{screenX, screenY};
         SIZE size{m_width, m_height};
         POINT source{0, 0};
-        BLENDFUNCTION blend{AC_SRC_OVER, 0, 255, AC_SRC_ALPHA};
+        BLENDFUNCTION blend{AC_SRC_OVER, 0, alpha, AC_SRC_ALPHA};
         UpdateLayeredWindow(window, nullptr, &position, &size, m_dc, &source, 0, &blend, ULW_ALPHA);
     }
 
@@ -390,6 +399,12 @@ struct BorderState
     // tint - the subtle tell that this region belongs to a window.
     std::wstring attachedLabel;
     std::wstring paintedLabel;
+    // The entrance animation: the rect the border is heading to (region
+    // lags it mid-flight), the start tick, and the whole-surface alpha.
+    RECT appearTarget{};
+    ULONGLONG appearStart = 0;
+    bool appearing = false;
+    BYTE alpha = 255;
 };
 
 BorderState g_border;
@@ -1353,7 +1368,55 @@ void paintBorder()
     g_border.paintedLabel = g_border.attachedLabel;
 
     surface.push(g_border.window, g_border.region.left - static_cast<int>(WindowPad * scale),
-                 g_border.region.top - static_cast<int>(WindowPad * scale) - strip);
+                 g_border.region.top - static_cast<int>(WindowPad * scale) - strip, g_border.alpha);
+}
+
+int borderSettleInset(const RECT& target, double scale)
+{
+    return static_cast<int>(
+        std::min({BorderSettlePoints * scale, (target.right - target.left) / 6.0, (target.bottom - target.top) / 6.0}));
+}
+
+void beginBorderAppear(double scale)
+{
+    g_border.appearing = true;
+    g_border.appearStart = GetTickCount64();
+    const int inset = borderSettleInset(g_border.appearTarget, scale);
+    InflateRect(&g_border.region, -inset, -inset);
+    g_border.alpha = 0;
+    SetTimer(g_border.window, BorderAppearTimer, 15, nullptr);
+}
+
+void snapBorderAppear()
+{
+    KillTimer(g_border.window, BorderAppearTimer);
+    g_border.appearing = false;
+    g_border.alpha = 255;
+}
+
+// One tick of the entrance: eased alpha and outward settle, the same
+// curve and constants as the macOS side.
+void advanceBorderAppear()
+{
+    const double elapsed = static_cast<double>(GetTickCount64() - g_border.appearStart) / 1000.0;
+    const double t = std::min(1.0, elapsed / BorderAppearSeconds);
+    const double eased = 1.0 - (1.0 - t) * (1.0 - t);
+    const double scale = uiScale(g_border.window);
+    const int inset = static_cast<int>(borderSettleInset(g_border.appearTarget, scale) * (1.0 - eased));
+    g_border.region = g_border.appearTarget;
+    InflateRect(&g_border.region, -inset, -inset);
+    g_border.alpha = static_cast<BYTE>(eased * 255.0);
+    if (t >= 1.0) {
+        g_border.region = g_border.appearTarget;
+        snapBorderAppear();
+    }
+    const auto pad = static_cast<int>(WindowPad * scale);
+    const int strip = static_cast<int>(g_border.attachedLabel.empty() ? 0.0 : LabelBand * scale);
+    const int width = (g_border.region.right - g_border.region.left) + 2 * pad;
+    const int height = (g_border.region.bottom - g_border.region.top) + 2 * pad + strip;
+    SetWindowPos(g_border.window, nullptr, g_border.region.left - pad, g_border.region.top - pad - strip, width, height,
+                 SWP_NOACTIVATE | SWP_NOZORDER | SWP_SHOWWINDOW);
+    paintBorder();
 }
 
 // The interior is the editor's, not ours; only the band takes the mouse.
@@ -1488,6 +1551,12 @@ LRESULT CALLBACK borderProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
         return borderOnMouseMove(window);
     case WM_LBUTTONUP:
         return borderOnLButtonUp(window, lParam);
+    case WM_TIMER:
+        if (wParam == BorderAppearTimer) {
+            advanceBorderAppear();
+            return 0;
+        }
+        break;
     default:
         break;
     }
@@ -1809,6 +1878,30 @@ void setRegionPickChipColor(const std::optional<FloatColor>& color)
     }
 }
 
+// Sizes, places, and repaints the border window for the current region.
+// Directly beneath the scope window when one is visible: the border must
+// never cover the scopes, and both live in the topmost band. The surface
+// only shows size, scale, and entrance alpha; a plain move needs no
+// repaint at all - the common case when the whole region is dragged.
+void presentBorderWindow(double scale, const std::wstring& label)
+{
+    const auto pad = static_cast<int>(WindowPad * scale);
+    HWND insertAfter = HWND_TOPMOST;
+    const std::vector<HWND> own = ownWindows();
+    if (!own.empty()) {
+        insertAfter = own.front();
+    }
+    const int strip = static_cast<int>(g_border.attachedLabel.empty() ? 0.0 : LabelBand * scale);
+    const int width = (g_border.region.right - g_border.region.left) + 2 * pad;
+    const int height = (g_border.region.bottom - g_border.region.top) + 2 * pad + strip;
+    SetWindowPos(g_border.window, insertAfter, g_border.region.left - pad, g_border.region.top - pad - strip, width,
+                 height, SWP_NOACTIVATE | SWP_SHOWWINDOW);
+    if (width != g_border.paintedWidth || height != g_border.paintedHeight || scale != g_border.paintedScale ||
+        label != g_border.paintedLabel || g_border.alpha != 255) {
+        paintBorder();
+    }
+}
+
 void showRegionBorder(uint32_t displayId, const RegionOfInterest& region, const std::string& attachedLabel)
 {
     const auto geometry = geometryOfDisplay(displayId);
@@ -1832,8 +1925,11 @@ void showRegionBorder(uint32_t displayId, const RegionOfInterest& region, const 
     wanted.top = static_cast<int>(geometry->originY + region.topPercent / 100.0 * geometry->heightPoints);
     wanted.right = static_cast<int>(geometry->originX + region.rightPercent / 100.0 * geometry->widthPoints);
     wanted.bottom = static_cast<int>(geometry->originY + region.bottomPercent / 100.0 * geometry->heightPoints);
-    // The host reconciles every frame; an unchanged border must cost nothing.
-    if (IsWindowVisible(g_border.window) && EqualRect(&wanted, &g_border.region) && label == g_border.attachedLabel) {
+    // The host reconciles every frame; an unchanged border must cost
+    // nothing. Mid-entrance the live rect lags the target, so the
+    // comparison is against the target.
+    const bool visible = IsWindowVisible(g_border.window) != FALSE;
+    if (visible && EqualRect(&wanted, &g_border.appearTarget) && label == g_border.attachedLabel) {
         return;
     }
 
@@ -1842,35 +1938,27 @@ void showRegionBorder(uint32_t displayId, const RegionOfInterest& region, const 
     g_border.displayWidth = geometry->widthPoints;
     g_border.displayHeight = geometry->heightPoints;
     g_border.region = wanted;
+    g_border.appearTarget = wanted;
     g_border.attachedLabel = label;
 
     const double scale = uiScale(g_border.window);
-    const auto pad = static_cast<int>(WindowPad * scale);
-    // Directly beneath the scope window when one is visible: the border
-    // must never cover the scopes, and both live in the topmost band.
-    HWND insertAfter = HWND_TOPMOST;
-    const std::vector<HWND> own = ownWindows();
-    if (!own.empty()) {
-        insertAfter = own.front();
+    if (!visible) {
+        beginBorderAppear(scale);
+    } else if (g_border.appearing) {
+        // The target moved mid-entrance: snap, never tween position.
+        snapBorderAppear();
     }
-    const int strip = static_cast<int>(g_border.attachedLabel.empty() ? 0.0 : LabelBand * scale);
-    const int width = (g_border.region.right - g_border.region.left) + 2 * pad;
-    const int height = (g_border.region.bottom - g_border.region.top) + 2 * pad + strip;
-    SetWindowPos(g_border.window, insertAfter, g_border.region.left - pad, g_border.region.top - pad - strip, width,
-                 height, SWP_NOACTIVATE | SWP_SHOWWINDOW);
-    // The surface only shows size and scale; while the region is dragged
-    // around whole - or this sync fires for an unrelated settings change -
-    // moving the window above is the entire job.
-    if (width != g_border.paintedWidth || height != g_border.paintedHeight || scale != g_border.paintedScale ||
-        label != g_border.paintedLabel) {
-        paintBorder();
-    }
+    presentBorderWindow(scale, label);
 }
 
 void hideRegionBorder()
 {
     if (g_border.window) {
+        if (g_border.appearing) {
+            snapBorderAppear();
+        }
         ShowWindow(g_border.window, SW_HIDE);
+        g_border.appearTarget = RECT{};
     }
 }
 
