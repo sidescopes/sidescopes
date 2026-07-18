@@ -106,11 +106,26 @@ TEST_CASE("A point away from every corner is not a corner grab")
 
 TEST_CASE("The scale factor grows the corner zone")
 {
-    const LocalRect region{0.0, 0.0, 100.0, 100.0};
+    // Large enough that the quarter-side cap stays out of the way: the zone
+    // is purely the scaled 22 points.
+    const LocalRect region{0.0, 0.0, 200.0, 200.0};
     // 30 points from the corner: outside the 22-point zone at 1x, inside the
     // 44-point zone at 2x.
     CHECK(cornerZoneAt(region, 30.0, 30.0, 1.0) == ZoneNone);
     CHECK(cornerZoneAt(region, 30.0, 30.0, 2.0) == (ZoneLeft | ZoneTop));
+}
+
+TEST_CASE("A small region keeps a grabbable move band between the zones")
+{
+    // 40x40: uncapped 22-point corners would cover every band point twice
+    // over. Capped to a quarter per side, the corners reach 10 points and
+    // the edge midpoints span 5 to either side of center, leaving move gaps.
+    const LocalRect region{100.0, 100.0, 40.0, 40.0};
+
+    CHECK(cornerZoneAt(region, 105.0, 105.0, 1.0) == (ZoneLeft | ZoneTop));
+    CHECK(cornerZoneAt(region, 118.0, 118.0, 1.0) == ZoneNone);     // past the capped corner
+    CHECK(edgeOrMoveZoneAt(region, 120.0, 95.0, 1.0) == ZoneTop);   // edge midpoint above
+    CHECK(edgeOrMoveZoneAt(region, 113.0, 95.0, 1.0) == ZoneMove);  // the gap corner-to-midpoint
 }
 
 // ---------------------------------------------------------------------------
