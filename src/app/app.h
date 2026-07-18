@@ -142,6 +142,7 @@ private:
                                                              const DisplayGeometry& display);
     void stopTrackingActiveWindow();
     void confirmPickedRegion(const RegionPickPoll& poll);
+    void adoptAttachedPick(uint64_t identity, int64_t ownerPid, const RegionOfInterest& region);
     void dismissEditedBorder();
     void applyBorderEdit(const RegionOfInterest& edited);
 

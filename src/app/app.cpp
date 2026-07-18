@@ -2192,12 +2192,20 @@ void App::followAttachedWindow()
 
     // The focused window drives everything: the foreground application's
     // frontmost ordinary window - frozen on the active window while its
-    // border is being dragged.
+    // border is being dragged, and held while SideScopes itself is in
+    // front. One region type at a time means there is no global region to
+    // switch to while windows are tracked, so the user can work the scopes
+    // against the last attached region without losing it.
     std::optional<uint64_t> focused;
     if (m_attachBorderEditing && m_attachActiveWatched != 0) {
         focused = m_attachActiveWatched;
     } else {
-        focused = frontmostWindowOfApplication(foregroundApplicationPid());
+        const int64_t foreground = foregroundApplicationPid();
+        if (foreground == m_ownPid && m_attachActiveWatched != 0) {
+            focused = m_attachActiveWatched;
+        } else {
+            focused = frontmostWindowOfApplication(foreground);
+        }
     }
     const AttachDecision decision = m_attach.observe(gatherTrackedObservations(), focused);
     if (activeWindowMoved(decision)) {
@@ -3821,6 +3829,22 @@ void App::pollRegionPreview(const RegionPickPoll& poll)
     }
 }
 
+// The shared tail of both attached creations: the global region retires
+// (one region type at a time), the motion state starts fresh, the watch
+// rebinds on the next follow step, and the picked window comes up so the
+// border never wraps someone else's pixels.
+void App::adoptAttachedPick(uint64_t identity, int64_t ownerPid, const RegionOfInterest& region)
+{
+    m_globalRegion = RegionOfInterest{};
+    m_attachedWindowMoving = false;
+    m_attachGripActive = false;
+    m_attachRegionMovedAt = -1.0;
+    unwatchWindowMotion();
+    m_attachActiveWatched = 0;
+    raiseWindow(identity, ownerPid);
+    setRegion(region);
+}
+
 // A confirmed region that names a window tracks it (or re-picks a tracked
 // one) as an attached region; the constrained draw binds to its target the
 // same way; a freehand draw sets the single global region.
@@ -3834,17 +3858,9 @@ void App::confirmPickedRegion(const RegionPickPoll& poll)
                                    geometry->originX, geometry->originY, geometry->widthPoints, geometry->heightPoints})
                              : std::nullopt;
     if (picked != nullptr && display) {
-        setRegion(m_attach.attach(picked->identity, picked->ownerPid, picked->application, picked->windowRect, *display,
-                                  confirmed));
-        m_attachedWindowMoving = false;
-        m_attachGripActive = false;
-        m_attachRegionMovedAt = -1.0;
-        // The follow step rebinds the motion watch to the new active window
-        // on its next run; a partially obstructed pick would wear a border
-        // around someone else's pixels, so bring it up first.
-        unwatchWindowMotion();
-        m_attachActiveWatched = 0;
-        raiseWindow(picked->identity, picked->ownerPid);
+        adoptAttachedPick(picked->identity, picked->ownerPid,
+                          m_attach.attach(picked->identity, picked->ownerPid, picked->application, picked->windowRect,
+                                          *display, confirmed));
 
         return;
     }
@@ -3855,19 +3871,24 @@ void App::confirmPickedRegion(const RegionPickPoll& poll)
         // The drawn rectangle must live on the target window's own display,
         // or the mapping is meaningless.
         if (windowGeom && !windowGeom->minimized && displayAtPoint(targetCentre).value_or(0) == poll.displayId) {
-            setRegion(m_attach.attach(
-                m_attachedDrawTarget->identity, m_attachedDrawTarget->ownerPid, m_attachedDrawTarget->application,
-                AttachWindowRect{windowGeom->x, windowGeom->y, windowGeom->width, windowGeom->height}, *display,
-                confirmed));
-            m_attachedWindowMoving = false;
-            m_attachGripActive = false;
-            m_attachRegionMovedAt = -1.0;
-            unwatchWindowMotion();
-            m_attachActiveWatched = 0;
-            raiseWindow(m_attachedDrawTarget->identity, m_attachedDrawTarget->ownerPid);
+            adoptAttachedPick(
+                m_attachedDrawTarget->identity, m_attachedDrawTarget->ownerPid,
+                m_attach.attach(m_attachedDrawTarget->identity, m_attachedDrawTarget->ownerPid,
+                                m_attachedDrawTarget->application,
+                                AttachWindowRect{windowGeom->x, windowGeom->y, windowGeom->width, windowGeom->height},
+                                *display, confirmed));
 
             return;
         }
+    }
+    // One region type at a time: a global draw retires every attached
+    // region.
+    if (m_attach.attached()) {
+        m_attach.detachAll();
+        unwatchWindowMotion();
+        m_attachActiveWatched = 0;
+        m_attachedWindowMoving = false;
+        m_attachGripActive = false;
     }
     m_globalRegion = confirmed;
     setRegion(m_globalRegion);
