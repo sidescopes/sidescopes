@@ -255,7 +255,9 @@ namespace {
 
 // The strip and margins a grab lands on when the user is about to move or
 // resize the window rather than click inside it: the standard title bar
-// plus the resize edges, in desktop points.
+// plus the resize edges, in desktop points. The edge band reaches OUTSIDE
+// the frame too - macOS resize grips extend past it, and a hide that waits
+// for the first geometry change is already too late.
 constexpr double MotionChromeTopPoints = 30.0;
 constexpr double MotionChromeEdgePoints = 8.0;
 
@@ -280,8 +282,22 @@ bool motionPointInWindow(const DesktopPoint& point, const WindowGeometry& rect)
     return point.x >= rect.x && point.x <= rect.x + rect.width && point.y >= rect.y && point.y <= rect.y + rect.height;
 }
 
+// Inside the window or within the resize-grip ring just outside it: macOS
+// resize grips reach past the frame, and a hide that waits for the first
+// geometry change is already too late.
+bool motionPointInGripRange(const DesktopPoint& point, const WindowGeometry& rect)
+{
+    return point.x >= rect.x - MotionChromeEdgePoints && point.x <= rect.x + rect.width + MotionChromeEdgePoints &&
+           point.y >= rect.y - MotionChromeEdgePoints && point.y <= rect.y + rect.height + MotionChromeEdgePoints;
+}
+
 bool motionPointOnChrome(const DesktopPoint& point, const WindowGeometry& rect)
 {
+    if (!motionPointInWindow(point, rect)) {
+        // The caller has already bounded the point to the grip range: the
+        // ring outside the frame is the resize grip.
+        return true;
+    }
     if (point.y - rect.y <= MotionChromeTopPoints) {
         return true;
     }
@@ -293,7 +309,7 @@ bool motionPointOnChrome(const DesktopPoint& point, const WindowGeometry& rect)
 void motionHandleMouseDown()
 {
     const auto rect = windowGeometry(g_motionIdentity);
-    if (!rect || !motionPointInWindow(motionCursorDesktopPoint(), *rect)) {
+    if (!rect || !motionPointInGripRange(motionCursorDesktopPoint(), *rect)) {
         return;
     }
 
