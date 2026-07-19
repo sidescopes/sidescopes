@@ -1168,12 +1168,18 @@ constexpr double BorderAppearSeconds = 0.12;
 constexpr double BorderSettlePoints = 16.0;
 NSRect g_borderTarget = {{0, 0}, {0, 0}};
 
-void cancelBorderFade()
+void snapBorderFrame(NSRect labelled)
 {
+    // A zero-duration group replaces any in-flight entrance animation on
+    // BOTH properties. A direct setFrame loses to a running animator frame
+    // animation - the window ends at the animation's stale target, and a
+    // label strip that arrived meanwhile is clipped off the top, drawing
+    // the region a strip short.
     [NSAnimationContext
         runAnimationGroup:^(NSAnimationContext* context) {
           context.duration = 0;
           g_borderWindow.animator.alphaValue = 1.0;
+          [g_borderWindow.animator setFrame:labelled display:YES];
         }
         completionHandler:nil];
 }
@@ -1644,8 +1650,7 @@ void showRegionBorder(uint32_t displayId, const RegionOfInterest& region, const 
     view.labelBand = label.length > 0 ? LabelBand : 0;
     if (g_borderWindow.visible) {
         // Already shown at another place: snap, never tween position.
-        cancelBorderFade();
-        [g_borderWindow setFrame:labelled display:YES];
+        snapBorderFrame(labelled);
         g_borderTarget = labelled;
 
         return;
