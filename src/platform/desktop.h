@@ -181,13 +181,6 @@ void unwatchWindowMotion();
 /// once, from the main thread.
 void observeForegroundChanges(std::function<void()> callback);
 
-/// The frontmost ordinary window belonging to the application with
-/// @p ownerPid, or nothing when it has none on screen. For the foreground
-/// application this is the focused window, which is what the border's focus
-/// rule needs: a tracked window is only "the focused window" if no untracked
-/// sibling of the same application sits above it.
-[[nodiscard]] std::optional<uint64_t> frontmostWindowOfApplication(int64_t ownerPid);
-
 /// Like onScreenWindows, additionally admitting floating-level panels:
 /// macOS lifts a key panel (a Quick Look preview) above the ordinary
 /// window layer, and pinning a region must still find the window visually

@@ -2,6 +2,7 @@
 #import <CoreGraphics/CoreGraphics.h>
 
 #include "platform/desktop.h"
+#include "platform/focus_resolution.h"
 
 #include <algorithm>
 #include <cstdlib>
@@ -130,13 +131,6 @@ std::optional<WindowGeometry> windowGeometry(uint64_t identity)
 
 namespace {
 
-struct OrderedWindow
-{
-    uint64_t identity = 0;
-    int64_t ownerPid = 0;
-    CGRect bounds = CGRectZero;
-};
-
 // The qualifying on-screen windows, front to back: layer 0, visible
 // alpha, at least picker-sized. A TRACKED window qualifies at any layer:
 // macOS shifts a Quick Look panel's level away from zero the moment it
@@ -168,108 +162,19 @@ std::vector<OrderedWindow> qualifyingWindows(const std::vector<uint64_t>& tracke
         if (bounds.size.width < 64 || bounds.size.height < 64) {
             continue;
         }
-        windows.push_back({identity, [info[(__bridge NSString*)kCGWindowOwnerPID] longLongValue], bounds});
+        windows.push_back({identity, [info[(__bridge NSString*)kCGWindowOwnerPID] longLongValue], bounds.origin.x,
+                           bounds.origin.y, bounds.size.width, bounds.size.height});
     }
     CFRelease(list);
 
     return windows;
 }
 
-// Whether some window listed above covers more than half of @p target:
-// the tracked window is genuinely behind a sibling, not merely
-// list-ordered below it the way panels are.
-bool windowBuried(const std::vector<OrderedWindow>& windows, std::size_t target)
-{
-    const CGRect bounds = windows[target].bounds;
-    const double area = bounds.size.width * bounds.size.height;
-    for (std::size_t index = 0; index < target; ++index) {
-        const CGRect overlap = CGRectIntersection(windows[index].bounds, bounds);
-        if (!CGRectIsNull(overlap) && area > 0 && overlap.size.width * overlap.size.height > area * 0.5) {
-            return true;
-        }
-    }
-
-    return false;
-}
-
 }  // namespace
 
 std::optional<uint64_t> focusedWindowForTracking(int64_t applicationPid, const std::vector<uint64_t>& tracked)
 {
-    const std::vector<OrderedWindow> windows = qualifyingWindows(tracked);
-    const auto isTracked = [&tracked](uint64_t identity) {
-        return std::find(tracked.begin(), tracked.end(), identity) != tracked.end();
-    };
-    std::optional<std::size_t> first;
-    std::optional<std::size_t> trackedOwn;
-    for (std::size_t index = 0; index < windows.size(); ++index) {
-        if (windows[index].ownerPid != applicationPid) {
-            continue;
-        }
-        if (!first) {
-            first = index;
-        }
-        if (isTracked(windows[index].identity)) {
-            trackedOwn = index;
-            break;
-        }
-    }
-    if (!first) {
-        return std::nullopt;
-    }
-    // A tracked window of another application above the foreground one and
-    // overlapping it wins: a preview panel rendered by a helper process.
-    for (std::size_t index = 0; index < *first; ++index) {
-        if (isTracked(windows[index].identity) && CGRectIntersectsRect(windows[index].bounds, windows[*first].bounds)) {
-            return windows[index].identity;
-        }
-    }
-    // A tracked window of the foreground application itself wins even when
-    // listed deeper - the window list's order and the visual stacking
-    // disagree for panels (Quick Look) - unless something above genuinely
-    // buries it.
-    if (trackedOwn && *trackedOwn != *first && !windowBuried(windows, *trackedOwn)) {
-        return windows[*trackedOwn].identity;
-    }
-
-    return windows[*first].identity;
-}
-
-std::optional<uint64_t> frontmostWindowOfApplication(int64_t ownerPid)
-{
-    CFArrayRef list = CGWindowListCopyWindowInfo(kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements,
-                                                 kCGNullWindowID);
-    if (!list) {
-        return std::nullopt;
-    }
-
-    // Front-to-back; the same layer, alpha, and size filters as the picker,
-    // so invisible helper windows never read as the focused one.
-    std::optional<uint64_t> frontmost;
-    const CFIndex count = CFArrayGetCount(list);
-    for (CFIndex index = 0; index < count && !frontmost; ++index) {
-        NSDictionary* info = (__bridge NSDictionary*)CFArrayGetValueAtIndex(list, index);
-        if ([info[(__bridge NSString*)kCGWindowOwnerPID] longLongValue] != ownerPid) {
-            continue;
-        }
-        if ([info[(__bridge NSString*)kCGWindowLayer] intValue] != 0) {
-            continue;
-        }
-        NSNumber* alpha = info[(__bridge NSString*)kCGWindowAlpha];
-        if (alpha && alpha.doubleValue < 0.05) {
-            continue;
-        }
-        CGRect bounds = CGRectZero;
-        CGRectMakeWithDictionaryRepresentation((__bridge CFDictionaryRef)info[(__bridge NSString*)kCGWindowBounds],
-                                               &bounds);
-        if (bounds.size.width < 64 || bounds.size.height < 64) {
-            continue;
-        }
-        frontmost = [info[(__bridge NSString*)kCGWindowNumber] unsignedLongLongValue];
-    }
-    CFRelease(list);
-
-    return frontmost;
+    return resolveTrackedFocus(qualifyingWindows(tracked), applicationPid, tracked);
 }
 
 void raiseWindow(uint64_t, int64_t ownerPid)

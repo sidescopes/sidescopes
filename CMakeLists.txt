@@ -167,6 +167,7 @@ endif()
 if(APPLE)
     enable_language(OBJCXX)
     add_library(sidescopes_platform STATIC
+        src/platform/focus_resolution.cpp
         src/platform/icons.cpp
         src/platform/region_geometry.cpp
         src/platform/macos/desktop.mm
@@ -195,6 +196,7 @@ if(WIN32)
     # compiler continuously; the application target follows with the port
     # itself.
     add_library(sidescopes_platform STATIC
+        src/platform/focus_resolution.cpp
         src/platform/icons.cpp
         src/platform/region_geometry.cpp
         src/platform/windows/desktop.cpp
