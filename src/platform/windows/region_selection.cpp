@@ -651,7 +651,10 @@ void paintSuggestionScene(PickerState& picker, Gdiplus::Graphics& canvas, double
             Gdiplus::SolidBrush wash(Gdiplus::Color(64, 0, 122, 255));
             canvas.FillRectangle(&wash, hovered.first);
         }
-        Gdiplus::Pen frame(Gdiplus::Color(255, 255, 255, 255), static_cast<Gdiplus::REAL>(2.0 * scale));
+        // Transient indicators wear the warm tone: they are on screen for a
+        // moment, and neutral grey vanished against bright content. Only
+        // RESTING chrome must stay neutral beside the sampled pixels.
+        Gdiplus::Pen frame(Gdiplus::Color(242, 255, 214, 140), static_cast<Gdiplus::REAL>(2.0 * scale));
         canvas.DrawRectangle(&frame, hovered.first);
         const Gdiplus::FontFamily family(L"Segoe UI");
         const Gdiplus::Font font(&family, static_cast<Gdiplus::REAL>(12 * scale), Gdiplus::FontStyleRegular,
@@ -684,7 +687,7 @@ void paintDrawScene(PickerState& picker, Gdiplus::Graphics& canvas, double scale
     canvas.FillRectangle(&dim, bounds);
     if (picker.constrained) {
         punchRect(canvas, picker.constraintRect);
-        Gdiplus::Pen spotlight(Gdiplus::Color(230, 247, 247, 247), static_cast<Gdiplus::REAL>(1.5 * scale));
+        Gdiplus::Pen spotlight(Gdiplus::Color(230, 255, 214, 140), static_cast<Gdiplus::REAL>(1.5 * scale));
         canvas.DrawRectangle(&spotlight, picker.constraintRect);
     }
     if (picker.dragging) {
@@ -2105,7 +2108,7 @@ void showAttachedEditDim(uint32_t displayId, const RegionOfInterest& windowRegio
     Gdiplus::SolidBrush clear(Gdiplus::Color(0, 0, 0, 0));
     canvas.FillRectangle(&clear, holeLocal);
     canvas.SetCompositingMode(Gdiplus::CompositingModeSourceOver);
-    Gdiplus::Pen rim(Gdiplus::Color(230, 247, 247, 247), 1.5f);
+    Gdiplus::Pen rim(Gdiplus::Color(230, 255, 214, 140), 1.5f);
     canvas.DrawRectangle(&rim, holeLocal);
 
     // Below the border in the topmost band: the veil must never cover the

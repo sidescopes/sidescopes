@@ -332,7 +332,10 @@ NSCursor* buildPinCursor(const std::optional<FloatColor>& color)
         [halo stroke];
         NSBezierPath* line = [NSBezierPath bezierPathWithRect:selection];
         line.lineWidth = 1.0;
-        [[NSColor whiteColor] setStroke];
+        // Transient indicators wear the warm tone: they are on screen for a
+        // moment, and neutral grey vanished against bright content. Only
+        // RESTING chrome must stay neutral beside the sampled pixels.
+        [[NSColor colorWithSRGBRed:1.0 green:0.84 blue:0.55 alpha:0.95] setStroke];
         [line stroke];
     }
     if (!self.dragging) {
@@ -411,7 +414,7 @@ NSCursor* buildPinCursor(const std::optional<FloatColor>& color)
     NSRectFillUsingOperation(self.bounds, NSCompositingOperationSourceOver);
     if (constrained) {
         [self punchRect:self.constraintRect];
-        [[NSColor colorWithWhite:0.97 alpha:0.9] setStroke];
+        [[NSColor colorWithSRGBRed:1.0 green:0.84 blue:0.55 alpha:0.9] setStroke];
         NSBezierPath* spotlight = [NSBezierPath bezierPathWithRect:self.constraintRect];
         spotlight.lineWidth = 1.5;
         [spotlight stroke];
@@ -1196,7 +1199,7 @@ NSCursor* buildPinCursor(const std::optional<FloatColor>& color)
     veil.windingRule = NSWindingRuleEvenOdd;
     [[NSColor colorWithWhite:0 alpha:0.45] setFill];
     [veil fill];
-    [[NSColor colorWithWhite:0.97 alpha:0.9] setStroke];
+    [[NSColor colorWithSRGBRed:1.0 green:0.84 blue:0.55 alpha:0.9] setStroke];
     NSBezierPath* rim = [NSBezierPath bezierPathWithRect:self.holeRect];
     rim.lineWidth = 1.5;
     [rim stroke];
