@@ -72,6 +72,14 @@ tccutil reset ScreenCapture org.sidescopes.app
 Then relaunch SideScopes and grant the permission when prompted. Toggling
 the switch in System Settings only takes effect after the app restarts.
 
+**Diagnostic log.** Launch with `SIDESCOPES_DIAG=attach,border` (or `all`)
+in the environment to stream timestamped diagnostic lines to
+`sidescopes-diag.log` in the system temporary directory; the previous run
+is kept next to it as `.prev`. Channels: `attach` (window-focus routing),
+`border` (region-border drawing). `SIDESCOPES_DIAG_FILE` overrides the
+location, and `SIDESCOPES_DIAG_FLUSH=0` buffers writes so logging does not
+distort performance measurement. Attach the log when reporting a problem.
+
 ## License
 
 SideScopes is free and open-source software, licensed under the

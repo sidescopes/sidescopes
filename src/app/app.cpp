@@ -36,6 +36,7 @@
 #include "app/window_suggestions.h"
 #include "core/analysis_worker.h"
 #include "core/color_lab.h"
+#include "core/diagnostics.h"
 #include "core/frame_mailbox.h"
 #include "core/marker_smoother.h"
 #include "core/preferences.h"
@@ -1504,6 +1505,7 @@ std::string borderLabelFrom(const std::string& title, const std::string& fallbac
 
 bool App::init()
 {
+    diagInit();
     if (!glfwInit()) {
         return false;
     }
@@ -2221,6 +2223,11 @@ void App::followAttachedWindow()
     m_attachLastSeenRect = decision.activeRect;
     applyAttachDecision(decision);
     captureActiveDisplay(decision);
+    SS_DIAG(Attach, "fg=%lld active=%llu display=%u region=%.1f,%.1f,%.1f,%.1f label=%s moving=%d",
+            static_cast<long long>(foregroundApplicationPid()),
+            static_cast<unsigned long long>(decision.activeIdentity), m_captureController->capturedDisplay(),
+            m_analysis.region.leftPercent, m_analysis.region.topPercent, m_analysis.region.rightPercent,
+            m_analysis.region.bottomPercent, m_attachActiveLabel.c_str(), m_attachedWindowMoving ? 1 : 0);
     updateFacePin(decision);
     if (decision.closedCount > 0) {
         m_lastActivity = glfwGetTime();
