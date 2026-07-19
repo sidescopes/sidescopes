@@ -119,10 +119,10 @@ public:
     /// makes it active. @p identity is its platform handle, @p ownerPid the
     /// process id of its application, @p applicationName its name,
     /// @p windowRect its current rectangle on @p display, and
-    /// @p absoluteRegion the region the user confirmed - the window rectangle
-    /// itself for a plain window pick. The region is stored as a fraction of
-    /// the window so later moves and resizes carry it, clamped inside the
-    /// window.
+    /// @p absoluteRegion the region the user confirmed. The region is
+    /// stored in absolute desktop coordinates, screen-glued: window moves
+    /// translate it, resizes leave it in place, and it is clamped inside
+    /// the window.
     /// @return The clamped absolute region actually stored, for immediate
     ///         analysis feedback.
     RegionOfInterest attach(uint64_t identity, int64_t ownerPid, std::string applicationName,
@@ -130,7 +130,7 @@ public:
                             const RegionOfInterest& absoluteRegion);
 
     /// Records an in-window region edit (a border drag or a fresh draw) on
-    /// the ACTIVE window: recomputes its window-relative fraction from
+    /// the ACTIVE window: re-anchors the stored absolute rectangle to
     /// @p newAbsoluteRegion against @p windowRect, clamped so the region
     /// stays inside the window.
     /// @return The clamped absolute region actually stored, or
@@ -168,6 +168,12 @@ private:
         double top = 0.0;
         double right = 0.0;
         double bottom = 0.0;
+        // Re-appearance settle: while set, rect changes rebaseline silently
+        // instead of binding - the OS animates hidden windows back on
+        // screen (Quick Look zooms its panel open), and those transitional
+        // rectangles must never push the stored region. Binding resumes
+        // once the rectangle holds still for two consecutive observations.
+        bool settling = false;
         // The window rectangle at the last observation, telling a move (same
         // size: the region rides along) from a resize (the region stays
         // screen-glued and only edges push it).

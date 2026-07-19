@@ -198,13 +198,40 @@ void AttachController::bindStoredToWindow(TrackedWindow& window, const AttachWin
     window.lastWindowRect = windowRect;
 }
 
+namespace {
+
+bool sameRect(const AttachWindowRect& a, const AttachWindowRect& b)
+{
+    return std::abs(a.x - b.x) < 0.5 && std::abs(a.y - b.y) < 0.5 && std::abs(a.width - b.width) < 0.5 &&
+           std::abs(a.height - b.height) < 0.5;
+}
+
+}  // namespace
+
 void AttachController::updateTracked(const std::vector<TrackedWindowObservation>& windows)
 {
     for (const TrackedWindowObservation& observation : windows) {
         TrackedWindow* window = find(observation.identity);
-        if (window && observation.windowRect && !observation.minimized) {
-            bindStoredToWindow(*window, *observation.windowRect);
+        if (window == nullptr || !observation.windowRect) {
+            continue;
         }
+        if (observation.minimized) {
+            window->settling = true;
+
+            continue;
+        }
+        if (window->settling) {
+            // The re-entry animation's rectangles rebaseline silently;
+            // two identical observations mean the window has landed.
+            if (sameRect(window->lastWindowRect, *observation.windowRect)) {
+                window->settling = false;
+            } else {
+                window->lastWindowRect = *observation.windowRect;
+            }
+
+            continue;
+        }
+        bindStoredToWindow(*window, *observation.windowRect);
     }
 }
 

@@ -218,7 +218,7 @@ TEST_CASE("A focused window that is minimized cannot be active")
     CHECK_FALSE(decision.region.has_value());
 }
 
-TEST_CASE("An in-window region edit updates the relative rect without detaching")
+TEST_CASE("An in-window region edit re-anchors the stored rect without detaching")
 {
     AttachController controller;
     controller.attach(42, EditorPid, "Editor", EditorWindow, PrimaryDisplay, WholeEditor);
@@ -424,6 +424,40 @@ TEST_CASE("A detached controller ignores observations and edits")
 
     controller.detachAll();
     CHECK_FALSE(controller.attached());
+}
+
+TEST_CASE("A reopening animation never pushes the region")
+{
+    AttachController controller;
+    (void)controller.attach(1, 100, "Editor", {200.0, 100.0, 800.0, 600.0}, PrimaryDisplay,
+                            RegionOfInterest{25.0, 15.0, 45.0, 35.0});
+
+    // Hidden, then animated back over several transitional rectangles -
+    // Quick Look zooms its panel open - before landing where it was.
+    (void)controller.observe({minimizedWindow(1, {200.0, 100.0, 800.0, 600.0})}, 1);
+    (void)controller.observe({visibleWindow(1, {450.0, 300.0, 200.0, 150.0})}, 1);
+    (void)controller.observe({visibleWindow(1, {300.0, 180.0, 560.0, 420.0})}, 1);
+    (void)controller.observe({visibleWindow(1, {200.0, 100.0, 800.0, 600.0})}, 1);
+    const AttachDecision landed = controller.observe({visibleWindow(1, {200.0, 100.0, 800.0, 600.0})}, 1);
+
+    REQUIRE(landed.region.has_value());
+    checkRegion(*landed.region, 25.0, 15.0, 45.0, 35.0);
+}
+
+TEST_CASE("A window moved while hidden leaves the region screen-glued")
+{
+    AttachController controller;
+    (void)controller.attach(1, 100, "Editor", {200.0, 100.0, 800.0, 600.0}, PrimaryDisplay,
+                            RegionOfInterest{25.0, 15.0, 45.0, 35.0});
+
+    (void)controller.observe({minimizedWindow(1, {200.0, 100.0, 800.0, 600.0})}, 1);
+    (void)controller.observe({visibleWindow(1, {400.0, 100.0, 800.0, 600.0})}, 1);
+    const AttachDecision landed = controller.observe({visibleWindow(1, {400.0, 100.0, 800.0, 600.0})}, 1);
+
+    // The re-appearance is a baseline, not a move: the region held its
+    // screen position and only the emitted mapping clips to the window.
+    REQUIRE(landed.region.has_value());
+    checkRegion(*landed.region, 40.0, 15.0, 45.0, 35.0);
 }
 
 }  // namespace sidescopes
