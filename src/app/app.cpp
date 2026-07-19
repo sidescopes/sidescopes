@@ -630,16 +630,36 @@ float hexFontWidth(ImFont* font, const char* text)
     return measured;
 }
 
+// The monospace face may sit at a size of its own (monospaceFontScale),
+// and ImGui top-aligns the items sharing a line, so a value drawn beside
+// an interface-font label lands on a different baseline. Sinking the
+// value by the ascent difference seats both on the label's baseline; the
+// line keeps its own top, so only this item shifts. Rows that position
+// their text by hand use pushHexFont directly instead.
+float hexFontBaselineDrop(ImFont* font)
+{
+    const float interfaceAscent = ImGui::GetFontBaked()->Ascent;
+    pushHexFont(font);
+    const float drop = interfaceAscent - ImGui::GetFontBaked()->Ascent;
+    popHexFont(font);
+
+    return drop;
+}
+
 void hexFontText(ImFont* font, const char* text)
 {
+    const float drop = hexFontBaselineDrop(font);
     pushHexFont(font);
+    ImGui::SetCursorPosY(ImGui::GetCursorPosY() + drop);
     ImGui::TextUnformatted(text);
     popHexFont(font);
 }
 
 void hexFontTextDisabled(ImFont* font, const char* text)
 {
+    const float drop = hexFontBaselineDrop(font);
     pushHexFont(font);
+    ImGui::SetCursorPosY(ImGui::GetCursorPosY() + drop);
     ImGui::TextDisabled("%s", text);
     popHexFont(font);
 }
@@ -901,15 +921,12 @@ void drawPickerValuesRow(const PickerContext& ctx, const ImVec2& area, float val
         ImGui::TextUnformatted(text);
     }
     ImGui::SameLine(0.0f, 0.0f);
-    pushHexFont(ctx.monospaceFont);
     if (ImGui::GetContentRegionAvail().x >= ctx.hexWidth + 12.0f) {
         ImGui::SameLine(area.x - ctx.hexWidth);
-        ImGui::TextUnformatted(ctx.hex);
     } else {
         ImGui::NewLine();
-        ImGui::TextUnformatted(ctx.hex);
     }
-    popHexFont(ctx.monospaceFont);
+    hexFontText(ctx.monospaceFont, ctx.hex);
 }
 
 // Three groups - lightness, chroma, hue - each a label over a fixed-width value.
@@ -1168,7 +1185,10 @@ void drawDeckRowValues(const PickerContext& ctx, std::size_t index, const DeckLa
     const auto numericCell = [&](float colRight, const char* value, const char* tip) {
         ImGui::SameLine(colRight - hexFontWidth(ctx.monospaceFont, value));
         ImGui::SetCursorPosY(rowPosY + textDrop);
-        hexFontTextDisabled(ctx.monospaceFont, value);
+        // The row centers its text by hand, so no baseline drop here.
+        pushHexFont(ctx.monospaceFont);
+        ImGui::TextDisabled("%s", value);
+        popHexFont(ctx.monospaceFont);
         ImGui::SetItemTooltip("%s", tip);
     };
     if (layout.showMatch) {
