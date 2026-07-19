@@ -95,6 +95,18 @@ TEST_CASE("The first window being tracked needs no help")
     CHECK(resolveTrackedFocus(desk, Editor, {1}) == 1);
 }
 
+TEST_CASE("A focused tracked window is not stolen from above")
+{
+    // The window just left in an alt-tab still lists above the newly
+    // focused one while the switch animation settles; a fullscreen one
+    // overlaps everything. Focus on a tracked window is the verdict.
+    const std::vector<OrderedWindow> desk = {
+        window(7, Other, 0, 0, 1920, 1080),
+        window(1, Editor, 100, 100, 1200, 800),
+    };
+    CHECK(resolveTrackedFocus(desk, Editor, {1, 7}) == 1);
+}
+
 TEST_CASE("A level-shifted tracked panel present in the list wins")
 {
     // macOS lifts a key panel above the ordinary window layer; the

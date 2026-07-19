@@ -55,6 +55,14 @@ std::optional<uint64_t> resolveTrackedFocus(const std::vector<OrderedWindow>& wi
     if (!first) {
         return std::nullopt;
     }
+    if (isTracked(windows[*first].identity)) {
+        // The focused window is itself tracked: focus is the verdict. The
+        // overlap rules below serve previews above an untracked focus;
+        // running them here lets a stale harvest order - the alt-tab
+        // switch animation on Windows - hand the region to the window
+        // just left.
+        return windows[*first].identity;
+    }
     // A tracked window of another application above the foreground one and
     // overlapping it wins: a preview panel rendered by a helper process.
     for (std::size_t index = 0; index < *first; ++index) {
