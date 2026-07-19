@@ -3806,7 +3806,6 @@ void App::openRegionPicker()
     if (beginRegionPick(pickerDisplays, *m_wantRegionPick)) {
         m_regionPicking = true;
         m_regionPickIsPin = *m_wantRegionPick == RegionPickerMode::PinColor;
-        m_lastPickMode = *m_wantRegionPick;
     }
     // Consumed either way: a request that could not open must not retry every
     // frame.
@@ -4246,7 +4245,7 @@ void App::confirmPickedRegion(const RegionPickPoll& poll)
     }
     // A rectangle drawn in attach mode binds to the frontmost window under
     // it; over no window at all it falls through to the global region.
-    if (m_lastPickMode == RegionPickerMode::PickWindows && display) {
+    if (poll.windowMode && display) {
         const PickableWindow* host = windowContaining(poll.displayId, confirmed);
         if (host != nullptr) {
             adoptAttachedPick(host->identity, host->ownerPid,

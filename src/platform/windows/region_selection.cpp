@@ -1854,6 +1854,7 @@ RegionPickPoll pollRegionPick()
     // region change. The pickers switch modes in lockstep; the front one
     // speaks for all.
     poll.pinMode = g_pickers.front()->pinMode;
+    poll.windowMode = !g_pickers.front()->pinMode && !g_pickers.front()->drawMode && !g_pickers.front()->facesMode;
     collectPinnedArea(poll);
     refreshBannerExclusions();
     if (finishRegionPick(poll)) {

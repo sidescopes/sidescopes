@@ -312,9 +312,6 @@ private:
     uint64_t m_attachBorderEditTarget = 0;
 
     std::vector<PickableWindow> m_pickableWindows;
-    /// Which tool opened the active pick: a rectangle drawn in attach
-    /// mode binds to the window under it, a global draw stays global.
-    RegionPickerMode m_lastPickMode = RegionPickerMode::Draw;
     std::vector<PickableFace> m_pickableFaces;
 
     /// The face-probe mailbox: a detached detection thread fills it, the

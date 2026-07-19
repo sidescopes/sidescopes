@@ -207,6 +207,8 @@ NSCursor* buildPinCursor(const std::optional<FloatColor>& color)
     m_suggestions = faces ? m_faces : m_windows;
     self.hoveredSuggestion = -1;
     self.dragging = NO;
+    self.pickDragging = NO;
+    self.constraintRect = NSZeroRect;
     [self.window invalidateCursorRectsForView:self];
     self.needsDisplay = YES;
 }
@@ -1511,6 +1513,8 @@ RegionPickPoll pollRegionPick()
     // caller needs them to know a pin-mode finish never means a region change.
     // The overlays switch modes in lockstep; the front one speaks for all.
     poll.pinMode = g_pickerOverlays.front().view.pinMode;
+    SidescopesPickerView* front = g_pickerOverlays.front().view;
+    poll.windowMode = !front.pinMode && !front.drawMode && !front.facesMode;
 
     refreshPickerExclusions();
     if (pollPickerFinish(poll)) {
