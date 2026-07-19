@@ -38,6 +38,7 @@ using std::min;
 #define WDA_EXCLUDEFROMCAPTURE 0x00000011
 #endif
 
+#include "core/diagnostics.h"
 #include "platform/desktop.h"
 #include "platform/face_detection.h"
 #include "platform/region_geometry.h"
@@ -1542,6 +1543,9 @@ void advanceBorderAppear()
     const int strip = static_cast<int>(LabelBand * scale);
     const int width = (g_border.region.right - g_border.region.left) + 2 * pad;
     const int height = (g_border.region.bottom - g_border.region.top) + 2 * pad + strip;
+    SS_DIAG(Border, "advance alpha=%d target=%ld,%ld,%ld,%ld", static_cast<int>(g_border.alpha),
+            g_border.appearTarget.left, g_border.appearTarget.top, g_border.appearTarget.right,
+            g_border.appearTarget.bottom);
     // Paint first, as in presentBorderWindow: the push places the surface.
     paintBorder();
     SetWindowPos(g_border.window, nullptr, g_border.region.left - pad, g_border.region.top - pad - strip, width, height,
@@ -2022,8 +2026,11 @@ void presentBorderWindow(double scale, const std::wstring& label)
     // whole repaint - a visible ghost when the surface is display-sized.
     // The push carries position and size, so the placement below only
     // settles z-order and visibility.
-    if (width != g_border.paintedWidth || height != g_border.paintedHeight || scale != g_border.paintedScale ||
-        label != g_border.paintedLabel || g_border.alpha != 255) {
+    const bool repaint = width != g_border.paintedWidth || height != g_border.paintedHeight ||
+                         scale != g_border.paintedScale || label != g_border.paintedLabel || g_border.alpha != 255;
+    SS_DIAG(Border, "present pos=%ld,%ld size=%dx%d repaint=%d alpha=%d", g_border.region.left - pad,
+            g_border.region.top - pad - strip, width, height, repaint ? 1 : 0, static_cast<int>(g_border.alpha));
+    if (repaint) {
         paintBorder();
     }
     SetWindowPos(g_border.window, insertAfter, g_border.region.left - pad, g_border.region.top - pad - strip, width,
@@ -2060,6 +2067,8 @@ void showRegionBorder(uint32_t displayId, const RegionOfInterest& region, const 
         attached == g_border.attachedRegion) {
         return;
     }
+    SS_DIAG(Border, "show wanted=%ld,%ld,%ld,%ld visible=%d appearing=%d", wanted.left, wanted.top, wanted.right,
+            wanted.bottom, visible ? 1 : 0, g_border.appearing ? 1 : 0);
 
     g_border.displayOriginX = geometry->originX;
     g_border.displayOriginY = geometry->originY;
@@ -2083,6 +2092,8 @@ void showRegionBorder(uint32_t displayId, const RegionOfInterest& region, const 
 void hideRegionBorder()
 {
     if (g_border.window) {
+        SS_DIAG(Border, "hide visible=%d appearing=%d", IsWindowVisible(g_border.window) ? 1 : 0,
+                g_border.appearing ? 1 : 0);
         if (g_border.appearing) {
             snapBorderAppear();
         }
