@@ -1542,9 +1542,10 @@ void advanceBorderAppear()
     const int strip = static_cast<int>(LabelBand * scale);
     const int width = (g_border.region.right - g_border.region.left) + 2 * pad;
     const int height = (g_border.region.bottom - g_border.region.top) + 2 * pad + strip;
+    // Paint first, as in presentBorderWindow: the push places the surface.
+    paintBorder();
     SetWindowPos(g_border.window, nullptr, g_border.region.left - pad, g_border.region.top - pad - strip, width, height,
                  SWP_NOACTIVATE | SWP_NOZORDER | SWP_SHOWWINDOW);
-    paintBorder();
 }
 
 // The interior is the editor's, not ours; only the band takes the mouse.
@@ -2015,12 +2016,18 @@ void presentBorderWindow(double scale, const std::wstring& label)
     const int strip = static_cast<int>(LabelBand * scale);
     const int width = (g_border.region.right - g_border.region.left) + 2 * pad;
     const int height = (g_border.region.bottom - g_border.region.top) + 2 * pad + strip;
-    SetWindowPos(g_border.window, insertAfter, g_border.region.left - pad, g_border.region.top - pad - strip, width,
-                 height, SWP_NOACTIVATE | SWP_SHOWWINDOW);
+    // Paint before placing. The layered surface keeps its previous bitmap
+    // until the repaint pushes a new one, anchored at the window's top-left;
+    // placing first parks the outgoing border at the new corner for the
+    // whole repaint - a visible ghost when the surface is display-sized.
+    // The push carries position and size, so the placement below only
+    // settles z-order and visibility.
     if (width != g_border.paintedWidth || height != g_border.paintedHeight || scale != g_border.paintedScale ||
         label != g_border.paintedLabel || g_border.alpha != 255) {
         paintBorder();
     }
+    SetWindowPos(g_border.window, insertAfter, g_border.region.left - pad, g_border.region.top - pad - strip, width,
+                 height, SWP_NOACTIVATE | SWP_SHOWWINDOW);
 }
 
 void showRegionBorder(uint32_t displayId, const RegionOfInterest& region, const std::string& attachedLabel,
