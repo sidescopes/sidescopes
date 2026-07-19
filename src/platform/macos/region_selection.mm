@@ -780,7 +780,7 @@ NSCursor* buildPinCursor(const std::optional<FloatColor>& color)
 - (NSPoint)attachButtonCenter
 {
     const NSRect region = [self regionRect];
-    return NSMakePoint(NSMinX(region) + sidescopes::TabPinZone / 2,
+    return NSMakePoint(NSMinX(region) - sidescopes::BorderPad + sidescopes::TabPinZone / 2,
                        NSMaxY(region) + sidescopes::WindowPad + self.labelBand / 2);
 }
 
@@ -855,16 +855,19 @@ NSCursor* buildPinCursor(const std::optional<FloatColor>& color)
         NSForegroundColorAttributeName : [NSColor colorWithWhite:0.97 alpha:0.95],
         NSParagraphStyleAttributeName : style,
     };
-    const CGFloat margin = 2.0;
     const CGFloat padX = 6.0;
     const CGFloat padY = 2.0;
     const NSSize textSize = [self.attachedLabel sizeWithAttributes:attributes];
-    const CGFloat tabX = NSMinX([self regionRect]);
+    // Flush with the band's outer left edge: the tab and the border read
+    // as one left-aligned block.
+    const CGFloat tabX = NSMinX([self regionRect]) - sidescopes::BorderPad;
     // The tab holds the attach toggle at its fixed left end, then the
     // text; left-aligned with the region's own corner. The shared layout
     // keeps both platforms' degradation on small regions identical.
+    // The trim budget ends at the band's outer right edge, so a truncated
+    // tab stays flush with the border block on both sides.
     const sidescopes::TabLayout layout = sidescopes::borderTabLayout(
-        self.bounds.size.width - tabX - margin, sidescopes::TabPinZone, padX, textSize.width, 16.0);
+        NSMaxX(region) + sidescopes::BorderPad - tabX, sidescopes::TabPinZone, padX, textSize.width, 16.0);
     if (!layout.visible) {
         return;
     }

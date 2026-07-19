@@ -1208,7 +1208,7 @@ Gdiplus::PointF closeCenter(double scale)
 Gdiplus::PointF attachButtonCenter(double scale)
 {
     const Gdiplus::RectF region = borderRegionLocal(scale);
-    return {static_cast<Gdiplus::REAL>(region.X + TabPinZone / 2 * scale),
+    return {static_cast<Gdiplus::REAL>(region.X + (TabPinZone / 2 - BorderPad) * scale),
             static_cast<Gdiplus::REAL>(region.Y - (WindowPad + LabelBand / 2) * scale)};
 }
 
@@ -1360,23 +1360,25 @@ void paintBorderLabel(Gdiplus::Graphics& canvas, const Gdiplus::RectF& region, d
     Gdiplus::Font font(L"Segoe UI", static_cast<Gdiplus::REAL>(10.0 * scale));
     Gdiplus::RectF measured;
     canvas.MeasureString(g_border.attachedLabel.c_str(), -1, &font, Gdiplus::PointF(0, 0), &measured);
-    const auto margin = static_cast<Gdiplus::REAL>(2.0 * scale);
     const auto padX = static_cast<Gdiplus::REAL>(6.0 * scale);
     const auto padY = static_cast<Gdiplus::REAL>(2.0 * scale);
-    const auto pad = static_cast<Gdiplus::REAL>(WindowPad * scale);
-    const Gdiplus::REAL surfaceWidth = region.Width + 2 * pad;
     const auto triangleZone = static_cast<Gdiplus::REAL>(TabPinZone * scale);
     // The tab holds the attach toggle at its fixed left end, then the
     // text; left-aligned with the region's own corner. The shared layout
     // keeps both platforms' degradation on small regions identical.
+    // Flush with the band's outer left edge: the tab and the border read
+    // as one left-aligned block.
+    const Gdiplus::REAL tabX = region.X - static_cast<Gdiplus::REAL>(BorderPad * scale);
+    // The trim budget ends at the band's outer right edge, so a truncated
+    // tab stays flush with the border block on both sides.
     const TabLayout layout =
-        borderTabLayout(surfaceWidth - pad - margin, triangleZone, padX, measured.Width, 16.0 * scale);
+        borderTabLayout(region.X + region.Width + static_cast<Gdiplus::REAL>(BorderPad * scale) - tabX, triangleZone,
+                        padX, measured.Width, 16.0 * scale);
     if (!layout.visible) {
         return;
     }
     const auto textWidth = static_cast<Gdiplus::REAL>(layout.textWidth);
     const auto tabWidth = static_cast<Gdiplus::REAL>(layout.tabWidth);
-    const Gdiplus::REAL tabX = region.X;
     const Gdiplus::REAL centreY = region.Y - static_cast<Gdiplus::REAL>((WindowPad + LabelBand / 2) * scale);
     const Gdiplus::RectF tab(tabX, centreY - measured.Height / 2 - padY, tabWidth, measured.Height + 2 * padY);
     Gdiplus::SolidBrush plate(Gdiplus::Color(217, 26, 26, 26));
