@@ -2163,10 +2163,10 @@ void App::refreshAttachedLabel(const AttachDecision& decision)
 
 // The focused window drives everything: the foreground application's
 // frontmost ordinary window - frozen on the active window while its border
-// is being dragged, and held while SideScopes itself is in front. One
-// region type at a time means there is no global region to switch to while
-// windows are tracked, so the user can work the scopes against the last
-// attached region without losing it.
+// is being dragged, and held while SideScopes itself is in front or no
+// application is. One region type at a time means there is no global region
+// to switch to while windows are tracked, so the user can work the scopes
+// against the last attached region without losing it.
 std::optional<uint64_t> App::resolveFocusedWindow() const
 {
     if (m_attachBorderEditing && m_activeTrackedWindow != 0) {
@@ -2174,11 +2174,15 @@ std::optional<uint64_t> App::resolveFocusedWindow() const
     }
     const int64_t foreground = foregroundApplicationPid();
     const uint64_t held = m_activeTrackedWindow != 0 ? m_activeTrackedWindow : m_attach.activeIdentity();
-    if (foreground == m_ownPid && held != 0) {
+    if ((foreground == m_ownPid || foreground == 0) && held != 0) {
         // Straight after a pick the held window is the picked one - the
         // watch has not bound yet, and a window owned by a helper process
         // (a Quick Look preview) can never take the foreground for itself,
-        // so this is the only thing keeping its region.
+        // so this is the only thing keeping its region. A foreground of
+        // zero is a focus handoff in flight - Windows reports no foreground
+        // window for a frame mid-click - and must hold too: rerouting on
+        // that frame wipes the held identity, so the region could never
+        // survive a click into SideScopes itself.
         return held;
     }
 
