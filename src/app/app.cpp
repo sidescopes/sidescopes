@@ -2037,8 +2037,13 @@ void App::syncRegionBorder()
         regionContentUnsettled() || glfwGetWindowAttrib(m_window, GLFW_ICONIFIED)) {
         hideRegionBorder();
     } else {
+        const bool attached = m_activeTrackedWindow != 0;
+        if (!attached && m_captureController->capturedDisplay() != m_displayLabelId) {
+            m_displayLabelId = m_captureController->capturedDisplay();
+            m_displayLabel = borderLabelFrom(displayName(m_displayLabelId), "Display");
+        }
         showRegionBorder(m_captureController->capturedDisplay(), m_analysis.region,
-                         m_attachActiveWatched != 0 ? m_attachActiveLabel : std::string());
+                         attached ? m_attachActiveLabel : m_displayLabel);
     }
 }
 
@@ -2106,7 +2111,7 @@ void App::resetRegionToFull()
     if (m_attach.attached()) {
         m_attach.detachAll();
         unwatchWindowMotion();
-        m_attachActiveWatched = 0;
+        m_activeTrackedWindow = 0;
         m_attachedWindowMoving = false;
         m_attachGripActive = false;
     }
@@ -2153,7 +2158,7 @@ std::vector<TrackedWindowObservation> App::gatherTrackedObservations() const
 // with the region.
 bool App::activeWindowMoved(const AttachDecision& decision) const
 {
-    if (decision.activeIdentity == 0 || decision.activeIdentity != m_attachActiveWatched) {
+    if (decision.activeIdentity == 0 || decision.activeIdentity != m_activeTrackedWindow) {
         return false;
     }
     if (!m_attachLastSeenRect || !decision.activeRect) {
@@ -2191,7 +2196,7 @@ void App::applyAttachDecision(const AttachDecision& decision)
     }
     if (decision.detachedAll) {
         unwatchWindowMotion();
-        m_attachActiveWatched = 0;
+        m_activeTrackedWindow = 0;
         m_attachedWindowMoving = false;
         m_attachGripActive = false;
     }
@@ -2251,11 +2256,11 @@ void App::refreshAttachedLabel(const AttachDecision& decision)
 // attached region without losing it.
 std::optional<uint64_t> App::resolveFocusedWindow() const
 {
-    if (m_attachBorderEditing && m_attachActiveWatched != 0) {
-        return m_attachActiveWatched;
+    if (m_attachBorderEditing && m_activeTrackedWindow != 0) {
+        return m_activeTrackedWindow;
     }
     const int64_t foreground = foregroundApplicationPid();
-    const uint64_t held = m_attachActiveWatched != 0 ? m_attachActiveWatched : m_attach.activeIdentity();
+    const uint64_t held = m_activeTrackedWindow != 0 ? m_activeTrackedWindow : m_attach.activeIdentity();
     if (foreground == m_ownPid && held != 0) {
         // Straight after a pick the held window is the picked one - the
         // watch has not bound yet, and a window owned by a helper process
@@ -2283,15 +2288,15 @@ void App::followAttachedWindow()
         onWindowMotion(WindowMotionSignal::Moved);
     }
     refreshAttachedLabel(decision);
-    if (decision.activeIdentity != m_attachActiveWatched) {
+    if (decision.activeIdentity != m_activeTrackedWindow) {
         // The active window switched: the motion watch moves with it and the
         // border, no longer mid-anything, follows the routing right away.
-        m_attachActiveWatched = decision.activeIdentity;
+        m_activeTrackedWindow = decision.activeIdentity;
         m_attachGripActive = false;
         m_attachedWindowMoving = false;
         unwatchWindowMotion();
-        if (m_attachActiveWatched != 0) {
-            watchWindowMotion(m_attachActiveWatched, decision.activeOwnerPid,
+        if (m_activeTrackedWindow != 0) {
+            watchWindowMotion(m_activeTrackedWindow, decision.activeOwnerPid,
                               [this](WindowMotionSignal signal) { onWindowMotion(signal); });
         }
         m_lastActivity = glfwGetTime();
@@ -2567,9 +2572,9 @@ void App::removeLostFacePin(uint64_t identity)
     m_facePinHunting = false;
     m_regionContentChangedAt = -1.0;
     m_attach.remove(identity);
-    if (m_attachActiveWatched == identity) {
+    if (m_activeTrackedWindow == identity) {
         unwatchWindowMotion();
-        m_attachActiveWatched = 0;
+        m_activeTrackedWindow = 0;
     }
     m_attachDetachNotice = "face lost - region removed";
     m_attachNoticeUntil = glfwGetTime() + 5.0;
@@ -2587,7 +2592,7 @@ void App::applyFacePinRegion(const FacePinState& pin)
         return;
     }
     const auto geometry = geometryOfDisplay(m_captureController->capturedDisplay());
-    const auto windowGeom = windowGeometry(m_attachActiveWatched);
+    const auto windowGeom = windowGeometry(m_activeTrackedWindow);
     if (!geometry || !windowGeom || windowGeom->minimized) {
         return;
     }
@@ -2615,13 +2620,13 @@ void App::idleWaitWatchingAttachedWindow()
         }
         const auto focusedNow = focusedWindowForTracking(foregroundApplicationPid(), m_attach.trackedIdentities());
         const uint64_t focusedTracked = focusedNow && m_attach.tracks(*focusedNow) ? *focusedNow : 0;
-        if (focusedTracked != m_attachActiveWatched) {
+        if (focusedTracked != m_activeTrackedWindow) {
             return;
         }
-        if (m_attachActiveWatched == 0 || !m_attachLastSeenRect) {
+        if (m_activeTrackedWindow == 0 || !m_attachLastSeenRect) {
             continue;
         }
-        const auto rect = windowGeometry(m_attachActiveWatched);
+        const auto rect = windowGeometry(m_activeTrackedWindow);
         if (!rect) {
             return;  // closed: the frame body prunes it
         }
@@ -2633,7 +2638,7 @@ void App::idleWaitWatchingAttachedWindow()
         }
         // A pinned region's content churn - a pan under an idle loop -
         // takes the border down within a slice, not a whole tick.
-        if (m_facePins.contains(m_attachActiveWatched)) {
+        if (m_facePins.contains(m_activeTrackedWindow)) {
             probeRegionContentChange();
             if (regionContentUnsettled()) {
                 hideRegionBorder();
@@ -2664,7 +2669,7 @@ void App::stopTrackingActiveWindow()
     if (m_attach.trackedCount() > 1 && m_attach.activeIdentity() != 0) {
         m_attach.remove(m_attach.activeIdentity());
         unwatchWindowMotion();
-        m_attachActiveWatched = 0;
+        m_activeTrackedWindow = 0;
     } else {
         resetRegionToFull();
     }
@@ -3187,7 +3192,7 @@ void App::drawRegionToolIcons()
         m_wantRegionPick = RegionPickerMode::Draw;
     }
     ImGui::SameLine(0.0f, 2.0f);
-    std::snprintf(tooltip, sizeof(tooltip), "Attach to a window (%s) - click for the window, drag to draw inside",
+    std::snprintf(tooltip, sizeof(tooltip), "Attach to a window (%s) - click the window or draw inside it",
                   m_shortcuts.pickWindow.c_str());
     if (iconButton("##pick-region", RegionIcon::PickHand, tooltip)) {
         m_wantRegionPick = RegionPickerMode::PickWindows;
@@ -3627,7 +3632,7 @@ void App::appendPerScopeOptions(std::vector<NativeMenuItem>& menu, std::vector<P
 void App::appendRegionAndAppSection(std::vector<NativeMenuItem>& menu)
 {
     menuSeparator(menu);
-    menuAction(menu, "Pick Window or Photo...", MenuSelectRegion, false, shortcutLabel(m_shortcuts.pickWindow));
+    menuAction(menu, "Attach to Window...", MenuSelectRegion, false, shortcutLabel(m_shortcuts.pickWindow));
     menuAction(menu, "Draw Area...", MenuDrawRegion, false, shortcutLabel(m_shortcuts.drawRegion));
     if (supportsFaceDetection()) {
         menuAction(menu, "Find Faces...", MenuPickFaces, false, shortcutLabel(m_shortcuts.pickFaces));
@@ -3964,12 +3969,12 @@ void App::handleRegionBorderEdit()
     if (edit.editing && !m_attachBorderEditing) {
         // Latch what the border showed when the drag began: no focus race
         // can reroute the edit to the other region kind.
-        m_attachBorderEditTarget = m_attachActiveWatched;
+        m_attachBorderEditTarget = m_activeTrackedWindow;
     }
     // While an attached border is dragged, a click-through veil dims
     // everything outside its window - the resize limit made visible.
-    if (edit.editing && m_attachBorderEditTarget != 0 && m_attachBorderEditTarget == m_attachActiveWatched) {
-        const auto windowGeom = windowGeometry(m_attachActiveWatched);
+    if (edit.editing && m_attachBorderEditTarget != 0 && m_attachBorderEditTarget == m_activeTrackedWindow) {
+        const auto windowGeom = windowGeometry(m_activeTrackedWindow);
         const auto geometry = geometryOfDisplay(m_captureController->capturedDisplay());
         if (windowGeom && geometry) {
             showAttachedEditDim(m_captureController->capturedDisplay(), displayPercentRect(*windowGeom, *geometry));
@@ -3980,8 +3985,67 @@ void App::handleRegionBorderEdit()
     m_attachBorderEditing = edit.editing;
     if (edit.dismissed) {
         dismissEditedBorder();
+    } else if (edit.attachToggled) {
+        toggleRegionAttach();
     } else if (edit.region) {
         applyBorderEdit(*edit.region);
+    }
+}
+
+// The border's pin toggle. An attached region lets go of its window and
+// becomes the global region in place; a global one attaches to the
+// frontmost window under it. Explicit conversions only - the structural
+// no-conversion rule is about drags and focus races, never this button.
+void App::toggleRegionAttach()
+{
+    if (m_activeTrackedWindow != 0) {
+        const RegionOfInterest region = m_analysis.region;
+        m_attach.detachAll();
+        m_facePins.clear();
+        m_facePinHunting = false;
+        m_regionContentChangedAt = -1.0;
+        unwatchWindowMotion();
+        m_activeTrackedWindow = 0;
+        m_attachedWindowMoving = false;
+        m_attachGripActive = false;
+        m_globalRegion = region;
+        setRegion(region);
+    } else {
+        attachGlobalRegionToWindow();
+    }
+    m_lastActivity = glfwGetTime();
+    syncRegionBorder();
+}
+
+// Pinning a global region: the frontmost on-screen window under the
+// region's centre becomes its window, the rectangle staying exactly where
+// it is. Over no window at all this is a no-op - predictable beats
+// guessing a target.
+void App::attachGlobalRegionToWindow()
+{
+    const uint32_t displayId = m_captureController->capturedDisplay();
+    const auto geometry = geometryOfDisplay(displayId);
+    if (!geometry || isFullRegion()) {
+        return;
+    }
+    const RegionOfInterest region = m_globalRegion;
+    const double centerX = (region.leftPercent + region.rightPercent) / 2.0;
+    const double centerY = (region.topPercent + region.bottomPercent) / 2.0;
+    for (const DesktopWindow& window : attachCandidateWindows(displayId)) {
+        const WindowGeometry rect{window.x, window.y, window.width, window.height, false, {}};
+        const RegionOfInterest area = displayPercentRect(rect, *geometry);
+        if (centerX < area.leftPercent || centerX > area.rightPercent || centerY < area.topPercent ||
+            centerY > area.bottomPercent) {
+            continue;
+        }
+        adoptAttachedPick(window.windowIdentity, window.ownerPid,
+                          m_attach.attach(window.windowIdentity, window.ownerPid, window.application,
+                                          AttachWindowRect{window.x, window.y, window.width, window.height},
+                                          AttachDisplayRect{geometry->originX, geometry->originY, geometry->widthPoints,
+                                                            geometry->heightPoints},
+                                          region));
+
+        return;
     }
 }
 
@@ -3990,10 +4054,10 @@ void App::handleRegionBorderEdit()
 // full screen; tracked windows keep their regions either way.
 void App::dismissEditedBorder()
 {
-    if (m_attachActiveWatched != 0) {
-        m_attach.remove(m_attachActiveWatched);
+    if (m_activeTrackedWindow != 0) {
+        m_attach.remove(m_activeTrackedWindow);
         unwatchWindowMotion();
-        m_attachActiveWatched = 0;
+        m_activeTrackedWindow = 0;
         setRegion(m_globalRegion);
     } else {
         m_globalRegion = RegionOfInterest{};
@@ -4010,11 +4074,11 @@ void App::applyBorderEdit(const RegionOfInterest& edited)
 {
     RegionOfInterest applied = edited;
     if (m_attachBorderEditTarget != 0) {
-        if (m_attachBorderEditTarget != m_attachActiveWatched) {
+        if (m_attachBorderEditTarget != m_activeTrackedWindow) {
             return;
         }
         const auto geometry = geometryOfDisplay(m_captureController->capturedDisplay());
-        const auto windowGeom = windowGeometry(m_attachActiveWatched);
+        const auto windowGeom = windowGeometry(m_activeTrackedWindow);
         if (!geometry || !windowGeom) {
             return;
         }
@@ -4169,7 +4233,7 @@ void App::adoptAttachedPick(uint64_t identity, int64_t ownerPid, const RegionOfI
     m_attachGripActive = false;
     m_attachRegionMovedAt = -1.0;
     unwatchWindowMotion();
-    m_attachActiveWatched = 0;
+    m_activeTrackedWindow = 0;
     raiseWindow(identity, ownerPid);
     setRegion(region);
 }
@@ -4262,7 +4326,7 @@ void App::confirmPickedRegion(const RegionPickPoll& poll)
     if (m_attach.attached()) {
         m_attach.detachAll();
         unwatchWindowMotion();
-        m_attachActiveWatched = 0;
+        m_activeTrackedWindow = 0;
         m_attachedWindowMoving = false;
         m_attachGripActive = false;
     }

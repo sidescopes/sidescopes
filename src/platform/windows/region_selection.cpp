@@ -77,6 +77,7 @@ constexpr UINT_PTR BorderAppearTimer = 1;
 constexpr double CloseRadius = 6.5;
 constexpr double CloseHitRadius = 11.0;
 constexpr double CloseCornerInset = 2.0;
+constexpr double TabPinZone = 18.0;
 constexpr double MinimumWidthForClose = 48.0;
 
 bool ensureGdiplus()
@@ -390,6 +391,7 @@ struct BorderState
     POINT dragStartMouse{};
     RECT dragStartRegion{};
     bool closePressed = false;
+    bool attachPressed = false;
     // The cached backing store and the geometry it was painted for. The
     // band's look depends on the window's size and scale, never on its
     // position, so a move needs no repaint at all - the common case when
@@ -417,6 +419,7 @@ BorderState g_border;
 bool g_borderEditing = false;
 bool g_borderEditChanged = false;
 bool g_borderDismissed = false;
+bool g_borderAttachToggled = false;
 RegionOfInterest g_borderEditRegion;
 
 // This application's own top-level windows, except the overlays
@@ -661,9 +664,9 @@ void paintSuggestionScene(PickerState& picker, Gdiplus::Graphics& canvas, double
     }
     if (picker.facesMode) {
         drawBanner(canvas, picker, picker.suggestions.empty() ? L"No faces found on this screen" : L"Click a face",
-                   L"[A] pick a window    [D] draw    [Esc] full screen", picker.suggestions.empty(), scale);
+                   L"[A] attach to a window    [D] draw    [Esc] full screen", picker.suggestions.empty(), scale);
     } else {
-        drawBanner(canvas, picker, L"Click a window",
+        drawBanner(canvas, picker, L"Click a window or drag an area inside it",
                    supportsFaceDetection() ? L"[F] pick a face    [D] draw    [Esc] full screen"
                                            : L"[D] draw    [Esc] full screen",
                    false, scale);
@@ -696,9 +699,9 @@ void paintDrawScene(PickerState& picker, Gdiplus::Graphics& canvas, double scale
     } else {
         const wchar_t* secondary = L"[Esc] full screen";
         if (!picker.windows.empty() && supportsFaceDetection()) {
-            secondary = L"[A] pick a window    [F] pick a face    [Esc] full screen";
+            secondary = L"[A] attach to a window    [F] pick a face    [Esc] full screen";
         } else if (!picker.windows.empty()) {
-            secondary = L"[A] pick a window    [Esc] full screen";
+            secondary = L"[A] attach to a window    [Esc] full screen";
         }
         drawBanner(canvas, picker, L"Drag to select an area", secondary, false, scale);
     }
@@ -1161,7 +1164,7 @@ Gdiplus::TextureBrush* stripeBrushFor(double scale)
 Gdiplus::RectF borderRegionLocal(double scale)
 {
     const auto pad = static_cast<Gdiplus::REAL>(WindowPad * scale);
-    const auto strip = static_cast<Gdiplus::REAL>(g_border.attachedLabel.empty() ? 0.0 : LabelBand * scale);
+    const auto strip = static_cast<Gdiplus::REAL>(LabelBand * scale);
     return {pad, pad + strip, static_cast<Gdiplus::REAL>(g_border.region.right - g_border.region.left),
             static_cast<Gdiplus::REAL>(g_border.region.bottom - g_border.region.top)};
 }
@@ -1187,6 +1190,15 @@ Gdiplus::PointF closeCenter(double scale)
             static_cast<Gdiplus::REAL>(region.Y - (BorderPad - CloseCornerInset + EdgeRing) * scale)};
 }
 
+// The attach toggle lives at the label tab's fixed left end: the same
+// spot whatever the label says, clear of every handle.
+Gdiplus::PointF attachButtonCenter(double scale)
+{
+    const Gdiplus::RectF region = borderRegionLocal(scale);
+    return {static_cast<Gdiplus::REAL>(region.X + TabPinZone / 2 * scale),
+            static_cast<Gdiplus::REAL>(region.Y - (WindowPad + LabelBand / 2) * scale)};
+}
+
 unsigned borderZoneAtPoint(double x, double y, double scale)
 {
     const Gdiplus::RectF region = borderRegionLocal(scale);
@@ -1200,6 +1212,15 @@ unsigned borderZoneAtPoint(double x, double y, double scale)
         const double hit = CloseHitRadius * scale;
         if (dx * dx + dy * dy <= hit * hit) {
             return ZoneClose;
+        }
+    }
+    {
+        const Gdiplus::PointF center = attachButtonCenter(scale);
+        const double dx = x - center.X;
+        const double dy = y - center.Y;
+        const double hit = CloseHitRadius * scale;
+        if (dx * dx + dy * dy <= hit * hit) {
+            return ZoneAttach;
         }
     }
     const LocalRect local = toLocalRect(region);
@@ -1216,7 +1237,7 @@ void applyBorderCursor(unsigned zone)
         SetCursor(LoadCursorW(nullptr, IDC_ARROW));
         return;
     }
-    if ((zone & ZoneClose) != 0) {
+    if ((zone & (ZoneClose | ZoneAttach)) != 0) {
         SetCursor(LoadCursorW(nullptr, IDC_HAND));
         return;
     }
@@ -1331,15 +1352,16 @@ void paintBorderLabel(Gdiplus::Graphics& canvas, const Gdiplus::RectF& region, d
     const auto padY = static_cast<Gdiplus::REAL>(2.0 * scale);
     const auto pad = static_cast<Gdiplus::REAL>(WindowPad * scale);
     const Gdiplus::REAL surfaceWidth = region.Width + 2 * pad;
-    const Gdiplus::REAL maxTextWidth = surfaceWidth - 2 * margin - 2 * padX;
+    const auto triangleZone = static_cast<Gdiplus::REAL>(TabPinZone * scale);
+    const Gdiplus::REAL maxTextWidth = surfaceWidth - pad - triangleZone - margin - 2 * padX;
     if (maxTextWidth < static_cast<Gdiplus::REAL>(16.0 * scale)) {
         return;  // a region too small for any legible label
     }
     const Gdiplus::REAL textWidth = std::min(measured.Width, maxTextWidth);
-    const Gdiplus::REAL tabWidth = textWidth + 2 * padX;
-    const Gdiplus::REAL minX = region.X - pad + margin;
-    const Gdiplus::REAL tabX =
-        std::clamp(region.X + region.Width / 2 - tabWidth / 2, minX, minX + surfaceWidth - 2 * margin - tabWidth);
+    // The tab holds the attach toggle at its fixed left end, then the
+    // text; left-aligned with the region's own corner.
+    const Gdiplus::REAL tabWidth = triangleZone + textWidth + 2 * padX;
+    const Gdiplus::REAL tabX = region.X;
     const Gdiplus::REAL centreY = region.Y - static_cast<Gdiplus::REAL>((WindowPad + LabelBand / 2) * scale);
     const Gdiplus::RectF tab(tabX, centreY - measured.Height / 2 - padY, tabWidth, measured.Height + 2 * padY);
     Gdiplus::SolidBrush plate(Gdiplus::Color(217, 26, 26, 26));
@@ -1350,7 +1372,7 @@ void paintBorderLabel(Gdiplus::Graphics& canvas, const Gdiplus::RectF& region, d
     format.SetFormatFlags(Gdiplus::StringFormatFlagsNoWrap);
     format.SetTrimming(Gdiplus::StringTrimmingEllipsisCharacter);
     Gdiplus::SolidBrush ink(Gdiplus::Color(242, 247, 247, 247));
-    const Gdiplus::RectF textRect(tab.X + padX, tab.Y + padY, textWidth, measured.Height);
+    const Gdiplus::RectF textRect(tab.X + triangleZone + padX, tab.Y + padY, textWidth, measured.Height);
     canvas.DrawString(g_border.attachedLabel.c_str(), -1, &font, textRect, &format, &ink);
 }
 
@@ -1374,6 +1396,29 @@ void paintBorderCloseButton(Gdiplus::Graphics& canvas, double scale)
     canvas.DrawLine(&cross, center.X - arm, center.Y + arm, center.X + arm, center.Y - arm);
 }
 
+// The system's own pushpin at the tab's fixed left end - one glyph for
+// both directions, the label text beside it saying which kind this
+// region is. Segoe MDL2 Assets ships with Windows 10 and draws it
+// properly at any size; hand-built silhouettes never survived label
+// scale.
+void paintBorderAttachButton(Gdiplus::Graphics& canvas, double scale)
+{
+    const Gdiplus::PointF center = attachButtonCenter(scale);
+    const Gdiplus::FontFamily family(L"Segoe MDL2 Assets");
+    const Gdiplus::Font font(&family, static_cast<Gdiplus::REAL>(11.0 * scale), Gdiplus::FontStyleRegular,
+                             Gdiplus::UnitPixel);
+    Gdiplus::StringFormat format;
+    format.SetAlignment(Gdiplus::StringAlignmentCenter);
+    format.SetLineAlignment(Gdiplus::StringAlignmentCenter);
+    Gdiplus::SolidBrush ink(Gdiplus::Color(242, 247, 247, 247));
+    // E718 is the Fluent "Pin" glyph.
+    canvas.DrawString(L"\uE718", -1, &font,
+                      Gdiplus::RectF(center.X - static_cast<Gdiplus::REAL>(8 * scale),
+                                     center.Y - static_cast<Gdiplus::REAL>(8 * scale),
+                                     static_cast<Gdiplus::REAL>(16 * scale), static_cast<Gdiplus::REAL>(16 * scale)),
+                      &format, &ink);
+}
+
 void paintBorder()
 {
     if (!g_border.window || !ensureGdiplus()) {
@@ -1381,7 +1426,7 @@ void paintBorder()
     }
     const double scale = uiScale(g_border.window);
     const auto pad = static_cast<Gdiplus::REAL>(WindowPad * scale);
-    const auto strip = static_cast<int>(g_border.attachedLabel.empty() ? 0.0 : LabelBand * scale);
+    const auto strip = static_cast<int>(LabelBand * scale);
     const Gdiplus::RectF region = borderRegionLocal(scale);
     const int width = static_cast<int>(region.Width + 2 * pad);
     const int height = static_cast<int>(region.Height + 2 * pad) + strip;
@@ -1408,6 +1453,7 @@ void paintBorder()
     paintBorderHandles(canvas, region, scale);
     paintBorderLabel(canvas, region, scale);
     paintBorderCloseButton(canvas, scale);
+    paintBorderAttachButton(canvas, scale);
     g_border.paintedLabel = g_border.attachedLabel;
 
     surface.push(g_border.window, g_border.region.left - static_cast<int>(WindowPad * scale),
@@ -1454,7 +1500,7 @@ void advanceBorderAppear()
         snapBorderAppear();
     }
     const auto pad = static_cast<int>(WindowPad * scale);
-    const int strip = static_cast<int>(g_border.attachedLabel.empty() ? 0.0 : LabelBand * scale);
+    const int strip = static_cast<int>(LabelBand * scale);
     const int width = (g_border.region.right - g_border.region.left) + 2 * pad;
     const int height = (g_border.region.bottom - g_border.region.top) + 2 * pad + strip;
     SetWindowPos(g_border.window, nullptr, g_border.region.left - pad, g_border.region.top - pad - strip, width, height,
@@ -1488,19 +1534,6 @@ LRESULT borderUpdateCursor(HWND window)
     return TRUE;
 }
 
-// Double-clicking anywhere on the band dismisses the region - the fast
-// path once the close button has taught the gesture's home.
-LRESULT borderOnDoubleClick(HWND window, LPARAM lParam)
-{
-    const double scale = uiScale(window);
-    const double x = static_cast<short>(LOWORD(lParam));
-    const double y = static_cast<short>(HIWORD(lParam));
-    if (borderZoneAtPoint(x, y, scale) != ZoneNone) {
-        g_borderDismissed = true;
-    }
-    return 0;
-}
-
 LRESULT borderOnLButtonDown(HWND window, LPARAM lParam)
 {
     const double scale = uiScale(window);
@@ -1512,6 +1545,10 @@ LRESULT borderOnLButtonDown(HWND window, LPARAM lParam)
     }
     if ((zone & ZoneClose) != 0) {
         g_border.closePressed = true;
+        return 0;
+    }
+    if ((zone & ZoneAttach) != 0) {
+        g_border.attachPressed = true;
         return 0;
     }
     g_border.dragZone = zone;
@@ -1563,6 +1600,16 @@ LRESULT borderOnLButtonUp(HWND window, LPARAM lParam)
         }
         return 0;
     }
+    if (g_border.attachPressed) {
+        g_border.attachPressed = false;
+        const double scale = uiScale(window);
+        const double x = static_cast<short>(LOWORD(lParam));
+        const double y = static_cast<short>(HIWORD(lParam));
+        if ((borderZoneAtPoint(x, y, scale) & ZoneAttach) != 0) {
+            g_borderAttachToggled = true;
+        }
+        return 0;
+    }
     if (g_border.dragZone != ZoneNone) {
         g_border.dragZone = ZoneNone;
         g_borderEditing = false;
@@ -1586,8 +1633,6 @@ LRESULT CALLBACK borderProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
         return borderHitTest(window, lParam);
     case WM_SETCURSOR:
         return borderUpdateCursor(window);
-    case WM_LBUTTONDBLCLK:
-        return borderOnDoubleClick(window, lParam);
     case WM_LBUTTONDOWN:
         return borderOnLButtonDown(window, lParam);
     case WM_MOUSEMOVE:
@@ -1928,7 +1973,7 @@ void presentBorderWindow(double scale, const std::wstring& label)
     if (!own.empty()) {
         insertAfter = own.front();
     }
-    const int strip = static_cast<int>(g_border.attachedLabel.empty() ? 0.0 : LabelBand * scale);
+    const int strip = static_cast<int>(LabelBand * scale);
     const int width = (g_border.region.right - g_border.region.left) + 2 * pad;
     const int height = (g_border.region.bottom - g_border.region.top) + 2 * pad + strip;
     SetWindowPos(g_border.window, insertAfter, g_border.region.left - pad, g_border.region.top - pad - strip, width,
@@ -1948,10 +1993,8 @@ void showRegionBorder(uint32_t displayId, const RegionOfInterest& region, const 
     const std::wstring label = wideFromUtf8(attachedLabel.c_str());
 
     if (!g_border.window) {
-        // CS_DBLCLKS so the band can take the double-click dismissal.
-        g_border.window =
-            createOverlayWindow(L"SidescopesRegionBorder", borderProc,
-                                WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, CS_DBLCLKS);
+        g_border.window = createOverlayWindow(L"SidescopesRegionBorder", borderProc,
+                                              WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, 0);
         if (!g_border.window) {
             return;
         }
@@ -2093,6 +2136,8 @@ RegionBorderEdit pollRegionBorderEdit()
     edit.editing = g_borderEditing;
     edit.dismissed = g_borderDismissed;
     g_borderDismissed = false;
+    edit.attachToggled = g_borderAttachToggled;
+    g_borderAttachToggled = false;
     if (g_borderEditChanged) {
         edit.region = g_borderEditRegion;
         g_borderEditChanged = false;

@@ -118,7 +118,10 @@ void setRegionPickChipColor(const std::optional<FloatColor>& color);
 /// tracked window's application) above the top edge. Idempotent AND cheap to
 /// repeat: an unchanged rectangle, label, and visibility is a no-op, so the
 /// host may reconcile every frame instead of chasing edges.
-void showRegionBorder(uint32_t displayId, const RegionOfInterest& region, const std::string& attachedLabel);
+/// @p label is always worn on the strip row above the band - the tracked
+/// window's title for an attached region, the display's name for the
+/// global one - with the attach toggle at the label's fixed left end.
+void showRegionBorder(uint32_t displayId, const RegionOfInterest& region, const std::string& label);
 void hideRegionBorder();
 
 /// The border's in-progress or just-finished adjustment, if any.
@@ -129,6 +132,10 @@ struct RegionBorderEdit
 {
     bool editing = false;
     bool dismissed = false;
+    /// The border's pin button was clicked: an attached region lets go of
+    /// its window and becomes the global region in place; a global one
+    /// attaches to the frontmost window under it.
+    bool attachToggled = false;
     std::optional<RegionOfInterest> region;
 };
 

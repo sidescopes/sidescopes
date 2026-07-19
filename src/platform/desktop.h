@@ -188,6 +188,17 @@ void observeForegroundChanges(std::function<void()> callback);
 /// sibling of the same application sits above it.
 [[nodiscard]] std::optional<uint64_t> frontmostWindowOfApplication(int64_t ownerPid);
 
+/// Like onScreenWindows, additionally admitting floating-level panels:
+/// macOS lifts a key panel (a Quick Look preview) above the ordinary
+/// window layer, and pinning a region must still find the window visually
+/// under it. Identical to onScreenWindows on Windows.
+[[nodiscard]] std::vector<DesktopWindow> attachCandidateWindows(uint32_t displayId);
+
+/// The display's user-facing name (macOS: the system's localized monitor
+/// name; Windows: the device ordinal), worn by the global region's border
+/// label.
+[[nodiscard]] std::string displayName(uint32_t displayId);
+
 /// The window the focus routing should treat as focused: the foreground
 /// application's frontmost ordinary window - unless one of @p tracked sits
 /// above it in z-order and overlaps it, in which case that tracked window

@@ -20,6 +20,7 @@ enum ZoneBits : unsigned
     ZoneBottom = 1u << 3,
     ZoneMove = 1u << 4,
     ZoneClose = 1u << 5,
+    ZoneAttach = 1u << 6,
 };
 
 /// A rectangle in overlay-local points. The region math is expressed

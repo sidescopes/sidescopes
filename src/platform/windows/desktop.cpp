@@ -167,6 +167,12 @@ std::vector<DesktopWindow> onScreenWindows(uint32_t displayId)
     return windows;
 }
 
+std::vector<DesktopWindow> attachCandidateWindows(uint32_t displayId)
+{
+    // No level shifts on Windows: the ordinary window list is the answer.
+    return onScreenWindows(displayId);
+}
+
 std::optional<WindowGeometry> windowGeometry(uint64_t identity)
 {
     HWND window = windowFromIdentity(identity);
@@ -213,6 +219,29 @@ std::optional<DisplayGeometry> geometryOfDisplay(uint32_t displayId)
     return DisplayGeometry{static_cast<double>(monitor->rect.left), static_cast<double>(monitor->rect.top),
                            static_cast<double>(monitor->rect.right) - monitor->rect.left,
                            static_cast<double>(monitor->rect.bottom) - monitor->rect.top};
+}
+
+std::string displayName(uint32_t displayId)
+{
+    const auto monitor = findMonitor(displayId);
+    MONITORINFOEXW info{};
+    info.cbSize = sizeof(info);
+    if (!monitor || !GetMonitorInfoW(monitor->monitor, &info)) {
+        return "Display";
+    }
+    // "\\.\DISPLAY2" -> "Display 2": the friendly product name would
+    // need the display-config API; the device ordinal is honest and stable.
+    const std::wstring device(info.szDevice);
+    const std::size_t digits = device.find_first_of(L"0123456789");
+    if (digits == std::wstring::npos) {
+        return "Display";
+    }
+    std::string name = "Display ";
+    for (std::size_t index = digits; index < device.size(); ++index) {
+        name.push_back(static_cast<char>(device[index]));
+    }
+
+    return name;
 }
 
 std::optional<uint32_t> displayAtPoint(DesktopPoint point)

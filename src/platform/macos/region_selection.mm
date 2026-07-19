@@ -42,6 +42,7 @@ constexpr double LabelBand = 20.0;
 constexpr double CloseRadius = 6.5;
 constexpr double CloseHitRadius = 11.0;
 constexpr double CloseCornerInset = 2.0;
+constexpr double TabPinZone = 18.0;
 constexpr double MinimumWidthForClose = 48.0;
 
 NSScreen* screenForDisplay(uint32_t displayId)
@@ -68,6 +69,7 @@ std::vector<BorderKeyPress> g_borderKeyPresses;
 bool g_borderEditing = false;
 bool g_borderEditChanged = false;
 bool g_borderDismissed = false;
+bool g_borderAttachToggled = false;
 RegionOfInterest g_borderEditRegion;
 
 // The pin cursor's swatch color, pushed by the application once per
@@ -388,10 +390,10 @@ NSCursor* buildPinCursor(const std::optional<FloatColor>& color)
     }
     if (self.facesMode) {
         [self drawBanner:m_suggestions.empty() ? @"No faces found on this screen" : @"Click a face"
-               secondary:@"[A] pick a window    [D] draw    [Esc] full screen"
+               secondary:@"[A] attach to a window    [D] draw    [Esc] full screen"
             preferCenter:m_suggestions.empty()];
     } else {
-        [self drawBanner:@"Click a window"
+        [self drawBanner:@"Click a window or drag an area inside it"
                secondary:sidescopes::supportsFaceDetection() ? @"[F] pick a face    [D] draw    [Esc] full screen"
                                                              : @"[D] draw    [Esc] full screen"
             preferCenter:NO];
@@ -440,9 +442,9 @@ NSCursor* buildPinCursor(const std::optional<FloatColor>& color)
     }
     NSString* secondary = @"[Esc] full screen";
     if (!m_windows.empty() && sidescopes::supportsFaceDetection()) {
-        secondary = @"[A] pick a window    [F] pick a face    [Esc] full screen";
+        secondary = @"[A] attach to a window    [F] pick a face    [Esc] full screen";
     } else if (!m_windows.empty()) {
-        secondary = @"[A] pick a window    [Esc] full screen";
+        secondary = @"[A] attach to a window    [Esc] full screen";
     }
     [self drawBanner:@"Drag to select an area" secondary:secondary preferCenter:NO];
 }
@@ -699,6 +701,7 @@ NSCursor* buildPinCursor(const std::optional<FloatColor>& color)
 @property(nonatomic, assign) NSPoint dragStartMouse;  // global screen coords
 @property(nonatomic, assign) NSRect dragStartRegion;  // global screen coords
 @property(nonatomic, assign) BOOL closePressed;
+@property(nonatomic, assign) BOOL attachPressed;
 // Non-empty for a window-attached region: the tracked application's name,
 // worn as a small tab above the band, with the measurement dashes taking a
 // label being the tell that this region belongs to a window.
@@ -757,6 +760,15 @@ NSCursor* buildPinCursor(const std::optional<FloatColor>& color)
     const NSRect region = [self regionRect];
     return NSMakePoint(NSMaxX(region) + sidescopes::BorderPad - sidescopes::CloseCornerInset,
                        NSMaxY(region) + sidescopes::BorderPad - sidescopes::CloseCornerInset + sidescopes::EdgeRing);
+}
+
+// The attach toggle lives at the label tab's fixed left end: the same
+// spot whatever the label says, clear of every handle.
+- (NSPoint)attachButtonCenter
+{
+    const NSRect region = [self regionRect];
+    return NSMakePoint(NSMinX(region) + sidescopes::TabPinZone / 2,
+                       NSMaxY(region) + sidescopes::WindowPad + self.labelBand / 2);
 }
 
 // The whole grab band is the hazard tape, muted so it stays calm beside the
@@ -834,13 +846,15 @@ NSCursor* buildPinCursor(const std::optional<FloatColor>& color)
     const CGFloat padX = 6.0;
     const CGFloat padY = 2.0;
     const NSSize textSize = [self.attachedLabel sizeWithAttributes:attributes];
-    const CGFloat maxTextWidth = self.bounds.size.width - 2 * margin - 2 * padX;
+    const CGFloat tabX = NSMinX([self regionRect]);
+    const CGFloat maxTextWidth = self.bounds.size.width - tabX - sidescopes::TabPinZone - margin - 2 * padX;
     if (maxTextWidth < 16) {
         return;  // a region too small for any legible label
     }
     const CGFloat textWidth = std::min(textSize.width, maxTextWidth);
-    const CGFloat tabWidth = textWidth + 2 * padX;
-    const CGFloat tabX = std::clamp(NSMidX(region) - tabWidth / 2, margin, self.bounds.size.width - margin - tabWidth);
+    // The tab holds the attach toggle at its fixed left end, then the
+    // text; left-aligned with the region's own corner.
+    const CGFloat tabWidth = sidescopes::TabPinZone + textWidth + 2 * padX;
     const CGFloat centreY = NSMaxY(region) + sidescopes::WindowPad + self.labelBand / 2;
     const NSRect tab = NSMakeRect(tabX, centreY - textSize.height / 2 - padY, tabWidth, textSize.height + 2 * padY);
     NSBezierPath* plate = [NSBezierPath bezierPathWithRoundedRect:tab xRadius:4 yRadius:4];
@@ -849,7 +863,9 @@ NSCursor* buildPinCursor(const std::optional<FloatColor>& color)
     [[NSColor colorWithWhite:0.75 alpha:0.6] setStroke];
     plate.lineWidth = 1.0;
     [plate stroke];
-    [self.attachedLabel drawInRect:NSInsetRect(tab, padX, padY) withAttributes:attributes];
+    const NSRect text =
+        NSMakeRect(tab.origin.x + sidescopes::TabPinZone + padX, tab.origin.y + padY, textWidth, textSize.height);
+    [self.attachedLabel drawInRect:text withAttributes:attributes];
 }
 
 // Eight handle dots - corners and edge midpoints - centered on the measurement
@@ -908,6 +924,31 @@ NSCursor* buildPinCursor(const std::optional<FloatColor>& color)
     [cross stroke];
 }
 
+// The system's own pushpin at the tab's fixed left end - one glyph for
+// both directions, the label text beside it saying which kind this
+// region is. SF Symbols draws it properly at any size; hand-built
+// silhouettes never survived label scale.
+- (void)drawAttachButton
+{
+    static NSImage* pin = nil;
+    if (!pin) {
+        NSImage* symbol = [NSImage imageWithSystemSymbolName:@"pin.fill" accessibilityDescription:nil];
+        pin = [NSImage imageWithSize:NSMakeSize(11, 11)
+                             flipped:NO
+                      drawingHandler:^(NSRect rect) {
+                        [symbol drawInRect:rect];
+                        [[NSColor colorWithWhite:0.97 alpha:0.95] set];
+                        NSRectFillUsingOperation(rect, NSCompositingOperationSourceAtop);
+                        return YES;
+                      }];
+    }
+    const NSPoint center = [self attachButtonCenter];
+    [pin drawInRect:NSMakeRect(center.x - 5.5, center.y - 5.5, 11, 11)
+           fromRect:NSZeroRect
+          operation:NSCompositingOperationSourceOver
+           fraction:1.0];
+}
+
 - (void)drawRect:(NSRect)dirty
 {
     (void)dirty;
@@ -919,6 +960,7 @@ NSCursor* buildPinCursor(const std::optional<FloatColor>& color)
     if ([self closeVisible]) {
         [self drawCloseButton];
     }
+    [self drawAttachButton];
 }
 
 // Eight handles, no modifier: the corners resize both axes, the edge
@@ -936,6 +978,14 @@ NSCursor* buildPinCursor(const std::optional<FloatColor>& color)
         const CGFloat dy = point.y - center.y;
         if (dx * dx + dy * dy <= sidescopes::CloseHitRadius * sidescopes::CloseHitRadius) {
             return sidescopes::ZoneClose;
+        }
+    }
+    {
+        const NSPoint center = [self attachButtonCenter];
+        const CGFloat dx = point.x - center.x;
+        const CGFloat dy = point.y - center.y;
+        if (dx * dx + dy * dy <= sidescopes::CloseHitRadius * sidescopes::CloseHitRadius) {
+            return sidescopes::ZoneAttach;
         }
     }
     // View space is bottom-left origin; the shared zone tests are top-left.
@@ -975,7 +1025,7 @@ NSCursor* buildPinCursor(const std::optional<FloatColor>& color)
         [NSCursor.arrowCursor set];
         return;
     }
-    if (zone & sidescopes::ZoneClose) {
+    if (zone & (sidescopes::ZoneClose | sidescopes::ZoneAttach)) {
         [NSCursor.pointingHandCursor set];
         return;
     }
@@ -1037,15 +1087,12 @@ NSCursor* buildPinCursor(const std::optional<FloatColor>& color)
             break;
         }
     }
-    // Double-clicking anywhere on the band dismisses the region - the
-    // fast path once the close button has taught the gesture's home.
-    if (event.clickCount == 2) {
-        self.closePressed = NO;
-        sidescopes::g_borderDismissed = true;
-        return;
-    }
     if (zone & sidescopes::ZoneClose) {
         self.closePressed = YES;
+        return;
+    }
+    if (zone & sidescopes::ZoneAttach) {
+        self.attachPressed = YES;
         return;
     }
     self.dragZone = zone;
@@ -1104,6 +1151,13 @@ NSCursor* buildPinCursor(const std::optional<FloatColor>& color)
         self.closePressed = NO;
         if ([self zoneAtPoint:local] & sidescopes::ZoneClose) {
             sidescopes::g_borderDismissed = true;
+            return;
+        }
+    }
+    if (self.attachPressed) {
+        self.attachPressed = NO;
+        if ([self zoneAtPoint:local] & sidescopes::ZoneAttach) {
+            sidescopes::g_borderAttachToggled = true;
             return;
         }
     }
@@ -1607,7 +1661,7 @@ NSWindow* makeBorderWindow(NSRect rect)
     return window;
 }
 
-void showRegionBorder(uint32_t displayId, const RegionOfInterest& region, const std::string& attachedLabel)
+void showRegionBorder(uint32_t displayId, const RegionOfInterest& region, const std::string& label)
 {
     NSScreen* screen = screenForDisplay(displayId);
     const NSRect frame = screen.frame;
@@ -1618,11 +1672,12 @@ void showRegionBorder(uint32_t displayId, const RegionOfInterest& region, const 
     const double top = frame.origin.y + (100.0 - region.topPercent) / 100.0 * frame.size.height;
     const NSRect rect = NSMakeRect(left - WindowPad, bottom - WindowPad, (right - left) + 2 * WindowPad,
                                    (top - bottom) + 2 * WindowPad);
-    NSString* label = attachedLabel.empty() ? @"" : [NSString stringWithUTF8String:attachedLabel.c_str()];
+    NSString* borderLabel = label.empty() ? @"" : [NSString stringWithUTF8String:label.c_str()];
+    // The strip row above the band is always present: the attached label
+    // rides its left, the close and attach buttons its right, and the
+    // window's height never changes when a label arrives.
     NSRect labelled = rect;
-    if (label.length > 0) {
-        labelled.size.height += LabelBand;
-    }
+    labelled.size.height += LabelBand;
 
     // The host reconciles every frame; an unchanged border must cost
     // nothing. Mid-animation the live frame lags the target, so the
@@ -1630,10 +1685,10 @@ void showRegionBorder(uint32_t displayId, const RegionOfInterest& region, const 
     if (g_borderWindow && g_borderWindow.visible && NSEqualRects(g_borderTarget, labelled)) {
         SidescopesBorderView* view = (SidescopesBorderView*)g_borderWindow.contentView;
         NSString* current = view.attachedLabel ? view.attachedLabel : @"";
-        if ([current isEqualToString:label]) {
+        if ([current isEqualToString:borderLabel]) {
             return;
         }
-        view.attachedLabel = label;
+        view.attachedLabel = borderLabel;
         view.needsDisplay = YES;
 
         return;
@@ -1644,11 +1699,11 @@ void showRegionBorder(uint32_t displayId, const RegionOfInterest& region, const 
     }
     SidescopesBorderView* view = (SidescopesBorderView*)g_borderWindow.contentView;
     NSString* current = view.attachedLabel ? view.attachedLabel : @"";
-    if (![current isEqualToString:label]) {
-        view.attachedLabel = label;
+    if (![current isEqualToString:borderLabel]) {
+        view.attachedLabel = borderLabel;
         view.needsDisplay = YES;
     }
-    view.labelBand = label.length > 0 ? LabelBand : 0;
+    view.labelBand = LabelBand;
     if (g_borderWindow.visible) {
         // Already shown at another place: snap, never tween position.
         snapBorderFrame(labelled);
@@ -1724,6 +1779,8 @@ RegionBorderEdit pollRegionBorderEdit()
     edit.editing = g_borderEditing;
     edit.dismissed = g_borderDismissed;
     g_borderDismissed = false;
+    edit.attachToggled = g_borderAttachToggled;
+    g_borderAttachToggled = false;
     if (g_borderEditChanged) {
         edit.region = g_borderEditRegion;
         g_borderEditChanged = false;

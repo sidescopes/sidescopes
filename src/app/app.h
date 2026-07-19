@@ -145,6 +145,8 @@ private:
     void confirmPickedRegion(const RegionPickPoll& poll);
     void adoptAttachedPick(uint64_t identity, int64_t ownerPid, const RegionOfInterest& region);
     void dismissEditedBorder();
+    void toggleRegionAttach();
+    void attachGlobalRegionToWindow();
     void applyBorderEdit(const RegionOfInterest& edited);
 
     // --- face pins ---
@@ -302,7 +304,7 @@ private:
     double m_attachRegionMovedAt = -1.0;
     // The active window the motion watch is bound to (0 = none), its last
     // seen rectangle, and the label its border wears.
-    uint64_t m_attachActiveWatched = 0;
+    uint64_t m_activeTrackedWindow = 0;
     std::optional<AttachWindowRect> m_attachLastSeenRect;
     std::string m_attachActiveLabel;
     // Which region the border edit in flight started on (0 = the global
@@ -313,6 +315,10 @@ private:
 
     std::vector<PickableWindow> m_pickableWindows;
     std::vector<PickableFace> m_pickableFaces;
+    /// The global region's border label: the captured display's name,
+    /// refreshed when the captured display changes.
+    std::string m_displayLabel;
+    uint32_t m_displayLabelId = 0;
 
     /// The face-probe mailbox: a detached detection thread fills it, the
     /// main loop drains it; at most one probe is in flight.

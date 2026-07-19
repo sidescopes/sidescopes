@@ -8,7 +8,9 @@
 
 namespace sidescopes {
 
-std::vector<DesktopWindow> onScreenWindows(uint32_t displayId)
+namespace {
+
+std::vector<DesktopWindow> onScreenWindowsUpToLayer(uint32_t displayId, int maxLayer)
 {
     std::vector<DesktopWindow> windows;
     const CGRect displayBounds = CGDisplayBounds(displayId);
@@ -23,9 +25,11 @@ std::vector<DesktopWindow> onScreenWindows(uint32_t displayId)
     const CFIndex count = CFArrayGetCount(list);
     for (CFIndex index = 0; index < count; ++index) {
         NSDictionary* info = (__bridge NSDictionary*)CFArrayGetValueAtIndex(list, index);
-        // Layer 0 is ordinary application windows; everything else is
-        // chrome (menu bar, dock, overlays - including our own).
-        if ([info[(__bridge NSString*)kCGWindowLayer] intValue] != 0) {
+        // Layer 0 is ordinary application windows; low positive layers are
+        // floating panels; everything above is chrome (menu bar, dock,
+        // overlays - including our own).
+        const int layer = [info[(__bridge NSString*)kCGWindowLayer] intValue];
+        if (layer < 0 || layer > maxLayer) {
             continue;
         }
         if ([info[(__bridge NSString*)kCGWindowOwnerPID] intValue] == ownPid) {
@@ -62,6 +66,21 @@ std::vector<DesktopWindow> onScreenWindows(uint32_t displayId)
     }
     CFRelease(list);
     return windows;
+}
+
+}  // namespace
+
+std::vector<DesktopWindow> onScreenWindows(uint32_t displayId)
+{
+    return onScreenWindowsUpToLayer(displayId, 0);
+}
+
+std::vector<DesktopWindow> attachCandidateWindows(uint32_t displayId)
+{
+    // A key panel floats a few levels up (a Quick Look preview rides at
+    // the floating level while it holds the keyboard), and pinning must
+    // still find it rather than the window underneath it.
+    return onScreenWindowsUpToLayer(displayId, 8);
 }
 
 std::optional<WindowGeometry> windowGeometry(uint64_t identity)
@@ -285,6 +304,18 @@ std::optional<DisplayGeometry> geometryOfDisplay(uint32_t displayId)
         return std::nullopt;
     }
     return DisplayGeometry{bounds.origin.x, bounds.origin.y, bounds.size.width, bounds.size.height};
+}
+
+std::string displayName(uint32_t displayId)
+{
+    for (NSScreen* screen in NSScreen.screens) {
+        NSNumber* number = screen.deviceDescription[@"NSScreenNumber"];
+        if (number.unsignedIntValue == displayId) {
+            return screen.localizedName.UTF8String;
+        }
+    }
+
+    return "Display";
 }
 
 std::optional<uint32_t> displayAtPoint(DesktopPoint point)
