@@ -92,7 +92,6 @@ AttachDecision AttachController::observe(const std::vector<TrackedWindowObservat
     }
 
     updateTracked(windows);
-    updateTracked(windows);
     m_activeIdentity = focusedWindow && find(*focusedWindow) ? *focusedWindow : 0;
     updateRegion(windows, decision);
 
