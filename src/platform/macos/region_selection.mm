@@ -424,9 +424,15 @@ NSCursor* buildPinCursor(const std::optional<FloatColor>& color)
     if (self.dragging) {
         const NSRect selection = [self selectionRect];
         [self punchRect:selection];
-        [[NSColor whiteColor] setStroke];
+        // The settled border's light-dark alternation, so the live drag
+        // reads on pure white and pure black alike.
         NSBezierPath* border = [NSBezierPath bezierPathWithRect:selection];
-        border.lineWidth = 1.5;
+        border.lineWidth = 1.0;
+        [[NSColor colorWithWhite:0.1 alpha:0.85] setStroke];
+        [border stroke];
+        const CGFloat dash[2] = {4.0, 4.0};
+        [border setLineDash:dash count:2 phase:0];
+        [[NSColor colorWithWhite:0.97 alpha:0.95] setStroke];
         [border stroke];
     }
     if (!self.dragging) {

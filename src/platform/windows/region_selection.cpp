@@ -697,7 +697,13 @@ void paintDrawScene(PickerState& picker, Gdiplus::Graphics& canvas, double scale
     if (picker.dragging) {
         const Gdiplus::RectF selection = selectionRect(picker);
         punchRect(canvas, selection);
-        Gdiplus::Pen frame(Gdiplus::Color(255, 255, 255, 255), static_cast<Gdiplus::REAL>(1.5 * scale));
+        // The settled border's light-dark alternation, so the live drag
+        // reads on pure white and pure black alike.
+        Gdiplus::Pen backing(Gdiplus::Color(217, 26, 26, 26), static_cast<Gdiplus::REAL>(EdgeRing * scale));
+        canvas.DrawRectangle(&backing, selection);
+        Gdiplus::Pen frame(Gdiplus::Color(242, 247, 247, 247), static_cast<Gdiplus::REAL>(EdgeRing * scale));
+        const Gdiplus::REAL pattern[2] = {static_cast<Gdiplus::REAL>(4.0), static_cast<Gdiplus::REAL>(4.0)};
+        frame.SetDashPattern(pattern, 2);
         canvas.DrawRectangle(&frame, selection);
     } else if (picker.constrained) {
         const std::wstring primary = picker.constraintLabel.empty() ? std::wstring(L"Draw a region in the window")
