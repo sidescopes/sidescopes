@@ -2500,8 +2500,10 @@ void App::launchFacePinProbe(const AttachDecision& decision, const FacePinState&
             probe->faces = std::move(faces);
         }
         probe->ready.store(true);
-        probe->running.store(false);
+        // The wake goes out before the running flag clears: the shutdown
+        // drain waits on running, and GLFW must still be alive to hear it.
         glfwPostEmptyEvent();
+        probe->running.store(false);
     }).detach();
 }
 
@@ -2640,8 +2642,8 @@ void App::idleWaitWatchingAttachedWindow()
     }
 }
 
-// A window rectangle as its display's percentages - the shape both the
-// attached draw's constraint and the edit-time veil speak.
+// A window rectangle as its display's percentages - the shape the
+// pickable-window list and the edit-time veil speak.
 RegionOfInterest App::displayPercentRect(const WindowGeometry& windowGeom, const DisplayGeometry& display)
 {
     RegionOfInterest region;
