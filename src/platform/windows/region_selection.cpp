@@ -242,12 +242,16 @@ struct PickerState
     int height = 0;
     bool drawMode = false;
     bool facesMode = false;
-    // The attached-draw constraint: with constrained set, the drag cannot
-    // leave constraintRect (overlay-local pixels) and everything outside it
-    // dims hard; the label names the target window's application.
+    // The attached draw's clamp: set when a drag starts in window mode
+    // over a suggestion - the drag cannot leave constraintRect
+    // (overlay-local pixels), everything outside it dims hard, and the
+    // label names the target window's application.
     bool constrained = false;
     Gdiplus::RectF constraintRect{};
     std::wstring constraintLabel;
+    // A drag in window mode: draws an attached region within the window
+    // under the drag's start instead of confirming a whole window.
+    bool pickDragging = false;
     // Color pinning: a click reports a point to sample, a drag an area to
     // average, the region is never touched, and a cursor chip previews the
     // sample.
@@ -638,8 +642,12 @@ void paintSuggestionScene(PickerState& picker, Gdiplus::Graphics& canvas, double
         // accent like window selection in the screenshot interfaces.
         const auto& hovered = picker.suggestions[static_cast<std::size_t>(picker.hovered)];
         punchRect(canvas, hovered.first);
-        Gdiplus::SolidBrush wash(Gdiplus::Color(64, 0, 122, 255));
-        canvas.FillRectangle(&wash, hovered.first);
+        if (picker.facesMode) {
+            // A face target keeps the accent wash; a hovered window stays
+            // natural - what shows is exactly what the scopes get.
+            Gdiplus::SolidBrush wash(Gdiplus::Color(64, 0, 122, 255));
+            canvas.FillRectangle(&wash, hovered.first);
+        }
         Gdiplus::Pen frame(Gdiplus::Color(255, 255, 255, 255), static_cast<Gdiplus::REAL>(2.0 * scale));
         canvas.DrawRectangle(&frame, hovered.first);
         const Gdiplus::FontFamily family(L"Segoe UI");
@@ -705,7 +713,7 @@ void paintPickerScene(PickerState& picker, Gdiplus::Graphics& canvas, double sca
                                 static_cast<Gdiplus::REAL>(picker.height));
     if (picker.pinMode) {
         paintPinScene(picker, canvas, scale, bounds);
-    } else if (!picker.drawMode) {
+    } else if (!picker.drawMode && !picker.pickDragging) {
         paintSuggestionScene(picker, canvas, scale, bounds);
     } else {
         paintDrawScene(picker, canvas, scale, bounds);
@@ -832,6 +840,8 @@ void switchPickerMode(int mode)
         picker->suggestions = faces ? picker->faces : picker->windows;
         picker->hovered = -1;
         picker->dragging = false;
+        picker->pickDragging = false;
+        picker->constrained = false;
         picker->selectionPainted = false;
         paintPicker(*picker);
     }
@@ -843,7 +853,9 @@ LRESULT pickerOnSetCursor(PickerState& picker)
         SetCursor(g_pinCursor ? g_pinCursor : LoadCursorW(nullptr, IDC_CROSS));
         return TRUE;
     }
-    SetCursor(LoadCursorW(nullptr, picker.drawMode ? IDC_CROSS : IDC_HAND));
+    // Window mode draws as readily as it clicks; only the face pick is
+    // click-only and keeps the hand.
+    SetCursor(LoadCursorW(nullptr, picker.facesMode && !picker.pickDragging ? IDC_HAND : IDC_CROSS));
     return TRUE;
 }
 
@@ -919,16 +931,43 @@ void pickerHoverMove(PickerState& picker, POINT point)
     }
 }
 
+// Window mode: the highlight follows the cursor until a held button has
+// travelled far enough, then the gesture becomes an attached draw within
+// the window under the drag's start - the spotlight and the clamp follow
+// that window for the whole gesture.
+void pickerWindowDrag(PickerState& picker, HWND window, WPARAM wParam, POINT point)
+{
+    if ((wParam & MK_LBUTTON) == 0 || picker.facesMode) {
+        pickerHoverMove(picker, point);
+        return;
+    }
+    picker.dragCurrent = point;
+    const double threshold = 4 * uiScale(window);
+    if (std::abs(static_cast<double>(picker.dragCurrent.x - picker.dragStart.x)) <= threshold &&
+        std::abs(static_cast<double>(picker.dragCurrent.y - picker.dragStart.y)) <= threshold) {
+        return;
+    }
+    const int target = suggestionAtPoint(picker, picker.dragStart);
+    picker.constrained = target >= 0;
+    if (target >= 0) {
+        picker.constraintRect = picker.suggestions[static_cast<std::size_t>(target)].first;
+        picker.constraintLabel = picker.suggestions[static_cast<std::size_t>(target)].second;
+    }
+    picker.pickDragging = true;
+    picker.dragging = true;
+    paintPicker(picker);  // full: the draw scene arrives
+}
+
 LRESULT pickerOnMouseMove(PickerState& picker, HWND window, WPARAM wParam, LPARAM lParam)
 {
     const POINT point{static_cast<int>(static_cast<short>(LOWORD(lParam))),
                       static_cast<int>(static_cast<short>(HIWORD(lParam)))};
     if (picker.pinMode) {
         pickerPinDrag(picker, window, wParam, point);
-    } else if (picker.drawMode) {
+    } else if (picker.drawMode || picker.pickDragging) {
         pickerDrawDrag(picker, window, wParam, point);
     } else {
-        pickerHoverMove(picker, point);
+        pickerWindowDrag(picker, window, wParam, point);
     }
     return 0;
 }
@@ -990,6 +1029,11 @@ void pickerDrawUp(PickerState& picker, HWND window, POINT point)
             picker.confirmed = selection;
             picker.finished = true;
         } else {
+            // A stray micro-drag keeps the picker open.
+            if (picker.pickDragging) {
+                picker.pickDragging = false;
+                picker.constrained = false;
+            }
             paintPicker(picker);
         }
     }
@@ -1002,7 +1046,7 @@ LRESULT pickerOnLButtonUp(PickerState& picker, HWND window, WPARAM wParam, LPARA
                       static_cast<int>(static_cast<short>(HIWORD(lParam)))};
     if (picker.pinMode) {
         pickerPinUp(picker, window, wParam, point);
-    } else if (!picker.drawMode) {
+    } else if (!picker.drawMode && !picker.pickDragging) {
         pickerWindowUp(picker, point);
     } else {
         pickerDrawUp(picker, window, point);
@@ -1767,8 +1811,7 @@ void collectRegionPreview(RegionPickPoll& poll)
 
 }  // namespace
 
-bool beginRegionPick(const std::vector<PickerDisplay>& displays, RegionPickerMode initialMode,
-                     const std::optional<PickConstraint>& constraint)
+bool beginRegionPick(const std::vector<PickerDisplay>& displays, RegionPickerMode initialMode)
 {
     if (!g_pickers.empty()) {
         return false;  // one picker at a time
@@ -1788,12 +1831,6 @@ bool beginRegionPick(const std::vector<PickerDisplay>& displays, RegionPickerMod
 
     for (const PickerDisplay& entry : displays) {
         if (PickerState* picker = createPicker(entry, draw, faces, pin)) {
-            if (constraint && constraint->displayId == entry.displayId) {
-                picker->constrained = true;
-                picker->constraintRect =
-                    toRectF(localRectFromRegion(constraint->region, picker->width, picker->height));
-                picker->constraintLabel = wideFromUtf8(constraint->label.c_str());
-            }
             g_pickers.push_back(picker);
         }
     }

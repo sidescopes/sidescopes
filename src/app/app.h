@@ -130,7 +130,6 @@ private:
     void setRegion(const RegionOfInterest& region);
 
     // --- attached regions ---
-    void probeExternalWindow();
     void followAttachedWindow();
     [[nodiscard]] std::vector<TrackedWindowObservation> gatherTrackedObservations() const;
     [[nodiscard]] bool activeWindowMoved(const AttachDecision& decision) const;
@@ -139,7 +138,6 @@ private:
     void refreshAttachedLabel(const AttachDecision& decision);
     void onWindowMotion(WindowMotionSignal signal);
     void idleWaitWatchingAttachedWindow();
-    [[nodiscard]] std::optional<PickConstraint> makeAttachedDrawConstraint();
     [[nodiscard]] static RegionOfInterest displayPercentRect(const WindowGeometry& windowGeom,
                                                              const DisplayGeometry& display);
     void stopTrackingActiveWindow();
@@ -195,6 +193,7 @@ private:
     };
 
     [[nodiscard]] const PickableFace* matchPickedFace(uint32_t displayId, const RegionOfInterest& region) const;
+    void dumpAttachMapping(const PickableWindow& picked, const RegionOfInterest& start) const;
     [[nodiscard]] const PickableWindow* windowContaining(uint32_t displayId, const RegionOfInterest& region) const;
     [[nodiscard]] std::optional<FloatColor> averageFrameArea(const RegionOfInterest& area) const;
     void resetRegionToFull();
@@ -311,18 +310,10 @@ private:
     bool m_attachBorderEditing = false;
     uint64_t m_attachBorderEditTarget = 0;
 
-    // The attached-draw gesture (Shift+D): the externally focused window
-    // SideScopes last stole focus from, and the target carried from the
-    // pick's opening to its confirm.
-    struct AttachedDrawTarget
-    {
-        uint64_t identity = 0;
-        int64_t ownerPid = 0;
-        std::string application;
-    };
-
-    std::optional<AttachedDrawTarget> m_attachedDrawTarget;
     std::vector<PickableWindow> m_pickableWindows;
+    /// Which tool opened the active pick: a rectangle drawn in attach
+    /// mode binds to the window under it, a global draw stays global.
+    RegionPickerMode m_lastPickMode = RegionPickerMode::Draw;
     std::vector<PickableFace> m_pickableFaces;
 
     /// The face-probe mailbox: a detached detection thread fills it, the
@@ -348,10 +339,6 @@ private:
     std::vector<uint8_t> m_regionContentSamples;
     RegionOfInterest m_regionContentRect;
     double m_regionContentChangedAt = -1.0;
-    uint64_t m_lastExternalWindowId = 0;
-    int64_t m_lastExternalOwnerPid = 0;
-    double m_nextExternalWindowProbe = 0.0;
-    bool m_wantAttachedDraw = false;
     // A short-lived toolbar note after a tracked window closed.
     std::string m_attachDetachNotice;
     double m_attachNoticeUntil = 0.0;

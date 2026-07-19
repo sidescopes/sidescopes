@@ -72,18 +72,6 @@ struct RegionPickPoll
     bool pinMode = false;
 };
 
-/// Constrains a Draw pick to one window - the attached-region gesture
-/// (Shift+D): only @c region, the target window's rectangle in
-/// @c displayId's percentages, stays bright and draggable; everything else
-/// dims hard, and the drawn region binds to that window. @c label names the
-/// window's application on the overlay banner.
-struct PickConstraint
-{
-    uint32_t displayId = 0;
-    RegionOfInterest region;
-    std::string label;
-};
-
 /// Screenshot-style selection spanning every display at once: each gets
 /// its own dimmed overlay, and a pick anywhere is a pick there. Pick mode
 /// highlights the application window under the cursor with the system
@@ -98,8 +86,7 @@ struct PickConstraint
 /// returns, the application keeps running its frame loop (which also pumps
 /// the overlays' events), and pollRegionPick is read once per frame so the
 /// scopes can preview the selection before it is confirmed.
-[[nodiscard]] bool beginRegionPick(const std::vector<PickerDisplay>& displays, RegionPickerMode initialMode,
-                                   const std::optional<PickConstraint>& constraint = std::nullopt);
+[[nodiscard]] bool beginRegionPick(const std::vector<PickerDisplay>& displays, RegionPickerMode initialMode);
 RegionPickPoll pollRegionPick();
 
 /// Cancels an active pick as if ESC had been pressed on the overlay.

@@ -161,11 +161,14 @@ NSCursor* buildPinCursor(const std::optional<FloatColor>& color)
 }
 // NO = suggestion picking (windows or faces), YES = drag to draw.
 @property(nonatomic, assign) BOOL drawMode;
-// The attached-draw constraint: an empty rect means unconstrained. The drag
-// cannot leave the rect and everything outside it dims hard; the label
-// names the target window's application on the banner.
+// The attached draw's clamp: an empty rect means unconstrained. Set when a
+// drag starts in window mode over a suggestion - the drag cannot leave the
+// rect, everything outside it dims hard, and the label names the target.
 @property(nonatomic, assign) NSRect constraintRect;
 @property(nonatomic, copy) NSString* constraintLabel;
+// A drag in window mode: draws an attached region within the window under
+// the drag's start instead of confirming a whole window.
+@property(nonatomic, assign) BOOL pickDragging;
 // In picking mode: whether the face list is active instead of windows.
 @property(nonatomic, assign) BOOL facesMode;
 // Color pinning: a click reports a point to sample, a drag an area to
@@ -362,8 +365,13 @@ NSCursor* buildPinCursor(const std::optional<FloatColor>& color)
     if (self.hoveredSuggestion >= 0 && self.hoveredSuggestion < static_cast<NSInteger>(m_suggestions.size())) {
         const auto& hovered = m_suggestions[self.hoveredSuggestion];
         [self punchRect:hovered.first];
-        [[[NSColor systemBlueColor] colorWithAlphaComponent:0.25] setFill];
-        NSRectFillUsingOperation(hovered.first, NSCompositingOperationSourceOver);
+        if (self.facesMode) {
+            // A face target is small and easy to miss, so it keeps the
+            // accent wash; a hovered window stays natural - what shows is
+            // exactly what the scopes get on the click.
+            [[[NSColor systemBlueColor] colorWithAlphaComponent:0.25] setFill];
+            NSRectFillUsingOperation(hovered.first, NSCompositingOperationSourceOver);
+        }
         [[NSColor whiteColor] setStroke];
         NSBezierPath* border = [NSBezierPath bezierPathWithRect:hovered.first];
         border.lineWidth = 2.0;
@@ -442,7 +450,7 @@ NSCursor* buildPinCursor(const std::optional<FloatColor>& color)
     (void)dirty;
     if (self.pinMode) {
         [self drawPinModeOverlay];
-    } else if (!self.drawMode) {
+    } else if (!self.drawMode && !self.pickDragging) {
         [self drawPickModeOverlay];
     } else {
         [self drawDrawModeOverlay];
@@ -451,11 +459,11 @@ NSCursor* buildPinCursor(const std::optional<FloatColor>& color)
 
 - (void)resetCursorRects
 {
-    NSCursor* cursor = NSCursor.pointingHandCursor;
+    // Window mode draws as readily as it clicks, so it wears the
+    // crosshair too; only the face pick is click-only.
+    NSCursor* cursor = self.facesMode ? NSCursor.pointingHandCursor : NSCursor.crosshairCursor;
     if (self.pinMode) {
         cursor = sidescopes::g_pinCursor ? sidescopes::g_pinCursor : NSCursor.crosshairCursor;
-    } else if (self.drawMode) {
-        cursor = NSCursor.crosshairCursor;
     }
     [self addCursorRect:self.bounds cursor:cursor];
 }
@@ -509,7 +517,8 @@ NSCursor* buildPinCursor(const std::optional<FloatColor>& color)
         [self setNeedsDisplayInRect:NSInsetRect(changed, -4, -4)];
         return;
     }
-    if (!self.drawMode) {
+    if (!self.drawMode && !self.pickDragging) {
+        [self dragInPickMode:event];
         return;
     }
     self.dragCurrent = [self convertPoint:event.locationInWindow fromView:nil];
@@ -520,6 +529,44 @@ NSCursor* buildPinCursor(const std::optional<FloatColor>& color)
         self.dragging = YES;
     }
     self.needsDisplay = YES;
+}
+
+// A drag in window mode draws an attached region within the window under
+// the drag's start; the spotlight and the clamp follow that window for the
+// whole gesture.
+- (void)dragInPickMode:(NSEvent*)event
+{
+    if (self.facesMode) {
+        return;
+    }
+    self.dragCurrent = [self convertPoint:event.locationInWindow fromView:nil];
+    if (std::abs(self.dragCurrent.x - self.dragStart.x) <= 4 && std::abs(self.dragCurrent.y - self.dragStart.y) <= 4) {
+        return;
+    }
+    const NSInteger target = [self suggestionAtPoint:self.dragStart];
+    self.constraintRect = target >= 0 ? m_suggestions[target].first : NSZeroRect;
+    self.constraintLabel = target >= 0 ? [NSString stringWithUTF8String:m_suggestions[target].second.c_str()] : @"";
+    self.pickDragging = YES;
+    self.dragging = YES;
+    self.needsDisplay = YES;
+}
+
+// The end of a window-mode drag: a real rectangle confirms as the drawn
+// attached region; a stray micro-drag keeps the picker open.
+- (void)finishPickDrag:(NSPoint)point
+{
+    self.dragCurrent = point;
+    const NSRect selection = [self selectionRect];
+    self.pickDragging = NO;
+    self.dragging = NO;
+    if (selection.size.width > 8 && selection.size.height > 8) {
+        self.picked = YES;
+        self.confirmedRect = selection;
+        self.finished = YES;
+    } else {
+        self.constraintRect = NSZeroRect;
+        self.needsDisplay = YES;
+    }
 }
 
 - (void)mouseUp:(NSEvent*)event
@@ -550,6 +597,10 @@ NSCursor* buildPinCursor(const std::optional<FloatColor>& color)
         return;
     }
     if (!self.drawMode) {
+        if (self.pickDragging) {
+            [self finishPickDrag:point];
+            return;
+        }
         const NSInteger hovered = [self suggestionAtPoint:point];
         if (hovered < 0) {
             return;  // a miss keeps the picker open
@@ -1232,18 +1283,7 @@ PickerModes computePickerModes(const std::vector<PickerDisplay>& displays, Regio
     return {pin, draw, faces};
 }
 
-// Hands the attached draw's spotlight to the overlay covering its display.
-void applyPickConstraint(SidescopesPickerView* view, uint32_t displayId,
-                         const std::optional<PickConstraint>& constraint, NSSize viewSize)
-{
-    if (!constraint || constraint->displayId != displayId) {
-        return;
-    }
-    view.constraintRect = regionToViewRect(constraint->region, viewSize);
-    view.constraintLabel = [NSString stringWithUTF8String:constraint->label.c_str()];
-}
-
-void addPickerOverlay(const PickerDisplay& entry, PickerModes modes, const std::optional<PickConstraint>& constraint)
+void addPickerOverlay(const PickerDisplay& entry, PickerModes modes)
 {
     NSScreen* screen = nil;
     for (NSScreen* candidate in NSScreen.screens) {
@@ -1278,7 +1318,6 @@ void addPickerOverlay(const PickerDisplay& entry, PickerModes modes, const std::
     view.drawMode = modes.draw ? YES : NO;
     view.facesMode = modes.faces ? YES : NO;
     view.pinMode = modes.pin ? YES : NO;
-    applyPickConstraint(view, entry.displayId, constraint, viewSize);
     if (!modes.draw && !modes.pin) {
         view->m_suggestions = modes.faces ? view->m_faces : view->m_windows;
     }
@@ -1432,8 +1471,7 @@ void collectPreview(RegionPickPoll& poll)
 
 }  // namespace
 
-bool beginRegionPick(const std::vector<PickerDisplay>& displays, RegionPickerMode initialMode,
-                     const std::optional<PickConstraint>& constraint)
+bool beginRegionPick(const std::vector<PickerDisplay>& displays, RegionPickerMode initialMode)
 {
     if (!g_pickerOverlays.empty()) {
         return false;  // one picker at a time
@@ -1441,7 +1479,7 @@ bool beginRegionPick(const std::vector<PickerDisplay>& displays, RegionPickerMod
 
     const PickerModes modes = computePickerModes(displays, initialMode);
     for (const PickerDisplay& entry : displays) {
-        addPickerOverlay(entry, modes, constraint);
+        addPickerOverlay(entry, modes);
     }
     if (g_pickerOverlays.empty()) {
         return false;

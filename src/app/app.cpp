@@ -1625,12 +1625,8 @@ bool App::init()
     observeSystemWake([this] { m_captureController->markStale(); });
     observeEscapeWithoutKeyWindow([this] { m_orphanEscape.store(true); });
     // A foreground switch reroutes the borders on the very next frame: the
-    // wake beats the idle tick, and the zeroed probe refreshes the attached
-    // draw's remembered window immediately.
-    observeForegroundChanges([this] {
-        m_nextExternalWindowProbe = 0.0;
-        glfwPostEmptyEvent();
-    });
+    // wake beats the idle tick.
+    observeForegroundChanges([] { glfwPostEmptyEvent(); });
     rememberApplicationWindow(m_graphics->nativeWindowHandle());
     m_ownPid = ownApplicationPid();
 
@@ -2117,25 +2113,6 @@ void App::resetRegionToFull()
     m_globalRegion = RegionOfInterest{};
     m_analysis.region = RegionOfInterest{};
     m_analysisDirty = true;
-}
-
-// Remember the window the user works in whenever another application holds
-// the foreground: the attached draw (Shift+D) targets it after SideScopes
-// has taken the keyboard to receive the shortcut.
-void App::probeExternalWindow()
-{
-    if (glfwGetTime() < m_nextExternalWindowProbe) {
-        return;
-    }
-    m_nextExternalWindowProbe = glfwGetTime() + 0.25;
-    const int64_t externalPid = foregroundApplicationPid();
-    if (externalPid == 0 || externalPid == m_ownPid) {
-        return;
-    }
-    if (const auto externalWindow = frontmostWindowOfApplication(externalPid)) {
-        m_lastExternalWindowId = *externalWindow;
-        m_lastExternalOwnerPid = externalPid;
-    }
 }
 
 // Gathers this frame's observation for every tracked window: geometry,
@@ -2671,47 +2648,6 @@ RegionOfInterest App::displayPercentRect(const WindowGeometry& windowGeom, const
     return region;
 }
 
-// Resolves the attached draw's target and constraint at pick-open time: the
-// last external window's current rectangle, in its display's percentages,
-// plus the application name off the picker's own window list. Returns
-// nothing - and the pick falls back to a plain global draw - when that
-// window is gone or not visible.
-std::optional<PickConstraint> App::makeAttachedDrawConstraint()
-{
-    m_attachedDrawTarget.reset();
-    if (m_lastExternalWindowId == 0) {
-        return std::nullopt;
-    }
-    const auto windowGeom = windowGeometry(m_lastExternalWindowId);
-    if (!windowGeom || windowGeom->minimized) {
-        return std::nullopt;
-    }
-    const DesktopPoint centre{windowGeom->x + windowGeom->width / 2.0, windowGeom->y + windowGeom->height / 2.0};
-    const auto displayId = displayAtPoint(centre);
-    if (!displayId) {
-        return std::nullopt;
-    }
-    const auto display = geometryOfDisplay(*displayId);
-    if (!display) {
-        return std::nullopt;
-    }
-
-    PickConstraint constraint;
-    constraint.displayId = *displayId;
-    constraint.region = displayPercentRect(*windowGeom, *display);
-    std::string application;
-    for (const DesktopWindow& candidate : onScreenWindows(*displayId)) {
-        if (candidate.windowIdentity == m_lastExternalWindowId) {
-            application = candidate.application;
-            break;
-        }
-    }
-    constraint.label = borderLabelFrom(windowGeom->title, application);
-    m_attachedDrawTarget = AttachedDrawTarget{m_lastExternalWindowId, m_lastExternalOwnerPid, constraint.label};
-
-    return constraint;
-}
-
 // Sheds only the front tracked window; the last one's detach is the full
 // reset back to the screen.
 void App::stopTrackingActiveWindow()
@@ -2760,7 +2696,6 @@ void App::runFrame()
     // Capture is a service that dies (lock screen, display sleep); restarting
     // it is our job.
     m_captureController->service(glfwGetTime());
-    probeExternalWindow();
     // Attached regions: observe the tracked windows and route the analysis by
     // the focused window. The border reconciles here every frame in both
     // regimes, so no missed edge can strand it on screen.
@@ -3201,11 +3136,7 @@ bool App::triggerShortcut(const std::string& key, bool shift)
     if (key == m_shortcuts.pickWindow) {
         m_wantRegionPick = RegionPickerMode::PickWindows;
     } else if (key == m_shortcuts.drawRegion) {
-        // Plain draw sets the global region; with Shift the draw is
-        // constrained to - and attaches to - the last external window (the
-        // one focused before SideScopes was).
         m_wantRegionPick = RegionPickerMode::Draw;
-        m_wantAttachedDraw = shift;
     } else if (key == m_shortcuts.pickFaces && supportsFaceDetection()) {
         m_wantRegionPick = RegionPickerMode::PickFaces;
     } else if (key == m_shortcuts.pinColor && pinsAvailable()) {
@@ -3242,14 +3173,13 @@ void App::handleViewShortcuts()
 void App::drawRegionToolIcons()
 {
     char tooltip[96];
-    std::snprintf(tooltip, sizeof(tooltip), "Draw an area (%s) - Shift draws a region attached to a window",
-                  m_shortcuts.drawRegion.c_str());
+    std::snprintf(tooltip, sizeof(tooltip), "Draw an area (%s)", m_shortcuts.drawRegion.c_str());
     if (iconButton("##draw-region", RegionIcon::Crosshair, tooltip)) {
         m_wantRegionPick = RegionPickerMode::Draw;
-        m_wantAttachedDraw = ImGui::GetIO().KeyShift;
     }
     ImGui::SameLine(0.0f, 2.0f);
-    std::snprintf(tooltip, sizeof(tooltip), "Pick a window (%s)", m_shortcuts.pickWindow.c_str());
+    std::snprintf(tooltip, sizeof(tooltip), "Attach to a window (%s) - click for the window, drag to draw inside",
+                  m_shortcuts.pickWindow.c_str());
     if (iconButton("##pick-region", RegionIcon::PickHand, tooltip)) {
         m_wantRegionPick = RegionPickerMode::PickWindows;
     }
@@ -3866,18 +3796,10 @@ void App::openRegionPicker()
     }
     const std::vector<PickerDisplay> pickerDisplays = buildPickerDisplays();
     dumpSuggestionsIfRequested(pickerDisplays);
-    std::optional<PickConstraint> constraint;
-    if (m_wantAttachedDraw && *m_wantRegionPick == RegionPickerMode::Draw) {
-        constraint = makeAttachedDrawConstraint();
-    } else {
-        m_attachedDrawTarget.reset();
-    }
-    m_wantAttachedDraw = false;
-    if (beginRegionPick(pickerDisplays, *m_wantRegionPick, constraint)) {
+    if (beginRegionPick(pickerDisplays, *m_wantRegionPick)) {
         m_regionPicking = true;
         m_regionPickIsPin = *m_wantRegionPick == RegionPickerMode::PinColor;
-    } else {
-        m_attachedDrawTarget.reset();
+        m_lastPickMode = *m_wantRegionPick;
     }
     // Consumed either way: a request that could not open must not retry every
     // frame.
@@ -4220,7 +4142,6 @@ void App::pollRegionPreview(const RegionPickPoll& poll)
             // not the user's Esc and resets nothing.
             resetRegionToFull();
         }
-        m_attachedDrawTarget.reset();
         m_regionPickSwallowCancel = false;
         syncRegionBorder();
         m_lastActivity = glfwGetTime();
@@ -4245,9 +4166,54 @@ void App::adoptAttachedPick(uint64_t identity, int64_t ownerPid, const RegionOfI
     setRegion(region);
 }
 
+/// The quick start a window click hands back: the window rectangle pulled
+/// in by a fixed margin - generous enough that the border chrome and label
+/// strip clear the title bar and its buttons. Toolbars are the user's
+/// resize job, never a guess.
+constexpr double AttachQuickStartInsetPoints = 48.0;
+
+RegionOfInterest quickStartRegion(const RegionOfInterest& window, const DisplayGeometry& display)
+{
+    const double widthPoints = (window.rightPercent - window.leftPercent) / 100.0 * display.widthPoints;
+    const double heightPoints = (window.bottomPercent - window.topPercent) / 100.0 * display.heightPoints;
+    const double inset = std::min({AttachQuickStartInsetPoints, widthPoints / 6.0, heightPoints / 6.0});
+    RegionOfInterest region = window;
+    region.leftPercent += inset / display.widthPoints * 100.0;
+    region.rightPercent -= inset / display.widthPoints * 100.0;
+    region.topPercent += inset / display.heightPoints * 100.0;
+    region.bottomPercent -= inset / display.heightPoints * 100.0;
+
+    return region;
+}
+
+// Field diagnosis for the window-pick mapping: every rectangle in the
+// chain, appended to the suggestions dump. Enable with
+// `launchctl setenv SIDESCOPES_DEBUG_SUGGESTIONS 1`.
+void App::dumpAttachMapping(const PickableWindow& picked, const RegionOfInterest& start) const
+{
+    if (!debugSuggestionsRequested()) {
+        return;
+    }
+    std::FILE* report = openDebugFile("/tmp/sidescopes-suggestions.txt", "a");
+    if (report == nullptr) {
+        return;
+    }
+    std::fprintf(report, "pick window %llu list-rect %.1f,%.1f %.1fx%.1f offered %.2f,%.2f..%.2f,%.2f%%\n",
+                 static_cast<unsigned long long>(picked.identity), picked.windowRect.x, picked.windowRect.y,
+                 picked.windowRect.width, picked.windowRect.height, picked.region.leftPercent, picked.region.topPercent,
+                 picked.region.rightPercent, picked.region.bottomPercent);
+    if (const auto live = windowGeometry(picked.identity)) {
+        std::fprintf(report, "  live-rect %.1f,%.1f %.1fx%.1f minimized=%d\n", live->x, live->y, live->width,
+                     live->height, live->minimized ? 1 : 0);
+    }
+    std::fprintf(report, "  quick-start %.2f,%.2f..%.2f,%.2f%%\n", start.leftPercent, start.topPercent,
+                 start.rightPercent, start.bottomPercent);
+    std::fclose(report);
+}
+
 // A confirmed region that names a window tracks it (or re-picks a tracked
-// one) as an attached region; the constrained draw binds to its target the
-// same way; a freehand draw sets the single global region.
+// one) as an attached region; a rectangle drawn in attach mode binds to
+// the frontmost window under it; a freehand draw sets the global region.
 void App::confirmPickedRegion(const RegionPickPoll& poll)
 {
     const RegionOfInterest confirmed = *poll.confirmed;
@@ -4257,10 +4223,13 @@ void App::confirmPickedRegion(const RegionPickPoll& poll)
                              ? std::optional<AttachDisplayRect>(AttachDisplayRect{
                                    geometry->originX, geometry->originY, geometry->widthPoints, geometry->heightPoints})
                              : std::nullopt;
-    if (picked != nullptr && display) {
+    if (picked != nullptr && display && geometry) {
+        // A window click quick-starts inset from the window's edges.
+        const RegionOfInterest start = quickStartRegion(picked->region, *geometry);
+        dumpAttachMapping(*picked, start);
         adoptAttachedPick(picked->identity, picked->ownerPid,
                           m_attach.attach(picked->identity, picked->ownerPid, picked->application, picked->windowRect,
-                                          *display, confirmed));
+                                          *display, start));
 
         return;
     }
@@ -4268,19 +4237,14 @@ void App::confirmPickedRegion(const RegionPickPoll& poll)
     if (adoptFacePick(poll.displayId, confirmed)) {
         return;
     }
-    if (m_attachedDrawTarget && display) {
-        const auto windowGeom = windowGeometry(m_attachedDrawTarget->identity);
-        const DesktopPoint targetCentre{windowGeom ? windowGeom->x + windowGeom->width / 2.0 : 0.0,
-                                        windowGeom ? windowGeom->y + windowGeom->height / 2.0 : 0.0};
-        // The drawn rectangle must live on the target window's own display,
-        // or the mapping is meaningless.
-        if (windowGeom && !windowGeom->minimized && displayAtPoint(targetCentre).value_or(0) == poll.displayId) {
-            adoptAttachedPick(
-                m_attachedDrawTarget->identity, m_attachedDrawTarget->ownerPid,
-                m_attach.attach(m_attachedDrawTarget->identity, m_attachedDrawTarget->ownerPid,
-                                m_attachedDrawTarget->application,
-                                AttachWindowRect{windowGeom->x, windowGeom->y, windowGeom->width, windowGeom->height},
-                                *display, confirmed));
+    // A rectangle drawn in attach mode binds to the frontmost window under
+    // it; over no window at all it falls through to the global region.
+    if (m_lastPickMode == RegionPickerMode::PickWindows && display) {
+        const PickableWindow* host = windowContaining(poll.displayId, confirmed);
+        if (host != nullptr) {
+            adoptAttachedPick(host->identity, host->ownerPid,
+                              m_attach.attach(host->identity, host->ownerPid, host->application, host->windowRect,
+                                              *display, confirmed));
 
             return;
         }
