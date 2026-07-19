@@ -396,6 +396,88 @@ std::optional<uint64_t> frontmostWindowOfApplication(int64_t ownerPid)
     return static_cast<uint64_t>(reinterpret_cast<uintptr_t>(foreground));
 }
 
+// Whether some visible window above @p target in the z-order covers more
+// than half of it: genuinely behind a sibling, not merely ordered below.
+bool windowBuriedAbove(HWND target, const RECT& bounds)
+{
+    const double area = static_cast<double>(bounds.right - bounds.left) * (bounds.bottom - bounds.top);
+    for (HWND above = GetTopWindow(nullptr); above && above != target; above = GetWindow(above, GW_HWNDNEXT)) {
+        if (!IsWindowVisible(above) || IsIconic(above)) {
+            continue;
+        }
+        RECT aboveRect{};
+        RECT overlap{};
+        if (GetWindowRect(above, &aboveRect) && IntersectRect(&overlap, &aboveRect, &bounds) && area > 0 &&
+            static_cast<double>(overlap.right - overlap.left) * (overlap.bottom - overlap.top) > area * 0.5) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+// A tracked window of the foreground application itself wins even when
+// ordered deeper - list order and visual stacking disagree for panels -
+// unless a window above genuinely buries it (covers more than half).
+std::optional<uint64_t> trackedOwnWindowBelow(HWND focusedWindow, int64_t applicationPid,
+                                              const std::vector<uint64_t>& tracked)
+{
+    for (HWND below = GetWindow(focusedWindow, GW_HWNDNEXT); below; below = GetWindow(below, GW_HWNDNEXT)) {
+        if (!IsWindowVisible(below) || IsIconic(below)) {
+            continue;
+        }
+        DWORD ownerPid = 0;
+        GetWindowThreadProcessId(below, &ownerPid);
+        const auto identity = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(below));
+        if (static_cast<int64_t>(ownerPid) != applicationPid ||
+            std::find(tracked.begin(), tracked.end(), identity) == tracked.end()) {
+            continue;
+        }
+        RECT rect{};
+        if (!GetWindowRect(below, &rect) || windowBuriedAbove(below, rect)) {
+            return std::nullopt;
+        }
+
+        return identity;
+    }
+
+    return std::nullopt;
+}
+
+std::optional<uint64_t> focusedWindowForTracking(int64_t applicationPid, const std::vector<uint64_t>& tracked)
+{
+    const auto focused = frontmostWindowOfApplication(applicationPid);
+    if (!focused) {
+        return std::nullopt;
+    }
+    HWND focusedWindow = windowFromIdentity(*focused);
+    RECT focusedRect{};
+    if (!GetWindowRect(focusedWindow, &focusedRect)) {
+        return focused;
+    }
+    // Walk the z-order from the top down to the focused window: a tracked,
+    // visible window above it that overlaps it wins the region.
+    for (HWND above = GetTopWindow(nullptr); above && above != focusedWindow; above = GetWindow(above, GW_HWNDNEXT)) {
+        if (!IsWindowVisible(above) || IsIconic(above)) {
+            continue;
+        }
+        const auto identity = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(above));
+        if (std::find(tracked.begin(), tracked.end(), identity) == tracked.end()) {
+            continue;
+        }
+        RECT aboveRect{};
+        RECT overlap{};
+        if (GetWindowRect(above, &aboveRect) && IntersectRect(&overlap, &aboveRect, &focusedRect)) {
+            return identity;
+        }
+    }
+    if (const auto own = trackedOwnWindowBelow(focusedWindow, applicationPid, tracked)) {
+        return own;
+    }
+
+    return focused;
+}
+
 void raiseWindow(uint64_t identity, int64_t)
 {
     HWND window = windowFromIdentity(identity);

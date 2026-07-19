@@ -136,6 +136,7 @@ private:
     void captureActiveDisplay(const AttachDecision& decision);
     void applyAttachDecision(const AttachDecision& decision);
     void refreshAttachedLabel(const AttachDecision& decision);
+    [[nodiscard]] std::optional<uint64_t> resolveFocusedWindow() const;
     void onWindowMotion(WindowMotionSignal signal);
     void idleWaitWatchingAttachedWindow();
     [[nodiscard]] static RegionOfInterest displayPercentRect(const WindowGeometry& windowGeom,

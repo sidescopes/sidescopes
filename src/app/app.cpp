@@ -2243,6 +2243,30 @@ void App::refreshAttachedLabel(const AttachDecision& decision)
     }
 }
 
+// The focused window drives everything: the foreground application's
+// frontmost ordinary window - frozen on the active window while its border
+// is being dragged, and held while SideScopes itself is in front. One
+// region type at a time means there is no global region to switch to while
+// windows are tracked, so the user can work the scopes against the last
+// attached region without losing it.
+std::optional<uint64_t> App::resolveFocusedWindow() const
+{
+    if (m_attachBorderEditing && m_attachActiveWatched != 0) {
+        return m_attachActiveWatched;
+    }
+    const int64_t foreground = foregroundApplicationPid();
+    const uint64_t held = m_attachActiveWatched != 0 ? m_attachActiveWatched : m_attach.activeIdentity();
+    if (foreground == m_ownPid && held != 0) {
+        // Straight after a pick the held window is the picked one - the
+        // watch has not bound yet, and a window owned by a helper process
+        // (a Quick Look preview) can never take the foreground for itself,
+        // so this is the only thing keeping its region.
+        return held;
+    }
+
+    return focusedWindowForTracking(foreground, m_attach.trackedIdentities());
+}
+
 // One follow step: observes every tracked window, lets the controller pick
 // the active one and map its region, and applies the verdict. Runs twice per
 // frame - once before the frame, and again right after the swap so the
@@ -2254,24 +2278,7 @@ void App::followAttachedWindow()
         return;
     }
 
-    // The focused window drives everything: the foreground application's
-    // frontmost ordinary window - frozen on the active window while its
-    // border is being dragged, and held while SideScopes itself is in
-    // front. One region type at a time means there is no global region to
-    // switch to while windows are tracked, so the user can work the scopes
-    // against the last attached region without losing it.
-    std::optional<uint64_t> focused;
-    if (m_attachBorderEditing && m_attachActiveWatched != 0) {
-        focused = m_attachActiveWatched;
-    } else {
-        const int64_t foreground = foregroundApplicationPid();
-        if (foreground == m_ownPid && m_attachActiveWatched != 0) {
-            focused = m_attachActiveWatched;
-        } else {
-            focused = frontmostWindowOfApplication(foreground);
-        }
-    }
-    const AttachDecision decision = m_attach.observe(gatherTrackedObservations(), focused);
+    const AttachDecision decision = m_attach.observe(gatherTrackedObservations(), resolveFocusedWindow());
     if (activeWindowMoved(decision)) {
         onWindowMotion(WindowMotionSignal::Moved);
     }
@@ -2604,7 +2611,7 @@ void App::idleWaitWatchingAttachedWindow()
         if (glfwGetTime() - sliceStart < 0.023) {
             return;
         }
-        const auto focusedNow = frontmostWindowOfApplication(foregroundApplicationPid());
+        const auto focusedNow = focusedWindowForTracking(foregroundApplicationPid(), m_attach.trackedIdentities());
         const uint64_t focusedTracked = focusedNow && m_attach.tracks(*focusedNow) ? *focusedNow : 0;
         if (focusedTracked != m_attachActiveWatched) {
             return;
