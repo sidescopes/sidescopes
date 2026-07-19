@@ -462,10 +462,31 @@ int64_t ownApplicationPid()
     return static_cast<int64_t>(GetCurrentProcessId());
 }
 
+// The shell surfaces that take the foreground mid focus switch: the alt-tab
+// and task-view hosts and the staging window foreground changes pass
+// through. The user works in none of them, so none may reroute the region.
+bool isFocusTransitionSurface(HWND window)
+{
+    wchar_t className[64];
+    const int length = GetClassNameW(window, className, 64);
+    if (length <= 0) {
+        return false;
+    }
+
+    return wcscmp(className, L"XamlExplorerHostIslandWindow") == 0 ||  // Windows 11 alt-tab and task view
+           wcscmp(className, L"MultitaskingViewFrame") == 0 ||         // Windows 10 alt-tab and task view
+           wcscmp(className, L"ForegroundStaging") == 0 ||             // transient staging between switches
+           wcscmp(className, L"TaskSwitcherWnd") == 0 ||               // classic alt-tab
+           wcscmp(className, L"TaskSwitcherOverlayWnd") == 0;
+}
+
 int64_t foregroundApplicationPid()
 {
     HWND foreground = GetForegroundWindow();
-    if (!foreground) {
+    if (!foreground || isFocusTransitionSurface(foreground)) {
+        // A switch in flight is no verdict; reporting no foreground lets
+        // the host hold the active window, as it does for the empty
+        // foreground of a click's handoff.
         return 0;
     }
     DWORD processId = 0;

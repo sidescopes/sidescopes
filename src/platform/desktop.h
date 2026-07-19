@@ -223,7 +223,10 @@ void rememberApplicationWindow(void* nativeWindow);
 
 /// The process id of the frontmost application, so the attach coupling can
 /// compare it against the attached window's owner and this application's own
-/// pid. Zero when no application is frontmost.
+/// pid. Zero when no application is frontmost - including while a system
+/// focus switcher (alt-tab, task view) holds the screen on Windows: those
+/// surfaces are not windows the user works in, and macOS's switcher never
+/// becomes the frontmost application at all.
 [[nodiscard]] int64_t foregroundApplicationPid();
 
 /// Absolute paths of system fonts suitable for the interface, best first;
