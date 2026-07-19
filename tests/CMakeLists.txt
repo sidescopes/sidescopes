@@ -34,6 +34,7 @@ add_executable(sidescopes_tests
     test_attach_controller.cpp
     test_face_pin.cpp
     test_region_geometry.cpp
+    test_icons.cpp
     test_window_suggestions.cpp
     test_version.cpp
 )
@@ -60,6 +61,10 @@ target_sources(sidescopes_tests PRIVATE
 # every platform. It needs only core, so the tests never link the
 # GUI/capture platform library.
 target_sources(sidescopes_tests PRIVATE ${CMAKE_SOURCE_DIR}/src/platform/region_geometry.cpp)
+target_sources(sidescopes_tests PRIVATE ${CMAKE_SOURCE_DIR}/src/platform/icons.cpp)
+set_source_files_properties(${CMAKE_SOURCE_DIR}/src/platform/icons.cpp
+    PROPERTIES COMPILE_OPTIONS "$<$<CXX_COMPILER_ID:MSVC>:/wd4702>")
+target_include_directories(sidescopes_tests PRIVATE ${nanosvg_SOURCE_DIR}/src)
 
 # The rest of the Windows platform layer's pure logic - UTF-8/UTF-16
 # conversion and display-id parsing - is unit-tested on the Windows runner.

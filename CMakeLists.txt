@@ -63,6 +63,20 @@ add_library(sidescopes_core STATIC
     src/modules/module_registry.cpp
 )
 target_include_directories(sidescopes_core PUBLIC src include)
+
+# NanoSVG (zlib license): the header-only rasterizer behind the embedded
+# Lucide icon set (ISC license) - one icon language on every platform.
+include(FetchContent)
+FetchContent_Declare(
+    nanosvg
+    GIT_REPOSITORY https://github.com/memononen/nanosvg.git
+    GIT_TAG 239e102ec2c691f2902e20ace2ed36ee4a35cfe6
+)
+FetchContent_MakeAvailable(nanosvg)
+# C4702 fires inside the vendored NanoSVG implementation and, being an
+# optimizer-stage warning, ignores in-source pragmas under /WX.
+set_source_files_properties(src/platform/icons.cpp
+    PROPERTIES COMPILE_OPTIONS "$<$<CXX_COMPILER_ID:MSVC>:/wd4702>")
 sidescopes_target_defaults(sidescopes_core)
 
 # --- scope modules ---
@@ -153,6 +167,7 @@ endif()
 if(APPLE)
     enable_language(OBJCXX)
     add_library(sidescopes_platform STATIC
+        src/platform/icons.cpp
         src/platform/region_geometry.cpp
         src/platform/macos/desktop.mm
         src/platform/macos/face_detection.mm
@@ -160,7 +175,7 @@ if(APPLE)
         src/platform/macos/region_selection.mm
         src/platform/macos/screen_capture.mm
     )
-    target_include_directories(sidescopes_platform PUBLIC src)
+    target_include_directories(sidescopes_platform PUBLIC src ${nanosvg_SOURCE_DIR}/src)
     target_compile_options(sidescopes_platform PRIVATE -fobjc-arc)
     target_link_libraries(sidescopes_platform
         PUBLIC
@@ -180,6 +195,7 @@ if(WIN32)
     # compiler continuously; the application target follows with the port
     # itself.
     add_library(sidescopes_platform STATIC
+        src/platform/icons.cpp
         src/platform/region_geometry.cpp
         src/platform/windows/desktop.cpp
         src/platform/windows/face_detection.cpp
@@ -187,7 +203,7 @@ if(WIN32)
         src/platform/windows/region_selection.cpp
         src/platform/windows/screen_capture.cpp
     )
-    target_include_directories(sidescopes_platform PUBLIC src)
+    target_include_directories(sidescopes_platform PUBLIC src ${nanosvg_SOURCE_DIR}/src)
     # The layer calls wide APIs explicitly; UNICODE makes the
     # resource-id macros (IDC_*) match them.
     target_compile_definitions(sidescopes_platform PRIVATE UNICODE _UNICODE)

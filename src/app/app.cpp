@@ -189,88 +189,14 @@ bool scopeToggleButton(const char* id, const char* letter, bool enabled, const c
     return pressed;
 }
 
-// Region tool icons mirror the cursors of their modes: a pointing hand
-// for picking a window (the pick-mode hover cursor), a crosshair
-// for drawing one (the draw-mode cursor), an eyedropper for pinning
-// colors, expanding arrows for full screen.
-enum class RegionIcon
+// The pixel size the icon textures rasterize at: the toolbar square in
+// framebuffer pixels, so the strokes land on the physical grid.
+int iconPixelSize()
 {
-    PickHand,
-    Crosshair,
-    Face,
-    Dropper,
-    Expand
-};
-
-// A simplified pointing hand, the shape of the pick-mode cursor. Traced from
-// the classic cursor-hand outline: tall index left of center, three knuckle
-// stubs descending to the right, the thumb web sweeping down-left, a flat cuff.
-void drawPickHandIcon(ImDrawList* draw, const ImVec2& center, ImU32 color)
-{
-    const ImVec2 outline[] = {
-        {-2.8f, 7.5f},  {-5.6f, 1.8f},  {-6.0f, 0.4f},  {-5.6f, -0.4f}, {-4.6f, -0.6f}, {-2.7f, 0.6f},
-        {-2.7f, -6.6f}, {-2.2f, -7.5f}, {-1.1f, -7.5f}, {-0.6f, -6.6f}, {-0.6f, -2.8f}, {0.1f, -3.3f},
-        {1.1f, -3.3f},  {1.5f, -2.6f},  {1.7f, -2.4f},  {2.4f, -2.5f},  {2.9f, -1.8f},  {3.2f, -1.6f},
-        {4.0f, -1.5f},  {4.5f, -0.8f},  {4.5f, 6.3f},   {3.9f, 7.5f},
-    };
-    ImVec2 points[std::size(outline)];
-    for (std::size_t i = 0; i < std::size(outline); ++i) {
-        points[i] = ImVec2(center.x + outline[i].x, center.y + outline[i].y);
-    }
-    draw->AddPolyline(points, static_cast<int>(std::size(outline)), color, ImDrawFlags_Closed, 1.4f);
+    return static_cast<int>(std::lround(ImGui::GetTextLineHeight() * ImGui::GetIO().DisplayFramebufferScale.x));
 }
 
-// The draw-mode crosshair: long thin beams, small center gap.
-void drawCrosshairIcon(ImDrawList* draw, const ImVec2& center, ImU32 color)
-{
-    const auto beam = [&](float dx, float dy) {
-        draw->AddLine(ImVec2(center.x + dx * 1.25f, center.y + dy * 1.25f),
-                      ImVec2(center.x + dx * 7.5f, center.y + dy * 7.5f), color, 1.4f);
-    };
-    beam(0.0f, -1.0f);
-    beam(0.0f, 1.0f);
-    beam(-1.0f, 0.0f);
-    beam(1.0f, 0.0f);
-}
-
-// A face: head outline, two eyes, a smile arc.
-void drawFaceIcon(ImDrawList* draw, const ImVec2& center, ImU32 color)
-{
-    draw->AddCircle(center, 7.5f, color, 0, 1.4f);
-    draw->AddCircleFilled(ImVec2(center.x - 2.8f, center.y - 2.0f), 1.1f, color);
-    draw->AddCircleFilled(ImVec2(center.x + 2.8f, center.y - 2.0f), 1.1f, color);
-    ImVec2 smile[5];
-    for (int i = 0; i < 5; ++i) {
-        const float angle = (0.30f + 0.10f * i) * 3.14159265f;
-        smile[i] = ImVec2(center.x + 3.3f * std::cos(angle), center.y + 3.3f * std::sin(angle));
-    }
-    draw->AddPolyline(smile, 5, color, ImDrawFlags_None, 1.4f);
-}
-
-// The classic pipette silhouette, filled so it reads at chip size: round bulb, a
-// wider collar band, a long tapering tip, and a drop fallen just past it.
-void drawDropperIcon(ImDrawList* draw, const ImVec2& center, ImU32 color)
-{
-    draw->AddCircleFilled(ImVec2(center.x + 4.4f, center.y - 4.4f), 2.4f, color);
-    draw->AddLine(ImVec2(center.x + 1.7f, center.y - 1.7f), ImVec2(center.x + 3.0f, center.y - 3.0f), color, 4.2f);
-    draw->AddTriangleFilled(ImVec2(center.x - 5.3f, center.y + 5.3f), ImVec2(center.x + 1.3f, center.y + 0.7f),
-                            ImVec2(center.x - 0.7f, center.y - 1.3f), color);
-    draw->AddCircleFilled(ImVec2(center.x - 6.6f, center.y + 6.6f), 1.0f, color);
-}
-
-// Two arrows expanding to opposite corners, the fullscreen idiom.
-void drawExpandIcon(ImDrawList* draw, const ImVec2& center, const ImVec2& a, const ImVec2& b, ImU32 color, float stroke)
-{
-    const auto arrow = [&](ImVec2 from, ImVec2 to, float headX, float headY) {
-        draw->AddLine(from, to, color, stroke);
-        draw->AddLine(to, ImVec2(to.x + headX * 3.5f, to.y), color, stroke);
-        draw->AddLine(to, ImVec2(to.x, to.y + headY * 3.5f), color, stroke);
-    };
-    arrow(ImVec2(center.x - 1.5f, center.y + 1.5f), ImVec2(a.x + 0.5f, b.y - 0.5f), 1, -1);
-    arrow(ImVec2(center.x + 1.5f, center.y - 1.5f), ImVec2(b.x - 0.5f, a.y + 0.5f), -1, 1);
-}
-
-bool iconButton(const char* id, RegionIcon icon, const char* tooltip, bool dimmed = false)
+bool iconButton(const char* id, ImTextureID texture, const char* tooltip, bool dimmed = false)
 {
     const float height = ImGui::GetTextLineHeight() + 4.0f;
     const bool pressed = ImGui::InvisibleButton(id, ImVec2(height + 8.0f, height));
@@ -280,23 +206,10 @@ bool iconButton(const char* id, RegionIcon icon, const char* tooltip, bool dimme
     if (ImGui::IsItemHovered()) {
         draw->AddRectFilled(min, max, ImGui::GetColorU32(ImGuiCol_ButtonHovered), 3.0f);
     }
-    const ImVec2 center(std::floor((min.x + max.x) / 2) + 0.5f, std::floor((min.y + max.y) / 2) + 0.5f);
-    const float half = 7.0f;
-    const ImVec2 a(center.x - half, center.y - half + 1.0f);
-    const ImVec2 b(center.x + half, center.y + half - 1.0f);
-    const ImU32 color = ImGui::GetColorU32(ImGuiCol_Text, dimmed ? 0.4f : 1.0f);
-    const float stroke = 1.5f;
-    if (icon == RegionIcon::PickHand) {
-        drawPickHandIcon(draw, center, color);
-    } else if (icon == RegionIcon::Crosshair) {
-        drawCrosshairIcon(draw, center, color);
-    } else if (icon == RegionIcon::Face) {
-        drawFaceIcon(draw, center, color);
-    } else if (icon == RegionIcon::Dropper) {
-        drawDropperIcon(draw, center, color);
-    } else {
-        drawExpandIcon(draw, center, a, b, color, stroke);
-    }
+    const ImVec2 center(std::floor((min.x + max.x) / 2), std::floor((min.y + max.y) / 2));
+    const float half = ImGui::GetTextLineHeight() / 2.0f;
+    draw->AddImage(texture, ImVec2(center.x - half, center.y - half), ImVec2(center.x + half, center.y + half),
+                   ImVec2(0, 0), ImVec2(1, 1), ImGui::GetColorU32(ImGuiCol_Text, dimmed ? 0.4f : 1.0f));
     ImGui::SetItemTooltip("%s", tooltip);
 
     return pressed;
@@ -2043,7 +1956,7 @@ void App::syncRegionBorder()
             m_displayLabel = borderLabelFrom(displayName(m_displayLabelId), "Display");
         }
         showRegionBorder(m_captureController->capturedDisplay(), m_analysis.region,
-                         attached ? m_attachActiveLabel : m_displayLabel);
+                         attached ? m_attachActiveLabel : m_displayLabel, attached);
     }
 }
 
@@ -3184,24 +3097,43 @@ void App::handleViewShortcuts()
     }
 }
 
+// Lazily rasterized textures for the embedded icon set, rebuilt when the
+// framebuffer scale changes the requested pixel size.
+ImTextureID App::iconTextureId(Icon icon, int sizePixels)
+{
+    IconTexture& slot = m_iconTextures[static_cast<std::size_t>(icon)];
+    if (!slot.texture || slot.sizePixels != sizePixels) {
+        ScopeImage image;
+        image.width = sizePixels;
+        image.height = sizePixels;
+        image.rgba = rasterizeIcon(icon, sizePixels);
+        slot.texture = m_graphics->createScopeTexture(sizePixels, sizePixels);
+        slot.texture->upload(image);
+        slot.sizePixels = sizePixels;
+    }
+
+    return slot.texture->textureId();
+}
+
 void App::drawRegionToolIcons()
 {
     char tooltip[96];
     std::snprintf(tooltip, sizeof(tooltip), "Draw an area (%s)", m_shortcuts.drawRegion.c_str());
-    if (iconButton("##draw-region", RegionIcon::Crosshair, tooltip)) {
+    const int iconPx = iconPixelSize();
+    if (iconButton("##draw-region", iconTextureId(Icon::SquarePen, iconPx), tooltip)) {
         m_wantRegionPick = RegionPickerMode::Draw;
     }
     ImGui::SameLine(0.0f, 2.0f);
     std::snprintf(tooltip, sizeof(tooltip), "Attach to a window (%s) - click the window or draw inside it",
                   m_shortcuts.pickWindow.c_str());
-    if (iconButton("##pick-region", RegionIcon::PickHand, tooltip)) {
+    if (iconButton("##pick-region", iconTextureId(Icon::Paperclip, iconPx), tooltip)) {
         m_wantRegionPick = RegionPickerMode::PickWindows;
     }
     ImGui::SameLine(0.0f, 2.0f);
     if (pinsAvailable()) {
         std::snprintf(tooltip, sizeof(tooltip), "Pin a color (%s) - Shift+click a color to pin several",
                       m_shortcuts.pinColor.c_str());
-        if (iconButton("##pin-color", RegionIcon::Dropper, tooltip)) {
+        if (iconButton("##pin-color", iconTextureId(Icon::Pipette, iconPx), tooltip)) {
             m_wantRegionPick = RegionPickerMode::PinColor;
         }
         ImGui::SameLine(0.0f, 2.0f);
@@ -3212,13 +3144,13 @@ void App::drawRegionToolIcons()
         const bool noneFound = m_callbackState.facesOnScreen.load() == 0;
         std::snprintf(tooltip, sizeof(tooltip), "Pick a face (%s)%s", m_shortcuts.pickFaces.c_str(),
                       noneFound ? " - none on screen right now" : "");
-        if (iconButton("##pick-face", RegionIcon::Face, tooltip, noneFound)) {
+        if (iconButton("##pick-face", iconTextureId(Icon::User, iconPx), tooltip, noneFound)) {
             m_wantRegionPick = RegionPickerMode::PickFaces;
         }
         ImGui::SameLine(0.0f, 2.0f);
     }
     if (!isFullRegion()) {
-        if (iconButton("##full-region", RegionIcon::Expand, "Reset to full screen (Esc)")) {
+        if (iconButton("##full-region", iconTextureId(Icon::Expand, iconPx), "Reset to full screen (Esc)")) {
             resetRegionToFull();
         }
         ImGui::SameLine(0.0f, 2.0f);

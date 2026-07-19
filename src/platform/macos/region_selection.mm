@@ -3,9 +3,11 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 
 #include "platform/desktop.h"
 #include "platform/face_detection.h"
+#include "platform/icons.h"
 #include "platform/region_geometry.h"
 #include "platform/region_selection.h"
 
@@ -705,6 +707,8 @@ NSCursor* buildPinCursor(const std::optional<FloatColor>& color)
 @property(nonatomic, assign) NSRect dragStartRegion;  // global screen coords
 @property(nonatomic, assign) BOOL closePressed;
 @property(nonatomic, assign) BOOL attachPressed;
+// Whether the outlined region is attached: picks the toggle's glyph.
+@property(nonatomic, assign) BOOL attachedRegion;
 // Non-empty for a window-attached region: the tracked application's name,
 // worn as a small tab above the band, with the measurement dashes taking a
 // label being the tell that this region belongs to a window.
@@ -927,29 +931,38 @@ NSCursor* buildPinCursor(const std::optional<FloatColor>& color)
     [cross stroke];
 }
 
-// The system's own pushpin at the tab's fixed left end - one glyph for
-// both directions, the label text beside it saying which kind this
-// region is. SF Symbols draws it properly at any size; hand-built
-// silhouettes never survived label scale.
+// The icon set's pushpin at the tab's fixed left end, showing the
+// STATE: the pin while the region is attached, the struck-through pin
+// while it is global. Rasterized once from the embedded vector sources,
+// so every platform draws the identical icons.
 - (void)drawAttachButton
 {
-    static NSImage* pin = nil;
-    if (!pin) {
-        NSImage* symbol = [NSImage imageWithSystemSymbolName:@"pin.fill" accessibilityDescription:nil];
-        pin = [NSImage imageWithSize:NSMakeSize(11, 11)
-                             flipped:NO
-                      drawingHandler:^(NSRect rect) {
-                        [symbol drawInRect:rect];
-                        [[NSColor colorWithWhite:0.97 alpha:0.95] set];
-                        NSRectFillUsingOperation(rect, NSCompositingOperationSourceAtop);
-                        return YES;
-                      }];
+    static NSImage* icons[2] = {nil, nil};
+    const int which = self.attachedRegion ? 1 : 0;
+    if (!icons[which]) {
+        const int pixels = 22;  // 11 points at the retina scale
+        const std::vector<uint8_t> rgba =
+            sidescopes::rasterizeIcon(self.attachedRegion ? sidescopes::Icon::Pin : sidescopes::Icon::PinOff, pixels);
+        NSBitmapImageRep* rep = [[NSBitmapImageRep alloc] initWithBitmapDataPlanes:nullptr
+                                                                        pixelsWide:pixels
+                                                                        pixelsHigh:pixels
+                                                                     bitsPerSample:8
+                                                                   samplesPerPixel:4
+                                                                          hasAlpha:YES
+                                                                          isPlanar:NO
+                                                                    colorSpaceName:NSDeviceRGBColorSpace
+                                                                      bitmapFormat:NSBitmapFormatAlphaNonpremultiplied
+                                                                       bytesPerRow:pixels * 4
+                                                                      bitsPerPixel:32];
+        std::memcpy(rep.bitmapData, rgba.data(), rgba.size());
+        icons[which] = [[NSImage alloc] initWithSize:NSMakeSize(11, 11)];
+        [icons[which] addRepresentation:rep];
     }
     const NSPoint center = [self attachButtonCenter];
-    [pin drawInRect:NSMakeRect(center.x - 5.5, center.y - 5.5, 11, 11)
-           fromRect:NSZeroRect
-          operation:NSCompositingOperationSourceOver
-           fraction:1.0];
+    [icons[which] drawInRect:NSMakeRect(center.x - 5.5, center.y - 5.5, 11, 11)
+                    fromRect:NSZeroRect
+                   operation:NSCompositingOperationSourceOver
+                    fraction:1.0];
 }
 
 - (void)drawRect:(NSRect)dirty
@@ -1664,7 +1677,7 @@ NSWindow* makeBorderWindow(NSRect rect)
     return window;
 }
 
-void showRegionBorder(uint32_t displayId, const RegionOfInterest& region, const std::string& label)
+void showRegionBorder(uint32_t displayId, const RegionOfInterest& region, const std::string& label, bool attached)
 {
     NSScreen* screen = screenForDisplay(displayId);
     const NSRect frame = screen.frame;
@@ -1688,10 +1701,11 @@ void showRegionBorder(uint32_t displayId, const RegionOfInterest& region, const 
     if (g_borderWindow && g_borderWindow.visible && NSEqualRects(g_borderTarget, labelled)) {
         SidescopesBorderView* view = (SidescopesBorderView*)g_borderWindow.contentView;
         NSString* current = view.attachedLabel ? view.attachedLabel : @"";
-        if ([current isEqualToString:borderLabel]) {
+        if ([current isEqualToString:borderLabel] && view.attachedRegion == attached) {
             return;
         }
         view.attachedLabel = borderLabel;
+        view.attachedRegion = attached;
         view.needsDisplay = YES;
 
         return;
@@ -1707,6 +1721,7 @@ void showRegionBorder(uint32_t displayId, const RegionOfInterest& region, const 
         view.needsDisplay = YES;
     }
     view.labelBand = LabelBand;
+    view.attachedRegion = attached;
     if (g_borderWindow.visible) {
         // Already shown at another place: snap, never tween position.
         snapBorderFrame(labelled);

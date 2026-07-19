@@ -13,6 +13,8 @@
 
 #include <windows.h>
 
+#include "platform/icons.h"
+
 // The COM base types GDI+ leans on (IStream, PROPID) are among what
 // WIN32_LEAN_AND_MEAN strips out of windows.h.
 #include <objidl.h>
@@ -392,6 +394,8 @@ struct BorderState
     RECT dragStartRegion{};
     bool closePressed = false;
     bool attachPressed = false;
+    // Whether the outlined region is attached: picks the toggle's glyph.
+    bool attachedRegion = false;
     // The cached backing store and the geometry it was painted for. The
     // band's look depends on the window's size and scale, never on its
     // position, so a move needs no repaint at all - the common case when
@@ -1399,27 +1403,47 @@ void paintBorderCloseButton(Gdiplus::Graphics& canvas, double scale)
     canvas.DrawLine(&cross, center.X - arm, center.Y + arm, center.X + arm, center.Y - arm);
 }
 
-// The system's own pushpin at the tab's fixed left end - one glyph for
-// both directions, the label text beside it saying which kind this
-// region is. Segoe MDL2 Assets ships with Windows 10 and draws it
-// properly at any size; hand-built silhouettes never survived label
-// scale.
+// The icon set's pushpin at the tab's fixed left end, showing the
+// STATE: the pin while the region is attached, the struck-through pin
+// while it is global. Rasterized once from the embedded vector sources,
+// so every platform draws the identical icons.
 void paintBorderAttachButton(Gdiplus::Graphics& canvas, double scale)
 {
     const Gdiplus::PointF center = attachButtonCenter(scale);
-    const Gdiplus::FontFamily family(L"Segoe MDL2 Assets");
-    const Gdiplus::Font font(&family, static_cast<Gdiplus::REAL>(11.0 * scale), Gdiplus::FontStyleRegular,
-                             Gdiplus::UnitPixel);
-    Gdiplus::StringFormat format;
-    format.SetAlignment(Gdiplus::StringAlignmentCenter);
-    format.SetLineAlignment(Gdiplus::StringAlignmentCenter);
-    Gdiplus::SolidBrush ink(Gdiplus::Color(242, 247, 247, 247));
-    // E718 is the Fluent "Pin" glyph.
-    canvas.DrawString(L"\uE718", -1, &font,
-                      Gdiplus::RectF(center.X - static_cast<Gdiplus::REAL>(8 * scale),
-                                     center.Y - static_cast<Gdiplus::REAL>(8 * scale),
-                                     static_cast<Gdiplus::REAL>(16 * scale), static_cast<Gdiplus::REAL>(16 * scale)),
-                      &format, &ink);
+    static std::unique_ptr<Gdiplus::Bitmap> icons[2];
+    static int iconSize = 0;
+    const int which = g_border.attachedRegion ? 1 : 0;
+    const int pixels = std::max(8, static_cast<int>(std::lround(11.0 * scale)));
+    if (!icons[which] || iconSize != pixels) {
+        if (iconSize != pixels) {
+            icons[0].reset();
+            icons[1].reset();
+        }
+        // GDI+'s 32bppARGB is BGRA in memory: swap channels on the copy.
+        const std::vector<uint8_t> rgba = rasterizeIcon(which == 1 ? Icon::Pin : Icon::PinOff, pixels);
+        auto bitmap = std::make_unique<Gdiplus::Bitmap>(pixels, pixels, PixelFormat32bppARGB);
+        Gdiplus::BitmapData data{};
+        const Gdiplus::Rect lock(0, 0, pixels, pixels);
+        if (bitmap->LockBits(&lock, Gdiplus::ImageLockModeWrite, PixelFormat32bppARGB, &data) == Gdiplus::Ok) {
+            for (int y = 0; y < pixels; ++y) {
+                auto* row = static_cast<uint8_t*>(data.Scan0) + static_cast<std::size_t>(y) * data.Stride;
+                const uint8_t* source = rgba.data() + static_cast<std::size_t>(y) * pixels * 4;
+                for (int x = 0; x < pixels; ++x) {
+                    row[x * 4 + 0] = source[x * 4 + 2];
+                    row[x * 4 + 1] = source[x * 4 + 1];
+                    row[x * 4 + 2] = source[x * 4 + 0];
+                    row[x * 4 + 3] = source[x * 4 + 3];
+                }
+            }
+            bitmap->UnlockBits(&data);
+        }
+        icons[which] = std::move(bitmap);
+        iconSize = pixels;
+    }
+    canvas.DrawImage(icons[which].get(),
+                     Gdiplus::RectF(center.X - static_cast<Gdiplus::REAL>(pixels) / 2,
+                                    center.Y - static_cast<Gdiplus::REAL>(pixels) / 2,
+                                    static_cast<Gdiplus::REAL>(pixels), static_cast<Gdiplus::REAL>(pixels)));
 }
 
 void paintBorder()
@@ -1987,7 +2011,8 @@ void presentBorderWindow(double scale, const std::wstring& label)
     }
 }
 
-void showRegionBorder(uint32_t displayId, const RegionOfInterest& region, const std::string& attachedLabel)
+void showRegionBorder(uint32_t displayId, const RegionOfInterest& region, const std::string& attachedLabel,
+                      bool attached)
 {
     const auto geometry = geometryOfDisplay(displayId);
     if (!geometry) {
@@ -2012,7 +2037,8 @@ void showRegionBorder(uint32_t displayId, const RegionOfInterest& region, const 
     // nothing. Mid-entrance the live rect lags the target, so the
     // comparison is against the target.
     const bool visible = IsWindowVisible(g_border.window) != FALSE;
-    if (visible && EqualRect(&wanted, &g_border.appearTarget) && label == g_border.attachedLabel) {
+    if (visible && EqualRect(&wanted, &g_border.appearTarget) && label == g_border.attachedLabel &&
+        attached == g_border.attachedRegion) {
         return;
     }
 
@@ -2023,6 +2049,7 @@ void showRegionBorder(uint32_t displayId, const RegionOfInterest& region, const 
     g_border.region = wanted;
     g_border.appearTarget = wanted;
     g_border.attachedLabel = label;
+    g_border.attachedRegion = attached;
 
     const double scale = uiScale(g_border.window);
     if (!visible) {

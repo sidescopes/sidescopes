@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <atomic>
 #include <cstdint>
 #include <map>
@@ -29,6 +30,7 @@
 #include "modules/module_registry.h"
 #include "platform/desktop.h"
 #include "platform/graphics.h"
+#include "platform/icons.h"
 #include "platform/native_menu.h"
 #include "platform/region_selection.h"
 #include "platform/screen_capture.h"
@@ -214,6 +216,16 @@ private:
     [[nodiscard]] ImVec2 paneSizePixels(std::string_view id, float density) const;
     [[nodiscard]] std::pair<int, int> desiredWaveformSize(float density, int regionWidth) const;
     [[nodiscard]] std::pair<int, int> desiredHistogramSize(float density) const;
+
+    /// A lazily rasterized texture for one of the embedded set's icons,
+    /// rebuilt when the requested pixel size changes with the display.
+    struct IconTexture
+    {
+        std::unique_ptr<ScopeTexture> texture;
+        int sizePixels = 0;
+    };
+
+    [[nodiscard]] ImTextureID iconTextureId(Icon icon, int sizePixels);
     [[nodiscard]] int desiredVectorscopeSize(float density) const;
 
     // --- frame UI ---
@@ -334,6 +346,7 @@ private:
 
     std::map<uint64_t, AppFacePin> m_facePins;
     FacePinProbe m_facePinProbe;
+    std::array<IconTexture, IconCount> m_iconTextures;
     double m_nextFacePinProbe = 0.0;
     /// True while the active pin's face is not confirmed where the region
     /// sits; the border hides instead of outlining stale content.

@@ -76,3 +76,7 @@ the switch in System Settings only takes effect after the app restarts.
 
 SideScopes is free and open-source software, licensed under the
 [GNU GPL v3.0 or later](LICENSE).
+
+Bundled components: Dear ImGui (MIT), GLFW (zlib), Catch2 (BSL-1.0),
+nlohmann/json (MIT), NanoSVG (zlib). Icons from [Lucide](https://lucide.dev)
+(ISC).

@@ -121,7 +121,9 @@ void setRegionPickChipColor(const std::optional<FloatColor>& color);
 /// @p label is always worn on the strip row above the band - the tracked
 /// window's title for an attached region, the display's name for the
 /// global one - with the attach toggle at the label's fixed left end.
-void showRegionBorder(uint32_t displayId, const RegionOfInterest& region, const std::string& label);
+/// @p attached picks the toggle's glyph, which shows the STATE: the pin
+/// on an attached region, the struck-through pin on the global one.
+void showRegionBorder(uint32_t displayId, const RegionOfInterest& region, const std::string& label, bool attached);
 void hideRegionBorder();
 
 /// The border's in-progress or just-finished adjustment, if any.
