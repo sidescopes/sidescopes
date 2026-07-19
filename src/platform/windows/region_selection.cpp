@@ -399,8 +399,8 @@ struct BorderState
     int paintedHeight = 0;
     double paintedScale = 0.0;
     // Non-empty for a window-attached region: the tracked application's
-    // name, worn above the band, with the measurement dashes taking a warm
-    // tint - the subtle tell that this region belongs to a window.
+    // name, worn above the band - the tell that this region belongs to a
+    // window.
     std::wstring attachedLabel;
     std::wstring paintedLabel;
     // The entrance animation: the rect the border is heading to (region
@@ -676,12 +676,12 @@ void paintDrawScene(PickerState& picker, Gdiplus::Graphics& canvas, double scale
 {
     // Constrained (attached) drawing spotlights the target window: a hard
     // dim everywhere else, the window under the usual light veil, rimmed in
-    // the attached regions' warm tone.
+    // a neutral rim.
     Gdiplus::SolidBrush dim(Gdiplus::Color(picker.constrained ? 140 : 89, 0, 0, 0));
     canvas.FillRectangle(&dim, bounds);
     if (picker.constrained) {
         punchRect(canvas, picker.constraintRect);
-        Gdiplus::Pen spotlight(Gdiplus::Color(230, 255, 214, 140), static_cast<Gdiplus::REAL>(1.5 * scale));
+        Gdiplus::Pen spotlight(Gdiplus::Color(230, 247, 247, 247), static_cast<Gdiplus::REAL>(1.5 * scale));
         canvas.DrawRectangle(&spotlight, picker.constraintRect);
     }
     if (picker.dragging) {
@@ -1271,11 +1271,10 @@ void paintBorderEdgeRing(Gdiplus::Graphics& canvas, const Gdiplus::RectF& region
     Gdiplus::SolidBrush ringBrush(Gdiplus::Color(217, 26, 26, 26));
     canvas.FillRectangle(&ringBrush, stripeHole);
     canvas.ResetClip();
-    // The attached region's dashes take a warm tint - enough to tell the two
-    // region kinds apart at a glance, calm enough beside a photograph.
-    const Gdiplus::Color dashTone =
-        g_border.attachedLabel.empty() ? Gdiplus::Color(242, 247, 247, 247) : Gdiplus::Color(242, 255, 214, 140);
-    Gdiplus::Pen dashPen(dashTone, ring);
+    // Neutral greys only, both region kinds: any hue this close to the
+    // sampled pixels would skew the eye's read of the photograph. The
+    // label above the band is what tells an attached region apart.
+    Gdiplus::Pen dashPen(Gdiplus::Color(242, 247, 247, 247), ring);
     const Gdiplus::REAL dashPattern[2] = {static_cast<Gdiplus::REAL>(4.0 * scale / (ring > 0 ? ring : 1)),
                                           static_cast<Gdiplus::REAL>(4.0 * scale / (ring > 0 ? ring : 1))};
     dashPen.SetDashPattern(dashPattern, 2);
@@ -1345,7 +1344,7 @@ void paintBorderLabel(Gdiplus::Graphics& canvas, const Gdiplus::RectF& region, d
     const Gdiplus::RectF tab(tabX, centreY - measured.Height / 2 - padY, tabWidth, measured.Height + 2 * padY);
     Gdiplus::SolidBrush plate(Gdiplus::Color(217, 26, 26, 26));
     canvas.FillRectangle(&plate, tab);
-    Gdiplus::Pen rim(Gdiplus::Color(153, 255, 214, 140), static_cast<Gdiplus::REAL>(1.0 * scale));
+    Gdiplus::Pen rim(Gdiplus::Color(153, 190, 190, 190), static_cast<Gdiplus::REAL>(1.0 * scale));
     canvas.DrawRectangle(&rim, tab);
     Gdiplus::StringFormat format;
     format.SetFormatFlags(Gdiplus::StringFormatFlagsNoWrap);
@@ -2063,7 +2062,7 @@ void showAttachedEditDim(uint32_t displayId, const RegionOfInterest& windowRegio
     Gdiplus::SolidBrush clear(Gdiplus::Color(0, 0, 0, 0));
     canvas.FillRectangle(&clear, holeLocal);
     canvas.SetCompositingMode(Gdiplus::CompositingModeSourceOver);
-    Gdiplus::Pen rim(Gdiplus::Color(230, 255, 214, 140), 1.5f);
+    Gdiplus::Pen rim(Gdiplus::Color(230, 247, 247, 247), 1.5f);
     canvas.DrawRectangle(&rim, holeLocal);
 
     // Below the border in the topmost band: the veil must never cover the

@@ -401,7 +401,7 @@ NSCursor* buildPinCursor(const std::optional<FloatColor>& color)
 // Freeform drawing: a heavier dim, and the dragged rectangle punched clear.
 // A constraint (the attached draw) spotlights the target window instead: a
 // hard dim everywhere else, the window itself under the usual light veil,
-// rimmed in the attached regions' warm tone.
+// rimmed neutrally.
 - (void)drawDrawModeOverlay
 {
     const BOOL constrained = !NSIsEmptyRect(self.constraintRect);
@@ -409,7 +409,7 @@ NSCursor* buildPinCursor(const std::optional<FloatColor>& color)
     NSRectFillUsingOperation(self.bounds, NSCompositingOperationSourceOver);
     if (constrained) {
         [self punchRect:self.constraintRect];
-        [[NSColor colorWithSRGBRed:1.0 green:0.84 blue:0.55 alpha:0.9] setStroke];
+        [[NSColor colorWithWhite:0.97 alpha:0.9] setStroke];
         NSBezierPath* spotlight = [NSBezierPath bezierPathWithRect:self.constraintRect];
         spotlight.lineWidth = 1.5;
         [spotlight stroke];
@@ -701,7 +701,7 @@ NSCursor* buildPinCursor(const std::optional<FloatColor>& color)
 @property(nonatomic, assign) BOOL closePressed;
 // Non-empty for a window-attached region: the tracked application's name,
 // worn as a small tab above the band, with the measurement dashes taking a
-// warm tint - the subtle tell that this region belongs to a window.
+// label being the tell that this region belongs to a window.
 @property(nonatomic, copy) NSString* attachedLabel;
 // Extra top strip carrying the attached label, zero when unattached; the
 // region math below subtracts it so every zone stays anchored to the band.
@@ -804,13 +804,10 @@ NSCursor* buildPinCursor(const std::optional<FloatColor>& color)
     dashes.lineWidth = sidescopes::EdgeRing;
     const CGFloat dash[2] = {4.0, 4.0};
     [dashes setLineDash:dash count:2 phase:0];
-    // The attached region's dashes take a warm tint - enough to tell the two
-    // region kinds apart at a glance, calm enough to sit beside a photograph.
-    if (self.attachedLabel.length > 0) {
-        [[NSColor colorWithSRGBRed:1.0 green:0.84 blue:0.55 alpha:0.95] setStroke];
-    } else {
-        [[NSColor colorWithWhite:0.97 alpha:0.95] setStroke];
-    }
+    // Neutral greys only, both region kinds: any hue this close to the
+    // sampled pixels would skew the eye's read of the photograph. The
+    // label above the band is what tells an attached region apart.
+    [[NSColor colorWithWhite:0.97 alpha:0.95] setStroke];
     [dashes stroke];
 }
 
@@ -849,7 +846,7 @@ NSCursor* buildPinCursor(const std::optional<FloatColor>& color)
     NSBezierPath* plate = [NSBezierPath bezierPathWithRoundedRect:tab xRadius:4 yRadius:4];
     [[NSColor colorWithWhite:0.1 alpha:0.85] setFill];
     [plate fill];
-    [[NSColor colorWithSRGBRed:1.0 green:0.84 blue:0.55 alpha:0.6] setStroke];
+    [[NSColor colorWithWhite:0.75 alpha:0.6] setStroke];
     plate.lineWidth = 1.0;
     [plate stroke];
     [self.attachedLabel drawInRect:NSInsetRect(tab, padX, padY) withAttributes:attributes];
@@ -1145,7 +1142,7 @@ NSCursor* buildPinCursor(const std::optional<FloatColor>& color)
     veil.windingRule = NSWindingRuleEvenOdd;
     [[NSColor colorWithWhite:0 alpha:0.45] setFill];
     [veil fill];
-    [[NSColor colorWithSRGBRed:1.0 green:0.84 blue:0.55 alpha:0.9] setStroke];
+    [[NSColor colorWithWhite:0.97 alpha:0.9] setStroke];
     NSBezierPath* rim = [NSBezierPath bezierPathWithRect:self.holeRect];
     rim.lineWidth = 1.5;
     [rim stroke];
