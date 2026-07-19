@@ -225,4 +225,19 @@ std::vector<std::size_t> meaningfulPickCandidates(const std::vector<LocalRect>& 
     return candidates;
 }
 
+TabLayout borderTabLayout(double availableWidth, double pinZone, double textPad, double measuredText,
+                          double minimumText)
+{
+    TabLayout layout;
+    const double maximumText = availableWidth - pinZone - 2.0 * textPad;
+    if (maximumText < minimumText) {
+        return layout;  // a region too small for any legible label
+    }
+    layout.visible = true;
+    layout.textWidth = std::min(measuredText, maximumText);
+    layout.tabWidth = pinZone + layout.textWidth + 2.0 * textPad;
+
+    return layout;
+}
+
 }  // namespace sidescopes

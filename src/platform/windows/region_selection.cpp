@@ -1366,14 +1366,16 @@ void paintBorderLabel(Gdiplus::Graphics& canvas, const Gdiplus::RectF& region, d
     const auto pad = static_cast<Gdiplus::REAL>(WindowPad * scale);
     const Gdiplus::REAL surfaceWidth = region.Width + 2 * pad;
     const auto triangleZone = static_cast<Gdiplus::REAL>(TabPinZone * scale);
-    const Gdiplus::REAL maxTextWidth = surfaceWidth - pad - triangleZone - margin - 2 * padX;
-    if (maxTextWidth < static_cast<Gdiplus::REAL>(16.0 * scale)) {
-        return;  // a region too small for any legible label
-    }
-    const Gdiplus::REAL textWidth = std::min(measured.Width, maxTextWidth);
     // The tab holds the attach toggle at its fixed left end, then the
-    // text; left-aligned with the region's own corner.
-    const Gdiplus::REAL tabWidth = triangleZone + textWidth + 2 * padX;
+    // text; left-aligned with the region's own corner. The shared layout
+    // keeps both platforms' degradation on small regions identical.
+    const TabLayout layout =
+        borderTabLayout(surfaceWidth - pad - margin, triangleZone, padX, measured.Width, 16.0 * scale);
+    if (!layout.visible) {
+        return;
+    }
+    const auto textWidth = static_cast<Gdiplus::REAL>(layout.textWidth);
+    const auto tabWidth = static_cast<Gdiplus::REAL>(layout.tabWidth);
     const Gdiplus::REAL tabX = region.X;
     const Gdiplus::REAL centreY = region.Y - static_cast<Gdiplus::REAL>((WindowPad + LabelBand / 2) * scale);
     const Gdiplus::RectF tab(tabX, centreY - measured.Height / 2 - padY, tabWidth, measured.Height + 2 * padY);

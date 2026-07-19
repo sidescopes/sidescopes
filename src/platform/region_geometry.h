@@ -88,4 +88,25 @@ inline constexpr double MinimumVisibleFraction = 0.15;
 /// @return candidate indices into @p windows, frontmost first.
 [[nodiscard]] std::vector<std::size_t> meaningfulPickCandidates(const std::vector<LocalRect>& windows);
 
+/// The label tab's width budget on the border's strip row: the pin zone
+/// leads, the text follows with @p textPad on both sides, and a region
+/// too small for legible text shows no tab at all. Both platforms lay the
+/// tab out through this one function, so the degradation ladder on
+/// shrinking regions stays identical - and tested.
+struct TabLayout
+{
+    bool visible = false;
+    double textWidth = 0.0;
+    double tabWidth = 0.0;
+};
+
+/// @param availableWidth the room from the tab's left edge to the border
+///        surface's usable right edge.
+/// @param pinZone the attach toggle's reserved lead width.
+/// @param textPad the horizontal padding on each side of the text.
+/// @param measuredText the label's natural width.
+/// @param minimumText the narrowest text still worth showing.
+[[nodiscard]] TabLayout borderTabLayout(double availableWidth, double pinZone, double textPad, double measuredText,
+                                        double minimumText);
+
 }  // namespace sidescopes

@@ -303,4 +303,36 @@ TEST_CASE("Zero-area windows are neither visible nor occluding")
     CHECK(meaningfulPickCandidates(withDegenerateFront) == std::vector<std::size_t>{1});
 }
 
+TEST_CASE("The label tab steps down gracefully as the region narrows")
+{
+    // Wide: the text fits whole.
+    const TabLayout wide = borderTabLayout(400.0, 18.0, 6.0, 120.0, 16.0);
+    CHECK(wide.visible);
+    CHECK(wide.textWidth == 120.0);
+    CHECK(wide.tabWidth == 18.0 + 120.0 + 12.0);
+
+    // Narrower: the text truncates to the budget.
+    const TabLayout narrow = borderTabLayout(100.0, 18.0, 6.0, 120.0, 16.0);
+    CHECK(narrow.visible);
+    CHECK(narrow.textWidth == 100.0 - 18.0 - 12.0);
+    CHECK(narrow.tabWidth == 100.0);
+
+    // Too small for legible text: no tab at all.
+    const TabLayout tiny = borderTabLayout(40.0, 18.0, 6.0, 120.0, 16.0);
+    CHECK_FALSE(tiny.visible);
+    CHECK(tiny.tabWidth == 0.0);
+}
+
+TEST_CASE("The label tab never exceeds its budget")
+{
+    for (int step = 0; step <= 300; step += 7) {
+        const double available = static_cast<double>(step);
+        const TabLayout layout = borderTabLayout(available, 18.0, 6.0, 500.0, 16.0);
+        if (layout.visible) {
+            CHECK(layout.tabWidth <= available);
+            CHECK(layout.textWidth >= 16.0);
+        }
+    }
+}
+
 }  // namespace sidescopes

@@ -860,14 +860,16 @@ NSCursor* buildPinCursor(const std::optional<FloatColor>& color)
     const CGFloat padY = 2.0;
     const NSSize textSize = [self.attachedLabel sizeWithAttributes:attributes];
     const CGFloat tabX = NSMinX([self regionRect]);
-    const CGFloat maxTextWidth = self.bounds.size.width - tabX - sidescopes::TabPinZone - margin - 2 * padX;
-    if (maxTextWidth < 16) {
-        return;  // a region too small for any legible label
-    }
-    const CGFloat textWidth = std::min(textSize.width, maxTextWidth);
     // The tab holds the attach toggle at its fixed left end, then the
-    // text; left-aligned with the region's own corner.
-    const CGFloat tabWidth = sidescopes::TabPinZone + textWidth + 2 * padX;
+    // text; left-aligned with the region's own corner. The shared layout
+    // keeps both platforms' degradation on small regions identical.
+    const sidescopes::TabLayout layout = sidescopes::borderTabLayout(
+        self.bounds.size.width - tabX - margin, sidescopes::TabPinZone, padX, textSize.width, 16.0);
+    if (!layout.visible) {
+        return;
+    }
+    const CGFloat textWidth = layout.textWidth;
+    const CGFloat tabWidth = layout.tabWidth;
     const CGFloat centreY = NSMaxY(region) + sidescopes::WindowPad + self.labelBand / 2;
     const NSRect tab = NSMakeRect(tabX, centreY - textSize.height / 2 - padY, tabWidth, textSize.height + 2 * padY);
     NSBezierPath* plate = [NSBezierPath bezierPathWithRoundedRect:tab xRadius:4 yRadius:4];
