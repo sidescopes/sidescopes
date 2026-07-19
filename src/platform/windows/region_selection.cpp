@@ -1357,7 +1357,9 @@ void paintBorderLabel(Gdiplus::Graphics& canvas, const Gdiplus::RectF& region, d
     // The tab hugs the text but never leaves the window: a title wider than
     // the region truncates at its tail, Preview-style, instead of being
     // clipped sharply at both ends by the surface bounds.
-    Gdiplus::Font font(L"Segoe UI", static_cast<Gdiplus::REAL>(10.0 * scale));
+    const Gdiplus::FontFamily family(L"Segoe UI");
+    const Gdiplus::Font font(&family, static_cast<Gdiplus::REAL>(10.0 * scale), Gdiplus::FontStyleRegular,
+                             Gdiplus::UnitPixel);
     Gdiplus::RectF measured;
     canvas.MeasureString(g_border.attachedLabel.c_str(), -1, &font, Gdiplus::PointF(0, 0), &measured);
     const auto padX = static_cast<Gdiplus::REAL>(6.0 * scale);
