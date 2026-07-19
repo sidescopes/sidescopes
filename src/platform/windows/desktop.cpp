@@ -21,6 +21,11 @@
 #include "platform/windows/display_identity.h"
 #include "platform/windows/wide_strings.h"
 
+// Windows 10 2004; absent from older SDKs.
+#ifndef WDA_EXCLUDEFROMCAPTURE
+#define WDA_EXCLUDEFROMCAPTURE 0x00000011
+#endif
+
 namespace sidescopes {
 namespace {
 
@@ -339,8 +344,40 @@ namespace {
 
 std::function<void()> g_foregroundCallback;
 
-void CALLBACK foregroundWinEvent(HWINEVENTHOOK, DWORD, HWND, LONG, LONG, DWORD, DWORD)
+// The shell surfaces that take the foreground mid focus switch: the alt-tab
+// and task-view hosts and the staging window foreground changes pass
+// through. The user works in none of them, so none may reroute the region.
+bool isFocusTransitionSurface(HWND window)
 {
+    wchar_t className[64];
+    const int length = GetClassNameW(window, className, 64);
+    if (length <= 0) {
+        return false;
+    }
+
+    return wcscmp(className, L"XamlExplorerHostIslandWindow") == 0 ||  // Windows 11 alt-tab and task view
+           wcscmp(className, L"MultitaskingViewFrame") == 0 ||         // Windows 10 alt-tab and task view
+           wcscmp(className, L"ForegroundStaging") == 0 ||             // transient staging between switches
+           wcscmp(className, L"TaskSwitcherWnd") == 0 ||               // classic alt-tab
+           wcscmp(className, L"TaskSwitcherOverlayWnd") == 0;
+}
+
+// The switcher's acrylic backdrop samples the desktop through a capture,
+// and a capture-excluded window is a hole in that sample the compositor
+// fills unstably - the covered part of the window flickers. While a
+// switcher surface holds the foreground the main window rejoins captures;
+// the exclusion returns with the next real foreground.
+void updateCaptureExclusion(HWND foreground)
+{
+    if (!g_mainWindow || captureExclusionDisabled()) {
+        return;
+    }
+    SetWindowDisplayAffinity(g_mainWindow, isFocusTransitionSurface(foreground) ? WDA_NONE : WDA_EXCLUDEFROMCAPTURE);
+}
+
+void CALLBACK foregroundWinEvent(HWINEVENTHOOK, DWORD, HWND hwnd, LONG, LONG, DWORD, DWORD)
+{
+    updateCaptureExclusion(hwnd);
     if (g_foregroundCallback) {
         g_foregroundCallback();
     }
@@ -460,24 +497,6 @@ void rememberApplicationWindow(void* nativeWindow)
 int64_t ownApplicationPid()
 {
     return static_cast<int64_t>(GetCurrentProcessId());
-}
-
-// The shell surfaces that take the foreground mid focus switch: the alt-tab
-// and task-view hosts and the staging window foreground changes pass
-// through. The user works in none of them, so none may reroute the region.
-bool isFocusTransitionSurface(HWND window)
-{
-    wchar_t className[64];
-    const int length = GetClassNameW(window, className, 64);
-    if (length <= 0) {
-        return false;
-    }
-
-    return wcscmp(className, L"XamlExplorerHostIslandWindow") == 0 ||  // Windows 11 alt-tab and task view
-           wcscmp(className, L"MultitaskingViewFrame") == 0 ||         // Windows 10 alt-tab and task view
-           wcscmp(className, L"ForegroundStaging") == 0 ||             // transient staging between switches
-           wcscmp(className, L"TaskSwitcherWnd") == 0 ||               // classic alt-tab
-           wcscmp(className, L"TaskSwitcherOverlayWnd") == 0;
 }
 
 int64_t foregroundApplicationPid()
