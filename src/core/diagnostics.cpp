@@ -263,7 +263,9 @@ DiagSpan::~DiagSpan()
     }
     const double elapsed =
         std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - m_begin).count();
-    diagLogf(m_channel, "%s_ms=%.3f", m_name, elapsed);
+    char message[128];
+    (void)std::snprintf(message, sizeof message, "%s_ms=%.3f", m_name, elapsed);
+    diagEmit(m_channel, message);
 }
 
 }  // namespace sidescopes

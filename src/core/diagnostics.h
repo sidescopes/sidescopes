@@ -64,23 +64,10 @@ void diagConfigure(const DiagConfig& config);
 /// Writes one finished line to the sink: "t=<seconds> <channel>
 /// <message>", where t counts from the sink's initialization on the
 /// steady clock - the single timeline every channel shares. A no-op when
-/// the sink is closed or the channel is off.
+/// the sink is closed or the channel is off. Prefer the SS_DIAG macro,
+/// which formats printf-style and skips all evaluation when the channel
+/// is off.
 void diagEmit(DiagChannel channel, const char* message);
-
-/// Formats printf-style and emits the line on @p channel. Prefer the
-/// SS_DIAG macro, which skips argument evaluation when the channel is
-/// off.
-template <typename... Args>
-void diagLogf(DiagChannel channel, const char* format, Args... args)
-{
-    if constexpr (sizeof...(Args) == 0) {
-        diagEmit(channel, format);
-    } else {
-        char message[1024];
-        (void)std::snprintf(message, sizeof(message), format, args...);
-        diagEmit(channel, message);
-    }
-}
 
 /// Measures a scope's wall time and logs it as one "<name>_ms=<elapsed>"
 /// line when the scope closes - the aggregatable shape performance questions
@@ -107,13 +94,18 @@ private:
 }  // namespace sidescopes
 
 /// Logs printf-style to a diagnostic channel by bare name:
-/// SS_DIAG(Border, "hide visible=%d", visible). Arguments are not evaluated
-/// unless the channel is enabled, so call sites may include syscalls.
-#define SS_DIAG(channel, ...)                                                    \
-    do {                                                                         \
-        if (sidescopes::diagEnabled(sidescopes::DiagChannel::channel)) {         \
-            sidescopes::diagLogf(sidescopes::DiagChannel::channel, __VA_ARGS__); \
-        }                                                                        \
+/// SS_DIAG(Border, "hide visible=%d", visible). The format string meets
+/// snprintf right here in the expansion, so every compiler checks it
+/// against its arguments; neither the arguments nor the formatting cost
+/// anything when the channel is off, so call sites may include syscalls.
+/// A literal percent in the message needs %% like any format string.
+#define SS_DIAG(channel, ...)                                                      \
+    do {                                                                           \
+        if (sidescopes::diagEnabled(sidescopes::DiagChannel::channel)) {           \
+            char ssDiagMessage[1024];                                              \
+            (void)std::snprintf(ssDiagMessage, sizeof ssDiagMessage, __VA_ARGS__); \
+            sidescopes::diagEmit(sidescopes::DiagChannel::channel, ssDiagMessage); \
+        }                                                                          \
     } while (false)
 
 /// Times the rest of the enclosing scope on a channel by bare name:

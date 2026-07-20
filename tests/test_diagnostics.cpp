@@ -99,7 +99,7 @@ TEST_CASE("A disabled channel stays out of the file even when called directly")
 {
     const std::string path = "diag-test-direct.log";
     sidescopes::diagConfigure({"attach", path});
-    sidescopes::diagLogf(sidescopes::DiagChannel::Border, "must not appear");
+    sidescopes::diagEmit(sidescopes::DiagChannel::Border, "must not appear");
     sidescopes::diagConfigure({});
     const std::string content = readAll(path);
     CHECK(content.find("must not appear") == std::string::npos);
