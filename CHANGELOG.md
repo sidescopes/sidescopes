@@ -4,6 +4,61 @@ All notable changes to this project are documented in this file. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-07-20
+
+### Added
+
+- Regions attached to windows: the window mode (A) clicks a window - or
+  draws a region inside one - and the region rides with that window from
+  then on, gluing to it through moves and resizes and appearing only
+  while the window is focused. Preview panels owned by helper processes
+  (Quick Look among them) attach like any other window. One region type
+  at a time: picking a window parks the global region until the
+  attachment ends.
+- Face regions: picking a face (F) pins the region to it and follows the
+  face through pans, zooms, and crops; a face that stays gone dissolves
+  the region rather than leave it outlining stale content.
+- The region border grew a label band: the window title (or the display
+  name for the global region), a pin button that attaches or releases
+  the region without re-picking, and the close button. The border fades
+  and settles into place when it appears, takes the keyboard on click,
+  and Escape dismisses it.
+- One icon set on every platform, rasterized from embedded SVG sources:
+  the toolbar and the border wear the same glyphs on macOS and Windows.
+- Built-in diagnostics: a Diagnostics submenu in the context menu
+  records a timestamped log of routing and border decisions ("Record
+  Diagnostic Log", "Show Diagnostic Log"), and SIDESCOPES_DIAG selects
+  individual channels for development use. Logging costs nothing when
+  off and at most ten writes a second while recording.
+- Windows: "Show in Screen Captures" in the Diagnostics menu makes the
+  SideScopes windows visible to screenshots for the session; they
+  normally hide from captures so the scopes never analyze themselves.
+
+### Changed
+
+- Border colors settled: neutral grey chrome beside the photo, with one
+  warm tone reserved for transient cues (window hover, draw spotlight,
+  edit veil), and the drag outline wears the same dashes as the settled
+  border.
+- Fixed-width values across the picker sit on their labels' baseline
+  instead of riding above it.
+- The developer dumps (window suggestions, face-pin verdicts) merged
+  into the diagnostics channels; SIDESCOPES_DEBUG_SUGGESTIONS and
+  SIDESCOPES_FACEPIN_LOG are gone.
+
+### Fixed
+
+- Windows: the border label sized in device pixels instead of doubling
+  under display scaling, alt-tab no longer reroutes the region
+  mid-switch or flickers the acrylic backdrop, and moving the border
+  between regions of different sizes no longer flashes the outgoing
+  frame.
+- Focus routing holds a tracked window's region through a click's empty
+  focus handoff, and a focused tracked window can no longer have its
+  region stolen by a stale window order.
+- Small regions stay movable: resize zones never take more than a sixth
+  of an edge.
+
 ## [0.2.0] - 2026-07-17
 
 ### Added
