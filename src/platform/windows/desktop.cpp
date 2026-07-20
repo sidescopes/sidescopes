@@ -18,6 +18,7 @@
 #include <string>
 #include <vector>
 
+#include "platform/windows/capture_visibility.h"
 #include "platform/windows/display_identity.h"
 #include "platform/windows/wide_strings.h"
 
@@ -148,6 +149,17 @@ BOOL CALLBACK collectWindow(HWND window, LPARAM context)
 // The main application window, remembered so hideApplication can target it:
 // Windows has no application-wide hide.
 HWND g_mainWindow = nullptr;
+
+// The session's capture visibility: screen captures see this
+// application's windows while set. Launches hidden unless the
+// environment's blanket override starts it visible; the menu toggle
+// owns it from there.
+bool& captureVisibleFlag()
+{
+    static bool visible = captureExclusionDisabled();
+
+    return visible;
+}
 
 HWND windowFromIdentity(uint64_t identity)
 {
@@ -366,13 +378,15 @@ bool isFocusTransitionSurface(HWND window)
 // and a capture-excluded window is a hole in that sample the compositor
 // fills unstably - the covered part of the window flickers. While a
 // switcher surface holds the foreground the main window rejoins captures;
-// the exclusion returns with the next real foreground.
+// the exclusion returns with the next real foreground, unless the
+// visibility toggle keeps the windows capturable anyway.
 void updateCaptureExclusion(HWND foreground)
 {
-    if (!g_mainWindow || captureExclusionDisabled()) {
+    if (!g_mainWindow) {
         return;
     }
-    SetWindowDisplayAffinity(g_mainWindow, isFocusTransitionSurface(foreground) ? WDA_NONE : WDA_EXCLUDEFROMCAPTURE);
+    SetWindowDisplayAffinity(
+        g_mainWindow, captureVisibleFlag() || isFocusTransitionSurface(foreground) ? WDA_NONE : WDA_EXCLUDEFROMCAPTURE);
 }
 
 void CALLBACK foregroundWinEvent(HWINEVENTHOOK, DWORD, HWND hwnd, LONG, LONG, DWORD, DWORD)
@@ -555,6 +569,44 @@ bool captureExclusionDisabled()
     }();
 
     return disabled;
+}
+
+bool captureWindowsVisible()
+{
+    return captureVisibleFlag();
+}
+
+bool captureVisible()
+{
+    return captureVisibleFlag();
+}
+
+bool captureVisibilityToggleSupported()
+{
+    return true;
+}
+
+namespace {
+
+BOOL CALLBACK applyCaptureAffinity(HWND window, LPARAM)
+{
+    DWORD processId = 0;
+    GetWindowThreadProcessId(window, &processId);
+    if (processId == GetCurrentProcessId()) {
+        SetWindowDisplayAffinity(window, captureWindowsVisible() ? WDA_NONE : WDA_EXCLUDEFROMCAPTURE);
+    }
+
+    return TRUE;
+}
+
+}  // namespace
+
+void setCaptureVisibility(bool visible)
+{
+    captureVisibleFlag() = visible;
+    // Every window of this process, whatever module created it: the main
+    // window, the region border, and any picker overlay alive right now.
+    EnumWindows(applyCaptureAffinity, 0);
 }
 
 float monospaceFontScale()

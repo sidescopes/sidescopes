@@ -42,6 +42,7 @@ using std::min;
 #include "platform/desktop.h"
 #include "platform/face_detection.h"
 #include "platform/region_geometry.h"
+#include "platform/windows/capture_visibility.h"
 #include "platform/windows/wide_strings.h"
 
 namespace sidescopes {
@@ -1708,12 +1709,11 @@ HWND createOverlayWindow(const wchar_t* className, WNDPROC procedure, DWORD exSt
     RegisterClassExW(&windowClass);  // idempotent; re-registration fails harmlessly
     HWND window = CreateWindowExW(exStyle, className, L"", WS_POPUP, 0, 0, 0, 0, nullptr, nullptr, instance, nullptr);
     // Our own surfaces must never reach the scopes; duplication has no
-    // application-level exclusion, so each window excludes itself. Best
-    // effort: unsupported before Windows 10 2004.
+    // application-level exclusion, so each window excludes itself unless
+    // the visibility toggle holds. Best effort: unsupported before
+    // Windows 10 2004.
     if (window) {
-        if (!captureExclusionDisabled()) {
-            SetWindowDisplayAffinity(window, WDA_EXCLUDEFROMCAPTURE);
-        }
+        SetWindowDisplayAffinity(window, captureWindowsVisible() ? WDA_NONE : WDA_EXCLUDEFROMCAPTURE);
     }
     return window;
 }

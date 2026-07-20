@@ -248,6 +248,25 @@ void rememberApplicationWindow(void* nativeWindow);
 /// API otherwise. Read once at first use.
 [[nodiscard]] bool captureExclusionDisabled();
 
+/// Whether screen captures can be asked to include this application's
+/// windows at runtime. True on Windows, whose windows hide from every
+/// capture - screenshots included - because duplication has no
+/// per-application exclusion; false on macOS, where screenshots always
+/// see the application and only its own capture stream excludes it.
+[[nodiscard]] bool captureVisibilityToggleSupported();
+
+/// Shows or hides every window of this application to screen captures
+/// (screenshots, recorders). Hidden is the launch default - keeping the
+/// scopes out of their own analysis - unless SIDESCOPES_NO_CAPTURE_EXCLUSION
+/// started the session visible; the change reaches the windows already on
+/// screen immediately. A no-op where unsupported.
+void setCaptureVisibility(bool visible);
+
+/// Whether screen captures currently see this application's windows - the
+/// truth behind the menu checkbox, whichever way visibility was switched.
+/// Always true on macOS, where system captures see every application.
+[[nodiscard]] bool captureVisible();
+
 /// Invokes the callback - on the platform's main-thread event context -
 /// whenever the display or the user session wakes up. Capture streams
 /// survive those transitions as zombies that look alive but deliver

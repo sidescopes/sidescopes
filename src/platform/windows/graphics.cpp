@@ -25,6 +25,7 @@
 #include "imgui_impl_opengl3.h"
 #include "platform/desktop.h"
 #include "platform/graphics.h"
+#include "platform/windows/capture_visibility.h"
 
 // Windows 10 2004; absent from older SDKs.
 #ifndef WDA_EXCLUDEFROMCAPTURE
@@ -108,11 +109,11 @@ public:
         glfwSwapInterval(0);
         // The scope window must never reach its own scopes: duplication
         // has no application-level capture exclusion, so the window
-        // excludes itself. Best effort: unsupported before Windows 10
-        // 2004, where the analysis-side masking still applies.
-        if (!captureExclusionDisabled()) {
-            SetWindowDisplayAffinity(glfwGetWin32Window(window), WDA_EXCLUDEFROMCAPTURE);
-        }
+        // excludes itself unless the visibility toggle holds. Best
+        // effort: unsupported before Windows 10 2004, where the
+        // analysis-side masking still applies.
+        SetWindowDisplayAffinity(glfwGetWin32Window(window),
+                                 captureWindowsVisible() ? WDA_NONE : WDA_EXCLUDEFROMCAPTURE);
         if (!ImGui_ImplGlfw_InitForOpenGL(window, true)) {
             return false;
         }

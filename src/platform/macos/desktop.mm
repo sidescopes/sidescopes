@@ -464,6 +464,22 @@ bool captureExclusionDisabled()
     return disabled;
 }
 
+bool captureVisibilityToggleSupported()
+{
+    // Screenshots always see the application here; only its own capture
+    // stream excludes it, so there is nothing to toggle.
+    return false;
+}
+
+void setCaptureVisibility(bool)
+{
+}
+
+bool captureVisible()
+{
+    return true;
+}
+
 float monospaceFontScale()
 {
     // SF Mono and Menlo already sit within a few percent of the interface
