@@ -697,14 +697,17 @@ ImU32 pickerLabelShadow(const FloatColor& under)
 }
 
 // One string over its shadow, in an optional font: the hex rows pass the
-// fixed-width font, everything else draws in the interface font.
+// fixed-width font, everything else draws in the interface font. AddText
+// is top-aligned, so a passed font sinks by the ascent difference and
+// shares the interface font's baseline.
 void swatchText(ImDrawList* draw, const ImVec2& pos, ImU32 ink, ImU32 shadow, const char* text, ImFont* font = nullptr)
 {
+    const ImVec2 seated(pos.x, pos.y + (font ? hexFontBaselineDrop(font) : 0.0f));
     if (font) {
         ImGui::PushFont(font, font->LegacySize);
     }
-    draw->AddText(ImVec2(pos.x, pos.y + 1.0f), shadow, text);
-    draw->AddText(pos, ink, text);
+    draw->AddText(ImVec2(seated.x, seated.y + 1.0f), shadow, text);
+    draw->AddText(seated, ink, text);
     if (font) {
         ImGui::PopFont();
     }
@@ -1174,10 +1177,14 @@ void drawDeckRowSwatch(const PickerContext& ctx, std::size_t index, const DeckLa
 void drawDeckRowValues(const PickerContext& ctx, std::size_t index, const DeckLayout& layout, float rowPosY,
                        float textDrop)
 {
+    // textDrop tops the text where the row's framed neighbours top their
+    // labels; the ascent difference then seats the fixed-width text on
+    // the same baseline as the cross button beside it.
+    const float seat = textDrop + hexFontBaselineDrop(ctx.monospaceFont);
     char pinHex[8];
     pinHexOf(ctx.pins, index, pinHex);
     ImGui::SameLine(layout.hexX);
-    ImGui::SetCursorPosY(rowPosY + textDrop);
+    ImGui::SetCursorPosY(rowPosY + seat);
     pushHexFont(ctx.monospaceFont);
     ImGui::TextUnformatted(pinHex);
     popHexFont(ctx.monospaceFont);
@@ -1188,8 +1195,7 @@ void drawDeckRowValues(const PickerContext& ctx, std::size_t index, const DeckLa
     const ColorDifference pinDiff = differenceFrom(labFromSrgb(ctx.pins.color(index)), labFromSrgb(ctx.color));
     const auto numericCell = [&](float colRight, const char* value, const char* tip) {
         ImGui::SameLine(colRight - hexFontWidth(ctx.monospaceFont, value));
-        ImGui::SetCursorPosY(rowPosY + textDrop);
-        // The row centers its text by hand, so no baseline drop here.
+        ImGui::SetCursorPosY(rowPosY + seat);
         pushHexFont(ctx.monospaceFont);
         ImGui::TextDisabled("%s", value);
         popHexFont(ctx.monospaceFont);
