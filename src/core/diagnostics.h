@@ -41,9 +41,25 @@ struct DiagConfig
 /// application start. Harmless when diagnostics are off.
 void diagInit();
 
-/// Reconfigures the sink from @p config, closing any open log. Test seam;
-/// production code never calls it.
+/// Reconfigures the sink from @p config, closing any open log. The menu's
+/// recording toggle and the tests drive it; the environment configures
+/// only the initial state.
 void diagConfigure(const DiagConfig& config);
+
+/// @return Whether the sink is open and lines are being recorded - the
+///         truth behind the menu checkbox, whichever way recording was
+///         switched on.
+[[nodiscard]] bool diagRecording();
+
+/// @return The log file path recording writes to, or would write to: the
+///         configured path while the sink is open, the environment's or
+///         the default location otherwise.
+[[nodiscard]] std::string diagLogPath();
+
+/// @return The directory for this application's diagnostic files: a
+///         sidescopes folder inside the OS temp directory, created on
+///         first use so "show the log" always has a folder to open.
+[[nodiscard]] std::string diagDirectory();
 
 /// Writes one finished line to the sink: "t=<seconds> <channel>
 /// <message>", where t counts from the sink's initialization on the

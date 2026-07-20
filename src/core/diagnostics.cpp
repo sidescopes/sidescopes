@@ -4,6 +4,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <ctime>
+#include <filesystem>
 #include <iterator>
 
 #ifdef _WIN32
@@ -60,6 +61,7 @@ struct DiagState
     bool channels[static_cast<std::size_t>(DiagChannel::Count)] = {};
     bool flushEachLine = true;
     std::chrono::steady_clock::time_point start;
+    std::string path;
 };
 
 /// Enables every channel named in the comma list ("all" names them all),
@@ -92,15 +94,20 @@ void parseChannels(const std::string& list, DiagState& state)
 
 std::string defaultLogPath()
 {
-    std::string base = envValue("TEMP");
-    if (base.empty()) {
-        base = envValue("TMPDIR");
-    }
-    if (base.empty()) {
-        base = "/tmp";
+    return diagDirectory() + "/sidescopes-diag.log";
+}
+
+// The previous run's name keeps the extension - sidescopes-diag.prev.log -
+// so the kept log opens like any other.
+std::string previousLogPath(const std::string& path)
+{
+    const std::size_t slash = path.find_last_of("/\\");
+    const std::size_t dot = path.find_last_of('.');
+    if (dot == std::string::npos || (slash != std::string::npos && dot < slash)) {
+        return path + ".prev";
     }
 
-    return base + "/sidescopes-diag.log";
+    return path.substr(0, dot) + ".prev" + path.substr(dot);
 }
 
 // The run header: identifies the process and shows what the environment
@@ -145,7 +152,11 @@ void applyConfig(DiagState& state, const DiagConfig& config)
     }
     parseChannels(config.channels, state);
     const std::string path = config.filePath.empty() ? defaultLogPath() : config.filePath;
-    const std::string previous = path + ".prev";
+    // A custom path may name a directory that does not exist yet, like
+    // the default location's own subfolder.
+    std::error_code ignored;
+    std::filesystem::create_directories(std::filesystem::path(path).parent_path(), ignored);
+    const std::string previous = previousLogPath(path);
     std::remove(previous.c_str());
     std::rename(path.c_str(), previous.c_str());
     state.sink = openFile(path.c_str(), "w");
@@ -156,6 +167,7 @@ void applyConfig(DiagState& state, const DiagConfig& config)
     }
     state.flushEachLine = config.flushEachLine;
     state.start = std::chrono::steady_clock::now();
+    state.path = path;
     writeHeader(state.sink, config.channels, state);
 }
 
@@ -187,6 +199,38 @@ void diagInit()
 void diagConfigure(const DiagConfig& config)
 {
     applyConfig(diagState(), config);
+}
+
+bool diagRecording()
+{
+    return diagState().sink != nullptr;
+}
+
+std::string diagLogPath()
+{
+    const DiagState& state = diagState();
+    if (!state.path.empty()) {
+        return state.path;
+    }
+    const std::string configured = envValue("SIDESCOPES_DIAG_FILE");
+
+    return configured.empty() ? defaultLogPath() : configured;
+}
+
+std::string diagDirectory()
+{
+    std::string base = envValue("TEMP");
+    if (base.empty()) {
+        base = envValue("TMPDIR");
+    }
+    if (base.empty()) {
+        base = "/tmp";
+    }
+    const std::string directory = base + "/sidescopes";
+    std::error_code ignored;
+    std::filesystem::create_directories(directory, ignored);
+
+    return directory;
 }
 
 void diagEmit(DiagChannel channel, const char* message)

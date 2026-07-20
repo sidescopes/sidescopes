@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 #include <cstdio>
+#include <filesystem>
 #include <fstream>
 #include <sstream>
 #include <string>
@@ -22,13 +23,22 @@ bool fileExists(const std::string& path)
     return std::ifstream(path).good();
 }
 
+// The rotated name keeps the extension: diag-test-x.log becomes
+// diag-test-x.prev.log.
+std::string previousOf(const std::string& path)
+{
+    const std::size_t dot = path.find_last_of('.');
+
+    return path.substr(0, dot) + ".prev" + path.substr(dot);
+}
+
 // Each case uses its own file name: ctest may run cases as parallel
 // processes, and a shared sink would interleave runs.
 void cleanup(const std::string& path)
 {
     sidescopes::diagConfigure({});
     std::remove(path.c_str());
-    std::remove((path + ".prev").c_str());
+    std::remove(previousOf(path).c_str());
 }
 
 }  // namespace
@@ -148,14 +158,36 @@ TEST_CASE("With flushing off, lines still land once the sink closes")
     cleanup(path);
 }
 
-TEST_CASE("Reconfiguring rotates the previous log to .prev")
+TEST_CASE("A path into a missing directory creates it")
+{
+    const std::string path = "diag-test-dir/nested.log";
+    sidescopes::diagConfigure({"all", path});
+    CHECK(sidescopes::diagRecording());
+    CHECK(fileExists(path));
+    sidescopes::diagConfigure({});
+    std::filesystem::remove_all("diag-test-dir");
+}
+
+TEST_CASE("Recording state and path follow the configuration")
+{
+    const std::string path = "diag-test-state.log";
+    sidescopes::diagConfigure({"all", path});
+    CHECK(sidescopes::diagRecording());
+    CHECK(sidescopes::diagLogPath() == path);
+    sidescopes::diagConfigure({});
+    CHECK_FALSE(sidescopes::diagRecording());
+    CHECK_FALSE(sidescopes::diagLogPath().empty());
+    cleanup(path);
+}
+
+TEST_CASE("Reconfiguring rotates the previous log, extension kept")
 {
     const std::string path = "diag-test-rotate.log";
     sidescopes::diagConfigure({"attach", path});
     SS_DIAG(Attach, "first run");
     sidescopes::diagConfigure({"attach", path});
-    CHECK(fileExists(path + ".prev"));
-    CHECK(readAll(path + ".prev").find("first run") != std::string::npos);
+    CHECK(fileExists("diag-test-rotate.prev.log"));
+    CHECK(readAll("diag-test-rotate.prev.log").find("first run") != std::string::npos);
     CHECK(readAll(path).find("first run") == std::string::npos);
     cleanup(path);
 }
