@@ -1,9 +1,11 @@
 #include <catch2/catch_test_macros.hpp>
+#include <chrono>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
 #include <string>
+#include <thread>
 
 #include "core/diagnostics.h"
 
@@ -158,13 +160,39 @@ TEST_CASE("Timestamps carry microsecond precision")
     cleanup(path);
 }
 
-TEST_CASE("With flushing off, lines still land once the sink closes")
+TEST_CASE("With flushing on close only, lines still land there")
 {
     const std::string path = "diag-test-noflush.log";
-    sidescopes::diagConfigure({"all", path, false});
+    sidescopes::diagConfigure({"all", path, sidescopes::DiagFlush::OnClose});
     SS_DIAG(Attach, "buffered=1");
     sidescopes::diagConfigure({});
     CHECK(readAll(path).find("buffered=1") != std::string::npos);
+    cleanup(path);
+}
+
+TEST_CASE("Per-line flushing shows a line before the sink closes")
+{
+    const std::string path = "diag-test-perline.log";
+    sidescopes::diagConfigure({"all", path, sidescopes::DiagFlush::EveryLine});
+    SS_DIAG(Attach, "eager=1");
+    CHECK(readAll(path).find("eager=1") != std::string::npos);
+    sidescopes::diagConfigure({});
+    cleanup(path);
+}
+
+TEST_CASE("Interval flushing lands a line once the interval passes")
+{
+    const std::string path = "diag-test-interval.log";
+    sidescopes::diagConfigure({"all", path});
+    SS_DIAG(Attach, "beat=1");
+    std::this_thread::sleep_for(std::chrono::milliseconds(120));
+    SS_DIAG(Attach, "beat=2");
+    // The second line crossed the interval, so both are flushed while
+    // the sink stays open.
+    const std::string content = readAll(path);
+    CHECK(content.find("beat=1") != std::string::npos);
+    CHECK(content.find("beat=2") != std::string::npos);
+    sidescopes::diagConfigure({});
     cleanup(path);
 }
 

@@ -90,7 +90,9 @@ the picker's window offers and pick mapping, `facepin`: face-pin probe
 verdicts); the previous run
 is kept beside the log as `sidescopes-diag.prev.log`.
 `SIDESCOPES_DIAG_FILE` overrides the
-location, and `SIDESCOPES_DIAG_FLUSH=0` buffers writes so logging does
+location. Writes reach the disk on a short interval by default;
+`SIDESCOPES_DIAG_FLUSH=1` flushes every line when chasing a crash, and
+`SIDESCOPES_DIAG_FLUSH=0` buffers until recording stops so logging does
 not distort performance measurement.
 
 ## License

@@ -19,6 +19,20 @@ enum class DiagChannel
     Count         ///< Sentinel; keep last.
 };
 
+/// How often logged lines are pushed to disk. The default flushes on a
+/// bounded interval: live enough to tail, at most one write syscall per
+/// interval on the logging thread, and a crash loses no more than the
+/// interval - though a quiet channel's last line waits for the next
+/// event or the close. EveryLine (SIDESCOPES_DIAG_FLUSH=1) is
+/// crash-hunting mode; OnClose (SIDESCOPES_DIAG_FLUSH=0) is measurement
+/// mode, where any flush in a hot loop would distort what is measured.
+enum class DiagFlush
+{
+    EveryLine,
+    Interval,
+    OnClose
+};
+
 /// How the sink is set up. Production reads it from the environment on first
 /// use; tests inject one directly through diagConfigure.
 struct DiagConfig
@@ -27,10 +41,8 @@ struct DiagConfig
     std::string channels;
     /// The log file path; empty picks the default in the OS temp directory.
     std::string filePath;
-    /// Flush after every line - crash-safe and live-tailable, the default.
-    /// SIDESCOPES_DIAG_FLUSH=0 turns it off for measurement runs, where a
-    /// flush inside a hot loop would distort what is being measured.
-    bool flushEachLine = true;
+    /// When lines reach the disk; the bounded interval by default.
+    DiagFlush flush = DiagFlush::Interval;
 };
 
 /// @return Whether @p channel is enabled this run. The first call reads

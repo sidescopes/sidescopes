@@ -3725,7 +3725,7 @@ void App::dispatchViewMenu(int chosen)
     case MenuToggleDiagRecording:
         // The menu records everything; channel selection stays with the
         // SIDESCOPES_DIAG environment for development use.
-        diagConfigure(diagRecording() ? DiagConfig{} : DiagConfig{"all", "", true});
+        diagConfigure(diagRecording() ? DiagConfig{} : DiagConfig{"all", "", DiagFlush::Interval});
         break;
     case MenuShowDiagLog:
         openDiagLogFolder();

@@ -19,6 +19,11 @@ namespace sidescopes {
 
 namespace {
 
+// The bounded-interval flush cadence: short enough that a live tail and a
+// crash both see everything but the last beat, long enough that recording
+// costs the frame loop at most ten write syscalls a second.
+constexpr double FlushIntervalSeconds = 0.1;
+
 // Indexed by DiagChannel; the env-list parser and the line prefix share it.
 constexpr const char* ChannelNames[] = {"attach", "border", "suggestions", "facepin"};
 static_assert(std::size(ChannelNames) == static_cast<std::size_t>(DiagChannel::Count));
@@ -60,10 +65,20 @@ struct DiagState
 {
     std::FILE* sink = nullptr;
     bool channels[static_cast<std::size_t>(DiagChannel::Count)] = {};
-    bool flushEachLine = true;
+    DiagFlush flush = DiagFlush::Interval;
+    double lastFlushSeconds = 0.0;
     std::chrono::steady_clock::time_point start;
     std::string path;
 };
+
+DiagFlush flushFromEnv(const std::string& value)
+{
+    if (value == "0") {
+        return DiagFlush::OnClose;
+    }
+
+    return value.empty() ? DiagFlush::Interval : DiagFlush::EveryLine;
+}
 
 /// Enables every channel named in the comma list ("all" names them all),
 /// ignoring unknown tokens and surrounding spaces.
@@ -166,7 +181,7 @@ void applyConfig(DiagState& state, const DiagConfig& config)
 
         return;
     }
-    state.flushEachLine = config.flushEachLine;
+    state.flush = config.flush;
     state.start = std::chrono::steady_clock::now();
     state.path = path;
     writeHeader(state.sink, config.channels, state);
@@ -184,7 +199,7 @@ DiagState& diagState()
     static DiagState state = []() {
         DiagState fresh;
         applyConfig(fresh, DiagConfig{envValue("SIDESCOPES_DIAG"), envValue("SIDESCOPES_DIAG_FILE"),
-                                      envValue("SIDESCOPES_DIAG_FLUSH") != "0"});
+                                      flushFromEnv(envValue("SIDESCOPES_DIAG_FLUSH"))});
 
         return fresh;
     }();
@@ -249,8 +264,10 @@ void diagEmit(DiagChannel channel, const char* message)
     }
     const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - state.start).count();
     std::fprintf(state.sink, "t=%.6f %s %s\n", seconds, ChannelNames[static_cast<std::size_t>(channel)], message);
-    if (state.flushEachLine) {
+    if (state.flush == DiagFlush::EveryLine ||
+        (state.flush == DiagFlush::Interval && seconds - state.lastFlushSeconds >= FlushIntervalSeconds)) {
         std::fflush(state.sink);
+        state.lastFlushSeconds = seconds;
     }
 }
 
