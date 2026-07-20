@@ -72,13 +72,24 @@ tccutil reset ScreenCapture org.sidescopes.app
 Then relaunch SideScopes and grant the permission when prompted. Toggling
 the switch in System Settings only takes effect after the app restarts.
 
-**Diagnostic log.** Launch with `SIDESCOPES_DIAG=attach,border` (or `all`)
-in the environment to stream timestamped diagnostic lines to
-`sidescopes-diag.log` in the system temporary directory; the previous run
-is kept next to it as `.prev`. Channels: `attach` (window-focus routing),
-`border` (region-border drawing). `SIDESCOPES_DIAG_FILE` overrides the
-location, and `SIDESCOPES_DIAG_FLUSH=0` buffers writes so logging does not
-distort performance measurement. Attach the log when reporting a problem.
+**The Diagnostics menu.** Right-click and open Diagnostics when reporting
+a problem. "Record Diagnostic Log" streams timestamped state lines to
+`sidescopes-diag.log` in a `sidescopes` folder inside the system
+temporary directory while you reproduce the issue - "Show Diagnostic
+Log" opens that folder; attach the log to the report. It records window
+titles and application names, so glance over it before sharing. On
+Windows, "Show in Screen Captures" makes the SideScopes windows visible
+to screenshots, which they normally are not so the scopes never analyze
+themselves. "Reset to Defaults" returns everything to the standard state;
+so does a restart.
+
+For development use, `SIDESCOPES_DIAG=attach,border` (or `all`) starts
+recording from launch with only the named channels (`attach`:
+window-focus routing, `border`: region-border drawing); the previous run
+is kept beside the log as `sidescopes-diag.prev.log`.
+`SIDESCOPES_DIAG_FILE` overrides the
+location, and `SIDESCOPES_DIAG_FLUSH=0` buffers writes so logging does
+not distort performance measurement.
 
 ## License
 

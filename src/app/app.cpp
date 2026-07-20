@@ -81,6 +81,10 @@ enum MenuAction
     MenuToggleGraticule = 40,
     MenuClearPinnedMarkers,
     MenuPickPinColor,
+    MenuToggleCaptureVisibility,
+    MenuToggleDiagRecording,
+    MenuShowDiagLog,
+    MenuResetDiagnostics,
     MenuOpenSettings = 50,
     MenuAbout,
     MenuQuit,
@@ -3614,8 +3618,21 @@ void App::appendRegionAndAppSection(std::vector<NativeMenuItem>& menu)
     menuAction(menu, "Graticule", MenuToggleGraticule, m_view.graticule());
 
     menuSeparator(menu);
+    // Support tooling in one clearly named place; every checkbox reads
+    // the live truth, so a session started by the environment shows as
+    // switched on and can be switched off here. Reset restores the
+    // standard state however recording or visibility were enabled.
+    menuSubmenu(menu, "Diagnostics");
+    if (captureVisibilityToggleSupported()) {
+        menuAction(menu, "Show in Screen Captures", MenuToggleCaptureVisibility, captureVisible());
+    }
+    menuAction(menu, "Record Diagnostic Log", MenuToggleDiagRecording, diagRecording());
+    menuAction(menu, "Show Diagnostic Log", MenuShowDiagLog, false);
+    menuSeparator(menu);
+    menuAction(menu, "Reset to Defaults", MenuResetDiagnostics, false);
+    menuEndSubmenu(menu);
+    menuAction(menu, "Settings", MenuOpenSettings, false);
     menuAction(menu, "About SideScopes", MenuAbout, false);
-    menuAction(menu, "Settings...", MenuOpenSettings, false);
     menuAction(menu, "Quit", MenuQuit, false);
 }
 
@@ -3711,6 +3728,20 @@ void App::dispatchRegionMenu(int chosen)
     }
 }
 
+// Opens the folder holding the diagnostic log, so "send the log" is a
+// click instead of a hunt through the temp directory.
+void openDiagLogFolder()
+{
+    std::string folder = diagLogPath();
+    const std::size_t cut = folder.find_last_of("/\\");
+    if (cut != std::string::npos) {
+        folder.resize(cut);
+    }
+    std::replace(folder.begin(), folder.end(), '\\', '/');
+    const std::string url = (folder.front() == '/' ? "file://" : "file:///") + folder;
+    openUrl(url.c_str());
+}
+
 void App::dispatchViewMenu(int chosen)
 {
     switch (chosen) {
@@ -3725,6 +3756,23 @@ void App::dispatchViewMenu(int chosen)
         break;
     case MenuToggleGraticule:
         m_view.setGraticule(!m_view.graticule());
+        break;
+    case MenuToggleCaptureVisibility:
+        setCaptureVisibility(!captureVisible());
+        break;
+    case MenuToggleDiagRecording:
+        // The menu records everything; channel selection stays with the
+        // SIDESCOPES_DIAG environment for development use.
+        diagConfigure(diagRecording() ? DiagConfig{} : DiagConfig{"all", "", true});
+        break;
+    case MenuShowDiagLog:
+        openDiagLogFolder();
+        break;
+    case MenuResetDiagnostics:
+        setCaptureVisibility(false);
+        if (diagRecording()) {
+            diagConfigure(DiagConfig{});
+        }
         break;
     case MenuAbout:
         m_showAbout = true;
@@ -3888,7 +3936,7 @@ void App::dumpSuggestionsIfRequested(const std::vector<PickerDisplay>& pickerDis
     if (!debugSuggestionsRequested()) {
         return;
     }
-    std::FILE* report = openDebugFile("/tmp/sidescopes-suggestions.txt", "w");
+    std::FILE* report = openDebugFile((diagDirectory() + "/sidescopes-suggestions.txt").c_str(), "w");
     if (report) {
         for (const auto& entry : pickerDisplays) {
             for (const auto& suggestion : entry.windows) {
@@ -4229,7 +4277,7 @@ void App::dumpAttachMapping(const PickableWindow& picked, const RegionOfInterest
     if (!debugSuggestionsRequested()) {
         return;
     }
-    std::FILE* report = openDebugFile("/tmp/sidescopes-suggestions.txt", "a");
+    std::FILE* report = openDebugFile((diagDirectory() + "/sidescopes-suggestions.txt").c_str(), "a");
     if (report == nullptr) {
         return;
     }
