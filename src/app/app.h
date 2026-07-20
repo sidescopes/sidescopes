@@ -169,7 +169,6 @@ private:
     void probeRegionContentChange();
     [[nodiscard]] bool regionContentUnsettled() const;
     bool adoptFacePick(uint32_t displayId, const RegionOfInterest& confirmed);
-    void logFacePin(const std::string& line);
 
     /// A window the picker offered, remembered with its identity so a
     /// confirmed window pick can be turned into an attachment.

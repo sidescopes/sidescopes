@@ -259,34 +259,6 @@ void refreshFacePresence(AnalysisWorker& worker, uint32_t displayId, AppCallback
     }).detach();
 }
 
-// The secure-CRT deprecations make std::getenv and std::fopen hard errors
-// under MSVC's warnings-as-errors, so the debug-dump plumbing goes through
-// the annexes Microsoft accepts.
-std::FILE* openDebugFile(const char* path, const char* mode)
-{
-#ifdef _MSC_VER
-    std::FILE* file = nullptr;
-    return fopen_s(&file, path, mode) == 0 ? file : nullptr;
-#else
-    return std::fopen(path, mode);
-#endif
-}
-
-bool facePinLogRequested()
-{
-#ifdef _MSC_VER
-    char* value = nullptr;
-    std::size_t size = 0;
-    if (_dupenv_s(&value, &size, "SIDESCOPES_FACEPIN_LOG") != 0 || value == nullptr) {
-        return false;
-    }
-    std::free(value);
-    return true;
-#else
-    return std::getenv("SIDESCOPES_FACEPIN_LOG") != nullptr;
-#endif
-}
-
 void applyTheme()
 {
     ImGuiStyle& style = ImGui::GetStyle();
@@ -2486,14 +2458,12 @@ void App::consumeFacePinProbe(const AttachDecision& decision)
     }
     const bool wide = face_pin::searchingWide(pin->second.state);
     const FacePinDecision verdict = face_pin::decide(pin->second.state, candidates);
-    logFacePin((verdict.adopt ? "adopt: " : "hold: ") + verdict.reason + (wide ? " [wide]" : "") + " (" +
-               std::to_string(candidates.size()) + " candidates" +
-               (edgeDropped != 0 ? ", edge-dropped " + std::to_string(edgeDropped) : "") + "), anchor " +
-               std::to_string(pin->second.state.lastAnchor.centerX) + "," +
-               std::to_string(pin->second.state.lastAnchor.centerY));
+    SS_DIAG(FacePin, "%s reason='%s' wide=%d candidates=%zu edge-dropped=%zu anchor=%.1f,%.1f",
+            verdict.adopt ? "adopt" : "hold", verdict.reason.c_str(), wide ? 1 : 0, candidates.size(), edgeDropped,
+            pin->second.state.lastAnchor.centerX, pin->second.state.lastAnchor.centerY);
     m_facePinHunting = verdict.hunting;
     if (face_pin::givenUp(pin->second.state)) {
-        logFacePin("gave up - removing region");
+        SS_DIAG(FacePin, "gave up - removing region");
         removeLostFacePin(m_facePinProbe.forWindow);
 
         return;
@@ -4373,26 +4343,10 @@ bool App::adoptFacePick(uint32_t displayId, const RegionOfInterest& confirmed)
     m_facePins[host->identity] =
         AppFacePin{face_pin::makePin(anchor, pinRectFromPercent(confirmed, face->frameWidth, face->frameHeight)),
                    host->windowRect};
-    logFacePin("pinned to '" + host->application + "', anchor " + std::to_string(anchor.centerX) + "," +
-               std::to_string(anchor.centerY) + " width " + std::to_string(anchor.width));
+    SS_DIAG(FacePin, "pinned to '%s' anchor=%.1f,%.1f width=%.1f", host->application.c_str(), anchor.centerX,
+            anchor.centerY, anchor.width);
 
     return true;
-}
-
-// The spike's decision log, appended when SIDESCOPES_FACEPIN_LOG is set in
-// the environment: every probe verdict, for grading the gates against real
-// editing sessions.
-void App::logFacePin(const std::string& line)
-{
-    static const bool enabled = facePinLogRequested();
-    if (!enabled) {
-        return;
-    }
-    std::FILE* file = openDebugFile("/tmp/sidescopes-facepin.txt", "a");
-    if (file != nullptr) {
-        std::fprintf(file, "%9.2f %s\n", glfwGetTime(), line.c_str());
-        std::fclose(file);
-    }
 }
 
 void App::commitAnalysisChanges()
