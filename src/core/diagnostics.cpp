@@ -20,7 +20,7 @@ namespace sidescopes {
 namespace {
 
 // Indexed by DiagChannel; the env-list parser and the line prefix share it.
-constexpr const char* ChannelNames[] = {"attach", "border"};
+constexpr const char* ChannelNames[] = {"attach", "border", "suggestions"};
 static_assert(std::size(ChannelNames) == static_cast<std::size_t>(DiagChannel::Count));
 
 // The secure-CRT deprecations make std::getenv and std::fopen hard errors

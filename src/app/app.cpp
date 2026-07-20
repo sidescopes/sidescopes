@@ -262,21 +262,6 @@ void refreshFacePresence(AnalysisWorker& worker, uint32_t displayId, AppCallback
 // The secure-CRT deprecations make std::getenv and std::fopen hard errors
 // under MSVC's warnings-as-errors, so the debug-dump plumbing goes through
 // the annexes Microsoft accepts.
-bool debugSuggestionsRequested()
-{
-#ifdef _MSC_VER
-    char* value = nullptr;
-    std::size_t size = 0;
-    if (_dupenv_s(&value, &size, "SIDESCOPES_DEBUG_SUGGESTIONS") != 0 || value == nullptr) {
-        return false;
-    }
-    std::free(value);
-    return true;
-#else
-    return std::getenv("SIDESCOPES_DEBUG_SUGGESTIONS") != nullptr;
-#endif
-}
-
 std::FILE* openDebugFile(const char* path, const char* mode)
 {
 #ifdef _MSC_VER
@@ -3827,7 +3812,7 @@ void App::openRegionPicker()
         waitForBorderFreeFrame();
     }
     const std::vector<PickerDisplay> pickerDisplays = buildPickerDisplays();
-    dumpSuggestionsIfRequested(pickerDisplays);
+    logPickerSuggestions(pickerDisplays);
     if (beginRegionPick(pickerDisplays, *m_wantRegionPick)) {
         m_regionPicking = true;
         m_regionPickIsPin = *m_wantRegionPick == RegionPickerMode::PinColor;
@@ -3936,41 +3921,20 @@ const App::PickableWindow* App::matchPickedWindow(uint32_t displayId, const Regi
     return (best != nullptr && bestDelta <= MatchTolerance) ? best : nullptr;
 }
 
-void App::dumpSuggestionsIfRequested(const std::vector<PickerDisplay>& pickerDisplays)
+void App::logPickerSuggestions(const std::vector<PickerDisplay>& pickerDisplays)
 {
-    // Field diagnosis: dump exactly what the pipeline saw. Enable with
-    // `launchctl setenv SIDESCOPES_DEBUG_SUGGESTIONS 1`.
-    if (!debugSuggestionsRequested()) {
+    // Field diagnosis: exactly what the pipeline offered, one line per
+    // suggested window.
+    if (!diagEnabled(DiagChannel::Suggestions)) {
         return;
     }
-    std::FILE* report = openDebugFile((diagDirectory() + "/sidescopes-suggestions.txt").c_str(), "w");
-    if (report) {
-        for (const auto& entry : pickerDisplays) {
-            for (const auto& suggestion : entry.windows) {
-                std::fprintf(report, "display %u suggestion '%s' %.1f,%.1f..%.1f,%.1f%%\n", entry.displayId,
-                             suggestion.label.c_str(), suggestion.region.leftPercent, suggestion.region.topPercent,
-                             suggestion.region.rightPercent, suggestion.region.bottomPercent);
-            }
+    for (const auto& entry : pickerDisplays) {
+        for (const auto& suggestion : entry.windows) {
+            SS_DIAG(Suggestions, "display %u offer '%s' %.1f,%.1f..%.1f,%.1f%%", entry.displayId,
+                    suggestion.label.c_str(), suggestion.region.leftPercent, suggestion.region.topPercent,
+                    suggestion.region.rightPercent, suggestion.region.bottomPercent);
         }
-        std::fclose(report);
     }
-    // The dump is skipped when no frame is held.
-    (void)m_worker.withLatestFrame([&](const FrameView& view) {
-        std::FILE* image = openDebugFile("/tmp/sidescopes-frame.ppm", "wb");
-        if (!image) {
-            return;
-        }
-        std::fprintf(image, "P6\n%d %d\n255\n", view.width / 2, view.height / 2);
-        for (int py = 0; py < view.height - 1; py += 2) {
-            for (int px = 0; px < view.width - 1; px += 2) {
-                const Color color = view.colorAt(px, py);
-                std::fputc(color.r, image);
-                std::fputc(color.g, image);
-                std::fputc(color.b, image);
-            }
-        }
-        std::fclose(image);
-    });
 }
 
 void App::handleRegionBorderEdit()
@@ -4277,28 +4241,19 @@ RegionOfInterest quickStartRegion(const RegionOfInterest& window, const DisplayG
 }
 
 // Field diagnosis for the window-pick mapping: every rectangle in the
-// chain, appended to the suggestions dump. Enable with
-// `launchctl setenv SIDESCOPES_DEBUG_SUGGESTIONS 1`.
-void App::dumpAttachMapping(const PickableWindow& picked, const RegionOfInterest& start) const
+// chain, on the suggestions channel.
+void App::logAttachMapping(const PickableWindow& picked, const RegionOfInterest& start) const
 {
-    if (!debugSuggestionsRequested()) {
-        return;
-    }
-    std::FILE* report = openDebugFile((diagDirectory() + "/sidescopes-suggestions.txt").c_str(), "a");
-    if (report == nullptr) {
-        return;
-    }
-    std::fprintf(report, "pick window %llu list-rect %.1f,%.1f %.1fx%.1f offered %.2f,%.2f..%.2f,%.2f%%\n",
-                 static_cast<unsigned long long>(picked.identity), picked.windowRect.x, picked.windowRect.y,
-                 picked.windowRect.width, picked.windowRect.height, picked.region.leftPercent, picked.region.topPercent,
-                 picked.region.rightPercent, picked.region.bottomPercent);
+    SS_DIAG(Suggestions, "pick window=%llu list-rect=%.1f,%.1f %.1fx%.1f offered=%.2f,%.2f..%.2f,%.2f%%",
+            static_cast<unsigned long long>(picked.identity), picked.windowRect.x, picked.windowRect.y,
+            picked.windowRect.width, picked.windowRect.height, picked.region.leftPercent, picked.region.topPercent,
+            picked.region.rightPercent, picked.region.bottomPercent);
     if (const auto live = windowGeometry(picked.identity)) {
-        std::fprintf(report, "  live-rect %.1f,%.1f %.1fx%.1f minimized=%d\n", live->x, live->y, live->width,
-                     live->height, live->minimized ? 1 : 0);
+        SS_DIAG(Suggestions, "pick live-rect=%.1f,%.1f %.1fx%.1f minimized=%d", live->x, live->y, live->width,
+                live->height, live->minimized ? 1 : 0);
     }
-    std::fprintf(report, "  quick-start %.2f,%.2f..%.2f,%.2f%%\n", start.leftPercent, start.topPercent,
-                 start.rightPercent, start.bottomPercent);
-    std::fclose(report);
+    SS_DIAG(Suggestions, "pick quick-start=%.2f,%.2f..%.2f,%.2f%%", start.leftPercent, start.topPercent,
+            start.rightPercent, start.bottomPercent);
 }
 
 // A confirmed region that names a window tracks it (or re-picks a tracked
@@ -4316,7 +4271,7 @@ void App::confirmPickedRegion(const RegionPickPoll& poll)
     if (picked != nullptr && display && geometry) {
         // A window click quick-starts inset from the window's edges.
         const RegionOfInterest start = quickStartRegion(picked->region, *geometry);
-        dumpAttachMapping(*picked, start);
+        logAttachMapping(*picked, start);
         adoptAttachedPick(picked->identity, picked->ownerPid,
                           m_attach.attach(picked->identity, picked->ownerPid, picked->application, picked->windowRect,
                                           *display, start));

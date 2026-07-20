@@ -198,7 +198,7 @@ private:
     };
 
     [[nodiscard]] const PickableFace* matchPickedFace(uint32_t displayId, const RegionOfInterest& region) const;
-    void dumpAttachMapping(const PickableWindow& picked, const RegionOfInterest& start) const;
+    void logAttachMapping(const PickableWindow& picked, const RegionOfInterest& start) const;
     [[nodiscard]] const PickableWindow* windowContaining(uint32_t displayId, const RegionOfInterest& region) const;
     [[nodiscard]] std::optional<FloatColor> averageFrameArea(const RegionOfInterest& area) const;
     void resetRegionToFull();
@@ -272,7 +272,7 @@ private:
     void openRegionPicker();
     void waitForBorderFreeFrame();
     [[nodiscard]] std::vector<PickerDisplay> buildPickerDisplays();
-    void dumpSuggestionsIfRequested(const std::vector<PickerDisplay>& pickerDisplays);
+    void logPickerSuggestions(const std::vector<PickerDisplay>& pickerDisplays);
     void handleRegionBorderEdit();
     void pollActiveRegionPick();
     void pollPinPick(const RegionPickPoll& poll);

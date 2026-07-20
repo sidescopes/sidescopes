@@ -12,9 +12,10 @@ namespace sidescopes {
 /// every channel is off and logging costs one branch per site.
 enum class DiagChannel
 {
-    Attach,  ///< Window-attach focus routing: one line per follow tick.
-    Border,  ///< Region-border presentation: hide/show/present events.
-    Count    ///< Sentinel; keep last.
+    Attach,       ///< Window-attach focus routing: one line per follow tick.
+    Border,       ///< Region-border presentation: hide/show/present events.
+    Suggestions,  ///< Region-picker offers and the pick's rectangle chain.
+    Count         ///< Sentinel; keep last.
 };
 
 /// How the sink is set up. Production reads it from the environment on first
