@@ -83,6 +83,16 @@ TEST_CASE("Unknown tokens and spaces are tolerated, and the header names the out
     cleanup(path);
 }
 
+TEST_CASE("A list of only unknown channels leaves the header but records off")
+{
+    const std::string path = "diag-test-unknown.log";
+    sidescopes::diagConfigure({"bogus", path});
+    CHECK_FALSE(sidescopes::diagRecording());
+    CHECK_FALSE(sidescopes::diagEnabled(sidescopes::DiagChannel::Attach));
+    CHECK(readAll(path).find("channels=(none)") != std::string::npos);
+    cleanup(path);
+}
+
 TEST_CASE("A logged line carries the timestamp, channel, and message")
 {
     const std::string path = "diag-test-line.log";

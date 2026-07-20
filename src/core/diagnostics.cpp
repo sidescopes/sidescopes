@@ -1,5 +1,6 @@
 #include "core/diagnostics.h"
 
+#include <algorithm>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -169,6 +170,13 @@ void applyConfig(DiagState& state, const DiagConfig& config)
     state.start = std::chrono::steady_clock::now();
     state.path = path;
     writeHeader(state.sink, config.channels, state);
+    if (std::none_of(std::begin(state.channels), std::end(state.channels), [](bool on) { return on; })) {
+        // A list of only unknown names: the header stays behind as the
+        // diagnosis, but no line can ever follow it, so the sink closes
+        // and the recording state reports off instead of lying.
+        std::fclose(state.sink);
+        state.sink = nullptr;
+    }
 }
 
 DiagState& diagState()
