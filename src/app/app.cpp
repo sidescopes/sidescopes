@@ -3739,11 +3739,12 @@ void App::dispatchRegionMenu(int chosen)
 void openDiagLogFolder()
 {
     std::string folder = diagLogPath();
-    const std::size_t cut = folder.find_last_of("/\\");
-    if (cut != std::string::npos) {
-        folder.resize(cut);
-    }
     std::replace(folder.begin(), folder.end(), '\\', '/');
+    const std::size_t cut = folder.find_last_of('/');
+    if (cut == std::string::npos) {
+        return;  // a bare file name names no folder to show
+    }
+    folder.resize(cut == 0 ? 1 : cut);  // a file at the root keeps the root
     const std::string url = (folder.front() == '/' ? "file://" : "file:///") + folder;
     openUrl(url.c_str());
 }
