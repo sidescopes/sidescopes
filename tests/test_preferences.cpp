@@ -417,6 +417,7 @@ TEST_CASE("Preferences round-trip the live layout orientation and weights")
     saved.layoutOrientation = 2;  // horizontal
     saved.layoutWeights[VectorscopeId] = 2.5;
     saved.layoutWeights[HistogramId] = 0.5;
+    saved.layoutActiveSlot = 3;
 
     const TempFile file("layout-live.txt");
     REQUIRE(savePreferences(saved, file.path()));
@@ -425,6 +426,18 @@ TEST_CASE("Preferences round-trip the live layout orientation and weights")
     CHECK(loaded.layoutOrientation == 2);
     CHECK(loaded.layoutWeights.at(VectorscopeId) == 2.5);
     CHECK(loaded.layoutWeights.at(HistogramId) == 0.5);
+    CHECK(loaded.layoutActiveSlot == 3);
+}
+
+TEST_CASE("Preferences clamp an out-of-range active preset slot")
+{
+    // A slot beyond 1-9 (or negative) means no active preset, never an
+    // out-of-bounds badge.
+    const TempFile file("layout-bad-slot.txt");
+    file.write("layout_active_slot=12\n");
+
+    const Preferences loaded = loadPreferences(file.path());
+    CHECK(loaded.layoutActiveSlot == 0);
 }
 
 TEST_CASE("Preferences default the layout to automatic with no weights")

@@ -81,6 +81,9 @@ struct Preferences
     std::map<std::string, double> layoutWeights;
     /// Saved layout slots 1-9 (index 0 is slot 1); an empty stack marks unused.
     std::array<LayoutPreset, LayoutPresetSlots> layoutPresets;
+    /// The last loaded or saved preset slot, 1-9; 0 when no preset is active.
+    /// Drives the toolbar's preset badge across sessions.
+    int layoutActiveSlot = 0;
     int windowX = -1;  ///< Negative lets the system place the window.
     int windowY = -1;
     int windowWidth = 440;

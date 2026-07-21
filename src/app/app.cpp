@@ -1402,15 +1402,23 @@ const char* orientationName(LayoutOrientation orientation)
 }
 
 // The Presets submenu entry text: "N - empty" for an unused slot, otherwise a
-// short summary like "1 - VWH horizontal" built from the saved stack tokens.
+// short summary like "1 - VWH" from the saved stack tokens, naming the
+// orientation only when the preset pins one - Automatic is the unspoken
+// default.
 std::string presetLabel(int slot, const LayoutPreset& preset)
 {
     const std::string number = std::to_string(slot);
     if (preset.stack.empty()) {
         return number + " - empty";
     }
+    std::string label = number + " - " + preset.stack;
+    const LayoutOrientation orientation = orientationFromInt(preset.orientation);
+    if (orientation != LayoutOrientation::Automatic) {
+        label += ' ';
+        label += orientationName(orientation);
+    }
 
-    return number + " - " + preset.stack + ' ' + orientationName(orientationFromInt(preset.orientation));
+    return label;
 }
 
 // Per-scope toolbar chrome, keyed by id: the button id, display name, and
@@ -1710,6 +1718,7 @@ void App::setupView(const Preferences& startup)
     m_view.setOrientation(orientationFromInt(startup.layoutOrientation));
     m_view.setWeights(startup.layoutWeights);
     m_layoutPresets = startup.layoutPresets;
+    m_activePresetSlot = startup.layoutActiveSlot;
     // The intensity control is derived from each trace's saved gain; smoothing
     // is the host's own per-scope value, read straight from the preferences.
     const auto startupSmoothing = [&](std::string_view id, double fallback) -> float {
@@ -2638,6 +2647,7 @@ void App::persistPreferences()
     preferences.layoutOrientation = orientationToInt(m_view.orientation());
     preferences.layoutWeights = m_view.weightsSnapshot();
     preferences.layoutPresets = m_layoutPresets;
+    preferences.layoutActiveSlot = m_activePresetSlot;
     preferences.shortcuts = m_shortcuts;
     preferences.scopeShortcuts = m_scopeShortcuts;
     glfwGetWindowPos(m_window, &preferences.windowX, &preferences.windowY);
@@ -2969,9 +2979,8 @@ void App::drawFrameUi()
     drawScopeToggles(modifiers.shift);
     handleShortcuts(modifiers);
     drawRegionToolIcons();
-    drawCursorReadout();
     drawScopePanes();
-    drawStatusMessage();
+    drawStatusBar();
     handleContextMenu();
 
     ImGui::End();
@@ -3007,6 +3016,8 @@ void App::drawScopeToggles(bool stackModifier)
                       binding.c_str(), extra);
         return tooltip;
     };
+    drawPresetPicker();
+    ImGui::SameLine(0.0f, 8.0f);
     for (const HostScope& scope : m_scopeRegistry.scopes()) {
         if (scope.letter == 0) {
             continue;
@@ -3153,13 +3164,65 @@ std::map<std::string, double> App::currentStackWeights() const
 
 void App::saveLayoutPreset(int slot)
 {
-    LayoutPreset& preset = m_layoutPresets[static_cast<std::size_t>(slot - 1)];
+    m_layoutPresets[static_cast<std::size_t>(slot - 1)] = capturePreset();
+    m_activePresetSlot = slot;
+    setStatus("preset " + std::to_string(slot) + " saved");
+    m_nextPreferencesSave = glfwGetTime() + 1.0;
+}
+
+LayoutPreset App::capturePreset() const
+{
+    LayoutPreset preset;
     preset.stack = m_view.stackTokens();
     preset.orientation = orientationToInt(m_view.orientation());
     preset.weights = currentStackWeights();
     preset.styles = currentStackStyles();
-    setStatus("layout saved to " + std::to_string(slot));
-    m_nextPreferencesSave = glfwGetTime() + 1.0;
+
+    return preset;
+}
+
+bool App::activePresetDirty() const
+{
+    if (m_activePresetSlot == 0) {
+        return false;
+    }
+    const LayoutPreset& stored = m_layoutPresets[static_cast<std::size_t>(m_activePresetSlot - 1)];
+    const LayoutPreset live = capturePreset();
+
+    return live.stack != stored.stack || live.orientation != stored.orientation || live.weights != stored.weights ||
+           live.styles != stored.styles;
+}
+
+void App::drawPresetPicker()
+{
+    // A chip like the scope letters, leading the row: the label names the
+    // active slot (starred once the live layout drifts; "-" when none), and
+    // clicking opens the slot list - the mouse mirror of the digit keys.
+    const bool dirty = activePresetDirty();
+    char preview[8] = "-";
+    if (m_activePresetSlot != 0) {
+        std::snprintf(preview, sizeof(preview), "%d%s", m_activePresetSlot, dirty ? "*" : "");
+    }
+    if (scopeToggleButton("##preset-picker", preview, false, "Layout presets - digits load, Shift+digits save")) {
+        ImGui::OpenPopup("##preset-popup");
+    }
+    const ImVec2 chipMin = ImGui::GetItemRectMin();
+    const ImVec2 chipMax = ImGui::GetItemRectMax();
+    ImGui::SetNextWindowPos(ImVec2(chipMin.x, chipMax.y + 2.0f));
+    if (ImGui::BeginPopup("##preset-popup")) {
+        for (int slot = 1; slot <= LayoutPresetSlots; ++slot) {
+            const LayoutPreset& preset = m_layoutPresets[static_cast<std::size_t>(slot - 1)];
+            if (ImGui::Selectable(presetLabel(slot, preset).c_str(), slot == m_activePresetSlot)) {
+                if (ImGui::GetIO().KeyShift) {
+                    saveLayoutPreset(slot);
+                } else {
+                    loadLayoutPreset(slot);
+                }
+            }
+        }
+        ImGui::TextDisabled("click loads - Shift+click saves");
+        ImGui::EndPopup();
+    }
 }
 
 std::map<std::string, std::map<std::string, double>> App::currentStackStyles() const
@@ -3213,6 +3276,7 @@ void App::loadLayoutPreset(int slot)
     m_view.setOrientation(orientationFromInt(preset.orientation));
     m_view.setWeights(preset.weights);
     applyPresetStyles(preset.styles);
+    m_activePresetSlot = slot;
     m_analysis.enabledScopes = m_view.enabledScopeIds();
     m_analysisDirty = true;
     setStatus("preset " + std::to_string(slot) + " loaded");
@@ -3252,11 +3316,37 @@ ImTextureID App::iconTextureId(Icon icon, int sizePixels)
     return slot.texture->textureId();
 }
 
+void App::placeRegionToolbox()
+{
+    // The brief note after a tracked window closed out from under its region
+    // stays on the left, by the scopes cluster, clear of the toolbox.
+    if (glfwGetTime() < m_attachNoticeUntil) {
+        ImGui::TextDisabled("%s", m_attachDetachNotice.c_str());
+        ImGui::SameLine(0.0f, 8.0f);
+    }
+    // The region toolbox is a constant-width cluster: state dims a tool, it
+    // never removes one, so the row reflows only when the WINDOW changes -
+    // not when the scope stack does. Right-aligned while it shares the row
+    // with the scopes; flush left when it wraps to a row of its own. Narrow
+    // windows are the tall beside-the-editor shape, which has the height
+    // for a second row; wide strips keep one row.
+    const int iconCount = 4 + (supportsFaceDetection() ? 1 : 0);
+    const float chip = ImGui::GetTextLineHeight() + 12.0f;
+    const float width = static_cast<float>(iconCount) * chip + static_cast<float>(iconCount - 1) * 2.0f;
+    const float right = ImGui::GetWindowContentRegionMax().x;
+    if (ImGui::GetCursorPosX() + width + 8.0f > right) {
+        ImGui::NewLine();
+    } else {
+        ImGui::SetCursorPosX(right - width);
+    }
+}
+
 void App::drawRegionToolIcons()
 {
     char tooltip[96];
     std::snprintf(tooltip, sizeof(tooltip), "Draw an area (%s)", m_shortcuts.drawRegion.c_str());
     const int iconPx = iconPixelSize();
+    placeRegionToolbox();
     if (iconButton("##draw-region", iconTextureId(Icon::SquarePen, iconPx), tooltip)) {
         m_wantRegionPick = RegionPickerMode::Draw;
     }
@@ -3267,14 +3357,13 @@ void App::drawRegionToolIcons()
         m_wantRegionPick = RegionPickerMode::PickWindows;
     }
     ImGui::SameLine(0.0f, 2.0f);
-    if (pinsAvailable()) {
-        std::snprintf(tooltip, sizeof(tooltip), "Pin a color (%s) - Shift+click a color to pin several",
-                      m_shortcuts.pinColor.c_str());
-        if (iconButton("##pin-color", iconTextureId(Icon::Pipette, iconPx), tooltip)) {
-            m_wantRegionPick = RegionPickerMode::PinColor;
-        }
-        ImGui::SameLine(0.0f, 2.0f);
+    const bool pins = pinsAvailable();
+    std::snprintf(tooltip, sizeof(tooltip), "Pin a color (%s)%s", m_shortcuts.pinColor.c_str(),
+                  pins ? " - Shift+click a color to pin several" : " - needs the vectorscope or color picker");
+    if (iconButton("##pin-color", iconTextureId(Icon::Pipette, iconPx), tooltip, !pins) && pins) {
+        m_wantRegionPick = RegionPickerMode::PinColor;
     }
+    ImGui::SameLine(0.0f, 2.0f);
     // The face button sits last among the pickers: it is the one most often
     // dimmed, and a disabled button reads best at the row's edge.
     if (supportsFaceDetection()) {
@@ -3286,44 +3375,64 @@ void App::drawRegionToolIcons()
         }
         ImGui::SameLine(0.0f, 2.0f);
     }
-    if (!isFullRegion()) {
-        if (iconButton("##full-region", iconTextureId(Icon::Expand, iconPx), "Reset to full screen (Esc)")) {
-            resetRegionToFull();
-        }
-        ImGui::SameLine(0.0f, 2.0f);
+    const bool fullAlready = isFullRegion();
+    if (iconButton("##full-region", iconTextureId(Icon::Expand, iconPx),
+                   fullAlready ? "Reset to full screen (Esc) - already full" : "Reset to full screen (Esc)",
+                   fullAlready) &&
+        !fullAlready) {
+        resetRegionToFull();
     }
-    // The attached regions identify themselves on their own borders; the
-    // toolbar keeps only the brief note after a tracked window closed out
-    // from under its region.
-    if (glfwGetTime() < m_attachNoticeUntil) {
-        ImGui::SameLine(0.0f, 8.0f);
-        ImGui::TextDisabled("%s", m_attachDetachNotice.c_str());
+    ImGui::SameLine(0.0f, 2.0f);
+    ImGui::NewLine();
+}
+
+float App::statusBarHeight() const
+{
+    return ImGui::GetTextLineHeight() + 6.0f;
+}
+
+float App::cursorReadoutWidth() const
+{
+    const float columnWidth = ImGui::CalcTextSize("100%").x;
+    const float columnGap = ImGui::CalcTextSize(" ").x;
+
+    return ImGui::GetTextLineHeight() + 6.0f + 3 * columnWidth + 2 * columnGap;
+}
+
+void App::drawStatusBar()
+{
+    // The reserved strip under the panes: transient feedback on the left,
+    // the live readout on the right. Output owns its own row - it never
+    // paints over the scopes' pixels. The dummy anchors the row when no
+    // message is up, so the readout's SameLine lands on this line.
+    const bool messageUp = !m_statusMessage.empty() && glfwGetTime() <= m_statusUntil;
+    if (messageUp) {
+        ImGui::TextUnformatted(m_statusMessage.c_str());
+    } else {
+        ImGui::Dummy(ImVec2(1.0f, ImGui::GetTextLineHeight()));
+    }
+    // On a strip too narrow for both, the readout yields while the message
+    // shows - the message is transient, the readout returns right after.
+    const float messageEnd = ImGui::GetItemRectMax().x - ImGui::GetWindowPos().x;
+    const float readoutStart = ImGui::GetWindowContentRegionMax().x - cursorReadoutWidth();
+    if (!messageUp || messageEnd + 8.0f <= readoutStart) {
+        drawCursorReadout();
     }
 }
 
 void App::drawCursorReadout()
 {
-    // The readout yields before the icons do: on a narrow window it would
-    // right-align on top of the toolbar buttons, and the buttons win.
-    const float toolbarEnd = ImGui::GetCursorPosX();
+    // The bar's right half. Each value gets a column sized for the widest it
+    // can be and is right-aligned inside it, so neither swatch nor numbers
+    // wander.
     if (!m_vectorscopeColor) {
-        ImGui::NewLine();
-
         return;
     }
     const FloatColor& color = *m_vectorscopeColor;
-    // Each value gets a column sized for the widest it can be and is
-    // right-aligned inside it, so neither swatch nor numbers wander.
     const float columnWidth = ImGui::CalcTextSize("100%").x;
     const float columnGap = ImGui::CalcTextSize(" ").x;
     const float swatch = ImGui::GetTextLineHeight();
-    const float textWidth = 3 * columnWidth + 2 * columnGap;
-    const float readoutStart = ImGui::GetWindowContentRegionMax().x - (textWidth + swatch + 6);
-    if (readoutStart < toolbarEnd + 8) {
-        ImGui::NewLine();
-
-        return;
-    }
+    const float readoutStart = ImGui::GetWindowContentRegionMax().x - cursorReadoutWidth();
     ImGui::SameLine(readoutStart);
     ImGui::ColorButton("##cursor-color", ImVec4(color.r / 255.0f, color.g / 255.0f, color.b / 255.0f, 1.0f),
                        ImGuiColorEditFlags_NoTooltip | ImGuiColorEditFlags_NoDragDrop, ImVec2(swatch, swatch));
@@ -3343,26 +3452,6 @@ void App::setStatus(std::string message)
     m_statusMessage = std::move(message);
     m_statusUntil = glfwGetTime() + 2.0;
     m_lastActivity = glfwGetTime();
-}
-
-void App::drawStatusMessage()
-{
-    // A transient line at the host window's lower-left, over a dim backing so it
-    // reads on any trace; it fades out on its own once the deadline passes. The
-    // foreground draw list keeps it above the pane children, whose full-bleed
-    // images (waveform, parade) otherwise cover the host window's own list.
-    if (m_statusMessage.empty() || glfwGetTime() > m_statusUntil) {
-        return;
-    }
-    ImDrawList* statusDraw = ImGui::GetForegroundDrawList();
-    const ImVec2 origin = ImGui::GetWindowPos();
-    const ImVec2 size = ImGui::GetWindowSize();
-    const float pad = 8.0f * m_uiScale;
-    const ImVec2 textSize = ImGui::CalcTextSize(m_statusMessage.c_str());
-    const ImVec2 at(origin.x + pad, origin.y + size.y - textSize.y - pad);
-    statusDraw->AddRectFilled(ImVec2(at.x - 4.0f, at.y - 2.0f),
-                              ImVec2(at.x + textSize.x + 4.0f, at.y + textSize.y + 2.0f), IM_COL32(0, 0, 0, 150), 3.0f);
-    statusDraw->AddText(at, IM_COL32(235, 235, 240, 235), m_statusMessage.c_str());
 }
 
 void App::drawScopePanes()
@@ -3391,12 +3480,16 @@ void App::drawScopePanes()
 
         return;
     }
+    // One reservation for every pane path: the panes live in a child sized to
+    // leave the status bar's strip below, solo and stacked alike.
+    ImGui::BeginChild("##pane-area", ImVec2(0.0f, -statusBarHeight()));
     const std::vector<std::string>& stack = m_view.stack();
     if (stack.size() == 1) {
         drawScopeById(stack.front());
     } else if (stack.size() > 1) {
         drawScopeStack();
     }
+    ImGui::EndChild();
 }
 
 std::vector<float> App::stackAspects() const
@@ -3846,7 +3939,8 @@ void App::appendPresetsSubmenu(std::vector<NativeMenuItem>& menu)
     menuSubmenu(menu, "Presets");
     for (int slot = 1; slot <= LayoutPresetSlots; ++slot) {
         const LayoutPreset& preset = m_layoutPresets[static_cast<std::size_t>(slot - 1)];
-        menuAction(menu, presetLabel(slot, preset).c_str(), MenuLoadPresetBase + slot, false, std::to_string(slot));
+        menuAction(menu, presetLabel(slot, preset).c_str(), MenuLoadPresetBase + slot, slot == m_activePresetSlot,
+                   std::to_string(slot));
     }
     menuSeparator(menu);
     menuSubmenu(menu, "Save Current To");

@@ -303,6 +303,10 @@ void readLiveLayout(const std::map<std::string, std::string, std::less<>>& value
     if (const auto found = values.find("layout_weights"); found != values.end()) {
         preferences.layoutWeights = decodeWeights(found->second);
     }
+    readInt(values, "layout_active_slot", preferences.layoutActiveSlot);
+    if (preferences.layoutActiveSlot < 0 || preferences.layoutActiveSlot > LayoutPresetSlots) {
+        preferences.layoutActiveSlot = 0;
+    }
 }
 
 // The saved layout slots, one prefixed group each: layout.presetN.stack,
@@ -440,7 +444,8 @@ void migrateScopeStack(const std::map<std::string, std::string, std::less<>>& va
 void writeLayout(std::ostream& out, const Preferences& preferences)
 {
     out << "layout_orientation=" << preferences.layoutOrientation << '\n'
-        << "layout_weights=" << encodeWeights(preferences.layoutWeights) << '\n';
+        << "layout_weights=" << encodeWeights(preferences.layoutWeights) << '\n'
+        << "layout_active_slot=" << preferences.layoutActiveSlot << '\n';
     for (int slot = 0; slot < LayoutPresetSlots; ++slot) {
         const LayoutPreset& preset = preferences.layoutPresets[static_cast<std::size_t>(slot)];
         if (preset.stack.empty()) {

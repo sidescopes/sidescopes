@@ -241,7 +241,17 @@ private:
     void loadLayoutPreset(int slot);
     void saveLayoutPreset(int slot);
     [[nodiscard]] std::map<std::string, double> currentStackWeights() const;
+    /// Seats the constant-width region toolbox: right-aligned beside the
+    /// scopes, flush left on its own wrapped row, attach notice on the left.
+    void placeRegionToolbox();
     void drawRegionToolIcons();
+    /// The status bar's reserved height below the panes.
+    [[nodiscard]] float statusBarHeight() const;
+    /// The readout's full width in the bar, for the message-overlap yield.
+    [[nodiscard]] float cursorReadoutWidth() const;
+    /// The reserved strip under the panes: transient status on the left, the
+    /// live readout on the right.
+    void drawStatusBar();
     void drawCursorReadout();
     void drawScopePanes();
     void drawScopeStack();
@@ -251,6 +261,14 @@ private:
     /// The stacked scopes' choice-parameter values - the style menus' state -
     /// for a preset to recall alongside the geometry.
     [[nodiscard]] std::map<std::string, std::map<std::string, double>> currentStackStyles() const;
+    /// The live layout as it would save into a preset slot.
+    [[nodiscard]] LayoutPreset capturePreset() const;
+    /// Whether the live layout has drifted from the active preset slot; false
+    /// when no preset is active.
+    [[nodiscard]] bool activePresetDirty() const;
+    /// The toolbar preset dropdown: the preview names the active slot
+    /// (starred when dirty); the popup loads on click, saves on Shift+click.
+    void drawPresetPicker();
     /// Applies a preset's stored choice values through the same write the
     /// style menus use, skipping keys the descriptors no longer declare and
     /// clamping each value to its parameter's range.
@@ -263,7 +281,6 @@ private:
     void drawScopeById(std::string_view id);
     void drawVectorscopePane();
     void drawWaveformPane(std::string_view id);
-    void drawStatusMessage();
     void setStatus(std::string message);
     void drawSettingsWindow();
     void drawVectorscopeSettings();
@@ -405,6 +422,9 @@ private:
     MarkerSmoother m_waveformMarker;
 
     std::array<LayoutPreset, LayoutPresetSlots> m_layoutPresets;
+    // The last loaded or saved preset slot, 1-9; 0 when none is active. The
+    // toolbar badge names it, starred when the live layout has drifted.
+    int m_activePresetSlot = 0;
     std::string m_statusMessage;
     double m_statusUntil = 0.0;
 
