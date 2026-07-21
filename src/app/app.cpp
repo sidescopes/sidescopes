@@ -3157,8 +3157,48 @@ void App::saveLayoutPreset(int slot)
     preset.stack = m_view.stackTokens();
     preset.orientation = orientationToInt(m_view.orientation());
     preset.weights = currentStackWeights();
+    preset.styles = currentStackStyles();
     setStatus("layout saved to " + std::to_string(slot));
     m_nextPreferencesSave = glfwGetTime() + 1.0;
+}
+
+std::map<std::string, std::map<std::string, double>> App::currentStackStyles() const
+{
+    std::map<std::string, std::map<std::string, double>> styles;
+    for (const std::string& scopeId : m_view.stack()) {
+        const HostScope* hostScope = m_scopeRegistry.byId(scopeId);
+        if (hostScope == nullptr || hostScope->descriptor == nullptr) {
+            continue;
+        }
+        const std::map<std::string, double>& params = paramsOf(scopeId);
+        for (uint32_t index = 0; index < hostScope->descriptor->param_count; ++index) {
+            const SsParamInfo& info = hostScope->descriptor->params[index];
+            if (info.kind != SS_PARAM_CHOICE) {
+                continue;
+            }
+            const auto current = params.find(info.key);
+            styles[scopeId][info.key] = current != params.end() ? current->second : info.default_value;
+        }
+    }
+
+    return styles;
+}
+
+void App::applyPresetStyles(const std::map<std::string, std::map<std::string, double>>& styles)
+{
+    for (const auto& [scopeId, params] : styles) {
+        const HostScope* hostScope = m_scopeRegistry.byId(scopeId);
+        if (hostScope == nullptr || hostScope->descriptor == nullptr) {
+            continue;
+        }
+        for (const auto& [key, value] : params) {
+            const SsParamInfo* info = findParam(hostScope->descriptor, key);
+            if (info == nullptr || info->kind != SS_PARAM_CHOICE) {
+                continue;
+            }
+            m_analysis.scopeParams[scopeId][key] = std::clamp(value, info->min_value, info->max_value);
+        }
+    }
 }
 
 void App::loadLayoutPreset(int slot)
@@ -3172,6 +3212,7 @@ void App::loadLayoutPreset(int slot)
     m_view.restoreStack(preset.stack);
     m_view.setOrientation(orientationFromInt(preset.orientation));
     m_view.setWeights(preset.weights);
+    applyPresetStyles(preset.styles);
     m_analysis.enabledScopes = m_view.enabledScopeIds();
     m_analysisDirty = true;
     setStatus("preset " + std::to_string(slot) + " loaded");

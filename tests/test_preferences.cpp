@@ -454,6 +454,8 @@ TEST_CASE("Preferences round-trip a saved layout preset")
     saved.layoutPresets[0].orientation = 1;  // vertical
     saved.layoutPresets[0].weights[VectorscopeId] = 3.0;
     saved.layoutPresets[0].weights[HistogramId] = 0.75;
+    saved.layoutPresets[0].styles[VectorscopeId]["matrix"] = 0.0;
+    saved.layoutPresets[0].styles[HistogramId]["style"] = 1.0;
     saved.layoutPresets[4].stack = "C";  // slot 5, another used slot
 
     const TempFile file("layout-presets.txt");
@@ -464,10 +466,30 @@ TEST_CASE("Preferences round-trip a saved layout preset")
     CHECK(loaded.layoutPresets[0].orientation == 1);
     CHECK(loaded.layoutPresets[0].weights.at(VectorscopeId) == 3.0);
     CHECK(loaded.layoutPresets[0].weights.at(HistogramId) == 0.75);
+    CHECK(loaded.layoutPresets[0].styles.at(VectorscopeId).at("matrix") == 0.0);
+    CHECK(loaded.layoutPresets[0].styles.at(HistogramId).at("style") == 1.0);
     CHECK(loaded.layoutPresets[4].stack == "C");
-    // Unused slots write nothing and reload empty.
+    // Unused slots write nothing and reload empty, and a preset without
+    // styles keeps its empty map rather than inventing keys.
     CHECK(loaded.layoutPresets[1].stack.empty());
+    CHECK(loaded.layoutPresets[4].styles.empty());
     CHECK(loaded.layoutPresets[8].stack.empty());
+}
+
+TEST_CASE("Preferences drop malformed preset style pairs")
+{
+    // The styles list is scopeId.key:value pairs; a pair without a colon or
+    // without a dot in its name is discarded while the valid pairs survive.
+    const TempFile file("layout-bad-styles.txt");
+    file.write(
+        "layout.preset1.stack=VH\n"
+        "layout.preset1.styles=org.sidescopes.vectorscope.matrix:0,garbage,nodot:2,.style:1,"
+        "org.sidescopes.histogram.style:1\n");
+
+    const Preferences loaded = loadPreferences(file.path());
+    CHECK(loaded.layoutPresets[0].styles.size() == 2);
+    CHECK(loaded.layoutPresets[0].styles.at(VectorscopeId).at("matrix") == 0.0);
+    CHECK(loaded.layoutPresets[0].styles.at(HistogramId).at("style") == 1.0);
 }
 
 TEST_CASE("Preferences skip empty preset slots in the file")

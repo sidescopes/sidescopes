@@ -29,6 +29,10 @@ struct ParamMenuAction
 ///         descriptor is null or declares none.
 [[nodiscard]] const SsParamInfo* firstParamOfKind(const SsScopeDescriptor* descriptor, uint32_t kind);
 
+/// @return The descriptor parameter named @p key, or null when the descriptor
+///         is null or does not declare it.
+[[nodiscard]] const SsParamInfo* findParam(const SsScopeDescriptor* descriptor, const std::string& key);
+
 /// Appends @p descriptor's choice parameters to @p items as checkable submenus
 /// and records each choice in @p actions.
 ///

@@ -50,6 +50,20 @@ const SsParamInfo* firstParamOfKind(const SsScopeDescriptor* descriptor, uint32_
     return nullptr;
 }
 
+const SsParamInfo* findParam(const SsScopeDescriptor* descriptor, const std::string& key)
+{
+    if (descriptor == nullptr) {
+        return nullptr;
+    }
+    for (uint32_t index = 0; index < descriptor->param_count; ++index) {
+        if (key == descriptor->params[index].key) {
+            return &descriptor->params[index];
+        }
+    }
+
+    return nullptr;
+}
+
 void appendScopeChoiceMenus(const SsScopeDescriptor& descriptor, const std::map<std::string, double>& params,
                             bool flatten, std::vector<NativeMenuItem>& items, std::vector<ParamMenuAction>& actions)
 {

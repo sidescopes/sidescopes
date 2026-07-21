@@ -44,6 +44,19 @@ TEST_CASE("firstParamOfKind finds a scope's intensity and integer parameters")
     CHECK(firstParamOfKind(descriptorOf(registry, ColorPickerScopeId), SS_PARAM_INTENSITY) == nullptr);
 }
 
+TEST_CASE("findParam resolves a descriptor parameter by key")
+{
+    const ScopeRegistry registry{builtinModules()};
+
+    const SsParamInfo* matrix = findParam(descriptorOf(registry, VectorscopeScopeId), "matrix");
+    REQUIRE(matrix != nullptr);
+    CHECK(matrix->kind == SS_PARAM_CHOICE);
+
+    // An unknown key and the descriptorless color picker both come back null.
+    CHECK(findParam(descriptorOf(registry, VectorscopeScopeId), "no-such-key") == nullptr);
+    CHECK(findParam(descriptorOf(registry, ColorPickerScopeId), "matrix") == nullptr);
+}
+
 TEST_CASE("Choice submenus strip the scope-name prefix and check the current value")
 {
     const ScopeRegistry registry{builtinModules()};

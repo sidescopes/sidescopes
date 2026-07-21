@@ -20,6 +20,11 @@ struct LayoutPreset
     std::string stack;                      ///< Stack tokens, the scopeStack format; empty = unused.
     int orientation = 0;                    ///< 0 automatic, 1 vertical, 2 horizontal.
     std::map<std::string, double> weights;  ///< Scope id to pane weight.
+    /// Choice-parameter values - the right-click style menus' state - per
+    /// scope id, captured when the preset is saved. Scopes and keys absent
+    /// here keep their live values on load; continuous parameters (gain,
+    /// smoothing) never enter a preset.
+    std::map<std::string, std::map<std::string, double>> styles;
 };
 
 /// Keyboard bindings for the non-scope actions the application offers, editable

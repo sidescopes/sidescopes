@@ -244,6 +244,50 @@ std::map<std::string, double> decodeWeights(const std::string& encoded)
     return weights;
 }
 
+// A preset's style choices serialize on one line as scopeId.key:value pairs
+// joined by commas - the same scopeId.paramKey scheme scopeParams uses. Keys
+// are C identifiers without dots, so the last dot splits id from key.
+std::string encodeStyles(const std::map<std::string, std::map<std::string, double>>& styles)
+{
+    std::ostringstream out;
+    bool first = true;
+    for (const auto& [id, params] : styles) {
+        for (const auto& [key, value] : params) {
+            if (!first) {
+                out << ',';
+            }
+            out << id << '.' << key << ':' << value;
+            first = false;
+        }
+    }
+
+    return out.str();
+}
+
+// Parses the scopeId.key:value form back into the nested map, dropping any
+// pair missing its colon, its dot, or either name.
+std::map<std::string, std::map<std::string, double>> decodeStyles(const std::string& encoded)
+{
+    std::map<std::string, std::map<std::string, double>> styles;
+    std::size_t at = 0;
+    while (at < encoded.size()) {
+        const auto comma = encoded.find(',', at);
+        const std::string pair = encoded.substr(at, comma == std::string::npos ? std::string::npos : comma - at);
+        if (const auto colon = pair.find(':'); colon != std::string::npos && colon > 0) {
+            const std::string name = pair.substr(0, colon);
+            if (const auto dot = name.rfind('.'); dot != std::string::npos && dot > 0 && dot + 1 < name.size()) {
+                styles[name.substr(0, dot)][name.substr(dot + 1)] = std::strtod(pair.c_str() + colon + 1, nullptr);
+            }
+        }
+        if (comma == std::string::npos) {
+            break;
+        }
+        at = comma + 1;
+    }
+
+    return styles;
+}
+
 // An orientation is 0 automatic, 1 vertical, or 2 horizontal; anything else
 // falls back to automatic, so a corrupt value never wedges the layout.
 int cleanedOrientation(int value)
@@ -262,7 +306,8 @@ void readLiveLayout(const std::map<std::string, std::string, std::less<>>& value
 }
 
 // The saved layout slots, one prefixed group each: layout.presetN.stack,
-// .orientation, and .weights. An absent stack leaves the slot unused.
+// .orientation, .weights, and .styles. An absent stack leaves the slot
+// unused.
 void readLayoutPresets(const std::map<std::string, std::string, std::less<>>& values, Preferences& preferences)
 {
     for (int slot = 0; slot < LayoutPresetSlots; ++slot) {
@@ -275,6 +320,9 @@ void readLayoutPresets(const std::map<std::string, std::string, std::less<>>& va
         preset.orientation = cleanedOrientation(preset.orientation);
         if (const auto found = values.find(prefix + "weights"); found != values.end()) {
             preset.weights = decodeWeights(found->second);
+        }
+        if (const auto found = values.find(prefix + "styles"); found != values.end()) {
+            preset.styles = decodeStyles(found->second);
         }
     }
 }
@@ -402,6 +450,9 @@ void writeLayout(std::ostream& out, const Preferences& preferences)
         out << prefix << "stack=" << preset.stack << '\n'
             << prefix << "orientation=" << preset.orientation << '\n'
             << prefix << "weights=" << encodeWeights(preset.weights) << '\n';
+        if (!preset.styles.empty()) {
+            out << prefix << "styles=" << encodeStyles(preset.styles) << '\n';
+        }
     }
 }
 

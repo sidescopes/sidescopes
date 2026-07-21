@@ -248,6 +248,13 @@ private:
     /// Each stacked scope's preferred pane aspect, in stack order, for the
     /// Automatic split scoring.
     [[nodiscard]] std::vector<float> stackAspects() const;
+    /// The stacked scopes' choice-parameter values - the style menus' state -
+    /// for a preset to recall alongside the geometry.
+    [[nodiscard]] std::map<std::string, std::map<std::string, double>> currentStackStyles() const;
+    /// Applies a preset's stored choice values through the same write the
+    /// style menus use, skipping keys the descriptors no longer declare and
+    /// clamping each value to its parameter's range.
+    void applyPresetStyles(const std::map<std::string, std::map<std::string, double>>& styles);
     void drawPaneDivider(int leftPane, bool sideBySide, float thickness, const ImVec2& area,
                          const std::vector<float>& lengths);
     void paintDivider(bool sideBySide, bool highlighted);
