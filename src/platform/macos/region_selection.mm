@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cstring>
 
+#include "core/diagnostics.h"
 #include "platform/desktop.h"
 #include "platform/face_detection.h"
 #include "platform/icons.h"
@@ -1250,6 +1251,11 @@ NSRect g_borderTarget = {{0, 0}, {0, 0}};
 
 void snapBorderFrame(NSRect labelled)
 {
+    // The settle onto a moved place, at full opacity: the macOS twin of the
+    // Windows present line, minus the repaint flag AppKit has no analog for.
+    SS_DIAG(Border, "present pos=%ld,%ld size=%ldx%ld alpha=255", static_cast<long>(labelled.origin.x),
+            static_cast<long>(labelled.origin.y), static_cast<long>(labelled.size.width),
+            static_cast<long>(labelled.size.height));
     // A zero-duration group replaces any in-flight entrance animation on
     // BOTH properties. A direct setFrame loses to a running animator frame
     // animation - the window ends at the animation's stale target, and a
@@ -1267,6 +1273,13 @@ void snapBorderFrame(NSRect labelled)
 void animateBorderAppear(NSRect labelled)
 {
     g_borderTarget = labelled;
+    // The entrance seam. The Windows border logs one advance line per
+    // WM_TIMER tick of the fade; the macOS entrance is Core-Animation-driven
+    // with no per-step callback, so the analog is one line at the start,
+    // naming the frame the fade heads to and how long it runs.
+    SS_DIAG(Border, "advance target=%ld,%ld,%ld,%ld duration=%.3f", static_cast<long>(NSMinX(labelled)),
+            static_cast<long>(NSMaxY(labelled)), static_cast<long>(NSMaxX(labelled)),
+            static_cast<long>(NSMinY(labelled)), BorderAppearSeconds);
     const double inset = std::min({BorderSettlePoints, labelled.size.width / 6.0, labelled.size.height / 6.0});
     const NSRect start = NSInsetRect(labelled, inset, inset);
     [NSAnimationContext
@@ -1721,6 +1734,11 @@ void showRegionBorder(uint32_t displayId, const RegionOfInterest& region, const 
 
         return;
     }
+    // Past the unchanged guard: a real appear or move. The macOS entrance
+    // carries no persistent appearing flag, so the Windows appearing field
+    // has no analog here.
+    SS_DIAG(Border, "show wanted=%ld,%ld,%ld,%ld visible=%d", static_cast<long>(left), static_cast<long>(top),
+            static_cast<long>(right), static_cast<long>(bottom), g_borderWindow.visible ? 1 : 0);
 
     if (!g_borderWindow) {
         g_borderWindow = makeBorderWindow(rect);
@@ -1745,6 +1763,12 @@ void showRegionBorder(uint32_t displayId, const RegionOfInterest& region, const 
 
 void hideRegionBorder()
 {
+    // Guarded on the window like the Windows side, so a down border does not
+    // log before one has ever been built. The macOS entrance carries no
+    // persistent appearing flag, so that Windows field has no analog here.
+    if (g_borderWindow) {
+        SS_DIAG(Border, "hide visible=%d", g_borderWindow.visible ? 1 : 0);
+    }
     [g_borderWindow orderOut:nil];
     g_borderTarget = NSMakeRect(0, 0, 0, 0);
 }
