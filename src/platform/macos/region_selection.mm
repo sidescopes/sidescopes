@@ -176,6 +176,11 @@ NSCursor* buildPinCursor(const std::optional<FloatColor>& color)
 @property(nonatomic, assign) BOOL pickDragging;
 // In picking mode: whether the face list is active instead of windows.
 @property(nonatomic, assign) BOOL facesMode;
+// Whether this display's face scan has finished. Until it has, face mode
+// stays silent about absence; once set, an empty face list means the honest
+// "none found". The streamed display arrives scanned; the others flip it
+// through updatePickerFaces when their background scan lands.
+@property(nonatomic, assign) BOOL facesScanned;
 // Color pinning: a click reports a point to sample, a drag an area to
 // average, the region is never touched, and a cursor chip previews the
 // sample. pinnedIsPoint says which of the two the pending pin is.
@@ -395,12 +400,17 @@ NSCursor* buildPinCursor(const std::optional<FloatColor>& color)
             withAttributes:labelAttributes];
     }
     if (self.facesMode) {
-        [self drawBanner:m_suggestions.empty() ? @"No faces found on this screen" : @"Click a face"
-               secondary:@"[A] attach to a window    [D] draw    [Esc] full screen"
-            preferCenter:m_suggestions.empty()];
+        NSString* secondary = @"[A] attach to a window    [D] draw    [Esc] full screen";
+        if (!m_suggestions.empty()) {
+            [self drawBanner:@"Click a face" secondary:secondary preferCenter:NO];
+        } else if (self.facesScanned) {
+            // Scanned, nothing found: the honest verdict, centered and quiet.
+            // Before the scan lands there is no banner - absence is not yet known.
+            [self drawBanner:@"No faces found on this screen" secondary:secondary preferCenter:YES];
+        }
     } else {
         [self drawBanner:@"Click a window or drag an area inside it"
-               secondary:sidescopes::supportsFaceDetection() ? @"[F] pick a face    [D] draw    [Esc] full screen"
+               secondary:sidescopes::supportsFaceDetection() ? @"[F] select a face    [D] draw    [Esc] full screen"
                                                              : @"[D] draw    [Esc] full screen"
             preferCenter:NO];
     }
@@ -454,7 +464,7 @@ NSCursor* buildPinCursor(const std::optional<FloatColor>& color)
     }
     NSString* secondary = @"[Esc] full screen";
     if (!m_windows.empty() && sidescopes::supportsFaceDetection()) {
-        secondary = @"[A] attach to a window    [F] pick a face    [Esc] full screen";
+        secondary = @"[A] attach to a window    [F] select a face    [Esc] full screen";
     } else if (!m_windows.empty()) {
         secondary = @"[A] attach to a window    [Esc] full screen";
     }
@@ -1416,6 +1426,7 @@ void addPickerOverlay(const PickerDisplay& entry, PickerModes modes)
     }
     view.drawMode = modes.draw ? YES : NO;
     view.facesMode = modes.faces ? YES : NO;
+    view.facesScanned = entry.facesScanned ? YES : NO;
     view.pinMode = modes.pin ? YES : NO;
     if (!modes.draw && !modes.pin) {
         view->m_suggestions = modes.faces ? view->m_faces : view->m_windows;

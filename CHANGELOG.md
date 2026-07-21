@@ -28,6 +28,13 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Record Diagnostic Log toggle captures it with the others, and
   `SIDESCOPES_DIAG=perf` selects it alone. Off costs one branch.
 
+### Changed
+
+- The face picker is always available where the platform detects faces;
+  the toolbar no longer dims it or reports presence in a tooltip. The
+  picker overlay itself now says "No faces found on this screen" once a
+  display's scan finds none, and stays silent until the scan completes.
+
 ## [0.3.0] - 2026-07-20
 
 ### Added

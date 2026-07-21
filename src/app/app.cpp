@@ -228,45 +228,6 @@ bool iconButton(const char* id, ImTextureID texture, const char* tooltip, bool d
     return pressed;
 }
 
-void refreshFacePresence(AnalysisWorker& worker, uint32_t displayId, AppCallbackState& state)
-{
-    if (!supportsFaceDetection()) {
-        return;
-    }
-    if (state.faceCheckRunning.exchange(true)) {
-        return;
-    }
-    // Detection takes long enough to hitch a frame, so it runs on a copy
-    // of the latest frame in a background thread.
-    auto pixels = std::make_shared<std::vector<uint8_t>>();
-    int width = 0;
-    int height = 0;
-    const bool captured = worker.withLatestFrame([&](const FrameView& view) {
-        width = view.width;
-        height = view.height;
-        pixels->resize(static_cast<std::size_t>(view.height) * view.strideBytes);
-        std::memcpy(pixels->data(), view.bgra, pixels->size());
-    });
-    if (!captured || width == 0 || height == 0) {
-        state.faceCheckRunning.store(false);
-        return;
-    }
-    float pixelsPerPoint = 1.0f;
-    if (const auto geometry = geometryOfDisplay(displayId)) {
-        pixelsPerPoint = static_cast<float>(width / geometry->widthPoints);
-    }
-    // The detached check captures a pointer to the state, valid because
-    // main() owns it and only starts checks from inside the frame loop;
-    // faceCheckRunning serializes to one in flight, and main drains that
-    // one after the loop before the state leaves scope.
-    AppCallbackState* statePtr = &state;
-    std::thread([pixels, width, height, pixelsPerPoint, statePtr] {
-        const FrameView view{pixels->data(), width * 4, width, height, ColorSpaceHint::Srgb, 0};
-        statePtr->facesOnScreen.store(static_cast<int>(detectFaces(view, pixelsPerPoint).size()));
-        statePtr->faceCheckRunning.store(false);
-    }).detach();
-}
-
 void applyTheme()
 {
     ImGuiStyle& style = ImGui::GetStyle();
@@ -1589,10 +1550,10 @@ void App::run()
 
 void App::shutdown()
 {
-    // No new face check or pin probe starts once the loop is done, so drain
-    // any still in flight before their targets leave scope: the detached
-    // threads hold pointers into this object.
-    while (m_callbackState.faceCheckRunning.load() || m_facePinProbe.running.load()) {
+    // No new pin probe starts once the loop is done, so drain any still in
+    // flight before its target leaves scope: the detached thread holds a
+    // pointer into this object.
+    while (m_facePinProbe.running.load()) {
         std::this_thread::yield();
     }
 
@@ -1636,14 +1597,6 @@ bool App::createMainWindow(const Preferences& startup)
     if (m_versionInfo.development) {
         glfwSetWindowTitle(m_window, ("SideScopes " + m_versionInfo.display).c_str());
     }
-    // Installed before the ImGui backend so it chains this callback instead of
-    // being replaced by it. The chained call carries the same window, so the
-    // state comes back through its user pointer.
-    glfwSetWindowFocusCallback(m_window, [](GLFWwindow* focusTarget, int focused) {
-        if (focused) {
-            static_cast<AppCallbackState*>(glfwGetWindowUserPointer(focusTarget))->faceCheckRequested.store(true);
-        }
-    });
     glfwSetWindowIconifyCallback(m_window, [](GLFWwindow* iconifyTarget, int) {
         static_cast<AppCallbackState*>(glfwGetWindowUserPointer(iconifyTarget))->iconifyChanged.store(true);
     });
@@ -2782,9 +2735,6 @@ void App::pumpEvents()
 
 void App::drainAsyncSignals()
 {
-    if (m_callbackState.faceCheckRequested.exchange(false)) {
-        refreshFacePresence(m_worker, m_captureController->capturedDisplay(), m_callbackState);
-    }
     if (m_callbackState.iconifyChanged.exchange(false)) {
         syncRegionBorder();
         m_lastActivity = glfwGetTime();
@@ -3413,13 +3363,13 @@ void App::drawRegionToolIcons()
         m_wantRegionPick = RegionPickerMode::PinColor;
     }
     ImGui::SameLine(0.0f, 2.0f);
-    // The face button sits last among the pickers: it is the one most often
-    // dimmed, and a disabled button reads best at the row's edge.
+    // The face picker sits last among the region pickers, before the reset.
+    // It is always available where the platform detects faces: whether any
+    // face is on screen is the picker overlay's answer to give, not the
+    // toolbar's.
     if (supportsFaceDetection()) {
-        const bool noneFound = m_callbackState.facesOnScreen.load() == 0;
-        std::snprintf(tooltip, sizeof(tooltip), "Pick a face (%s)%s", m_shortcuts.pickFaces.c_str(),
-                      noneFound ? " - none on screen right now" : "");
-        if (iconButton("##pick-face", iconTextureId(Icon::User, iconPx), tooltip, noneFound)) {
+        std::snprintf(tooltip, sizeof(tooltip), "Select a face (%s)", m_shortcuts.pickFaces.c_str());
+        if (iconButton("##pick-face", iconTextureId(Icon::User, iconPx), tooltip)) {
             m_wantRegionPick = RegionPickerMode::PickFaces;
         }
         ImGui::SameLine(0.0f, 2.0f);
@@ -4308,7 +4258,6 @@ std::vector<PickerDisplay> App::buildPickerDisplays()
             const float pixelsPerPoint = geometry ? static_cast<float>(view.width / geometry->widthPoints) : 1.0f;
             const std::vector<IntRect> faces = detectFaces(view, pixelsPerPoint);
             faceSuggestions = buildFaceSuggestions(faces, view.width, view.height);
-            m_callbackState.facesOnScreen.store(static_cast<int>(faceSuggestions.size()));
             // The raw boxes are remembered too: a confirmed face pick
             // anchors its pin on the detector's box, not the inset offer.
             for (const IntRect& box : faces) {
@@ -4335,7 +4284,10 @@ std::vector<PickerDisplay> App::buildPickerDisplays()
             }
         }
         if (target.displayId == m_captureController->capturedDisplay()) {
+            // The streamed display's faces are known now, from the live frame:
+            // the picker opens with them and, empty or not, its scan is done.
             entry.faces = faceSuggestions;
+            entry.facesScanned = true;
         }
         pickerDisplays.push_back(std::move(entry));
     }

@@ -33,6 +33,12 @@ struct PickerDisplay
     uint32_t displayId = 0;
     std::vector<SuggestedRegion> windows;
     std::vector<SuggestedRegion> faces;
+    /// Whether this display's face scan has completed. The streamed display
+    /// is scanned when the picker opens; the others are scanned in the
+    /// background and reported later through updatePickerFaces. The overlay
+    /// tells "no faces here" (scanned, none) from "scanning" (not yet) by
+    /// this flag, and only voices the empty verdict once it is set.
+    bool facesScanned = false;
 };
 
 /// A single point on a display, in that display's percentages - the same

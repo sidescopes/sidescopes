@@ -41,26 +41,12 @@ struct GLFWwindow;
 
 namespace sidescopes {
 
-/// State the GLFW C callbacks and the background face-check worker reach
-/// through the window user pointer, since C callbacks cannot capture. One
-/// instance lives in the App for the whole run, so a raw pointer to it
-/// outlives every callback GLFW fires and every thread it spawns. The ImGui
-/// GLFW backend deliberately leaves the user pointer alone, so it is ours.
+/// State the GLFW C callbacks reach through the window user pointer, since C
+/// callbacks cannot capture. One instance lives in the App for the whole run,
+/// so a raw pointer to it outlives every callback GLFW fires. The ImGui GLFW
+/// backend deliberately leaves the user pointer alone, so it is ours.
 struct AppCallbackState
 {
-    /// How many faces the platform detector saw on the captured screen at the
-    /// last check: -1 before any check. Refreshed in the background when the
-    /// application gains focus, so the face button can present itself honestly
-    /// - dimmed when there is currently nothing to pick. The state can go stale
-    /// while the user works elsewhere, so the button only dims, never disables:
-    /// pressing F always detects freshly. Written by the async worker thread
-    /// and read by the UI: stays atomic.
-    std::atomic<int> facesOnScreen{-1};
-    /// Set by the GLFW focus callback, drained by the frame loop.
-    std::atomic<bool> faceCheckRequested{false};
-    /// Guards a single in-flight async check; shared by the frame loop and the
-    /// worker thread, so it stays atomic.
-    std::atomic<bool> faceCheckRunning{false};
     /// Minimizing is "get out of my way": the region border follows the window
     /// down and returns on restore. The flag wakes the frame loop's border sync
     /// when the iconified state flips either way. Set by the GLFW iconify

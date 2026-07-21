@@ -247,6 +247,11 @@ struct PickerState
     int height = 0;
     bool drawMode = false;
     bool facesMode = false;
+    // Whether this display's face scan has finished. Until it has, face mode
+    // stays silent about absence; once set, an empty face list means the
+    // honest "none found". The streamed display arrives scanned; the others
+    // flip it through updatePickerFaces when their background scan lands.
+    bool facesScanned = false;
     // The attached draw's clamp: set when a drag starts in window mode
     // over a suggestion - the drag cannot leave constraintRect
     // (overlay-local pixels), everything outside it dims hard, and the
@@ -672,11 +677,17 @@ void paintSuggestionScene(PickerState& picker, Gdiplus::Graphics& canvas, double
                           &text);
     }
     if (picker.facesMode) {
-        drawBanner(canvas, picker, picker.suggestions.empty() ? L"No faces found on this screen" : L"Click a face",
-                   L"[A] attach to a window    [D] draw    [Esc] full screen", picker.suggestions.empty(), scale);
+        const wchar_t* secondary = L"[A] attach to a window    [D] draw    [Esc] full screen";
+        if (!picker.suggestions.empty()) {
+            drawBanner(canvas, picker, L"Click a face", secondary, false, scale);
+        } else if (picker.facesScanned) {
+            // Scanned, nothing found: the honest verdict. Before the scan
+            // lands there is no banner - absence is not yet known.
+            drawBanner(canvas, picker, L"No faces found on this screen", secondary, true, scale);
+        }
     } else {
         drawBanner(canvas, picker, L"Click a window or drag an area inside it",
-                   supportsFaceDetection() ? L"[F] pick a face    [D] draw    [Esc] full screen"
+                   supportsFaceDetection() ? L"[F] select a face    [D] draw    [Esc] full screen"
                                            : L"[D] draw    [Esc] full screen",
                    false, scale);
     }
@@ -714,7 +725,7 @@ void paintDrawScene(PickerState& picker, Gdiplus::Graphics& canvas, double scale
     } else {
         const wchar_t* secondary = L"[Esc] full screen";
         if (!picker.windows.empty() && supportsFaceDetection()) {
-            secondary = L"[A] attach to a window    [F] pick a face    [Esc] full screen";
+            secondary = L"[A] attach to a window    [F] select a face    [Esc] full screen";
         } else if (!picker.windows.empty()) {
             secondary = L"[A] attach to a window    [Esc] full screen";
         }
@@ -1745,6 +1756,7 @@ PickerState* createPicker(const PickerDisplay& entry, bool draw, bool faces, boo
     }
     picker->drawMode = draw;
     picker->facesMode = faces;
+    picker->facesScanned = entry.facesScanned;
     picker->pinMode = pin;
     if (!draw && !pin) {
         picker->suggestions = faces ? picker->faces : picker->windows;
