@@ -23,6 +23,10 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Module ABI 0.2: descriptors may declare a preferred pane aspect for
   the automatic layout and flag their images as pin targets; the pin
   tool now follows the declarations instead of hard-coded scope ids.
+- Diagnostics gained a `perf` channel: frame body and present/vsync
+  wait, analysis-pass duration, and capture inter-arrival cadence. The
+  Record Diagnostic Log toggle captures it with the others, and
+  `SIDESCOPES_DIAG=perf` selects it alone. Off costs one branch.
 
 ## [0.3.0] - 2026-07-20
 

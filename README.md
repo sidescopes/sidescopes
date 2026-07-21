@@ -87,8 +87,8 @@ For development use, `SIDESCOPES_DIAG=attach,border` (or `all`) starts
 recording from launch with only the named channels (`attach`:
 window-focus routing, `border`: region-border drawing, `suggestions`:
 the picker's window offers and pick mapping, `facepin`: face-pin probe
-verdicts); the previous run
-is kept beside the log as `sidescopes-diag.prev.log`.
+verdicts, `perf`: frame, analysis-pass, and capture-cadence timings);
+the previous run is kept beside the log as `sidescopes-diag.prev.log`.
 `SIDESCOPES_DIAG_FILE` overrides the
 location. Writes reach the disk on a short interval by default;
 `SIDESCOPES_DIAG_FLUSH=1` flushes every line when chasing a crash, and

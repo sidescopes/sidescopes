@@ -16,6 +16,7 @@ enum class DiagChannel
     Border,       ///< Region-border presentation: hide/show/present events.
     Suggestions,  ///< Region-picker offers and the pick's rectangle chain.
     FacePin,      ///< Face-pin probe verdicts, for grading the gates.
+    Perf,         ///< Frame, analysis-pass, and capture-cadence timings.
     Count         ///< Sentinel; keep last.
 };
 

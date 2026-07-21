@@ -7,6 +7,7 @@
 #include <optional>
 #include <vector>
 
+#include "core/diagnostics.h"
 #include "core/frame.h"
 
 namespace sidescopes {
@@ -51,6 +52,19 @@ public:
         }
         m_pending = std::move(filled);
         m_hasPending = true;
+        // Capture cadence: the gap between deliveries, measured on the
+        // producer thread that owns this call. Off costs one branch; on
+        // reads the clock only here. The first delivery of a recording sets
+        // the baseline without a line.
+        if (diagEnabled(DiagChannel::Perf)) {
+            const auto now = std::chrono::steady_clock::now();
+            if (m_hasLastPublish) {
+                const double gapMs = std::chrono::duration<double, std::milli>(now - m_lastPublish).count();
+                SS_DIAG(Perf, "capture interval_ms=%.1f", gapMs);
+            }
+            m_lastPublish = now;
+            m_hasLastPublish = true;
+        }
         m_available.notify_one();
         return reusable;
     }
@@ -93,6 +107,10 @@ private:
     FrameBuffer m_returned;
     bool m_hasPending = false;
     bool m_nudged = false;
+    // Producer-thread cadence state, touched only while the perf channel
+    // records; guarded by the same mutex every publish already holds.
+    std::chrono::steady_clock::time_point m_lastPublish;
+    bool m_hasLastPublish = false;
 };
 
 }  // namespace sidescopes

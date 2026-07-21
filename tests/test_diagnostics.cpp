@@ -60,6 +60,22 @@ TEST_CASE("The word all enables every channel")
     sidescopes::diagConfigure({"all", path});
     CHECK(sidescopes::diagEnabled(sidescopes::DiagChannel::Attach));
     CHECK(sidescopes::diagEnabled(sidescopes::DiagChannel::Border));
+    // The menu's Record toggle records with "all", so the perf channel it
+    // never names individually still comes on with the rest.
+    CHECK(sidescopes::diagEnabled(sidescopes::DiagChannel::Perf));
+    cleanup(path);
+}
+
+TEST_CASE("The perf channel records timing lines under its own name")
+{
+    const std::string path = "diag-test-perf.log";
+    sidescopes::diagConfigure({"perf", path});
+    CHECK(sidescopes::diagEnabled(sidescopes::DiagChannel::Perf));
+    CHECK_FALSE(sidescopes::diagEnabled(sidescopes::DiagChannel::Attach));
+    SS_DIAG(Perf, "frame body_ms=%.1f present_ms=%.1f", 4.0, 12.0);
+    sidescopes::diagConfigure({});
+    const std::string content = readAll(path);
+    CHECK(content.find(" perf frame body_ms=4.0 present_ms=12.0\n") != std::string::npos);
     cleanup(path);
 }
 
