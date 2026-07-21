@@ -240,6 +240,7 @@ const SsScopeDescriptor WaveformDescriptor{
     0u,
     WaveformParams,
     static_cast<uint32_t>(sizeof(WaveformParams) / sizeof(WaveformParams[0])),
+    3.0f,
 };
 
 const SsScopeDescriptor ParadeDescriptor{
@@ -251,6 +252,7 @@ const SsScopeDescriptor ParadeDescriptor{
     0u,
     ParadeParams,
     static_cast<uint32_t>(sizeof(ParadeParams) / sizeof(ParadeParams[0])),
+    3.0f,
 };
 
 bool moduleInit()

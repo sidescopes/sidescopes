@@ -38,7 +38,7 @@ uint32_t oneScope()
 }
 
 const SsScopeDescriptor FakeDescriptor{
-    "org.sidescopes.test.fake", "Fake", 'X', 0, 0, 0u, nullptr, 0u,
+    "org.sidescopes.test.fake", "Fake", 'X', 0, 0, 0u, nullptr, 0u, 0.0f,
 };
 
 const SsScopeDescriptor* fakeDescriptor(uint32_t index)

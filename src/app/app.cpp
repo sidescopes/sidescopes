@@ -1877,9 +1877,21 @@ std::string App::bindingFor(std::string_view id) const
 
 bool App::pinsAvailable() const
 {
-    // Pins mark the vectorscope and the color picker; without either on screen,
-    // the tool's button, menu entries, and shortcuts all stand down together.
-    return m_view.shows(VectorscopeScopeId) || m_view.shows(ColorPickerScopeId);
+    // Pins mark any scope that declares itself a pin target (plus the host's
+    // own color picker); without one on screen, the tool's button, menu
+    // entries, and shortcuts all stand down together.
+    for (const std::string& scopeId : m_view.stack()) {
+        if (scopeId == ColorPickerScopeId) {
+            return true;
+        }
+        const HostScope* hostScope = m_scopeRegistry.byId(scopeId);
+        if (hostScope != nullptr && hostScope->descriptor != nullptr &&
+            (hostScope->descriptor->flags & SS_SCOPE_PIN_TARGET) != 0u) {
+            return true;
+        }
+    }
+
+    return false;
 }
 
 const ScopeImage& App::imageForId(std::string_view id) const
@@ -3359,7 +3371,7 @@ void App::drawRegionToolIcons()
     ImGui::SameLine(0.0f, 2.0f);
     const bool pins = pinsAvailable();
     std::snprintf(tooltip, sizeof(tooltip), "Pin a color (%s)%s", m_shortcuts.pinColor.c_str(),
-                  pins ? " - Shift+click a color to pin several" : " - needs the vectorscope or color picker");
+                  pins ? " - Shift+click a color to pin several" : " - needs a scope that takes pins");
     if (iconButton("##pin-color", iconTextureId(Icon::Pipette, iconPx), tooltip, !pins) && pins) {
         m_wantRegionPick = RegionPickerMode::PinColor;
     }
@@ -3494,10 +3506,15 @@ void App::drawScopePanes()
 
 std::vector<float> App::stackAspects() const
 {
+    // A module's own declaration wins; the host table covers the color
+    // picker and modules that declare nothing.
     std::vector<float> aspects;
     aspects.reserve(m_view.stack().size());
     for (const std::string& scopeId : m_view.stack()) {
-        aspects.push_back(preferredScopeAspect(scopeId));
+        const HostScope* hostScope = m_scopeRegistry.byId(scopeId);
+        const float declared =
+            hostScope != nullptr && hostScope->descriptor != nullptr ? hostScope->descriptor->preferred_aspect : 0.0f;
+        aspects.push_back(declared > 0.0f ? declared : preferredScopeAspect(scopeId));
     }
 
     return aspects;

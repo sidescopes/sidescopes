@@ -32,8 +32,9 @@ inline constexpr float MinPaneLength = 80.0f;
 /// The grabbable divider's thickness between two panes, in 100%-scale points.
 inline constexpr float DividerThickness = 6.0f;
 
-/// The width-to-height shape @p scopeId's trace reads best at, for the
-/// Automatic split scoring. Unknown ids lean gently wide, like most traces.
+/// The fallback width-to-height shape for @p scopeId when its descriptor
+/// declares no preferred_aspect: the host's own table for the built-ins and
+/// the color picker, gently wide for unknown module ids.
 [[nodiscard]] float preferredScopeAspect(const std::string& scopeId);
 
 /// Resolves @p orientation for a pane area of @p areaWidth by @p areaHeight

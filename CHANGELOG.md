@@ -4,6 +4,26 @@ All notable changes to this project are documented in this file. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Flexible scope layout: orientation (Automatic, Vertical, Horizontal),
+  weighted panes with draggable dividers (double-click equalizes), and
+  layout presets on the digit keys - a digit loads, Shift+digit saves.
+  Presets recall each scope's style choices along with the geometry.
+  Automatic picks the split whose panes best match each scope's natural
+  shape instead of following the window's longer axis.
+- A preset chip leads the toolbar, starred when the layout drifts from
+  the saved slot; its popup loads on click and saves on Shift+click.
+- A status bar under the panes holds transient messages and the live
+  color readout, so neither paints over a trace. The region toolbox
+  keeps a constant width - unavailable tools dim instead of vanishing -
+  and right-aligns, wrapping to its own row on narrow windows.
+- Module ABI 0.2: descriptors may declare a preferred pane aspect for
+  the automatic layout and flag their images as pin targets; the pin
+  tool now follows the declarations instead of hard-coded scope ids.
+
 ## [0.3.0] - 2026-07-20
 
 ### Added

@@ -40,9 +40,10 @@ extern "C" {
 
 /* The host accepts a module when the majors are equal; the minor may
  * differ, since a newer minor only adds optional, backward-compatible
- * extensions. */
+ * extensions. Until 1.0 the layout itself may still change under a minor
+ * bump; rebuild modules against the current header. */
 #define SS_ABI_MAJOR 0u
-#define SS_ABI_MINOR 1u
+#define SS_ABI_MINOR 2u
 
 /* ---- core types ---------------------------------------------------- */
 
@@ -231,6 +232,9 @@ struct SsScopeInstance
  * Module-owned; valid from init to deinit. */
 
 #define SS_SCOPE_KEEP_ASPECT 0x1u
+/* The scope's image can hold the host's pin markers; the pin tool stands
+ * up whenever a declaring scope is on screen. */
+#define SS_SCOPE_PIN_TARGET 0x2u
 
 typedef struct SsScopeDescriptor
 {
@@ -242,6 +246,9 @@ typedef struct SsScopeDescriptor
     uint32_t flags;       /* SS_SCOPE_* */
     const SsParamInfo* params;
     uint32_t param_count;
+    /* The pane width-to-height shape the trace reads best at, scored by the
+     * host's automatic layout; 0 lets the host choose. */
+    float preferred_aspect;
 } SsScopeDescriptor;
 
 /* ---- module entry: the one exported symbol -------------------------- */

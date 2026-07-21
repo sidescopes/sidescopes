@@ -206,9 +206,10 @@ const SsScopeDescriptor VectorscopeDescriptor{
     'V',
     Vectorscope::CodeGridSize,
     Vectorscope::CodeGridSize,
-    SS_SCOPE_KEEP_ASPECT,
+    SS_SCOPE_KEEP_ASPECT | SS_SCOPE_PIN_TARGET,
     Params,
     static_cast<uint32_t>(sizeof(Params) / sizeof(Params[0])),
+    1.0f,
 };
 
 bool moduleInit()

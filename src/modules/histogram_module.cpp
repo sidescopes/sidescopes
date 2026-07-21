@@ -186,8 +186,15 @@ const SsParamInfo Params[] = {
 };
 
 const SsScopeDescriptor HistogramDescriptor{
-    "org.sidescopes.histogram", "Histogram", 'H',    Histogram::ImageWidth,
-    Histogram::Height,          0u,          Params, static_cast<uint32_t>(sizeof(Params) / sizeof(Params[0])),
+    "org.sidescopes.histogram",
+    "Histogram",
+    'H',
+    Histogram::ImageWidth,
+    Histogram::Height,
+    0u,
+    Params,
+    static_cast<uint32_t>(sizeof(Params) / sizeof(Params[0])),
+    2.0f,
 };
 
 bool moduleInit()

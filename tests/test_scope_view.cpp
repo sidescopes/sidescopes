@@ -45,7 +45,7 @@ SsScopeInstance* nullCreate(const char*, const SsHost*)
 }
 
 const SsScopeDescriptor LetterlessDescriptor{
-    LetterlessId, "Letterless", 'C', 0, 0, 0u, nullptr, 0u,
+    LetterlessId, "Letterless", 'C', 0, 0, 0u, nullptr, 0u, 0.0f,
 };
 
 const SsScopeDescriptor* letterlessDescriptor(uint32_t index)

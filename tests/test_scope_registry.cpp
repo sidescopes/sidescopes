@@ -33,7 +33,7 @@ SsScopeInstance* nullCreate(const char*, const SsHost*)
 }
 
 const SsScopeDescriptor HolderWDescriptor{
-    "org.sidescopes.test.holderw", "Holder W", 'W', 0, 0, 0u, nullptr, 0u,
+    "org.sidescopes.test.holderw", "Holder W", 'W', 0, 0, 0u, nullptr, 0u, 0.0f,
 };
 
 const SsScopeDescriptor* holderWDescriptor(uint32_t index)
@@ -46,7 +46,7 @@ const SsModuleEntry HolderWModuleEntry{
 };
 
 const SsScopeDescriptor CollideWDescriptor{
-    "org.sidescopes.test.collidew", "Collide W", 'W', 0, 0, 0u, nullptr, 0u,
+    "org.sidescopes.test.collidew", "Collide W", 'W', 0, 0, 0u, nullptr, 0u, 0.0f,
 };
 
 const SsScopeDescriptor* collideWDescriptor(uint32_t index)

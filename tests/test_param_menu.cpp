@@ -44,6 +44,23 @@ TEST_CASE("firstParamOfKind finds a scope's intensity and integer parameters")
     CHECK(firstParamOfKind(descriptorOf(registry, ColorPickerScopeId), SS_PARAM_INTENSITY) == nullptr);
 }
 
+TEST_CASE("Built-in descriptors declare pin targeting and pane aspects")
+{
+    // The pin tool and the automatic layout read these declarations instead
+    // of hard-coding scope ids, so modules can opt in the same way.
+    const ScopeRegistry registry{builtinModules()};
+
+    const SsScopeDescriptor* vectorscope = descriptorOf(registry, VectorscopeScopeId);
+    REQUIRE(vectorscope != nullptr);
+    CHECK((vectorscope->flags & SS_SCOPE_PIN_TARGET) != 0u);
+    CHECK(vectorscope->preferred_aspect == 1.0f);
+
+    const SsScopeDescriptor* waveform = descriptorOf(registry, WaveformScopeId);
+    REQUIRE(waveform != nullptr);
+    CHECK((waveform->flags & SS_SCOPE_PIN_TARGET) == 0u);
+    CHECK(waveform->preferred_aspect == 3.0f);
+}
+
 TEST_CASE("findParam resolves a descriptor parameter by key")
 {
     const ScopeRegistry registry{builtinModules()};
