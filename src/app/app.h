@@ -171,17 +171,11 @@ private:
 
     [[nodiscard]] const PickableWindow* matchPickedWindow(uint32_t displayId, const RegionOfInterest& region) const;
 
-    /// A face the picker offered, remembered with its detector box and the
-    /// frame it was measured on so a confirmed face pick can be turned into
-    /// a pinned attachment.
-    struct PickableFace
-    {
-        RegionOfInterest region;
-        IntRect box;
-        uint32_t displayId = 0;
-        int frameWidth = 0;
-        int frameHeight = 0;
-    };
+    /// A face the picker offered: its detector box, its display, and the
+    /// frame it was measured on, so a confirmed pick on any display maps
+    /// back to the right pixels. The same record for every display, built by
+    /// the core buildFaceOffers from that display's detections.
+    using PickableFace = FaceOffer;
 
     [[nodiscard]] const PickableFace* matchPickedFace(uint32_t displayId, const RegionOfInterest& region) const;
     void logAttachMapping(const PickableWindow& picked, const RegionOfInterest& start) const;
@@ -307,7 +301,11 @@ private:
     void handleRegionPicking();
     void openRegionPicker();
     void waitForBorderFreeFrame();
+    struct DisplayFaceScan;
     [[nodiscard]] std::vector<PickerDisplay> buildPickerDisplays();
+    void launchDisplayFaceScans(const std::vector<PickerDisplay>& pickerDisplays);
+    void drainDisplayFaceScans();
+    void consumeDisplayFaceScan(DisplayFaceScan& scan);
     void logPickerSuggestions(const std::vector<PickerDisplay>& pickerDisplays);
     void handleRegionBorderEdit();
     void pollActiveRegionPick();
@@ -382,6 +380,31 @@ private:
 
     std::map<uint64_t, AppFacePin> m_facePins;
     FacePinProbe m_facePinProbe;
+
+    /// One non-streamed display's background face scan for an open picker: a
+    /// detached thread grabs that display off the capture stream, detects,
+    /// and fills this; the main loop drains it and pushes the boxes into the
+    /// picker overlay. Held by unique_ptr so the detached thread's raw
+    /// pointer stays valid across the vector's growth, and never erased while
+    /// @c running.
+    struct DisplayFaceScan
+    {
+        std::atomic<bool> running{false};
+        std::atomic<bool> ready{false};
+        std::mutex mutex;
+        uint32_t displayId = 0;
+        uint64_t generation = 0;     ///< which picker opening spawned it
+        std::vector<IntRect> faces;  ///< detector boxes, guarded by mutex
+        int frameWidth = 0;          ///< the grabbed frame's size, guarded by mutex
+        int frameHeight = 0;
+        double elapsedMs = 0.0;  ///< grab plus detect, for the diagnostics line
+    };
+
+    std::vector<std::unique_ptr<DisplayFaceScan>> m_displayFaceScans;
+    /// Bumped every time the picker opens, stamped on each scan it spawns: a
+    /// scan that lands after its picker closed or a newer one opened is
+    /// dropped rather than fed to the wrong overlay.
+    uint64_t m_facePickGeneration = 0;
     std::array<IconTexture, IconCount> m_iconTextures;
     double m_nextFacePinProbe = 0.0;
     /// True while the active pin's face is not confirmed where the region

@@ -397,6 +397,78 @@ void sampleScreenColorAsync(DesktopPoint point, std::function<void(std::optional
                               }];
 }
 
+namespace {
+
+// Redraws the captured image into a known BGRA layout - top-down, tightly
+// packed - so the detector reads it exactly like a live capture frame,
+// whatever byte order the screenshot returned.
+std::optional<CapturedImage> imageToBgra(CGImageRef image)
+{
+    const size_t width = CGImageGetWidth(image);
+    const size_t height = CGImageGetHeight(image);
+    if (width == 0 || height == 0) {
+        return std::nullopt;
+    }
+    CapturedImage captured;
+    captured.width = static_cast<int>(width);
+    captured.height = static_cast<int>(height);
+    captured.bgra.resize(width * height * 4);
+    CGColorSpaceRef srgb = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
+    CGContextRef context = CGBitmapContextCreate(
+        captured.bgra.data(), width, height, 8, width * 4, srgb,
+        static_cast<uint32_t>(kCGImageAlphaPremultipliedFirst) | static_cast<uint32_t>(kCGBitmapByteOrder32Little));
+    CGColorSpaceRelease(srgb);
+    if (!context) {
+        return std::nullopt;
+    }
+    CGContextDrawImage(context, CGRectMake(0, 0, static_cast<CGFloat>(width), static_cast<CGFloat>(height)), image);
+    CGContextRelease(context);
+
+    return captured;
+}
+
+}  // namespace
+
+// A full-display one-shot for off-stream analysis: fresh shareable content
+// (this runs on a background thread, so it must not touch the main-thread
+// sampler cache), the same self-exclusion and sRGB request the stream uses,
+// captured synchronously through a semaphore like fetchShareableContent.
+std::optional<CapturedImage> captureDisplayImage(uint32_t displayId)
+{
+    @autoreleasepool {
+        SCShareableContent* content = fetchShareableContent();
+        if (!content) {
+            return std::nullopt;
+        }
+        SCDisplay* display = findCaptureDisplay(content, std::to_string(displayId));
+        if (!display) {
+            return std::nullopt;
+        }
+        SCContentFilter* filter = buildContentFilter(content, display);
+        SCStreamConfiguration* configuration = [[SCStreamConfiguration alloc] init];
+        const CGFloat scale = filter.pointPixelScale > 0 ? filter.pointPixelScale : 2.0;
+        configuration.width = static_cast<size_t>(display.width * scale);
+        configuration.height = static_cast<size_t>(display.height * scale);
+        configuration.showsCursor = NO;
+        configuration.pixelFormat = kCVPixelFormatType_32BGRA;
+        configuration.colorSpaceName = kCGColorSpaceSRGB;
+
+        dispatch_semaphore_t done = dispatch_semaphore_create(0);
+        __block std::optional<CapturedImage> result;
+        [SCScreenshotManager captureImageWithFilter:filter
+                                      configuration:configuration
+                                  completionHandler:^(CGImageRef image, NSError* error) {
+                                    if (image && !error) {
+                                        result = imageToBgra(image);
+                                    }
+                                    dispatch_semaphore_signal(done);
+                                  }];
+        dispatch_semaphore_wait(done, DISPATCH_TIME_FOREVER);
+
+        return result;
+    }
+}
+
 }  // namespace sidescopes
 
 @implementation SidescopesStreamHandler

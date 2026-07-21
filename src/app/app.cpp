@@ -228,6 +228,42 @@ bool iconButton(const char* id, ImTextureID texture, const char* tooltip, bool d
     return pressed;
 }
 
+/// The outcome of scanning one non-streamed display: its detector boxes, the
+/// grabbed frame's size (zero when the grab failed), and how long grab plus
+/// detect took, for the diagnostics line.
+struct ScanResult
+{
+    std::vector<IntRect> faces;
+    int width = 0;
+    int height = 0;
+    double elapsedMs = 0.0;
+};
+
+// Grabs one display off the capture stream and runs the face detector on it.
+// Pure of application state: it takes only the display and its point width
+// (for the detector's density floor), so it is safe to run on a detached
+// thread with nothing but value captures.
+ScanResult scanDisplayForFaces(uint32_t displayId, double widthPoints)
+{
+    const auto started = std::chrono::steady_clock::now();
+    ScanResult result;
+    if (const std::optional<CapturedImage> image = captureDisplayImage(displayId)) {
+        FrameView view;
+        view.bgra = image->bgra.data();
+        view.strideBytes = image->width * 4;
+        view.width = image->width;
+        view.height = image->height;
+        const float pixelsPerPoint = widthPoints > 0.0 ? static_cast<float>(image->width / widthPoints) : 1.0f;
+        result.faces = detectFaces(view, pixelsPerPoint);
+        result.width = image->width;
+        result.height = image->height;
+    }
+    const std::chrono::duration<double, std::milli> elapsed = std::chrono::steady_clock::now() - started;
+    result.elapsedMs = elapsed.count();
+
+    return result;
+}
+
 void applyTheme()
 {
     ImGuiStyle& style = ImGui::GetStyle();
@@ -1550,10 +1586,17 @@ void App::run()
 
 void App::shutdown()
 {
-    // No new pin probe starts once the loop is done, so drain any still in
-    // flight before its target leaves scope: the detached thread holds a
-    // pointer into this object.
-    while (m_facePinProbe.running.load()) {
+    // No new pin probe or display face scan starts once the loop is done, so
+    // drain any still in flight before their targets leave scope: the
+    // detached threads hold pointers into this object.
+    for (;;) {
+        bool waiting = m_facePinProbe.running.load();
+        for (const std::unique_ptr<DisplayFaceScan>& scan : m_displayFaceScans) {
+            waiting = waiting || scan->running.load();
+        }
+        if (!waiting) {
+            break;
+        }
         std::this_thread::yield();
     }
 
@@ -2735,6 +2778,7 @@ void App::pumpEvents()
 
 void App::drainAsyncSignals()
 {
+    drainDisplayFaceScans();
     if (m_callbackState.iconifyChanged.exchange(false)) {
         syncRegionBorder();
         m_lastActivity = glfwGetTime();
@@ -4215,6 +4259,9 @@ void App::openRegionPicker()
     if (beginRegionPick(pickerDisplays, *m_wantRegionPick)) {
         m_regionPicking = true;
         m_regionPickIsPin = *m_wantRegionPick == RegionPickerMode::PinColor;
+        // The streamed display's faces opened with the picker; scan the rest
+        // in the background and deliver them as they land.
+        launchDisplayFaceScans(pickerDisplays);
     }
     // Consumed either way: a request that could not open must not retry every
     // frame.
@@ -4247,23 +4294,25 @@ void App::waitForBorderFreeFrame()
 
 std::vector<PickerDisplay> App::buildPickerDisplays()
 {
-    // The offer, per display: the visible application windows, frontmost first,
-    // plus, behind their own key, the faces the platform detector finds in the
-    // current frame. Faces are offered on the tracked display only.
+    // The offer, per display: the visible application windows, frontmost
+    // first, plus, behind their own key, the faces the platform detector
+    // finds. The streamed display's faces come from its live frame right
+    // now; the other displays are scanned in the background (see
+    // launchDisplayFaceScans) and their offers arrive later.
+    const uint32_t streamed = m_captureController->capturedDisplay();
     std::vector<SuggestedRegion> faceSuggestions;
     m_pickableFaces.clear();
     if (supportsFaceDetection()) {
         (void)m_worker.withLatestFrame([&](const FrameView& view) {
-            const auto geometry = geometryOfDisplay(m_captureController->capturedDisplay());
+            const auto geometry = geometryOfDisplay(streamed);
             const float pixelsPerPoint = geometry ? static_cast<float>(view.width / geometry->widthPoints) : 1.0f;
             const std::vector<IntRect> faces = detectFaces(view, pixelsPerPoint);
             faceSuggestions = buildFaceSuggestions(faces, view.width, view.height);
-            // The raw boxes are remembered too: a confirmed face pick
-            // anchors its pin on the detector's box, not the inset offer.
-            for (const IntRect& box : faces) {
-                m_pickableFaces.push_back({faceSuggestionRegion(box, view.width, view.height), box,
-                                           m_captureController->capturedDisplay(), view.width, view.height});
-            }
+            // The raw boxes are remembered too, one offer each: a confirmed
+            // face pick anchors its pin on the detector's box, not the inset.
+            const std::vector<FaceOffer> offers = buildFaceOffers(faces, streamed, view.width, view.height);
+            m_pickableFaces.insert(m_pickableFaces.end(), offers.begin(), offers.end());
+            SS_DIAG(Suggestions, "display %u faces=%zu (streamed)", streamed, faceSuggestions.size());
         });
     }
 
@@ -4283,7 +4332,7 @@ std::vector<PickerDisplay> App::buildPickerDisplays()
                                              displayPercentRect(rect, *geometry), target.displayId});
             }
         }
-        if (target.displayId == m_captureController->capturedDisplay()) {
+        if (target.displayId == streamed) {
             // The streamed display's faces are known now, from the live frame:
             // the picker opens with them and, empty or not, its scan is done.
             entry.faces = faceSuggestions;
@@ -4293,6 +4342,102 @@ std::vector<PickerDisplay> App::buildPickerDisplays()
     }
 
     return pickerDisplays;
+}
+
+// One detached scan per non-streamed display, following the face-pin probe's
+// discipline: a per-scan record the thread fills under a mutex, a ready flag,
+// a wake, and a running flag the shutdown drain waits on. Opening the picker
+// never blocks on these - only the streamed display's instant scan gates the
+// open.
+void App::launchDisplayFaceScans(const std::vector<PickerDisplay>& pickerDisplays)
+{
+    if (!supportsFaceDetection()) {
+        return;
+    }
+    ++m_facePickGeneration;
+    // Clear out the records of scans that have finished and been consumed; a
+    // still-running one stays put - its detached thread holds a pointer in.
+    std::erase_if(m_displayFaceScans, [](const std::unique_ptr<DisplayFaceScan>& scan) {
+        return !scan->running.load() && !scan->ready.load();
+    });
+    const uint32_t streamed = m_captureController->capturedDisplay();
+    for (const PickerDisplay& entry : pickerDisplays) {
+        if (entry.displayId == streamed) {
+            continue;  // scanned already, from the live frame
+        }
+        const auto geometry = geometryOfDisplay(entry.displayId);
+        const double widthPoints = geometry ? geometry->widthPoints : 0.0;
+        auto scan = std::make_unique<DisplayFaceScan>();
+        scan->displayId = entry.displayId;
+        scan->generation = m_facePickGeneration;
+        scan->running.store(true);
+        DisplayFaceScan* probe = scan.get();
+        m_displayFaceScans.push_back(std::move(scan));
+        const uint32_t displayId = entry.displayId;
+        std::thread([probe, displayId, widthPoints] {
+            ScanResult scanned = scanDisplayForFaces(displayId, widthPoints);
+            {
+                std::lock_guard lock(probe->mutex);
+                probe->faces = std::move(scanned.faces);
+                probe->frameWidth = scanned.width;
+                probe->frameHeight = scanned.height;
+                probe->elapsedMs = scanned.elapsedMs;
+            }
+            probe->ready.store(true);
+            // The wake goes out before the running flag clears: the shutdown
+            // drain waits on running, and GLFW must still be alive to hear it.
+            glfwPostEmptyEvent();
+            probe->running.store(false);
+        }).detach();
+    }
+}
+
+// Drains every finished display scan into the open picker. Runs each frame,
+// so a scan that lands after its picker closed is still consumed (and
+// dropped) and its record retired.
+void App::drainDisplayFaceScans()
+{
+    for (const std::unique_ptr<DisplayFaceScan>& scan : m_displayFaceScans) {
+        if (scan->ready.load()) {
+            consumeDisplayFaceScan(*scan);
+            scan->ready.store(false);
+        }
+    }
+    // Only a fully finished scan is removed: a running one's detached thread
+    // still holds a pointer into it.
+    std::erase_if(m_displayFaceScans, [](const std::unique_ptr<DisplayFaceScan>& scan) {
+        return !scan->running.load() && !scan->ready.load();
+    });
+}
+
+// Turns one landed scan into the display's face offer: the overlay boxes and
+// the pickable-face records for a confirmed pick, both keyed to this
+// display's own frame dimensions. A scan whose picker has closed or that a
+// newer opening superseded is logged and dropped.
+void App::consumeDisplayFaceScan(DisplayFaceScan& scan)
+{
+    std::vector<IntRect> boxes;
+    int frameWidth = 0;
+    int frameHeight = 0;
+    double elapsedMs = 0.0;
+    {
+        std::lock_guard lock(scan.mutex);
+        boxes = std::move(scan.faces);
+        scan.faces.clear();
+        frameWidth = scan.frameWidth;
+        frameHeight = scan.frameHeight;
+        elapsedMs = scan.elapsedMs;
+    }
+    SS_DIAG(Suggestions, "display %u scan faces=%zu elapsed=%.1fms", scan.displayId, boxes.size(), elapsedMs);
+    if (!m_regionPicking || scan.generation != m_facePickGeneration) {
+        return;
+    }
+    const std::vector<SuggestedRegion> suggestions = buildFaceSuggestions(boxes, frameWidth, frameHeight);
+    const std::vector<FaceOffer> offers = buildFaceOffers(boxes, scan.displayId, frameWidth, frameHeight);
+    m_pickableFaces.insert(m_pickableFaces.end(), offers.begin(), offers.end());
+    // Delivering the offer marks this display scanned: an empty list now
+    // reads as "none found", and a failed grab (empty too) shows no boxes.
+    updatePickerFaces(scan.displayId, suggestions);
 }
 
 // Recovers which pickable window a confirmed region names. The picker passes

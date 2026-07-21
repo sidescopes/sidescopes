@@ -12,6 +12,16 @@ namespace sidescopes {
 
 // Small desktop services the app needs outside capture itself.
 
+/// An owned one-shot snapshot of a display: BGRA, 8 bits per channel, rows
+/// top-down and tightly packed (stride is width * 4), the same encoding a
+/// FrameView carries. Returned by captureDisplayImage.
+struct CapturedImage
+{
+    std::vector<uint8_t> bgra;
+    int width = 0;
+    int height = 0;
+};
+
 struct DesktopPoint
 {
     double x = 0.0;
@@ -293,5 +303,14 @@ void observeEscapeWithoutKeyWindow(std::function<void()> callback);
 /// where reading the screen is immediate; it receives nothing when the
 /// point cannot be read. Callers own the pacing.
 void sampleScreenColorAsync(DesktopPoint point, std::function<void(std::optional<FloatColor>)> callback);
+
+/// Grabs a single frame of @p displayId's current contents, off the live
+/// capture stream, for a one-shot analysis - the region picker scans the
+/// non-streamed displays for faces this way, since only one display feeds
+/// the stream. This application's own windows are excluded where the
+/// platform allows. Returns nothing when the display cannot be read. Runs
+/// synchronously and may block briefly (an off-stream grab); call it off
+/// the main thread.
+[[nodiscard]] std::optional<CapturedImage> captureDisplayImage(uint32_t displayId);
 
 }  // namespace sidescopes

@@ -1650,6 +1650,30 @@ void setRegionPickMode(RegionPickerMode mode)
     }
 }
 
+void updatePickerFaces(uint32_t displayId, const std::vector<SuggestedRegion>& faces)
+{
+    for (PickerOverlay& overlay : g_pickerOverlays) {
+        if (overlay.displayId != displayId) {
+            continue;
+        }
+        SidescopesPickerView* view = overlay.view;
+        view->m_faces.clear();
+        for (const SuggestedRegion& suggestion : faces) {
+            view->m_faces.emplace_back(regionToViewRect(suggestion.region, overlay.size), suggestion.label);
+        }
+        // The scan is done for this display now: an empty list is the honest
+        // "none found", no longer "not yet scanned".
+        view.facesScanned = YES;
+        if (view.facesMode) {
+            view->m_suggestions = view->m_faces;
+            view.hoveredSuggestion = -1;
+        }
+        view.needsDisplay = YES;
+
+        return;
+    }
+}
+
 void setRegionPickChipColor(const std::optional<FloatColor>& color)
 {
     const bool colorChanged =

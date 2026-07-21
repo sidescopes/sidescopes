@@ -1981,6 +1981,30 @@ void setRegionPickMode(RegionPickerMode mode)
                                                            : 0);
 }
 
+void updatePickerFaces(uint32_t displayId, const std::vector<SuggestedRegion>& faces)
+{
+    for (PickerState* picker : g_pickers) {
+        if (picker->displayId != displayId) {
+            continue;
+        }
+        picker->faces.clear();
+        for (const SuggestedRegion& suggestion : faces) {
+            picker->faces.emplace_back(toRectF(localRectFromRegion(suggestion.region, picker->width, picker->height)),
+                                       wideFromUtf8(suggestion.label));
+        }
+        // The scan is done for this display now: an empty list is the honest
+        // "none found", no longer "not yet scanned".
+        picker->facesScanned = true;
+        if (picker->facesMode) {
+            picker->suggestions = picker->faces;
+            picker->hovered = -1;
+        }
+        paintPicker(*picker);
+
+        return;
+    }
+}
+
 void setRegionPickChipColor(const std::optional<FloatColor>& color)
 {
     const bool colorChanged =

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -12,6 +13,19 @@ struct SuggestedRegion
 {
     RegionOfInterest region;
     std::string label;
+};
+
+/// One detected face turned into everything a confirmed pick needs: the
+/// offered crop (as the overlay shows it), the raw detector box the pin
+/// anchors on, and the display and frame the box was measured on so a pick
+/// on any display maps back to the right pixels.
+struct FaceOffer
+{
+    RegionOfInterest region;
+    IntRect box;
+    uint32_t displayId = 0;
+    int frameWidth = 0;
+    int frameHeight = 0;
 };
 
 /// A window rectangle in percent of the display, with its owning application.
@@ -36,5 +50,12 @@ struct WindowRegion
 /// hair and background that skew the vectorscope's skin cluster.
 [[nodiscard]] std::vector<SuggestedRegion> buildFaceSuggestions(const std::vector<IntRect>& faces, int frameWidth,
                                                                 int frameHeight);
+
+/// One face offer per detector box, tagged with @p displayId and the frame
+/// dimensions, so a confirmed pick on any display recovers its box. Each
+/// offer's region is faceSuggestionRegion of the same box, matching the
+/// overlay list buildFaceSuggestions produces for the display.
+[[nodiscard]] std::vector<FaceOffer> buildFaceOffers(const std::vector<IntRect>& faces, uint32_t displayId,
+                                                     int frameWidth, int frameHeight);
 
 }  // namespace sidescopes

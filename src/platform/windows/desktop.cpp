@@ -15,6 +15,7 @@
 #include <shellapi.h>
 
 #include <algorithm>
+#include <cstring>
 #include <string>
 #include <vector>
 
@@ -680,6 +681,60 @@ void sampleScreenColorAsync(DesktopPoint point, std::function<void(std::optional
     }
     ReleaseDC(nullptr, screen);
     callback(color);
+}
+
+std::optional<CapturedImage> captureDisplayImage(uint32_t displayId)
+{
+    // A GDI BitBlt of the whole monitor into a top-down 32-bit DIB, whose
+    // BGRX memory order matches the FrameView the detector reads; the unused
+    // alpha byte is ignored. Our own overlays carry capture exclusion and
+    // stay out; CAPTUREBLT pulls in other applications' layered windows.
+    const auto geometry = geometryOfDisplay(displayId);
+    if (!geometry) {
+        return std::nullopt;
+    }
+    const int left = static_cast<int>(geometry->originX);
+    const int top = static_cast<int>(geometry->originY);
+    const int width = static_cast<int>(geometry->widthPoints);
+    const int height = static_cast<int>(geometry->heightPoints);
+    if (width <= 0 || height <= 0) {
+        return std::nullopt;
+    }
+    HDC screen = GetDC(nullptr);
+    if (!screen) {
+        return std::nullopt;
+    }
+    std::optional<CapturedImage> result;
+    HDC memory = CreateCompatibleDC(screen);
+    BITMAPINFO info{};
+    info.bmiHeader.biSize = sizeof(info.bmiHeader);
+    info.bmiHeader.biWidth = width;
+    info.bmiHeader.biHeight = -height;  // top-down rows
+    info.bmiHeader.biPlanes = 1;
+    info.bmiHeader.biBitCount = 32;
+    info.bmiHeader.biCompression = BI_RGB;
+    void* bits = nullptr;
+    HBITMAP bitmap = memory ? CreateDIBSection(memory, &info, DIB_RGB_COLORS, &bits, nullptr, 0) : nullptr;
+    if (bitmap) {
+        HGDIOBJ previous = SelectObject(memory, bitmap);
+        if (BitBlt(memory, 0, 0, width, height, screen, left, top, SRCCOPY | CAPTUREBLT)) {
+            CapturedImage captured;
+            captured.width = width;
+            captured.height = height;
+            const std::size_t bytes = static_cast<std::size_t>(width) * static_cast<std::size_t>(height) * 4;
+            captured.bgra.resize(bytes);
+            std::memcpy(captured.bgra.data(), bits, bytes);
+            result = std::move(captured);
+        }
+        SelectObject(memory, previous);
+        DeleteObject(bitmap);
+    }
+    if (memory) {
+        DeleteDC(memory);
+    }
+    ReleaseDC(nullptr, screen);
+
+    return result;
 }
 
 }  // namespace sidescopes

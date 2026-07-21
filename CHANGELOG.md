@@ -35,6 +35,13 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   picker overlay itself now says "No faces found on this screen" once a
   display's scan finds none, and stays silent until the scan completes.
 
+### Fixed
+
+- Face picking offers faces on every display, not only the one the scopes
+  currently capture. The streamed display's faces still appear the instant
+  the picker opens; each other display is grabbed once and scanned in the
+  background, its faces filling in when ready.
+
 ## [0.3.0] - 2026-07-20
 
 ### Added

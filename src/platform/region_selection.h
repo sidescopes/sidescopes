@@ -106,6 +106,16 @@ void cancelRegionPick();
 /// Switches an active pick between its modes; no-op when none is active.
 void setRegionPickMode(RegionPickerMode mode);
 
+/// Delivers a display's face offer to an already-open picker, after the
+/// background scan of a non-streamed display lands. The call marks that
+/// display's face scan complete: an empty @p faces means the scan finished
+/// and found nothing, which the overlay reports as "no faces" rather than
+/// staying silent. If the picker is in face mode the new offer shows at
+/// once. A no-op when no pick is active or no overlay covers @p displayId
+/// (the picker may have closed before the scan finished). Call on the main
+/// thread.
+void updatePickerFaces(uint32_t displayId, const std::vector<SuggestedRegion>& faces);
+
 /// The live color for the pin modes' cursor chip, pushed by the
 /// application each frame: the sample comes from the capture frame, so
 /// the chip previews exactly what a click would pin. Ignored outside the
