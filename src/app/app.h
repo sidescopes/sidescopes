@@ -245,6 +245,9 @@ private:
     void drawCursorReadout();
     void drawScopePanes();
     void drawScopeStack();
+    /// Each stacked scope's preferred pane aspect, in stack order, for the
+    /// Automatic split scoring.
+    [[nodiscard]] std::vector<float> stackAspects() const;
     void drawPaneDivider(int leftPane, bool sideBySide, float thickness, const ImVec2& area,
                          const std::vector<float>& lengths);
     void paintDivider(bool sideBySide, bool highlighted);

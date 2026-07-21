@@ -4,6 +4,7 @@
 #include <vector>
 
 #include "app/scope_layout.h"
+#include "app/scope_view.h"
 
 namespace sidescopes {
 namespace {
@@ -18,20 +19,55 @@ float total(const std::vector<float>& lengths)
 
 }  // namespace
 
-TEST_CASE("Automatic orientation splits the longer axis")
+TEST_CASE("Automatic stacks a wide-scope stack in a landscape window")
 {
-    // A wide area lays side by side; a tall one stacks; a square ties to side by
-    // side, matching the historical horizontal-on-tie default.
-    CHECK(resolveSplitDirection(LayoutOrientation::Automatic, 800.0f, 400.0f) == SplitDirection::SideBySide);
-    CHECK(resolveSplitDirection(LayoutOrientation::Automatic, 400.0f, 800.0f) == SplitDirection::Stacked);
-    CHECK(resolveSplitDirection(LayoutOrientation::Automatic, 500.0f, 500.0f) == SplitDirection::SideBySide);
+    // The reported failure: three wide traces in a 1200x900 window went side
+    // by side into 400x900 slivers; stacking gives each a full-width band.
+    const std::vector<float> weights{1.0f, 1.0f, 1.0f};
+    const std::vector<float> aspects{3.0f, 3.0f, 2.0f};
+    CHECK(resolveSplitDirection(LayoutOrientation::Automatic, 1200.0f, 900.0f, weights, aspects, 6.0f) ==
+          SplitDirection::Stacked);
 }
 
-TEST_CASE("Explicit orientation ignores the area proportions")
+TEST_CASE("Automatic lays squares side by side in a wide window")
 {
-    // Vertical stacks and Horizontal lays side by side whatever the area shape.
-    CHECK(resolveSplitDirection(LayoutOrientation::Vertical, 800.0f, 400.0f) == SplitDirection::Stacked);
-    CHECK(resolveSplitDirection(LayoutOrientation::Horizontal, 400.0f, 800.0f) == SplitDirection::SideBySide);
+    // Two square scopes in a 1600x500 strip read far better as 800x500
+    // neighbors than as 1600x250 ribbons.
+    const std::vector<float> weights{1.0f, 1.0f};
+    const std::vector<float> aspects{1.0f, 1.0f};
+    CHECK(resolveSplitDirection(LayoutOrientation::Automatic, 1600.0f, 500.0f, weights, aspects, 6.0f) ==
+          SplitDirection::SideBySide);
+}
+
+TEST_CASE("Automatic ties and degenerate metadata stack")
+{
+    // A single pane scores identically both ways, and a weight list that
+    // disagrees with the aspect list must not steer the layout.
+    CHECK(resolveSplitDirection(LayoutOrientation::Automatic, 800.0f, 400.0f, {1.0f}, {3.0f}, 6.0f) ==
+          SplitDirection::Stacked);
+    CHECK(resolveSplitDirection(LayoutOrientation::Automatic, 800.0f, 400.0f, {1.0f, 1.0f}, {3.0f}, 6.0f) ==
+          SplitDirection::Stacked);
+}
+
+TEST_CASE("Explicit orientation ignores area and aspects")
+{
+    // Vertical stacks and Horizontal lays side by side whatever the area
+    // shape or the scopes' preferences.
+    CHECK(resolveSplitDirection(LayoutOrientation::Vertical, 800.0f, 400.0f, {1.0f, 1.0f}, {1.0f, 1.0f}, 6.0f) ==
+          SplitDirection::Stacked);
+    CHECK(resolveSplitDirection(LayoutOrientation::Horizontal, 400.0f, 800.0f, {1.0f, 1.0f}, {3.0f, 3.0f}, 6.0f) ==
+          SplitDirection::SideBySide);
+}
+
+TEST_CASE("Preferred aspects know the built-in scopes")
+{
+    // The wide traces want width, the vectorscope is square, and unknown
+    // module ids fall back gently wide.
+    CHECK(preferredScopeAspect(WaveformScopeId) == Approx(3.0f));
+    CHECK(preferredScopeAspect(ParadeScopeId) == Approx(3.0f));
+    CHECK(preferredScopeAspect(HistogramScopeId) == Approx(2.0f));
+    CHECK(preferredScopeAspect(VectorscopeScopeId) == Approx(1.0f));
+    CHECK(preferredScopeAspect("org.example.custom") == Approx(2.0f));
 }
 
 TEST_CASE("Equal weights split the axis evenly")

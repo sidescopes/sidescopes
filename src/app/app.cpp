@@ -3358,6 +3358,17 @@ void App::drawScopePanes()
     }
 }
 
+std::vector<float> App::stackAspects() const
+{
+    std::vector<float> aspects;
+    aspects.reserve(m_view.stack().size());
+    for (const std::string& scopeId : m_view.stack()) {
+        aspects.push_back(preferredScopeAspect(scopeId));
+    }
+
+    return aspects;
+}
+
 void App::drawScopeStack()
 {
     // Weights split the axis; a divider between each neighboring pair is a thin
@@ -3366,10 +3377,12 @@ void App::drawScopeStack()
     // keep their normal breathing room.
     const ImVec2 area = ImGui::GetContentRegionAvail();
     const int count = static_cast<int>(m_view.stack().size());
-    const bool sideBySide = resolveSplitDirection(m_view.orientation(), area.x, area.y) == SplitDirection::SideBySide;
     const float divider = DividerThickness * m_uiScale;
+    const std::vector<float> weights = m_view.stackWeights();
+    const bool sideBySide = resolveSplitDirection(m_view.orientation(), area.x, area.y, weights, stackAspects(),
+                                                  divider) == SplitDirection::SideBySide;
     const float axisLength = (sideBySide ? area.x : area.y) - divider * static_cast<float>(count - 1);
-    const std::vector<float> lengths = paneLengths(m_view.stackWeights(), axisLength, MinPaneLength * m_uiScale);
+    const std::vector<float> lengths = paneLengths(weights, axisLength, MinPaneLength * m_uiScale);
     const ImVec2 spacing = ImGui::GetStyle().ItemSpacing;
 
     ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0.0f, 0.0f));

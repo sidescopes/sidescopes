@@ -1,16 +1,18 @@
 #pragma once
 
+#include <string>
 #include <utility>
 #include <vector>
 
 namespace sidescopes {
 
-/// How the enabled scopes divide the window. Automatic keeps the historical
-/// behavior - the longer window axis splits - while Vertical and Horizontal
-/// pin the split direction regardless of the window's proportions.
+/// How the enabled scopes divide the window. Automatic picks the direction
+/// whose panes sit closest to each scope's preferred shape, while Vertical
+/// and Horizontal pin the split direction regardless of the window's
+/// proportions.
 enum class LayoutOrientation
 {
-    Automatic,   ///< Split along the longer axis, as the app always has.
+    Automatic,   ///< Score both directions against the scopes' preferred aspects.
     Vertical,    ///< Panes stacked top to bottom.
     Horizontal,  ///< Panes side by side, left to right.
 };
@@ -30,10 +32,21 @@ inline constexpr float MinPaneLength = 80.0f;
 /// The grabbable divider's thickness between two panes, in 100%-scale points.
 inline constexpr float DividerThickness = 6.0f;
 
-/// Resolves @p orientation for a pane area of @p areaWidth by @p areaHeight.
-/// Automatic picks the longer axis (ties split side by side, matching the
-/// historical default); Vertical and Horizontal ignore the area.
-[[nodiscard]] SplitDirection resolveSplitDirection(LayoutOrientation orientation, float areaWidth, float areaHeight);
+/// The width-to-height shape @p scopeId's trace reads best at, for the
+/// Automatic split scoring. Unknown ids lean gently wide, like most traces.
+[[nodiscard]] float preferredScopeAspect(const std::string& scopeId);
+
+/// Resolves @p orientation for a pane area of @p areaWidth by @p areaHeight
+/// holding one pane per @p weights entry, each with a preferred
+/// width-to-height shape in @p aspects. Automatic scores both directions by
+/// the panes' summed aspect misfit (absolute log of actual over preferred,
+/// pane lengths taken from the weights with @p dividerThickness reserved
+/// between neighbors) and picks the lower; ties, single panes, and
+/// mismatched weight/aspect lists stack. Vertical and Horizontal ignore
+/// everything but themselves.
+[[nodiscard]] SplitDirection resolveSplitDirection(LayoutOrientation orientation, float areaWidth, float areaHeight,
+                                                   const std::vector<float>& weights, const std::vector<float>& aspects,
+                                                   float dividerThickness);
 
 /// Distributes @p totalLength (the axis length already minus the inter-pane
 /// dividers) across panes in proportion to @p weights, clamping each pane to at

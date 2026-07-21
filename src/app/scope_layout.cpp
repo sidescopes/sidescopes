@@ -1,10 +1,44 @@
 #include "app/scope_layout.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
+
+#include "app/scope_view.h"
 
 namespace sidescopes {
 namespace {
+
+// A collapsed pane out-scores any real misfit, so a direction that starves a
+// pane of all room loses to one that does not.
+constexpr float DegenerateMisfit = 100.0f;
+
+// One pane's misfit as |log(actual / preferred)|: scale-free, and twice too
+// wide reads as bad as twice too tall.
+float aspectMisfit(float width, float height, float preferred)
+{
+    if (width <= 0.0f || height <= 0.0f) {
+        return DegenerateMisfit;
+    }
+
+    return std::abs(std::log(width / height / preferred));
+}
+
+// The summed misfit of laying the weighted panes along mainLength with
+// crossLength across, in the given direction.
+float splitScore(const std::vector<float>& weights, const std::vector<float>& aspects, float mainLength,
+                 float crossLength, bool sideBySide)
+{
+    const std::vector<float> lengths = paneLengths(weights, mainLength, 0.0f);
+    float score = 0.0f;
+    for (std::size_t i = 0; i < lengths.size(); ++i) {
+        const float width = sideBySide ? lengths[i] : crossLength;
+        const float height = sideBySide ? crossLength : lengths[i];
+        score += aspectMisfit(width, height, aspects[i]);
+    }
+
+    return score;
+}
 
 // One water-filling round: free panes take their weighted share of the length
 // left after the pinned panes claim the floor, any free pane that would fall
@@ -45,17 +79,44 @@ bool distributeFreePanes(const std::vector<float>& weights, float total, float f
 
 }  // namespace
 
-SplitDirection resolveSplitDirection(LayoutOrientation orientation, float areaWidth, float areaHeight)
+float preferredScopeAspect(const std::string& scopeId)
 {
-    switch (orientation) {
-    case LayoutOrientation::Vertical:
-        return SplitDirection::Stacked;
-    case LayoutOrientation::Horizontal:
-        return SplitDirection::SideBySide;
-    case LayoutOrientation::Automatic:
-    default:
-        return areaWidth >= areaHeight ? SplitDirection::SideBySide : SplitDirection::Stacked;
+    // Dogfood-tuned starting points, not measurements: the wide traces want
+    // width far more than height, the vectorscope is square by construction.
+    if (scopeId == WaveformScopeId || scopeId == ParadeScopeId) {
+        return 3.0f;
     }
+    if (scopeId == HistogramScopeId) {
+        return 2.0f;
+    }
+    if (scopeId == VectorscopeScopeId) {
+        return 1.0f;
+    }
+
+    return 2.0f;
+}
+
+SplitDirection resolveSplitDirection(LayoutOrientation orientation, float areaWidth, float areaHeight,
+                                     const std::vector<float>& weights, const std::vector<float>& aspects,
+                                     float dividerThickness)
+{
+    if (orientation == LayoutOrientation::Vertical) {
+        return SplitDirection::Stacked;
+    }
+    if (orientation == LayoutOrientation::Horizontal) {
+        return SplitDirection::SideBySide;
+    }
+    // Single panes tie by construction; mismatched metadata must not steer
+    // the layout. Both stack - the full-width photographer default.
+    if (weights.size() != aspects.size() || weights.size() < 2) {
+        return SplitDirection::Stacked;
+    }
+
+    const float dividers = dividerThickness * static_cast<float>(weights.size() - 1);
+    const float sideScore = splitScore(weights, aspects, areaWidth - dividers, areaHeight, true);
+    const float stackScore = splitScore(weights, aspects, areaHeight - dividers, areaWidth, false);
+
+    return stackScore <= sideScore ? SplitDirection::Stacked : SplitDirection::SideBySide;
 }
 
 std::vector<float> paneLengths(const std::vector<float>& weights, float totalLength, float minLength)
