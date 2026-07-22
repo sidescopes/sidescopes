@@ -38,19 +38,22 @@ TEST_CASE("Every icon rasterizes with plausible stroke coverage")
 
 TEST_CASE("Icons are distinct images")
 {
+    // Named by glyph, like the enumerators: Pin and PinOff dress the
+    // border's attach toggle, Paperclip the toolbar's attach button, and
+    // SquarePen the toolbar's draw button.
     const auto pin = rasterizeIcon(Icon::Pin, 24);
     const auto pinOff = rasterizeIcon(Icon::PinOff, 24);
-    const auto draw = rasterizeIcon(Icon::SquarePen, 24);
-    const auto attach = rasterizeIcon(Icon::Paperclip, 24);
+    const auto squarePen = rasterizeIcon(Icon::SquarePen, 24);
+    const auto paperclip = rasterizeIcon(Icon::Paperclip, 24);
     CHECK(pin != pinOff);
-    CHECK(pin != draw);
-    CHECK(draw != attach);
+    CHECK(pin != squarePen);
+    CHECK(squarePen != paperclip);
 }
 
 TEST_CASE("The pin-off keeps its slash")
 {
-    // The diagonal strike-through is what tells detach from attach; a
-    // rasterizer change must never lose it.
+    // The diagonal strike-through is what tells the border toggle's global
+    // state from its attached one; a rasterizer change must never lose it.
     const int size = 48;
     const auto pinOff = rasterizeIcon(Icon::PinOff, size);
     const auto pin = rasterizeIcon(Icon::Pin, size);

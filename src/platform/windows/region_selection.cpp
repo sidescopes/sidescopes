@@ -81,7 +81,7 @@ constexpr UINT_PTR BorderAppearTimer = 1;
 constexpr double CloseRadius = 6.5;
 constexpr double CloseHitRadius = 11.0;
 constexpr double CloseCornerInset = 2.0;
-constexpr double TabPinZone = 18.0;
+constexpr double TabAttachZone = 18.0;
 constexpr double MinimumWidthForClose = 48.0;
 
 bool ensureGdiplus()
@@ -1222,7 +1222,7 @@ Gdiplus::PointF closeCenter(double scale)
 Gdiplus::PointF attachButtonCenter(double scale)
 {
     const Gdiplus::RectF region = borderRegionLocal(scale);
-    return {static_cast<Gdiplus::REAL>(region.X + (TabPinZone / 2 - BorderPad) * scale),
+    return {static_cast<Gdiplus::REAL>(region.X + (TabAttachZone / 2 - BorderPad) * scale),
             static_cast<Gdiplus::REAL>(region.Y - (WindowPad + LabelBand / 2) * scale)};
 }
 
@@ -1378,7 +1378,7 @@ void paintBorderLabel(Gdiplus::Graphics& canvas, const Gdiplus::RectF& region, d
     canvas.MeasureString(g_border.attachedLabel.c_str(), -1, &font, Gdiplus::PointF(0, 0), &measured);
     const auto padX = static_cast<Gdiplus::REAL>(6.0 * scale);
     const auto padY = static_cast<Gdiplus::REAL>(2.0 * scale);
-    const auto triangleZone = static_cast<Gdiplus::REAL>(TabPinZone * scale);
+    const auto triangleZone = static_cast<Gdiplus::REAL>(TabAttachZone * scale);
     // The tab holds the attach toggle at its fixed left end, then the
     // text; left-aligned with the region's own corner. The shared layout
     // keeps both platforms' degradation on small regions identical.

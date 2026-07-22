@@ -1,10 +1,10 @@
-#include "app/face_pin.h"
+#include "app/face_lock.h"
 
 #include <cmath>
 #include <cstddef>
 
 namespace sidescopes {
-namespace face_pin {
+namespace face_lock {
 namespace {
 
 // Gates, all relative to the last adopted anchor's width. A candidate must
@@ -20,7 +20,7 @@ constexpr double MicroCenterSlack = 0.08;  ///< adoption threshold: centre motio
 constexpr double MicroSizeSlack = 0.04;    ///< adoption threshold: width change
 constexpr int StableProbes = 2;            ///< consecutive agreeing sightings to adopt
 constexpr int RecoveryMisses = 3;          ///< empty probes before the search widens
-constexpr int GiveUpMisses = 16;           ///< probes without the face before the pin gives up
+constexpr int GiveUpMisses = 16;           ///< probes without the face before the lock gives up
 constexpr double FlushClearance = 4.0;     ///< pixels: a box this close to a side edge was clipped by it
 
 double centerDistance(const FaceAnchor& a, const FaceAnchor& b)
@@ -55,9 +55,9 @@ bool withinSlack(const FaceAnchor& a, const FaceAnchor& b, double centerSlack, d
 
 }  // namespace
 
-FacePinState makePin(const FaceAnchor& anchor, const PinRect& crop)
+FaceLockState makeLock(const FaceAnchor& anchor, const LockRect& crop)
 {
-    FacePinState state;
+    FaceLockState state;
     state.lastAnchor = anchor;
     rebindCrop(state, crop);
     // The pick itself is the first sighting; one agreeing probe confirms.
@@ -67,17 +67,17 @@ FacePinState makePin(const FaceAnchor& anchor, const PinRect& crop)
     return state;
 }
 
-PinRect mapRegion(const FacePinState& state, const FaceAnchor& anchor)
+LockRect mapRegion(const FaceLockState& state, const FaceAnchor& anchor)
 {
     const double centerX = anchor.centerX + state.offsetX * anchor.width;
     const double centerY = anchor.centerY + state.offsetY * anchor.width;
     const double halfWidth = state.sizeX * anchor.width / 2.0;
     const double halfHeight = state.sizeY * anchor.width / 2.0;
 
-    return PinRect{centerX - halfWidth, centerY - halfHeight, centerX + halfWidth, centerY + halfHeight};
+    return LockRect{centerX - halfWidth, centerY - halfHeight, centerX + halfWidth, centerY + halfHeight};
 }
 
-void rebindCrop(FacePinState& state, const PinRect& crop)
+void rebindCrop(FaceLockState& state, const LockRect& crop)
 {
     if (state.lastAnchor.width <= 0.0) {
         return;
@@ -89,7 +89,7 @@ void rebindCrop(FacePinState& state, const PinRect& crop)
     state.sizeY = (crop.bottom - crop.top) / width;
 }
 
-void translate(FacePinState& state, double dxPixels, double dyPixels)
+void translate(FaceLockState& state, double dxPixels, double dyPixels)
 {
     state.lastAnchor.centerX += dxPixels;
     state.lastAnchor.centerY += dyPixels;
@@ -97,22 +97,22 @@ void translate(FacePinState& state, double dxPixels, double dyPixels)
     state.pendingAnchor.centerY += dyPixels;
 }
 
-bool searchingWide(const FacePinState& state)
+bool searchingWide(const FaceLockState& state)
 {
     return state.missCount >= RecoveryMisses;
 }
 
-bool givenUp(const FacePinState& state)
+bool givenUp(const FaceLockState& state)
 {
     return state.missCount >= GiveUpMisses;
 }
 
-bool trustworthyBox(const PinRect& box, const PinRect& bounds)
+bool trustworthyBox(const LockRect& box, const LockRect& bounds)
 {
     return box.left - bounds.left >= FlushClearance && bounds.right - box.right >= FlushClearance;
 }
 
-FacePinDecision decide(FacePinState& state, const std::vector<FaceAnchor>& candidates)
+FaceLockDecision decide(FaceLockState& state, const std::vector<FaceAnchor>& candidates)
 {
     const bool wide = searchingWide(state);
     const FaceAnchor* winner = nullptr;
@@ -131,35 +131,35 @@ FacePinDecision decide(FacePinState& state, const std::vector<FaceAnchor>& candi
         ++state.missCount;
         state.pendingCount = 0;
 
-        return FacePinDecision{
+        return FaceLockDecision{
             false, true,
             candidates.empty() ? "no faces" : "none near (" + std::to_string(candidates.size()) + " seen)"};
     }
     if (passing > 1) {
         // Rivals mean the face's position is not certain: the region
         // freezes, the border hides, and the give-up clock keeps running -
-        // persistent rivalry ends the pin instead of guessing.
+        // persistent rivalry ends the lock instead of guessing.
         state.pendingCount = 0;
         ++state.missCount;
 
-        return FacePinDecision{false, true, "ambiguous (" + std::to_string(passing) + " rivals)"};
+        return FaceLockDecision{false, true, "ambiguous (" + std::to_string(passing) + " rivals)"};
     }
     const bool agrees = withinSlack(*winner, state.pendingAnchor, SameCenterSlack, SameSizeSlack);
     state.pendingCount = agrees ? state.pendingCount + 1 : 1;
     state.pendingAnchor = *winner;
     if (state.pendingCount < StableProbes) {
-        return FacePinDecision{false, true, "unsettled"};
+        return FaceLockDecision{false, true, "unsettled"};
     }
     // A stable candidate is a found face, wherever the verdict lands next:
     // the search narrows back to the patch around it.
     state.missCount = 0;
     if (withinSlack(*winner, state.lastAnchor, MicroCenterSlack, MicroSizeSlack)) {
-        return FacePinDecision{false, false, "micro-move"};
+        return FaceLockDecision{false, false, "micro-move"};
     }
     state.lastAnchor = *winner;
 
-    return FacePinDecision{true, false, wide ? "reacquired" : "settled"};
+    return FaceLockDecision{true, false, wide ? "reacquired" : "settled"};
 }
 
-}  // namespace face_pin
+}  // namespace face_lock
 }  // namespace sidescopes

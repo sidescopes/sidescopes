@@ -43,6 +43,9 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Region is the one word for the rectangle the scopes read: the menu
   says Draw Region..., and the toolbar tooltip and picker banner ask
   you to draw a region rather than select an area.
+- The diagnostics channel for face regions is named after the face
+  locking it records: `SIDESCOPES_DIAG=facelock` selects the probe
+  verdicts, and `facepin` selects nothing.
 
 ### Fixed
 
@@ -51,7 +54,7 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   scheduled tick, so the border no longer lingers over the window that
   replaced it. On macOS this covers application switches; a switch
   between two windows of one application keeps the previous latency.
-- A face-pinned window regaining focus no longer flashes the stale
+- A face-locked window regaining focus no longer flashes the stale
   region border for the first probe's latency; the border waits for
   this activation's verdict, and the probe fires immediately instead
   of waiting out its cadence.

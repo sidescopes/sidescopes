@@ -156,7 +156,7 @@ struct RegionBorderEdit
 {
     bool editing = false;
     bool dismissed = false;
-    /// The border's pin button was clicked: an attached region lets go of
+    /// The border's attach toggle was clicked: an attached region lets go of
     /// its window and becomes the global region in place; a global one
     /// attaches to the frontmost window under it.
     bool attachToggled = false;

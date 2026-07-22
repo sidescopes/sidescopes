@@ -45,7 +45,7 @@ constexpr double LabelBand = 20.0;
 constexpr double CloseRadius = 6.5;
 constexpr double CloseHitRadius = 11.0;
 constexpr double CloseCornerInset = 2.0;
-constexpr double TabPinZone = 18.0;
+constexpr double TabAttachZone = 18.0;
 constexpr double MinimumWidthForClose = 48.0;
 
 NSScreen* screenForDisplay(uint32_t displayId)
@@ -791,7 +791,7 @@ NSCursor* buildPinCursor(const std::optional<FloatColor>& color)
 - (NSPoint)attachButtonCenter
 {
     const NSRect region = [self regionRect];
-    return NSMakePoint(NSMinX(region) - sidescopes::BorderPad + sidescopes::TabPinZone / 2,
+    return NSMakePoint(NSMinX(region) - sidescopes::BorderPad + sidescopes::TabAttachZone / 2,
                        NSMaxY(region) + sidescopes::WindowPad + self.labelBand / 2);
 }
 
@@ -878,7 +878,7 @@ NSCursor* buildPinCursor(const std::optional<FloatColor>& color)
     // The trim budget ends at the band's outer right edge, so a truncated
     // tab stays flush with the border block on both sides.
     const sidescopes::TabLayout layout = sidescopes::borderTabLayout(
-        NSMaxX(region) + sidescopes::BorderPad - tabX, sidescopes::TabPinZone, padX, textSize.width, 16.0);
+        NSMaxX(region) + sidescopes::BorderPad - tabX, sidescopes::TabAttachZone, padX, textSize.width, 16.0);
     if (!layout.visible) {
         return;
     }
@@ -893,7 +893,7 @@ NSCursor* buildPinCursor(const std::optional<FloatColor>& color)
     plate.lineWidth = 1.0;
     [plate stroke];
     const NSRect text =
-        NSMakeRect(tab.origin.x + sidescopes::TabPinZone + padX, tab.origin.y + padY, textWidth, textSize.height);
+        NSMakeRect(tab.origin.x + sidescopes::TabAttachZone + padX, tab.origin.y + padY, textWidth, textSize.height);
     [self.attachedLabel drawInRect:text withAttributes:attributes];
 }
 

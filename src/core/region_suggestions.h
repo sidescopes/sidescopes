@@ -18,7 +18,7 @@ struct SuggestedRegion
 
 /// What the application keeps for one detected face so a confirmed pick
 /// resolves back to its source: the suggested crop the overlay drew, the raw
-/// detector box the pin anchors on, and the display and frame the box was
+/// detector box the lock anchors on, and the display and frame the box was
 /// measured on so a pick on any display maps back to the right pixels.
 struct FaceCandidate
 {

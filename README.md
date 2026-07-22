@@ -86,7 +86,7 @@ so does a restart.
 For development use, `SIDESCOPES_DIAG=attach,border` (or `all`) starts
 recording from launch with only the named channels (`attach`:
 window-focus routing, `border`: region-border drawing, `suggestions`:
-the picker's window suggestions and pick mapping, `facepin`: face-pin
+the picker's window suggestions and pick mapping, `facelock`: face-lock
 probe verdicts, `perf`: frame, analysis-pass, and capture-cadence
 timings); the previous run is kept beside the log as
 `sidescopes-diag.prev.log`. `SIDESCOPES_DIAG_FILE` overrides the

@@ -79,7 +79,7 @@ std::vector<DesktopWindow> onScreenWindows(uint32_t displayId)
 std::vector<DesktopWindow> attachCandidateWindows(uint32_t displayId)
 {
     // A key panel floats a few levels up (a Quick Look preview rides at
-    // the floating level while it holds the keyboard), and pinning must
+    // the floating level while it holds the keyboard), and attaching must
     // still find it rather than the window underneath it.
     return onScreenWindowsUpToLayer(displayId, 8);
 }

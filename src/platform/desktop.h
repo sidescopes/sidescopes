@@ -204,7 +204,7 @@ void unobserveForegroundChanges();
 
 /// Like onScreenWindows, additionally admitting floating-level panels:
 /// macOS lifts a key panel (a Quick Look preview) above the ordinary
-/// window layer, and pinning a region must still find the window visually
+/// window layer, and attaching a region must still find the window visually
 /// under it. Identical to onScreenWindows on Windows.
 [[nodiscard]] std::vector<DesktopWindow> attachCandidateWindows(uint32_t displayId);
 

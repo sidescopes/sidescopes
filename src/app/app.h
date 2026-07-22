@@ -15,7 +15,7 @@
 
 #include "app/attach_controller.h"
 #include "app/capture_controller.h"
-#include "app/face_pin.h"
+#include "app/face_lock.h"
 #include "app/param_menu.h"
 #include "app/pin_board.h"
 #include "app/scope_registry.h"
@@ -144,25 +144,25 @@ private:
     void attachGlobalRegionToWindow();
     void applyBorderEdit(const RegionOfInterest& edited);
 
-    // --- face pins ---
-    /// A pin plus the window rectangle it last saw: a same-size window
-    /// move translates the pin's anchors along with the face. The verdict
+    // --- face locks ---
+    /// A lock plus the window rectangle it last saw: a same-size window
+    /// move translates the lock's anchors along with the face. The verdict
     /// stamp says when a probe (or the creating pick) last confirmed the
     /// anchor; an anchor older than a probe period is stale on activation
     /// and must not dress the border until re-verified.
-    struct AppFacePin
+    struct AppFaceLock
     {
-        FacePinState state;
+        FaceLockState state;
         std::optional<AttachWindowRect> windowRect;
         double anchorVerifiedAt = 0.0;
     };
 
-    void updateFacePin(const AttachDecision& decision);
-    void launchFacePinProbe(const AttachDecision& decision, const FacePinState& pin);
-    void consumeFacePinProbe(const AttachDecision& decision);
-    void applyFacePinRegion(const FacePinState& pin);
-    void trackPinWindowRect(AppFacePin& pin, const AttachWindowRect& rect);
-    void removeLostFacePin(uint64_t identity);
+    void updateFaceLock(const AttachDecision& decision);
+    void launchFaceLockProbe(const AttachDecision& decision, const FaceLockState& lock);
+    void consumeFaceLockProbe(const AttachDecision& decision);
+    void applyFaceLockRegion(const FaceLockState& lock);
+    void carryLockWithWindow(AppFaceLock& lock, const AttachWindowRect& rect);
+    void removeLostFaceLock(uint64_t identity);
     void probeRegionContentChange();
     [[nodiscard]] bool regionContentUnsettled() const;
     bool adoptFacePick(uint32_t displayId, const RegionOfInterest& confirmed);
@@ -372,7 +372,7 @@ private:
 
     /// The face-probe mailbox: a detached detection thread fills it, the
     /// main loop drains it; at most one probe is in flight.
-    struct FacePinProbe
+    struct FaceLockProbe
     {
         std::atomic<bool> running{false};
         std::atomic<bool> ready{false};
@@ -382,8 +382,8 @@ private:
         IntRect roi;  ///< the searched area, for judging edge-clipped boxes
     };
 
-    std::map<uint64_t, AppFacePin> m_facePins;
-    FacePinProbe m_facePinProbe;
+    std::map<uint64_t, AppFaceLock> m_faceLocks;
+    FaceLockProbe m_faceLockProbe;
 
     /// One non-streamed display's background face scan for an open picker: a
     /// detached thread grabs that display off the capture stream, detects,
@@ -410,11 +410,11 @@ private:
     /// dropped rather than fed to the wrong overlay.
     uint64_t m_facePickGeneration = 0;
     std::array<IconTexture, IconCount> m_iconTextures;
-    double m_nextFacePinProbe = 0.0;
-    /// True while the active pin's face is not confirmed where the region
+    double m_nextFaceLockProbe = 0.0;
+    /// True while the active lock's face is not confirmed where the region
     /// sits; the border hides instead of outlining stale content.
-    bool m_facePinHunting = false;
-    /// The content-stability probe over the pinned region: a sparse pixel
+    bool m_faceLockHunting = false;
+    /// The content-stability probe over the face-locked region: a sparse pixel
     /// grid compared frame to frame; the border shows only settled content.
     std::vector<uint8_t> m_regionContentSamples;
     RegionOfInterest m_regionContentRect;
