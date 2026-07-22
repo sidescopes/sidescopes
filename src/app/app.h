@@ -263,6 +263,8 @@ private:
     /// so far - allows it.
     void drawCursorReadout(float taken);
     void drawScopePanes();
+    /// What fills the pane area: the capture help pages, or the scope stack.
+    void drawPaneContent();
     void drawScopeStack();
     /// Each stacked scope's preferred pane aspect, in stack order, for the
     /// Automatic split scoring.

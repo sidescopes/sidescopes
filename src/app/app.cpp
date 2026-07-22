@@ -3683,6 +3683,19 @@ void App::drawScopePanes()
     // identity index, so the adaptive block and the context menu read back the
     // right pane.
     m_paneRects.assign(m_scopeRegistry.scopes().size(), ImVec4());
+    // One reservation around every pane path, help pages included: whatever
+    // fills the area lives in a child sized to leave the status bar's strip
+    // below it, so the bar keeps the foot of the window in every state and a
+    // centred help block centres on the space it actually has. The host window
+    // carries no scrollbar, and neither does this.
+    ImGui::BeginChild("##pane-area", ImVec2(0.0f, -statusBarHeight()), ImGuiChildFlags_None,
+                      ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+    drawPaneContent();
+    ImGui::EndChild();
+}
+
+void App::drawPaneContent()
+{
     if (!m_captureController->permissionGranted()) {
         drawCaptureHelp("SideScopes cannot see the screen",
                         {
@@ -3702,16 +3715,12 @@ void App::drawScopePanes()
 
         return;
     }
-    // One reservation for every pane path: the panes live in a child sized to
-    // leave the status bar's strip below, solo and stacked alike.
-    ImGui::BeginChild("##pane-area", ImVec2(0.0f, -statusBarHeight()));
     const std::vector<std::string>& stack = m_view.stack();
     if (stack.size() == 1) {
         drawScopeById(stack.front());
     } else if (stack.size() > 1) {
         drawScopeStack();
     }
-    ImGui::EndChild();
 }
 
 std::vector<float> App::stackAspects() const
