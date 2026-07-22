@@ -89,6 +89,19 @@ foreach(suite IN ITEMS pipeline view)
     add_test(NAME sidescopes_ui_${suite} COMMAND sidescopes_ui_${suite}_tests)
 endforeach()
 
+# The seating-rule suite needs none of the pipeline: it asserts the arithmetic
+# in src/app/row_layout.cpp, the one app translation unit that DOES depend on
+# Dear ImGui - linking the test engine gives it the hooked build's headers, so
+# it sees the same ImGuiContext layout as everything else here.
+add_executable(sidescopes_ui_layout_tests
+    test_layout_ui.cpp
+    ui_test_harness.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/row_layout.cpp)
+target_include_directories(sidescopes_ui_layout_tests PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(sidescopes_ui_layout_tests PRIVATE sidescopes_imgui_test_engine)
+sidescopes_target_defaults(sidescopes_ui_layout_tests)
+add_test(NAME sidescopes_ui_layout COMMAND sidescopes_ui_layout_tests)
+
 # In the dynamic module configuration the engines live only in the loaded
 # MODULE bundles, so - as in tests/CMakeLists.txt - compile their sources in to
 # supply the symbols core's shared graticule references, and wait for the
