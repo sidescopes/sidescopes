@@ -1565,9 +1565,13 @@ bool App::init()
 
     observeSystemWake([this] { m_captureController->markStale(); });
     observeEscapeWithoutKeyWindow([this] { m_orphanEscape.store(true); });
-    // A foreground switch reroutes the borders on the very next frame: the
-    // wake beats the idle tick.
-    observeForegroundChanges([] { glfwPostEmptyEvent(); });
+    // A foreground switch reroutes the borders at the top of the next frame:
+    // the flag makes the loop route on arrival, and the empty event wakes an
+    // idle wait so "the next frame" is now.
+    observeForegroundChanges([this] {
+        m_callbackState.foregroundChanged.store(true);
+        glfwPostEmptyEvent();
+    });
     rememberApplicationWindow(m_graphics->nativeWindowHandle());
     m_ownPid = ownApplicationPid();
 
@@ -1602,6 +1606,9 @@ void App::shutdown()
 
     persistPreferences();
     unwatchWindowMotion();
+    // The observer reaches this object and posts GLFW events, so it must not
+    // outlive either.
+    unobserveForegroundChanges();
     hideAttachedEditDim();
     hideRegionBorder();
     m_worker.stop();
@@ -2792,6 +2799,14 @@ void App::pumpEvents()
 
 void App::drainAsyncSignals()
 {
+    // First of the drains, and ahead of the capture service below: the focus
+    // routing is what takes a stale border down, and everything after this
+    // point can stall the tick - a capture restart most of all.
+    if (m_callbackState.foregroundChanged.exchange(false)) {
+        SS_DIAG(Attach, "fg-event wake");
+        followAttachedWindow();
+        m_lastActivity = glfwGetTime();
+    }
     drainDisplayFaceScans();
     if (m_callbackState.iconifyChanged.exchange(false)) {
         syncRegionBorder();

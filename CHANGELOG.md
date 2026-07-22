@@ -39,6 +39,11 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Switching focus away from a window carrying an attached region takes
+  its border down on the focus event itself, rather than at the next
+  scheduled tick, so the border no longer lingers over the window that
+  replaced it. On macOS this covers application switches; a switch
+  between two windows of one application keeps the previous latency.
 - A face-pinned window regaining focus no longer flashes the stale
   region border for the first probe's latency; the border waits for
   this activation's verdict, and the probe fires immediately instead

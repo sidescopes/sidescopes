@@ -356,6 +356,7 @@ bool applicationHidden()
 namespace {
 
 std::function<void()> g_foregroundCallback;
+HWINEVENTHOOK g_foregroundHook = nullptr;
 
 // The shell surfaces that take the foreground mid focus switch: the alt-tab
 // and task-view hosts and the staging window foreground changes pass
@@ -402,9 +403,25 @@ void CALLBACK foregroundWinEvent(HWINEVENTHOOK, DWORD, HWND hwnd, LONG, LONG, DW
 
 void observeForegroundChanges(std::function<void()> callback)
 {
+    unobserveForegroundChanges();
     g_foregroundCallback = std::move(callback);
-    SetWinEventHook(EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND, nullptr, foregroundWinEvent, 0, 0,
-                    WINEVENT_OUTOFCONTEXT);
+    // System-wide and deliberately without WINEVENT_SKIPOWNPROCESS: this
+    // application taking the foreground is a routing input of its own - the
+    // focus rule holds the active window on our own pid - and the capture
+    // exclusion the same hook drives has to follow every switch, ours
+    // included. Out-of-context delivery lands on this thread whenever it
+    // pumps messages, the idle wait included.
+    g_foregroundHook = SetWinEventHook(EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND, nullptr, foregroundWinEvent, 0,
+                                       0, WINEVENT_OUTOFCONTEXT);
+}
+
+void unobserveForegroundChanges()
+{
+    if (g_foregroundHook) {
+        UnhookWinEvent(g_foregroundHook);
+        g_foregroundHook = nullptr;
+    }
+    g_foregroundCallback = nullptr;
 }
 
 namespace {

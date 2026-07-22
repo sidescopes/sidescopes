@@ -52,6 +52,12 @@ struct AppCallbackState
     /// when the iconified state flips either way. Set by the GLFW iconify
     /// callback.
     std::atomic<bool> iconifyChanged{false};
+    /// A foreground application switch happened: the focus routing must run
+    /// now rather than at the next scheduled tick, or the border outlives the
+    /// window it dresses. Set by the platform foreground observer, which may
+    /// deliver from an operating-system callback context, so the flag is all
+    /// the callback touches; the frame loop drains it and does the routing.
+    std::atomic<bool> foregroundChanged{false};
     /// The fixed-width companion for values whose glyphs must align - hex codes
     /// most of all; null when no system monospace font was found, and the
     /// interface font stands in. Set once at font load, read by the picker.

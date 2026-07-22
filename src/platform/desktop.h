@@ -187,9 +187,20 @@ void unwatchWindowMotion();
 /// application changes (macOS: the workspace activation notification;
 /// Windows: a global foreground win-event hook), so the focus-routed region
 /// logic reroutes immediately instead of waiting out an idle tick - a
-/// Cmd+Tab must not leave the old border on screen for a beat. Install
-/// once, from the main thread.
+/// Cmd+Tab must not leave the old border on screen for a beat. The signal
+/// carries no payload: the routing re-reads the foreground itself, so a
+/// callback that raced the switch still reaches the right verdict. It may
+/// arrive from an operating-system callback context, so a handler may only
+/// mark state and wake the loop. macOS reports application switches alone -
+/// a switch between two windows of the SAME application raises no
+/// activation notification, and those keep the per-tick poll's latency.
+/// Install once, from the main thread.
 void observeForegroundChanges(std::function<void()> callback);
+
+/// Stops the foreground observation and drops the callback, so no signal
+/// reaches a half torn-down application. Safe to call when nothing is
+/// observed. Call from the main thread.
+void unobserveForegroundChanges();
 
 /// Like onScreenWindows, additionally admitting floating-level panels:
 /// macOS lifts a key panel (a Quick Look preview) above the ordinary

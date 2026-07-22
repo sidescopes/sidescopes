@@ -520,15 +520,37 @@ void observeSystemWake(std::function<void()> callback)
                                                   usingBlock:observe];
 }
 
+namespace {
+
+// The activation observer's token, kept so teardown can retire it.
+id g_foregroundObserver = nil;
+
+}  // namespace
+
 void observeForegroundChanges(std::function<void()> callback)
 {
+    // Application activation is the notification macOS offers here, so a
+    // switch between two windows of the same application raises nothing: the
+    // per-tick focus poll still covers that case at its own latency. The
+    // named cases - Cmd+Tab and a click into another application - are
+    // application switches and arrive on this observer.
+    unobserveForegroundChanges();
     auto shared = std::make_shared<std::function<void()>>(std::move(callback));
-    [[[NSWorkspace sharedWorkspace] notificationCenter] addObserverForName:NSWorkspaceDidActivateApplicationNotification
-                                                                    object:nil
-                                                                     queue:[NSOperationQueue mainQueue]
-                                                                usingBlock:^(NSNotification*) {
-                                                                  (*shared)();
-                                                                }];
+    g_foregroundObserver = [[[NSWorkspace sharedWorkspace] notificationCenter]
+        addObserverForName:NSWorkspaceDidActivateApplicationNotification
+                    object:nil
+                     queue:[NSOperationQueue mainQueue]
+                usingBlock:^(NSNotification*) {
+                  (*shared)();
+                }];
+}
+
+void unobserveForegroundChanges()
+{
+    if (g_foregroundObserver) {
+        [[[NSWorkspace sharedWorkspace] notificationCenter] removeObserver:g_foregroundObserver];
+        g_foregroundObserver = nil;
+    }
 }
 
 void observeEscapeWithoutKeyWindow(std::function<void()> callback)
