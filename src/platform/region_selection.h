@@ -137,10 +137,10 @@ void setRegionPickChipColor(const std::optional<FloatColor>& color);
 /// @p attachedLabel distinguishes the two region kinds: empty is the global
 /// region in its plain dress; non-empty is a window-attached region, whose
 /// measurement dashes take a warm tint and whose band wears the label (the
-/// tracked window's application) above the top edge. Idempotent AND cheap to
+/// attached window's application) above the top edge. Idempotent AND cheap to
 /// repeat: an unchanged rectangle, label, and visibility is a no-op, so the
 /// host may reconcile every frame instead of chasing edges.
-/// @p label is always worn on the strip row above the band - the tracked
+/// @p label is always worn on the strip row above the band - the attached
 /// window's title for an attached region, the display's name for the
 /// global one - with the attach toggle at the label's fixed left end.
 /// @p attached picks the toggle's glyph, which shows the STATE: the pin
@@ -150,8 +150,8 @@ void hideRegionBorder();
 
 /// The border's in-progress or just-finished adjustment, if any.
 /// @c dismissed reports the border's own close affordances - the hover
-/// close button and a double-click on the band - and means "stop
-/// tracking this region"; the application resets to full screen.
+/// close button and a double-click on the band - and means "dismiss
+/// this region"; the application resets to full screen.
 struct RegionBorderEdit
 {
     bool editing = false;
@@ -181,7 +181,7 @@ struct BorderKeyPress
 [[nodiscard]] std::vector<BorderKeyPress> drainBorderKeyPresses();
 
 /// A click-through spotlight while an attached border is being edited:
-/// everything on @p displayId outside @p windowRegion (the tracked window's
+/// everything on @p displayId outside @p windowRegion (the attached window's
 /// rectangle, in display percentages) dims hard, in the attached draw's
 /// dress, so the resize limit is visible while dragging. Idempotent and
 /// cheap when unchanged; hideAttachedEditDim takes it down.

@@ -126,7 +126,7 @@ private:
 
     // --- attached regions ---
     void followAttachedWindow();
-    [[nodiscard]] std::vector<TrackedWindowObservation> gatherTrackedObservations() const;
+    [[nodiscard]] std::vector<AttachedWindowObservation> gatherAttachedObservations() const;
     [[nodiscard]] bool activeWindowMoved(const AttachDecision& decision) const;
     void captureActiveDisplay(const AttachDecision& decision);
     void applyAttachDecision(const AttachDecision& decision);
@@ -136,7 +136,7 @@ private:
     void idleWaitWatchingAttachedWindow();
     [[nodiscard]] static RegionOfInterest displayPercentRect(const WindowGeometry& windowGeom,
                                                              const DisplayGeometry& display);
-    void stopTrackingActiveWindow();
+    void detachActiveWindow();
     void confirmPickedRegion(const RegionPickPoll& poll);
     void adoptAttachedPick(uint64_t identity, int64_t ownerPid, const RegionOfInterest& region);
     void dismissEditedBorder();
@@ -347,7 +347,7 @@ private:
     AnalysisSettings m_analysis;
     bool m_analysisDirty = true;
 
-    // Attached regions: the tracked-window set and the single global region
+    // Attached regions: the attached-window set and the single global region
     // the analysis falls back to whenever the focused window has no region
     // of its own. The border hides the instant the active window moves - a
     // polled border trails a fast drag - and returns once the window has sat
@@ -360,14 +360,14 @@ private:
     double m_attachRegionMovedAt = -1.0;
     // The active window the motion watch is bound to (0 = none), its last
     // seen rectangle, and the label its border wears.
-    uint64_t m_activeTrackedWindow = 0;
+    uint64_t m_activeWindowIdentity = 0;
     std::optional<AttachWindowRect> m_attachLastSeenRect;
     std::string m_attachActiveLabel;
     // Which region the border edit in flight started on (0 = the global
     // one), latched at the drag's first frame: no focus race can reroute a
     // grabbed border, and an attached edit can never convert to global.
     bool m_attachBorderEditing = false;
-    uint64_t m_attachBorderEditTarget = 0;
+    uint64_t m_attachBorderEditIdentity = 0;
 
     std::vector<PickableWindow> m_pickableWindows;
     std::vector<PickableFace> m_pickableFaces;
@@ -384,7 +384,7 @@ private:
         std::atomic<bool> ready{false};
         std::mutex mutex;
         std::vector<IntRect> faces;  ///< detector boxes, full-frame pixels
-        uint64_t forWindow = 0;
+        uint64_t forWindowIdentity = 0;
         IntRect roi;  ///< the searched area, for judging edge-clipped boxes
     };
 
@@ -425,7 +425,7 @@ private:
     std::vector<uint8_t> m_regionContentSamples;
     RegionOfInterest m_regionContentRect;
     double m_regionContentChangedAt = -1.0;
-    // A short-lived toolbar note after a tracked window closed.
+    // A short-lived toolbar note after an attached window closed.
     std::string m_attachDetachNotice;
     double m_attachNoticeUntil = 0.0;
     int64_t m_ownPid = 0;

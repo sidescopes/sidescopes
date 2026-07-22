@@ -726,7 +726,7 @@ NSCursor* buildPinCursor(const std::optional<FloatColor>& color)
 @property(nonatomic, assign) BOOL attachPressed;
 // Whether the outlined region is attached: picks the toggle's glyph.
 @property(nonatomic, assign) BOOL attachedRegion;
-// Non-empty for a window-attached region: the tracked application's name,
+// Non-empty for a window-attached region: the attached application's name,
 // worn as a small tab above the band, with the measurement dashes taking a
 // label being the tell that this region belongs to a window.
 @property(nonatomic, copy) NSString* attachedLabel;
@@ -847,7 +847,7 @@ NSCursor* buildPinCursor(const std::optional<FloatColor>& color)
     [dashes stroke];
 }
 
-// The tracked window's name rides a tab above the band: the attached region
+// The attached window's name rides a tab above the band: the attached region
 // carries its own identification instead of the main window's toolbar doing
 // it at a distance. The label strip the window grew makes room for it clear
 // of the handles.
@@ -1219,7 +1219,7 @@ NSCursor* buildPinCursor(const std::optional<FloatColor>& color)
 @end
 
 // The attached-edit spotlight: a click-through veil that dims everything
-// outside the tracked window while its border is being dragged, so the
+// outside the attached window while its border is being dragged, so the
 // resize limit is visible - the attached draw's dress, without a picker.
 @interface SidescopesEditDimView : NSView
 @property(nonatomic, assign) NSRect holeRect;

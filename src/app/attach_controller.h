@@ -32,11 +32,11 @@ struct AttachDisplayRect
     double height = 0.0;
 };
 
-/// One tracked window's state this frame, gathered by the host from the
+/// One attached window's state this frame, gathered by the host from the
 /// desktop seams: its rectangle (nothing once it has closed), whether it is
 /// minimized or otherwise off screen, and the display it sits on. The display
 /// fields are only meaningful for a visible window.
-struct TrackedWindowObservation
+struct AttachedWindowObservation
 {
     uint64_t identity = 0;
     std::optional<AttachWindowRect> windowRect;
@@ -48,14 +48,14 @@ struct TrackedWindowObservation
 };
 
 /// The per-frame verdict: the active window's mapped region (present exactly
-/// when the focused window is a visible tracked one), where that window
-/// sits, and how many tracked windows closed this frame. With no region the
+/// when the focused window is a visible attached one), where that window
+/// sits, and how many attached windows closed this frame. With no region the
 /// host falls back to the single global region - the two kinds never mix.
 struct AttachDecision
 {
     std::optional<RegionOfInterest> region;
-    /// The focused tracked window, or 0 when the focused window is not a
-    /// visible tracked one - the window whose region the scopes analyze and
+    /// The focused attached window, or 0 when the focused window is not a
+    /// visible attached one - the window whose region the scopes analyze and
     /// whose border wears the attached style and label.
     uint64_t activeIdentity = 0;
     int64_t activeOwnerPid = 0;
@@ -64,15 +64,15 @@ struct AttachDecision
     /// The active window's current title, or empty; the host prefers it over
     /// the application name for the border's label.
     std::string activeTitle;
-    /// Tracked windows that closed and were pruned this frame.
+    /// Attached windows that closed and were pruned this frame.
     std::size_t closedCount = 0;
-    /// The closures emptied the tracked set; the host tells the user and the
+    /// The closures emptied the attached set; the host tells the user and the
     /// analysis falls back to the global region.
     bool detachedAll = false;
 };
 
-/// The window-tracking brain behind attached regions. Pure logic: it holds a
-/// set of tracked windows - each with its region as an ABSOLUTE screen
+/// The brain behind attached regions. Pure logic: it holds a set of
+/// attached windows - each with its region as an ABSOLUTE screen
 /// rectangle, mechanically bound to its window: a window MOVE translates the
 /// region exactly; a window RESIZE leaves it glued to the screen, with an
 /// arriving window edge pushing it (position, permanently) and walls closing
@@ -83,41 +83,42 @@ struct AttachDecision
 /// The controller consumes per-frame observations the host gathers from the
 /// desktop seams and emits region decisions. An attached region is effective
 /// exactly while ITS window is the focused one: the active window is the
-/// focused tracked window, switching focus between tracked windows switches
-/// the analyzed region, and any other focus (SideScopes itself, an untracked
-/// window) yields no region here - the host falls back to the single global
-/// region. A hidden or minimized tracked window keeps its region and simply
-/// cannot be active. The application's own visibility is none of this
-/// class's business, and neither is the global region. The controller never
-/// calls a platform function itself, so every transition is unit-testable.
+/// focused attached window, switching focus between attached windows
+/// switches the analyzed region, and any other focus (SideScopes itself, an
+/// unattached window) yields no region here - the host falls back to the
+/// single global region. A hidden or minimized attached window keeps its
+/// region and simply cannot be active. The application's own visibility is
+/// none of this class's business, and neither is the global region. The
+/// controller never calls a platform function itself, so every transition is
+/// unit-testable.
 class AttachController
 {
 public:
-    /// @return Whether any window is currently tracked.
+    /// @return Whether any window is currently attached.
     [[nodiscard]] bool attached() const;
 
-    /// @return How many windows are currently tracked.
-    [[nodiscard]] std::size_t trackedCount() const;
+    /// @return How many windows are currently attached.
+    [[nodiscard]] std::size_t attachedCount() const;
 
-    /// @return The identities of all tracked windows, in attach order, for
+    /// @return The identities of all attached windows, in attach order, for
     ///         the host's per-frame observation sweep.
-    [[nodiscard]] std::vector<uint64_t> trackedIdentities() const;
+    [[nodiscard]] std::vector<uint64_t> attachedIdentities() const;
 
-    /// @return Whether the window with @p identity is tracked.
-    [[nodiscard]] bool tracks(uint64_t identity) const;
+    /// @return Whether the window with @p identity is attached.
+    [[nodiscard]] bool isAttached(uint64_t identity) const;
 
-    /// @return The active window's platform identity, or 0 when no tracked
+    /// @return The active window's platform identity, or 0 when no attached
     ///         window is visible.
     [[nodiscard]] uint64_t activeIdentity() const;
 
     /// @return The active window's application name, or an empty string when
-    ///         the focused window is not a visible tracked one. The border's
+    ///         the focused window is not a visible attached one. The border's
     ///         label wears it.
     [[nodiscard]] std::string activeApplicationName() const;
 
-    /// Tracks a window, or re-picks the region of one already tracked, and
-    /// makes it active. @p identity is its platform handle, @p ownerPid the
-    /// process id of its application, @p applicationName its name,
+    /// Attaches to a window, or re-picks the region of one already attached,
+    /// and makes it active. @p identity is its platform handle, @p ownerPid
+    /// the process id of its application, @p applicationName its name,
     /// @p windowRect its current rectangle on @p display, and
     /// @p absoluteRegion the region the user confirmed. The region is
     /// stored in absolute desktop coordinates, screen-glued: window moves
@@ -139,23 +140,24 @@ public:
                                 AttachDisplayRect display);
 
     /// One frame of observation while attached. @p windows carries one entry
-    /// per tracked window (closed ones are pruned); @p focusedWindow names
+    /// per attached window (closed ones are pruned); @p focusedIdentity names
     /// the window the user is working in - the foreground application's
     /// frontmost ordinary window - or nothing when that is unknown. Emits
     /// the active window's mapped region exactly when the focused window is
-    /// a visible tracked one, plus the closures. A no-op verdict when
-    /// nothing is tracked.
-    AttachDecision observe(const std::vector<TrackedWindowObservation>& windows, std::optional<uint64_t> focusedWindow);
+    /// a visible attached one, plus the closures. A no-op verdict when
+    /// nothing is attached.
+    AttachDecision observe(const std::vector<AttachedWindowObservation>& windows,
+                           std::optional<uint64_t> focusedIdentity);
 
-    /// Stops tracking one window; the remaining set keeps working.
+    /// Detaches one window; the remaining set keeps working.
     void remove(uint64_t identity);
 
-    /// Stops tracking everything - the user pressed Escape - and the caller
+    /// Detaches everything - the user pressed Escape - and the caller
     /// returns the region to full screen.
     void detachAll();
 
 private:
-    struct TrackedWindow
+    struct AttachedWindow
     {
         uint64_t identity = 0;
         int64_t ownerPid = 0;
@@ -181,36 +183,36 @@ private:
         bool observedOnce = false;
     };
 
-    [[nodiscard]] TrackedWindow* find(uint64_t identity);
-    [[nodiscard]] const TrackedWindow* find(uint64_t identity) const;
+    [[nodiscard]] AttachedWindow* find(uint64_t identity);
+    [[nodiscard]] const AttachedWindow* find(uint64_t identity) const;
 
     /// Stores @p window's absolute rectangle from a display-percent region,
     /// clamped into the window, and remembers the window rectangle it was
     /// set against.
-    static void setStoredFromAbsolute(TrackedWindow& window, const RegionOfInterest& absoluteRegion,
+    static void setStoredFromAbsolute(AttachedWindow& window, const RegionOfInterest& absoluteRegion,
                                       const AttachWindowRect& windowRect, const AttachDisplayRect& display);
 
     /// Applies one window observation to the stored rectangle: a move (same
     /// size) translates it; a resize leaves it screen-glued and pushes its
     /// position just enough to keep it inside (permanently), per axis.
-    static void bindStoredToWindow(TrackedWindow& window, const AttachWindowRect& windowRect);
+    static void bindStoredToWindow(AttachedWindow& window, const AttachWindowRect& windowRect);
 
-    /// Advances every tracked window's stored rectangle from this frame's
+    /// Advances every attached window's stored rectangle from this frame's
     /// observations; minimized and closed windows are left untouched.
-    void updateTracked(const std::vector<TrackedWindowObservation>& windows);
+    void updateAttached(const std::vector<AttachedWindowObservation>& windows);
 
     /// @p window's stored rectangle clipped to the window - elastically, the
     /// stored size survives - as display percentages on @p display.
-    [[nodiscard]] static RegionOfInterest toAbsolute(const TrackedWindow& window, const AttachWindowRect& windowRect,
+    [[nodiscard]] static RegionOfInterest toAbsolute(const AttachedWindow& window, const AttachWindowRect& windowRect,
                                                      const AttachDisplayRect& display);
 
-    /// Prunes tracked windows whose observation reports them closed.
-    void pruneClosed(const std::vector<TrackedWindowObservation>& windows, AttachDecision& decision);
+    /// Prunes attached windows whose observation reports them closed.
+    void pruneClosed(const std::vector<AttachedWindowObservation>& windows, AttachDecision& decision);
 
     /// Maps the active window's region into the decision.
-    void updateRegion(const std::vector<TrackedWindowObservation>& windows, AttachDecision& decision);
+    void updateRegion(const std::vector<AttachedWindowObservation>& windows, AttachDecision& decision);
 
-    std::vector<TrackedWindow> m_windows;
+    std::vector<AttachedWindow> m_windows;
     uint64_t m_activeIdentity = 0;
 };
 

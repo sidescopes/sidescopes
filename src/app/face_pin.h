@@ -54,7 +54,7 @@ struct FacePinState
     FaceAnchor pendingAnchor;
     int pendingCount = 0;
     // Consecutive probes that found nothing near the anchor; past the
-    // recovery threshold the search widens to the whole tracked window.
+    // recovery threshold the search widens to the whole attached window.
     int missCount = 0;
 };
 
@@ -62,7 +62,7 @@ struct FacePinState
 /// calm: it adopts only positions confirmed by two consecutive agreeing
 /// probes, so a pan or zoom in progress freezes the region and one clean
 /// snap follows when the photo settles. A pin that has lost its face
-/// searches the whole tracked window with the size gate relaxed - zoom
+/// searches the whole attached window with the size gate relaxed - zoom
 /// legitimately resizes faces - but adoption still needs a unique, stable
 /// candidate.
 namespace face_pin {
@@ -84,7 +84,7 @@ void rebindCrop(FacePinState& state, const PinRect& crop);
 void translate(FacePinState& state, double dxPixels, double dyPixels);
 
 /// Whether the pin has lost its face and the probe should search the whole
-/// tracked window instead of the patch around the anchor.
+/// attached window instead of the patch around the anchor.
 [[nodiscard]] bool searchingWide(const FacePinState& state);
 
 /// Whether the face has been missing long enough that the pin gives up:

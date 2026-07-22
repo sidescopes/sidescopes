@@ -11,23 +11,23 @@ bool AttachController::attached() const
     return !m_windows.empty();
 }
 
-std::size_t AttachController::trackedCount() const
+std::size_t AttachController::attachedCount() const
 {
     return m_windows.size();
 }
 
-std::vector<uint64_t> AttachController::trackedIdentities() const
+std::vector<uint64_t> AttachController::attachedIdentities() const
 {
     std::vector<uint64_t> identities;
     identities.reserve(m_windows.size());
-    for (const TrackedWindow& window : m_windows) {
+    for (const AttachedWindow& window : m_windows) {
         identities.push_back(window.identity);
     }
 
     return identities;
 }
 
-bool AttachController::tracks(uint64_t identity) const
+bool AttachController::isAttached(uint64_t identity) const
 {
     return find(identity) != nullptr;
 }
@@ -39,7 +39,7 @@ uint64_t AttachController::activeIdentity() const
 
 std::string AttachController::activeApplicationName() const
 {
-    const TrackedWindow* active = find(m_activeIdentity);
+    const AttachedWindow* active = find(m_activeIdentity);
 
     return active ? active->applicationName : std::string();
 }
@@ -48,9 +48,9 @@ RegionOfInterest AttachController::attach(uint64_t identity, int64_t ownerPid, s
                                           AttachWindowRect windowRect, AttachDisplayRect display,
                                           const RegionOfInterest& absoluteRegion)
 {
-    TrackedWindow* window = find(identity);
+    AttachedWindow* window = find(identity);
     if (!window) {
-        m_windows.push_back(TrackedWindow{});
+        m_windows.push_back(AttachedWindow{});
         window = &m_windows.back();
         window->identity = identity;
     }
@@ -65,7 +65,7 @@ RegionOfInterest AttachController::attach(uint64_t identity, int64_t ownerPid, s
 RegionOfInterest AttachController::editRegion(const RegionOfInterest& newAbsoluteRegion, AttachWindowRect windowRect,
                                               AttachDisplayRect display)
 {
-    TrackedWindow* active = find(m_activeIdentity);
+    AttachedWindow* active = find(m_activeIdentity);
     if (!active) {
         return newAbsoluteRegion;
     }
@@ -75,8 +75,8 @@ RegionOfInterest AttachController::editRegion(const RegionOfInterest& newAbsolut
     return toAbsolute(*active, windowRect, display);
 }
 
-AttachDecision AttachController::observe(const std::vector<TrackedWindowObservation>& windows,
-                                         std::optional<uint64_t> focusedWindow)
+AttachDecision AttachController::observe(const std::vector<AttachedWindowObservation>& windows,
+                                         std::optional<uint64_t> focusedIdentity)
 {
     AttachDecision decision;
     if (m_windows.empty()) {
@@ -91,8 +91,8 @@ AttachDecision AttachController::observe(const std::vector<TrackedWindowObservat
         return decision;
     }
 
-    updateTracked(windows);
-    m_activeIdentity = focusedWindow && find(*focusedWindow) ? *focusedWindow : 0;
+    updateAttached(windows);
+    m_activeIdentity = focusedIdentity && find(*focusedIdentity) ? *focusedIdentity : 0;
     updateRegion(windows, decision);
 
     return decision;
@@ -100,7 +100,7 @@ AttachDecision AttachController::observe(const std::vector<TrackedWindowObservat
 
 void AttachController::remove(uint64_t identity)
 {
-    const auto matches = [identity](const TrackedWindow& window) { return window.identity == identity; };
+    const auto matches = [identity](const AttachedWindow& window) { return window.identity == identity; };
     m_windows.erase(std::remove_if(m_windows.begin(), m_windows.end(), matches), m_windows.end());
     if (m_activeIdentity == identity) {
         m_activeIdentity = 0;
@@ -113,9 +113,9 @@ void AttachController::detachAll()
     m_activeIdentity = 0;
 }
 
-AttachController::TrackedWindow* AttachController::find(uint64_t identity)
+AttachController::AttachedWindow* AttachController::find(uint64_t identity)
 {
-    for (TrackedWindow& window : m_windows) {
+    for (AttachedWindow& window : m_windows) {
         if (window.identity == identity) {
             return &window;
         }
@@ -124,9 +124,9 @@ AttachController::TrackedWindow* AttachController::find(uint64_t identity)
     return nullptr;
 }
 
-const AttachController::TrackedWindow* AttachController::find(uint64_t identity) const
+const AttachController::AttachedWindow* AttachController::find(uint64_t identity) const
 {
-    for (const TrackedWindow& window : m_windows) {
+    for (const AttachedWindow& window : m_windows) {
         if (window.identity == identity) {
             return &window;
         }
@@ -135,7 +135,7 @@ const AttachController::TrackedWindow* AttachController::find(uint64_t identity)
     return nullptr;
 }
 
-void AttachController::setStoredFromAbsolute(TrackedWindow& window, const RegionOfInterest& absoluteRegion,
+void AttachController::setStoredFromAbsolute(AttachedWindow& window, const RegionOfInterest& absoluteRegion,
                                              const AttachWindowRect& windowRect, const AttachDisplayRect& display)
 {
     window.lastWindowRect = windowRect;
@@ -160,7 +160,7 @@ void AttachController::setStoredFromAbsolute(TrackedWindow& window, const Region
                                windowRect.y + windowRect.height);
 }
 
-void AttachController::bindStoredToWindow(TrackedWindow& window, const AttachWindowRect& windowRect)
+void AttachController::bindStoredToWindow(AttachedWindow& window, const AttachWindowRect& windowRect)
 {
     if (!window.observedOnce) {
         window.lastWindowRect = windowRect;
@@ -208,10 +208,10 @@ bool sameRect(const AttachWindowRect& a, const AttachWindowRect& b)
 
 }  // namespace
 
-void AttachController::updateTracked(const std::vector<TrackedWindowObservation>& windows)
+void AttachController::updateAttached(const std::vector<AttachedWindowObservation>& windows)
 {
-    for (const TrackedWindowObservation& observation : windows) {
-        TrackedWindow* window = find(observation.identity);
+    for (const AttachedWindowObservation& observation : windows) {
+        AttachedWindow* window = find(observation.identity);
         if (window == nullptr || !observation.windowRect) {
             continue;
         }
@@ -235,7 +235,7 @@ void AttachController::updateTracked(const std::vector<TrackedWindowObservation>
     }
 }
 
-RegionOfInterest AttachController::toAbsolute(const TrackedWindow& window, const AttachWindowRect& windowRect,
+RegionOfInterest AttachController::toAbsolute(const AttachedWindow& window, const AttachWindowRect& windowRect,
                                               const AttachDisplayRect& display)
 {
     RegionOfInterest region;
@@ -258,13 +258,13 @@ RegionOfInterest AttachController::toAbsolute(const TrackedWindow& window, const
     return region;
 }
 
-void AttachController::pruneClosed(const std::vector<TrackedWindowObservation>& windows, AttachDecision& decision)
+void AttachController::pruneClosed(const std::vector<AttachedWindowObservation>& windows, AttachDecision& decision)
 {
-    for (const TrackedWindowObservation& observation : windows) {
+    for (const AttachedWindowObservation& observation : windows) {
         if (observation.windowRect.has_value()) {
             continue;
         }
-        const auto matches = [&](const TrackedWindow& window) { return window.identity == observation.identity; };
+        const auto matches = [&](const AttachedWindow& window) { return window.identity == observation.identity; };
         const auto removed = std::remove_if(m_windows.begin(), m_windows.end(), matches);
         if (removed != m_windows.end()) {
             m_windows.erase(removed, m_windows.end());
@@ -273,14 +273,14 @@ void AttachController::pruneClosed(const std::vector<TrackedWindowObservation>& 
     }
 }
 
-void AttachController::updateRegion(const std::vector<TrackedWindowObservation>& windows, AttachDecision& decision)
+void AttachController::updateRegion(const std::vector<AttachedWindowObservation>& windows, AttachDecision& decision)
 {
-    const TrackedWindow* active = find(m_activeIdentity);
+    const AttachedWindow* active = find(m_activeIdentity);
     if (!active) {
         return;
     }
 
-    for (const TrackedWindowObservation& observation : windows) {
+    for (const AttachedWindowObservation& observation : windows) {
         if (observation.identity != m_activeIdentity || !observation.windowRect || observation.minimized) {
             continue;
         }
@@ -294,7 +294,7 @@ void AttachController::updateRegion(const std::vector<TrackedWindowObservation>&
         return;
     }
 
-    // The focused window is tracked but not visible right now (a race with a
+    // The focused window is attached but not visible right now (a race with a
     // minimize): not active.
     m_activeIdentity = 0;
 }

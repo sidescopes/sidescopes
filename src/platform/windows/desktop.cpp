@@ -506,9 +506,9 @@ std::vector<OrderedWindow> orderedTopLevelWindows()
 
 }  // namespace
 
-std::optional<uint64_t> focusedWindowForTracking(int64_t applicationPid, const std::vector<uint64_t>& tracked)
+std::optional<uint64_t> focusedAttachedWindow(int64_t applicationPid, const std::vector<uint64_t>& attached)
 {
-    return resolveTrackedFocus(orderedTopLevelWindows(), applicationPid, tracked);
+    return resolveAttachedFocus(orderedTopLevelWindows(), applicationPid, attached);
 }
 
 void raiseWindow(uint64_t identity, int64_t)

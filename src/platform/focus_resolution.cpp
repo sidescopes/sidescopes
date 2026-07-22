@@ -11,7 +11,7 @@ bool overlaps(const OrderedWindow& a, const OrderedWindow& b)
 }
 
 // Whether some window listed above covers more than half of @p target:
-// the tracked window is genuinely behind a sibling, not merely
+// the attached window is genuinely behind a sibling, not merely
 // list-ordered below it the way panels are.
 bool windowBuried(const std::vector<OrderedWindow>& windows, std::size_t target)
 {
@@ -32,14 +32,14 @@ bool windowBuried(const std::vector<OrderedWindow>& windows, std::size_t target)
 
 }  // namespace
 
-std::optional<uint64_t> resolveTrackedFocus(const std::vector<OrderedWindow>& windows, int64_t applicationPid,
-                                            const std::vector<uint64_t>& tracked)
+std::optional<uint64_t> resolveAttachedFocus(const std::vector<OrderedWindow>& windows, int64_t applicationPid,
+                                             const std::vector<uint64_t>& attached)
 {
-    const auto isTracked = [&tracked](uint64_t identity) {
-        return std::find(tracked.begin(), tracked.end(), identity) != tracked.end();
+    const auto isAttached = [&attached](uint64_t identity) {
+        return std::find(attached.begin(), attached.end(), identity) != attached.end();
     };
     std::optional<std::size_t> first;
-    std::optional<std::size_t> trackedOwn;
+    std::optional<std::size_t> attachedOwn;
     for (std::size_t index = 0; index < windows.size(); ++index) {
         if (windows[index].ownerPid != applicationPid) {
             continue;
@@ -47,35 +47,35 @@ std::optional<uint64_t> resolveTrackedFocus(const std::vector<OrderedWindow>& wi
         if (!first) {
             first = index;
         }
-        if (isTracked(windows[index].identity)) {
-            trackedOwn = index;
+        if (isAttached(windows[index].identity)) {
+            attachedOwn = index;
             break;
         }
     }
     if (!first) {
         return std::nullopt;
     }
-    if (isTracked(windows[*first].identity)) {
-        // The focused window is itself tracked: focus is the verdict. The
-        // overlap rules below serve previews above an untracked focus;
+    if (isAttached(windows[*first].identity)) {
+        // The focused window is itself attached: focus is the verdict. The
+        // overlap rules below serve previews above an unattached focus;
         // running them here lets a stale harvest order - the alt-tab
         // switch animation on Windows - hand the region to the window
         // just left.
         return windows[*first].identity;
     }
-    // A tracked window of another application above the foreground one and
+    // An attached window of another application above the foreground one and
     // overlapping it wins: a preview panel rendered by a helper process.
     for (std::size_t index = 0; index < *first; ++index) {
-        if (isTracked(windows[index].identity) && overlaps(windows[index], windows[*first])) {
+        if (isAttached(windows[index].identity) && overlaps(windows[index], windows[*first])) {
             return windows[index].identity;
         }
     }
-    // A tracked window of the foreground application itself wins even when
+    // An attached window of the foreground application itself wins even when
     // listed deeper - the window list's order and the visual stacking
     // disagree for panels (Quick Look) - unless something above genuinely
     // buries it.
-    if (trackedOwn && *trackedOwn != *first && !windowBuried(windows, *trackedOwn)) {
-        return windows[*trackedOwn].identity;
+    if (attachedOwn && *attachedOwn != *first && !windowBuried(windows, *attachedOwn)) {
+        return windows[*attachedOwn].identity;
     }
 
     return windows[*first].identity;

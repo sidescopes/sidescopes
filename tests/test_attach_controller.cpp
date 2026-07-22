@@ -17,7 +17,7 @@ constexpr uint32_t PrimaryDisplayId = 1;
 constexpr AttachDisplayRect SecondaryDisplay{1000.0, 0.0, 1000.0, 1000.0};
 constexpr uint32_t SecondaryDisplayId = 2;
 
-// The tracked editor windows: desktop 100..500 and 500..900 on both axes.
+// The attached editor windows: desktop 100..500 and 500..900 on both axes.
 constexpr AttachWindowRect EditorWindow{100.0, 100.0, 400.0, 400.0};
 constexpr AttachWindowRect SecondWindow{500.0, 500.0, 400.0, 400.0};
 
@@ -35,10 +35,10 @@ void checkRegion(const RegionOfInterest& region, double left, double top, double
     CHECK(region.bottomPercent == Approx(bottom));
 }
 
-TrackedWindowObservation visibleWindow(uint64_t identity, AttachWindowRect rect, uint32_t displayId = PrimaryDisplayId,
-                                       AttachDisplayRect display = PrimaryDisplay)
+AttachedWindowObservation visibleWindow(uint64_t identity, AttachWindowRect rect, uint32_t displayId = PrimaryDisplayId,
+                                        AttachDisplayRect display = PrimaryDisplay)
 {
-    TrackedWindowObservation observation;
+    AttachedWindowObservation observation;
     observation.identity = identity;
     observation.windowRect = rect;
     observation.displayId = displayId;
@@ -47,9 +47,9 @@ TrackedWindowObservation visibleWindow(uint64_t identity, AttachWindowRect rect,
     return observation;
 }
 
-TrackedWindowObservation minimizedWindow(uint64_t identity, AttachWindowRect rect)
+AttachedWindowObservation minimizedWindow(uint64_t identity, AttachWindowRect rect)
 {
-    TrackedWindowObservation observation;
+    AttachedWindowObservation observation;
     observation.identity = identity;
     observation.windowRect = rect;
     observation.minimized = true;
@@ -57,9 +57,9 @@ TrackedWindowObservation minimizedWindow(uint64_t identity, AttachWindowRect rec
     return observation;
 }
 
-TrackedWindowObservation closedWindow(uint64_t identity)
+AttachedWindowObservation closedWindow(uint64_t identity)
 {
-    TrackedWindowObservation observation;
+    AttachedWindowObservation observation;
     observation.identity = identity;
 
     return observation;
@@ -67,7 +67,7 @@ TrackedWindowObservation closedWindow(uint64_t identity)
 
 }  // namespace
 
-TEST_CASE("Attaching tracks the window and maps its region to display percent")
+TEST_CASE("Attaching a window maps its region to display percent")
 {
     AttachController controller;
     REQUIRE_FALSE(controller.attached());
@@ -76,7 +76,7 @@ TEST_CASE("Attaching tracks the window and maps its region to display percent")
         controller.attach(42, EditorPid, "Lightroom", EditorWindow, PrimaryDisplay, WholeEditor);
 
     CHECK(controller.attached());
-    CHECK(controller.trackedCount() == 1);
+    CHECK(controller.attachedCount() == 1);
     CHECK(controller.activeIdentity() == 42);
     CHECK(controller.activeApplicationName() == "Lightroom");
     checkRegion(mapped, 10.0, 10.0, 50.0, 50.0);
@@ -175,7 +175,7 @@ TEST_CASE("Walls smaller than the region squeeze it elastically")
     checkRegion(*expanded.region, 10.0, 10.0, 20.0, 20.0);
 }
 
-TEST_CASE("A focused tracked window always carries its mapping")
+TEST_CASE("A focused attached window always carries its mapping")
 {
     AttachController controller;
     controller.attach(42, EditorPid, "Editor", EditorWindow, PrimaryDisplay, WholeEditor);
@@ -189,12 +189,12 @@ TEST_CASE("A focused tracked window always carries its mapping")
     checkRegion(*decision.region, 10.0, 10.0, 50.0, 50.0);
 }
 
-TEST_CASE("Focus on an untracked window yields no attached region")
+TEST_CASE("Focus on an unattached window yields no attached region")
 {
     AttachController controller;
     controller.attach(42, EditorPid, "Editor", EditorWindow, PrimaryDisplay, WholeEditor);
 
-    // The focused window is an untracked sibling (a second Preview
+    // The focused window is an unattached sibling (a second Preview
     // document) or SideScopes itself: the attached region must neither show
     // nor be effective - the host falls back to the global region.
     const AttachDecision sibling = controller.observe({visibleWindow(42, EditorWindow)}, 7);
@@ -255,7 +255,7 @@ TEST_CASE("A hidden window keeps its region and stops being active")
     controller.attach(42, EditorPid, "Editor", EditorWindow, PrimaryDisplay, WholeEditor);
 
     // Hidden or minimized: no attached region is emitted, the window stays
-    // tracked.
+    // attached.
     const AttachDecision decision = controller.observe({minimizedWindow(42, EditorWindow)}, std::nullopt);
 
     CHECK(decision.activeIdentity == 0);
@@ -270,14 +270,14 @@ TEST_CASE("A hidden window keeps its region and stops being active")
     checkRegion(*back.region, 10.0, 10.0, 50.0, 50.0);
 }
 
-TEST_CASE("Two tracked windows keep independent regions and follow the front one")
+TEST_CASE("Two attached windows keep independent regions and follow the front one")
 {
     AttachController controller;
     controller.attach(42, EditorPid, "Editor", EditorWindow, PrimaryDisplay, WholeEditor);
     controller.attach(7, EditorPid, "Editor", SecondWindow, PrimaryDisplay, WholeSecond);
-    CHECK(controller.trackedCount() == 2);
+    CHECK(controller.attachedCount() == 2);
 
-    const std::vector<TrackedWindowObservation> both{visibleWindow(42, EditorWindow), visibleWindow(7, SecondWindow)};
+    const std::vector<AttachedWindowObservation> both{visibleWindow(42, EditorWindow), visibleWindow(7, SecondWindow)};
 
     // The second window is in front right after its pick; switching the
     // front window switches the analyzed region, both regions intact.
@@ -298,7 +298,7 @@ TEST_CASE("An edit binds to the active window only")
     controller.attach(42, EditorPid, "Editor", EditorWindow, PrimaryDisplay, WholeEditor);
     controller.attach(7, EditorPid, "Editor", SecondWindow, PrimaryDisplay, WholeSecond);
 
-    const std::vector<TrackedWindowObservation> both{visibleWindow(42, EditorWindow), visibleWindow(7, SecondWindow)};
+    const std::vector<AttachedWindowObservation> both{visibleWindow(42, EditorWindow), visibleWindow(7, SecondWindow)};
     controller.observe(both, 42);
 
     // Editing while the first window is active narrows only its region.
@@ -314,18 +314,18 @@ TEST_CASE("An edit binds to the active window only")
     checkRegion(*toFirst.region, 20.0, 20.0, 40.0, 40.0);
 }
 
-TEST_CASE("Re-picking a tracked window updates its region in place")
+TEST_CASE("Re-picking an attached window updates its region in place")
 {
     AttachController controller;
     controller.attach(42, EditorPid, "Editor", EditorWindow, PrimaryDisplay, WholeEditor);
     const RegionOfInterest narrower{20.0, 20.0, 40.0, 40.0};
     const RegionOfInterest stored = controller.attach(42, EditorPid, "Editor", EditorWindow, PrimaryDisplay, narrower);
 
-    CHECK(controller.trackedCount() == 1);
+    CHECK(controller.attachedCount() == 1);
     checkRegion(stored, 20.0, 20.0, 40.0, 40.0);
 }
 
-TEST_CASE("With no tracked window visible no attached region is emitted")
+TEST_CASE("With no attached window visible no region is emitted")
 {
     AttachController controller;
     controller.attach(42, EditorPid, "Editor", EditorWindow, PrimaryDisplay, WholeEditor);
@@ -339,7 +339,7 @@ TEST_CASE("With no tracked window visible no attached region is emitted")
     CHECK(controller.attached());
 }
 
-TEST_CASE("One of two windows closing prunes it and keeps tracking the other")
+TEST_CASE("One of two windows closing prunes it and keeps the other attached")
 {
     AttachController controller;
     controller.attach(42, EditorPid, "Editor", EditorWindow, PrimaryDisplay, WholeEditor);
@@ -349,7 +349,7 @@ TEST_CASE("One of two windows closing prunes it and keeps tracking the other")
 
     CHECK(decision.closedCount == 1);
     CHECK_FALSE(decision.detachedAll);
-    CHECK(controller.trackedCount() == 1);
+    CHECK(controller.attachedCount() == 1);
     CHECK(decision.activeIdentity == 7);
 }
 
@@ -369,7 +369,7 @@ TEST_CASE("The last window closing detaches; the host falls back to the global r
     CHECK_FALSE(decision.region.has_value());
 }
 
-TEST_CASE("Removing one window keeps the rest tracked")
+TEST_CASE("Removing one window keeps the rest attached")
 {
     AttachController controller;
     controller.attach(42, EditorPid, "Editor", EditorWindow, PrimaryDisplay, WholeEditor);
@@ -377,7 +377,7 @@ TEST_CASE("Removing one window keeps the rest tracked")
 
     controller.remove(7);
 
-    CHECK(controller.trackedCount() == 1);
+    CHECK(controller.attachedCount() == 1);
     CHECK(controller.activeIdentity() == 0);
 
     const AttachDecision decision = controller.observe({visibleWindow(42, EditorWindow)}, 42);
@@ -393,7 +393,7 @@ TEST_CASE("Detaching everything clears the set")
     controller.detachAll();
 
     CHECK_FALSE(controller.attached());
-    CHECK(controller.trackedCount() == 0);
+    CHECK(controller.attachedCount() == 0);
     CHECK(controller.activeIdentity() == 0);
 }
 

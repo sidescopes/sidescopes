@@ -214,12 +214,12 @@ void unobserveForegroundChanges();
 [[nodiscard]] std::string displayName(uint32_t displayId);
 
 /// The window the focus routing should treat as focused: the foreground
-/// application's frontmost ordinary window - unless one of @p tracked sits
-/// above it in z-order and overlaps it, in which case that tracked window
+/// application's frontmost ordinary window - unless one of @p attached sits
+/// above it in z-order and overlaps it, in which case that attached window
 /// wins. A preview panel rendered by a helper process (macOS Quick Look)
 /// stays focused while its host application holds the foreground.
-[[nodiscard]] std::optional<uint64_t> focusedWindowForTracking(int64_t applicationPid,
-                                                               const std::vector<uint64_t>& tracked);
+[[nodiscard]] std::optional<uint64_t> focusedAttachedWindow(int64_t applicationPid,
+                                                            const std::vector<uint64_t>& attached);
 
 /// Raises the window with @p identity, owned by the application with
 /// @p ownerPid, after the user picked it: a partially obstructed pick would

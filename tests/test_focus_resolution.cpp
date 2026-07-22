@@ -27,16 +27,16 @@ TEST_CASE("The foreground application's first window is the baseline")
         window(1, Editor, 100, 100, 1200, 800),
         window(2, Editor, 150, 150, 1200, 800),
     };
-    CHECK(resolveTrackedFocus(desk, Editor, {}) == 1);
+    CHECK(resolveAttachedFocus(desk, Editor, {}) == 1);
 }
 
 TEST_CASE("An application with nothing on screen resolves to nothing")
 {
     const std::vector<OrderedWindow> desk = {window(9, Other, 0, 0, 800, 600)};
-    CHECK_FALSE(resolveTrackedFocus(desk, Editor, {9}).has_value());
+    CHECK_FALSE(resolveAttachedFocus(desk, Editor, {9}).has_value());
 }
 
-TEST_CASE("A tracked helper-process preview above the application wins")
+TEST_CASE("An attached helper-process preview above the application wins")
 {
     // The Quick Look panel as first met: rendered by another process,
     // floating above the file list it belongs to.
@@ -44,19 +44,19 @@ TEST_CASE("A tracked helper-process preview above the application wins")
         window(7, Helper, 300, 200, 900, 700),
         window(1, Editor, 100, 100, 1200, 800),
     };
-    CHECK(resolveTrackedFocus(desk, Editor, {7}) == 7);
+    CHECK(resolveAttachedFocus(desk, Editor, {7}) == 7);
 }
 
-TEST_CASE("A tracked overlay that does not overlap stays out of it")
+TEST_CASE("An attached overlay that does not overlap stays out of it")
 {
     const std::vector<OrderedWindow> desk = {
         window(7, Helper, 2000, 2000, 400, 300),
         window(1, Editor, 100, 100, 1200, 800),
     };
-    CHECK(resolveTrackedFocus(desk, Editor, {7}) == 1);
+    CHECK(resolveAttachedFocus(desk, Editor, {7}) == 1);
 }
 
-TEST_CASE("A tracked same-application panel listed deeper wins")
+TEST_CASE("An attached same-application panel listed deeper wins")
 {
     // The list reorders the sibling above the panel while the visual
     // stacking keeps the panel on top; the sibling only clips a corner.
@@ -64,59 +64,59 @@ TEST_CASE("A tracked same-application panel listed deeper wins")
         window(2, Editor, 900, 700, 900, 400),
         window(1, Editor, 100, 100, 1300, 900),
     };
-    CHECK(resolveTrackedFocus(desk, Editor, {1}) == 1);
+    CHECK(resolveAttachedFocus(desk, Editor, {1}) == 1);
 }
 
-TEST_CASE("A tracked window genuinely buried by a sibling stays hidden")
+TEST_CASE("An attached window genuinely buried by a sibling stays hidden")
 {
     const std::vector<OrderedWindow> desk = {
         window(2, Editor, 120, 120, 1300, 900),
         window(1, Editor, 100, 100, 1300, 900),
     };
-    CHECK(resolveTrackedFocus(desk, Editor, {1}) == 2);
+    CHECK(resolveAttachedFocus(desk, Editor, {1}) == 2);
 }
 
-TEST_CASE("A tracked window buried by a foreign window stays hidden")
+TEST_CASE("An attached window buried by a foreign window stays hidden")
 {
     const std::vector<OrderedWindow> desk = {
         window(9, Other, 90, 90, 1400, 1000),
         window(2, Editor, 0, 0, 700, 500),
         window(1, Editor, 100, 100, 1300, 900),
     };
-    CHECK(resolveTrackedFocus(desk, Editor, {1}) == 2);
+    CHECK(resolveAttachedFocus(desk, Editor, {1}) == 2);
 }
 
-TEST_CASE("The first window being tracked needs no help")
+TEST_CASE("The first window being attached needs no help")
 {
     const std::vector<OrderedWindow> desk = {
         window(1, Editor, 100, 100, 1200, 800),
         window(2, Editor, 150, 150, 1200, 800),
     };
-    CHECK(resolveTrackedFocus(desk, Editor, {1}) == 1);
+    CHECK(resolveAttachedFocus(desk, Editor, {1}) == 1);
 }
 
-TEST_CASE("A focused tracked window is not stolen from above")
+TEST_CASE("A focused attached window is not stolen from above")
 {
     // The window just left in an alt-tab still lists above the newly
     // focused one while the switch animation settles; a fullscreen one
-    // overlaps everything. Focus on a tracked window is the verdict.
+    // overlaps everything. Focus on an attached window is the verdict.
     const std::vector<OrderedWindow> desk = {
         window(7, Other, 0, 0, 1920, 1080),
         window(1, Editor, 100, 100, 1200, 800),
     };
-    CHECK(resolveTrackedFocus(desk, Editor, {1, 7}) == 1);
+    CHECK(resolveAttachedFocus(desk, Editor, {1, 7}) == 1);
 }
 
-TEST_CASE("A level-shifted tracked panel present in the list wins")
+TEST_CASE("A level-shifted attached panel present in the list wins")
 {
     // macOS lifts a key panel above the ordinary window layer; the
-    // harvest admits tracked windows at any layer, so the panel appears
+    // harvest admits attached windows at any layer, so the panel appears
     // here first even while the layer-zero list would have lost it.
     const std::vector<OrderedWindow> desk = {
         window(7, Editor, 300, 200, 900, 700),
         window(1, Editor, 100, 100, 1300, 900),
     };
-    CHECK(resolveTrackedFocus(desk, Editor, {7}) == 7);
+    CHECK(resolveAttachedFocus(desk, Editor, {7}) == 7);
 }
 
 }  // namespace sidescopes

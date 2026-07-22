@@ -411,7 +411,7 @@ struct BorderState
     int paintedWidth = 0;
     int paintedHeight = 0;
     double paintedScale = 0.0;
-    // Non-empty for a window-attached region: the tracked application's
+    // Non-empty for a window-attached region: the attached application's
     // name, worn above the band - the tell that this region belongs to a
     // window.
     std::wstring attachedLabel;
@@ -1360,7 +1360,7 @@ void paintBorderHandles(Gdiplus::Graphics& canvas, const Gdiplus::RectF& region,
 // The hover-revealed close button, in the handles' own visual
 // language: a dark disc where the dots are light, so it reads as an
 // action rather than a grip, with the same bright ring and an x.
-// The tracked window's name rides the band above the top edge: the attached
+// The attached window's name rides the band above the top edge: the attached
 // region carries its own identification instead of the main window's toolbar
 // doing it at a distance.
 void paintBorderLabel(Gdiplus::Graphics& canvas, const Gdiplus::RectF& region, double scale)
@@ -2142,7 +2142,7 @@ void hideRegionBorder()
 namespace {
 
 // The attached-edit spotlight: a click-through veil that dims everything
-// outside the tracked window while its border is dragged.
+// outside the attached window while its border is dragged.
 HWND g_editDimWindow = nullptr;
 RECT g_editDimHole{};
 uint32_t g_editDimDisplay = 0;

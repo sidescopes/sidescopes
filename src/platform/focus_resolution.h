@@ -25,13 +25,14 @@ struct OrderedWindow
 /// The window the focus routing should treat as focused, given the
 /// qualifying on-screen windows front to back. The foreground
 /// application's first-listed window is the baseline; a baseline that
-/// is itself tracked wins outright. Otherwise a TRACKED window wins
+/// is itself attached wins outright. Otherwise an ATTACHED window wins
 /// over it from another process when it overlaps it from above, and
 /// from the same process even when listed deeper - the window list's
 /// order and the visual stacking disagree for panels (Quick Look) -
 /// unless some window above covers more than half of it.
 /// An application with nothing on screen resolves to nothing.
-[[nodiscard]] std::optional<uint64_t> resolveTrackedFocus(const std::vector<OrderedWindow>& windows,
-                                                          int64_t applicationPid, const std::vector<uint64_t>& tracked);
+[[nodiscard]] std::optional<uint64_t> resolveAttachedFocus(const std::vector<OrderedWindow>& windows,
+                                                           int64_t applicationPid,
+                                                           const std::vector<uint64_t>& attached);
 
 }  // namespace sidescopes

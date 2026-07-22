@@ -132,11 +132,11 @@ std::optional<WindowGeometry> windowGeometry(uint64_t identity)
 namespace {
 
 // The qualifying on-screen windows, front to back: layer 0, visible
-// alpha, at least picker-sized. A TRACKED window qualifies at any layer:
+// alpha, at least picker-sized. An ATTACHED window qualifies at any layer:
 // macOS shifts a Quick Look panel's level away from zero the moment it
 // becomes key (probe-verified), and dropping the very window the user
 // attached would lose its region on every click into it.
-std::vector<OrderedWindow> qualifyingWindows(const std::vector<uint64_t>& tracked)
+std::vector<OrderedWindow> qualifyingWindows(const std::vector<uint64_t>& attached)
 {
     std::vector<OrderedWindow> windows;
     CFArrayRef list = CGWindowListCopyWindowInfo(kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements,
@@ -148,8 +148,8 @@ std::vector<OrderedWindow> qualifyingWindows(const std::vector<uint64_t>& tracke
     for (CFIndex index = 0; index < count; ++index) {
         NSDictionary* info = (__bridge NSDictionary*)CFArrayGetValueAtIndex(list, index);
         const uint64_t identity = [info[(__bridge NSString*)kCGWindowNumber] unsignedLongLongValue];
-        const bool trackedWindow = std::find(tracked.begin(), tracked.end(), identity) != tracked.end();
-        if ([info[(__bridge NSString*)kCGWindowLayer] intValue] != 0 && !trackedWindow) {
+        const bool isAttached = std::find(attached.begin(), attached.end(), identity) != attached.end();
+        if ([info[(__bridge NSString*)kCGWindowLayer] intValue] != 0 && !isAttached) {
             continue;
         }
         NSNumber* alpha = info[(__bridge NSString*)kCGWindowAlpha];
@@ -172,9 +172,9 @@ std::vector<OrderedWindow> qualifyingWindows(const std::vector<uint64_t>& tracke
 
 }  // namespace
 
-std::optional<uint64_t> focusedWindowForTracking(int64_t applicationPid, const std::vector<uint64_t>& tracked)
+std::optional<uint64_t> focusedAttachedWindow(int64_t applicationPid, const std::vector<uint64_t>& attached)
 {
-    return resolveTrackedFocus(qualifyingWindows(tracked), applicationPid, tracked);
+    return resolveAttachedFocus(qualifyingWindows(attached), applicationPid, attached);
 }
 
 void raiseWindow(uint64_t, int64_t ownerPid)
