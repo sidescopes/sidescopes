@@ -228,20 +228,35 @@ int iconPixelSize()
     return static_cast<int>(std::lround(ImGui::GetTextLineHeight() * ImGui::GetIO().DisplayFramebufferScale.x));
 }
 
+float iconButtonWidth()
+{
+    return ImGui::GetTextLineHeight() + 12.0f;
+}
+
+float iconButtonHeight()
+{
+    return ImGui::GetTextLineHeight() + 4.0f;
+}
+
 bool iconButton(const char* id, ImTextureID texture, const char* tooltip, bool dimmed = false)
 {
-    const float height = ImGui::GetTextLineHeight() + 4.0f;
-    const bool pressed = ImGui::InvisibleButton(id, ImVec2(height + 8.0f, height));
+    const bool pressed = ImGui::InvisibleButton(id, ImVec2(iconButtonWidth(), iconButtonHeight()));
     ImDrawList* draw = ImGui::GetWindowDrawList();
     const ImVec2 min = ImGui::GetItemRectMin();
     const ImVec2 max = ImGui::GetItemRectMax();
     if (ImGui::IsItemHovered()) {
         draw->AddRectFilled(min, max, ImGui::GetColorU32(ImGuiCol_ButtonHovered), 3.0f);
     }
-    const ImVec2 center(std::floor((min.x + max.x) / 2), std::floor((min.y + max.y) / 2));
-    const float half = ImGui::GetTextLineHeight() / 2.0f;
-    draw->AddImage(texture, ImVec2(center.x - half, center.y - half), ImVec2(center.x + half, center.y + half),
-                   ImVec2(0, 0), ImVec2(1, 1), ImGui::GetColorU32(ImGuiCol_Text, dimmed ? 0.4f : 1.0f));
+    // Seated from the box's own edges rather than its centre on screen: the
+    // box stands an odd number of pixels taller than the glyph, so a centre
+    // falls on a half pixel and rounding it drifts with wherever the window
+    // sits. Measured from the edge, the glyph lands on the same rows as a
+    // swatch or a line of text beside it, every time.
+    const float side = ImGui::GetTextLineHeight();
+    const ImVec2 glyph(std::round(min.x + (max.x - min.x - side) / 2.0f),
+                       std::round(min.y + (max.y - min.y - side) / 2.0f));
+    draw->AddImage(texture, glyph, ImVec2(glyph.x + side, glyph.y + side), ImVec2(0, 0), ImVec2(1, 1),
+                   ImGui::GetColorU32(ImGuiCol_Text, dimmed ? 0.4f : 1.0f));
     wrappedTooltip(tooltip);
 
     return pressed;
