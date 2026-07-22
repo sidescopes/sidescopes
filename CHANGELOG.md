@@ -27,6 +27,8 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   wait, analysis-pass duration, and capture inter-arrival cadence. The
   Record Diagnostic Log toggle captures it with the others, and
   `SIDESCOPES_DIAG=perf` selects it alone. Off costs one branch.
+- Pinned colors survive a restart, along with the one chosen as the
+  comparison reference; the preferences file lists them as hex.
 
 ### Changed
 

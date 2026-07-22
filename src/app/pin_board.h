@@ -7,9 +7,11 @@
 
 namespace sidescopes {
 
-/// The session's pinned reference colors: a small ring the user pins sampled
-/// colors into, one of which can be the active comparison reference, plus the
-/// pin the management popup currently targets. Session-scoped, not persisted.
+/// The pinned reference colors: a small ring the user pins sampled colors
+/// into, one of which can be the active comparison reference, plus the pin the
+/// management popup currently targets. The colors and the comparison reference
+/// are saved with the preferences and come back through @ref restore; the
+/// managed pin is popup state and lives only for the session.
 class PinBoard
 {
 public:
@@ -31,6 +33,12 @@ public:
     /// Pins @p color as the new comparison reference, dropping the oldest pin
     /// when the ring is already full.
     void pin(const FloatColor& color);
+
+    /// Restores a saved board: @p colors become the pins, oldest first, and
+    /// @p comparator selects the comparison reference among them, or -1 for
+    /// none. A longer list keeps its first @ref Maximum colors, and a
+    /// comparator indexing none of them selects nothing.
+    void restore(const std::vector<FloatColor>& colors, int comparator);
 
     /// Removes the pin at @p index, keeping the comparator selection valid.
     void removeAt(std::size_t index);

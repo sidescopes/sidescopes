@@ -1,11 +1,15 @@
 #include "core/preferences.h"
 
+#include <algorithm>
+#include <cmath>
 #include <cstdlib>
 #include <fstream>
 #include <map>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "core/scopes/scope_types.h"
 
@@ -288,6 +292,96 @@ std::map<std::string, std::map<std::string, double>> decodeStyles(const std::str
     return styles;
 }
 
+// One channel of a pinned color as the two hex digits the file stores. Samples
+// ride on the 0..255 scale in floating point, and averaging a swatch lands
+// between two codes, so the value is rounded and clamped rather than truncated.
+void appendPinChannel(std::string& out, float value)
+{
+    constexpr char HexDigits[] = "0123456789ABCDEF";
+    const int code = static_cast<int>(std::lround(std::clamp(value, 0.0f, 255.0f)));
+    out += HexDigits[code >> 4];
+    out += HexDigits[code & 0xF];
+}
+
+// The pinned colors serialize on one line as RRGGBB hex joined by commas: the
+// notation the picker itself shows, and exact for 8-bit samples.
+std::string encodePins(const std::vector<FloatColor>& pins)
+{
+    std::string encoded;
+    for (const FloatColor& pin : pins) {
+        if (!encoded.empty()) {
+            encoded += ',';
+        }
+        appendPinChannel(encoded, pin.r);
+        appendPinChannel(encoded, pin.g);
+        appendPinChannel(encoded, pin.b);
+    }
+
+    return encoded;
+}
+
+// One RRGGBB token as a color, or nothing when it is not exactly six hex
+// digits. A leading # is accepted, because that is the form the picker copies
+// to the clipboard and the form a user pastes back.
+std::optional<FloatColor> decodeHexColor(const std::string& token)
+{
+    const std::string digits = !token.empty() && token.front() == '#' ? token.substr(1) : token;
+    if (digits.size() != 6 || digits.find_first_not_of("0123456789abcdefABCDEF") != std::string::npos) {
+        return std::nullopt;
+    }
+    const long packed = std::strtol(digits.c_str(), nullptr, 16);
+
+    return FloatColor{static_cast<float>((packed >> 16) & 0xFF), static_cast<float>((packed >> 8) & 0xFF),
+                      static_cast<float>(packed & 0xFF)};
+}
+
+// Parses the RRGGBB,RRGGBB form back into colors, skipping any malformed token
+// and stopping at MaximumPins, so a hand-edited file can neither corrupt a pin
+// nor overflow the ring.
+std::vector<FloatColor> decodePins(const std::string& encoded)
+{
+    std::vector<FloatColor> pins;
+    std::size_t at = 0;
+    while (at < encoded.size() && pins.size() < MaximumPins) {
+        const auto comma = encoded.find(',', at);
+        const std::string token = encoded.substr(at, comma == std::string::npos ? std::string::npos : comma - at);
+        if (const auto color = decodeHexColor(token)) {
+            pins.push_back(*color);
+        }
+        if (comma == std::string::npos) {
+            break;
+        }
+        at = comma + 1;
+    }
+
+    return pins;
+}
+
+// The comparison reference, read strictly: only a plain index into the colors
+// the file carried selects a pin. Junk, the file's own -1, and an index past
+// the list alike leave no reference, never a pin the user did not choose.
+int decodePinComparator(const std::string& value, std::size_t pinCount)
+{
+    if (value.empty() || value.find_first_not_of("0123456789") != std::string::npos) {
+        return -1;
+    }
+    const long index = std::strtol(value.c_str(), nullptr, 10);
+
+    return index < static_cast<long>(pinCount) ? static_cast<int>(index) : -1;
+}
+
+// The pinned colors and the reference selected among them. A session that
+// pinned nothing writes neither key, and its file loads an empty board.
+void readPins(const std::map<std::string, std::string, std::less<>>& values, Preferences& preferences)
+{
+    if (const auto found = values.find("pins"); found != values.end()) {
+        preferences.pins = decodePins(found->second);
+    }
+    if (const auto found = values.find("pin_comparator"); found != values.end()) {
+        preferences.pinComparator = decodePinComparator(found->second, preferences.pins.size());
+    }
+}
+
 // An orientation is 0 automatic, 1 vertical, or 2 horizontal; anything else
 // falls back to automatic, so a corrupt value never wedges the layout.
 int cleanedOrientation(int value)
@@ -493,6 +587,7 @@ Preferences loadPreferences(const std::filesystem::path& file)
 
     readShortcuts(values, preferences.shortcuts);
     readScopeShortcuts(values, preferences);
+    readPins(values, preferences);
 
     readInt(values, "window_x", preferences.windowX);
     readInt(values, "window_y", preferences.windowY);
@@ -535,6 +630,11 @@ bool savePreferences(const Preferences& preferences, const std::filesystem::path
     // as shortcut_<id>, so a scope at its default letter needs no line.
     for (const auto& [id, letter] : preferences.scopeShortcuts) {
         out << "shortcut_" << id << '=' << letter << '\n';
+    }
+    // An empty board writes neither pin key, so the file stays terse.
+    if (!preferences.pins.empty()) {
+        out << "pins=" << encodePins(preferences.pins) << '\n'
+            << "pin_comparator=" << preferences.pinComparator << '\n';
     }
     writeLayout(out, preferences);
 

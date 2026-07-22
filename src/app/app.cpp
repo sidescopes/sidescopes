@@ -543,8 +543,8 @@ void drawHistogram(const ScopeTexture& texture, const AnalysisWorker::Output& ou
 // swatch with its values spelled out three ways at once - 0-255,
 // percent, and hex - because matching a reference means never
 // converting in your head. Clicking the swatch or the hex line
-// copies the hex; the session's pinned colors (P) ride along as
-// small swatches with the same click.
+// copies the hex; the pinned colors (P) ride along as small
+// swatches with the same click.
 // Managing a pin happens where the pin lives; the app-wide
 // native menu yields to this popup.
 // Hex codes render in the fixed-width font when one loaded, so
@@ -1256,7 +1256,7 @@ void drawPickerChipRail(const PickerContext& ctx)
 // The color picker pane: the sampled cursor color as a large swatch with its
 // values spelled out three ways at once - 0-255, percent, and hex - because
 // matching a reference means never converting in your head. Clicking the swatch
-// or the hex line copies the hex; the session's pinned colors (P) ride along.
+// or the hex line copies the hex; the pinned colors (P) ride along.
 // Three size tiers, few and spaced so resizing feels like deliberate steps: a
 // strip, a compact comparator, the full reference deck. Order never changes -
 // comparator, values, pins - and only the comparator absorbs extra height.
@@ -1736,6 +1736,10 @@ void App::seedAnalysis(const Preferences& startup)
 
 void App::setupView(const Preferences& startup)
 {
+    // The file format caps its pin list at the ring's capacity; the two
+    // constants sit in different layers, so the build checks they agree.
+    static_assert(MaximumPins == PinBoard::Maximum);
+    m_pins.restore(startup.pins, startup.pinComparator);
     m_view.restoreStack(startup.scopeStack);
     m_view.setGraticule(startup.showGraticule);
     m_view.setZoom(startup.vectorscopeZoom);
@@ -2709,6 +2713,8 @@ void App::persistPreferences()
     preferences.layoutActiveSlot = m_activePresetSlot;
     preferences.shortcuts = m_shortcuts;
     preferences.scopeShortcuts = m_scopeShortcuts;
+    preferences.pins = m_pins.colors();
+    preferences.pinComparator = m_pins.comparator();
     glfwGetWindowPos(m_window, &preferences.windowX, &preferences.windowY);
     glfwGetWindowSize(m_window, &preferences.windowWidth, &preferences.windowHeight);
     if (!savePreferences(preferences, preferencesFilePath())) {

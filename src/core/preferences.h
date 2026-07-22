@@ -1,15 +1,25 @@
 #pragma once
 
 #include <array>
+#include <cstddef>
 #include <filesystem>
 #include <map>
 #include <string>
+#include <vector>
+
+#include "core/frame.h"
 
 namespace sidescopes {
 
 /// How many quick-access layout preset slots the app offers, bound to the
 /// number keys 1-9.
 inline constexpr int LayoutPresetSlots = 9;
+
+/// How many pinned colors a file may carry. This restates PinBoard::Maximum,
+/// the pin ring's capacity: the class lives in the application layer, which
+/// the core cannot see, so a hand-edited file is capped here instead. The two
+/// constants are asserted equal where the board is seeded.
+inline constexpr std::size_t MaximumPins = 8;
 
 /// One saved layout slot: the scope stack, its split orientation, and the
 /// per-scope pane weights. An empty @ref stack marks an unused slot, which
@@ -89,6 +99,13 @@ struct Preferences
     int windowWidth = 440;
     int windowHeight = 500;
     ShortcutBindings shortcuts;
+    /// The pinned reference colors, oldest first, at most @ref MaximumPins.
+    /// They serialize as hex, so a color reloads at the 8 bits the picker
+    /// shows; an averaged swatch loses its fraction of a code value.
+    std::vector<FloatColor> pins;
+    /// Which pinned color is the comparison reference, as an index into
+    /// @ref pins; -1 for none.
+    int pinComparator = -1;
     /// Per-scope toggle bindings, keyed by scope id, holding only the overrides
     /// a file names; every other scope defaults to its descriptor letter, which
     /// the host supplies. A custom binding is a file edit away without a host UI

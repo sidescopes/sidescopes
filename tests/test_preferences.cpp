@@ -520,6 +520,107 @@ TEST_CASE("Preferences skip empty preset slots in the file")
     CHECK(contents.find("layout.preset2.stack") == std::string::npos);
 }
 
+TEST_CASE("Preferences round-trip the pinned colors and their reference")
+{
+    Preferences saved;
+    saved.pins = {FloatColor{125.0f, 19.0f, 17.0f}, FloatColor{33.0f, 221.0f, 101.0f}};
+    saved.pinComparator = 1;
+
+    const TempFile file("pins-roundtrip.txt");
+    REQUIRE(savePreferences(saved, file.path()));
+
+    // One line, oldest pin first, in the hex the picker itself shows, so a
+    // hand edit reads exactly like the swatches on screen.
+    std::ifstream text(file.path());
+    std::string contents((std::istreambuf_iterator<char>(text)), std::istreambuf_iterator<char>());
+    CHECK(contents.find("pins=7D1311,21DD65\n") != std::string::npos);
+    CHECK(contents.find("pin_comparator=1\n") != std::string::npos);
+
+    const Preferences loaded = loadPreferences(file.path());
+    REQUIRE(loaded.pins.size() == 2);
+    CHECK(loaded.pins[0].r == 125.0f);
+    CHECK(loaded.pins[0].g == 19.0f);
+    CHECK(loaded.pins[0].b == 17.0f);
+    CHECK(loaded.pins[1].r == 33.0f);
+    CHECK(loaded.pins[1].g == 221.0f);
+    CHECK(loaded.pins[1].b == 101.0f);
+    CHECK(loaded.pinComparator == 1);
+}
+
+TEST_CASE("Preferences write no pin keys for an empty board")
+{
+    Preferences saved;  // nothing pinned this session
+
+    const TempFile file("pins-empty.txt");
+    REQUIRE(savePreferences(saved, file.path()));
+
+    std::ifstream text(file.path());
+    std::string contents((std::istreambuf_iterator<char>(text)), std::istreambuf_iterator<char>());
+    CHECK(contents.find("pins=") == std::string::npos);
+    CHECK(contents.find("pin_comparator=") == std::string::npos);
+
+    const Preferences loaded = loadPreferences(file.path());
+    CHECK(loaded.pins.empty());
+    CHECK(loaded.pinComparator == -1);
+}
+
+TEST_CASE("Preferences skip malformed pinned colors")
+{
+    // A pinned color is six hex digits, optionally behind the # the picker
+    // copies; anything else is dropped while the valid colors keep their order.
+    const TempFile file("pins-garbage.txt");
+    file.write("pins=7D1311,zzzzzz,#21DD65,12345,,00FF00\n");
+
+    const Preferences loaded = loadPreferences(file.path());
+    REQUIRE(loaded.pins.size() == 3);
+    CHECK(loaded.pins[0].r == 125.0f);
+    CHECK(loaded.pins[1].g == 221.0f);
+    CHECK(loaded.pins[2].g == 255.0f);
+    CHECK(loaded.pinComparator == -1);  // no key at all means no reference
+}
+
+TEST_CASE("Preferences drop a comparison reference no pin answers")
+{
+    // Out of range, unparsable, or naming a pin in a file that lists none: each
+    // means no reference rather than a pin the user never chose.
+    const TempFile beyond("pins-comparator-beyond.txt");
+    beyond.write("pins=7D1311,21DD65\npin_comparator=4\n");
+    CHECK(loadPreferences(beyond.path()).pinComparator == -1);
+
+    const TempFile text("pins-comparator-text.txt");
+    text.write("pins=7D1311\npin_comparator=first\n");
+    CHECK(loadPreferences(text.path()).pinComparator == -1);
+
+    const TempFile orphan("pins-comparator-orphan.txt");
+    orphan.write("pin_comparator=0\n");
+    CHECK(loadPreferences(orphan.path()).pinComparator == -1);
+
+    // Pins with nothing selected round-trip through the file's own -1.
+    Preferences saved;
+    saved.pins = {FloatColor{125.0f, 19.0f, 17.0f}};
+    const TempFile none("pins-comparator-none.txt");
+    REQUIRE(savePreferences(saved, none.path()));
+    const Preferences loaded = loadPreferences(none.path());
+    CHECK(loaded.pins.size() == 1);
+    CHECK(loaded.pinComparator == -1);
+}
+
+TEST_CASE("Preferences cap a hand-edited pin list at the ring's capacity")
+{
+    // The board holds MaximumPins colors; a longer list fills it with the
+    // leading ones, and a reference among the dropped ones selects nothing.
+    const TempFile file("pins-overflow.txt");
+    file.write(
+        "pins=000000,010000,020000,030000,040000,050000,060000,070000,080000,090000,0A0000\n"
+        "pin_comparator=9\n");
+
+    const Preferences loaded = loadPreferences(file.path());
+    REQUIRE(loaded.pins.size() == MaximumPins);
+    CHECK(loaded.pins.front().r == 0.0f);
+    CHECK(loaded.pins.back().r == static_cast<float>(MaximumPins) - 1.0f);
+    CHECK(loaded.pinComparator == -1);
+}
+
 TEST_CASE("Preferences drop malformed preset weight pairs")
 {
     // The weights list is id:weight pairs; a pair without a colon, and any

@@ -32,6 +32,16 @@ void PinBoard::pin(const FloatColor& color)
     m_comparator = static_cast<int>(m_colors.size()) - 1;
 }
 
+void PinBoard::restore(const std::vector<FloatColor>& colors, int comparator)
+{
+    m_colors = colors;
+    if (m_colors.size() > Maximum) {
+        m_colors.resize(Maximum);
+    }
+    const bool selects = comparator >= 0 && comparator < static_cast<int>(m_colors.size());
+    m_comparator = selects ? comparator : -1;
+}
+
 void PinBoard::removeAt(std::size_t index)
 {
     if (index >= m_colors.size()) {

@@ -1,4 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
+#include <cstddef>
+#include <vector>
 
 #include "app/pin_board.h"
 
@@ -85,6 +87,81 @@ TEST_CASE("Removing a pin keeps the comparator index valid")
         CHECK(board.size() == 3);
         CHECK(board.comparator() == 2);
     }
+}
+
+TEST_CASE("Restoring a saved board brings back its colors and comparator")
+{
+    PinBoard board;
+    board.restore({gray(10.0f), gray(20.0f), gray(30.0f)}, 1);
+    REQUIRE(board.size() == 3);
+    CHECK(board.color(0).r == 10.0f);
+    CHECK(board.color(2).r == 30.0f);
+    REQUIRE(board.hasComparator());
+    CHECK(board.comparator() == 1);
+    CHECK(board.comparatorColor().r == 20.0f);
+}
+
+TEST_CASE("Restoring caps the board at its capacity")
+{
+    // A hand-edited preferences file can name more colors than the ring holds;
+    // the leading ones fill it and the rest are dropped.
+    std::vector<FloatColor> saved;
+    for (std::size_t index = 0; index < PinBoard::Maximum + 3; ++index) {
+        saved.push_back(gray(static_cast<float>(index)));
+    }
+    PinBoard board;
+    board.restore(saved, 0);
+    CHECK(board.size() == PinBoard::Maximum);
+    CHECK(board.color(0).r == 0.0f);
+    CHECK(board.color(PinBoard::Maximum - 1).r == static_cast<float>(PinBoard::Maximum) - 1.0f);
+}
+
+TEST_CASE("Restoring rejects a comparator no restored color answers")
+{
+    PinBoard board;
+
+    SECTION("an index past the colors selects nothing")
+    {
+        board.restore({gray(10.0f), gray(20.0f)}, 5);
+        CHECK(board.size() == 2);
+        CHECK_FALSE(board.hasComparator());
+        CHECK(board.comparator() == -1);
+    }
+
+    SECTION("a negative index other than none selects nothing")
+    {
+        board.restore({gray(10.0f)}, -7);
+        CHECK(board.comparator() == -1);
+    }
+
+    SECTION("a comparator on an empty board selects nothing")
+    {
+        board.restore({}, 0);
+        CHECK(board.empty());
+        CHECK(board.comparator() == -1);
+    }
+
+    SECTION("a comparator dropped by the capacity cap selects nothing")
+    {
+        std::vector<FloatColor> saved;
+        for (std::size_t index = 0; index < PinBoard::Maximum + 1; ++index) {
+            saved.push_back(gray(static_cast<float>(index)));
+        }
+        board.restore(saved, static_cast<int>(PinBoard::Maximum));
+        CHECK(board.size() == PinBoard::Maximum);
+        CHECK(board.comparator() == -1);
+    }
+}
+
+TEST_CASE("Restoring replaces whatever the board already held")
+{
+    PinBoard board;
+    board.pin(gray(10.0f));
+    board.pin(gray(20.0f));
+    board.restore({gray(30.0f)}, 0);
+    REQUIRE(board.size() == 1);
+    CHECK(board.color(0).r == 30.0f);
+    CHECK(board.comparator() == 0);
 }
 
 TEST_CASE("Clearing empties the board and drops the comparator")
