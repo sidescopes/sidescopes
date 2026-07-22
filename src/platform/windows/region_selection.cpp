@@ -679,7 +679,7 @@ void paintSuggestionScene(PickerState& picker, Gdiplus::Graphics& canvas, double
     if (picker.facesMode) {
         const wchar_t* secondary = L"[A] attach to a window    [D] draw    [Esc] full screen";
         if (!picker.suggestions.empty()) {
-            drawBanner(canvas, picker, L"Click a face", secondary, false, scale);
+            drawBanner(canvas, picker, L"Select a face", secondary, false, scale);
         } else if (picker.facesScanned) {
             // Scanned, nothing found: the honest verdict. Before the scan
             // lands there is no banner - absence is not yet known.

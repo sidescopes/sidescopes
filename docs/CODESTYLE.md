@@ -26,7 +26,7 @@ line separates definitions.
 - **Public data members** of plain structs: `camelCase`, no prefix.
 - **File-scope globals** (mutable state in anonymous namespaces, typically
   platform callback state): a `g_` prefix with a `camelCase` body —
-  `g_faceCheckRequested`.
+  `g_borderEditing`.
 - **Constants** (`constexpr` and `const` at namespace scope, enumerators):
   `PascalCase` with no prefix — `DefaultVectorscopeSize`.
 - Because functions and variables share `camelCase`, a local can shadow a

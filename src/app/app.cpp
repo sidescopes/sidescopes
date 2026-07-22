@@ -4020,7 +4020,7 @@ void App::appendRegionAndAppSection(std::vector<NativeMenuItem>& menu)
     menuAction(menu, "Attach to Window...", MenuSelectRegion, false, shortcutLabel(m_shortcuts.pickWindow));
     menuAction(menu, "Draw Area...", MenuDrawRegion, false, shortcutLabel(m_shortcuts.drawRegion));
     if (supportsFaceDetection()) {
-        menuAction(menu, "Find Faces...", MenuPickFaces, false, shortcutLabel(m_shortcuts.pickFaces));
+        menuAction(menu, "Select Face...", MenuPickFaces, false, shortcutLabel(m_shortcuts.pickFaces));
     }
     menuAction(menu, "Watch Full Screen", MenuFullScreenRegion, isFullRegion(), shortcutLabel(m_shortcuts.fullRegion));
     if (m_attach.trackedCount() > 1) {

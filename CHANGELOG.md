@@ -6,13 +6,6 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-### Fixed
-
-- A face-pinned window regaining focus no longer flashes the stale
-  region border for the first probe's latency; the border waits for
-  this activation's verdict, and the probe fires immediately instead
-  of waiting out its cadence.
-
 ### Added
 
 - Flexible scope layout: orientation (Automatic, Vertical, Horizontal),
@@ -41,9 +34,15 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the toolbar no longer dims it or reports presence in a tooltip. The
   picker overlay itself now says "No faces found on this screen" once a
   display's scan finds none, and stays silent until the scan completes.
+- The face action reads the same everywhere: the toolbar, the picker
+  banner, and the menu all say select a face.
 
 ### Fixed
 
+- A face-pinned window regaining focus no longer flashes the stale
+  region border for the first probe's latency; the border waits for
+  this activation's verdict, and the probe fires immediately instead
+  of waiting out its cadence.
 - Face picking offers faces on every display, not only the one the scopes
   currently capture. The streamed display's faces still appear the instant
   the picker opens; each other display is grabbed once and scanned in the

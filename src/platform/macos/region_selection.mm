@@ -402,7 +402,7 @@ NSCursor* buildPinCursor(const std::optional<FloatColor>& color)
     if (self.facesMode) {
         NSString* secondary = @"[A] attach to a window    [D] draw    [Esc] full screen";
         if (!m_suggestions.empty()) {
-            [self drawBanner:@"Click a face" secondary:secondary preferCenter:NO];
+            [self drawBanner:@"Select a face" secondary:secondary preferCenter:NO];
         } else if (self.facesScanned) {
             // Scanned, nothing found: the honest verdict, centered and quiet.
             // Before the scan lands there is no banner - absence is not yet known.

@@ -32,7 +32,7 @@ screen itself, so it works with every editor and needs no plugins.
 | V / W / R / H / C | show one scope alone: vectorscope, waveform, RGB parade, histogram, color picker |
 | Shift+V / W / R / H / C | stack or unstack a scope; panes follow the order they were turned on |
 | A | pick a window |
-| F | pick a face (macOS) |
+| F | select a face |
 | D | draw an area |
 | Esc | reset to the full screen |
 | P | pin the color under the cursor |
