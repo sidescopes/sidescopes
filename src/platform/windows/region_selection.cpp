@@ -847,7 +847,7 @@ void paintPickerSelectionDelta(PickerState& picker, const Gdiplus::RectF& previo
 }
 
 // 0 = attach to a window, 1 = draw, 2 = attach to a face, 3 = pin
-// colors. Face mode is offered even when no face was found: the honest
+// colors. Face mode is available even when no face was found: the honest
 // answer is the empty overlay saying so, not a key that silently does
 // nothing.
 void switchPickerMode(int mode)

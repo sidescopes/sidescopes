@@ -82,19 +82,19 @@ std::vector<SuggestedRegion> buildFaceSuggestions(const std::vector<IntRect>& fa
     return suggestions;
 }
 
-std::vector<FaceOffer> buildFaceOffers(const std::vector<IntRect>& faces, uint32_t displayId, int frameWidth,
-                                       int frameHeight)
+std::vector<FaceCandidate> buildFaceCandidates(const std::vector<IntRect>& faces, uint32_t displayId, int frameWidth,
+                                               int frameHeight)
 {
-    std::vector<FaceOffer> offers;
+    std::vector<FaceCandidate> candidates;
     if (frameWidth <= 0 || frameHeight <= 0) {
-        return offers;
+        return candidates;
     }
-    offers.reserve(faces.size());
+    candidates.reserve(faces.size());
     for (const IntRect& face : faces) {
-        offers.push_back(
+        candidates.push_back(
             {faceSuggestionRegion(face, frameWidth, frameHeight), face, displayId, frameWidth, frameHeight});
     }
-    return offers;
+    return candidates;
 }
 
 }  // namespace sidescopes

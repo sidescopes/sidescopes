@@ -167,9 +167,10 @@ private:
     [[nodiscard]] bool regionContentUnsettled() const;
     bool adoptFacePick(uint32_t displayId, const RegionOfInterest& confirmed);
 
-    /// A window the picker offered, remembered with its identity so a
-    /// confirmed window pick can be turned into an attachment.
-    struct PickableWindow
+    /// What the application keeps for one window the picker suggested, so a
+    /// confirmed pick resolves back to its source: the rectangle the match
+    /// runs against, and the identity the attachment is made on.
+    struct WindowCandidate
     {
         uint64_t identity = 0;
         int64_t ownerPid = 0;
@@ -179,17 +180,10 @@ private:
         uint32_t displayId = 0;
     };
 
-    [[nodiscard]] const PickableWindow* matchPickedWindow(uint32_t displayId, const RegionOfInterest& region) const;
-
-    /// A face the picker offered: its detector box, its display, and the
-    /// frame it was measured on, so a confirmed pick on any display maps
-    /// back to the right pixels. The same record for every display, built by
-    /// the core buildFaceOffers from that display's detections.
-    using PickableFace = FaceOffer;
-
-    [[nodiscard]] const PickableFace* matchPickedFace(uint32_t displayId, const RegionOfInterest& region) const;
-    void logAttachMapping(const PickableWindow& picked, const RegionOfInterest& start) const;
-    [[nodiscard]] const PickableWindow* windowContaining(uint32_t displayId, const RegionOfInterest& region) const;
+    [[nodiscard]] const WindowCandidate* matchWindowCandidate(uint32_t displayId, const RegionOfInterest& region) const;
+    [[nodiscard]] const FaceCandidate* matchFaceCandidate(uint32_t displayId, const RegionOfInterest& region) const;
+    void logAttachMapping(const WindowCandidate& picked, const RegionOfInterest& start) const;
+    [[nodiscard]] const WindowCandidate* windowContaining(uint32_t displayId, const RegionOfInterest& region) const;
     [[nodiscard]] std::optional<FloatColor> averageFrameArea(const RegionOfInterest& area) const;
     void resetRegionToFull();
     void persistPreferences();
@@ -369,8 +363,8 @@ private:
     bool m_attachBorderEditing = false;
     uint64_t m_attachBorderEditIdentity = 0;
 
-    std::vector<PickableWindow> m_pickableWindows;
-    std::vector<PickableFace> m_pickableFaces;
+    std::vector<WindowCandidate> m_windowCandidates;
+    std::vector<FaceCandidate> m_faceCandidates;
     /// The global region's border label: the captured display's name,
     /// refreshed when the captured display changes.
     std::string m_displayLabel;

@@ -14,7 +14,7 @@ enum class DiagChannel
 {
     Attach,       ///< Window-attach focus routing: one line per follow tick.
     Border,       ///< Region-border presentation: hide/show/present events.
-    Suggestions,  ///< Region-picker offers and the pick's rectangle chain.
+    Suggestions,  ///< Region-picker suggestions and the pick's rectangle chain.
     FacePin,      ///< Face-pin probe verdicts, for grading the gates.
     Perf,         ///< Frame, analysis-pass, and capture-cadence timings.
     Count         ///< Sentinel; keep last.

@@ -1,5 +1,5 @@
 // Unit tests for the picker's window-suggestion logic (window_suggestions.cpp):
-// which of a display's on-screen windows are offered, in what order, and as
+// which of a display's on-screen windows are suggested, in what order, and as
 // what display-relative rectangles. The auxiliary-chrome and occlusion rules
 // are exercised here rather than through the live window server.
 
@@ -32,7 +32,7 @@ std::vector<std::string> labelsOf(const std::vector<SuggestedRegion>& suggestion
 
 }  // namespace
 
-TEST_CASE("An empty desktop offers nothing")
+TEST_CASE("An empty desktop suggests nothing")
 {
     CHECK(buildWindowSuggestions({}, Display, 5).empty());
 }
@@ -54,7 +54,7 @@ TEST_CASE("A window buried under the union of the ones in front drops out")
 {
     // Two front windows each hide one half of the back window; neither hides it
     // alone, but together they bury it. This is the owner-reported case: a
-    // window fully behind the visible ones must not be offered. Testing
+    // window fully behind the visible ones must not be suggested. Testing
     // coverage against a single front window at a time - the flaw this
     // replaces - would leave the buried window a candidate.
     const std::vector<DesktopWindow> windows{
@@ -82,7 +82,7 @@ TEST_CASE("A window all but hidden behind a smaller one in front drops out")
 {
     // A different-app window in front covers 90 percent of the one behind it,
     // leaving it under the visibility threshold, so only the front one is
-    // offered.
+    // suggested.
     const std::vector<DesktopWindow> windows{
         {0.0, 0.0, 900.0, 500.0, "Browser"},
         {0.0, 0.0, 1000.0, 500.0, "Editor"},
@@ -91,10 +91,10 @@ TEST_CASE("A window all but hidden behind a smaller one in front drops out")
     CHECK(labelsOf(buildWindowSuggestions(windows, Display, 5)) == std::vector<std::string>{"Browser"});
 }
 
-TEST_CASE("Auxiliary chrome is neither offered nor an occluder")
+TEST_CASE("Auxiliary chrome is neither suggested nor an occluder")
 {
     // A panel of the same application, mostly inside the bigger main window, is
-    // auxiliary chrome: it is not offered, and - the point of excluding it
+    // auxiliary chrome: it is not suggested, and - the point of excluding it
     // before the occlusion math - it does not bury the window it sits on. Were
     // it counted as an occluder it would hide 90 percent of the main window and
     // drop it below the threshold; instead the main window stays, at its own
@@ -112,8 +112,8 @@ TEST_CASE("Auxiliary chrome is neither offered nor an occluder")
 
 TEST_CASE("The suggestion count is capped at the limit")
 {
-    // Six disjoint windows, but the offer is limited to three; the three kept
-    // are the frontmost.
+    // Six disjoint windows, but the suggestions are limited to three; the three
+    // kept are the frontmost.
     const std::vector<DesktopWindow> windows{
         {0.0, 0.0, 100.0, 100.0, "1"},   {200.0, 0.0, 100.0, 100.0, "2"}, {400.0, 0.0, 100.0, 100.0, "3"},
         {600.0, 0.0, 100.0, 100.0, "4"}, {800.0, 0.0, 100.0, 100.0, "5"}, {0.0, 300.0, 100.0, 100.0, "6"},

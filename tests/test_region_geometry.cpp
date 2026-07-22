@@ -201,7 +201,7 @@ TEST_CASE("Dragging a corner moves both of its edges")
 // the ones with lower indices.
 // ---------------------------------------------------------------------------
 
-TEST_CASE("A lone window is fully visible and pickable")
+TEST_CASE("A lone window is fully visible and a pick candidate")
 {
     const std::vector<LocalRect> windows{{0.0, 0.0, 100.0, 100.0}};
     const std::vector<double> fractions = visibleFractions(windows);

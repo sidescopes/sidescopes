@@ -56,11 +56,11 @@ unsigned edgeOrMoveZoneAt(const LocalRect& region, double x, double y, double sc
 /// edge or corner zone moves only those sides.
 LocalRect draggedRegionRect(unsigned dragZone, const LocalRect& start, double dx, double dy, double minimum);
 
-/// The least share of itself a window must still show to be offered as a pick
-/// candidate. At 0.15 a window peeking out from behind the editor stays
-/// pickable, while one hidden down to a sliver drops out: low enough not to
-/// lose a genuinely reachable window, high enough that a click meant for it
-/// would not as readily land on whatever covers it.
+/// The least share of itself a window must still show to be suggested as a
+/// pick. At 0.15 a window peeking out from behind the editor still counts,
+/// while one hidden down to a sliver drops out: low enough not to lose a
+/// genuinely reachable window, high enough that a click meant for it would
+/// not as readily land on whatever covers it.
 inline constexpr double MinimumVisibleFraction = 0.15;
 
 /// The visible fraction of each window: the share of its area not hidden under
@@ -81,7 +81,7 @@ inline constexpr double MinimumVisibleFraction = 0.15;
 [[nodiscard]] std::optional<std::size_t> topmostVisibleWindowAt(const std::vector<LocalRect>& windows, double x,
                                                                 double y);
 
-/// The windows worth offering as pick candidates: those at least
+/// The windows worth suggesting as picks: those at least
 /// MinimumVisibleFraction visible. Fully hidden windows never appear, so the
 /// picker stops proposing windows the user cannot see behind the ones on top.
 /// @param windows the on-screen windows, frontmost first.

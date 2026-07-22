@@ -201,7 +201,7 @@ NSCursor* buildPinCursor(const std::optional<FloatColor>& color)
 
 @implementation SidescopesPickerView
 
-// Face mode is offered even when no face was found: the honest answer is
+// Face mode is available even when no face was found: the honest answer is
 // the empty overlay saying so, not a key that silently does nothing.
 - (void)switchToMode:(sidescopes::RegionPickerMode)mode
 {

@@ -7,7 +7,7 @@
 namespace sidescopes {
 
 /// Whether this platform ships a built-in face detector. Where it does
-/// not, the face-picking action simply is not offered.
+/// not, the face-picking action is simply unavailable.
 [[nodiscard]] bool supportsFaceDetection();
 
 /// Loads the platform's face-detection model in the background so the

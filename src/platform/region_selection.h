@@ -32,7 +32,7 @@ enum class RegionPickerMode
     PinColor
 };
 
-/// What the picker offers on one display. Region percentages are always
+/// What the picker suggests on one display. Region percentages are always
 /// relative to their own display.
 struct PickerDisplay
 {
@@ -112,11 +112,11 @@ void cancelRegionPick();
 /// Switches an active pick between its modes; no-op when none is active.
 void setRegionPickMode(RegionPickerMode mode);
 
-/// Delivers a display's face offer to an already-open picker, after the
+/// Delivers a display's face suggestions to an already-open picker, after the
 /// background scan of a non-streamed display lands. The call marks that
 /// display's face scan complete: an empty @p faces means the scan finished
 /// and found nothing, which the overlay reports as "no faces" rather than
-/// staying silent. If the picker is in face mode the new offer shows at
+/// staying silent. If the picker is in face mode the new suggestions show at
 /// once. A no-op when no pick is active or no overlay covers @p displayId
 /// (the picker may have closed before the scan finished). Call on the main
 /// thread.

@@ -92,9 +92,9 @@ the whole screen. Once confirmed, the region carries a live border on the
 desktop, drawn like a macOS screenshot selection, that moves and resizes in
 place without reopening the picker.
 
-The picker offers only exact information — real window rectangles and detected
-faces — and leaves everything else to a manual draw, on the principle that an
-unreliable guess is worse than an honest selection.
+The picker suggests only exact information — real window rectangles and
+detected faces — and leaves everything else to a manual draw, on the principle
+that an unreliable guess is worse than an honest selection.
 
 Reference colors can be pinned on the vectorscope and the color picker for
 matching tones across photos. A dedicated pin tool turns the cursor into a

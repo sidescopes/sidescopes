@@ -70,58 +70,58 @@ TEST_CASE("Face suggestions keep two well-separated faces")
     CHECK(suggestions.size() == 2);
 }
 
-TEST_CASE("Face offers carry the display and the frame they were measured on")
+TEST_CASE("Face candidates carry the display and the frame they were measured on")
 {
-    const auto offers = buildFaceOffers({IntRect{100, 100, 200, 200}}, 7, 1000, 500);
-    REQUIRE(offers.size() == 1);
-    CHECK(offers[0].displayId == 7);
-    CHECK(offers[0].frameWidth == 1000);
-    CHECK(offers[0].frameHeight == 500);
+    const auto candidates = buildFaceCandidates({IntRect{100, 100, 200, 200}}, 7, 1000, 500);
+    REQUIRE(candidates.size() == 1);
+    CHECK(candidates[0].displayId == 7);
+    CHECK(candidates[0].frameWidth == 1000);
+    CHECK(candidates[0].frameHeight == 500);
     // The raw detector box is kept unshrunk for the pin to anchor on.
-    CHECK(offers[0].box.x == 100);
-    CHECK(offers[0].box.width == 200);
+    CHECK(candidates[0].box.x == 100);
+    CHECK(candidates[0].box.width == 200);
 }
 
-TEST_CASE("Face offers agree with the overlay's suggestion regions")
+TEST_CASE("Face candidates agree with the overlay's suggestion regions")
 {
-    // An offer's region and its display's suggestion for the same box are the
-    // same shrunk rectangle, so a confirmed offer matches its box regardless
-    // of which display it came from.
+    // A candidate's region and its display's suggestion for the same box are
+    // the same shrunk rectangle, so a confirmed suggestion matches its box
+    // regardless of which display it came from.
     const std::vector<IntRect> faces{IntRect{100, 100, 200, 200}};
-    const auto offers = buildFaceOffers(faces, 1, 1000, 500);
+    const auto candidates = buildFaceCandidates(faces, 1, 1000, 500);
     const auto suggestions = buildFaceSuggestions(faces, 1000, 500);
-    REQUIRE(offers.size() == 1);
+    REQUIRE(candidates.size() == 1);
     REQUIRE(suggestions.size() == 1);
-    CHECK(offers[0].region.leftPercent == suggestions[0].region.leftPercent);
-    CHECK(offers[0].region.rightPercent == suggestions[0].region.rightPercent);
-    CHECK(offers[0].region.topPercent == suggestions[0].region.topPercent);
-    CHECK(offers[0].region.bottomPercent == suggestions[0].region.bottomPercent);
+    CHECK(candidates[0].region.leftPercent == suggestions[0].region.leftPercent);
+    CHECK(candidates[0].region.rightPercent == suggestions[0].region.rightPercent);
+    CHECK(candidates[0].region.topPercent == suggestions[0].region.topPercent);
+    CHECK(candidates[0].region.bottomPercent == suggestions[0].region.bottomPercent);
 }
 
-TEST_CASE("Face offers keep per-display frame dimensions distinct")
+TEST_CASE("Face candidates keep per-display frame dimensions distinct")
 {
     // The same box on two displays of different resolutions must not collapse
-    // to one frame: each offer maps back through its own dimensions.
+    // to one frame: each candidate maps back through its own dimensions.
     const std::vector<IntRect> box{IntRect{50, 50, 100, 100}};
-    const auto small = buildFaceOffers(box, 1, 400, 300);
-    const auto large = buildFaceOffers(box, 2, 3840, 2160);
+    const auto small = buildFaceCandidates(box, 1, 400, 300);
+    const auto large = buildFaceCandidates(box, 2, 3840, 2160);
     REQUIRE(small.size() == 1);
     REQUIRE(large.size() == 1);
     CHECK(small[0].frameWidth == 400);
     CHECK(large[0].frameWidth == 3840);
-    // Same pixel box, different frames, so different offered percentages.
+    // Same pixel box, different frames, so different suggested percentages.
     CHECK(small[0].region.leftPercent != large[0].region.leftPercent);
 }
 
-TEST_CASE("Face offers reject a degenerate frame")
+TEST_CASE("Face candidates reject a degenerate frame")
 {
-    CHECK(buildFaceOffers({IntRect{10, 10, 40, 40}}, 1, 0, 100).empty());
-    CHECK(buildFaceOffers({IntRect{10, 10, 40, 40}}, 1, 100, 0).empty());
+    CHECK(buildFaceCandidates({IntRect{10, 10, 40, 40}}, 1, 0, 100).empty());
+    CHECK(buildFaceCandidates({IntRect{10, 10, 40, 40}}, 1, 100, 0).empty());
 }
 
-TEST_CASE("Face offers are empty for no detections")
+TEST_CASE("Face candidates are empty for no detections")
 {
-    CHECK(buildFaceOffers({}, 1, 1000, 500).empty());
+    CHECK(buildFaceCandidates({}, 1, 1000, 500).empty());
 }
 
 }  // namespace sidescopes

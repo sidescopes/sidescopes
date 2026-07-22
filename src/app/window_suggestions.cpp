@@ -57,9 +57,9 @@ bool isAuxiliary(const DesktopWindow& candidate, const std::vector<DesktopWindow
 std::vector<SuggestedRegion> buildWindowSuggestions(const std::vector<DesktopWindow>& windows,
                                                     const DisplayGeometry& geometry, int maxSuggestions)
 {
-    // Drop the auxiliary chrome up front so the occlusion math never sees it:
-    // a window's own panels must neither be offered nor bury the window behind.
-    std::vector<DesktopWindow> pickable;
+    // Drop the auxiliary chrome up front so the occlusion math never sees it: a
+    // window's own panels must neither be suggested nor bury the window behind.
+    std::vector<DesktopWindow> eligible;
     std::vector<LocalRect> rects;
     for (const DesktopWindow& candidate : windows) {
         if (isAuxiliary(candidate, windows)) {
@@ -67,18 +67,18 @@ std::vector<SuggestedRegion> buildWindowSuggestions(const std::vector<DesktopWin
         }
 
         rects.push_back(LocalRect{candidate.x, candidate.y, candidate.width, candidate.height});
-        pickable.push_back(candidate);
+        eligible.push_back(candidate);
     }
 
     // The windows still meaningfully visible under the union of everything in
-    // front of them, frontmost first, capped at the offer limit.
+    // front of them, frontmost first, capped at the suggestion limit.
     std::vector<WindowRegion> windowRegions;
     for (const std::size_t index : meaningfulPickCandidates(rects)) {
         if (static_cast<int>(windowRegions.size()) >= maxSuggestions) {
             break;
         }
 
-        const DesktopWindow& window = pickable[index];
+        const DesktopWindow& window = eligible[index];
         WindowRegion region;
         region.region.leftPercent =
             std::clamp((window.x - geometry.originX) / geometry.widthPoints * 100.0, 0.0, 100.0);

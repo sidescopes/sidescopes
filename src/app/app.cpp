@@ -449,7 +449,7 @@ void restoreWindowPlacement(GLFWwindow* window, const Preferences& startup)
 
 // The on-screen windows of a display become its region suggestions. The
 // platform query lives here; buildWindowSuggestions owns the choice of which
-// windows to offer and in what order.
+// windows to suggest and in what order.
 std::vector<SuggestedRegion> windowSuggestionsFor(uint32_t displayId)
 {
     const auto geometry = geometryOfDisplay(displayId);
@@ -457,7 +457,7 @@ std::vector<SuggestedRegion> windowSuggestionsFor(uint32_t displayId)
         return {};
     }
 
-    // The most windows the picker offers at once, so the overlay stays
+    // The most windows the picker suggests at once, so the overlay stays
     // readable on a crowded desktop.
     constexpr int MaxWindowSuggestions = 5;
 
@@ -2633,7 +2633,7 @@ void App::idleWaitWatchingAttachedWindow()
 }
 
 // A window rectangle as its display's percentages - the shape the
-// pickable-window list and the edit-time veil speak.
+// window-candidate list and the edit-time veil speak.
 RegionOfInterest App::displayPercentRect(const WindowGeometry& windowGeom, const DisplayGeometry& display)
 {
     RegionOfInterest region;
@@ -4323,24 +4323,24 @@ void App::waitForBorderFreeFrame()
 
 std::vector<PickerDisplay> App::buildPickerDisplays()
 {
-    // The offer, per display: the visible application windows, frontmost
+    // The suggestions, per display: the visible application windows, frontmost
     // first, plus, behind their own key, the faces the platform detector
     // finds. The streamed display's faces come from its live frame right
     // now; the other displays are scanned in the background (see
-    // launchDisplayFaceScans) and their offers arrive later.
+    // launchDisplayFaceScans) and their suggestions arrive later.
     const uint32_t streamed = m_captureController->capturedDisplay();
     std::vector<SuggestedRegion> faceSuggestions;
-    m_pickableFaces.clear();
+    m_faceCandidates.clear();
     if (supportsFaceDetection()) {
         (void)m_worker.withLatestFrame([&](const FrameView& view) {
             const auto geometry = geometryOfDisplay(streamed);
             const float pixelsPerPoint = geometry ? static_cast<float>(view.width / geometry->widthPoints) : 1.0f;
             const std::vector<IntRect> faces = detectFaces(view, pixelsPerPoint);
             faceSuggestions = buildFaceSuggestions(faces, view.width, view.height);
-            // The raw boxes are remembered too, one offer each: a confirmed
+            // The raw boxes are remembered too, one candidate each: a confirmed
             // face pick anchors its pin on the detector's box, not the inset.
-            const std::vector<FaceOffer> offers = buildFaceOffers(faces, streamed, view.width, view.height);
-            m_pickableFaces.insert(m_pickableFaces.end(), offers.begin(), offers.end());
+            const std::vector<FaceCandidate> candidates = buildFaceCandidates(faces, streamed, view.width, view.height);
+            m_faceCandidates.insert(m_faceCandidates.end(), candidates.begin(), candidates.end());
             SS_DIAG(Suggestions, "display %u faces=%zu (streamed)", streamed, faceSuggestions.size());
         });
     }
@@ -4348,17 +4348,17 @@ std::vector<PickerDisplay> App::buildPickerDisplays()
     std::vector<PickerDisplay> pickerDisplays;
     // Remember every window and its identity so a confirmed window pick can
     // be turned into an attachment.
-    m_pickableWindows.clear();
+    m_windowCandidates.clear();
     for (const CaptureTarget& target : m_capture->listTargets()) {
         PickerDisplay entry;
         entry.displayId = target.displayId;
         entry.windows = windowSuggestionsFor(target.displayId);
         if (const auto geometry = geometryOfDisplay(target.displayId)) {
-            for (const DesktopWindow& pickable : onScreenWindows(target.displayId)) {
-                const WindowGeometry rect{pickable.x, pickable.y, pickable.width, pickable.height, false, {}};
-                m_pickableWindows.push_back({pickable.windowIdentity, pickable.ownerPid, pickable.application,
-                                             AttachWindowRect{pickable.x, pickable.y, pickable.width, pickable.height},
-                                             displayPercentRect(rect, *geometry), target.displayId});
+            for (const DesktopWindow& onScreen : onScreenWindows(target.displayId)) {
+                const WindowGeometry rect{onScreen.x, onScreen.y, onScreen.width, onScreen.height, false, {}};
+                m_windowCandidates.push_back({onScreen.windowIdentity, onScreen.ownerPid, onScreen.application,
+                                              AttachWindowRect{onScreen.x, onScreen.y, onScreen.width, onScreen.height},
+                                              displayPercentRect(rect, *geometry), target.displayId});
             }
         }
         if (target.displayId == streamed) {
@@ -4439,8 +4439,8 @@ void App::drainDisplayFaceScans()
     });
 }
 
-// Turns one landed scan into the display's face offer: the overlay boxes and
-// the pickable-face records for a confirmed pick, both keyed to this
+// Turns one landed scan into the display's face suggestions: the overlay
+// boxes and the face candidates for a confirmed pick, both keyed to this
 // display's own frame dimensions. A scan whose picker has closed or that a
 // newer opening superseded is logged and dropped.
 void App::consumeDisplayFaceScan(DisplayFaceScan& scan)
@@ -4462,21 +4462,21 @@ void App::consumeDisplayFaceScan(DisplayFaceScan& scan)
         return;
     }
     const std::vector<SuggestedRegion> suggestions = buildFaceSuggestions(boxes, frameWidth, frameHeight);
-    const std::vector<FaceOffer> offers = buildFaceOffers(boxes, scan.displayId, frameWidth, frameHeight);
-    m_pickableFaces.insert(m_pickableFaces.end(), offers.begin(), offers.end());
-    // Delivering the offer marks this display scanned: an empty list now
+    const std::vector<FaceCandidate> candidates = buildFaceCandidates(boxes, scan.displayId, frameWidth, frameHeight);
+    m_faceCandidates.insert(m_faceCandidates.end(), candidates.begin(), candidates.end());
+    // Delivering the suggestions marks this display scanned: an empty list now
     // reads as "none found", and a failed grab (empty too) shows no boxes.
     updatePickerFaces(scan.displayId, suggestions);
 }
 
-// Recovers which pickable window a confirmed region names. The picker passes
+// Recovers which window candidate a confirmed region names. The picker passes
 // a window's exact rectangle through unchanged, so the match is a near-exact
 // rectangle comparison; a freehand draw matches nothing.
-const App::PickableWindow* App::matchPickedWindow(uint32_t displayId, const RegionOfInterest& region) const
+const App::WindowCandidate* App::matchWindowCandidate(uint32_t displayId, const RegionOfInterest& region) const
 {
-    const PickableWindow* best = nullptr;
+    const WindowCandidate* best = nullptr;
     double bestDelta = 0.0;
-    for (const PickableWindow& candidate : m_pickableWindows) {
+    for (const WindowCandidate& candidate : m_windowCandidates) {
         if (candidate.displayId != displayId) {
             continue;
         }
@@ -4498,14 +4498,14 @@ const App::PickableWindow* App::matchPickedWindow(uint32_t displayId, const Regi
 
 void App::logPickerSuggestions(const std::vector<PickerDisplay>& pickerDisplays)
 {
-    // Field diagnosis: exactly what the pipeline offered, one line per
+    // Field diagnosis: exactly what the pipeline suggested, one line per
     // suggested window.
     if (!diagEnabled(DiagChannel::Suggestions)) {
         return;
     }
     for (const auto& entry : pickerDisplays) {
         for (const auto& suggestion : entry.windows) {
-            SS_DIAG(Suggestions, "display %u offer '%s' %.1f,%.1f..%.1f,%.1f%%", entry.displayId,
+            SS_DIAG(Suggestions, "display %u suggestion '%s' %.1f,%.1f..%.1f,%.1f%%", entry.displayId,
                     suggestion.label.c_str(), suggestion.region.leftPercent, suggestion.region.topPercent,
                     suggestion.region.rightPercent, suggestion.region.bottomPercent);
         }
@@ -4817,9 +4817,9 @@ RegionOfInterest quickStartRegion(const RegionOfInterest& window, const DisplayG
 
 // Field diagnosis for the window-pick mapping: every rectangle in the
 // chain, on the suggestions channel.
-void App::logAttachMapping(const PickableWindow& picked, const RegionOfInterest& start) const
+void App::logAttachMapping(const WindowCandidate& picked, const RegionOfInterest& start) const
 {
-    SS_DIAG(Suggestions, "pick window=%llu list-rect=%.1f,%.1f %.1fx%.1f offered=%.2f,%.2f..%.2f,%.2f%%",
+    SS_DIAG(Suggestions, "pick window=%llu list-rect=%.1f,%.1f %.1fx%.1f suggested=%.2f,%.2f..%.2f,%.2f%%",
             static_cast<unsigned long long>(picked.identity), picked.windowRect.x, picked.windowRect.y,
             picked.windowRect.width, picked.windowRect.height, picked.region.leftPercent, picked.region.topPercent,
             picked.region.rightPercent, picked.region.bottomPercent);
@@ -4837,7 +4837,7 @@ void App::logAttachMapping(const PickableWindow& picked, const RegionOfInterest&
 void App::confirmPickedRegion(const RegionPickPoll& poll)
 {
     const RegionOfInterest confirmed = *poll.confirmed;
-    const PickableWindow* picked = matchPickedWindow(poll.displayId, confirmed);
+    const WindowCandidate* picked = matchWindowCandidate(poll.displayId, confirmed);
     const auto geometry = geometryOfDisplay(poll.displayId);
     const auto display = geometry
                              ? std::optional<AttachDisplayRect>(AttachDisplayRect{
@@ -4860,7 +4860,7 @@ void App::confirmPickedRegion(const RegionPickPoll& poll)
     // A rectangle drawn in attach mode binds to the frontmost window under
     // it; over no window at all it falls through to the global region.
     if (poll.windowMode && display) {
-        const PickableWindow* host = windowContaining(poll.displayId, confirmed);
+        const WindowCandidate* host = windowContaining(poll.displayId, confirmed);
         if (host != nullptr) {
             adoptAttachedPick(host->identity, host->ownerPid,
                               m_attach.attach(host->identity, host->ownerPid, host->application, host->windowRect,
@@ -4882,13 +4882,13 @@ void App::confirmPickedRegion(const RegionPickPoll& poll)
     setRegion(m_globalRegion);
 }
 
-// Recovers which offered face a confirmed region names, by the same
+// Recovers which face candidate a confirmed region names, by the same
 // near-exact comparison the window match uses.
-const App::PickableFace* App::matchPickedFace(uint32_t displayId, const RegionOfInterest& region) const
+const FaceCandidate* App::matchFaceCandidate(uint32_t displayId, const RegionOfInterest& region) const
 {
     constexpr double MatchTolerance = 1.0;
 
-    for (const PickableFace& candidate : m_pickableFaces) {
+    for (const FaceCandidate& candidate : m_faceCandidates) {
         if (candidate.displayId != displayId) {
             continue;
         }
@@ -4904,13 +4904,13 @@ const App::PickableFace* App::matchPickedFace(uint32_t displayId, const RegionOf
     return nullptr;
 }
 
-// The frontmost offered window under a region's centre: the window a face
+// The frontmost suggested window under a region's centre: the window a face
 // pick pins to.
-const App::PickableWindow* App::windowContaining(uint32_t displayId, const RegionOfInterest& region) const
+const App::WindowCandidate* App::windowContaining(uint32_t displayId, const RegionOfInterest& region) const
 {
     const double centerX = (region.leftPercent + region.rightPercent) / 2.0;
     const double centerY = (region.topPercent + region.bottomPercent) / 2.0;
-    for (const PickableWindow& candidate : m_pickableWindows) {
+    for (const WindowCandidate& candidate : m_windowCandidates) {
         if (candidate.displayId != displayId) {
             continue;
         }
@@ -4925,15 +4925,15 @@ const App::PickableWindow* App::windowContaining(uint32_t displayId, const Regio
 
 // A confirmed face suggestion becomes a pinned attachment on the window
 // under it: the window's attachment carries the region between focus changes,
-// and the pin follows the face within it. A face over no offered window
+// and the pin follows the face within it. A face over no suggested window
 // falls through to the plain global path.
 bool App::adoptFacePick(uint32_t displayId, const RegionOfInterest& confirmed)
 {
-    const PickableFace* face = matchPickedFace(displayId, confirmed);
+    const FaceCandidate* face = matchFaceCandidate(displayId, confirmed);
     if (face == nullptr) {
         return false;
     }
-    const PickableWindow* host = windowContaining(displayId, confirmed);
+    const WindowCandidate* host = windowContaining(displayId, confirmed);
     const auto geometry = geometryOfDisplay(displayId);
     if (host == nullptr || !geometry) {
         return false;
