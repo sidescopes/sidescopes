@@ -31,6 +31,7 @@ add_executable(sidescopes_tests
     test_param_menu.cpp
     test_overlay_style.cpp
     test_scope_layout.cpp
+    test_ui_scaling.cpp
     test_scope_registry.cpp
     test_scope_view.cpp
     test_capture_controller.cpp
@@ -58,6 +59,7 @@ target_sources(sidescopes_tests PRIVATE
     ${CMAKE_SOURCE_DIR}/src/app/scope_layout.cpp
     ${CMAKE_SOURCE_DIR}/src/app/scope_registry.cpp
     ${CMAKE_SOURCE_DIR}/src/app/scope_view.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/ui_scaling.cpp
     ${CMAKE_SOURCE_DIR}/src/app/version.cpp
     ${CMAKE_SOURCE_DIR}/src/app/window_suggestions.cpp)
 

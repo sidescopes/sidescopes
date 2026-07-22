@@ -358,6 +358,7 @@ if(APPLE OR WIN32)
         src/app/scope_layout.cpp
         src/app/scope_registry.cpp
         src/app/scope_view.cpp
+        src/app/ui_scaling.cpp
         src/app/version.cpp
         src/app/window_suggestions.cpp)
 

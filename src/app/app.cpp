@@ -34,6 +34,7 @@
 #include "app/scope_layout.h"
 #include "app/scope_registry.h"
 #include "app/scope_view.h"
+#include "app/ui_scaling.h"
 #include "app/version.h"
 #include "app/window_suggestions.h"
 #include "core/analysis_worker.h"
@@ -320,13 +321,14 @@ void applyTheme()
 // Loads the interface font and its fixed-width companion, returning the
 // monospace font so the picker can align hex codes with it; null when the
 // system had none and the interface font stands in.
-ImFont* loadInterfaceFont()
+ImFont* loadInterfaceFont(GLFWwindow* window)
 {
-    // RasterizerDensity stays at its 1.0 default: ImGui derives the
-    // rasterization density from the framebuffer scale each frame and
-    // multiplies this one into it, so setting it here bakes glyphs larger
-    // than the box they are drawn into.
+    int windowWidth = 0;
+    int framebufferWidth = 0;
+    glfwGetWindowSize(window, &windowWidth, nullptr);
+    glfwGetFramebufferSize(window, &framebufferWidth, nullptr);
     ImFontConfig config;
+    config.RasterizerDensity = interfaceFontDensity(windowWidth, framebufferWidth);
     // ImGui's default range stops at U+00FF, which would drop the delta the
     // color picker labels its differences with. Latin-1 plus that one glyph.
     static constexpr ImWchar InterfaceGlyphRanges[] = {0x0020, 0x00FF, 0x0394, 0x0394, 0};
@@ -362,13 +364,11 @@ float computeUiScale(GLFWwindow* window)
     float scaleY = 1.0f;
     glfwGetWindowContentScale(window, &scaleX, &scaleY);
     int windowWidth = 0;
-    int windowHeight = 0;
     int framebufferWidth = 0;
-    int framebufferHeight = 0;
-    glfwGetWindowSize(window, &windowWidth, &windowHeight);
-    glfwGetFramebufferSize(window, &framebufferWidth, &framebufferHeight);
-    const float density = windowWidth > 0 ? framebufferWidth / static_cast<float>(windowWidth) : 1.0f;
-    return density > 0 ? scaleX / density : scaleX;
+    glfwGetWindowSize(window, &windowWidth, nullptr);
+    glfwGetFramebufferSize(window, &framebufferWidth, nullptr);
+
+    return uiScaleForWindow(scaleX, windowWidth, framebufferWidth);
 }
 
 // Applies the saved window placement and keeps the window on screen.
@@ -1702,7 +1702,7 @@ void App::setupImGui()
     io.IniFilename = nullptr;  // window layout is ours to persist
     ImGui::StyleColorsDark();
     applyTheme();
-    m_callbackState.monospaceFont = loadInterfaceFont();
+    m_callbackState.monospaceFont = loadInterfaceFont(m_window);
     m_uiScale = computeUiScale(m_window);
     if (m_uiScale != 1.0f) {
         applyUiScale(m_uiScale);
