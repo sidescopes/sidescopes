@@ -670,11 +670,18 @@ void swatchText(ImDrawList* draw, const ImVec2& pos, ImU32 ink, ImU32 shadow, co
     }
 }
 
-// Tooltip strings shared by the deck header and its rows.
+// Tooltip strings shared by the deck header, its rows, and the difference row
+// under the hero. One line per column: a paragraph covering all three tells a
+// reader about two quantities they did not ask about. The sign gloss is the
+// convention every colorimetric tool follows; hue has none, because it runs
+// around a circle rather than along an axis.
 constexpr const char* PickerMatchTip =
-    "similarity to the live color: 100% is identical, 0% is as far apart as black and white (CIEDE2000) - sRGB assumed";
-constexpr const char* PickerLchTip =
-    "lightness, chroma, and hue difference, live minus pinned - hue weighted by chroma, sRGB assumed";
+    "closeness to the live color: 100% is identical, 0% is black against white (CIEDE2000, sRGB assumed)";
+constexpr const char* PickerLchTips[3] = {
+    "lightness, live minus pinned: + lighter, - darker",
+    "chroma, live minus pinned: + more colorful, - duller",
+    "hue, live minus pinned, weighted by chroma",
+};
 constexpr const char* PickerRgbTip = "channel difference, live minus pinned";
 
 // The live color, its formatted values, and the shared column metrics every
@@ -870,8 +877,8 @@ void formatMatch(float deltaE, char (&value)[8], char (&help)[192])
 {
     std::snprintf(value, sizeof(value), "%d%%", static_cast<int>(std::clamp(100.0f - deltaE, 0.0f, 100.0f)));
     std::snprintf(help, sizeof(help),
-                  "similarity to the live color: 100%% is identical, 0%% is as far apart as black and white "
-                  "(CIEDE2000 difference %.1f) - sRGB assumed",
+                  "closeness to the live color: 100%% is identical, 0%% is black against white "
+                  "(CIEDE2000 difference %.1f, sRGB assumed)",
                   deltaE);
 }
 
@@ -904,7 +911,6 @@ void drawPickerDiffTriplet(const PickerContext& ctx, float valuesStart, const fl
                            const DiffColumns& columns)
 {
     const char* diffLabels[3] = {"ΔL", "ΔC", "ΔH"};
-    const char* diffHelp = "live minus pinned: lightness, chroma, and hue weighted by chroma - sRGB assumed";
     for (int component = 0; component < 3; ++component) {
         const float columnStart = valuesStart + static_cast<float>(component) * columns.stride;
         if (component == 0) {
@@ -913,11 +919,12 @@ void drawPickerDiffTriplet(const PickerContext& ctx, float valuesStart, const fl
             ImGui::SameLine(columnStart);
         }
         ImGui::TextUnformatted(diffLabels[component]);
+        ImGui::SetItemTooltip("%s", PickerLchTips[component]);
         char value[8];
         std::snprintf(value, sizeof(value), "%+d", static_cast<int>(std::lround(diffValues[component])));
         ImGui::SameLine(columnStart + columns.label + ctx.columnGap);
         ImGui::TextUnformatted(value);
-        ImGui::SetItemTooltip("%s", diffHelp);
+        ImGui::SetItemTooltip("%s", PickerLchTips[component]);
     }
 }
 
@@ -1070,9 +1077,9 @@ void drawPickerDeckHeader(const DeckLayout& layout)
         headerCell(layout.matchRight, layout.matchTypical, "Match", PickerMatchTip);
     }
     if (layout.showLch) {
-        headerCell(layout.lchRight[0], layout.lchTypical, "ΔL", PickerLchTip);
-        headerCell(layout.lchRight[1], layout.lchTypical, "ΔC", PickerLchTip);
-        headerCell(layout.lchRight[2], layout.lchTypical, "ΔH", PickerLchTip);
+        headerCell(layout.lchRight[0], layout.lchTypical, "ΔL", PickerLchTips[0]);
+        headerCell(layout.lchRight[1], layout.lchTypical, "ΔC", PickerLchTips[1]);
+        headerCell(layout.lchRight[2], layout.lchTypical, "ΔH", PickerLchTips[2]);
     }
     if (layout.showRgb) {
         headerCell(layout.rgbRight[0], layout.rgbTypical, "ΔR", PickerRgbTip);
@@ -1173,7 +1180,7 @@ void drawDeckRowValues(const PickerContext& ctx, std::size_t index, const DeckLa
         for (int column = 0; column < 3; ++column) {
             char value[8];
             std::snprintf(value, sizeof(value), "%+d", static_cast<int>(std::lround(lchValues[column])));
-            numericCell(layout.lchRight[column], value, PickerLchTip);
+            numericCell(layout.lchRight[column], value, PickerLchTips[column]);
         }
     }
     if (layout.showRgb) {
