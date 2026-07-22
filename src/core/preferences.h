@@ -35,8 +35,8 @@ struct LayoutPreset
 struct ShortcutBindings
 {
     std::string attachWindow = "A";
-    std::string drawArea = "D";
-    std::string selectFace = "F";
+    std::string drawRegion = "D";
+    std::string attachFace = "F";
     std::string pinColor = "P";
     std::string vectorscopeZoom = "Z";
     std::string fullScreen = "Escape";

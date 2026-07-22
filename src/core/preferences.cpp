@@ -81,8 +81,8 @@ void readShortcut(const std::map<std::string, std::string, std::less<>>& values,
 void readShortcuts(const std::map<std::string, std::string, std::less<>>& values, ShortcutBindings& shortcuts)
 {
     readShortcut(values, "shortcut_attach_window", shortcuts.attachWindow);
-    readShortcut(values, "shortcut_draw_area", shortcuts.drawArea);
-    readShortcut(values, "shortcut_select_face", shortcuts.selectFace);
+    readShortcut(values, "shortcut_draw_region", shortcuts.drawRegion);
+    readShortcut(values, "shortcut_attach_face", shortcuts.attachFace);
     readShortcut(values, "shortcut_pin_color", shortcuts.pinColor);
     readShortcut(values, "shortcut_vectorscope_zoom", shortcuts.vectorscopeZoom);
     readShortcut(values, "shortcut_full_screen", shortcuts.fullScreen);
@@ -526,8 +526,8 @@ bool savePreferences(const Preferences& preferences, const std::filesystem::path
         << "window_width=" << preferences.windowWidth << '\n'
         << "window_height=" << preferences.windowHeight << '\n'
         << "shortcut_attach_window=" << preferences.shortcuts.attachWindow << '\n'
-        << "shortcut_draw_area=" << preferences.shortcuts.drawArea << '\n'
-        << "shortcut_select_face=" << preferences.shortcuts.selectFace << '\n'
+        << "shortcut_draw_region=" << preferences.shortcuts.drawRegion << '\n'
+        << "shortcut_attach_face=" << preferences.shortcuts.attachFace << '\n'
         << "shortcut_pin_color=" << preferences.shortcuts.pinColor << '\n'
         << "shortcut_vectorscope_zoom=" << preferences.shortcuts.vectorscopeZoom << '\n'
         << "shortcut_full_screen=" << preferences.shortcuts.fullScreen << '\n';

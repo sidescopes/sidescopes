@@ -35,11 +35,14 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   picker overlay itself now says "No faces found on this screen" once a
   display's scan finds none, and stays silent until the scan completes.
 - The face action reads the same everywhere: the toolbar, the picker
-  banner, and the menu all say select a face.
+  banner, and the menu all say attach to a face.
 - The preferences file names its shortcut keys after the actions the
-  menus show: `shortcut_attach_window`, `shortcut_draw_area`,
-  `shortcut_select_face`, and `shortcut_full_screen`. A binding
+  menus show: `shortcut_attach_window`, `shortcut_draw_region`,
+  `shortcut_attach_face`, and `shortcut_full_screen`. A binding
   customized under one of the old names falls back to its default.
+- Region is the one word for the rectangle the scopes read: the menu
+  says Draw Region..., and the toolbar tooltip and picker banner ask
+  you to draw a region rather than select an area.
 
 ### Fixed
 

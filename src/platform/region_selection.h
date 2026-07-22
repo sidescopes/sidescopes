@@ -12,17 +12,23 @@ namespace sidescopes {
 
 /// How the region picker starts out. The mode is chosen up front by the
 /// toolbar button (or key) that opened the picker; inside the region
-/// modes, A, D, and F switch between window picking, drawing, and face
-/// picking. PinColor is its own tool, never switched into or out of: it
-/// picks colors rather than regions - undimmed, since judging a color
-/// through a dim wash misleads - and the capture region is never
+/// modes, A, D, and F switch between attaching to a window, drawing, and
+/// attaching to a face. PinColor is its own tool, never switched into or
+/// out of: it picks colors rather than regions - undimmed, since judging
+/// a color through a dim wash misleads - and the capture region is never
 /// touched. Each click decides its own fate: a plain pin closes the
 /// tool, a Shift+click (or Shift+drag) pins and keeps it open.
 enum class RegionPickerMode
 {
-    PickWindows,
-    Draw,
-    PickFaces,
+    /// An attached region: click the window, or draw a rectangle inside
+    /// it. A rectangle drawn where no window sits under it has nothing
+    /// to attach to and yields a global region instead.
+    AttachWindow,
+    /// A global region, drawn by hand and bound to no window.
+    DrawGlobal,
+    /// An attached region on the window carrying the chosen face.
+    AttachFace,
+    /// No region at all - the color pinning tool leaves the region be.
     PinColor
 };
 
@@ -84,10 +90,10 @@ struct RegionPickPoll
 };
 
 /// Screenshot-style selection spanning every display at once: each gets
-/// its own dimmed overlay, and a pick anywhere is a pick there. Pick mode
-/// highlights the application window under the cursor with the system
+/// its own dimmed overlay, and a pick anywhere is a pick there. The attach
+/// modes highlight the application window under the cursor with the system
 /// accent for one-click confirmation, the way the macOS screenshot
-/// interface selects windows; draw mode drags a fresh area by hand within
+/// interface selects windows; draw mode drags a fresh region by hand within
 /// one display - adjusting an existing region happens on the region
 /// border itself, not in here. ESC cancels. This application's own
 /// windows stay undimmed and clickable through the overlays, so the

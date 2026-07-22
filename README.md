@@ -18,7 +18,7 @@ screen itself, so it works with every editor and needs no plugins.
 - Histogram with per-channel or combined bars
 - Color picker that holds the live color against pinned references, with
   values you can copy at a click
-- Smart region selection: click a window or a detected face, or draw the area
+- Smart region selection: click a window or a detected face, or draw the region
   yourself — the screenshot-tool idiom you already know
 - Live marker showing the color under your cursor on every scope, with
   pinnable reference colors for matching skin tones across photos
@@ -31,9 +31,9 @@ screen itself, so it works with every editor and needs no plugins.
 | --- | ------ |
 | V / W / R / H / C | show one scope alone: vectorscope, waveform, RGB parade, histogram, color picker |
 | Shift+V / W / R / H / C | stack or unstack a scope; panes follow the order they were turned on |
-| A | pick a window |
-| F | select a face |
-| D | draw an area |
+| A | attach to a window |
+| F | attach to a face |
+| D | draw a region |
 | Esc | reset to the full screen |
 | P | pin the color under the cursor |
 

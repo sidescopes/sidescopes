@@ -205,8 +205,8 @@ NSCursor* buildPinCursor(const std::optional<FloatColor>& color)
 // the empty overlay saying so, not a key that silently does nothing.
 - (void)switchToMode:(sidescopes::RegionPickerMode)mode
 {
-    const BOOL draw = mode == sidescopes::RegionPickerMode::Draw;
-    const BOOL faces = mode == sidescopes::RegionPickerMode::PickFaces;
+    const BOOL draw = mode == sidescopes::RegionPickerMode::DrawGlobal;
+    const BOOL faces = mode == sidescopes::RegionPickerMode::AttachFace;
     const BOOL pin = mode == sidescopes::RegionPickerMode::PinColor;
     if (self.drawMode == draw && self.facesMode == faces && self.pinMode == pin) {
         return;
@@ -355,9 +355,9 @@ NSCursor* buildPinCursor(const std::optional<FloatColor>& color)
     }
 }
 
-// Window or face picking: the screen is dimmed and the candidate under the
-// cursor washed with the system accent, the way the macOS screenshot interface
-// highlights a window.
+// Attaching to a window or a face: the screen is dimmed and the candidate under
+// the cursor washed with the system accent, the way the macOS screenshot
+// interface highlights a window.
 - (void)drawPickModeOverlay
 {
     [[NSColor colorWithWhite:0 alpha:0.2] setFill];
@@ -402,15 +402,15 @@ NSCursor* buildPinCursor(const std::optional<FloatColor>& color)
     if (self.facesMode) {
         NSString* secondary = @"[A] attach to a window    [D] draw    [Esc] full screen";
         if (!m_suggestions.empty()) {
-            [self drawBanner:@"Select a face" secondary:secondary preferCenter:NO];
+            [self drawBanner:@"Attach to a face" secondary:secondary preferCenter:NO];
         } else if (self.facesScanned) {
             // Scanned, nothing found: the honest verdict, centered and quiet.
             // Before the scan lands there is no banner - absence is not yet known.
             [self drawBanner:@"No faces found on this screen" secondary:secondary preferCenter:YES];
         }
     } else {
-        [self drawBanner:@"Click a window or drag an area inside it"
-               secondary:sidescopes::supportsFaceDetection() ? @"[F] select a face    [D] draw    [Esc] full screen"
+        [self drawBanner:@"Click a window or drag a region inside it"
+               secondary:sidescopes::supportsFaceDetection() ? @"[F] attach to a face    [D] draw    [Esc] full screen"
                                                              : @"[D] draw    [Esc] full screen"
             preferCenter:NO];
     }
@@ -464,11 +464,11 @@ NSCursor* buildPinCursor(const std::optional<FloatColor>& color)
     }
     NSString* secondary = @"[Esc] full screen";
     if (!m_windows.empty() && sidescopes::supportsFaceDetection()) {
-        secondary = @"[A] attach to a window    [F] select a face    [Esc] full screen";
+        secondary = @"[A] attach to a window    [F] attach to a face    [Esc] full screen";
     } else if (!m_windows.empty()) {
         secondary = @"[A] attach to a window    [Esc] full screen";
     }
-    [self drawBanner:@"Drag to select an area" secondary:secondary preferCenter:NO];
+    [self drawBanner:@"Drag to draw a region" secondary:secondary preferCenter:NO];
 }
 
 - (void)drawRect:(NSRect)dirty
@@ -486,7 +486,7 @@ NSCursor* buildPinCursor(const std::optional<FloatColor>& color)
 - (void)resetCursorRects
 {
     // Window mode draws as readily as it clicks, so it wears the
-    // crosshair too; only the face pick is click-only.
+    // crosshair too; only face mode is click-only.
     NSCursor* cursor = self.facesMode ? NSCursor.pointingHandCursor : NSCursor.crosshairCursor;
     if (self.pinMode) {
         cursor = sidescopes::g_pinCursor ? sidescopes::g_pinCursor : NSCursor.crosshairCursor;
@@ -666,15 +666,15 @@ NSCursor* buildPinCursor(const std::optional<FloatColor>& color)
         // Modes switch on every display's overlay at once.
         const unichar key = [keys characterAtIndex:0];
         if (key == 'a' || key == 'A') {
-            sidescopes::setRegionPickMode(sidescopes::RegionPickerMode::PickWindows);
+            sidescopes::setRegionPickMode(sidescopes::RegionPickerMode::AttachWindow);
             return;
         }
         if (key == 'd' || key == 'D') {
-            sidescopes::setRegionPickMode(sidescopes::RegionPickerMode::Draw);
+            sidescopes::setRegionPickMode(sidescopes::RegionPickerMode::DrawGlobal);
             return;
         }
         if (key == 'f' || key == 'F') {
-            sidescopes::setRegionPickMode(sidescopes::RegionPickerMode::PickFaces);
+            sidescopes::setRegionPickMode(sidescopes::RegionPickerMode::AttachFace);
             return;
         }
     }
@@ -1368,9 +1368,9 @@ RegionOfInterest regionPercentFromViewRect(NSRect rect, NSSize size)
     return regionFromLocalRect(local, size.width, size.height);
 }
 
-// The initial tool decides every overlay's mode: a window pick with nothing to
-// pick anywhere opens as drawing, and the decision is global so every display
-// shows the same mode.
+// The initial tool decides every overlay's mode: an attach with nothing to
+// attach to anywhere opens as drawing, and the decision is global so every
+// display shows the same mode.
 struct PickerModes
 {
     bool pin;
@@ -1385,9 +1385,9 @@ PickerModes computePickerModes(const std::vector<PickerDisplay>& displays, Regio
         anyWindows |= !entry.windows.empty();
     }
     const bool pin = initialMode == RegionPickerMode::PinColor;
-    const bool draw = !pin && (initialMode == RegionPickerMode::Draw ||
-                               (initialMode == RegionPickerMode::PickWindows && !anyWindows));
-    const bool faces = initialMode == RegionPickerMode::PickFaces;
+    const bool draw = !pin && (initialMode == RegionPickerMode::DrawGlobal ||
+                               (initialMode == RegionPickerMode::AttachWindow && !anyWindows));
+    const bool faces = initialMode == RegionPickerMode::AttachFace;
 
     return {pin, draw, faces};
 }

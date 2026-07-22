@@ -71,17 +71,17 @@ enum MenuAction
     MenuShowHistogram,
     MenuShowColorPicker,
     MenuDrawRegion = 25,
-    MenuPickFaces,
+    MenuAttachFace,
     MenuZoom1,
     MenuZoom2,
     MenuZoom4,
-    MenuSelectRegion = 30,
-    MenuFullScreenRegion,
+    MenuAttachWindow = 30,
+    MenuFullScreen,
     MenuDetachWindow,
     MenuDetachAll,
     MenuToggleGraticule = 40,
     MenuClearPinnedMarkers,
-    MenuPickPinColor,
+    MenuPinColor,
     MenuToggleCaptureVisibility,
     MenuToggleDiagRecording,
     MenuShowDiagLog,
@@ -3161,7 +3161,7 @@ void App::handleLetterShortcuts(const ModifierState& modifiers, bool systemChord
         }
     }
     for (const std::string& binding :
-         {m_shortcuts.attachWindow, m_shortcuts.drawArea, m_shortcuts.selectFace, m_shortcuts.pinColor}) {
+         {m_shortcuts.attachWindow, m_shortcuts.drawRegion, m_shortcuts.attachFace, m_shortcuts.pinColor}) {
         if (shortcutPressed(binding)) {
             triggerShortcut(binding, modifiers.shift);
         }
@@ -3183,11 +3183,11 @@ bool App::triggerShortcut(const std::string& key, bool shift)
         }
     }
     if (key == m_shortcuts.attachWindow) {
-        m_wantRegionPick = RegionPickerMode::PickWindows;
-    } else if (key == m_shortcuts.drawArea) {
-        m_wantRegionPick = RegionPickerMode::Draw;
-    } else if (key == m_shortcuts.selectFace && supportsFaceDetection()) {
-        m_wantRegionPick = RegionPickerMode::PickFaces;
+        m_wantRegionPick = RegionPickerMode::AttachWindow;
+    } else if (key == m_shortcuts.drawRegion) {
+        m_wantRegionPick = RegionPickerMode::DrawGlobal;
+    } else if (key == m_shortcuts.attachFace && supportsFaceDetection()) {
+        m_wantRegionPick = RegionPickerMode::AttachFace;
     } else if (key == m_shortcuts.pinColor && pinsAvailable()) {
         // One pin tool; each click inside decides between pin-and-close and
         // Shift's pin-and-continue.
@@ -3416,17 +3416,17 @@ void App::placeRegionToolbox()
 void App::drawRegionToolIcons()
 {
     char tooltip[96];
-    std::snprintf(tooltip, sizeof(tooltip), "Draw an area (%s)", m_shortcuts.drawArea.c_str());
+    std::snprintf(tooltip, sizeof(tooltip), "Draw a region (%s)", m_shortcuts.drawRegion.c_str());
     const int iconPx = iconPixelSize();
     placeRegionToolbox();
     if (iconButton("##draw-region", iconTextureId(Icon::SquarePen, iconPx), tooltip)) {
-        m_wantRegionPick = RegionPickerMode::Draw;
+        m_wantRegionPick = RegionPickerMode::DrawGlobal;
     }
     ImGui::SameLine(0.0f, 2.0f);
     std::snprintf(tooltip, sizeof(tooltip), "Attach to a window (%s) - click the window or draw inside it",
                   m_shortcuts.attachWindow.c_str());
-    if (iconButton("##pick-region", iconTextureId(Icon::Paperclip, iconPx), tooltip)) {
-        m_wantRegionPick = RegionPickerMode::PickWindows;
+    if (iconButton("##attach-window", iconTextureId(Icon::Paperclip, iconPx), tooltip)) {
+        m_wantRegionPick = RegionPickerMode::AttachWindow;
     }
     ImGui::SameLine(0.0f, 2.0f);
     const bool pins = pinsAvailable();
@@ -3436,19 +3436,19 @@ void App::drawRegionToolIcons()
         m_wantRegionPick = RegionPickerMode::PinColor;
     }
     ImGui::SameLine(0.0f, 2.0f);
-    // The face picker sits last among the region pickers, before the reset.
-    // It is always available where the platform detects faces: whether any
+    // The face tool sits last among the region tools, before the reset. It
+    // is always available where the platform detects faces: whether any
     // face is on screen is the picker overlay's answer to give, not the
     // toolbar's.
     if (supportsFaceDetection()) {
-        std::snprintf(tooltip, sizeof(tooltip), "Select a face (%s)", m_shortcuts.selectFace.c_str());
-        if (iconButton("##pick-face", iconTextureId(Icon::User, iconPx), tooltip)) {
-            m_wantRegionPick = RegionPickerMode::PickFaces;
+        std::snprintf(tooltip, sizeof(tooltip), "Attach to a face (%s)", m_shortcuts.attachFace.c_str());
+        if (iconButton("##attach-face", iconTextureId(Icon::User, iconPx), tooltip)) {
+            m_wantRegionPick = RegionPickerMode::AttachFace;
         }
         ImGui::SameLine(0.0f, 2.0f);
     }
     const bool fullAlready = isFullRegion();
-    if (iconButton("##full-region", iconTextureId(Icon::Expand, iconPx),
+    if (iconButton("##full-screen", iconTextureId(Icon::Expand, iconPx),
                    fullAlready ? "Reset to full screen (Esc) - already full" : "Reset to full screen (Esc)",
                    fullAlready) &&
         !fullAlready) {
@@ -3925,7 +3925,7 @@ void App::appendPinOptions(std::vector<NativeMenuItem>& menu)
     // Pins are a scope tool: they mark the vectorscope and the color picker, so
     // their submenu rides those scopes' own sections.
     menuSubmenu(menu, "Pins");
-    menuAction(menu, "Pin Colors...", MenuPickPinColor, false, shortcutLabel(m_shortcuts.pinColor));
+    menuAction(menu, "Pin Colors...", MenuPinColor, false, shortcutLabel(m_shortcuts.pinColor));
     if (!m_pins.empty()) {
         menuAction(menu, "Clear Pinned Markers", MenuClearPinnedMarkers, false);
     }
@@ -4032,12 +4032,12 @@ void App::appendPresetsSubmenu(std::vector<NativeMenuItem>& menu)
 void App::appendRegionAndAppSection(std::vector<NativeMenuItem>& menu)
 {
     menuSeparator(menu);
-    menuAction(menu, "Attach to Window...", MenuSelectRegion, false, shortcutLabel(m_shortcuts.attachWindow));
-    menuAction(menu, "Draw Area...", MenuDrawRegion, false, shortcutLabel(m_shortcuts.drawArea));
+    menuAction(menu, "Attach to Window...", MenuAttachWindow, false, shortcutLabel(m_shortcuts.attachWindow));
+    menuAction(menu, "Draw Region...", MenuDrawRegion, false, shortcutLabel(m_shortcuts.drawRegion));
     if (supportsFaceDetection()) {
-        menuAction(menu, "Select Face...", MenuPickFaces, false, shortcutLabel(m_shortcuts.selectFace));
+        menuAction(menu, "Attach to Face...", MenuAttachFace, false, shortcutLabel(m_shortcuts.attachFace));
     }
-    menuAction(menu, "Watch Full Screen", MenuFullScreenRegion, isFullRegion(), shortcutLabel(m_shortcuts.fullScreen));
+    menuAction(menu, "Watch Full Screen", MenuFullScreen, isFullRegion(), shortcutLabel(m_shortcuts.fullScreen));
     if (m_attach.trackedCount() > 1) {
         if (m_attach.activeIdentity() != 0) {
             menuAction(menu, "Stop Tracking Front Window", MenuDetachWindow, false);
@@ -4137,23 +4137,23 @@ void App::dispatchScopeToggleMenu(int chosen)
 void App::dispatchRegionMenu(int chosen)
 {
     switch (chosen) {
-    case MenuSelectRegion:
-        m_wantRegionPick = RegionPickerMode::PickWindows;
+    case MenuAttachWindow:
+        m_wantRegionPick = RegionPickerMode::AttachWindow;
         break;
     case MenuDrawRegion:
-        m_wantRegionPick = RegionPickerMode::Draw;
+        m_wantRegionPick = RegionPickerMode::DrawGlobal;
         break;
-    case MenuPickFaces:
-        m_wantRegionPick = RegionPickerMode::PickFaces;
+    case MenuAttachFace:
+        m_wantRegionPick = RegionPickerMode::AttachFace;
         break;
-    case MenuFullScreenRegion:
+    case MenuFullScreen:
     case MenuDetachAll:
         resetRegionToFull();
         break;
     case MenuDetachWindow:
         stopTrackingActiveWindow();
         break;
-    case MenuPickPinColor:
+    case MenuPinColor:
         m_wantRegionPick = RegionPickerMode::PinColor;
         break;
     case MenuClearPinnedMarkers:

@@ -679,15 +679,15 @@ void paintSuggestionScene(PickerState& picker, Gdiplus::Graphics& canvas, double
     if (picker.facesMode) {
         const wchar_t* secondary = L"[A] attach to a window    [D] draw    [Esc] full screen";
         if (!picker.suggestions.empty()) {
-            drawBanner(canvas, picker, L"Select a face", secondary, false, scale);
+            drawBanner(canvas, picker, L"Attach to a face", secondary, false, scale);
         } else if (picker.facesScanned) {
             // Scanned, nothing found: the honest verdict. Before the scan
             // lands there is no banner - absence is not yet known.
             drawBanner(canvas, picker, L"No faces found on this screen", secondary, true, scale);
         }
     } else {
-        drawBanner(canvas, picker, L"Click a window or drag an area inside it",
-                   supportsFaceDetection() ? L"[F] select a face    [D] draw    [Esc] full screen"
+        drawBanner(canvas, picker, L"Click a window or drag a region inside it",
+                   supportsFaceDetection() ? L"[F] attach to a face    [D] draw    [Esc] full screen"
                                            : L"[D] draw    [Esc] full screen",
                    false, scale);
     }
@@ -725,11 +725,11 @@ void paintDrawScene(PickerState& picker, Gdiplus::Graphics& canvas, double scale
     } else {
         const wchar_t* secondary = L"[Esc] full screen";
         if (!picker.windows.empty() && supportsFaceDetection()) {
-            secondary = L"[A] attach to a window    [F] select a face    [Esc] full screen";
+            secondary = L"[A] attach to a window    [F] attach to a face    [Esc] full screen";
         } else if (!picker.windows.empty()) {
             secondary = L"[A] attach to a window    [Esc] full screen";
         }
-        drawBanner(canvas, picker, L"Drag to select an area", secondary, false, scale);
+        drawBanner(canvas, picker, L"Drag to draw a region", secondary, false, scale);
     }
 }
 
@@ -846,9 +846,10 @@ void paintPickerSelectionDelta(PickerState& picker, const Gdiplus::RectF& previo
     }
 }
 
-// 0 = pick a window, 1 = draw, 2 = pick a face, 3 = pin colors. Face
-// mode is offered even when no face was found: the honest answer is the
-// empty overlay saying so, not a key that silently does nothing.
+// 0 = attach to a window, 1 = draw, 2 = attach to a face, 3 = pin
+// colors. Face mode is offered even when no face was found: the honest
+// answer is the empty overlay saying so, not a key that silently does
+// nothing.
 void switchPickerMode(int mode)
 {
     const bool draw = mode == 1;
@@ -882,7 +883,7 @@ LRESULT pickerOnSetCursor(PickerState& picker)
         SetCursor(g_pinCursor ? g_pinCursor : LoadCursorW(nullptr, IDC_CROSS));
         return TRUE;
     }
-    // Window mode draws as readily as it clicks; only the face pick is
+    // Window mode draws as readily as it clicks; only face mode is
     // click-only and keeps the hand.
     SetCursor(LoadCursorW(nullptr, picker.facesMode && !picker.pickDragging ? IDC_HAND : IDC_CROSS));
     return TRUE;
@@ -1917,7 +1918,7 @@ bool beginRegionPick(const std::vector<PickerDisplay>& displays, RegionPickerMod
         return false;  // one picker at a time
     }
 
-    // A window pick with nothing to pick anywhere opens as drawing, like
+    // An attach with nothing to attach to anywhere opens as drawing, like
     // before, but the decision is global so every display shows the same
     // mode.
     bool anyWindows = false;
@@ -1925,9 +1926,9 @@ bool beginRegionPick(const std::vector<PickerDisplay>& displays, RegionPickerMod
         anyWindows |= !entry.windows.empty();
     }
     const bool pin = initialMode == RegionPickerMode::PinColor;
-    const bool draw = !pin && (initialMode == RegionPickerMode::Draw ||
-                               (initialMode == RegionPickerMode::PickWindows && !anyWindows));
-    const bool faces = initialMode == RegionPickerMode::PickFaces;
+    const bool draw = !pin && (initialMode == RegionPickerMode::DrawGlobal ||
+                               (initialMode == RegionPickerMode::AttachWindow && !anyWindows));
+    const bool faces = initialMode == RegionPickerMode::AttachFace;
 
     for (const PickerDisplay& entry : displays) {
         if (PickerState* picker = createPicker(entry, draw, faces, pin)) {
@@ -1975,10 +1976,10 @@ void cancelRegionPick()
 
 void setRegionPickMode(RegionPickerMode mode)
 {
-    switchPickerMode(mode == RegionPickerMode::Draw        ? 1
-                     : mode == RegionPickerMode::PickFaces ? 2
-                     : mode == RegionPickerMode::PinColor  ? 3
-                                                           : 0);
+    switchPickerMode(mode == RegionPickerMode::DrawGlobal   ? 1
+                     : mode == RegionPickerMode::AttachFace ? 2
+                     : mode == RegionPickerMode::PinColor   ? 3
+                                                            : 0);
 }
 
 void updatePickerFaces(uint32_t displayId, const std::vector<SuggestedRegion>& faces)
