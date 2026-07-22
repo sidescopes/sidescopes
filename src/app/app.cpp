@@ -30,6 +30,7 @@
 #include "app/overlay_render.h"
 #include "app/param_menu.h"
 #include "app/pin_board.h"
+#include "app/row_layout.h"
 #include "app/scope_layout.h"
 #include "app/scope_registry.h"
 #include "app/scope_view.h"
@@ -228,23 +229,6 @@ int iconPixelSize()
     return static_cast<int>(std::lround(ImGui::GetTextLineHeight() * ImGui::GetIO().DisplayFramebufferScale.x));
 }
 
-float iconButtonWidth()
-{
-    return ImGui::GetTextLineHeight() + 12.0f;
-}
-
-float iconButtonHeight()
-{
-    return ImGui::GetTextLineHeight() + 4.0f;
-}
-
-// How far the glyph sits inside its button's box - the left margin a line of
-// text needs to start where an icon in that box appears to start.
-float iconButtonInset()
-{
-    return std::round((iconButtonWidth() - ImGui::GetTextLineHeight()) / 2.0f);
-}
-
 bool iconButton(const char* id, ImTextureID texture, const char* tooltip, bool dimmed = false)
 {
     const bool pressed = ImGui::InvisibleButton(id, ImVec2(iconButtonWidth(), iconButtonHeight()));
@@ -254,14 +238,8 @@ bool iconButton(const char* id, ImTextureID texture, const char* tooltip, bool d
     if (ImGui::IsItemHovered()) {
         draw->AddRectFilled(min, max, ImGui::GetColorU32(ImGuiCol_ButtonHovered), 3.0f);
     }
-    // Seated from the box's own edges rather than its centre on screen: the
-    // box stands an odd number of pixels taller than the glyph, so a centre
-    // falls on a half pixel and rounding it drifts with wherever the window
-    // sits. Measured from the edge, the glyph lands on the same rows as a
-    // swatch or a line of text beside it, every time.
     const float side = ImGui::GetTextLineHeight();
-    const ImVec2 glyph(std::round(min.x + (max.x - min.x - side) / 2.0f),
-                       std::round(min.y + (max.y - min.y - side) / 2.0f));
+    const ImVec2 glyph = iconGlyphOrigin(min, max, side);
     draw->AddImage(texture, glyph, ImVec2(glyph.x + side, glyph.y + side), ImVec2(0, 0), ImVec2(1, 1),
                    ImGui::GetColorU32(ImGuiCol_Text, dimmed ? 0.4f : 1.0f));
     wrappedTooltip(tooltip);
@@ -3530,51 +3508,9 @@ void App::drawRegionToolIcons()
 
 namespace {
 
-// The bar names each channel, so its columns follow the picker's difference
-// row: the value sits one gap after its letter and three gaps separate the
-// groups, which binds every number to the letter on its left. Both alignments
-// are fixed, so no digit coming or going moves anything.
-struct ReadoutColumns
-{
-    float label;
-    float gap;
-    float stride;
-    float width;
-};
-
-ReadoutColumns measureReadoutColumns()
-{
-    ReadoutColumns columns{};
-    columns.label = ImGui::CalcTextSize("R").x;
-    columns.gap = ImGui::CalcTextSize(" ").x;
-    const float group = columns.label + columns.gap + ImGui::CalcTextSize("100%").x;
-    columns.stride = group + 2.0f * columns.gap;
-    columns.width = 2.0f * columns.stride + group;
-
-    return columns;
-}
-
-// The pin tool's box is the tallest thing that can stand on the row, so it
-// sets the height; everything shorter drops by half the difference to share
-// its centre line.
-float readoutNudge()
-{
-    return std::round((iconButtonHeight() - ImGui::GetTextLineHeight()) / 2.0f);
-}
-
-// The strip is bounded above by the spacing that parts it from the panes and
-// below by the window's own padding. Where those differ the row lands off
-// centre in the visible gap, so it takes up half the difference.
-float statusRowOffset()
-{
-    const ImGuiStyle& style = ImGui::GetStyle();
-
-    return std::max(0.0f, std::round((style.WindowPadding.y - style.ItemSpacing.y) / 2.0f));
-}
-
 void statusRowText(const char* text)
 {
-    ImGui::SetCursorPosY(ImGui::GetCursorPosY() + readoutNudge());
+    ImGui::SetCursorPosY(ImGui::GetCursorPosY() + rowTextDrop());
     ImGui::TextUnformatted(text);
 }
 
@@ -3664,7 +3600,7 @@ void App::drawCursorReadout(float taken)
         drawReadoutChannels(color, channelsStart, columns);
     }
     ImGui::SameLine(swatchStart);
-    ImGui::SetCursorPosY(ImGui::GetCursorPosY() + readoutNudge());
+    ImGui::SetCursorPosY(ImGui::GetCursorPosY() + rowTextDrop());
     ImGui::ColorButton("##cursor-color", ImVec4(color.r / 255.0f, color.g / 255.0f, color.b / 255.0f, 1.0f),
                        ImGuiColorEditFlags_NoTooltip | ImGuiColorEditFlags_NoDragDrop, ImVec2(swatch, swatch));
 }
