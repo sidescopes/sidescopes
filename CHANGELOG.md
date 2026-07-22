@@ -36,6 +36,10 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   display's scan finds none, and stays silent until the scan completes.
 - The face action reads the same everywhere: the toolbar, the picker
   banner, and the menu all say select a face.
+- The preferences file names its shortcut keys after the actions the
+  menus show: `shortcut_attach_window`, `shortcut_draw_area`,
+  `shortcut_select_face`, and `shortcut_full_screen`. A binding
+  customized under one of the old names falls back to its default.
 
 ### Fixed
 

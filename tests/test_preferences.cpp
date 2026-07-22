@@ -298,10 +298,10 @@ TEST_CASE("Preferences reject a malformed action shortcut binding")
     // A binding is one letter A-Z or "Escape"; anything else keeps the
     // default rather than storing an unusable chord.
     const TempFile file("bad-shortcut.txt");
-    file.write("shortcut_draw_region=ab\n");
+    file.write("shortcut_draw_area=ab\n");
 
     const Preferences loaded = loadPreferences(file.path());
-    CHECK(loaded.shortcuts.drawRegion == "D");
+    CHECK(loaded.shortcuts.drawArea == "D");
 }
 
 TEST_CASE("Preferences rekey a legacy scope shortcut to its id")

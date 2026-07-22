@@ -3161,7 +3161,7 @@ void App::handleLetterShortcuts(const ModifierState& modifiers, bool systemChord
         }
     }
     for (const std::string& binding :
-         {m_shortcuts.pickWindow, m_shortcuts.drawRegion, m_shortcuts.pickFaces, m_shortcuts.pinColor}) {
+         {m_shortcuts.attachWindow, m_shortcuts.drawArea, m_shortcuts.selectFace, m_shortcuts.pinColor}) {
         if (shortcutPressed(binding)) {
             triggerShortcut(binding, modifiers.shift);
         }
@@ -3182,11 +3182,11 @@ bool App::triggerShortcut(const std::string& key, bool shift)
             return true;
         }
     }
-    if (key == m_shortcuts.pickWindow) {
+    if (key == m_shortcuts.attachWindow) {
         m_wantRegionPick = RegionPickerMode::PickWindows;
-    } else if (key == m_shortcuts.drawRegion) {
+    } else if (key == m_shortcuts.drawArea) {
         m_wantRegionPick = RegionPickerMode::Draw;
-    } else if (key == m_shortcuts.pickFaces && supportsFaceDetection()) {
+    } else if (key == m_shortcuts.selectFace && supportsFaceDetection()) {
         m_wantRegionPick = RegionPickerMode::PickFaces;
     } else if (key == m_shortcuts.pinColor && pinsAvailable()) {
         // One pin tool; each click inside decides between pin-and-close and
@@ -3194,7 +3194,7 @@ bool App::triggerShortcut(const std::string& key, bool shift)
         m_wantRegionPick = RegionPickerMode::PinColor;
     } else if (key == m_shortcuts.vectorscopeZoom) {
         m_view.setZoom(m_view.zoom() >= 4 ? 1 : m_view.zoom() * 2);
-    } else if (key == m_shortcuts.fullRegion) {
+    } else if (key == m_shortcuts.fullScreen) {
         resetRegionToFull();
     } else {
         return false;
@@ -3359,7 +3359,7 @@ void App::handleViewShortcuts()
     if (shortcutPressed(m_shortcuts.vectorscopeZoom)) {
         m_view.setZoom(m_view.zoom() >= 4 ? 1 : m_view.zoom() * 2);
     }
-    if (shortcutPressed(m_shortcuts.fullRegion)) {
+    if (shortcutPressed(m_shortcuts.fullScreen)) {
         // Escape peels back one layer at a time: the settings window first, the
         // drawn region only when nothing is stacked above it.
         if (m_showSettings) {
@@ -3416,7 +3416,7 @@ void App::placeRegionToolbox()
 void App::drawRegionToolIcons()
 {
     char tooltip[96];
-    std::snprintf(tooltip, sizeof(tooltip), "Draw an area (%s)", m_shortcuts.drawRegion.c_str());
+    std::snprintf(tooltip, sizeof(tooltip), "Draw an area (%s)", m_shortcuts.drawArea.c_str());
     const int iconPx = iconPixelSize();
     placeRegionToolbox();
     if (iconButton("##draw-region", iconTextureId(Icon::SquarePen, iconPx), tooltip)) {
@@ -3424,7 +3424,7 @@ void App::drawRegionToolIcons()
     }
     ImGui::SameLine(0.0f, 2.0f);
     std::snprintf(tooltip, sizeof(tooltip), "Attach to a window (%s) - click the window or draw inside it",
-                  m_shortcuts.pickWindow.c_str());
+                  m_shortcuts.attachWindow.c_str());
     if (iconButton("##pick-region", iconTextureId(Icon::Paperclip, iconPx), tooltip)) {
         m_wantRegionPick = RegionPickerMode::PickWindows;
     }
@@ -3441,7 +3441,7 @@ void App::drawRegionToolIcons()
     // face is on screen is the picker overlay's answer to give, not the
     // toolbar's.
     if (supportsFaceDetection()) {
-        std::snprintf(tooltip, sizeof(tooltip), "Select a face (%s)", m_shortcuts.pickFaces.c_str());
+        std::snprintf(tooltip, sizeof(tooltip), "Select a face (%s)", m_shortcuts.selectFace.c_str());
         if (iconButton("##pick-face", iconTextureId(Icon::User, iconPx), tooltip)) {
             m_wantRegionPick = RegionPickerMode::PickFaces;
         }
@@ -4032,12 +4032,12 @@ void App::appendPresetsSubmenu(std::vector<NativeMenuItem>& menu)
 void App::appendRegionAndAppSection(std::vector<NativeMenuItem>& menu)
 {
     menuSeparator(menu);
-    menuAction(menu, "Attach to Window...", MenuSelectRegion, false, shortcutLabel(m_shortcuts.pickWindow));
-    menuAction(menu, "Draw Area...", MenuDrawRegion, false, shortcutLabel(m_shortcuts.drawRegion));
+    menuAction(menu, "Attach to Window...", MenuSelectRegion, false, shortcutLabel(m_shortcuts.attachWindow));
+    menuAction(menu, "Draw Area...", MenuDrawRegion, false, shortcutLabel(m_shortcuts.drawArea));
     if (supportsFaceDetection()) {
-        menuAction(menu, "Select Face...", MenuPickFaces, false, shortcutLabel(m_shortcuts.pickFaces));
+        menuAction(menu, "Select Face...", MenuPickFaces, false, shortcutLabel(m_shortcuts.selectFace));
     }
-    menuAction(menu, "Watch Full Screen", MenuFullScreenRegion, isFullRegion(), shortcutLabel(m_shortcuts.fullRegion));
+    menuAction(menu, "Watch Full Screen", MenuFullScreenRegion, isFullRegion(), shortcutLabel(m_shortcuts.fullScreen));
     if (m_attach.trackedCount() > 1) {
         if (m_attach.activeIdentity() != 0) {
             menuAction(menu, "Stop Tracking Front Window", MenuDetachWindow, false);

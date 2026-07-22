@@ -80,12 +80,12 @@ void readShortcut(const std::map<std::string, std::string, std::less<>>& values,
 // keyed by scope id and read separately into the map.
 void readShortcuts(const std::map<std::string, std::string, std::less<>>& values, ShortcutBindings& shortcuts)
 {
-    readShortcut(values, "shortcut_pick_window", shortcuts.pickWindow);
-    readShortcut(values, "shortcut_draw_region", shortcuts.drawRegion);
-    readShortcut(values, "shortcut_pick_faces", shortcuts.pickFaces);
+    readShortcut(values, "shortcut_attach_window", shortcuts.attachWindow);
+    readShortcut(values, "shortcut_draw_area", shortcuts.drawArea);
+    readShortcut(values, "shortcut_select_face", shortcuts.selectFace);
     readShortcut(values, "shortcut_pin_color", shortcuts.pinColor);
     readShortcut(values, "shortcut_vectorscope_zoom", shortcuts.vectorscopeZoom);
-    readShortcut(values, "shortcut_full_region", shortcuts.fullRegion);
+    readShortcut(values, "shortcut_full_screen", shortcuts.fullScreen);
 }
 
 // Reads the scope-toggle bindings into the map keyed by scope id. Each retired
@@ -525,12 +525,12 @@ bool savePreferences(const Preferences& preferences, const std::filesystem::path
         << "window_y=" << preferences.windowY << '\n'
         << "window_width=" << preferences.windowWidth << '\n'
         << "window_height=" << preferences.windowHeight << '\n'
-        << "shortcut_pick_window=" << preferences.shortcuts.pickWindow << '\n'
-        << "shortcut_draw_region=" << preferences.shortcuts.drawRegion << '\n'
-        << "shortcut_pick_faces=" << preferences.shortcuts.pickFaces << '\n'
+        << "shortcut_attach_window=" << preferences.shortcuts.attachWindow << '\n'
+        << "shortcut_draw_area=" << preferences.shortcuts.drawArea << '\n'
+        << "shortcut_select_face=" << preferences.shortcuts.selectFace << '\n'
         << "shortcut_pin_color=" << preferences.shortcuts.pinColor << '\n'
         << "shortcut_vectorscope_zoom=" << preferences.shortcuts.vectorscopeZoom << '\n'
-        << "shortcut_full_region=" << preferences.shortcuts.fullRegion << '\n';
+        << "shortcut_full_screen=" << preferences.shortcuts.fullScreen << '\n';
     // Scope-toggle bindings keyed by scope id: only overrides are written, each
     // as shortcut_<id>, so a scope at its default letter needs no line.
     for (const auto& [id, letter] : preferences.scopeShortcuts) {

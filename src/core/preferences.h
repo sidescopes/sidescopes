@@ -34,12 +34,12 @@ struct LayoutPreset
 /// @ref Preferences::scopeShortcuts, not here.
 struct ShortcutBindings
 {
-    std::string pickWindow = "A";
-    std::string drawRegion = "D";
-    std::string pickFaces = "F";
+    std::string attachWindow = "A";
+    std::string drawArea = "D";
+    std::string selectFace = "F";
     std::string pinColor = "P";
     std::string vectorscopeZoom = "Z";
-    std::string fullRegion = "Escape";
+    std::string fullScreen = "Escape";
 };
 
 /// Everything worth remembering between sessions. Serialized as a small
