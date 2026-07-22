@@ -320,13 +320,13 @@ void applyTheme()
 // Loads the interface font and its fixed-width companion, returning the
 // monospace font so the picker can align hex codes with it; null when the
 // system had none and the interface font stands in.
-ImFont* loadInterfaceFont(GLFWwindow* window)
+ImFont* loadInterfaceFont()
 {
-    float scaleX = 2.0f;
-    float scaleY = 2.0f;
-    glfwGetWindowContentScale(window, &scaleX, &scaleY);
+    // RasterizerDensity stays at its 1.0 default: ImGui derives the
+    // rasterization density from the framebuffer scale each frame and
+    // multiplies this one into it, so setting it here bakes glyphs larger
+    // than the box they are drawn into.
     ImFontConfig config;
-    config.RasterizerDensity = scaleX;
     // ImGui's default range stops at U+00FF, which would drop the delta the
     // color picker labels its differences with. Latin-1 plus that one glyph.
     static constexpr ImWchar InterfaceGlyphRanges[] = {0x0020, 0x00FF, 0x0394, 0x0394, 0};
@@ -1702,7 +1702,7 @@ void App::setupImGui()
     io.IniFilename = nullptr;  // window layout is ours to persist
     ImGui::StyleColorsDark();
     applyTheme();
-    m_callbackState.monospaceFont = loadInterfaceFont(m_window);
+    m_callbackState.monospaceFont = loadInterfaceFont();
     m_uiScale = computeUiScale(m_window);
     if (m_uiScale != 1.0f) {
         applyUiScale(m_uiScale);
