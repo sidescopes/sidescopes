@@ -140,11 +140,15 @@ private:
 
     // --- face pins ---
     /// A pin plus the window rectangle it last saw: a same-size window
-    /// move translates the pin's anchors along with the face.
+    /// move translates the pin's anchors along with the face. The verdict
+    /// stamp says when a probe (or the creating pick) last confirmed the
+    /// anchor; an anchor older than a probe period is stale on activation
+    /// and must not dress the border until re-verified.
     struct AppFacePin
     {
         FacePinState state;
         std::optional<AttachWindowRect> windowRect;
+        double anchorVerifiedAt = 0.0;
     };
 
     void updateFacePin(const AttachDecision& decision);

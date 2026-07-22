@@ -2260,6 +2260,17 @@ void App::followAttachedWindow()
             watchWindowMotion(m_activeTrackedWindow, decision.activeOwnerPid,
                               [this](WindowMotionSignal signal) { onWindowMotion(signal); });
         }
+        // A face pin's anchor goes stale across a focus gap: dressing the
+        // border from it flashes a wrong region for one probe's latency -
+        // invisible on a fast detector, half a second on a slow one. Hold
+        // the border until this activation's first verdict, probing now
+        // rather than waiting out the cadence. A recently verified anchor
+        // (a fresh pick, a quick focus flip) keeps its instant border.
+        const auto activated = m_facePins.find(m_activeTrackedWindow);
+        if (activated != m_facePins.end() && glfwGetTime() - activated->second.anchorVerifiedAt > FacePinProbeSeconds) {
+            m_facePinHunting = true;
+            m_nextFacePinProbe = 0.0;
+        }
         m_lastActivity = glfwGetTime();
     }
     m_attachLastSeenRect = decision.activeRect;
@@ -2517,6 +2528,9 @@ void App::consumeFacePinProbe(const AttachDecision& decision)
             verdict.adopt ? "adopt" : "hold", verdict.reason.c_str(), wide ? 1 : 0, candidates.size(), edgeDropped,
             pin->second.state.lastAnchor.centerX, pin->second.state.lastAnchor.centerY);
     m_facePinHunting = verdict.hunting;
+    if (!verdict.hunting) {
+        pin->second.anchorVerifiedAt = glfwGetTime();
+    }
     if (face_pin::givenUp(pin->second.state)) {
         SS_DIAG(FacePin, "gave up - removing region");
         removeLostFacePin(m_facePinProbe.forWindow);
@@ -4918,7 +4932,7 @@ bool App::adoptFacePick(uint32_t displayId, const RegionOfInterest& confirmed)
                             static_cast<double>(face->box.width)};
     m_facePins[host->identity] =
         AppFacePin{face_pin::makePin(anchor, pinRectFromPercent(confirmed, face->frameWidth, face->frameHeight)),
-                   host->windowRect};
+                   host->windowRect, glfwGetTime()};
     SS_DIAG(FacePin, "pinned to '%s' anchor=%.1f,%.1f width=%.1f", host->application.c_str(), anchor.centerX,
             anchor.centerY, anchor.width);
 

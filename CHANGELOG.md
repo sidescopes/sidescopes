@@ -6,6 +6,13 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- A face-pinned window regaining focus no longer flashes the stale
+  region border for the first probe's latency; the border waits for
+  this activation's verdict, and the probe fires immediately instead
+  of waiting out its cadence.
+
 ### Added
 
 - Flexible scope layout: orientation (Automatic, Vertical, Horizontal),
