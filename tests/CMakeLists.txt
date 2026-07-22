@@ -22,6 +22,7 @@ add_executable(sidescopes_tests
     test_histogram.cpp
     test_preferences.cpp
     test_region_suggestions.cpp
+    test_scope_goldens.cpp
     test_vectorscope.cpp
     test_modules.cpp
     test_module_loader.cpp
