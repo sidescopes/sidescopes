@@ -179,6 +179,25 @@ std::optional<TraceAdjustment> traceIntensityGesture(const DrawnScope& scope, st
     return adjusted;
 }
 
+// The widest a tooltip may run before wrapping, in 100%-scale points.
+inline constexpr float TooltipWrapWidth = 260.0f;
+
+// A tooltip that wraps rather than running off the edge. Without multi-viewport
+// support a tooltip cannot spill past the application window, and this one is
+// often deliberately narrow - so a long line would simply be cut. Wrapping
+// tracks the window when that is the tighter of the two.
+void wrappedTooltip(const char* text)
+{
+    if (!ImGui::IsItemHovered(ImGuiHoveredFlags_ForTooltip) || !ImGui::BeginTooltip()) {
+        return;
+    }
+    const float margin = 4.0f * ImGui::GetStyle().WindowPadding.x;
+    ImGui::PushTextWrapPos(std::min(ImGui::GetMainViewport()->Size.x - margin, TooltipWrapWidth));
+    ImGui::TextUnformatted(text);
+    ImGui::PopTextWrapPos();
+    ImGui::EndTooltip();
+}
+
 // Scope toggles are letter chips: professional tools label scopes with
 // text because no icon language exists for them, and the letters double
 // as the keyboard shortcuts.
@@ -198,7 +217,7 @@ bool scopeToggleButton(const char* id, const char* letter, bool enabled, const c
     const ImVec2 size = ImGui::CalcTextSize(letter);
     const ImVec2 at(std::floor(min.x + (max.x - min.x - size.x) / 2), std::floor(min.y + (max.y - min.y - size.y) / 2));
     draw->AddText(at, color, letter);
-    ImGui::SetItemTooltip("%s", tooltip);
+    wrappedTooltip(tooltip);
     return pressed;
 }
 
@@ -223,7 +242,7 @@ bool iconButton(const char* id, ImTextureID texture, const char* tooltip, bool d
     const float half = ImGui::GetTextLineHeight() / 2.0f;
     draw->AddImage(texture, ImVec2(center.x - half, center.y - half), ImVec2(center.x + half, center.y + half),
                    ImVec2(0, 0), ImVec2(1, 1), ImGui::GetColorU32(ImGuiCol_Text, dimmed ? 0.4f : 1.0f));
-    ImGui::SetItemTooltip("%s", tooltip);
+    wrappedTooltip(tooltip);
 
     return pressed;
 }
@@ -675,14 +694,17 @@ void swatchText(ImDrawList* draw, const ImVec2& pos, ImU32 ink, ImU32 shadow, co
 // reader about two quantities they did not ask about. The sign gloss is the
 // convention every colorimetric tool follows; hue has none, because it runs
 // around a circle rather than along an axis.
-constexpr const char* PickerMatchTip =
-    "closeness to the live color: 100% is identical, 0% is black against white (CIEDE2000, sRGB assumed)";
+constexpr const char* PickerDeltaETip = "CIEDE2000 difference from the live color, lower is closer (sRGB assumed)";
 constexpr const char* PickerLchTips[3] = {
-    "lightness, live minus pinned: + lighter, - darker",
-    "chroma, live minus pinned: + more colorful, - duller",
-    "hue, live minus pinned, weighted by chroma",
+    "how much lighter (+) or darker (-) the live color is",
+    "how much more colorful (+) or duller (-) the live color is",
+    "how far the live color's hue has drifted - counts for less when the color is dull",
 };
-constexpr const char* PickerRgbTip = "channel difference, live minus pinned";
+constexpr const char* PickerRgbTips[3] = {
+    "how much more (+) or less (-) red the live color is",
+    "how much more (+) or less (-) green the live color is",
+    "how much more (+) or less (-) blue the live color is",
+};
 
 // The live color, its formatted values, and the shared column metrics every
 // picker section measures against. pins is borrowed for the length of one draw.
@@ -726,13 +748,13 @@ struct DeckLayout
 {
     float swatchX;
     float hexX;
-    bool showMatch;
+    bool showDeltaE;
     bool showLch;
     bool showRgb;
-    float matchRight;
+    float deltaERight;
     float lchRight[3];
     float rgbRight[3];
-    float matchTypical;
+    float deltaETypical;
     float lchTypical;
     float rgbTypical;
 };
@@ -854,7 +876,9 @@ void drawPickerHero(const PickerContext& ctx, const PickerHero& hero)
                                ImVec2(hero.heroWidth / 2.0f, hero.heroHeight))) {
             ImGui::SetClipboardText(pinHex);
         }
-        ImGui::SetItemTooltip("pinned  %s - click to copy", pinHex);
+        char pinnedTip[48];
+        std::snprintf(pinnedTip, sizeof(pinnedTip), "pinned  %s - click to copy", pinHex);
+        wrappedTooltip(pinnedTip);
         if (!hero.tiny) {
             draw->AddText(ImVec2(hero.heroOrigin.x + 5, hero.heroOrigin.y + 3), pickerLabelInk(ctx.color), "LIVE");
             const float pinLabel = ImGui::CalcTextSize("PIN").x;
@@ -871,15 +895,13 @@ void drawPickerHero(const PickerContext& ctx, const PickerHero& hero)
     }
 }
 
-// The match reading - 100 minus the CIEDE2000 distance, floored - and the
-// sentence that explains it, shared by the difference row and every deck row.
-void formatMatch(float deltaE, char (&value)[8], char (&help)[192])
+// The CIEDE2000 distance itself, one decimal the way the field quotes it. It
+// replaced a friendlier "match percentage": that read as a claim about how
+// alike two colors LOOK, which the measure cannot honor at the distances this
+// picker works over - it is built and validated for small differences.
+void formatDeltaE(float deltaE, char (&value)[8])
 {
-    std::snprintf(value, sizeof(value), "%d%%", static_cast<int>(std::clamp(100.0f - deltaE, 0.0f, 100.0f)));
-    std::snprintf(help, sizeof(help),
-                  "closeness to the live color: 100%% is identical, 0%% is black against white "
-                  "(CIEDE2000 difference %.1f, sRGB assumed)",
-                  deltaE);
+    std::snprintf(value, sizeof(value), "%.1f", deltaE);
 }
 
 // The difference triplet's own metrics. Nothing below the hero lines up with
@@ -919,59 +941,55 @@ void drawPickerDiffTriplet(const PickerContext& ctx, float valuesStart, const fl
             ImGui::SameLine(columnStart);
         }
         ImGui::TextUnformatted(diffLabels[component]);
-        ImGui::SetItemTooltip("%s", PickerLchTips[component]);
+        wrappedTooltip(PickerLchTips[component]);
         char value[8];
         std::snprintf(value, sizeof(value), "%+d", static_cast<int>(std::lround(diffValues[component])));
         ImGui::SameLine(columnStart + columns.label + ctx.columnGap);
         ImGui::TextUnformatted(value);
-        ImGui::SetItemTooltip("%s", PickerLchTips[component]);
+        wrappedTooltip(PickerLchTips[component]);
     }
 }
 
-// One quiet line below the hero: the colorist's difference on the left and a
-// match percentage on the right. The triplet drops out whole when the line is
-// too narrow to seat it clear of the match, which always stays.
 // Everything under the hero: where the live color sits relative to the pinned
-// one, and how close that is overall. The triplet leads and the match closes
-// the line; when the pane cannot seat both, the match drops to its own line
-// rather than pushing the detail off the pane. The live color's hex is not
+// one, and how far apart they are overall. The triplet leads and the distance
+// closes the line; when the pane cannot seat both, the distance drops to its
+// own line rather than pushing the detail off the pane. The live color's hex is not
 // here - it changes with every mouse move and cannot be copied, and the deck
 // carries the hexes that are worth keeping.
 void drawPickerDifferenceRow(const PickerContext& ctx, const ImVec2& area, float valuesStart)
 {
     const ColorDifference difference = differenceFrom(labFromSrgb(ctx.pins.comparatorColor()), labFromSrgb(ctx.color));
-    char matchValue[8];
-    char matchHelp[192];
-    formatMatch(difference.deltaE, matchValue, matchHelp);
-    const float matchValueX = area.x - hexFontWidth(ctx.monospaceFont, matchValue);
-    const float matchLabelX = matchValueX - ctx.columnGap - ImGui::CalcTextSize("Match").x;
+    char deltaEValue[8];
+    formatDeltaE(difference.deltaE, deltaEValue);
+    const float deltaEValueX = area.x - hexFontWidth(ctx.monospaceFont, deltaEValue);
+    const float deltaELabelX = deltaEValueX - ctx.columnGap - ImGui::CalcTextSize("ΔE").x;
     const float diffValues[3] = {difference.lightness, difference.chroma, difference.hue};
     const DiffColumns columns = measureDiffColumns(ctx);
-    const bool tripletShares = valuesStart + columns.width + ctx.columnGap <= matchLabelX;
+    const bool tripletShares = valuesStart + columns.width + ctx.columnGap <= deltaELabelX;
     if (tripletShares || valuesStart + columns.width <= area.x) {
         drawPickerDiffTriplet(ctx, valuesStart, diffValues, columns);
     }
     // Right-aligned while it closes the triplet's line; flush left once it has
     // a line of its own, the way the region toolbox wraps.
-    float labelX = matchLabelX;
-    float valueX = matchValueX;
+    float labelX = deltaELabelX;
+    float valueX = deltaEValueX;
     if (tripletShares) {
         ImGui::SameLine(labelX);
     } else {
         labelX = valuesStart;
-        valueX = labelX + ImGui::CalcTextSize("Match").x + ctx.columnGap;
+        valueX = labelX + ImGui::CalcTextSize("ΔE").x + ctx.columnGap;
         ImGui::SetCursorPosX(labelX);
     }
-    ImGui::TextUnformatted("Match");
-    ImGui::SetItemTooltip("%s", matchHelp);
+    ImGui::TextUnformatted("ΔE");
+    wrappedTooltip(PickerDeltaETip);
     ImGui::SameLine(valueX);
-    hexFontText(ctx.monospaceFont, matchValue);
-    ImGui::SetItemTooltip("%s", matchHelp);
+    hexFontText(ctx.monospaceFont, deltaEValue);
+    wrappedTooltip(PickerDeltaETip);
 }
 
-// Progressive disclosure: Match first, then L/C/H, then R/G/B, each group
+// Progressive disclosure: the distance first, then L/C/H, then R/G/B, each group
 // admitted only if the whole block still clears the hex column.
-void admitDeckGroups(float leftPartEnd, float deckWidth, float blockGap, float columnGap, float matchCol,
+void admitDeckGroups(float leftPartEnd, float deckWidth, float blockGap, float columnGap, float deltaECol,
                      float lchGroupWidth, float rgbGroupWidth, DeckLayout& layout)
 {
     float numericBlockWidth = 0.0f;
@@ -985,20 +1003,20 @@ void admitDeckGroups(float leftPartEnd, float deckWidth, float blockGap, float c
 
         return false;
     };
-    layout.showMatch = admitGroup(matchCol);
-    layout.showLch = layout.showMatch && admitGroup(lchGroupWidth);
+    layout.showDeltaE = admitGroup(deltaECol);
+    layout.showLch = layout.showDeltaE && admitGroup(lchGroupWidth);
     layout.showRgb = layout.showLch && admitGroup(rgbGroupWidth);
 }
 
 // Right edges of every visible column, walked left to right from the block's
 // left edge. The block anchors just past the hex column, not the far edge.
-void computeDeckRights(float leftPartEnd, float blockGap, float columnGap, float matchCol, const float lchCol[3],
+void computeDeckRights(float leftPartEnd, float blockGap, float columnGap, float deltaECol, const float lchCol[3],
                        const float rgbCol[3], DeckLayout& layout)
 {
     float walk = leftPartEnd + blockGap;
-    if (layout.showMatch) {
-        layout.matchRight = walk + matchCol;
-        walk = layout.matchRight;
+    if (layout.showDeltaE) {
+        layout.deltaERight = walk + deltaECol;
+        walk = layout.deltaERight;
     }
     if (layout.showLch) {
         walk += 3.0f * columnGap;
@@ -1032,7 +1050,7 @@ DeckLayout computeDeckLayout(const PickerContext& ctx, float deckWidth)
     layout.swatchX = ctx.lineHeight + 3.0f * ctx.columnGap;
     layout.hexX = layout.swatchX + ctx.lineHeight + ctx.columnGap;
     const float leftPartEnd = layout.hexX + hexColumn;
-    const float matchCol = std::max(hexFontWidth(ctx.monospaceFont, "100%"), ImGui::CalcTextSize("Match").x);
+    const float deltaECol = std::max(hexFontWidth(ctx.monospaceFont, "199.9"), ImGui::CalcTextSize("ΔE").x);
     // Every numeric column in the deck is a difference against the live color,
     // so each carries the delta the hero row's absolute channels do without.
     const char* lchLabels[3] = {"ΔL", "ΔC", "ΔH"};
@@ -1046,13 +1064,13 @@ DeckLayout computeDeckLayout(const PickerContext& ctx, float deckWidth)
     const float lchGroupWidth = lchCol[0] + lchCol[1] + lchCol[2] + 2.0f * (2.0f * ctx.columnGap);
     const float rgbGroupWidth = rgbCol[0] + rgbCol[1] + rgbCol[2] + 2.0f * (2.0f * ctx.columnGap);
     const float blockGap = 3.0f * ctx.columnGap;
-    admitDeckGroups(leftPartEnd, deckWidth, blockGap, ctx.columnGap, matchCol, lchGroupWidth, rgbGroupWidth, layout);
-    computeDeckRights(leftPartEnd, blockGap, ctx.columnGap, matchCol, lchCol, rgbCol, layout);
+    admitDeckGroups(leftPartEnd, deckWidth, blockGap, ctx.columnGap, deltaECol, lchGroupWidth, rgbGroupWidth, layout);
+    computeDeckRights(leftPartEnd, blockGap, ctx.columnGap, deltaECol, lchCol, rgbCol, layout);
     // Each header label centers over the ink of a typical value - a sign and two
     // digits, right-aligned - rather than over the column box.
     layout.lchTypical = hexFontWidth(ctx.monospaceFont, "+34");
     layout.rgbTypical = hexFontWidth(ctx.monospaceFont, "+34%");
-    layout.matchTypical = hexFontWidth(ctx.monospaceFont, "77%");
+    layout.deltaETypical = hexFontWidth(ctx.monospaceFont, "77.7");
 
     return layout;
 }
@@ -1071,10 +1089,10 @@ void drawPickerDeckHeader(const DeckLayout& layout)
             ImGui::SameLine(headerX);
         }
         ImGui::TextUnformatted(label);
-        ImGui::SetItemTooltip("%s", tip);
+        wrappedTooltip(tip);
     };
-    if (layout.showMatch) {
-        headerCell(layout.matchRight, layout.matchTypical, "Match", PickerMatchTip);
+    if (layout.showDeltaE) {
+        headerCell(layout.deltaERight, layout.deltaETypical, "ΔE", PickerDeltaETip);
     }
     if (layout.showLch) {
         headerCell(layout.lchRight[0], layout.lchTypical, "ΔL", PickerLchTips[0]);
@@ -1082,9 +1100,9 @@ void drawPickerDeckHeader(const DeckLayout& layout)
         headerCell(layout.lchRight[2], layout.lchTypical, "ΔH", PickerLchTips[2]);
     }
     if (layout.showRgb) {
-        headerCell(layout.rgbRight[0], layout.rgbTypical, "ΔR", PickerRgbTip);
-        headerCell(layout.rgbRight[1], layout.rgbTypical, "ΔG", PickerRgbTip);
-        headerCell(layout.rgbRight[2], layout.rgbTypical, "ΔB", PickerRgbTip);
+        headerCell(layout.rgbRight[0], layout.rgbTypical, "ΔR", PickerRgbTips[0]);
+        headerCell(layout.rgbRight[1], layout.rgbTypical, "ΔG", PickerRgbTips[1]);
+        headerCell(layout.rgbRight[2], layout.rgbTypical, "ΔB", PickerRgbTips[2]);
     }
 }
 
@@ -1097,7 +1115,7 @@ void drawDeckRowCross(std::size_t index, float lineHeight, int& removePin)
     if (ImGui::InvisibleButton(closeId, ImVec2(lineHeight, lineHeight))) {
         removePin = static_cast<int>(index);
     }
-    ImGui::SetItemTooltip("remove this pin");
+    wrappedTooltip("remove this pin");
     const ImVec2 crossLo = ImGui::GetItemRectMin();
     const ImVec2 crossHi = ImGui::GetItemRectMax();
     const ImVec2 crossCenter = ImVec2((crossLo.x + crossHi.x) / 2.0f, (crossLo.y + crossHi.y) / 2.0f);
@@ -1127,7 +1145,7 @@ void drawDeckRowSwatch(const PickerContext& ctx, std::size_t index, const DeckLa
         ctx.pins.manage(static_cast<int>(index));
         ImGui::OpenPopup("##pinned-menu");
     }
-    ImGui::SetItemTooltip(selected ? "click to unload from the comparator" : "click to compare against the live color");
+    wrappedTooltip(selected ? "click to unload from the comparator" : "click to compare against the live color");
     if (selected) {
         // A white ring inside a dark one reads on any pin color; the gold rim
         // vanished on skin tones.
@@ -1159,7 +1177,7 @@ void drawDeckRowValues(const PickerContext& ctx, std::size_t index, const DeckLa
     if (ImGui::IsItemClicked()) {
         ImGui::SetClipboardText(pinHex);
     }
-    ImGui::SetItemTooltip("click to copy");
+    wrappedTooltip("click to copy");
     const ColorDifference pinDiff = differenceFrom(labFromSrgb(ctx.pins.color(index)), labFromSrgb(ctx.color));
     const auto numericCell = [&](float colRight, const char* value, const char* tip) {
         ImGui::SameLine(colRight - hexFontWidth(ctx.monospaceFont, value));
@@ -1167,13 +1185,12 @@ void drawDeckRowValues(const PickerContext& ctx, std::size_t index, const DeckLa
         pushHexFont(ctx.monospaceFont);
         ImGui::TextUnformatted(value);
         popHexFont(ctx.monospaceFont);
-        ImGui::SetItemTooltip("%s", tip);
+        wrappedTooltip(tip);
     };
-    if (layout.showMatch) {
-        char match[8];
-        char matchHelp[192];
-        formatMatch(pinDiff.deltaE, match, matchHelp);
-        numericCell(layout.matchRight, match, matchHelp);
+    if (layout.showDeltaE) {
+        char deltaEValue[8];
+        formatDeltaE(pinDiff.deltaE, deltaEValue);
+        numericCell(layout.deltaERight, deltaEValue, PickerDeltaETip);
     }
     if (layout.showLch) {
         const float lchValues[3] = {pinDiff.lightness, pinDiff.chroma, pinDiff.hue};
@@ -1189,7 +1206,7 @@ void drawDeckRowValues(const PickerContext& ctx, std::size_t index, const DeckLa
         for (int column = 0; column < 3; ++column) {
             char value[8];
             std::snprintf(value, sizeof(value), "%+.0f%%", (liveChannels[column] - pinChannels[column]) / 2.55f);
-            numericCell(layout.rgbRight[column], value, PickerRgbTip);
+            numericCell(layout.rgbRight[column], value, PickerRgbTips[column]);
         }
     }
 }
@@ -1240,7 +1257,9 @@ void drawPickerChipRail(const PickerContext& ctx)
             ctx.pins.manage(static_cast<int>(index));
             ImGui::OpenPopup("##pinned-menu");
         }
-        ImGui::SetItemTooltip("%s - click to compare, right-click to manage", pinHex);
+        char deckTip[64];
+        std::snprintf(deckTip, sizeof(deckTip), "%s - click to compare, right-click to manage", pinHex);
+        wrappedTooltip(deckTip);
         if (selected) {
             const ImVec2 lo = ImGui::GetItemRectMin();
             const ImVec2 hi = ImGui::GetItemRectMax();
@@ -3886,7 +3905,7 @@ void App::drawAboutWindow()
     if (ImGui::IsItemClicked()) {
         ImGui::SetClipboardText(m_versionInfo.display.c_str());
     }
-    ImGui::SetItemTooltip("click to copy");
+    wrappedTooltip("click to copy");
     ImGui::Separator();
     // Clickable link text in the accent color, underlined, opening the
     // destination in the default browser; the tooltip names the URL.
@@ -3901,7 +3920,7 @@ void App::drawAboutWindow()
         if (ImGui::IsItemClicked()) {
             openUrl(url);
         }
-        ImGui::SetItemTooltip("%s", url);
+        wrappedTooltip(url);
     };
     link("sidescopes.org", "https://sidescopes.org");
     link("github.com/sidescopes/sidescopes", "https://github.com/sidescopes/sidescopes");
