@@ -4,7 +4,7 @@ All notable changes to this project are documented in this file. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.4.0] - 2026-07-22
 
 ### Added
 
@@ -16,10 +16,14 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   shape instead of following the window's longer axis.
 - A preset chip leads the toolbar, starred when the layout drifts from
   the saved slot; its popup loads on click and saves on Shift+click.
-- A status bar under the panes holds transient messages and the live
-  color readout, so neither paints over a trace. The region toolbox
-  keeps a constant width - unavailable tools dim instead of vanishing -
-  and right-aligns, wrapping to its own row on narrow windows.
+- A status bar under the panes carries the live color: the pin tool in
+  its left corner, the color under the cursor in its right, and that
+  color's channels named and read between them, so none of it paints
+  over a trace. A transient message clears the row and takes it whole,
+  and the channels are the first reading dropped when a narrow window
+  leaves no room. The region toolbox keeps a constant width -
+  unavailable tools dim instead of vanishing - and right-aligns,
+  wrapping to its own row on narrow windows.
 - Module ABI 0.2: descriptors may declare a preferred pane aspect for
   the automatic layout and flag their images as pin targets; the pin
   tool now follows the declarations instead of hard-coded scope ids.
@@ -29,9 +33,19 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `SIDESCOPES_DIAG=perf` selects it alone. Off costs one branch.
 - Pinned colors survive a restart, along with the one chosen as the
   comparison reference; the preferences file lists them as hex.
+- The color picker states its distance from the pinned color as a
+  delta E figure, with the signed lightness, colorfulness and hue
+  differences beside it. Every column carries a tooltip saying what it
+  means in plain words rather than in color-science terms.
 
 ### Changed
 
+- The pin-a-color tool sits in the status bar beside the color it
+  samples, rather than in the region toolbox; the toolbox now holds
+  only the tools that choose what the scopes read.
+- The tools that draw a region carry pen glyphs: a framed pen for
+  attaching a region to a window, a plain pencil for drawing a global
+  one.
 - The face picker is always available where the platform detects faces;
   the toolbar no longer dims it or reports presence in a tooltip. The
   picker overlay itself now says "No faces found on this screen" once a
@@ -51,6 +65,11 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Toolbar and status bar icons keep their place to the pixel as the
+  window moves across the screen, instead of shifting against the text
+  beside them.
+- The status bar stays at the foot of the window on the screen-capture
+  help pages, instead of sitting directly under their text.
 - Switching focus away from a window carrying an attached region takes
   its border down on the focus event itself, rather than at the next
   scheduled tick, so the border no longer lingers over the window that
