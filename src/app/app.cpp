@@ -3474,13 +3474,13 @@ void App::drawRegionToolIcons()
     std::snprintf(tooltip, sizeof(tooltip), "Draw a region (%s)", m_shortcuts.drawRegion.c_str());
     const int iconPx = iconPixelSize();
     placeRegionToolbox();
-    if (iconButton("##draw-region", iconTextureId(Icon::SquarePen, iconPx), tooltip)) {
+    if (iconButton("##draw-region", iconTextureId(Icon::Pencil, iconPx), tooltip)) {
         m_wantRegionPick = RegionPickerMode::DrawGlobal;
     }
     ImGui::SameLine(0.0f, 2.0f);
     std::snprintf(tooltip, sizeof(tooltip), "Attach to a window (%s) - click the window or draw inside it",
                   m_shortcuts.attachWindow.c_str());
-    if (iconButton("##attach-window", iconTextureId(Icon::Paperclip, iconPx), tooltip)) {
+    if (iconButton("##attach-window", iconTextureId(Icon::SquarePen, iconPx), tooltip)) {
         m_wantRegionPick = RegionPickerMode::AttachWindow;
     }
     ImGui::SameLine(0.0f, 2.0f);

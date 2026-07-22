@@ -12,8 +12,8 @@ enum class Icon
 {
     Pin,
     PinOff,
-    Paperclip,
     SquarePen,
+    Pencil,
     User,
     Pipette,
     Expand,

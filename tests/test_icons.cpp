@@ -23,7 +23,7 @@ double alphaCoverage(const std::vector<uint8_t>& pixels)
 TEST_CASE("Every icon rasterizes with plausible stroke coverage")
 {
     for (const Icon icon :
-         {Icon::Pin, Icon::PinOff, Icon::Paperclip, Icon::SquarePen, Icon::User, Icon::Pipette, Icon::Expand}) {
+         {Icon::Pin, Icon::PinOff, Icon::SquarePen, Icon::Pencil, Icon::User, Icon::Pipette, Icon::Expand}) {
         for (const int size : {16, 24, 48}) {
             const auto pixels = rasterizeIcon(icon, size);
             REQUIRE(pixels.size() == static_cast<std::size_t>(size) * size * 4);
@@ -39,15 +39,15 @@ TEST_CASE("Every icon rasterizes with plausible stroke coverage")
 TEST_CASE("Icons are distinct images")
 {
     // Named by glyph, like the enumerators: Pin and PinOff dress the
-    // border's attach toggle, Paperclip the toolbar's attach button, and
-    // SquarePen the toolbar's draw button.
+    // border's attach toggle, SquarePen the toolbar's attach button, and
+    // Pencil the toolbar's draw button.
     const auto pin = rasterizeIcon(Icon::Pin, 24);
     const auto pinOff = rasterizeIcon(Icon::PinOff, 24);
     const auto squarePen = rasterizeIcon(Icon::SquarePen, 24);
-    const auto paperclip = rasterizeIcon(Icon::Paperclip, 24);
+    const auto pencil = rasterizeIcon(Icon::Pencil, 24);
     CHECK(pin != pinOff);
     CHECK(pin != squarePen);
-    CHECK(squarePen != paperclip);
+    CHECK(squarePen != pencil);
 }
 
 TEST_CASE("The pin-off keeps its slash")
