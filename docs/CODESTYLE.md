@@ -34,6 +34,32 @@ line separates definitions.
   call with `this->`, or giving the free function a distinct verb name.
 - Prefer spelled-out names over abbreviations.
 
+## Vocabulary
+
+Feature names come from the interface: an action a user can see and the code
+behind it share the same distinctive word, so searching for one finds the
+other. `Attach to Window...` is `AttachWindow`, `shortcut_attach_window`.
+
+- **Region** — the rectangle the scopes read. Not "area": `area` is left for
+  plain geometry with no region behind it, like an ImGui content area.
+- **Attached region** — bound to a window, following it, in effect only while
+  that window is focused. **Global region** — bound to nothing, living on a
+  display. `RegionKind` names the pair; almost everything about regions hangs
+  off which one is in hand.
+- **Attached** is membership, whether a window holds a region at all;
+  **active** is the one attached window in effect right now.
+- **Suggestion** — what the picker overlay draws for one-click confirmation.
+  **Candidate** — what the application keeps so a confirmed pick resolves back
+  to the window or face it came from.
+- **Pin** belongs to the colour-reference feature alone. Locking a region onto
+  a face is `face_lock`; the region border's toggle speaks attach. (The
+  `Icon::Pin` glyph keeps its name — icons are named for what they depict.)
+- **Display** for a monitor, and **captured display** for the one the scopes
+  read; `monitor` and `screen` appear only where a platform API brings them.
+
+One word per concept. A second word for something that already has one is
+drift: replace it rather than letting both live.
+
 ## The C module ABI
 
 `include/sidescopes/module.h` is a frozen C boundary: `Ss`-prefixed types,
