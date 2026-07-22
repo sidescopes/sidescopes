@@ -82,11 +82,12 @@ struct RegionPickPoll
     std::optional<RegionOfInterest> pinnedArea;
     bool pinnedKeepOpen = false;
     bool pinMode = false;
-    /// Whether the picker is in window mode RIGHT NOW - the overlays switch
-    /// modes on their own keys, so the mode that opened the pick can be
-    /// stale by the confirm. A rectangle confirmed in window mode binds to
-    /// the window under it; one confirmed in draw mode stays global.
-    bool windowMode = false;
+    /// Whether a rectangle confirmed RIGHT NOW may attach to the window under
+    /// it - set exactly while the picker sits in its window-attach mode. The
+    /// overlays switch modes on their own keys, so the mode that opened the
+    /// pick can be stale by the confirm and only the picker knows this; one
+    /// confirmed in draw or face mode stays global.
+    bool attachesToWindow = false;
 };
 
 /// Screenshot-style selection spanning every display at once: each gets

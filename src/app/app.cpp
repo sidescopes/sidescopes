@@ -1985,6 +1985,14 @@ bool App::isFullRegion() const
            m_analysis.region.rightPercent >= 100.0 && m_analysis.region.bottomPercent >= 100.0;
 }
 
+RegionKind App::regionKind() const
+{
+    // The active identity IS the kind: the follow step takes the attached
+    // region exactly while a visible attached window holds the focus, and
+    // falls back to the global region the moment it does not.
+    return m_activeWindowIdentity != 0 ? RegionKind::Attached : RegionKind::Global;
+}
+
 void App::syncRegionBorder()
 {
     if (m_captureController->capturedDisplay() == 0) {
@@ -2001,7 +2009,7 @@ void App::syncRegionBorder()
         regionContentUnsettled() || glfwGetWindowAttrib(m_window, GLFW_ICONIFIED)) {
         hideRegionBorder();
     } else {
-        const bool attached = m_activeWindowIdentity != 0;
+        const bool attached = regionKind() == RegionKind::Attached;
         if (!attached && m_captureController->capturedDisplay() != m_displayLabelId) {
             m_displayLabelId = m_captureController->capturedDisplay();
             m_displayLabel = borderLabelFrom(displayName(m_displayLabelId), "Display");
@@ -2215,7 +2223,7 @@ void App::refreshAttachedLabel(const AttachDecision& decision)
 // The focused window drives everything: the foreground application's
 // frontmost ordinary window - frozen on the active window while its border
 // is being dragged, and held while SideScopes itself is in front or no
-// application is. One region type at a time means there is no global region
+// application is. One region kind at a time means there is no global region
 // to switch to while windows are attached, so the user can work the scopes
 // against the last attached region without losing it.
 std::optional<uint64_t> App::resolveFocusedWindow() const
@@ -4556,7 +4564,7 @@ void App::handleRegionBorderEdit()
 // no-conversion rule is about drags and focus races, never this button.
 void App::toggleRegionAttach()
 {
-    if (m_activeWindowIdentity != 0) {
+    if (regionKind() == RegionKind::Attached) {
         const RegionOfInterest region = m_analysis.region;
         m_attach.detachAll();
         m_faceLocks.clear();
@@ -4612,7 +4620,7 @@ void App::attachGlobalRegionToWindow()
 // full screen; the other attached windows keep their regions either way.
 void App::dismissEditedBorder()
 {
-    if (m_activeWindowIdentity != 0) {
+    if (regionKind() == RegionKind::Attached) {
         m_attach.remove(m_activeWindowIdentity);
         unwatchWindowMotion();
         m_activeWindowIdentity = 0;
@@ -4779,7 +4787,7 @@ void App::pollRegionPreview(const RegionPickPoll& poll)
 }
 
 // The shared tail of both attached creations: the global region retires
-// (one region type at a time), the motion state starts fresh, the watch
+// (one region kind at a time), the motion state starts fresh, the watch
 // rebinds on the next follow step, and the picked window comes up so the
 // border never wraps someone else's pixels.
 void App::adoptAttachedPick(uint64_t identity, int64_t ownerPid, const RegionOfInterest& region)
@@ -4860,7 +4868,7 @@ void App::confirmPickedRegion(const RegionPickPoll& poll)
     }
     // A rectangle drawn in attach mode binds to the frontmost window under
     // it; over no window at all it falls through to the global region.
-    if (poll.windowMode && display) {
+    if (poll.attachesToWindow && display) {
         const WindowCandidate* host = windowContaining(poll.displayId, confirmed);
         if (host != nullptr) {
             adoptAttachedPick(host->identity, host->ownerPid,
@@ -4870,7 +4878,7 @@ void App::confirmPickedRegion(const RegionPickPoll& poll)
             return;
         }
     }
-    // One region type at a time: a global draw retires every attached
+    // One region kind at a time: a global draw retires every attached
     // region.
     if (m_attach.attached()) {
         m_attach.detachAll();

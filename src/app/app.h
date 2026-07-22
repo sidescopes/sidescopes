@@ -26,6 +26,7 @@
 #include "core/frame_mailbox.h"
 #include "core/marker_smoother.h"
 #include "core/preferences.h"
+#include "core/region_kind.h"
 #include "core/scopes/histogram.h"
 #include "imgui.h"
 #include "modules/module_registry.h"
@@ -121,6 +122,14 @@ private:
     void toggleScope(std::string_view id);
     void chooseScope(std::string_view id, bool stack);
     [[nodiscard]] bool isFullRegion() const;
+    /// @return The kind of the region the scopes are reading right now: the
+    ///         active attached window's, or the global one. A narrower
+    ///         question than AttachController::attached(), which reports
+    ///         whether ANY window holds a region - an attached window that is
+    ///         not focused leaves the global kind in effect. Orthogonal to
+    ///         isFullRegion(), which measures a region's extent rather than
+    ///         what it is bound to.
+    [[nodiscard]] RegionKind regionKind() const;
     void syncRegionBorder();
     void setRegion(const RegionOfInterest& region);
 

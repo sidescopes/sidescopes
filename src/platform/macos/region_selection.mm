@@ -1616,7 +1616,7 @@ RegionPickPoll pollRegionPick()
     // The overlays switch modes in lockstep; the front one speaks for all.
     poll.pinMode = g_pickerOverlays.front().view.pinMode;
     SidescopesPickerView* front = g_pickerOverlays.front().view;
-    poll.windowMode = !front.pinMode && !front.drawMode && !front.facesMode;
+    poll.attachesToWindow = !front.pinMode && !front.drawMode && !front.facesMode;
 
     refreshPickerExclusions();
     if (pollPickerFinish(poll)) {
