@@ -73,13 +73,13 @@ struct RegionPickPoll
     /// it happens without finishing the pick. @c pinnedPoint is a plain
     /// click: a single display-percent point the caller samples the same
     /// way it samples the live cursor readout, so a pin matches the color
-    /// the user was reading. @c pinnedArea is a dragged rectangle to
+    /// the user was reading. @c pinnedSample is a dragged rectangle to
     /// average - the explicit way to ask for a swatch over textured pixels.
     /// @c pinnedKeepOpen carries the click's Shift state: the user's
     /// per-pin choice to keep picking. While @c pinMode is set the caller
     /// must not treat previews or a finish as region changes.
     std::optional<DisplayPoint> pinnedPoint;
-    std::optional<RegionOfInterest> pinnedArea;
+    std::optional<RegionOfInterest> pinnedSample;
     bool pinnedKeepOpen = false;
     bool pinMode = false;
     /// Whether a rectangle confirmed RIGHT NOW may attach to the window under

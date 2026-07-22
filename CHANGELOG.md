@@ -58,7 +58,7 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   region border for the first probe's latency; the border waits for
   this activation's verdict, and the probe fires immediately instead
   of waiting out its cadence.
-- Face picking offers faces on every display, not only the one the scopes
+- Face picking suggests faces on every display, not only the one the scopes
   currently capture. The streamed display's faces still appear the instant
   the picker opens; each other display is grabbed once and scanned in the
   background, its faces filling in when ready.

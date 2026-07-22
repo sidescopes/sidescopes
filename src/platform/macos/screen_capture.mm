@@ -349,7 +349,7 @@ SCDisplay* samplerDisplay(CGDirectDisplayID displayId)
 
 }  // namespace
 
-// The cursor readout away from the tracked display: a one-shot capture
+// The cursor readout away from the captured display: a one-shot capture
 // of a tiny rectangle around the point, excluding this application the
 // way the main stream does, requested in sRGB for the same honest
 // values.

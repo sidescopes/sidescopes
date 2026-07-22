@@ -121,13 +121,17 @@ private:
     void refreshActivatedScope(std::string_view id);
     void toggleScope(std::string_view id);
     void chooseScope(std::string_view id, bool stack);
-    [[nodiscard]] bool isFullRegion() const;
+    /// @return Whether the region the scopes are reading covers the whole
+    ///         captured display - the state Watch Full Screen restores. An
+    ///         extent, not a kind: a region attached to a window filling the
+    ///         display reads full here too.
+    [[nodiscard]] bool isFullScreen() const;
     /// @return The kind of the region the scopes are reading right now: the
     ///         active attached window's, or the global one. A narrower
     ///         question than AttachController::attached(), which reports
     ///         whether ANY window holds a region - an attached window that is
     ///         not focused leaves the global kind in effect. Orthogonal to
-    ///         isFullRegion(), which measures a region's extent rather than
+    ///         isFullScreen(), which measures a region's extent rather than
     ///         what it is bound to.
     [[nodiscard]] RegionKind regionKind() const;
     void syncRegionBorder();
@@ -193,8 +197,8 @@ private:
     [[nodiscard]] const FaceCandidate* matchFaceCandidate(uint32_t displayId, const RegionOfInterest& region) const;
     void logAttachMapping(const WindowCandidate& picked, const RegionOfInterest& start) const;
     [[nodiscard]] const WindowCandidate* windowContaining(uint32_t displayId, const RegionOfInterest& region) const;
-    [[nodiscard]] std::optional<FloatColor> averageFrameArea(const RegionOfInterest& area) const;
-    void resetRegionToFull();
+    [[nodiscard]] std::optional<FloatColor> averageFrameColor(const RegionOfInterest& region) const;
+    void resetToFullScreen();
     void persistPreferences();
 
     // --- per-frame ---
@@ -388,7 +392,7 @@ private:
         std::mutex mutex;
         std::vector<IntRect> faces;  ///< detector boxes, full-frame pixels
         uint64_t forWindowIdentity = 0;
-        IntRect roi;  ///< the searched area, for judging edge-clipped boxes
+        IntRect roi;  ///< the searched rectangle, for judging edge-clipped boxes
     };
 
     std::map<uint64_t, AppFaceLock> m_faceLocks;

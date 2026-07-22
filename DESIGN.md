@@ -86,7 +86,7 @@ asymptotic tail of the average decisively.
 
 The analyzed region is chosen the way a screenshot tool works. A toolbar — and
 keyboard shortcuts — opens a picker over the dimmed screen: click a window to
-scope it, draw a rectangle for an arbitrary area, or, where the platform can
+scope it, draw an arbitrary region by hand, or, where the platform can
 detect faces, click a face to scope the skin around it. Escape falls back to
 the whole screen. Once confirmed, the region carries a live border on the
 desktop, drawn like a macOS screenshot selection, that moves and resizes in
@@ -99,8 +99,9 @@ that an unreliable guess is worse than an honest selection.
 Reference colors can be pinned on the vectorscope and the color picker for
 matching tones across photos. A dedicated pin tool turns the cursor into a
 live swatch: a click pins a cursor-sized sample and a drag pins the average of
-an area — photographs are textured, so a useful sample comes from an area, not
-a single pixel — while holding Shift keeps pinning without closing the tool.
+a rectangle — photographs are textured, so a useful sample comes from a patch,
+not a single pixel — while holding Shift keeps pinning without closing the
+tool.
 
 ## Multiple displays
 

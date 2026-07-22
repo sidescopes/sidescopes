@@ -262,16 +262,16 @@ struct PickerState
     // A drag in window mode: draws an attached region within the window
     // under the drag's start instead of confirming a whole window.
     bool pickDragging = false;
-    // Color pinning: a click reports a point to sample, a drag an area to
-    // average, the region is never touched, and a cursor chip previews the
-    // sample.
+    // Color pinning: a click reports a point to sample, a drag a rectangle
+    // to average, the region is never touched, and a cursor chip previews
+    // the sample.
     bool pinMode = false;
     // The pending pin, in overlay-local pixels, left here until the next
     // poll collects it - with the click's Shift state, the per-pin choice
     // to keep picking. pinnedIsPoint says whether pinnedPoint (a click) or
-    // pinnedArea (a drag) holds it.
+    // pinnedSample (a drag) holds it.
     Gdiplus::PointF pinnedPoint{};
-    Gdiplus::RectF pinnedArea{};
+    Gdiplus::RectF pinnedSample{};
     bool pinnedIsPoint = false;
     bool pinnedKeepOpen = false;
     bool pinnedReady = false;
@@ -283,13 +283,13 @@ struct PickerState
     // This application's own windows, local pixels: they float above the
     // overlay, and the banner avoids sitting beneath them.
     std::vector<Gdiplus::RectF> exclusions;
-    int hovered = -1;
+    int hoveredSuggestion = -1;
     bool dragging = false;
     POINT dragStart{};
     POINT dragCurrent{};
     bool picked = false;
     bool finished = false;
-    Gdiplus::RectF confirmed{};
+    Gdiplus::RectF confirmedRect{};
     // The cached backing store, plus the selection rectangle it last
     // showed: successive drag repaints touch only the union of the two.
     std::unique_ptr<LayeredSurface> surface;
@@ -591,7 +591,7 @@ void drawBanner(Gdiplus::Graphics& canvas, const PickerState& picker, const wcha
 
 // A punched hole keeps a whisper of alpha where it must stay clickable:
 // the picker owns every click on the overlay, but the darkened wash must
-// lift off the area being indicated.
+// lift off the rectangle being indicated.
 void punchRect(Gdiplus::Graphics& canvas, const Gdiplus::RectF& rect)
 {
     const Gdiplus::CompositingMode previous = canvas.GetCompositingMode();
@@ -644,17 +644,17 @@ void paintSuggestionScene(PickerState& picker, Gdiplus::Graphics& canvas, double
         // hovered one still gets the full accent treatment below.
         Gdiplus::Pen outline(Gdiplus::Color(217, 255, 255, 255), static_cast<Gdiplus::REAL>(1.5 * scale));
         for (int i = 0; i < static_cast<int>(picker.suggestions.size()); ++i) {
-            if (i == picker.hovered) {
+            if (i == picker.hoveredSuggestion) {
                 continue;
             }
             punchRect(canvas, picker.suggestions[static_cast<std::size_t>(i)].first);
             canvas.DrawRectangle(&outline, picker.suggestions[static_cast<std::size_t>(i)].first);
         }
     }
-    if (picker.hovered >= 0 && picker.hovered < static_cast<int>(picker.suggestions.size())) {
+    if (picker.hoveredSuggestion >= 0 && picker.hoveredSuggestion < static_cast<int>(picker.suggestions.size())) {
         // Only the rectangle under the cursor is shown, washed with an
         // accent like window selection in the screenshot interfaces.
-        const auto& hovered = picker.suggestions[static_cast<std::size_t>(picker.hovered)];
+        const auto& hovered = picker.suggestions[static_cast<std::size_t>(picker.hoveredSuggestion)];
         punchRect(canvas, hovered.first);
         if (picker.facesMode) {
             // A face target keeps the accent wash; a hovered window stays
@@ -868,7 +868,7 @@ void switchPickerMode(int mode)
         picker->facesMode = faces;
         picker->pinMode = pin;
         picker->suggestions = faces ? picker->faces : picker->windows;
-        picker->hovered = -1;
+        picker->hoveredSuggestion = -1;
         picker->dragging = false;
         picker->pickDragging = false;
         picker->constrained = false;
@@ -955,8 +955,8 @@ void pickerDrawDrag(PickerState& picker, HWND window, WPARAM wParam, POINT point
 void pickerHoverMove(PickerState& picker, POINT point)
 {
     const int hovered = suggestionAtPoint(picker, point);
-    if (hovered != picker.hovered) {
-        picker.hovered = hovered;
+    if (hovered != picker.hoveredSuggestion) {
+        picker.hoveredSuggestion = hovered;
         paintPicker(picker);
     }
 }
@@ -1011,13 +1011,13 @@ void pickerPinUp(PickerState& picker, HWND window, WPARAM wParam, POINT point)
     const Gdiplus::RectF selection = selectionRect(picker);
     const double minimum = 8 * scale;
     if (picker.dragging && selection.Width > minimum && selection.Height > minimum) {
-        picker.pinnedArea = selection;
+        picker.pinnedSample = selection;
         picker.pinnedIsPoint = false;
     } else {
         // A plain click pins the point itself, so the pinned color is
         // exactly what the live cursor readout showed; averaging a patch
-        // here would fade pins taken over a small subject. Dragging an
-        // area is the explicit way to average a swatch.
+        // here would fade pins taken over a small subject. Dragging a
+        // rectangle is the explicit way to average a swatch.
         picker.pinnedPoint = Gdiplus::PointF(static_cast<Gdiplus::REAL>(point.x), static_cast<Gdiplus::REAL>(point.y));
         picker.pinnedIsPoint = true;
     }
@@ -1040,7 +1040,7 @@ void pickerWindowUp(PickerState& picker, POINT point)
         return;  // a miss keeps the picker open
     }
     picker.picked = true;
-    picker.confirmed = picker.suggestions[static_cast<std::size_t>(hovered)].first;
+    picker.confirmedRect = picker.suggestions[static_cast<std::size_t>(hovered)].first;
     picker.finished = true;
 }
 
@@ -1056,7 +1056,7 @@ void pickerDrawUp(PickerState& picker, HWND window, POINT point)
         const double minimum = 8 * uiScale(window);
         if (selection.Width > minimum && selection.Height > minimum) {
             picker.picked = true;
-            picker.confirmed = selection;
+            picker.confirmedRect = selection;
             picker.finished = true;
         } else {
             // A stray micro-drag keeps the picker open.
@@ -1292,7 +1292,7 @@ void paintBorderBand(Gdiplus::Graphics& canvas, const Gdiplus::RectF& region, do
     Gdiplus::RectF band(region.X - bandPad, region.Y - bandPad, region.Width + 2 * bandPad,
                         region.Height + 2 * bandPad);
     // The stripes stop short of the measured-edge ring: crossing it would
-    // read as the band bleeding into the measured area.
+    // read as the band bleeding into the measured region.
     Gdiplus::RectF stripeHole(region.X - ring, region.Y - ring, region.Width + 2 * ring, region.Height + 2 * ring);
     canvas.SetClip(band);
     canvas.ExcludeClip(stripeHole);
@@ -1806,7 +1806,7 @@ void presentPickers()
 
 // A pin ready on any overlay is reported once and cleared; at most one is
 // outstanding per poll.
-void collectPinnedArea(RegionPickPoll& poll)
+void collectPinnedSample(RegionPickPoll& poll)
 {
     for (PickerState* picker : g_pickers) {
         if (!picker->pinnedReady) {
@@ -1819,7 +1819,7 @@ void collectPinnedArea(RegionPickPoll& poll)
             poll.pinnedPoint = DisplayPoint{picker->pinnedPoint.X / static_cast<double>(picker->width) * 100.0,
                                             picker->pinnedPoint.Y / static_cast<double>(picker->height) * 100.0};
         } else {
-            poll.pinnedArea = regionFromLocalRect(toLocalRect(picker->pinnedArea), picker->width, picker->height);
+            poll.pinnedSample = regionFromLocalRect(toLocalRect(picker->pinnedSample), picker->width, picker->height);
         }
         poll.pinnedKeepOpen = picker->pinnedKeepOpen;
         poll.displayId = picker->displayId;
@@ -1867,8 +1867,8 @@ bool finishRegionPick(RegionPickPoll& poll)
     poll.finished = true;
     poll.displayId = finishedPicker->displayId;
     if (finishedPicker->picked) {
-        poll.confirmed =
-            regionFromLocalRect(toLocalRect(finishedPicker->confirmed), finishedPicker->width, finishedPicker->height);
+        poll.confirmed = regionFromLocalRect(toLocalRect(finishedPicker->confirmedRect), finishedPicker->width,
+                                             finishedPicker->height);
     }
     for (PickerState* picker : g_pickers) {
         DestroyWindow(picker->window);
@@ -1891,10 +1891,11 @@ void collectRegionPreview(RegionPickPoll& poll)
             break;  // pin modes never preview a region
         }
         if (!picker->drawMode) {
-            if (picker->hovered >= 0 && picker->hovered < static_cast<int>(picker->suggestions.size())) {
+            if (picker->hoveredSuggestion >= 0 &&
+                picker->hoveredSuggestion < static_cast<int>(picker->suggestions.size())) {
                 poll.preview = regionFromLocalRect(
-                    toLocalRect(picker->suggestions[static_cast<std::size_t>(picker->hovered)].first), picker->width,
-                    picker->height);
+                    toLocalRect(picker->suggestions[static_cast<std::size_t>(picker->hoveredSuggestion)].first),
+                    picker->width, picker->height);
                 poll.displayId = picker->displayId;
                 break;
             }
@@ -1957,7 +1958,7 @@ RegionPickPoll pollRegionPick()
     poll.pinMode = g_pickers.front()->pinMode;
     poll.attachesToWindow =
         !g_pickers.front()->pinMode && !g_pickers.front()->drawMode && !g_pickers.front()->facesMode;
-    collectPinnedArea(poll);
+    collectPinnedSample(poll);
     refreshBannerExclusions();
     if (finishRegionPick(poll)) {
         return poll;
@@ -1999,7 +2000,7 @@ void updatePickerFaces(uint32_t displayId, const std::vector<SuggestedRegion>& f
         picker->facesScanned = true;
         if (picker->facesMode) {
             picker->suggestions = picker->faces;
-            picker->hovered = -1;
+            picker->hoveredSuggestion = -1;
         }
         paintPicker(*picker);
 

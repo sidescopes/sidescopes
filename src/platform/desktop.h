@@ -308,7 +308,7 @@ void observeEscapeWithoutKeyWindow(std::function<void()> callback);
 
 /// Samples the averaged screen color around a desktop point on whatever
 /// display it falls on, independent of the capture stream, so the cursor
-/// readout works on every screen and not only the tracked one. This
+/// readout works on every screen and not only the captured one. This
 /// application's own windows are excluded where the platform allows.
 /// Asynchronous: the callback may fire on any thread, or synchronously
 /// where reading the screen is immediate; it receives nothing when the

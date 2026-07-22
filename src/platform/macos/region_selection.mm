@@ -181,12 +181,12 @@ NSCursor* buildPinCursor(const std::optional<FloatColor>& color)
 // "none found". The streamed display arrives scanned; the others flip it
 // through updatePickerFaces when their background scan lands.
 @property(nonatomic, assign) BOOL facesScanned;
-// Color pinning: a click reports a point to sample, a drag an area to
-// average, the region is never touched, and a cursor chip previews the
-// sample. pinnedIsPoint says which of the two the pending pin is.
+// Color pinning: a click reports a point to sample, a drag a rectangle
+// to average, the region is never touched, and a cursor chip previews
+// the sample. pinnedIsPoint says which of the two the pending pin is.
 @property(nonatomic, assign) BOOL pinMode;
 @property(nonatomic, assign) NSPoint pinnedPoint;
-@property(nonatomic, assign) NSRect pinnedArea;
+@property(nonatomic, assign) NSRect pinnedSample;
 @property(nonatomic, assign) BOOL pinnedIsPoint;
 @property(nonatomic, assign) BOOL pinnedKeepOpen;
 @property(nonatomic, assign) BOOL pinnedReady;
@@ -602,13 +602,13 @@ NSCursor* buildPinCursor(const std::optional<FloatColor>& color)
         self.dragCurrent = point;
         const NSRect selection = [self selectionRect];
         if (self.dragging && selection.size.width > 8 && selection.size.height > 8) {
-            self.pinnedArea = selection;
+            self.pinnedSample = selection;
             self.pinnedIsPoint = NO;
         } else {
             // A plain click pins the point itself, so the pinned color is
             // exactly what the live cursor readout showed; averaging a
             // patch here would fade pins taken over a small subject.
-            // Dragging an area is the explicit way to average a swatch.
+            // Dragging a rectangle is the explicit way to average a swatch.
             self.pinnedPoint = point;
             self.pinnedIsPoint = YES;
         }
@@ -802,7 +802,7 @@ NSCursor* buildPinCursor(const std::optional<FloatColor>& color)
 {
     const NSRect band = NSInsetRect(region, -sidescopes::BorderPad, -sidescopes::BorderPad);
     // The stripes stop short of the measured-edge ring: crossing it would read
-    // as the band bleeding into the measured area.
+    // as the band bleeding into the measured region.
     const NSRect stripeHole = NSInsetRect(region, -sidescopes::EdgeRing, -sidescopes::EdgeRing);
     NSBezierPath* ringClip = [NSBezierPath bezierPathWithRect:band];
     [ringClip appendBezierPathWithRect:stripeHole];
@@ -1545,7 +1545,7 @@ void collectPinnedResult(RegionPickPoll& poll)
             poll.pinnedPoint = DisplayPoint{click.x / overlay.size.width * 100.0,
                                             flippedY(click.y, overlay.size.height) / overlay.size.height * 100.0};
         } else {
-            poll.pinnedArea = regionPercentFromViewRect(overlay.view.pinnedArea, overlay.size);
+            poll.pinnedSample = regionPercentFromViewRect(overlay.view.pinnedSample, overlay.size);
         }
         poll.pinnedKeepOpen = overlay.view.pinnedKeepOpen;
         poll.displayId = overlay.displayId;

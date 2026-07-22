@@ -1979,7 +1979,7 @@ void App::chooseScope(std::string_view id, bool stack)
     m_analysisDirty = true;
 }
 
-bool App::isFullRegion() const
+bool App::isFullScreen() const
 {
     return m_analysis.region.leftPercent <= 0.0 && m_analysis.region.topPercent <= 0.0 &&
            m_analysis.region.rightPercent >= 100.0 && m_analysis.region.bottomPercent >= 100.0;
@@ -2005,7 +2005,7 @@ void App::syncRegionBorder()
     // attached region on the focused attached window (label and warm dress),
     // else the plain global one. Called every frame; the platform side makes
     // the unchanged case free.
-    if (m_regionPicking || isFullRegion() || applicationHidden() || m_attachedWindowMoving || m_faceLockHunting ||
+    if (m_regionPicking || isFullScreen() || applicationHidden() || m_attachedWindowMoving || m_faceLockHunting ||
         regionContentUnsettled() || glfwGetWindowAttrib(m_window, GLFW_ICONIFIED)) {
         hideRegionBorder();
     } else {
@@ -2019,17 +2019,17 @@ void App::syncRegionBorder()
     }
 }
 
-std::optional<FloatColor> App::averageFrameArea(const RegionOfInterest& area) const
+std::optional<FloatColor> App::averageFrameColor(const RegionOfInterest& region) const
 {
-    // Averages a display-percent area of the latest frame: a dragged pin's
+    // Averages a display-percent region of the latest frame: a dragged pin's
     // sample. A drag is the explicit request to average textured pixels; a
     // plain click samples a point instead, matching the live readout.
     std::optional<FloatColor> color;
     const bool sampled = m_worker.withLatestFrame([&](const FrameView& view) {
-        const int left = std::clamp(static_cast<int>(area.leftPercent / 100.0 * view.width), 0, view.width);
-        const int right = std::clamp(static_cast<int>(area.rightPercent / 100.0 * view.width), 0, view.width);
-        const int top = std::clamp(static_cast<int>(area.topPercent / 100.0 * view.height), 0, view.height);
-        const int bottom = std::clamp(static_cast<int>(area.bottomPercent / 100.0 * view.height), 0, view.height);
+        const int left = std::clamp(static_cast<int>(region.leftPercent / 100.0 * view.width), 0, view.width);
+        const int right = std::clamp(static_cast<int>(region.rightPercent / 100.0 * view.width), 0, view.width);
+        const int top = std::clamp(static_cast<int>(region.topPercent / 100.0 * view.height), 0, view.height);
+        const int bottom = std::clamp(static_cast<int>(region.bottomPercent / 100.0 * view.height), 0, view.height);
         if (right <= left || bottom <= top) {
             return;
         }
@@ -2075,7 +2075,7 @@ void App::setRegion(const RegionOfInterest& region)
     m_lastActivity = glfwGetTime();
 }
 
-void App::resetRegionToFull()
+void App::resetToFullScreen()
 {
     // Resets all selection: a pending pick, every attached window, and the
     // global region alike. The border sync rides the analysis-dirty path.
@@ -2521,16 +2521,16 @@ void App::consumeFaceLockProbe(const AttachDecision& decision)
     if (locked == m_faceLocks.end() || m_faceLockProbe.forWindowIdentity != decision.activeIdentity) {
         return;
     }
-    const LockRect bounds{static_cast<double>(m_faceLockProbe.roi.x), static_cast<double>(m_faceLockProbe.roi.y),
-                          static_cast<double>(m_faceLockProbe.roi.x + m_faceLockProbe.roi.width),
-                          static_cast<double>(m_faceLockProbe.roi.y + m_faceLockProbe.roi.height)};
+    const IntRect& roi = m_faceLockProbe.roi;
+    const LockRect roiRect{static_cast<double>(roi.x), static_cast<double>(roi.y),
+                           static_cast<double>(roi.x + roi.width), static_cast<double>(roi.y + roi.height)};
     std::vector<FaceAnchor> candidates;
     candidates.reserve(boxes.size());
     std::size_t edgeDropped = 0;
     for (const IntRect& box : boxes) {
         const LockRect boxRect{static_cast<double>(box.x), static_cast<double>(box.y),
                                static_cast<double>(box.x + box.width), static_cast<double>(box.y + box.height)};
-        if (!face_lock::trustworthyBox(boxRect, bounds)) {
+        if (!face_lock::trustworthyBox(boxRect, roiRect)) {
             ++edgeDropped;
 
             continue;
@@ -2665,7 +2665,7 @@ void App::detachActiveWindow()
         unwatchWindowMotion();
         m_activeWindowIdentity = 0;
     } else {
-        resetRegionToFull();
+        resetToFullScreen();
     }
 }
 
@@ -2822,7 +2822,7 @@ void App::drainAsyncSignals()
         m_lastActivity = glfwGetTime();
     }
     if (m_orphanEscape.exchange(false)) {
-        resetRegionToFull();
+        resetToFullScreen();
         m_lastActivity = glfwGetTime();
     }
     // Keys the border panel took while it held the keyboard: Escape and the
@@ -2845,7 +2845,7 @@ void App::followWindowDisplay()
     // this window sits on. A drawn region or an attached window pins capture to
     // its own display regardless of the window.
     if (m_captureController->permissionGranted() && !m_captureController->dead() && !m_regionPicking &&
-        isFullRegion() && !m_attach.attached()) {
+        isFullScreen() && !m_attach.attached()) {
         const auto homeDisplay = displayOfWindow();
         if (homeDisplay && *homeDisplay != m_captureController->capturedDisplay()) {
             m_captureController->requestDisplay(*homeDisplay);
@@ -2897,7 +2897,7 @@ void App::publishSelfWindowMask()
 
 void App::sampleCursorColor()
 {
-    // Cursor color, smoothed per scope with its own rhythm. On the tracked
+    // Cursor color, smoothed per scope with its own rhythm. On the captured
     // display it reads the capture stream's frame; on every other display a
     // throttled one-shot sample keeps the readout alive even while capture is
     // paused.
@@ -2913,8 +2913,8 @@ void App::sampleCursorColor()
         m_lastActivity = glfwGetTime();
     }
     std::optional<FloatColor> sampled;
-    const bool onTrackedDisplay = displayAtPoint(*cursor).value_or(0) == m_captureController->capturedDisplay();
-    if (onTrackedDisplay && !m_captureController->dead() && m_frameSize) {
+    const bool onCapturedDisplay = displayAtPoint(*cursor).value_or(0) == m_captureController->capturedDisplay();
+    if (onCapturedDisplay && !m_captureController->dead() && m_frameSize) {
         if (const auto geometry = geometryOfDisplay(m_captureController->capturedDisplay())) {
             const int pixelX =
                 static_cast<int>((cursor->x - geometry->originX) * m_frameSize->width / geometry->widthPoints);
@@ -3204,7 +3204,7 @@ bool App::triggerShortcut(const std::string& key, bool shift)
     } else if (key == m_shortcuts.vectorscopeZoom) {
         m_view.setZoom(m_view.zoom() >= 4 ? 1 : m_view.zoom() * 2);
     } else if (key == m_shortcuts.fullScreen) {
-        resetRegionToFull();
+        resetToFullScreen();
     } else {
         return false;
     }
@@ -3374,7 +3374,7 @@ void App::handleViewShortcuts()
         if (m_showSettings) {
             m_showSettings = false;
         } else {
-            resetRegionToFull();
+            resetToFullScreen();
         }
     }
 }
@@ -3456,12 +3456,12 @@ void App::drawRegionToolIcons()
         }
         ImGui::SameLine(0.0f, 2.0f);
     }
-    const bool fullAlready = isFullRegion();
+    const bool fullAlready = isFullScreen();
     if (iconButton("##full-screen", iconTextureId(Icon::Expand, iconPx),
                    fullAlready ? "Reset to full screen (Esc) - already full" : "Reset to full screen (Esc)",
                    fullAlready) &&
         !fullAlready) {
-        resetRegionToFull();
+        resetToFullScreen();
     }
     ImGui::SameLine(0.0f, 2.0f);
     ImGui::NewLine();
@@ -4046,7 +4046,7 @@ void App::appendRegionAndAppSection(std::vector<NativeMenuItem>& menu)
     if (supportsFaceDetection()) {
         menuAction(menu, "Attach to Face...", MenuAttachFace, false, shortcutLabel(m_shortcuts.attachFace));
     }
-    menuAction(menu, "Watch Full Screen", MenuFullScreen, isFullRegion(), shortcutLabel(m_shortcuts.fullScreen));
+    menuAction(menu, "Watch Full Screen", MenuFullScreen, isFullScreen(), shortcutLabel(m_shortcuts.fullScreen));
     if (m_attach.attachedCount() > 1) {
         if (m_attach.activeIdentity() != 0) {
             menuAction(menu, "Detach Front Window", MenuDetachWindow, false);
@@ -4157,7 +4157,7 @@ void App::dispatchRegionMenu(int chosen)
         break;
     case MenuFullScreen:
     case MenuDetachAll:
-        resetRegionToFull();
+        resetToFullScreen();
         break;
     case MenuDetachWindow:
         detachActiveWindow();
@@ -4289,7 +4289,7 @@ void App::openRegionPicker()
     // The previous region's border must not leak into the analyzed frame: its
     // strokes read as rectangle edges and cut suggestions short. Wait briefly
     // for a frame taken after the border left the screen.
-    if (!isFullRegion()) {
+    if (!isFullScreen()) {
         waitForBorderFreeFrame();
     }
     const std::vector<PickerDisplay> pickerDisplays = buildPickerDisplays();
@@ -4405,27 +4405,26 @@ void App::launchDisplayFaceScans(const std::vector<PickerDisplay>& pickerDisplay
         }
         const auto geometry = geometryOfDisplay(entry.displayId);
         const double widthPoints = geometry ? geometry->widthPoints : 0.0;
-        auto scan = std::make_unique<DisplayFaceScan>();
+        m_displayFaceScans.push_back(std::make_unique<DisplayFaceScan>());
+        DisplayFaceScan* scan = m_displayFaceScans.back().get();
         scan->displayId = entry.displayId;
         scan->generation = m_facePickGeneration;
         scan->running.store(true);
-        DisplayFaceScan* probe = scan.get();
-        m_displayFaceScans.push_back(std::move(scan));
         const uint32_t displayId = entry.displayId;
-        std::thread([probe, displayId, widthPoints] {
+        std::thread([scan, displayId, widthPoints] {
             ScanResult scanned = scanDisplayForFaces(displayId, widthPoints);
             {
-                std::lock_guard lock(probe->mutex);
-                probe->faces = std::move(scanned.faces);
-                probe->frameWidth = scanned.width;
-                probe->frameHeight = scanned.height;
-                probe->elapsedMs = scanned.elapsedMs;
+                std::lock_guard lock(scan->mutex);
+                scan->faces = std::move(scanned.faces);
+                scan->frameWidth = scanned.width;
+                scan->frameHeight = scanned.height;
+                scan->elapsedMs = scanned.elapsedMs;
             }
-            probe->ready.store(true);
+            scan->ready.store(true);
             // The wake goes out before the running flag clears: the shutdown
             // drain waits on running, and GLFW must still be alive to hear it.
             glfwPostEmptyEvent();
-            probe->running.store(false);
+            scan->running.store(false);
         }).detach();
     }
 }
@@ -4591,7 +4590,7 @@ void App::attachGlobalRegionToWindow()
 {
     const uint32_t displayId = m_captureController->capturedDisplay();
     const auto geometry = geometryOfDisplay(displayId);
-    if (!geometry || isFullRegion()) {
+    if (!geometry || isFullScreen()) {
         return;
     }
     const RegionOfInterest region = m_globalRegion;
@@ -4599,9 +4598,9 @@ void App::attachGlobalRegionToWindow()
     const double centerY = (region.topPercent + region.bottomPercent) / 2.0;
     for (const DesktopWindow& window : attachCandidateWindows(displayId)) {
         const WindowGeometry rect{window.x, window.y, window.width, window.height, false, {}};
-        const RegionOfInterest area = displayPercentRect(rect, *geometry);
-        if (centerX < area.leftPercent || centerX > area.rightPercent || centerY < area.topPercent ||
-            centerY > area.bottomPercent) {
+        const RegionOfInterest windowRegion = displayPercentRect(rect, *geometry);
+        if (centerX < windowRegion.leftPercent || centerX > windowRegion.rightPercent ||
+            centerY < windowRegion.topPercent || centerY > windowRegion.bottomPercent) {
             continue;
         }
         adoptAttachedPick(window.windowIdentity, window.ownerPid,
@@ -4686,8 +4685,8 @@ void App::pollActiveRegionPick()
 
 void App::pollPinPick(const RegionPickPoll& poll)
 {
-    // Color pinning never touches the region: clicks and drags deliver areas to
-    // average, and a finish just puts things back.
+    // Color pinning never touches the region: clicks and drags deliver samples
+    // to average, and a finish just puts things back.
     std::optional<FloatColor> chip;
     if (const auto cursor = globalCursorPosition()) {
         if (displayAtPoint(*cursor).value_or(0) == m_captureController->capturedDisplay() &&
@@ -4710,7 +4709,7 @@ void App::pollPinPick(const RegionPickPoll& poll)
     }
     setRegionPickChipColor(chip);
 
-    if (poll.pinnedPoint || poll.pinnedArea) {
+    if (poll.pinnedPoint || poll.pinnedSample) {
         applyPinnedColor(poll);
     }
     if (poll.finished || !poll.active) {
@@ -4727,12 +4726,12 @@ void App::applyPinnedColor(const RegionPickPoll& poll)
     if (poll.displayId == m_captureController->capturedDisplay() && !m_captureController->dead()) {
         if (poll.pinnedPoint && m_frameSize) {
             // A plain pin samples the frame exactly like the live readout; only a
-            // dragged area averages, the explicit way to ask for a swatch.
+            // dragged rectangle averages, the explicit way to ask for a swatch.
             const int pixelX = static_cast<int>(poll.pinnedPoint->xPercent / 100.0 * m_frameSize->width);
             const int pixelY = static_cast<int>(poll.pinnedPoint->yPercent / 100.0 * m_frameSize->height);
             pinned = m_worker.sampleFrameColor(pixelX, pixelY);
-        } else if (poll.pinnedArea) {
-            pinned = averageFrameArea(*poll.pinnedArea);
+        } else if (poll.pinnedSample) {
+            pinned = averageFrameColor(*poll.pinnedSample);
         }
     } else {
         std::lock_guard lock(m_screenSample->mutex);
@@ -4761,7 +4760,7 @@ void App::pollRegionPreview(const RegionPickPoll& poll)
         m_analysisDirty = true;
         m_lastActivity = glfwGetTime();
     };
-    // Live preview only for the tracked display: previewing a suggestion on
+    // Live preview only for the captured display: previewing a suggestion on
     // another display would flap the capture stream on every hover.
     if (poll.preview && poll.displayId == m_captureController->capturedDisplay()) {
         applyRegion(*poll.preview);
@@ -4778,7 +4777,7 @@ void App::pollRegionPreview(const RegionPickPoll& poll)
             // Cancelled with Esc: detach every attached window and reset all
             // drawing to full screen. A cancel ordered by a tool switch is
             // not the user's Esc and resets nothing.
-            resetRegionToFull();
+            resetToFullScreen();
         }
         m_regionPickSwallowCancel = false;
         syncRegionBorder();
