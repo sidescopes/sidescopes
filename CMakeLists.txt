@@ -11,6 +11,10 @@ if(MSVC)
     # parallelizes across targets, and most sources here live in a few.
     # Directory-scoped so the fetched dependencies build the same way.
     add_compile_options(/MP)
+    # Read sources and encode literals as UTF-8. Without this MSVC reads a
+    # source file as the machine's ANSI code page, so a non-ASCII literal
+    # compiles into different bytes than it does everywhere else.
+    add_compile_options(/utf-8)
 endif()
 
 if(NOT CMAKE_BUILD_TYPE)

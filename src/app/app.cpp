@@ -308,6 +308,10 @@ ImFont* loadInterfaceFont(GLFWwindow* window)
     glfwGetWindowContentScale(window, &scaleX, &scaleY);
     ImFontConfig config;
     config.RasterizerDensity = scaleX;
+    // ImGui's default range stops at U+00FF, which would drop the delta the
+    // color picker labels its differences with. Latin-1 plus that one glyph.
+    static constexpr ImWchar InterfaceGlyphRanges[] = {0x0020, 0x00FF, 0x0394, 0x0394, 0};
+    config.GlyphRanges = InterfaceGlyphRanges;
     ImGuiIO& io = ImGui::GetIO();
     bool loaded = false;
     for (const std::string& path : interfaceFontFiles()) {
@@ -621,15 +625,6 @@ void hexFontText(ImFont* font, const char* text)
     popHexFont(font);
 }
 
-void hexFontTextDisabled(ImFont* font, const char* text)
-{
-    const float drop = hexFontBaselineDrop(font);
-    pushHexFont(font);
-    ImGui::SetCursorPosY(ImGui::GetCursorPosY() + drop);
-    ImGui::TextDisabled("%s", text);
-    popHexFont(font);
-}
-
 ImVec4 pickerSwatchColor(const FloatColor& source)
 {
     return ImVec4(source.r / 255.0f, source.g / 255.0f, source.b / 255.0f, 1.0f);
@@ -869,98 +864,100 @@ void drawPickerHero(const PickerContext& ctx, const PickerHero& hero)
     }
 }
 
-// The same reading below the hero when the swatches are too small to carry it:
-// the percent a photographer reads at a glance, with hex alongside.
-void drawPickerValuesRow(const PickerContext& ctx, const ImVec2& area, float valuesStart)
+// The match reading - 100 minus the CIEDE2000 distance, floored - and the
+// sentence that explains it, shared by the difference row and every deck row.
+void formatMatch(float deltaE, char (&value)[8], char (&help)[192])
 {
-    const float liveChannels[3] = {ctx.color.r, ctx.color.g, ctx.color.b};
-    const char* channelLabels[3] = {"R", "G", "B"};
-    for (int channel = 0; channel < 3; ++channel) {
-        const float columnStart = valuesStart + channel * ctx.channelStride;
-        if (channel > 0) {
-            ImGui::SameLine(columnStart);
-        } else {
-            ImGui::SetCursorPosX(columnStart);
-        }
-        ImGui::TextUnformatted(channelLabels[channel]);
-        char text[8];
-        std::snprintf(text, sizeof(text), "%.0f%%", liveChannels[channel] / 2.55f);
-        ImGui::SameLine(columnStart + ctx.labelColumn + ctx.columnGap + ctx.percentColumn -
-                        ImGui::CalcTextSize(text).x);
-        ImGui::TextUnformatted(text);
-    }
-    ImGui::SameLine(0.0f, 0.0f);
-    if (ImGui::GetContentRegionAvail().x >= ctx.hexWidth + 12.0f) {
-        ImGui::SameLine(area.x - ctx.hexWidth);
-    } else {
-        ImGui::NewLine();
-    }
-    hexFontText(ctx.monospaceFont, ctx.hex);
+    std::snprintf(value, sizeof(value), "%d%%", static_cast<int>(std::clamp(100.0f - deltaE, 0.0f, 100.0f)));
+    std::snprintf(help, sizeof(help),
+                  "similarity to the live color: 100%% is identical, 0%% is as far apart as black and white "
+                  "(CIEDE2000 difference %.1f) - sRGB assumed",
+                  deltaE);
 }
 
-// Three groups - lightness, chroma, hue - each a label over a fixed-width value.
-// The group starts keep fixed strides so the letters never move.
-void drawPickerDiffTriplet(const PickerContext& ctx, float valuesStart, const float diffValues[3],
-                           float diffValueColumn)
+// The difference triplet's own metrics. Nothing below the hero lines up with
+// it any more - the channel percentages that used to sit above it live in the
+// status bar now - so a group is only as wide as it reads: the value sits one
+// gap from its label, and the space between groups does the separating.
+struct DiffColumns
 {
-    const char* diffLabels[3] = {"L", "C", "H"};
+    float label;
+    float stride;
+    float width;
+};
+
+DiffColumns measureDiffColumns(const PickerContext& ctx)
+{
+    DiffColumns columns{};
+    columns.label = ImGui::CalcTextSize("ΔL").x;
+    const float value = ImGui::CalcTextSize("-199").x;
+    const float group = columns.label + ctx.columnGap + value;
+    columns.stride = group + 3.0f * ctx.columnGap;
+    columns.width = 2.0f * columns.stride + group;
+
+    return columns;
+}
+
+// Three groups - lightness, chroma, hue - each a label and the signed number it
+// names, held together by sitting closer to each other than to their neighbors.
+void drawPickerDiffTriplet(const PickerContext& ctx, float valuesStart, const float diffValues[3],
+                           const DiffColumns& columns)
+{
+    const char* diffLabels[3] = {"ΔL", "ΔC", "ΔH"};
     const char* diffHelp = "live minus pinned: lightness, chroma, and hue weighted by chroma - sRGB assumed";
-    float groupX = valuesStart;
     for (int component = 0; component < 3; ++component) {
+        const float columnStart = valuesStart + static_cast<float>(component) * columns.stride;
         if (component == 0) {
-            ImGui::SetCursorPosX(groupX);
+            ImGui::SetCursorPosX(columnStart);
         } else {
-            ImGui::SameLine(groupX);
+            ImGui::SameLine(columnStart);
         }
-        ImGui::TextDisabled("%s", diffLabels[component]);
+        ImGui::TextUnformatted(diffLabels[component]);
         char value[8];
         std::snprintf(value, sizeof(value), "%+d", static_cast<int>(std::lround(diffValues[component])));
-        const float labelWidth = ImGui::CalcTextSize(diffLabels[component]).x;
-        ImGui::SameLine(groupX + labelWidth + ctx.columnGap);
-        hexFontTextDisabled(ctx.monospaceFont, value);
+        ImGui::SameLine(columnStart + columns.label + ctx.columnGap);
+        ImGui::TextUnformatted(value);
         ImGui::SetItemTooltip("%s", diffHelp);
-        groupX += labelWidth + ctx.columnGap + diffValueColumn + 2.0f * ctx.columnGap;
     }
 }
 
 // One quiet line below the hero: the colorist's difference on the left and a
 // match percentage on the right. The triplet drops out whole when the line is
 // too narrow to seat it clear of the match, which always stays.
+// Everything under the hero: where the live color sits relative to the pinned
+// one, and how close that is overall. The triplet leads and the match closes
+// the line; when the pane cannot seat both, the match drops to its own line
+// rather than pushing the detail off the pane. The live color's hex is not
+// here - it changes with every mouse move and cannot be copied, and the deck
+// carries the hexes that are worth keeping.
 void drawPickerDifferenceRow(const PickerContext& ctx, const ImVec2& area, float valuesStart)
 {
-    const LabColor liveLab = labFromSrgb(ctx.color);
-    const LabColor pinLab = labFromSrgb(ctx.pins.comparatorColor());
-    const ColorDifference difference = differenceFrom(pinLab, liveLab);
-    // Match is 100 minus the CIEDE2000 distance, floored.
-    const int matchPercent = static_cast<int>(std::clamp(100.0f - difference.deltaE, 0.0f, 100.0f));
+    const ColorDifference difference = differenceFrom(labFromSrgb(ctx.pins.comparatorColor()), labFromSrgb(ctx.color));
     char matchValue[8];
-    std::snprintf(matchValue, sizeof(matchValue), "%d%%", matchPercent);
+    char matchHelp[192];
+    formatMatch(difference.deltaE, matchValue, matchHelp);
     const float matchValueX = area.x - hexFontWidth(ctx.monospaceFont, matchValue);
     const float matchLabelX = matchValueX - ctx.columnGap - ImGui::CalcTextSize("Match").x;
-    char matchHelp[192];
-    std::snprintf(matchHelp, sizeof(matchHelp),
-                  "similarity to the live color: 100%% is identical, 0%% is as far apart as black and white "
-                  "(CIEDE2000 difference %.1f) - sRGB assumed",
-                  difference.deltaE);
     const float diffValues[3] = {difference.lightness, difference.chroma, difference.hue};
-    const float diffValueColumn = hexFontWidth(ctx.monospaceFont, "+199");
-    const char* diffLabels[3] = {"L", "C", "H"};
-    float tripletWidth = 0.0f;
-    for (int component = 0; component < 3; ++component) {
-        tripletWidth += ImGui::CalcTextSize(diffLabels[component]).x + ctx.columnGap + diffValueColumn;
-        if (component < 2) {
-            tripletWidth += 2.0f * ctx.columnGap;
-        }
+    const DiffColumns columns = measureDiffColumns(ctx);
+    const bool tripletShares = valuesStart + columns.width + ctx.columnGap <= matchLabelX;
+    if (tripletShares || valuesStart + columns.width <= area.x) {
+        drawPickerDiffTriplet(ctx, valuesStart, diffValues, columns);
     }
-    if (valuesStart + tripletWidth + ctx.columnGap <= matchLabelX) {
-        drawPickerDiffTriplet(ctx, valuesStart, diffValues, diffValueColumn);
-        ImGui::SameLine(matchLabelX);
+    // Right-aligned while it closes the triplet's line; flush left once it has
+    // a line of its own, the way the region toolbox wraps.
+    float labelX = matchLabelX;
+    float valueX = matchValueX;
+    if (tripletShares) {
+        ImGui::SameLine(labelX);
     } else {
-        ImGui::SetCursorPosX(matchLabelX);
+        labelX = valuesStart;
+        valueX = labelX + ImGui::CalcTextSize("Match").x + ctx.columnGap;
+        ImGui::SetCursorPosX(labelX);
     }
-    ImGui::TextDisabled("Match");
+    ImGui::TextUnformatted("Match");
     ImGui::SetItemTooltip("%s", matchHelp);
-    ImGui::SameLine(matchValueX);
+    ImGui::SameLine(valueX);
     hexFontText(ctx.monospaceFont, matchValue);
     ImGui::SetItemTooltip("%s", matchHelp);
 }
@@ -1029,8 +1026,10 @@ DeckLayout computeDeckLayout(const PickerContext& ctx, float deckWidth)
     layout.hexX = layout.swatchX + ctx.lineHeight + ctx.columnGap;
     const float leftPartEnd = layout.hexX + hexColumn;
     const float matchCol = std::max(hexFontWidth(ctx.monospaceFont, "100%"), ImGui::CalcTextSize("Match").x);
-    const char* lchLabels[3] = {"L", "C", "H"};
-    const char* rgbLabels[3] = {"R", "G", "B"};
+    // Every numeric column in the deck is a difference against the live color,
+    // so each carries the delta the hero row's absolute channels do without.
+    const char* lchLabels[3] = {"ΔL", "ΔC", "ΔH"};
+    const char* rgbLabels[3] = {"ΔR", "ΔG", "ΔB"};
     float lchCol[3];
     float rgbCol[3];
     for (int column = 0; column < 3; ++column) {
@@ -1064,21 +1063,21 @@ void drawPickerDeckHeader(const DeckLayout& layout)
         } else {
             ImGui::SameLine(headerX);
         }
-        ImGui::TextDisabled("%s", label);
+        ImGui::TextUnformatted(label);
         ImGui::SetItemTooltip("%s", tip);
     };
     if (layout.showMatch) {
         headerCell(layout.matchRight, layout.matchTypical, "Match", PickerMatchTip);
     }
     if (layout.showLch) {
-        headerCell(layout.lchRight[0], layout.lchTypical, "L", PickerLchTip);
-        headerCell(layout.lchRight[1], layout.lchTypical, "C", PickerLchTip);
-        headerCell(layout.lchRight[2], layout.lchTypical, "H", PickerLchTip);
+        headerCell(layout.lchRight[0], layout.lchTypical, "ΔL", PickerLchTip);
+        headerCell(layout.lchRight[1], layout.lchTypical, "ΔC", PickerLchTip);
+        headerCell(layout.lchRight[2], layout.lchTypical, "ΔH", PickerLchTip);
     }
     if (layout.showRgb) {
-        headerCell(layout.rgbRight[0], layout.rgbTypical, "R", PickerRgbTip);
-        headerCell(layout.rgbRight[1], layout.rgbTypical, "G", PickerRgbTip);
-        headerCell(layout.rgbRight[2], layout.rgbTypical, "B", PickerRgbTip);
+        headerCell(layout.rgbRight[0], layout.rgbTypical, "ΔR", PickerRgbTip);
+        headerCell(layout.rgbRight[1], layout.rgbTypical, "ΔG", PickerRgbTip);
+        headerCell(layout.rgbRight[2], layout.rgbTypical, "ΔB", PickerRgbTip);
     }
 }
 
@@ -1159,19 +1158,14 @@ void drawDeckRowValues(const PickerContext& ctx, std::size_t index, const DeckLa
         ImGui::SameLine(colRight - hexFontWidth(ctx.monospaceFont, value));
         ImGui::SetCursorPosY(rowPosY + seat);
         pushHexFont(ctx.monospaceFont);
-        ImGui::TextDisabled("%s", value);
+        ImGui::TextUnformatted(value);
         popHexFont(ctx.monospaceFont);
         ImGui::SetItemTooltip("%s", tip);
     };
     if (layout.showMatch) {
         char match[8];
-        std::snprintf(match, sizeof(match), "%d%%",
-                      static_cast<int>(std::clamp(100.0f - pinDiff.deltaE, 0.0f, 100.0f)));
         char matchHelp[192];
-        std::snprintf(matchHelp, sizeof(matchHelp),
-                      "similarity to the live color: 100%% is identical, 0%% is as far apart as black and "
-                      "white (CIEDE2000 difference %.1f) - sRGB assumed",
-                      pinDiff.deltaE);
+        formatMatch(pinDiff.deltaE, match, matchHelp);
         numericCell(layout.matchRight, match, matchHelp);
     }
     if (layout.showLch) {
@@ -1259,6 +1253,31 @@ void drawPickerChipRail(const PickerContext& ctx)
 // Three size tiers, few and spaced so resizing feels like deliberate steps: a
 // strip, a compact comparator, the full reference deck. Order never changes -
 // comparator, values, pins - and only the comparator absorbs extra height.
+// The column metrics of the readout a roomy hero carries on the swatch itself:
+// a channel letter, its percentage, and the hex under them.
+struct PickerColumns
+{
+    float label;
+    float value;
+    float gap;
+    float stride;
+};
+
+// Every value owns a column sized for its widest form and right-aligns inside
+// it - the cure for layouts that twitch as digits come and go. The difference
+// row below the hero measures itself (see measureDiffColumns): it carries
+// wider labels and signed readings, and nothing lines the two up.
+PickerColumns measurePickerColumns()
+{
+    PickerColumns columns{};
+    columns.label = ImGui::CalcTextSize("R").x;
+    columns.value = ImGui::CalcTextSize("100%").x;
+    columns.gap = ImGui::CalcTextSize(" ").x;
+    columns.stride = columns.label + columns.gap + columns.value + 2.0f * columns.gap;
+
+    return columns;
+}
+
 void drawColorPicker(const std::optional<FloatColor>& liveColor, PinBoard& pins, ImFont* monospaceFont)
 {
     const ImVec2 area = ImGui::GetContentRegionAvail();
@@ -1278,22 +1297,17 @@ void drawColorPicker(const std::optional<FloatColor>& liveColor, PinBoard& pins,
     const int blue = static_cast<int>(std::lround(std::clamp(color.b, 0.0f, 255.0f)));
     char hex[8];
     std::snprintf(hex, sizeof(hex), "#%02X%02X%02X", red, green, blue);
-    // Every value owns a column sized for its widest form and right-aligns
-    // inside it - the toolbar's cure for layouts that twitch as digits come and
-    // go. Hex measures in the fixed-width font, one figure serving every half.
-    const float labelColumn = ImGui::CalcTextSize("R").x;
-    const float percentColumn = ImGui::CalcTextSize("100%").x;
-    const float columnGap = ImGui::CalcTextSize(" ").x;
-    const float channelStride = labelColumn + columnGap + percentColumn + 2 * columnGap;
+    const PickerColumns columns = measurePickerColumns();
+    const float labelColumn = columns.label;
+    const float percentColumn = columns.value;
+    const float columnGap = columns.gap;
+    const float channelStride = columns.stride;
     const float hexWidth = hexFontWidth(monospaceFont, hex);
     const PickerContext ctx{color,     pins,          monospaceFont, labelColumn, percentColumn,
                             columnGap, channelStride, hexWidth,      lineHeight,  hex};
 
     const PickerHero hero = computePickerHero(ctx, area, style);
     drawPickerHero(ctx, hero);
-    if (!hero.onSwatch && !hero.soloOnSwatch) {
-        drawPickerValuesRow(ctx, area, hero.valuesStart);
-    }
     if (hero.split && !hero.tiny) {
         drawPickerDifferenceRow(ctx, area, hero.valuesStart);
     }
