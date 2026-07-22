@@ -238,6 +238,13 @@ float iconButtonHeight()
     return ImGui::GetTextLineHeight() + 4.0f;
 }
 
+// How far the glyph sits inside its button's box - the left margin a line of
+// text needs to start where an icon in that box appears to start.
+float iconButtonInset()
+{
+    return std::round((iconButtonWidth() - ImGui::GetTextLineHeight()) / 2.0f);
+}
+
 bool iconButton(const char* id, ImTextureID texture, const char* tooltip, bool dimmed = false)
 {
     const bool pressed = ImGui::InvisibleButton(id, ImVec2(iconButtonWidth(), iconButtonHeight()));
@@ -3472,7 +3479,7 @@ void App::placeRegionToolbox()
     // with the scopes; flush left when it wraps to a row of its own. Narrow
     // windows are the tall beside-the-editor shape, which has the height
     // for a second row; wide strips keep one row.
-    const int iconCount = 4 + (supportsFaceDetection() ? 1 : 0);
+    const int iconCount = 3 + (supportsFaceDetection() ? 1 : 0);
     const float chip = ImGui::GetTextLineHeight() + 12.0f;
     const float width = static_cast<float>(iconCount) * chip + static_cast<float>(iconCount - 1) * 2.0f;
     const float right = ImGui::GetWindowContentRegionMax().x;
@@ -3499,13 +3506,6 @@ void App::drawRegionToolIcons()
         m_wantRegionPick = RegionPickerMode::AttachWindow;
     }
     ImGui::SameLine(0.0f, 2.0f);
-    const bool pins = pinsAvailable();
-    std::snprintf(tooltip, sizeof(tooltip), "Pin a color (%s)%s", m_shortcuts.pinColor.c_str(),
-                  pins ? " - Shift+click a color to pin several" : " - needs a scope that takes pins");
-    if (iconButton("##pin-color", iconTextureId(Icon::Pipette, iconPx), tooltip, !pins) && pins) {
-        m_wantRegionPick = RegionPickerMode::PinColor;
-    }
-    ImGui::SameLine(0.0f, 2.0f);
     // The face tool sits last among the region tools, before the reset. It
     // is always available where the platform detects faces: whether any
     // face is on screen is the picker overlay's answer to give, not the
@@ -3528,65 +3528,145 @@ void App::drawRegionToolIcons()
     ImGui::NewLine();
 }
 
-float App::statusBarHeight() const
+namespace {
+
+// The bar names each channel, so its columns follow the picker's difference
+// row: the value sits one gap after its letter and three gaps separate the
+// groups, which binds every number to the letter on its left. Both alignments
+// are fixed, so no digit coming or going moves anything.
+struct ReadoutColumns
 {
-    return ImGui::GetTextLineHeight() + 6.0f;
+    float label;
+    float gap;
+    float stride;
+    float width;
+};
+
+ReadoutColumns measureReadoutColumns()
+{
+    ReadoutColumns columns{};
+    columns.label = ImGui::CalcTextSize("R").x;
+    columns.gap = ImGui::CalcTextSize(" ").x;
+    const float group = columns.label + columns.gap + ImGui::CalcTextSize("100%").x;
+    columns.stride = group + 2.0f * columns.gap;
+    columns.width = 2.0f * columns.stride + group;
+
+    return columns;
 }
 
-float App::cursorReadoutWidth() const
+// The pin tool's box is the tallest thing that can stand on the row, so it
+// sets the height; everything shorter drops by half the difference to share
+// its centre line.
+float readoutNudge()
 {
-    const float columnWidth = ImGui::CalcTextSize("100%").x;
-    const float columnGap = ImGui::CalcTextSize(" ").x;
+    return std::round((iconButtonHeight() - ImGui::GetTextLineHeight()) / 2.0f);
+}
 
-    return ImGui::GetTextLineHeight() + 6.0f + 3 * columnWidth + 2 * columnGap;
+// The strip is bounded above by the spacing that parts it from the panes and
+// below by the window's own padding. Where those differ the row lands off
+// centre in the visible gap, so it takes up half the difference.
+float statusRowOffset()
+{
+    const ImGuiStyle& style = ImGui::GetStyle();
+
+    return std::max(0.0f, std::round((style.WindowPadding.y - style.ItemSpacing.y) / 2.0f));
+}
+
+void statusRowText(const char* text)
+{
+    ImGui::SetCursorPosY(ImGui::GetCursorPosY() + readoutNudge());
+    ImGui::TextUnformatted(text);
+}
+
+void drawReadoutChannels(const FloatColor& color, float start, const ReadoutColumns& columns)
+{
+    const char* labels[3] = {"R", "G", "B"};
+    const float channels[3] = {color.r, color.g, color.b};
+    for (int channel = 0; channel < 3; ++channel) {
+        const float columnStart = start + static_cast<float>(channel) * columns.stride;
+        char value[8];
+        std::snprintf(value, sizeof(value), "%.0f%%", channels[channel] / 2.55);
+        ImGui::SameLine(columnStart);
+        statusRowText(labels[channel]);
+        ImGui::SameLine(columnStart + columns.label + columns.gap);
+        statusRowText(value);
+    }
+}
+
+}  // namespace
+
+float App::statusBarHeight() const
+{
+    // The spacing that parts the strip from the panes, the tallest thing that
+    // can stand on its row, and the offset that centres the row between them.
+    return ImGui::GetStyle().ItemSpacing.y + iconButtonHeight() + statusRowOffset();
 }
 
 void App::drawStatusBar()
 {
-    // The reserved strip under the panes: transient feedback on the left,
-    // the live readout on the right. Output owns its own row - it never
-    // paints over the scopes' pixels. The dummy anchors the row when no
-    // message is up, so the readout's SameLine lands on this line.
-    const bool messageUp = !m_statusMessage.empty() && glfwGetTime() <= m_statusUntil;
-    if (messageUp) {
-        ImGui::TextUnformatted(m_statusMessage.c_str());
-    } else {
-        ImGui::Dummy(ImVec2(1.0f, ImGui::GetTextLineHeight()));
+    // The reserved strip under the panes. Output owns its own row - it never
+    // paints over the scopes' pixels. Idle, the row spans corner to corner:
+    // the pin tool holds the left, the live swatch the right, and the channel
+    // readout gathers against the swatch. A message clears the row and takes
+    // it whole, so a line that only shows for a moment is not something to be
+    // picked out from among the standing furniture.
+    ImGui::SetCursorPosY(ImGui::GetCursorPosY() + statusRowOffset());
+    // A full-height anchor opens the row before anything stands on it, so the
+    // line's origin never depends on which of them is showing. Without it the
+    // first element to be placed sets the origin, and a message - shorter than
+    // the tool - dragged everything after it down.
+    ImGui::Dummy(ImVec2(0.0f, iconButtonHeight()));
+    if (!m_statusMessage.empty() && glfwGetTime() <= m_statusUntil) {
+        // Indented to the tool's glyph rather than to the content edge: the
+        // row keeps one left edge whichever of the two is standing on it.
+        ImGui::SameLine(0.0f, iconButtonInset());
+        statusRowText(m_statusMessage.c_str());
+
+        return;
     }
-    // On a strip too narrow for both, the readout yields while the message
-    // shows - the message is transient, the readout returns right after.
-    const float messageEnd = ImGui::GetItemRectMax().x - ImGui::GetWindowPos().x;
-    const float readoutStart = ImGui::GetWindowContentRegionMax().x - cursorReadoutWidth();
-    if (!messageUp || messageEnd + 8.0f <= readoutStart) {
-        drawCursorReadout();
+    ImGui::SameLine(0.0f, 0.0f);
+    drawPinTool();
+    drawCursorReadout(ImGui::GetItemRectMax().x - ImGui::GetWindowPos().x);
+}
+
+// The tool that samples a colour sits beside the colour it samples, not among
+// the region tools - those choose what is captured, this one reads it.
+void App::drawPinTool()
+{
+    const bool pins = pinsAvailable();
+    char tooltip[160];
+    std::snprintf(tooltip, sizeof(tooltip), "Pin a color (%s)%s", m_shortcuts.pinColor.c_str(),
+                  pins ? " - Shift+click a color to pin several" : " - needs a scope that takes pins");
+    if (iconButton("##pin-color", iconTextureId(Icon::Pipette, iconPixelSize()), tooltip, !pins) && pins) {
+        m_wantRegionPick = RegionPickerMode::PinColor;
     }
 }
 
-void App::drawCursorReadout()
+void App::drawCursorReadout(float taken)
 {
-    // The bar's right half. Each value gets a column sized for the widest it
-    // can be and is right-aligned inside it, so neither swatch nor numbers
-    // wander.
+    // The colour under the cursor, laid out inwards from its corner: the
+    // swatch first, then a named percentage per channel in fixed columns, so
+    // no digit coming or going moves anything. The swatch outranks the numbers
+    // when the strip runs short, and both give way to whatever already stands
+    // on the row.
     if (!m_vectorscopeColor) {
         return;
     }
     const FloatColor& color = *m_vectorscopeColor;
-    const float columnWidth = ImGui::CalcTextSize("100%").x;
-    const float columnGap = ImGui::CalcTextSize(" ").x;
     const float swatch = ImGui::GetTextLineHeight();
-    const float readoutStart = ImGui::GetWindowContentRegionMax().x - cursorReadoutWidth();
-    ImGui::SameLine(readoutStart);
+    const float swatchStart = ImGui::GetWindowContentRegionMax().x - swatch;
+    if (swatchStart < taken + 8.0f) {
+        return;
+    }
+    const ReadoutColumns columns = measureReadoutColumns();
+    const float channelsStart = swatchStart - 6.0f - columns.width;
+    if (channelsStart >= taken + 8.0f) {
+        drawReadoutChannels(color, channelsStart, columns);
+    }
+    ImGui::SameLine(swatchStart);
+    ImGui::SetCursorPosY(ImGui::GetCursorPosY() + readoutNudge());
     ImGui::ColorButton("##cursor-color", ImVec4(color.r / 255.0f, color.g / 255.0f, color.b / 255.0f, 1.0f),
                        ImGuiColorEditFlags_NoTooltip | ImGuiColorEditFlags_NoDragDrop, ImVec2(swatch, swatch));
-    const float columnsStart = readoutStart + swatch + 6;
-    const float channels[3] = {color.r, color.g, color.b};
-    for (int channel = 0; channel < 3; ++channel) {
-        char value[8];
-        std::snprintf(value, sizeof(value), "%.0f%%", channels[channel] / 2.55);
-        const float columnStart = columnsStart + channel * (columnWidth + columnGap);
-        ImGui::SameLine(columnStart + columnWidth - ImGui::CalcTextSize(value).x);
-        ImGui::TextUnformatted(value);
-    }
 }
 
 void App::setStatus(std::string message)

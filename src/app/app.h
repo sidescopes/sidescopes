@@ -253,12 +253,15 @@ private:
     void drawRegionToolIcons();
     /// The status bar's reserved height below the panes.
     [[nodiscard]] float statusBarHeight() const;
-    /// The readout's full width in the bar, for the message-overlap yield.
-    [[nodiscard]] float cursorReadoutWidth() const;
-    /// The reserved strip under the panes: transient status on the left, the
-    /// live readout on the right.
+    /// The reserved strip under the panes: the pin tool in the left corner,
+    /// the live swatch in the right, messages and the readout between them.
     void drawStatusBar();
-    void drawCursorReadout();
+    /// The bar's colour sampler, anchored to the strip's left corner.
+    void drawPinTool();
+    /// Draws the swatch inwards from the right corner, preceded by the
+    /// channel readout when the room left by \p taken - the row's used width
+    /// so far - allows it.
+    void drawCursorReadout(float taken);
     void drawScopePanes();
     void drawScopeStack();
     /// Each stacked scope's preferred pane aspect, in stack order, for the
