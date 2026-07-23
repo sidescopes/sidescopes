@@ -3,6 +3,7 @@
 #include <algorithm>
 
 #include "app/scope_registry.h"
+#include "app/stack_tokens.h"
 
 namespace sidescopes {
 namespace {
@@ -83,44 +84,12 @@ std::vector<std::string> ScopeView::enabledScopeIds() const
 
 void ScopeView::restoreStack(const std::string& tokens)
 {
-    m_stack.clear();
-    for (std::size_t at = 0; at < tokens.size();) {
-        const HostScope* scope = nullptr;
-        if (tokens[at] == '[') {
-            const auto close = tokens.find(']', at);
-            if (close == std::string::npos) {
-                break;
-            }
-            scope = m_registry.byId(tokens.substr(at + 1, close - at - 1));
-            at = close + 1;
-        } else {
-            scope = m_registry.byLetter(tokens[at]);
-            ++at;
-        }
-        if (scope != nullptr && !shows(scope->id)) {
-            m_stack.push_back(scope->id);
-        }
-    }
-    if (m_stack.empty()) {
-        m_stack.emplace_back(VectorscopeScopeId);
-    }
+    m_stack = parseStackTokens(m_registry, tokens);
 }
 
 std::string ScopeView::stackTokens() const
 {
-    std::string tokens;
-    for (const std::string& id : m_stack) {
-        const HostScope* scope = m_registry.byId(id);
-        if (scope != nullptr && scope->letter != 0) {
-            tokens += scope->letter;
-        } else {
-            tokens += '[';
-            tokens += id;
-            tokens += ']';
-        }
-    }
-
-    return tokens;
+    return formatStackTokens(m_registry, m_stack);
 }
 
 bool ScopeView::graticule() const

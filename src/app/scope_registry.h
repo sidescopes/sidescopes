@@ -10,6 +10,14 @@ namespace sidescopes {
 
 class ModuleRegistry;
 
+/// Well-known module scope ids the host special-cases: the parade-to-waveform
+/// control alias and the default stack. Every other identity flows through the
+/// registry by string.
+inline constexpr char VectorscopeScopeId[] = "org.sidescopes.vectorscope";
+inline constexpr char WaveformScopeId[] = "org.sidescopes.waveform";
+inline constexpr char ParadeScopeId[] = "org.sidescopes.parade";
+inline constexpr char HistogramScopeId[] = "org.sidescopes.histogram";
+
 /// The host color picker's reserved scope id; it has no module descriptor and
 /// asks nothing of the analysis worker.
 inline constexpr char ColorPickerScopeId[] = "org.sidescopes.colorpicker";

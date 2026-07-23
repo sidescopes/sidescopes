@@ -8,18 +8,9 @@
 #include <vector>
 
 #include "app/scope_layout.h"
+#include "app/scope_registry.h"
 
 namespace sidescopes {
-
-class ScopeRegistry;
-
-/// Well-known module scope ids the host special-cases: the parade-to-waveform
-/// control alias and the default stack. Every other identity flows through the
-/// registry by string.
-inline constexpr char VectorscopeScopeId[] = "org.sidescopes.vectorscope";
-inline constexpr char WaveformScopeId[] = "org.sidescopes.waveform";
-inline constexpr char ParadeScopeId[] = "org.sidescopes.parade";
-inline constexpr char HistogramScopeId[] = "org.sidescopes.histogram";
 
 /// Which trace's intensity readout is flashing, and until when. The control is
 /// named by the scope id that owns it; the waveform and its parade share one.
@@ -68,15 +59,12 @@ public:
     ///         worker), in activation order.
     [[nodiscard]] std::vector<std::string> enabledScopeIds() const;
 
-    /// Restores the stack from a preference token string, falling back to the
-    /// vectorscope when it names nothing valid. A token is a bracketed `[id]`
-    /// resolved by id, or a bare letter resolved through the registry; a token
-    /// the registry does not know is dropped, and duplicates collapse.
+    /// Restores the stack from a preference token string, in the format
+    /// parseStackTokens reads.
     void restoreStack(const std::string& tokens);
 
-    /// @return The stack as a preference token string: one token per scope, a
-    ///         bracketed `[id]` for a letterless scope and its letter otherwise,
-    ///         so a letterless scope survives a save.
+    /// @return The stack as a preference token string, in the format
+    ///         formatStackTokens writes.
     [[nodiscard]] std::string stackTokens() const;
 
     [[nodiscard]] bool graticule() const;

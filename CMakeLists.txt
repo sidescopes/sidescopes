@@ -382,6 +382,7 @@ if(APPLE OR WIN32)
         src/app/scope_view.cpp
         src/app/settings_window.cpp
         src/app/shortcut_resolver.cpp
+        src/app/stack_tokens.cpp
         src/app/ui_scale.cpp
         src/app/ui_scaling.cpp
         src/app/version.cpp
