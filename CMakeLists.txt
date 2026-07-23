@@ -365,13 +365,15 @@ if(APPLE OR WIN32)
         src/app/face_lock.cpp
         src/app/face_lock_controller.cpp
         src/app/frame_timer.cpp
+        src/app/icon_textures.cpp
         src/app/imgui_ui.cpp
         src/app/layout_preset_store.cpp
         src/app/layout_presets.cpp
         src/app/overlay_render.cpp
         src/app/overlay_style.cpp
-        src/app/param_menu.cpp
+        src/app/pane_area.cpp
         src/app/pane_layout.cpp
+        src/app/param_menu.cpp
         src/app/pin_board.cpp
         src/app/region_coordinator.cpp
         src/app/region_geometry.cpp
@@ -385,6 +387,8 @@ if(APPLE OR WIN32)
         src/app/settings_window.cpp
         src/app/shortcut_resolver.cpp
         src/app/stack_tokens.cpp
+        src/app/status_bar.cpp
+        src/app/toolbar.cpp
         src/app/trace_params.cpp
         src/app/ui_scale.cpp
         src/app/ui_scaling.cpp
