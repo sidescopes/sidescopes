@@ -347,6 +347,7 @@ if(APPLE OR WIN32)
     # out of main.
     target_sources(SideScopes PRIVATE
         src/app/app.cpp
+        src/app/app_region_pick.cpp
         src/app/attach_controller.cpp
         src/app/capture_controller.cpp
         src/app/color_readout.cpp
@@ -357,6 +358,7 @@ if(APPLE OR WIN32)
         src/app/overlay_style.cpp
         src/app/param_menu.cpp
         src/app/pin_board.cpp
+        src/app/region_geometry.cpp
         src/app/row_layout.cpp
         src/app/scope_layout.cpp
         src/app/scope_registry.cpp
