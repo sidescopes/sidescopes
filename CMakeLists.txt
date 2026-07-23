@@ -359,12 +359,17 @@ if(APPLE OR WIN32)
         src/app/attach_controller.cpp
         src/app/border_label.cpp
         src/app/capture_controller.cpp
+        src/app/color_picker_common.cpp
+        src/app/color_picker_deck.cpp
+        src/app/color_picker_difference.cpp
+        src/app/color_picker_hero.cpp
         src/app/color_readout.cpp
         src/app/context_menu.cpp
         src/app/cursor_sampler.cpp
         src/app/face_lock.cpp
         src/app/face_lock_controller.cpp
         src/app/frame_timer.cpp
+        src/app/hex_font.cpp
         src/app/icon_textures.cpp
         src/app/imgui_ui.cpp
         src/app/layout_preset_store.cpp
