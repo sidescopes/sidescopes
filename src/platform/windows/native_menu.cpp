@@ -49,7 +49,7 @@ int showNativeContextMenu(const std::vector<NativeMenuItem>& items)
                 label += "\t" + item.shortcut;
             }
             AppendMenuW(current, MF_STRING | (item.checked ? MF_CHECKED : MF_UNCHECKED),
-                        static_cast<UINT_PTR>(item.actionId + 1), wideFromUtf8(label).c_str());
+                        static_cast<UINT_PTR>(item.actionId) + 1, wideFromUtf8(label).c_str());
             break;
         }
         }

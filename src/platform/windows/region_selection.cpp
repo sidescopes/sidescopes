@@ -544,9 +544,9 @@ void drawBanner(Gdiplus::Graphics& canvas, const PickerState& picker, const wcha
 
     const auto width = static_cast<Gdiplus::REAL>(std::max(primarySize.Width, secondarySize.Width) + 48 * scale);
     const auto height = static_cast<Gdiplus::REAL>(primarySize.Height + secondarySize.Height + 30 * scale);
-    const auto x = static_cast<Gdiplus::REAL>((picker.width - width) / 2);
+    const auto x = static_cast<Gdiplus::REAL>((static_cast<Gdiplus::REAL>(picker.width) - width) / 2);
     const auto topY = static_cast<Gdiplus::REAL>(80 * scale);
-    const auto centerY = static_cast<Gdiplus::REAL>((picker.height - height) / 2);
+    const auto centerY = static_cast<Gdiplus::REAL>((static_cast<Gdiplus::REAL>(picker.height) - height) / 2);
     const auto lowY = static_cast<Gdiplus::REAL>(picker.height * 0.78 - height);
     const Gdiplus::REAL candidates[3] = {preferCenter ? centerY : topY, preferCenter ? topY : centerY, lowY};
     Gdiplus::RectF banner(x, candidates[0], width, height);

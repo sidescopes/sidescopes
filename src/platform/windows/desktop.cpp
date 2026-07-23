@@ -634,6 +634,7 @@ float monospaceFontScale()
     return 0.866f;
 }
 
+// NOLINTNEXTLINE(performance-unnecessary-value-param): by-value matches the sink interface
 void observeSystemWake(std::function<void()>)
 {
     // Duplication dies loudly on lock and wake (access lost) and the
@@ -641,6 +642,7 @@ void observeSystemWake(std::function<void()>)
     // nothing to observe here.
 }
 
+// NOLINTNEXTLINE(performance-unnecessary-value-param): by-value matches the sink interface
 void observeEscapeWithoutKeyWindow(std::function<void()>)
 {
     // The border window carries WS_EX_NOACTIVATE: interacting with it
@@ -648,15 +650,16 @@ void observeEscapeWithoutKeyWindow(std::function<void()>)
     // this seam exists for cannot occur here.
 }
 
+// NOLINTNEXTLINE(performance-unnecessary-value-param): by-value matches the sink interface
 void sampleScreenColorAsync(DesktopPoint point, std::function<void(std::optional<FloatColor>)> callback)
 {
     // GDI reads any monitor of the virtual screen synchronously.
     // CAPTUREBLT includes other applications' layered windows (tooltips,
     // notification toasts) the way the eye sees them; this application's
     // own overlays stay out through their capture affinity.
-    constexpr int side = 3;
-    const int left = static_cast<int>(point.x) - side / 2;
-    const int top = static_cast<int>(point.y) - side / 2;
+    constexpr int Side = 3;
+    const int left = static_cast<int>(point.x) - Side / 2;
+    const int top = static_cast<int>(point.y) - Side / 2;
 
     HDC screen = GetDC(nullptr);
     if (!screen) {
@@ -667,8 +670,8 @@ void sampleScreenColorAsync(DesktopPoint point, std::function<void(std::optional
     HDC memory = CreateCompatibleDC(screen);
     BITMAPINFO info{};
     info.bmiHeader.biSize = sizeof(info.bmiHeader);
-    info.bmiHeader.biWidth = side;
-    info.bmiHeader.biHeight = -side;  // top-down rows
+    info.bmiHeader.biWidth = Side;
+    info.bmiHeader.biHeight = -Side;  // top-down rows
     info.bmiHeader.biPlanes = 1;
     info.bmiHeader.biBitCount = 32;
     info.bmiHeader.biCompression = BI_RGB;
@@ -676,19 +679,19 @@ void sampleScreenColorAsync(DesktopPoint point, std::function<void(std::optional
     HBITMAP bitmap = memory ? CreateDIBSection(memory, &info, DIB_RGB_COLORS, &bits, nullptr, 0) : nullptr;
     if (bitmap) {
         HGDIOBJ previous = SelectObject(memory, bitmap);
-        if (BitBlt(memory, 0, 0, side, side, screen, left, top, SRCCOPY | CAPTUREBLT)) {
+        if (BitBlt(memory, 0, 0, Side, Side, screen, left, top, SRCCOPY | CAPTUREBLT)) {
             const auto* pixels = static_cast<const uint8_t*>(bits);
             double sumR = 0;
             double sumG = 0;
             double sumB = 0;
-            for (int index = 0; index < side * side; ++index) {
+            for (int index = 0; index < Side * Side; ++index) {
                 sumB += pixels[index * 4 + 0];
                 sumG += pixels[index * 4 + 1];
                 sumR += pixels[index * 4 + 2];
             }
-            constexpr double count = static_cast<double>(side) * side;
-            color = FloatColor{static_cast<float>(sumR / count), static_cast<float>(sumG / count),
-                               static_cast<float>(sumB / count)};
+            constexpr double Count = static_cast<double>(Side) * Side;
+            color = FloatColor{static_cast<float>(sumR / Count), static_cast<float>(sumG / Count),
+                               static_cast<float>(sumB / Count)};
         }
         SelectObject(memory, previous);
         DeleteObject(bitmap);

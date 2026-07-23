@@ -10,6 +10,10 @@
 #   supports it.
 # - enum-size: shrinking enums to uint8_t saves nothing measurable and costs
 #   readability.
+# - no-int-to-ptr: the platform layers pass pointers through the integer
+#   handles the OS APIs define that way (Win32 LPARAM callback context, HWND as
+#   a uint64, Core Foundation window ids as void*), so it only ever fires on
+#   interop that cannot be rewritten.
 # - EnumCastOutOfRange: fires inside Catch2's own result-type flag
 #   arithmetic, and analyzer findings ignore the header filter.
 Checks: >
@@ -21,6 +25,7 @@ Checks: >
   cppcoreguidelines-narrowing-conversions,
   performance-*,
   -performance-enum-size,
+  -performance-no-int-to-ptr,
   portability-*,
   -portability-avoid-pragma-once,
   modernize-use-nullptr,

@@ -75,13 +75,13 @@ public:
         stop();
     }
 
-    CapturePermission requestPermission()
+    CapturePermission requestPermission() override
     {
         // Reading the desktop needs no user consent on Windows.
         return CapturePermission::Granted;
     }
 
-    std::vector<CaptureTarget> listTargets()
+    std::vector<CaptureTarget> listTargets() override
     {
         std::vector<CaptureTarget> targets;
         ComPtr<IDXGIFactory1> factory;
@@ -115,7 +115,7 @@ public:
         return targets;
     }
 
-    bool start(const CaptureTarget& target, int maxFramesPerSecond, FrameMailbox& mailbox)
+    bool start(const CaptureTarget& target, int maxFramesPerSecond, FrameMailbox& mailbox) override
     {
         stop();
         UINT adapterIndex = 0;
@@ -134,7 +134,7 @@ public:
         return true;
     }
 
-    void stop()
+    void stop() override
     {
         m_stopRequested.store(true);
         if (m_worker.joinable()) {
@@ -142,7 +142,7 @@ public:
         }
     }
 
-    void setStatusCallback(StatusCallback callback)
+    void setStatusCallback(StatusCallback callback) override
     {
         m_statusCallback = std::move(callback);
     }

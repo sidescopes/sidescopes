@@ -89,8 +89,7 @@ std::optional<WindowGeometry> windowGeometry(uint64_t identity)
     const CGWindowID windowId = static_cast<CGWindowID>(identity);
     // CGWindowListCreateDescriptionFromArray takes a CFArray whose elements are
     // window ids encoded directly as pointer values - Apple's documented
-    // contract, so the integer-to-pointer cast is required here.
-    // NOLINTNEXTLINE(performance-no-int-to-ptr)
+    // contract (see the performance-no-int-to-ptr note in .clang-tidy).
     const void* ids[1] = {reinterpret_cast<const void*>(static_cast<uintptr_t>(windowId))};
     CFArrayRef idArray = CFArrayCreate(kCFAllocatorDefault, ids, 1, nullptr);
     if (!idArray) {

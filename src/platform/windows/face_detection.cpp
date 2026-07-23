@@ -130,7 +130,7 @@ void warmFaceDetection()
             // The temporary releases before the apartment closes.
             FaceDetector::CreateAsync().get();
             winrt::uninit_apartment();
-        } catch (...) {
+        } catch (...) {  // NOLINT(bugprone-empty-catch): warm-up failure is retried by real detection
         }
     }).detach();
 }
