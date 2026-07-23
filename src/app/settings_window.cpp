@@ -36,9 +36,9 @@ void drawVectorscopeSettings(const SettingsContext& ctx)
     const SsParamInfo* gain = firstParamOfKind(descriptorFor(ctx.registry, VectorscopeScopeId), SS_PARAM_INTENSITY);
     const SsParamInfo* strideParam = firstParamOfKind(descriptorFor(ctx.registry, VectorscopeScopeId), SS_PARAM_INT);
     ImGui::TextDisabled("vectorscope");
-    float percent = ctx.view.intensity(VectorscopeScopeId);
+    float percent = ctx.view.traces().intensity(VectorscopeScopeId);
     if (ImGui::SliderFloat("intensity##v", &percent, 0.0f, 100.0f, "%.0f%%")) {
-        ctx.view.setIntensity(VectorscopeScopeId, percent);
+        ctx.view.traces().setIntensity(VectorscopeScopeId, percent);
         ctx.analysis.scopeParams[VectorscopeScopeId][gain->key] =
             traceGainFromIntensity(percent, static_cast<float>(gain->intensity_shift));
         ctx.analysisDirty = true;
@@ -50,9 +50,9 @@ void drawVectorscopeSettings(const SettingsContext& ctx)
         ctx.analysis.scopeParams[VectorscopeScopeId][strideParam->key] = stride;
         ctx.analysisDirty = true;
     }
-    float smoothingMs = ctx.view.smoothing(VectorscopeScopeId);
+    float smoothingMs = ctx.view.traces().smoothing(VectorscopeScopeId);
     if (ImGui::SliderFloat("smoothing ms##v", &smoothingMs, 0.0f, 500.0f, "%.0f")) {
-        ctx.view.setSmoothing(VectorscopeScopeId, smoothingMs);
+        ctx.view.traces().setSmoothing(VectorscopeScopeId, smoothingMs);
     }
 }
 
@@ -63,9 +63,9 @@ void drawWaveformSettings(const SettingsContext& ctx)
     const SsParamInfo* gain = firstParamOfKind(descriptorFor(ctx.registry, WaveformScopeId), SS_PARAM_INTENSITY);
     const SsParamInfo* strideParam = firstParamOfKind(descriptorFor(ctx.registry, WaveformScopeId), SS_PARAM_INT);
     ImGui::TextDisabled("waveform");
-    float percent = ctx.view.intensity(WaveformScopeId);
+    float percent = ctx.view.traces().intensity(WaveformScopeId);
     if (ImGui::SliderFloat("intensity##w", &percent, 0.0f, 100.0f, "%.0f%%")) {
-        ctx.view.setIntensity(WaveformScopeId, percent);
+        ctx.view.traces().setIntensity(WaveformScopeId, percent);
         const double value = traceGainFromIntensity(percent, static_cast<float>(gain->intensity_shift));
         ctx.analysis.scopeParams[WaveformScopeId]["gain"] = value;
         ctx.analysis.scopeParams[ParadeScopeId]["gain"] = value;
@@ -79,9 +79,9 @@ void drawWaveformSettings(const SettingsContext& ctx)
         ctx.analysis.scopeParams[ParadeScopeId]["stride"] = stride;
         ctx.analysisDirty = true;
     }
-    float smoothingMs = ctx.view.smoothing(WaveformScopeId);
+    float smoothingMs = ctx.view.traces().smoothing(WaveformScopeId);
     if (ImGui::SliderFloat("smoothing ms##w", &smoothingMs, 0.0f, 500.0f, "%.0f")) {
-        ctx.view.setSmoothing(WaveformScopeId, smoothingMs);
+        ctx.view.traces().setSmoothing(WaveformScopeId, smoothingMs);
     }
 }
 

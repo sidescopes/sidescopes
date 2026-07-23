@@ -130,7 +130,7 @@ void pipelineGui(ImGuiTestContext*)
         }
         const char label[2] = {scope.letter, '\0'};
         if (ImGui::Button(label)) {
-            h.scopeView.toggle(scope.id);
+            h.scopeView.stack().toggle(scope.id);
         }
         ImGui::SameLine();
     }
@@ -146,7 +146,7 @@ void pipelineGui(ImGuiTestContext*)
     // Sync the view's stack and the pane-derived resolution into the worker
     // whenever either changed - the app's per-frame settings push. The
     // waveform and its parade share one image size.
-    const std::vector<std::string> ids = h.scopeView.enabledScopeIds();
+    const std::vector<std::string> ids = h.scopeView.stack().enabledScopeIds();
     const std::pair<int, int> waveSize{columns, imageHeight};
     const auto currentSize = h.settings.imageSizes.find(WaveformScopeId);
     const bool sizeChanged = currentSize == h.settings.imageSizes.end() || currentSize->second != waveSize;
@@ -172,7 +172,7 @@ void endToEnd(ImGuiTestContext* ctx)
     ctx->SetRef("Pipeline");
 
     const auto enables = [&](std::string_view id) {
-        const std::vector<std::string> ids = h.scopeView.enabledScopeIds();
+        const std::vector<std::string> ids = h.scopeView.stack().enabledScopeIds();
 
         return std::find(ids.begin(), ids.end(), id) != ids.end();
     };
@@ -188,7 +188,7 @@ void endToEnd(ImGuiTestContext* ctx)
     ctx->Yield();
     IM_CHECK(h.settingsPushes >= 1);
     IM_CHECK(h.settings.imageSizes.at(WaveformScopeId).second == 512);  // pane height flowed in
-    IM_CHECK(h.scopeView.enabledScopeIds() == std::vector<std::string>{VectorscopeScopeId});
+    IM_CHECK(h.scopeView.stack().enabledScopeIds() == std::vector<std::string>{VectorscopeScopeId});
 
     // --- data plane: a known input frame yields a known vectorscope output ---
     h.mailbox.publish(makeSolidFrameBuffer(64, 64, Color{191, 0, 0}, 1));
@@ -206,7 +206,7 @@ void endToEnd(ImGuiTestContext* ctx)
     // --- UI action: clicking W adds the waveform to the real ScopeView ---
     IM_CHECK(!enables(WaveformScopeId));
     ctx->ItemClick("W");
-    IM_CHECK(h.scopeView.shows(WaveformScopeId));
+    IM_CHECK(h.scopeView.stack().shows(WaveformScopeId));
     IM_CHECK(enables(WaveformScopeId));
 
     // The GuiFunc pushes the new ids on its next frame; the worker recomputes
@@ -245,7 +245,7 @@ try {
 
     // Start on the vectorscope alone, so the waveform is provably off until the
     // UI turns it on. The worker consumes frames on its own thread from here.
-    h.settings.enabledScopes = h.scopeView.enabledScopeIds();
+    h.settings.enabledScopes = h.scopeView.stack().enabledScopeIds();
     h.worker.updateSettings(h.settings);
     h.worker.start();
 

@@ -235,11 +235,11 @@ void App::setupView(const Preferences& startup)
     // constants sit in different layers, so the build checks they agree.
     static_assert(MaximumPins == PinBoard::Maximum);
     m_pins.restore(startup.pins, startup.pinComparator);
-    m_view.restoreStack(startup.scopeStack);
+    m_view.stack().restore(startup.scopeStack);
     m_view.setGraticule(startup.showGraticule);
     m_view.setZoom(startup.vectorscopeZoom);
-    m_view.setOrientation(orientationFromInt(startup.layoutOrientation));
-    m_view.setWeights(startup.layoutWeights);
+    m_view.layout().setOrientation(orientationFromInt(startup.layoutOrientation));
+    m_view.layout().setWeights(startup.layoutWeights);
     m_presets.restore(startup.layoutPresets, startup.layoutActiveSlot);
     // The stored factor is cleaned to an offered step here, at the app boundary,
     // so core preferences never depend on the app's scaling policy. setupImGui
@@ -257,14 +257,14 @@ void App::setupView(const Preferences& startup)
 
         return value != scope->second.end() ? static_cast<float>(value->second) : static_cast<float>(fallback);
     };
-    m_view.setIntensity(VectorscopeScopeId,
-                        intensityFromTraceGain(static_cast<float>(scopeParam(VectorscopeScopeId, "gain", 3.0)),
-                                               VectorscopeIntensityShift));
-    m_view.setIntensity(WaveformScopeId,
-                        intensityFromTraceGain(static_cast<float>(scopeParam(WaveformScopeId, "gain", 0.05))));
-    m_view.setSmoothing(VectorscopeScopeId, startupSmoothing(VectorscopeScopeId, 75.0));
-    m_view.setSmoothing(WaveformScopeId, startupSmoothing(WaveformScopeId, 100.0));
-    m_analysis.enabledScopes = m_view.enabledScopeIds();
+    m_view.traces().setIntensity(VectorscopeScopeId,
+                                 intensityFromTraceGain(static_cast<float>(scopeParam(VectorscopeScopeId, "gain", 3.0)),
+                                                        VectorscopeIntensityShift));
+    m_view.traces().setIntensity(WaveformScopeId,
+                                 intensityFromTraceGain(static_cast<float>(scopeParam(WaveformScopeId, "gain", 0.05))));
+    m_view.traces().setSmoothing(VectorscopeScopeId, startupSmoothing(VectorscopeScopeId, 75.0));
+    m_view.traces().setSmoothing(WaveformScopeId, startupSmoothing(WaveformScopeId, 100.0));
+    m_analysis.enabledScopes = m_view.stack().enabledScopeIds();
 }
 
 std::optional<uint32_t> App::displayOfWindow() const
@@ -295,7 +295,7 @@ bool App::pinsAvailable() const
     // Pins mark any scope that declares itself a pin target (plus the host's
     // own color picker); without one on screen, the tool's button, menu
     // entries, and shortcuts all stand down together.
-    for (const std::string& scopeId : m_view.stack()) {
+    for (const std::string& scopeId : m_view.stack().ids()) {
         if (scopeId == ColorPickerScopeId) {
             return true;
         }
@@ -335,8 +335,8 @@ void App::refreshActivatedScope(std::string_view id)
 
 void App::toggleScope(std::string_view id)
 {
-    const bool activated = m_view.toggle(id);
-    m_analysis.enabledScopes = m_view.enabledScopeIds();
+    const bool activated = m_view.stack().toggle(id);
+    m_analysis.enabledScopes = m_view.stack().enabledScopeIds();
     if (activated) {
         refreshActivatedScope(id);
     }
@@ -345,8 +345,8 @@ void App::toggleScope(std::string_view id)
 
 void App::chooseScope(std::string_view id, bool stack)
 {
-    const bool activated = m_view.choose(id, stack);
-    m_analysis.enabledScopes = m_view.enabledScopeIds();
+    const bool activated = m_view.stack().choose(id, stack);
+    m_analysis.enabledScopes = m_view.stack().enabledScopeIds();
     if (activated) {
         refreshActivatedScope(id);
     }
@@ -388,13 +388,13 @@ void App::persistPreferences()
     // mirrors the waveform and re-seeds on load.
     preferences.scopeParams = m_analysis.scopeParams;
     preferences.scopeParams.erase(ParadeScopeId);
-    preferences.scopeParams[VectorscopeScopeId]["smoothing_ms"] = m_view.smoothing(VectorscopeScopeId);
-    preferences.scopeParams[WaveformScopeId]["smoothing_ms"] = m_view.smoothing(WaveformScopeId);
-    preferences.scopeStack = m_view.stackTokens();
+    preferences.scopeParams[VectorscopeScopeId]["smoothing_ms"] = m_view.traces().smoothing(VectorscopeScopeId);
+    preferences.scopeParams[WaveformScopeId]["smoothing_ms"] = m_view.traces().smoothing(WaveformScopeId);
+    preferences.scopeStack = m_view.stack().tokens();
     preferences.showGraticule = m_view.graticule();
     preferences.vectorscopeZoom = m_view.zoom();
-    preferences.layoutOrientation = orientationToInt(m_view.orientation());
-    preferences.layoutWeights = m_view.weightsSnapshot();
+    preferences.layoutOrientation = orientationToInt(m_view.layout().orientation());
+    preferences.layoutWeights = m_view.layout().weightsSnapshot();
     preferences.layoutPresets = m_presets.all();
     preferences.layoutActiveSlot = m_presets.activeSlot();
     preferences.uiScaleFactor = m_uiScale.userFactor();
@@ -577,7 +577,8 @@ void App::publishSelfWindowMask()
 // frame's drawing, and a moved pointer counts as interaction.
 void App::sampleCursorColor()
 {
-    const CursorSmoothing smoothing{m_view.smoothing(VectorscopeScopeId), m_view.smoothing(WaveformScopeId)};
+    const CursorSmoothing smoothing{m_view.traces().smoothing(VectorscopeScopeId),
+                                    m_view.traces().smoothing(WaveformScopeId)};
     const CursorSample sample = m_cursor.update(m_frameSize, smoothing, glfwGetTime(), ImGui::GetIO().DeltaTime);
     m_vectorscopeColor = sample.vectorscopeColor;
     m_waveformColor = sample.waveformColor;
@@ -929,15 +930,15 @@ void App::dispatchLayoutMenu(int chosen)
     // slot. Persistence rides dispatchMenuChoice's tail.
     switch (chosen) {
     case MenuLayoutAuto:
-        m_view.setOrientation(LayoutOrientation::Automatic);
+        m_view.layout().setOrientation(LayoutOrientation::Automatic);
 
         return;
     case MenuLayoutVertical:
-        m_view.setOrientation(LayoutOrientation::Vertical);
+        m_view.layout().setOrientation(LayoutOrientation::Vertical);
 
         return;
     case MenuLayoutHorizontal:
-        m_view.setOrientation(LayoutOrientation::Horizontal);
+        m_view.layout().setOrientation(LayoutOrientation::Horizontal);
 
         return;
     default:

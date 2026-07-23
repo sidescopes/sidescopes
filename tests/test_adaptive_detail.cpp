@@ -39,7 +39,7 @@ struct DetailFixture
 TEST_CASE("A resolution change waits out the settle time")
 {
     DetailFixture fixture;
-    fixture.view.choose(WaveformScopeId, false);
+    fixture.view.stack().choose(WaveformScopeId, false);
     fixture.analysis.imageSizes[WaveformScopeId] = {512, WaveformLevels};
 
     // The first sight of the larger pane only starts the clock, and a step
@@ -56,7 +56,7 @@ TEST_CASE("A resolution change waits out the settle time")
 TEST_CASE("A resolution that reverts during the wait is dropped")
 {
     DetailFixture fixture;
-    fixture.view.choose(WaveformScopeId, false);
+    fixture.view.stack().choose(WaveformScopeId, false);
     fixture.analysis.imageSizes[WaveformScopeId] = {512, WaveformLevels};
 
     CHECK_FALSE(fixture.detail.update(LargePanes, 1.0f, std::nullopt, 10.0).has_value());
@@ -75,7 +75,7 @@ TEST_CASE("A resolution that reverts during the wait is dropped")
 TEST_CASE("The display density decides which threshold a pane clears")
 {
     DetailFixture fixture;
-    fixture.view.choose(WaveformScopeId, false);
+    fixture.view.stack().choose(WaveformScopeId, false);
     fixture.analysis.imageSizes[WaveformScopeId] = {512, WaveformLevels};
 
     // At one framebuffer pixel per point the small pane asks for the smallest
@@ -94,8 +94,8 @@ TEST_CASE("The display density decides which threshold a pane clears")
 TEST_CASE("Each scope's resolution follows its own pane")
 {
     DetailFixture fixture;
-    fixture.view.choose(WaveformScopeId, true);
-    fixture.view.choose(HistogramScopeId, true);
+    fixture.view.stack().choose(WaveformScopeId, true);
+    fixture.view.stack().choose(HistogramScopeId, true);
 
     // The wider of the waveform and its parade decides the columns, the taller
     // the levels; the panes here are in framebuffer pixels already.

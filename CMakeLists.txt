@@ -371,6 +371,7 @@ if(APPLE OR WIN32)
         src/app/overlay_render.cpp
         src/app/overlay_style.cpp
         src/app/param_menu.cpp
+        src/app/pane_layout.cpp
         src/app/pin_board.cpp
         src/app/region_coordinator.cpp
         src/app/region_geometry.cpp
@@ -379,10 +380,12 @@ if(APPLE OR WIN32)
         src/app/scope_layout.cpp
         src/app/scope_pane_renderer.cpp
         src/app/scope_registry.cpp
+        src/app/scope_stack.cpp
         src/app/scope_view.cpp
         src/app/settings_window.cpp
         src/app/shortcut_resolver.cpp
         src/app/stack_tokens.cpp
+        src/app/trace_params.cpp
         src/app/ui_scale.cpp
         src/app/ui_scaling.cpp
         src/app/version.cpp

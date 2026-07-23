@@ -33,7 +33,10 @@ add_executable(sidescopes_tests
     test_scope_layout.cpp
     test_ui_scaling.cpp
     test_scope_registry.cpp
+    test_pane_layout.cpp
+    test_scope_stack.cpp
     test_scope_view.cpp
+    test_trace_params.cpp
     test_stack_tokens.cpp
     test_adaptive_detail.cpp
     test_capture_controller.cpp
@@ -63,13 +66,16 @@ target_sources(sidescopes_tests PRIVATE
     ${CMAKE_SOURCE_DIR}/src/app/region_geometry.cpp
     ${CMAKE_SOURCE_DIR}/src/app/overlay_style.cpp
     ${CMAKE_SOURCE_DIR}/src/app/param_menu.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/pane_layout.cpp
     ${CMAKE_SOURCE_DIR}/src/app/pin_board.cpp
     ${CMAKE_SOURCE_DIR}/src/app/region_picker.cpp
     ${CMAKE_SOURCE_DIR}/src/app/scope_layout.cpp
     ${CMAKE_SOURCE_DIR}/src/app/scope_registry.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/scope_stack.cpp
     ${CMAKE_SOURCE_DIR}/src/app/scope_view.cpp
     ${CMAKE_SOURCE_DIR}/src/app/shortcut_resolver.cpp
     ${CMAKE_SOURCE_DIR}/src/app/stack_tokens.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/trace_params.cpp
     ${CMAKE_SOURCE_DIR}/src/app/ui_scaling.cpp
     ${CMAKE_SOURCE_DIR}/src/app/version.cpp
     ${CMAKE_SOURCE_DIR}/src/app/window_suggestions.cpp)

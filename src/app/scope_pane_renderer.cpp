@@ -337,7 +337,7 @@ PaneRenderOutcome ScopePaneRenderer::drawScopeToggles(bool stackModifier)
         }
         const ScopeChrome chrome = scopeChromeFor(scope.id);
         const char letter[2] = {scope.letter, '\0'};
-        if (scopeToggleButton(chrome.buttonId, letter, m_view.shows(scope.id),
+        if (scopeToggleButton(chrome.buttonId, letter, m_view.stack().shows(scope.id),
                               scopeTooltip(chrome.name, m_shortcuts.bindingFor(scope.id), chrome.extra))) {
             outcome.chosenScope = ScopeChoice{scope.id, stackModifier};
         }
@@ -535,7 +535,7 @@ void ScopePaneRenderer::drawPaneContent(Pass& pass)
 
         return;
     }
-    const std::vector<std::string>& stack = m_view.stack();
+    const std::vector<std::string>& stack = m_view.stack().ids();
     if (stack.size() == 1) {
         drawScopeById(stack.front(), pass);
     } else if (stack.size() > 1) {
@@ -550,10 +550,12 @@ void ScopePaneRenderer::drawScopeStack(Pass& pass)
     // tile the area exactly, and restored inside each pane so scope contents
     // keep their normal breathing room.
     const ImVec2 area = ImGui::GetContentRegionAvail();
-    const int count = static_cast<int>(m_view.stack().size());
+    const std::vector<std::string>& ids = m_view.stack().ids();
+    const PaneLayout& layout = m_view.layout();
+    const int count = static_cast<int>(ids.size());
     const float divider = DividerThickness * pass.input.uiScale;
-    const std::vector<float> weights = m_view.stackWeights();
-    const bool sideBySide = resolveSplitDirection(m_view.orientation(), area.x, area.y, weights, stackAspects(),
+    const std::vector<float> weights = layout.stackWeights(ids);
+    const bool sideBySide = resolveSplitDirection(layout.orientation(), area.x, area.y, weights, stackAspects(),
                                                   divider) == SplitDirection::SideBySide;
     const float axisLength = (sideBySide ? area.x : area.y) - divider * static_cast<float>(count - 1);
     const std::vector<float> lengths = paneLengths(weights, axisLength, MinPaneLength * pass.input.uiScale);
@@ -565,7 +567,7 @@ void ScopePaneRenderer::drawScopeStack(Pass& pass)
         const ImVec2 paneSize = sideBySide ? ImVec2(lengths[index], area.y) : ImVec2(area.x, lengths[index]);
         ImGui::BeginChild(m_paneIds[index].c_str(), paneSize);
         ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, spacing);
-        drawScopeById(m_view.stack()[index], pass);
+        drawScopeById(ids[index], pass);
         ImGui::PopStyleVar();
         ImGui::EndChild();
         if (pane + 1 < count) {
@@ -586,8 +588,9 @@ std::vector<float> ScopePaneRenderer::stackAspects() const
     // A module's own declaration wins; the host table covers the color
     // picker and modules that declare nothing.
     std::vector<float> aspects;
-    aspects.reserve(m_view.stack().size());
-    for (const std::string& scopeId : m_view.stack()) {
+    const std::vector<std::string>& ids = m_view.stack().ids();
+    aspects.reserve(ids.size());
+    for (const std::string& scopeId : ids) {
         const HostScope* hostScope = m_registry.byId(scopeId);
         const float declared =
             hostScope != nullptr && hostScope->descriptor != nullptr ? hostScope->descriptor->preferred_aspect : 0.0f;
@@ -639,12 +642,13 @@ void ScopePaneRenderer::adjustDividerWeights(int leftPane, float deltaPixels, co
         return;
     }
     const auto left = static_cast<std::size_t>(leftPane);
-    const std::string& leftId = m_view.stack()[left];
-    const std::string& rightId = m_view.stack()[left + 1];
-    const auto [newLeft, newRight] = dragDividerWeights(m_view.weight(leftId), m_view.weight(rightId), lengths[left],
+    PaneLayout& layout = m_view.layout();
+    const std::string& leftId = m_view.stack().ids()[left];
+    const std::string& rightId = m_view.stack().ids()[left + 1];
+    const auto [newLeft, newRight] = dragDividerWeights(layout.weight(leftId), layout.weight(rightId), lengths[left],
                                                         lengths[left + 1], deltaPixels, MinPaneLength * uiScale);
-    m_view.setWeight(leftId, newLeft);
-    m_view.setWeight(rightId, newRight);
+    layout.setWeight(leftId, newLeft);
+    layout.setWeight(rightId, newRight);
 }
 
 void ScopePaneRenderer::equalizeDividerWeights(int leftPane, Pass& pass)
@@ -652,11 +656,12 @@ void ScopePaneRenderer::equalizeDividerWeights(int leftPane, Pass& pass)
     // Double-click reset: the two neighbors share their combined weight evenly,
     // leaving every other pane untouched.
     const auto left = static_cast<std::size_t>(leftPane);
-    const std::string& leftId = m_view.stack()[left];
-    const std::string& rightId = m_view.stack()[left + 1];
-    const float average = (m_view.weight(leftId) + m_view.weight(rightId)) * 0.5f;
-    m_view.setWeight(leftId, average);
-    m_view.setWeight(rightId, average);
+    PaneLayout& layout = m_view.layout();
+    const std::string& leftId = m_view.stack().ids()[left];
+    const std::string& rightId = m_view.stack().ids()[left + 1];
+    const float average = (layout.weight(leftId) + layout.weight(rightId)) * 0.5f;
+    layout.setWeight(leftId, average);
+    layout.setWeight(rightId, average);
     pass.outcome.preferencesSaveDue = true;
     pass.outcome.activity = true;
 }
@@ -687,11 +692,12 @@ void ScopePaneRenderer::drawVectorscopePane(Pass& pass)
 {
     const DrawnScope scope = drawScopeImage(textureForId(VectorscopeScopeId), true, static_cast<float>(m_view.zoom()));
     const SsParamInfo* gain = firstParamOfKind(descriptorFor(VectorscopeScopeId), SS_PARAM_INTENSITY);
+    TraceParams& traces = m_view.traces();
     if (gain != nullptr) {
-        if (const auto adjusted = traceIntensityGesture(scope, VectorscopeScopeId, m_view.intensity(VectorscopeScopeId),
+        if (const auto adjusted = traceIntensityGesture(scope, VectorscopeScopeId, traces.intensity(VectorscopeScopeId),
                                                         static_cast<float>(gain->default_value),
                                                         static_cast<float>(gain->intensity_shift), m_flash)) {
-            m_view.setIntensity(VectorscopeScopeId, adjusted->intensity);
+            traces.setIntensity(VectorscopeScopeId, adjusted->intensity);
             m_analysis.scopeParams[VectorscopeScopeId][gain->key] = adjusted->gain;
             pass.outcome.analysisDirty = true;
         }
@@ -727,11 +733,12 @@ void ScopePaneRenderer::drawWaveformPane(std::string_view id, Pass& pass)
     // already follows its configured mode, so the host needs no branch.
     const DrawnScope scope = drawScopeImage(textureForId(id), false);
     const SsParamInfo* gain = firstParamOfKind(descriptorFor(WaveformScopeId), SS_PARAM_INTENSITY);
+    TraceParams& traces = m_view.traces();
     if (gain != nullptr) {
-        if (const auto adjusted = traceIntensityGesture(scope, WaveformScopeId, m_view.intensity(WaveformScopeId),
+        if (const auto adjusted = traceIntensityGesture(scope, WaveformScopeId, traces.intensity(WaveformScopeId),
                                                         static_cast<float>(gain->default_value),
                                                         static_cast<float>(gain->intensity_shift), m_flash)) {
-            m_view.setIntensity(WaveformScopeId, adjusted->intensity);
+            traces.setIntensity(WaveformScopeId, adjusted->intensity);
             setWaveformGain(adjusted->gain);
             pass.outcome.analysisDirty = true;
         }
@@ -847,7 +854,7 @@ void ScopePaneRenderer::uploadScope(std::unique_ptr<ScopeTexture>& texture, cons
 
 void ScopePaneRenderer::uploadVisibleScopes()
 {
-    for (const std::string& id : m_view.stack()) {
+    for (const std::string& id : m_view.stack().ids()) {
         const auto texture = m_scopeTextures.find(id);
         if (texture == m_scopeTextures.end()) {
             continue;  // the color picker has no texture

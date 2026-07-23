@@ -44,8 +44,8 @@ std::map<std::string, double> LayoutPresetController::currentStackWeights() cons
     // so a loaded preset reproduces the exact split even for scopes left at the
     // default weight.
     std::map<std::string, double> weights;
-    for (const std::string& id : m_view.stack()) {
-        weights[id] = m_view.weight(id);
+    for (const std::string& id : m_view.stack().ids()) {
+        weights[id] = m_view.layout().weight(id);
     }
 
     return weights;
@@ -62,7 +62,7 @@ const std::map<std::string, double>& LayoutPresetController::paramsOf(std::strin
 std::map<std::string, std::map<std::string, double>> LayoutPresetController::currentStackStyles() const
 {
     std::map<std::string, std::map<std::string, double>> styles;
-    for (const std::string& scopeId : m_view.stack()) {
+    for (const std::string& scopeId : m_view.stack().ids()) {
         const HostScope* hostScope = m_registry.byId(scopeId);
         if (hostScope == nullptr || hostScope->descriptor == nullptr) {
             continue;
@@ -101,8 +101,8 @@ void LayoutPresetController::applyStyles(const std::map<std::string, std::map<st
 LayoutPreset LayoutPresetController::capture() const
 {
     LayoutPreset preset;
-    preset.stack = m_view.stackTokens();
-    preset.orientation = orientationToInt(m_view.orientation());
+    preset.stack = m_view.stack().tokens();
+    preset.orientation = orientationToInt(m_view.layout().orientation());
     preset.weights = currentStackWeights();
     preset.styles = currentStackStyles();
 
@@ -127,12 +127,12 @@ LayoutPresetOutcome LayoutPresetController::load(int slot)
     if (preset.stack.empty()) {
         return LayoutPresetOutcome{"preset " + std::to_string(slot) + " is empty", false, false};
     }
-    m_view.restoreStack(preset.stack);
-    m_view.setOrientation(orientationFromInt(preset.orientation));
-    m_view.setWeights(preset.weights);
+    m_view.stack().restore(preset.stack);
+    m_view.layout().setOrientation(orientationFromInt(preset.orientation));
+    m_view.layout().setWeights(preset.weights);
     applyStyles(preset.styles);
     m_store.markLoaded(slot);
-    m_analysis.enabledScopes = m_view.enabledScopeIds();
+    m_analysis.enabledScopes = m_view.stack().enabledScopeIds();
 
     return LayoutPresetOutcome{"preset " + std::to_string(slot) + " loaded", true, false};
 }

@@ -123,15 +123,15 @@ void appendScopeOptions(const ContextMenuModel& model, std::string_view id, bool
 void appendScopesSubmenu(const ContextMenuModel& model, std::vector<NativeMenuItem>& menu)
 {
     menuSubmenu(menu, "Scopes");
-    menuAction(menu, "Vectorscope", MenuShowVectorscope, model.view.shows(VectorscopeScopeId),
+    menuAction(menu, "Vectorscope", MenuShowVectorscope, model.view.stack().shows(VectorscopeScopeId),
                shortcutLabel(model.shortcuts.bindingFor(VectorscopeScopeId)));
-    menuAction(menu, "Waveform", MenuShowWaveform, model.view.shows(WaveformScopeId),
+    menuAction(menu, "Waveform", MenuShowWaveform, model.view.stack().shows(WaveformScopeId),
                shortcutLabel(model.shortcuts.bindingFor(WaveformScopeId)));
-    menuAction(menu, "RGB Parade", MenuShowWaveformParade, model.view.shows(ParadeScopeId),
+    menuAction(menu, "RGB Parade", MenuShowWaveformParade, model.view.stack().shows(ParadeScopeId),
                shortcutLabel(model.shortcuts.bindingFor(ParadeScopeId)));
-    menuAction(menu, "Histogram", MenuShowHistogram, model.view.shows(HistogramScopeId),
+    menuAction(menu, "Histogram", MenuShowHistogram, model.view.stack().shows(HistogramScopeId),
                shortcutLabel(model.shortcuts.bindingFor(HistogramScopeId)));
-    menuAction(menu, "Color Picker", MenuShowColorPicker, model.view.shows(ColorPickerScopeId),
+    menuAction(menu, "Color Picker", MenuShowColorPicker, model.view.stack().shows(ColorPickerScopeId),
                shortcutLabel(model.shortcuts.bindingFor(ColorPickerScopeId)));
     menuEndSubmenu(menu);
 }
@@ -142,12 +142,12 @@ void appendPerScopeOptions(const ContextMenuModel& model, std::vector<NativeMenu
     // On a background or toolbar click, each visible scope's options ride under
     // its own name, in toolbar order.
     for (const HostScope& scope : model.registry.scopes()) {
-        if (!model.view.shows(scope.id)) {
+        if (!model.view.stack().shows(scope.id)) {
             continue;
         }
         // The vectorscope's section already carries the pins; the color picker
         // shows them only when the vectorscope is gone.
-        if (scope.id == ColorPickerScopeId && model.view.shows(VectorscopeScopeId)) {
+        if (scope.id == ColorPickerScopeId && model.view.stack().shows(VectorscopeScopeId)) {
             continue;
         }
         if (!scopeHasOptions(model.registry, scope.id)) {
@@ -161,7 +161,7 @@ void appendPerScopeOptions(const ContextMenuModel& model, std::vector<NativeMenu
 
 void appendLayoutSubmenu(const ContextMenuModel& model, std::vector<NativeMenuItem>& menu)
 {
-    const LayoutOrientation current = model.view.orientation();
+    const LayoutOrientation current = model.view.layout().orientation();
     menuSubmenu(menu, "Layout");
     menuAction(menu, "Automatic", MenuLayoutAuto, current == LayoutOrientation::Automatic);
     menuAction(menu, "Vertical (stacked)", MenuLayoutVertical, current == LayoutOrientation::Vertical);

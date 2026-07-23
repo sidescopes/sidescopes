@@ -69,7 +69,7 @@ void viewGui(ImGuiTestContext*)
         }
         const char label[2] = {scope.letter, '\0'};
         if (ImGui::Button(label)) {
-            h.scopeView.toggle(scope.id);
+            h.scopeView.stack().toggle(scope.id);
         }
         ImGui::SameLine();
     }
@@ -101,7 +101,7 @@ void viewGui(ImGuiTestContext*)
         h.pinBoard.clear();
     }
 
-    ImGui::Text("stack=%s pins=%d comparator=%d", h.scopeView.stackTokens().c_str(),
+    ImGui::Text("stack=%s pins=%d comparator=%d", h.scopeView.stack().tokens().c_str(),
                 static_cast<int>(h.pinBoard.size()), h.pinBoard.comparator());
 
     ImGui::End();
@@ -110,30 +110,30 @@ void viewGui(ImGuiTestContext*)
 void scopeToggles(ImGuiTestContext* ctx)
 {
     View& h = view();
-    h.scopeView.restoreStack("V");  // known starting stack
+    h.scopeView.stack().restore("V");  // known starting stack
     ctx->SetRef("View");
 
     const auto enables = [&](std::string_view id) {
-        const std::vector<std::string> ids = h.scopeView.enabledScopeIds();
+        const std::vector<std::string> ids = h.scopeView.stack().enabledScopeIds();
 
         return std::find(ids.begin(), ids.end(), id) != ids.end();
     };
 
     // Clicking W stacks the waveform and the enabled ids follow.
     ctx->ItemClick("W");
-    IM_CHECK(h.scopeView.shows(WaveformScopeId));
-    IM_CHECK(h.scopeView.stack().size() == 2);
+    IM_CHECK(h.scopeView.stack().shows(WaveformScopeId));
+    IM_CHECK(h.scopeView.stack().ids().size() == 2);
     IM_CHECK(enables(WaveformScopeId));
 
     // Clicking H stacks the histogram in activation order after W.
     ctx->ItemClick("H");
-    IM_CHECK(h.scopeView.shows(HistogramScopeId));
-    IM_CHECK(h.scopeView.stackTokens() == "VWH");
+    IM_CHECK(h.scopeView.stack().shows(HistogramScopeId));
+    IM_CHECK(h.scopeView.stack().tokens() == "VWH");
 
     // Clicking W again toggles the waveform back off.
     ctx->ItemClick("W");
-    IM_CHECK(!h.scopeView.shows(WaveformScopeId));
-    IM_CHECK(h.scopeView.stackTokens() == "VH");
+    IM_CHECK(!h.scopeView.stack().shows(WaveformScopeId));
+    IM_CHECK(h.scopeView.stack().tokens() == "VH");
     IM_CHECK(!enables(WaveformScopeId));
 }
 

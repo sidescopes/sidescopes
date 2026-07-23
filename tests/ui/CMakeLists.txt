@@ -79,8 +79,11 @@ foreach(suite IN ITEMS pipeline view)
         test_${suite}_ui.cpp
         ui_test_harness.cpp
         ${CMAKE_SOURCE_DIR}/src/app/scope_registry.cpp
+        ${CMAKE_SOURCE_DIR}/src/app/pane_layout.cpp
+        ${CMAKE_SOURCE_DIR}/src/app/scope_stack.cpp
         ${CMAKE_SOURCE_DIR}/src/app/scope_view.cpp
         ${CMAKE_SOURCE_DIR}/src/app/stack_tokens.cpp
+        ${CMAKE_SOURCE_DIR}/src/app/trace_params.cpp
         ${CMAKE_SOURCE_DIR}/src/app/pin_board.cpp
         ${CMAKE_SOURCE_DIR}/src/app/capture_controller.cpp)
     target_include_directories(sidescopes_ui_${suite}_tests PRIVATE ${CMAKE_SOURCE_DIR}/tests/support)

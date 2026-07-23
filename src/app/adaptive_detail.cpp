@@ -43,7 +43,7 @@ std::pair<int, int> AdaptiveDetail::desiredWaveformSize(const ScopePaneSizes& pa
     const std::pair<int, int> waveSize = currentSize(WaveformScopeId);
     int wantColumns = waveSize.first;
     int wantHeight = waveSize.second;
-    if (m_view.shows(WaveformScopeId) || m_view.shows(ParadeScopeId)) {
+    if (m_view.stack().shows(WaveformScopeId) || m_view.stack().shows(ParadeScopeId)) {
         const float wfWidth = std::max(panePixels.waveform.width, panePixels.parade.width);
         const float wfHeight = std::max(panePixels.waveform.height, panePixels.parade.height);
         wantColumns = wfWidth >= 1400.0f ? 2048 : wfWidth >= 500.0f ? 1024 : 512;
@@ -61,7 +61,7 @@ std::pair<int, int> AdaptiveDetail::desiredHistogramSize(const ScopePaneSizes& p
     const std::pair<int, int> histSize = currentSize(HistogramScopeId);
     int wantHistWidth = histSize.first;
     int wantHistHeight = histSize.second;
-    if (m_view.shows(HistogramScopeId)) {
+    if (m_view.stack().shows(HistogramScopeId)) {
         // Near one texture pixel per screen pixel keeps the outline's width even
         // on flats and steep slopes alike.
         const PaneSize scopePane = panePixels.histogram;
@@ -75,7 +75,7 @@ std::pair<int, int> AdaptiveDetail::desiredHistogramSize(const ScopePaneSizes& p
 int AdaptiveDetail::desiredVectorscopeSize(const ScopePaneSizes& panePixels) const
 {
     int wantVectorscope = currentSize(VectorscopeScopeId).second;
-    if (m_view.shows(VectorscopeScopeId)) {
+    if (m_view.stack().shows(VectorscopeScopeId)) {
         // Purely a display resolution: accumulation stays on the 256-code grid
         // and a finer image is interpolated from it, so a sparse region costs
         // nothing extra.
