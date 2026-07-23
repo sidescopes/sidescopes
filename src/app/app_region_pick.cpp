@@ -3,6 +3,7 @@
 #define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
 
+#include "app/region_coordinator.h"
 #include "app/window_suggestions.h"
 
 namespace sidescopes {
@@ -14,16 +15,9 @@ namespace sidescopes {
 void App::applyRegionPickOutcome(const RegionPickOutcome& outcome)
 {
     if (outcome.previewRegion) {
-        const RegionOfInterest& region = *outcome.previewRegion;
-        // The no-op check keeps a hover that indicates the same region from
-        // nudging the worker or the activity clock every frame.
-        if (region.leftPercent != m_analysis.region.leftPercent || region.topPercent != m_analysis.region.topPercent ||
-            region.rightPercent != m_analysis.region.rightPercent ||
-            region.bottomPercent != m_analysis.region.bottomPercent) {
-            m_analysis.region = region;
-            m_analysisDirty = true;
-            m_lastActivity = glfwGetTime();
-        }
+        // The coordinator's no-op check keeps a hover that indicates the same
+        // region from nudging the worker or the activity clock every frame.
+        applyRegionOutcome(m_regions.useRegion(*outcome.previewRegion));
     }
     if (outcome.pinColor) {
         m_pins.pin(*outcome.pinColor);
@@ -39,50 +33,27 @@ void App::applyRegionPickOutcome(const RegionPickOutcome& outcome)
         confirmPickedRegion(pick);
     }
     if (outcome.cancelled) {
-        resetToFullScreen();
+        applyRegionOutcome(m_regions.resetToFullScreen());
     }
     if (outcome.ended) {
-        syncRegionBorder();
+        m_regions.syncBorder(borderState());
     }
     if (outcome.activity) {
         m_lastActivity = glfwGetTime();
     }
 }
 
-void App::handleRegionBorderEdit()
+// Carries out what the border's live edit decided. The coordinator has
+// already latched which region the drag began on and dressed the screen for
+// it; what is left is the region work only the host can do.
+void App::applyBorderEditOutcome(const RegionBorderEditOutcome& outcome)
 {
-    // The region border is live: dragging its edges, corners, or move tab
-    // adjusts the region it currently outlines - the attached region of the
-    // focused attached window, or the global one - with the scopes following.
-    if (m_regionPicker.active()) {
-        m_attachBorderEditing = false;
-
-        return;
-    }
-    const RegionBorderEdit edit = pollRegionBorderEdit();
-    if (edit.editing && !m_attachBorderEditing) {
-        // Latch what the border showed when the drag began: no focus race
-        // can reroute the edit to the other region kind.
-        m_attachBorderEditIdentity = m_activeWindowIdentity;
-    }
-    // While an attached border is dragged, a click-through veil dims
-    // everything outside its window - the resize limit made visible.
-    if (edit.editing && m_attachBorderEditIdentity != 0 && m_attachBorderEditIdentity == m_activeWindowIdentity) {
-        const auto windowGeom = windowGeometry(m_activeWindowIdentity);
-        const auto geometry = geometryOfDisplay(m_captureController.capturedDisplay());
-        if (windowGeom && geometry) {
-            showAttachedEditDim(m_captureController.capturedDisplay(), displayPercentRect(*windowGeom, *geometry));
-        }
-    } else if (!edit.editing && m_attachBorderEditing) {
-        hideAttachedEditDim();
-    }
-    m_attachBorderEditing = edit.editing;
-    if (edit.dismissed) {
+    if (outcome.dismissed) {
         dismissEditedBorder();
-    } else if (edit.attachToggled) {
+    } else if (outcome.attachToggled) {
         toggleRegionAttach();
-    } else if (edit.region) {
-        applyBorderEdit(*edit.region);
+    } else if (outcome.edited) {
+        applyBorderEdit(*outcome.edited);
     }
 }
 
@@ -92,7 +63,7 @@ void App::handleRegionBorderEdit()
 // no-conversion rule is about drags and focus races, never this button.
 void App::toggleRegionAttach()
 {
-    if (regionKind() == RegionKind::Attached) {
+    if (regionKind(m_activeWindowIdentity) == RegionKind::Attached) {
         const RegionOfInterest region = m_analysis.region;
         m_attach.detachAll();
         m_faceLock.clear();
@@ -100,13 +71,13 @@ void App::toggleRegionAttach()
         m_activeWindowIdentity = 0;
         m_attachedWindowMoving = false;
         m_attachGripActive = false;
-        m_globalRegion = region;
-        setRegion(region);
+        m_regions.setGlobalRegion(region);
+        applyRegionOutcome(m_regions.useRegion(region));
     } else {
         attachGlobalRegionToWindow();
     }
     m_lastActivity = glfwGetTime();
-    syncRegionBorder();
+    m_regions.syncBorder(borderState());
 }
 
 // Attaching a global region: the frontmost on-screen window under the
@@ -117,10 +88,10 @@ void App::attachGlobalRegionToWindow()
 {
     const uint32_t displayId = m_captureController.capturedDisplay();
     const auto geometry = geometryOfDisplay(displayId);
-    if (!geometry || isFullScreen()) {
+    if (!geometry || m_regions.isFullScreen()) {
         return;
     }
-    const RegionOfInterest region = m_globalRegion;
+    const RegionOfInterest region = m_regions.globalRegion();
     const double centerX = (region.leftPercent + region.rightPercent) / 2.0;
     const double centerY = (region.topPercent + region.bottomPercent) / 2.0;
     for (const DesktopWindow& window : attachCandidateWindows(displayId)) {
@@ -146,15 +117,14 @@ void App::attachGlobalRegionToWindow()
 // full screen; the other attached windows keep their regions either way.
 void App::dismissEditedBorder()
 {
-    if (regionKind() == RegionKind::Attached) {
+    if (regionKind(m_activeWindowIdentity) == RegionKind::Attached) {
         m_attach.remove(m_activeWindowIdentity);
         unwatchWindowMotion();
         m_activeWindowIdentity = 0;
-        setRegion(m_globalRegion);
     } else {
-        m_globalRegion = RegionOfInterest{};
-        setRegion(m_globalRegion);
+        m_regions.setGlobalRegion(RegionOfInterest{});
     }
+    applyRegionOutcome(m_regions.useRegion(m_regions.globalRegion()));
     m_lastActivity = glfwGetTime();
 }
 
@@ -165,8 +135,8 @@ void App::dismissEditedBorder()
 void App::applyBorderEdit(const RegionOfInterest& edited)
 {
     RegionOfInterest applied = edited;
-    if (m_attachBorderEditIdentity != 0) {
-        if (m_attachBorderEditIdentity != m_activeWindowIdentity) {
+    if (m_regions.borderEditIdentity() != 0) {
+        if (m_regions.borderEditIdentity() != m_activeWindowIdentity) {
             return;
         }
         const auto geometry = geometryOfDisplay(m_captureController.capturedDisplay());
@@ -182,10 +152,10 @@ void App::applyBorderEdit(const RegionOfInterest& edited)
         // A face-locked window's edit re-teaches the lock: the new rectangle
         // becomes the crop the face carries from here on.
         if (m_frameSize) {
-            m_faceLock.rebindCrop(m_attachBorderEditIdentity, applied, *m_frameSize);
+            m_faceLock.rebindCrop(m_regions.borderEditIdentity(), applied, *m_frameSize);
         }
     } else {
-        m_globalRegion = edited;
+        m_regions.setGlobalRegion(edited);
     }
     m_analysis.region = applied;
     // The analysis-dirty path syncs the border this same iteration.
@@ -199,7 +169,7 @@ void App::applyBorderEdit(const RegionOfInterest& edited)
 // border never wraps someone else's pixels.
 void App::adoptAttachedPick(uint64_t identity, int64_t ownerPid, const RegionOfInterest& region)
 {
-    m_globalRegion = RegionOfInterest{};
+    m_regions.setGlobalRegion(RegionOfInterest{});
     // A manual pick or draw replaces whatever face lock the window wore.
     m_faceLock.removeLock(identity);
     m_attachedWindowMoving = false;
@@ -208,7 +178,7 @@ void App::adoptAttachedPick(uint64_t identity, int64_t ownerPid, const RegionOfI
     unwatchWindowMotion();
     m_activeWindowIdentity = 0;
     raiseWindow(identity, ownerPid);
-    setRegion(region);
+    applyRegionOutcome(m_regions.useRegion(region));
 }
 
 }  // namespace sidescopes

@@ -20,6 +20,7 @@
 #include "app/layout_presets.h"
 #include "app/param_menu.h"
 #include "app/pin_board.h"
+#include "app/region_coordinator.h"
 #include "app/region_picker.h"
 #include "app/scope_pane_renderer.h"
 #include "app/scope_registry.h"
@@ -31,7 +32,6 @@
 #include "core/frame.h"
 #include "core/frame_mailbox.h"
 #include "core/preferences.h"
-#include "core/region_kind.h"
 #include "imgui.h"
 #include "platform/desktop.h"
 #include "platform/graphics.h"
@@ -105,21 +105,13 @@ private:
     void refreshActivatedScope(std::string_view id);
     void toggleScope(std::string_view id);
     void chooseScope(std::string_view id, bool stack);
-    /// @return Whether the region the scopes are reading covers the whole
-    ///         captured display - the state Watch Full Screen restores. An
-    ///         extent, not a kind: a region attached to a window filling the
-    ///         display reads full here too.
-    [[nodiscard]] bool isFullScreen() const;
-    /// @return The kind of the region the scopes are reading right now: the
-    ///         active attached window's, or the global one. A narrower
-    ///         question than AttachController::attached(), which reports
-    ///         whether ANY window holds a region - an attached window that is
-    ///         not focused leaves the global kind in effect. Orthogonal to
-    ///         isFullScreen(), which measures a region's extent rather than
-    ///         what it is bound to.
-    [[nodiscard]] RegionKind regionKind() const;
-    void syncRegionBorder();
-    void setRegion(const RegionOfInterest& region);
+    /// The shell state a border sync reads, gathered fresh per call.
+    [[nodiscard]] RegionBorderState borderState() const;
+    /// Applies a region decision to host state: the region the coordinator
+    /// settled on becomes the analysis region, a wholesale detach drops the
+    /// active window along with its motion watch, and interaction stamps the
+    /// activity clock.
+    void applyRegionOutcome(const RegionOutcome& outcome);
 
     // --- attached regions ---
     void followAttachedWindow();
@@ -150,7 +142,6 @@ private:
     bool adoptFacePick(uint32_t displayId, const RegionOfInterest& confirmed);
 
     static void logAttachMapping(const RegionPicker::WindowCandidate& picked, const RegionOfInterest& start);
-    void resetToFullScreen();
     void persistPreferences();
 
     // --- per-frame ---
@@ -203,7 +194,9 @@ private:
     /// drawn, an Esc cancel resets to full screen, and the pick's end re-syncs
     /// the region border.
     void applyRegionPickOutcome(const RegionPickOutcome& outcome);
-    void handleRegionBorderEdit();
+    /// Carries out the region border's live edit: its close affordances, its
+    /// attach toggle, or the drag that moved or resized the region.
+    void applyBorderEditOutcome(const RegionBorderEditOutcome& outcome);
     void commitAnalysisChanges();
 
     GLFWwindow* m_window = nullptr;
@@ -225,14 +218,14 @@ private:
     AnalysisSettings m_analysis;
     bool m_analysisDirty = true;
 
-    // Attached regions: the attached-window set and the single global region
-    // the analysis falls back to whenever the focused window has no region
-    // of its own. The border hides the instant the active window moves - a
-    // polled border trails a fast drag - and returns once the window has sat
-    // still for the settle time; the motion watch delivers the grab itself,
-    // so the hide precedes the first stale composite at any frame rate.
+    // Attached regions: the attached-window set, beside which the coordinator
+    // holds the single global region the analysis falls back to whenever the
+    // focused window has no region of its own. The border hides the instant
+    // the active window moves - a polled border trails a fast drag - and
+    // returns once the window has sat still for the settle time; the motion
+    // watch delivers the grab itself, so the hide precedes the first stale
+    // composite at any frame rate.
     AttachController m_attach;
-    RegionOfInterest m_globalRegion;
     bool m_attachedWindowMoving = false;
     bool m_attachGripActive = false;
     double m_attachRegionMovedAt = -1.0;
@@ -241,16 +234,6 @@ private:
     uint64_t m_activeWindowIdentity = 0;
     std::optional<AttachWindowRect> m_attachLastSeenRect;
     std::string m_attachActiveLabel;
-    // Which region the border edit in flight started on (0 = the global
-    // one), latched at the drag's first frame: no focus race can reroute a
-    // grabbed border, and an attached edit can never convert to global.
-    bool m_attachBorderEditing = false;
-    uint64_t m_attachBorderEditIdentity = 0;
-
-    /// The global region's border label: the captured display's name,
-    /// refreshed when the captured display changes.
-    std::string m_displayLabel;
-    uint32_t m_displayLabelId = 0;
 
     /// Owns the face locks, the detection probe thread, and the content
     /// stability watch; the host applies the outcomes it returns.
@@ -260,6 +243,11 @@ private:
     /// face scans, and the confirm/pin/preview polling; the host applies the
     /// RegionPickOutcome it returns.
     RegionPicker m_regionPicker;
+
+    /// Owns the global region, the border on screen and its labels, and the
+    /// latch a border drag in flight runs on; the host applies the
+    /// RegionOutcome it returns.
+    RegionCoordinator m_regions;
 
     int64_t m_ownPid = 0;
 

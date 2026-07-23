@@ -92,7 +92,7 @@ void App::captureActiveDisplay(const AttachDecision& decision)
 // blank the border.
 void App::applyAttachDecision(const AttachDecision& decision)
 {
-    setRegion(decision.region ? *decision.region : m_globalRegion);
+    applyRegionOutcome(m_regions.useRegion(decision.region ? *decision.region : m_regions.globalRegion()));
     if (decision.closedCount > 0) {
         m_panes->showAttachNotice(decision.detachedAll ? "window closed - detached" : "window closed - still attached");
     }
@@ -158,7 +158,7 @@ void App::refreshAttachedLabel(const AttachDecision& decision)
 // against the last attached region without losing it.
 std::optional<uint64_t> App::resolveFocusedWindow() const
 {
-    if (m_attachBorderEditing && m_activeWindowIdentity != 0) {
+    if (m_regions.borderEditing() && m_activeWindowIdentity != 0) {
         return m_activeWindowIdentity;
     }
     const int64_t foreground = foregroundApplicationPid();
@@ -218,7 +218,7 @@ void App::followAttachedWindow()
             m_analysis.region.bottomPercent, m_attachActiveLabel.c_str(), m_attachedWindowMoving ? 1 : 0);
     const FaceLockOutcome faceLockOutcome =
         m_faceLock.update(decision, m_frameSize, m_activeWindowIdentity, m_analysis.region,
-                          m_attachBorderEditing || m_attachedWindowMoving || m_attachGripActive, glfwGetTime());
+                          m_regions.borderEditing() || m_attachedWindowMoving || m_attachGripActive, glfwGetTime());
     applyFaceLockOutcome(faceLockOutcome);
     if (decision.closedCount > 0) {
         m_lastActivity = glfwGetTime();
@@ -229,7 +229,7 @@ void App::followAttachedWindow()
         glfwGetTime() - m_attachRegionMovedAt > AttachMotionSettleSeconds) {
         m_attachedWindowMoving = false;
     }
-    syncRegionBorder();
+    m_regions.syncBorder(borderState());
 }
 
 // Applies the face-lock controller's per-frame outcome to host state. An
@@ -251,8 +251,8 @@ void App::applyFaceLockOutcome(const FaceLockOutcome& outcome)
             m_activeWindowIdentity = 0;
         }
         m_panes->showAttachNotice("face lost - region removed");
-        setRegion(m_globalRegion);
-        syncRegionBorder();
+        applyRegionOutcome(m_regions.useRegion(m_regions.globalRegion()));
+        m_regions.syncBorder(borderState());
         m_lastActivity = glfwGetTime();
     }
 }
@@ -309,7 +309,7 @@ void App::detachActiveWindow()
         unwatchWindowMotion();
         m_activeWindowIdentity = 0;
     } else {
-        resetToFullScreen();
+        applyRegionOutcome(m_regions.resetToFullScreen());
     }
 }
 
@@ -396,8 +396,8 @@ void App::confirmPickedRegion(const ConfirmedPick& pick)
         m_attachedWindowMoving = false;
         m_attachGripActive = false;
     }
-    m_globalRegion = confirmed;
-    setRegion(m_globalRegion);
+    m_regions.setGlobalRegion(confirmed);
+    applyRegionOutcome(m_regions.useRegion(confirmed));
 }
 
 // A confirmed face suggestion becomes an attachment on the window under it:

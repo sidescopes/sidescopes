@@ -27,7 +27,6 @@
 #include "app/about_window.h"
 #include "app/adaptive_detail.h"
 #include "app/app_startup.h"
-#include "app/border_label.h"
 #include "app/capture_controller.h"
 #include "app/color_readout.h"
 #include "app/context_menu.h"
@@ -35,6 +34,7 @@
 #include "app/overlay_render.h"
 #include "app/param_menu.h"
 #include "app/pin_board.h"
+#include "app/region_coordinator.h"
 #include "app/region_geometry.h"
 #include "app/row_layout.h"
 #include "app/scope_layout.h"
@@ -106,6 +106,7 @@ App::App()
       m_captureController(*m_capture, m_mailbox),
       m_faceLock(m_attach, m_worker, m_captureController),
       m_regionPicker(m_captureController, m_worker, *m_capture),
+      m_regions(m_attach, m_captureController, m_regionPicker, m_faceLock, m_analysis.region),
       m_scopeRegistry(builtinModules()),
       m_view(m_scopeRegistry),
       m_shortcuts(m_scopeRegistry),
@@ -166,7 +167,7 @@ bool App::init()
     m_ownPid = ownApplicationPid();
 
     m_lastActivity = glfwGetTime();
-    syncRegionBorder();
+    m_regions.syncBorder(borderState());
 
     return true;
 }
@@ -352,77 +353,31 @@ void App::chooseScope(std::string_view id, bool stack)
     m_analysisDirty = true;
 }
 
-bool App::isFullScreen() const
+RegionBorderState App::borderState() const
 {
-    return m_analysis.region.leftPercent <= 0.0 && m_analysis.region.topPercent <= 0.0 &&
-           m_analysis.region.rightPercent >= 100.0 && m_analysis.region.bottomPercent >= 100.0;
+    return RegionBorderState{m_attachActiveLabel, m_activeWindowIdentity, m_attachedWindowMoving,
+                             glfwGetWindowAttrib(m_window, GLFW_ICONIFIED) != 0, glfwGetTime()};
 }
 
-RegionKind App::regionKind() const
+// Applies a region decision to host state. The coordinator owns the global
+// region and the border; what lands here is what only the host can carry out -
+// the settings the worker reads, the active window the motion watch follows,
+// and the clock the idle wait measures against.
+void App::applyRegionOutcome(const RegionOutcome& outcome)
 {
-    // The active identity IS the kind: the follow step takes the attached
-    // region exactly while a visible attached window holds the focus, and
-    // falls back to the global region the moment it does not.
-    return m_activeWindowIdentity != 0 ? RegionKind::Attached : RegionKind::Global;
-}
-
-void App::syncRegionBorder()
-{
-    if (m_captureController.capturedDisplay() == 0) {
-        return;
-    }
-    // The border shows only while this application is itself visible - a
-    // hidden or minimized SideScopes must not leave regions floating on
-    // screen - never during a pick or window motion. What it outlines
-    // follows the focus routing already folded into the analysis region: the
-    // attached region on the focused attached window (label and warm dress),
-    // else the plain global one. Called every frame; the platform side makes
-    // the unchanged case free.
-    if (m_regionPicker.active() || isFullScreen() || applicationHidden() || m_attachedWindowMoving ||
-        m_faceLock.hunting() || m_faceLock.contentUnsettled(glfwGetTime()) ||
-        glfwGetWindowAttrib(m_window, GLFW_ICONIFIED)) {
-        hideRegionBorder();
-    } else {
-        const bool attached = regionKind() == RegionKind::Attached;
-        if (!attached && m_captureController.capturedDisplay() != m_displayLabelId) {
-            m_displayLabelId = m_captureController.capturedDisplay();
-            m_displayLabel = borderLabelFrom(displayName(m_displayLabelId), "Display");
-        }
-        showRegionBorder(m_captureController.capturedDisplay(), m_analysis.region,
-                         attached ? m_attachActiveLabel : m_displayLabel, attached);
-    }
-}
-
-// Sets the capture region, skipping a no-op so the worker and border are not
-// nudged for nothing.
-void App::setRegion(const RegionOfInterest& region)
-{
-    if (region.leftPercent == m_analysis.region.leftPercent && region.topPercent == m_analysis.region.topPercent &&
-        region.rightPercent == m_analysis.region.rightPercent &&
-        region.bottomPercent == m_analysis.region.bottomPercent) {
-        return;
-    }
-
-    m_analysis.region = region;
-    m_analysisDirty = true;
-    m_lastActivity = glfwGetTime();
-}
-
-void App::resetToFullScreen()
-{
-    // Resets all selection: a pending pick, every attached window, and the
-    // global region alike. The border sync rides the analysis-dirty path.
-    cancelRegionPick();
-    if (m_attach.attached()) {
-        m_attach.detachAll();
+    if (outcome.detachedAll) {
         unwatchWindowMotion();
         m_activeWindowIdentity = 0;
         m_attachedWindowMoving = false;
         m_attachGripActive = false;
     }
-    m_globalRegion = RegionOfInterest{};
-    m_analysis.region = RegionOfInterest{};
-    m_analysisDirty = true;
+    if (outcome.region) {
+        m_analysis.region = *outcome.region;
+        m_analysisDirty = true;
+    }
+    if (outcome.activity) {
+        m_lastActivity = glfwGetTime();
+    }
 }
 
 void App::persistPreferences()
@@ -472,7 +427,7 @@ void App::runFrame()
     // the focused window. The border reconciles here every frame in both
     // regimes, so no missed edge can strand it on screen.
     followAttachedWindow();
-    syncRegionBorder();
+    m_regions.syncBorder(borderState());
     followWindowDisplay();
     syncUiScaleToMonitor();
 
@@ -508,8 +463,8 @@ void App::runFrame()
 
     // The blocking overlay runs after the frame is submitted; capture and
     // analysis keep flowing underneath.
-    applyRegionPickOutcome(m_regionPicker.openIfRequested(isFullScreen()));
-    handleRegionBorderEdit();
+    applyRegionPickOutcome(m_regionPicker.openIfRequested(m_regions.isFullScreen()));
+    applyBorderEditOutcome(m_regions.pollBorderEdit(m_activeWindowIdentity));
     applyRegionPickOutcome(m_regionPicker.poll(m_frameSize, m_cursor.screenSampleColor()));
     commitAnalysisChanges();
 }
@@ -542,11 +497,11 @@ void App::drainAsyncSignals()
     }
     m_regionPicker.drainFaceScans();
     if (m_callbackState.iconifyChanged.exchange(false)) {
-        syncRegionBorder();
+        m_regions.syncBorder(borderState());
         m_lastActivity = glfwGetTime();
     }
     if (m_orphanEscape.exchange(false)) {
-        resetToFullScreen();
+        applyRegionOutcome(m_regions.resetToFullScreen());
         m_lastActivity = glfwGetTime();
     }
     // Keys the border panel took while it held the keyboard: Escape and the
@@ -569,7 +524,7 @@ void App::followWindowDisplay()
     // this window sits on. A drawn region or an attached window pins capture to
     // its own display regardless of the window.
     if (m_captureController.permissionGranted() && !m_captureController.dead() && !m_regionPicker.active() &&
-        isFullScreen() && !m_attach.attached()) {
+        m_regions.isFullScreen() && !m_attach.attached()) {
         const auto homeDisplay = displayOfWindow();
         if (homeDisplay && *homeDisplay != m_captureController.capturedDisplay()) {
             m_captureController.requestDisplay(*homeDisplay);
@@ -668,8 +623,8 @@ void App::drawFrameUi()
     ImGui::SameLine(0.0f, 8.0f);
     applyPaneRenderOutcome(m_panes->drawScopeToggles(modifiers.shift));
     applyShortcutAction(m_shortcuts.resolvePressed(shortcutContext(), modifiers, shortcutPressed));
-    const PaneRenderInput input{m_uiScale.scale(),  isFullScreen(),  pinsAvailable(),
-                                m_vectorscopeColor, m_waveformColor, m_callbackState.monospaceFont};
+    const PaneRenderInput input{m_uiScale.scale(),  m_regions.isFullScreen(), pinsAvailable(),
+                                m_vectorscopeColor, m_waveformColor,          m_callbackState.monospaceFont};
     applyPaneRenderOutcome(m_panes->drawRegionToolIcons(input));
     applyPaneRenderOutcome(m_panes->drawScopePanes(input));
     m_panes->drawStatusBar(input);
@@ -710,7 +665,7 @@ void App::applyPaneRenderOutcome(const PaneRenderOutcome& outcome)
         chooseScope(outcome.chosenScope->id, outcome.chosenScope->stack);
     }
     if (outcome.resetToFullScreen) {
-        resetToFullScreen();
+        applyRegionOutcome(m_regions.resetToFullScreen());
     }
     if (outcome.analysisDirty) {
         m_analysisDirty = true;
@@ -757,7 +712,7 @@ void App::applyShortcutAction(const ShortcutAction& action)
         m_showSettings = false;
         break;
     case ShortcutAction::Kind::ResetToFullScreen:
-        resetToFullScreen();
+        applyRegionOutcome(m_regions.resetToFullScreen());
         break;
     case ShortcutAction::Kind::LoadPreset:
         applyPresetOutcome(m_presets.load(action.presetSlot));
@@ -824,7 +779,7 @@ void App::handleContextMenu()
                                  m_pins.empty(),
                                  m_presets.activeSlot(),
                                  m_uiScale.userFactor(),
-                                 isFullScreen()};
+                                 m_regions.isFullScreen()};
     buildContextMenu(model, clickedPane, menu, paramActions);
     const int chosen = showNativeContextMenu(menu);
     dispatchMenuChoice(chosen, paramActions);
@@ -891,7 +846,7 @@ void App::dispatchRegionMenu(int chosen)
         break;
     case MenuFullScreen:
     case MenuDetachAll:
-        resetToFullScreen();
+        applyRegionOutcome(m_regions.resetToFullScreen());
         break;
     case MenuDetachWindow:
         detachActiveWindow();
@@ -1005,7 +960,7 @@ void App::commitAnalysisChanges()
     if (m_analysisDirty) {
         m_worker.updateSettings(m_analysis);
         m_panes->configureProjections();
-        syncRegionBorder();
+        m_regions.syncBorder(borderState());
         m_analysisDirty = false;
         m_lastActivity = glfwGetTime();
         m_nextPreferencesSave = glfwGetTime() + 1.0;

@@ -372,6 +372,7 @@ if(APPLE OR WIN32)
         src/app/overlay_style.cpp
         src/app/param_menu.cpp
         src/app/pin_board.cpp
+        src/app/region_coordinator.cpp
         src/app/region_geometry.cpp
         src/app/region_picker.cpp
         src/app/row_layout.cpp
