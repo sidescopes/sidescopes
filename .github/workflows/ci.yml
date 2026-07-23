@@ -49,6 +49,28 @@ jobs:
           files=$(git ls-files 'src/core/*.cpp' 'src/core/**/*.cpp' 'src/modules/*.cpp' 'tests/*.cpp' ':(exclude)tests/ui/*' ':(exclude)tests/test_windows_platform.cpp' ':(exclude)src/modules/module_loader.cpp')
           clang-tidy-18 -p build --quiet $files
 
+  tidy-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install clang-tidy
+        run: brew install llvm@22
+      - name: Build
+        # The generated version header and the fetched ImGui headers must exist
+        # before clang-tidy can parse the app layer.
+        run: |
+          cmake -B build -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+          cmake --build build
+      - name: Analyze
+        # The app layer (src/app) and the macOS platform sources build only on
+        # APPLE, so they are absent from the Linux tidy job's compile database -
+        # this is where they get their clang-tidy coverage. Homebrew clang-tidy
+        # needs the SDK sysroot that Apple clang knows implicitly.
+        run: |
+          files=$(git ls-files 'src/app/*.cpp' 'src/platform/macos/*.mm')
+          "$(brew --prefix llvm@22)/bin/clang-tidy" -p build --quiet \
+            --extra-arg=-isysroot --extra-arg="$(xcrun --show-sdk-path)" $files
+
   test:
     strategy:
       fail-fast: false
