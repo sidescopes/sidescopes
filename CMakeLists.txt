@@ -355,6 +355,7 @@ if(APPLE OR WIN32)
         src/app/color_readout.cpp
         src/app/context_menu.cpp
         src/app/face_lock.cpp
+        src/app/face_lock_controller.cpp
         src/app/imgui_ui.cpp
         src/app/layout_preset_store.cpp
         src/app/overlay_render.cpp

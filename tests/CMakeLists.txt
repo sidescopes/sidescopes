@@ -37,6 +37,7 @@ add_executable(sidescopes_tests
     test_capture_controller.cpp
     test_attach_controller.cpp
     test_face_lock.cpp
+    test_face_lock_controller.cpp
     test_region_geometry.cpp
     test_icons.cpp
     test_focus_resolution.cpp
@@ -53,6 +54,8 @@ target_sources(sidescopes_tests PRIVATE
     ${CMAKE_SOURCE_DIR}/src/app/attach_controller.cpp
     ${CMAKE_SOURCE_DIR}/src/app/capture_controller.cpp
     ${CMAKE_SOURCE_DIR}/src/app/face_lock.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/face_lock_controller.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/region_geometry.cpp
     ${CMAKE_SOURCE_DIR}/src/app/overlay_style.cpp
     ${CMAKE_SOURCE_DIR}/src/app/param_menu.cpp
     ${CMAKE_SOURCE_DIR}/src/app/pin_board.cpp

@@ -15,7 +15,7 @@
 
 #include "app/attach_controller.h"
 #include "app/capture_controller.h"
-#include "app/face_lock.h"
+#include "app/face_lock_controller.h"
 #include "app/layout_preset_store.h"
 #include "app/param_menu.h"
 #include "app/pin_board.h"
@@ -163,26 +163,10 @@ private:
     void applyBorderEdit(const RegionOfInterest& edited);
 
     // --- face locks ---
-    /// A lock plus the window rectangle it last saw: a same-size window
-    /// move translates the lock's anchors along with the face. The verdict
-    /// stamp says when a probe (or the creating pick) last confirmed the
-    /// anchor; an anchor older than a probe period is stale on activation
-    /// and must not dress the border until re-verified.
-    struct AppFaceLock
-    {
-        FaceLockState state;
-        std::optional<AttachWindowRect> windowRect;
-        double anchorVerifiedAt = 0.0;
-    };
-
-    void updateFaceLock(const AttachDecision& decision);
-    void launchFaceLockProbe(const AttachDecision& decision, const FaceLockState& lock);
-    void consumeFaceLockProbe(const AttachDecision& decision);
-    void applyFaceLockRegion(const FaceLockState& lock);
-    void carryLockWithWindow(AppFaceLock& lock, const AttachWindowRect& rect);
-    void removeLostFaceLock(uint64_t identity);
-    void probeRegionContentChange();
-    [[nodiscard]] bool regionContentUnsettled() const;
+    /// Applies a controller outcome to host state: an adopted region becomes
+    /// the analysis region; a lost lock detaches its window and falls back to
+    /// the global region. The controller has already updated its own state.
+    void applyFaceLockOutcome(const FaceLockOutcome& outcome);
     bool adoptFacePick(uint32_t displayId, const RegionOfInterest& confirmed);
 
     /// What the application keeps for one window the picker suggested, so a
@@ -382,20 +366,9 @@ private:
     std::string m_displayLabel;
     uint32_t m_displayLabelId = 0;
 
-    /// The face-probe mailbox: a detached detection thread fills it, the
-    /// main loop drains it; at most one probe is in flight.
-    struct FaceLockProbe
-    {
-        std::atomic<bool> running{false};
-        std::atomic<bool> ready{false};
-        std::mutex mutex;
-        std::vector<IntRect> faces;  ///< detector boxes, full-frame pixels
-        uint64_t forWindowIdentity = 0;
-        IntRect roi;  ///< the searched rectangle, for judging edge-clipped boxes
-    };
-
-    std::map<uint64_t, AppFaceLock> m_faceLocks;
-    FaceLockProbe m_faceLockProbe;
+    /// Owns the face locks, the detection probe thread, and the content
+    /// stability watch; the host applies the outcomes it returns.
+    FaceLockController m_faceLock;
 
     /// One non-streamed display's background face scan for an open picker: a
     /// detached thread grabs that display off the capture stream, detects,
@@ -422,15 +395,6 @@ private:
     /// dropped rather than fed to the wrong overlay.
     uint64_t m_facePickGeneration = 0;
     std::array<IconTexture, IconCount> m_iconTextures;
-    double m_nextFaceLockProbe = 0.0;
-    /// True while the active lock's face is not confirmed where the region
-    /// sits; the border hides instead of outlining stale content.
-    bool m_faceLockHunting = false;
-    /// The content-stability probe over the face-locked region: a sparse pixel
-    /// grid compared frame to frame; the border shows only settled content.
-    std::vector<uint8_t> m_regionContentSamples;
-    RegionOfInterest m_regionContentRect;
-    double m_regionContentChangedAt = -1.0;
     // A short-lived toolbar note after an attached window closed.
     std::string m_attachDetachNotice;
     double m_attachNoticeUntil = 0.0;

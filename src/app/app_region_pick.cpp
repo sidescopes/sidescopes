@@ -10,7 +10,6 @@
 #include <string>
 #include <vector>
 
-#include "app/region_geometry.h"
 #include "app/window_suggestions.h"
 #include "core/diagnostics.h"
 #include "core/region_suggestions.h"
@@ -379,9 +378,7 @@ void App::toggleRegionAttach()
     if (regionKind() == RegionKind::Attached) {
         const RegionOfInterest region = m_analysis.region;
         m_attach.detachAll();
-        m_faceLocks.clear();
-        m_faceLockHunting = false;
-        m_regionContentChangedAt = -1.0;
+        m_faceLock.clear();
         unwatchWindowMotion();
         m_activeWindowIdentity = 0;
         m_attachedWindowMoving = false;
@@ -467,10 +464,8 @@ void App::applyBorderEdit(const RegionOfInterest& edited)
             AttachDisplayRect{geometry->originX, geometry->originY, geometry->widthPoints, geometry->heightPoints});
         // A face-locked window's edit re-teaches the lock: the new rectangle
         // becomes the crop the face carries from here on.
-        const auto lock = m_faceLocks.find(m_attachBorderEditIdentity);
-        if (lock != m_faceLocks.end() && m_frameSize) {
-            face_lock::rebindCrop(lock->second.state,
-                                  lockRectFromPercent(applied, m_frameSize->width, m_frameSize->height));
+        if (m_frameSize) {
+            m_faceLock.rebindCrop(m_attachBorderEditIdentity, applied, *m_frameSize);
         }
     } else {
         m_globalRegion = edited;
@@ -606,7 +601,7 @@ void App::adoptAttachedPick(uint64_t identity, int64_t ownerPid, const RegionOfI
 {
     m_globalRegion = RegionOfInterest{};
     // A manual pick or draw replaces whatever face lock the window wore.
-    m_faceLocks.erase(identity);
+    m_faceLock.removeLock(identity);
     m_attachedWindowMoving = false;
     m_attachGripActive = false;
     m_attachRegionMovedAt = -1.0;

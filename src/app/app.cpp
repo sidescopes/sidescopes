@@ -284,6 +284,7 @@ App::App()
     : m_worker(m_mailbox),
       m_capture(createScreenCaptureSource()),
       m_captureController(*m_capture, m_mailbox),
+      m_faceLock(m_attach, m_worker, m_captureController),
       m_scopeRegistry(builtinModules()),
       m_view(m_scopeRegistry)
 {
@@ -355,7 +356,7 @@ void App::shutdown()
     // done, so drain any still in flight before their targets leave scope:
     // the detached threads hold pointers into this object.
     for (;;) {
-        bool waiting = m_faceLockProbe.running.load();
+        bool waiting = m_faceLock.probeRunning();
         for (const std::unique_ptr<DisplayFaceScan>& scan : m_displayFaceScans) {
             waiting = waiting || scan->running.load();
         }
@@ -775,8 +776,8 @@ void App::syncRegionBorder()
     // attached region on the focused attached window (label and warm dress),
     // else the plain global one. Called every frame; the platform side makes
     // the unchanged case free.
-    if (m_regionPicking || isFullScreen() || applicationHidden() || m_attachedWindowMoving || m_faceLockHunting ||
-        regionContentUnsettled() || glfwGetWindowAttrib(m_window, GLFW_ICONIFIED)) {
+    if (m_regionPicking || isFullScreen() || applicationHidden() || m_attachedWindowMoving || m_faceLock.hunting() ||
+        m_faceLock.contentUnsettled(glfwGetTime()) || glfwGetWindowAttrib(m_window, GLFW_ICONIFIED)) {
         hideRegionBorder();
     } else {
         const bool attached = regionKind() == RegionKind::Attached;
