@@ -285,6 +285,7 @@ App::App()
       m_capture(createScreenCaptureSource()),
       m_captureController(*m_capture, m_mailbox),
       m_faceLock(m_attach, m_worker, m_captureController),
+      m_regionPicker(m_captureController, m_worker, *m_capture),
       m_scopeRegistry(builtinModules()),
       m_view(m_scopeRegistry)
 {
@@ -356,11 +357,7 @@ void App::shutdown()
     // done, so drain any still in flight before their targets leave scope:
     // the detached threads hold pointers into this object.
     for (;;) {
-        bool waiting = m_faceLock.probeRunning();
-        for (const std::unique_ptr<DisplayFaceScan>& scan : m_displayFaceScans) {
-            waiting = waiting || scan->running.load();
-        }
-        if (!waiting) {
+        if (!m_faceLock.probeRunning() && !m_regionPicker.scansRunning()) {
             break;
         }
         std::this_thread::yield();
@@ -776,8 +773,9 @@ void App::syncRegionBorder()
     // attached region on the focused attached window (label and warm dress),
     // else the plain global one. Called every frame; the platform side makes
     // the unchanged case free.
-    if (m_regionPicking || isFullScreen() || applicationHidden() || m_attachedWindowMoving || m_faceLock.hunting() ||
-        m_faceLock.contentUnsettled(glfwGetTime()) || glfwGetWindowAttrib(m_window, GLFW_ICONIFIED)) {
+    if (m_regionPicker.active() || isFullScreen() || applicationHidden() || m_attachedWindowMoving ||
+        m_faceLock.hunting() || m_faceLock.contentUnsettled(glfwGetTime()) ||
+        glfwGetWindowAttrib(m_window, GLFW_ICONIFIED)) {
         hideRegionBorder();
     } else {
         const bool attached = regionKind() == RegionKind::Attached;
@@ -857,7 +855,7 @@ void App::runFrame()
     // would; the phase methods below fill them in.
     m_vectorscopeColor.reset();
     m_waveformColor.reset();
-    m_wantRegionPick.reset();
+    m_regionPicker.clearRequest();
 
     pumpEvents();
     markFrameBodyStart();
@@ -905,9 +903,9 @@ void App::runFrame()
 
     // The blocking overlay runs after the frame is submitted; capture and
     // analysis keep flowing underneath.
-    handleRegionPicking();
+    applyRegionPickOutcome(m_regionPicker.openIfRequested(isFullScreen()));
     handleRegionBorderEdit();
-    pollActiveRegionPick();
+    applyRegionPickOutcome(m_regionPicker.poll(m_frameSize, currentScreenSampleColor()));
     commitAnalysisChanges();
 }
 
@@ -952,7 +950,7 @@ void App::pumpEvents()
     // events at a slow tick instead of spinning at refresh - in short slices
     // while windows are attached, so their motion and focus stay fresh.
     if (glfwGetTime() - m_lastActivity > 0.5) {
-        if (m_attach.attached() && !m_regionPicking) {
+        if (m_attach.attached() && !m_regionPicker.active()) {
             idleWaitWatchingAttachedWindow();
         } else {
             glfwWaitEventsTimeout(0.1);
@@ -972,7 +970,7 @@ void App::drainAsyncSignals()
         followAttachedWindow();
         m_lastActivity = glfwGetTime();
     }
-    drainDisplayFaceScans();
+    m_regionPicker.drainFaceScans();
     if (m_callbackState.iconifyChanged.exchange(false)) {
         syncRegionBorder();
         m_lastActivity = glfwGetTime();
@@ -1000,8 +998,8 @@ void App::followWindowDisplay()
     // With no region drawn and no window attached, capture follows the display
     // this window sits on. A drawn region or an attached window pins capture to
     // its own display regardless of the window.
-    if (m_captureController.permissionGranted() && !m_captureController.dead() && !m_regionPicking && isFullScreen() &&
-        !m_attach.attached()) {
+    if (m_captureController.permissionGranted() && !m_captureController.dead() && !m_regionPicker.active() &&
+        isFullScreen() && !m_attach.attached()) {
         const auto homeDisplay = displayOfWindow();
         if (homeDisplay && *homeDisplay != m_captureController.capturedDisplay()) {
             m_captureController.requestDisplay(*homeDisplay);
@@ -1281,15 +1279,15 @@ bool App::triggerShortcut(const std::string& key, bool shift)
         }
     }
     if (key == m_shortcuts.attachWindow) {
-        m_wantRegionPick = RegionPickerMode::AttachWindow;
+        m_regionPicker.request(RegionPickerMode::AttachWindow);
     } else if (key == m_shortcuts.drawRegion) {
-        m_wantRegionPick = RegionPickerMode::DrawGlobal;
+        m_regionPicker.request(RegionPickerMode::DrawGlobal);
     } else if (key == m_shortcuts.attachFace && supportsFaceDetection()) {
-        m_wantRegionPick = RegionPickerMode::AttachFace;
+        m_regionPicker.request(RegionPickerMode::AttachFace);
     } else if (key == m_shortcuts.pinColor && pinsAvailable()) {
         // One pin tool; each click inside decides between pin-and-close and
         // Shift's pin-and-continue.
-        m_wantRegionPick = RegionPickerMode::PinColor;
+        m_regionPicker.request(RegionPickerMode::PinColor);
     } else if (key == m_shortcuts.vectorscopeZoom) {
         m_view.setZoom(m_view.zoom() >= 4 ? 1 : m_view.zoom() * 2);
     } else if (key == m_shortcuts.fullScreen) {
@@ -1581,13 +1579,13 @@ void App::dispatchRegionMenu(int chosen)
 {
     switch (chosen) {
     case MenuAttachWindow:
-        m_wantRegionPick = RegionPickerMode::AttachWindow;
+        m_regionPicker.request(RegionPickerMode::AttachWindow);
         break;
     case MenuDrawRegion:
-        m_wantRegionPick = RegionPickerMode::DrawGlobal;
+        m_regionPicker.request(RegionPickerMode::DrawGlobal);
         break;
     case MenuAttachFace:
-        m_wantRegionPick = RegionPickerMode::AttachFace;
+        m_regionPicker.request(RegionPickerMode::AttachFace);
         break;
     case MenuFullScreen:
     case MenuDetachAll:
@@ -1597,7 +1595,7 @@ void App::dispatchRegionMenu(int chosen)
         detachActiveWindow();
         break;
     case MenuPinColor:
-        m_wantRegionPick = RegionPickerMode::PinColor;
+        m_regionPicker.request(RegionPickerMode::PinColor);
         break;
     case MenuClearPinnedMarkers:
         m_pins.clear();

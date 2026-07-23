@@ -23,48 +23,6 @@ constexpr double AttachMotionSettleSeconds = 0.2;
 
 }  // namespace
 
-std::optional<FloatColor> App::averageFrameColor(const RegionOfInterest& region) const
-{
-    // Averages a display-percent region of the latest frame: a dragged pin's
-    // sample. A drag is the explicit request to average textured pixels; a
-    // plain click samples a point instead, matching the live readout.
-    std::optional<FloatColor> color;
-    const bool sampled = m_worker.withLatestFrame([&](const FrameView& view) {
-        const int left = std::clamp(static_cast<int>(region.leftPercent / 100.0 * view.width), 0, view.width);
-        const int right = std::clamp(static_cast<int>(region.rightPercent / 100.0 * view.width), 0, view.width);
-        const int top = std::clamp(static_cast<int>(region.topPercent / 100.0 * view.height), 0, view.height);
-        const int bottom = std::clamp(static_cast<int>(region.bottomPercent / 100.0 * view.height), 0, view.height);
-        if (right <= left || bottom <= top) {
-            return;
-        }
-        // A stride caps the work on huge drags; the average barely moves past a
-        // hundred thousand samples.
-        const long long pixels = static_cast<long long>(right - left) * (bottom - top);
-        const int stride = std::max(1, static_cast<int>(std::sqrt(static_cast<double>(pixels) / 100000.0)));
-        double sumR = 0;
-        double sumG = 0;
-        double sumB = 0;
-        long long count = 0;
-        for (int y = top; y < bottom; y += stride) {
-            for (int x = left; x < right; x += stride) {
-                const uint8_t* pixel = view.pixelAt(x, y);
-                sumB += pixel[0];
-                sumG += pixel[1];
-                sumR += pixel[2];
-                ++count;
-            }
-        }
-        if (count == 0) {
-            return;
-        }
-        const auto samples = static_cast<double>(count);
-        color = FloatColor{static_cast<float>(sumR / samples), static_cast<float>(sumG / samples),
-                           static_cast<float>(sumB / samples)};
-    });
-
-    return sampled ? color : std::nullopt;
-}
-
 // Gathers this frame's observation for every attached window: geometry,
 // minimized state, and - for visible ones - the display it sits on.
 std::vector<AttachedWindowObservation> App::gatherAttachedObservations() const
@@ -228,7 +186,7 @@ std::optional<uint64_t> App::resolveFocusedWindow() const
 // wait, not a frame earlier.
 void App::followAttachedWindow()
 {
-    if (!m_attach.attached() || m_regionPicking) {
+    if (!m_attach.attached() || m_regionPicker.active()) {
         return;
     }
 
@@ -344,21 +302,6 @@ void App::idleWaitWatchingAttachedWindow()
     }
 }
 
-// A window rectangle as its display's percentages - the shape the
-// window-candidate list and the edit-time veil speak.
-RegionOfInterest App::displayPercentRect(const WindowGeometry& windowGeom, const DisplayGeometry& display)
-{
-    RegionOfInterest region;
-    region.leftPercent = std::clamp((windowGeom.x - display.originX) / display.widthPoints * 100.0, 0.0, 100.0);
-    region.topPercent = std::clamp((windowGeom.y - display.originY) / display.heightPoints * 100.0, 0.0, 100.0);
-    region.rightPercent =
-        std::clamp((windowGeom.x + windowGeom.width - display.originX) / display.widthPoints * 100.0, 0.0, 100.0);
-    region.bottomPercent =
-        std::clamp((windowGeom.y + windowGeom.height - display.originY) / display.heightPoints * 100.0, 0.0, 100.0);
-
-    return region;
-}
-
 // Sheds only the front attached window; the last one's detach is the full
 // reset back to the screen.
 void App::detachActiveWindow()
@@ -394,7 +337,7 @@ RegionOfInterest quickStartRegion(const RegionOfInterest& window, const DisplayG
 
 // Field diagnosis for the window-pick mapping: every rectangle in the
 // chain, on the suggestions channel.
-void App::logAttachMapping(const WindowCandidate& picked, const RegionOfInterest& start)
+void App::logAttachMapping(const RegionPicker::WindowCandidate& picked, const RegionOfInterest& start)
 {
     SS_DIAG(Suggestions, "pick window=%llu list-rect=%.1f,%.1f %.1fx%.1f suggested=%.2f,%.2f..%.2f,%.2f%%",
             static_cast<unsigned long long>(picked.identity), picked.windowRect.x, picked.windowRect.y,
@@ -411,14 +354,11 @@ void App::logAttachMapping(const WindowCandidate& picked, const RegionOfInterest
 // A confirmed region that names a window attaches to it (or re-picks an
 // attached one); a rectangle drawn in attach mode binds to the frontmost
 // window under it; a freehand draw sets the global region.
-void App::confirmPickedRegion(const RegionPickPoll& poll)
+void App::confirmPickedRegion(const ConfirmedPick& pick)
 {
-    if (!poll.confirmed) {
-        return;
-    }
-    const RegionOfInterest confirmed = *poll.confirmed;
-    const WindowCandidate* picked = matchWindowCandidate(poll.displayId, confirmed);
-    const auto geometry = geometryOfDisplay(poll.displayId);
+    const RegionOfInterest confirmed = pick.region;
+    const RegionPicker::WindowCandidate* picked = m_regionPicker.matchWindowCandidate(pick.displayId, confirmed);
+    const auto geometry = geometryOfDisplay(pick.displayId);
     const auto display = geometry
                              ? std::optional<AttachDisplayRect>(AttachDisplayRect{
                                    geometry->originX, geometry->originY, geometry->widthPoints, geometry->heightPoints})
@@ -434,13 +374,13 @@ void App::confirmPickedRegion(const RegionPickPoll& poll)
         return;
     }
     // A confirmed face suggestion attaches to the window under it.
-    if (adoptFacePick(poll.displayId, confirmed)) {
+    if (adoptFacePick(pick.displayId, confirmed)) {
         return;
     }
     // A rectangle drawn in attach mode binds to the frontmost window under
     // it; over no window at all it falls through to the global region.
-    if (poll.attachesToWindow && display) {
-        const WindowCandidate* host = windowContaining(poll.displayId, confirmed);
+    if (pick.attachesToWindow && display) {
+        const RegionPicker::WindowCandidate* host = m_regionPicker.windowContaining(pick.displayId, confirmed);
         if (host != nullptr) {
             adoptAttachedPick(host->identity, host->ownerPid,
                               m_attach.attach(host->identity, host->ownerPid, host->application, host->windowRect,
@@ -462,58 +402,17 @@ void App::confirmPickedRegion(const RegionPickPoll& poll)
     setRegion(m_globalRegion);
 }
 
-// Recovers which face candidate a confirmed region names, by the same
-// near-exact comparison the window match uses.
-const FaceCandidate* App::matchFaceCandidate(uint32_t displayId, const RegionOfInterest& region) const
-{
-    constexpr double MatchTolerance = 1.0;
-
-    for (const FaceCandidate& candidate : m_faceCandidates) {
-        if (candidate.displayId != displayId) {
-            continue;
-        }
-        const double delta = std::abs(candidate.region.leftPercent - region.leftPercent) +
-                             std::abs(candidate.region.topPercent - region.topPercent) +
-                             std::abs(candidate.region.rightPercent - region.rightPercent) +
-                             std::abs(candidate.region.bottomPercent - region.bottomPercent);
-        if (delta <= MatchTolerance) {
-            return &candidate;
-        }
-    }
-
-    return nullptr;
-}
-
-// The frontmost suggested window under a region's centre: the window a face
-// pick attaches to.
-const App::WindowCandidate* App::windowContaining(uint32_t displayId, const RegionOfInterest& region) const
-{
-    const double centerX = (region.leftPercent + region.rightPercent) / 2.0;
-    const double centerY = (region.topPercent + region.bottomPercent) / 2.0;
-    for (const WindowCandidate& candidate : m_windowCandidates) {
-        if (candidate.displayId != displayId) {
-            continue;
-        }
-        if (centerX >= candidate.region.leftPercent && centerX <= candidate.region.rightPercent &&
-            centerY >= candidate.region.topPercent && centerY <= candidate.region.bottomPercent) {
-            return &candidate;
-        }
-    }
-
-    return nullptr;
-}
-
 // A confirmed face suggestion becomes an attachment on the window under it:
 // the window's attachment carries the region between focus changes, and the
 // lock follows the face within it. A face over no suggested window falls
 // through to the plain global path.
 bool App::adoptFacePick(uint32_t displayId, const RegionOfInterest& confirmed)
 {
-    const FaceCandidate* face = matchFaceCandidate(displayId, confirmed);
+    const FaceCandidate* face = m_regionPicker.matchFaceCandidate(displayId, confirmed);
     if (face == nullptr) {
         return false;
     }
-    const WindowCandidate* host = windowContaining(displayId, confirmed);
+    const RegionPicker::WindowCandidate* host = m_regionPicker.windowContaining(displayId, confirmed);
     const auto geometry = geometryOfDisplay(displayId);
     if (host == nullptr || !geometry) {
         return false;

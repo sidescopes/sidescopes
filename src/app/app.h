@@ -19,6 +19,7 @@
 #include "app/layout_preset_store.h"
 #include "app/param_menu.h"
 #include "app/pin_board.h"
+#include "app/region_picker.h"
 #include "app/scope_registry.h"
 #include "app/scope_view.h"
 #include "app/version.h"
@@ -152,10 +153,11 @@ private:
     [[nodiscard]] std::optional<uint64_t> resolveFocusedWindow() const;
     void onWindowMotion(WindowMotionSignal signal);
     void idleWaitWatchingAttachedWindow();
-    [[nodiscard]] static RegionOfInterest displayPercentRect(const WindowGeometry& windowGeom,
-                                                             const DisplayGeometry& display);
     void detachActiveWindow();
-    void confirmPickedRegion(const RegionPickPoll& poll);
+    /// Attaches or draws a region the picker confirmed: a window click, an
+    /// in-attach-mode draw, a face suggestion, or a freehand global draw. Fed
+    /// from a RegionPickOutcome by applyRegionPickOutcome.
+    void confirmPickedRegion(const ConfirmedPick& pick);
     void adoptAttachedPick(uint64_t identity, int64_t ownerPid, const RegionOfInterest& region);
     void dismissEditedBorder();
     void toggleRegionAttach();
@@ -169,24 +171,7 @@ private:
     void applyFaceLockOutcome(const FaceLockOutcome& outcome);
     bool adoptFacePick(uint32_t displayId, const RegionOfInterest& confirmed);
 
-    /// What the application keeps for one window the picker suggested, so a
-    /// confirmed pick resolves back to its source: the rectangle the match
-    /// runs against, and the identity the attachment is made on.
-    struct WindowCandidate
-    {
-        uint64_t identity = 0;
-        int64_t ownerPid = 0;
-        std::string application;
-        AttachWindowRect windowRect;
-        RegionOfInterest region;
-        uint32_t displayId = 0;
-    };
-
-    [[nodiscard]] const WindowCandidate* matchWindowCandidate(uint32_t displayId, const RegionOfInterest& region) const;
-    [[nodiscard]] const FaceCandidate* matchFaceCandidate(uint32_t displayId, const RegionOfInterest& region) const;
-    static void logAttachMapping(const WindowCandidate& picked, const RegionOfInterest& start);
-    [[nodiscard]] const WindowCandidate* windowContaining(uint32_t displayId, const RegionOfInterest& region) const;
-    [[nodiscard]] std::optional<FloatColor> averageFrameColor(const RegionOfInterest& region) const;
+    static void logAttachMapping(const RegionPicker::WindowCandidate& picked, const RegionOfInterest& start);
     void resetToFullScreen();
     void persistPreferences();
 
@@ -295,20 +280,16 @@ private:
     void dispatchUiScaleMenu(int chosen);
 
     // --- post-render region handling ---
-    void handleRegionPicking();
-    void openRegionPicker(RegionPickerMode mode);
-    void waitForBorderFreeFrame();
-    struct DisplayFaceScan;
-    [[nodiscard]] std::vector<PickerDisplay> buildPickerDisplays();
-    void launchDisplayFaceScans(const std::vector<PickerDisplay>& pickerDisplays);
-    void drainDisplayFaceScans();
-    void consumeDisplayFaceScan(DisplayFaceScan& scan);
-    static void logPickerSuggestions(const std::vector<PickerDisplay>& pickerDisplays);
+    /// Applies a RegionPickOutcome to host state: a live preview becomes the
+    /// analysis region (its own no-op check deciding whether anything moved), a
+    /// sampled colour joins the pin board, a confirmed pick is attached or
+    /// drawn, an Esc cancel resets to full screen, and the pick's end re-syncs
+    /// the region border.
+    void applyRegionPickOutcome(const RegionPickOutcome& outcome);
+    /// The throttled cross-display cursor sample under its lock, passed to the
+    /// picker's pin tool each poll.
+    [[nodiscard]] std::optional<FloatColor> currentScreenSampleColor() const;
     void handleRegionBorderEdit();
-    void pollActiveRegionPick();
-    void pollPinPick(const RegionPickPoll& poll);
-    void applyPinnedColor(const RegionPickPoll& poll);
-    void pollRegionPreview(const RegionPickPoll& poll);
     void commitAnalysisChanges();
 
     // The freshest cross-display sample: the async sampler's callback may land
@@ -359,8 +340,6 @@ private:
     bool m_attachBorderEditing = false;
     uint64_t m_attachBorderEditIdentity = 0;
 
-    std::vector<WindowCandidate> m_windowCandidates;
-    std::vector<FaceCandidate> m_faceCandidates;
     /// The global region's border label: the captured display's name,
     /// refreshed when the captured display changes.
     std::string m_displayLabel;
@@ -370,30 +349,11 @@ private:
     /// stability watch; the host applies the outcomes it returns.
     FaceLockController m_faceLock;
 
-    /// One non-streamed display's background face scan for an open picker: a
-    /// detached thread grabs that display off the capture stream, detects,
-    /// and fills this; the main loop drains it and pushes the boxes into the
-    /// picker overlay. Held by unique_ptr so the detached thread's raw
-    /// pointer stays valid across the vector's growth, and never erased while
-    /// @c running.
-    struct DisplayFaceScan
-    {
-        std::atomic<bool> running{false};
-        std::atomic<bool> ready{false};
-        std::mutex mutex;
-        uint32_t displayId = 0;
-        uint64_t generation = 0;     ///< which picker opening spawned it
-        std::vector<IntRect> faces;  ///< detector boxes, guarded by mutex
-        int frameWidth = 0;          ///< the grabbed frame's size, guarded by mutex
-        int frameHeight = 0;
-        double elapsedMs = 0.0;  ///< grab plus detect, for the diagnostics line
-    };
+    /// Owns the region-picker lifecycle - the overlay, the background display
+    /// face scans, and the confirm/pin/preview polling; the host applies the
+    /// RegionPickOutcome it returns.
+    RegionPicker m_regionPicker;
 
-    std::vector<std::unique_ptr<DisplayFaceScan>> m_displayFaceScans;
-    /// Bumped every time the picker opens, stamped on each scan it spawns: a
-    /// scan that lands after its picker closed or a newer one opened is
-    /// dropped rather than fed to the wrong overlay.
-    uint64_t m_facePickGeneration = 0;
     std::array<IconTexture, IconCount> m_iconTextures;
     // A short-lived toolbar note after an attached window closed.
     std::string m_attachDetachNotice;
@@ -411,10 +371,6 @@ private:
     bool m_showSettings = false;
     bool m_showAbout = false;
     PinBoard m_pins;
-
-    bool m_regionPicking = false;
-    bool m_regionPickIsPin = false;
-    bool m_regionPickSwallowCancel = false;
 
     MarkerSmoother m_vectorscopeMarker;
     MarkerSmoother m_waveformMarker;
@@ -455,7 +411,6 @@ private:
     // methods a single frame runs through.
     std::optional<FloatColor> m_vectorscopeColor;
     std::optional<FloatColor> m_waveformColor;
-    std::optional<RegionPickerMode> m_wantRegionPick;
     std::optional<AnalysisWorker::FrameSize> m_frameSize;
     std::vector<ImVec4> m_paneRects;
 };

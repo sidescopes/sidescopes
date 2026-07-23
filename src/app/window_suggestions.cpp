@@ -95,4 +95,17 @@ std::vector<SuggestedRegion> buildWindowSuggestions(const std::vector<DesktopWin
     return buildRegionSuggestions(windowRegions);
 }
 
+RegionOfInterest displayPercentRect(const WindowGeometry& windowGeom, const DisplayGeometry& display)
+{
+    RegionOfInterest region;
+    region.leftPercent = std::clamp((windowGeom.x - display.originX) / display.widthPoints * 100.0, 0.0, 100.0);
+    region.topPercent = std::clamp((windowGeom.y - display.originY) / display.heightPoints * 100.0, 0.0, 100.0);
+    region.rightPercent =
+        std::clamp((windowGeom.x + windowGeom.width - display.originX) / display.widthPoints * 100.0, 0.0, 100.0);
+    region.bottomPercent =
+        std::clamp((windowGeom.y + windowGeom.height - display.originY) / display.heightPoints * 100.0, 0.0, 100.0);
+
+    return region;
+}
+
 }  // namespace sidescopes

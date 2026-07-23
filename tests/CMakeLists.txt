@@ -38,6 +38,7 @@ add_executable(sidescopes_tests
     test_attach_controller.cpp
     test_face_lock.cpp
     test_face_lock_controller.cpp
+    test_region_picker.cpp
     test_region_geometry.cpp
     test_icons.cpp
     test_focus_resolution.cpp
@@ -59,6 +60,7 @@ target_sources(sidescopes_tests PRIVATE
     ${CMAKE_SOURCE_DIR}/src/app/overlay_style.cpp
     ${CMAKE_SOURCE_DIR}/src/app/param_menu.cpp
     ${CMAKE_SOURCE_DIR}/src/app/pin_board.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/region_picker.cpp
     ${CMAKE_SOURCE_DIR}/src/app/scope_layout.cpp
     ${CMAKE_SOURCE_DIR}/src/app/scope_registry.cpp
     ${CMAKE_SOURCE_DIR}/src/app/scope_view.cpp

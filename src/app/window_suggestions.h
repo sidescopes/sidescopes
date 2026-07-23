@@ -24,4 +24,9 @@ namespace sidescopes {
 [[nodiscard]] std::vector<SuggestedRegion> buildWindowSuggestions(const std::vector<DesktopWindow>& windows,
                                                                   const DisplayGeometry& geometry, int maxSuggestions);
 
+/// A window rectangle as its display's percentages - the shape the
+/// window-candidate list and the edit-time veil speak. Clamped to the
+/// display, so a window straddling an edge reports the visible part.
+[[nodiscard]] RegionOfInterest displayPercentRect(const WindowGeometry& windowGeom, const DisplayGeometry& display);
+
 }  // namespace sidescopes

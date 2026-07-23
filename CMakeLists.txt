@@ -363,6 +363,7 @@ if(APPLE OR WIN32)
         src/app/param_menu.cpp
         src/app/pin_board.cpp
         src/app/region_geometry.cpp
+        src/app/region_picker.cpp
         src/app/row_layout.cpp
         src/app/scope_layout.cpp
         src/app/scope_panes.cpp

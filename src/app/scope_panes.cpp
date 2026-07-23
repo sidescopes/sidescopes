@@ -389,13 +389,13 @@ void App::drawRegionToolIcons()
     const int iconPx = iconPixelSize();
     placeRegionToolbox();
     if (iconButton("##draw-region", iconTextureId(Icon::Pencil, iconPx), tooltip)) {
-        m_wantRegionPick = RegionPickerMode::DrawGlobal;
+        m_regionPicker.request(RegionPickerMode::DrawGlobal);
     }
     ImGui::SameLine(0.0f, 2.0f);
     std::snprintf(tooltip, sizeof(tooltip), "Attach to a window (%s) - click the window or draw inside it",
                   m_shortcuts.attachWindow.c_str());
     if (iconButton("##attach-window", iconTextureId(Icon::SquarePen, iconPx), tooltip)) {
-        m_wantRegionPick = RegionPickerMode::AttachWindow;
+        m_regionPicker.request(RegionPickerMode::AttachWindow);
     }
     ImGui::SameLine(0.0f, 2.0f);
     // The face tool sits last among the region tools, before the reset. It
@@ -405,7 +405,7 @@ void App::drawRegionToolIcons()
     if (supportsFaceDetection()) {
         std::snprintf(tooltip, sizeof(tooltip), "Attach to a face (%s)", m_shortcuts.attachFace.c_str());
         if (iconButton("##attach-face", iconTextureId(Icon::User, iconPx), tooltip)) {
-            m_wantRegionPick = RegionPickerMode::AttachFace;
+            m_regionPicker.request(RegionPickerMode::AttachFace);
         }
         ImGui::SameLine(0.0f, 2.0f);
     }
@@ -463,7 +463,7 @@ void App::drawPinTool()
     std::snprintf(tooltip, sizeof(tooltip), "Pin a color (%s)%s", m_shortcuts.pinColor.c_str(),
                   pins ? " - Shift+click a color to pin several" : " - needs a scope that takes pins");
     if (iconButton("##pin-color", iconTextureId(Icon::Pipette, iconPixelSize()), tooltip, !pins) && pins) {
-        m_wantRegionPick = RegionPickerMode::PinColor;
+        m_regionPicker.request(RegionPickerMode::PinColor);
     }
 }
 
