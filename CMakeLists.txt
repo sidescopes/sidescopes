@@ -360,6 +360,7 @@ if(APPLE OR WIN32)
         src/app/capture_controller.cpp
         src/app/color_readout.cpp
         src/app/context_menu.cpp
+        src/app/cursor_sampler.cpp
         src/app/face_lock.cpp
         src/app/face_lock_controller.cpp
         src/app/imgui_ui.cpp

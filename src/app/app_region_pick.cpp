@@ -3,9 +3,6 @@
 #define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
 
-#include <mutex>
-#include <optional>
-
 #include "app/window_suggestions.h"
 
 namespace sidescopes {
@@ -50,13 +47,6 @@ void App::applyRegionPickOutcome(const RegionPickOutcome& outcome)
     if (outcome.activity) {
         m_lastActivity = glfwGetTime();
     }
-}
-
-std::optional<FloatColor> App::currentScreenSampleColor() const
-{
-    std::lock_guard lock(m_screenSample->mutex);
-
-    return m_screenSample->color;
 }
 
 void App::handleRegionBorderEdit()

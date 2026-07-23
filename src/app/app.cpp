@@ -12,13 +12,11 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
-#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <map>
 #include <memory>
-#include <mutex>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -50,7 +48,6 @@
 #include "core/color_lab.h"
 #include "core/diagnostics.h"
 #include "core/frame_mailbox.h"
-#include "core/marker_smoother.h"
 #include "core/preferences.h"
 #include "core/region_suggestions.h"
 #include "core/trace_intensity.h"
@@ -111,10 +108,10 @@ App::App()
       m_scopeRegistry(builtinModules()),
       m_view(m_scopeRegistry),
       m_shortcuts(m_scopeRegistry),
+      m_cursor(m_captureController, m_worker),
       m_presets(m_view, m_scopeRegistry, m_analysis),
       m_detail(m_view, m_analysis)
 {
-    m_screenSample = std::make_shared<ScreenSample>();
 }
 
 bool App::init()
@@ -511,7 +508,7 @@ void App::runFrame()
     // analysis keep flowing underneath.
     applyRegionPickOutcome(m_regionPicker.openIfRequested(isFullScreen()));
     handleRegionBorderEdit();
-    applyRegionPickOutcome(m_regionPicker.poll(m_frameSize, currentScreenSampleColor()));
+    applyRegionPickOutcome(m_regionPicker.poll(m_frameSize, m_cursor.screenSampleColor()));
     commitAnalysisChanges();
 }
 
@@ -654,54 +651,16 @@ void App::publishSelfWindowMask()
     }
 }
 
+// Applies a cursor sample to host state: the smoothed colors flow on to this
+// frame's drawing, and a moved pointer counts as interaction.
 void App::sampleCursorColor()
 {
-    // Cursor color, smoothed per scope with its own rhythm. On the captured
-    // display it reads the capture stream's frame; on every other display a
-    // throttled one-shot sample keeps the readout alive even while capture is
-    // paused.
-    if (m_captureController.capturedDisplay() == 0) {
-        return;
-    }
-    const auto cursor = globalCursorPosition();
-    if (!cursor) {
-        return;
-    }
-    if (std::abs(cursor->x - m_lastCursor.x) + std::abs(cursor->y - m_lastCursor.y) > 0.5) {
-        m_lastCursor = *cursor;
+    const CursorSmoothing smoothing{m_view.smoothing(VectorscopeScopeId), m_view.smoothing(WaveformScopeId)};
+    const CursorSample sample = m_cursor.update(m_frameSize, smoothing, glfwGetTime(), ImGui::GetIO().DeltaTime);
+    m_vectorscopeColor = sample.vectorscopeColor;
+    m_waveformColor = sample.waveformColor;
+    if (sample.moved) {
         m_lastActivity = glfwGetTime();
-    }
-    std::optional<FloatColor> sampled;
-    const bool onCapturedDisplay = displayAtPoint(*cursor).value_or(0) == m_captureController.capturedDisplay();
-    if (onCapturedDisplay && !m_captureController.dead() && m_frameSize) {
-        if (const auto geometry = geometryOfDisplay(m_captureController.capturedDisplay())) {
-            const int pixelX =
-                static_cast<int>((cursor->x - geometry->originX) * m_frameSize->width / geometry->widthPoints);
-            const int pixelY =
-                static_cast<int>((cursor->y - geometry->originY) * m_frameSize->height / geometry->heightPoints);
-            sampled = m_worker.sampleFrameColor(pixelX, pixelY);
-        }
-    } else {
-        if (glfwGetTime() > m_nextScreenSample) {
-            m_nextScreenSample = glfwGetTime() + 0.05;
-            auto screenSample = m_screenSample;
-            sampleScreenColorAsync(*cursor, [screenSample](std::optional<FloatColor> color) {
-                if (!color) {
-                    return;
-                }
-                std::lock_guard lock(screenSample->mutex);
-                screenSample->color = color;
-            });
-        }
-        std::lock_guard lock(m_screenSample->mutex);
-        sampled = m_screenSample->color;
-    }
-    if (sampled) {
-        m_vectorscopeMarker.setTimeConstant(m_view.smoothing(VectorscopeScopeId));
-        m_waveformMarker.setTimeConstant(m_view.smoothing(WaveformScopeId));
-        const ImGuiIO& io = ImGui::GetIO();
-        m_vectorscopeColor = m_vectorscopeMarker.update(*sampled, io.DeltaTime);
-        m_waveformColor = m_waveformMarker.update(*sampled, io.DeltaTime);
     }
 }
 

@@ -5,7 +5,6 @@
 #include <cstdint>
 #include <map>
 #include <memory>
-#include <mutex>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -15,6 +14,7 @@
 #include "app/adaptive_detail.h"
 #include "app/attach_controller.h"
 #include "app/capture_controller.h"
+#include "app/cursor_sampler.h"
 #include "app/face_lock_controller.h"
 #include "app/layout_presets.h"
 #include "app/param_menu.h"
@@ -29,7 +29,6 @@
 #include "core/analysis_worker.h"
 #include "core/frame.h"
 #include "core/frame_mailbox.h"
-#include "core/marker_smoother.h"
 #include "core/preferences.h"
 #include "core/region_kind.h"
 #include "imgui.h"
@@ -212,20 +211,8 @@ private:
     /// drawn, an Esc cancel resets to full screen, and the pick's end re-syncs
     /// the region border.
     void applyRegionPickOutcome(const RegionPickOutcome& outcome);
-    /// The throttled cross-display cursor sample under its lock, passed to the
-    /// picker's pin tool each poll.
-    [[nodiscard]] std::optional<FloatColor> currentScreenSampleColor() const;
     void handleRegionBorderEdit();
     void commitAnalysisChanges();
-
-    // The freshest cross-display sample: the async sampler's callback may land
-    // on any thread, and may still be in flight at shutdown, so the state it
-    // writes is shared ownership.
-    struct ScreenSample
-    {
-        std::mutex mutex;
-        std::optional<FloatColor> color;
-    };
 
     GLFWwindow* m_window = nullptr;
     AppCallbackState m_callbackState;
@@ -298,8 +285,9 @@ private:
     bool m_showAbout = false;
     PinBoard m_pins;
 
-    MarkerSmoother m_vectorscopeMarker;
-    MarkerSmoother m_waveformMarker;
+    /// Owns the color under the pointer - the cross-display sample and the
+    /// per-trace smoothing; the host hands what it returns to its drawing.
+    CursorSampler m_cursor;
 
     /// Owns the layout preset slots and what a slot records of - and restores
     /// to - the live layout; the host applies the outcomes it returns.
@@ -319,10 +307,6 @@ private:
     bool m_frameBodyStamped = false;
     double m_lastActivity = 0.0;
     double m_nextPreferencesSave = -1.0;
-    DesktopPoint m_lastCursor{-1.0, -1.0};
-
-    std::shared_ptr<ScreenSample> m_screenSample;
-    double m_nextScreenSample = 0.0;
     std::atomic<bool> m_orphanEscape{false};
 
     // Recomputed every frame, held on the App only to flow between the phase
