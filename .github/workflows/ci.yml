@@ -56,20 +56,50 @@ jobs:
       - name: Install clang-tidy
         run: brew install llvm@22
       - name: Build
-        # The generated version header and the fetched ImGui headers must exist
+        # UI tests ON so the one compile database also covers tests/ui. The
+        # generated version header and the fetched ImGui headers must exist
         # before clang-tidy can parse the app layer.
         run: |
-          cmake -B build -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+          cmake -B build -DSIDESCOPES_UI_TESTS=ON -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
           cmake --build build
       - name: Analyze
-        # The app layer (src/app) and the macOS platform sources build only on
-        # APPLE, so they are absent from the Linux tidy job's compile database -
-        # this is where they get their clang-tidy coverage. Homebrew clang-tidy
-        # needs the SDK sysroot that Apple clang knows implicitly.
+        # The app layer, the macOS platform sources, and the UI tests build only
+        # on APPLE, so they are absent from the Linux tidy job's compile database
+        # - this is where they get their clang-tidy coverage. Homebrew clang-tidy
+        # needs the SDK sysroot that Apple clang knows implicitly; -Wno-c2y is for
+        # the test files, whose Catch2/test-engine macros use __COUNTER__ (a no-op
+        # for the non-test sources).
         run: |
-          files=$(git ls-files 'src/app/*.cpp' 'src/platform/macos/*.mm')
+          files=$(git ls-files 'src/app/*.cpp' 'src/platform/macos/*.mm' 'tests/ui/*.cpp')
           "$(brew --prefix llvm@22)/bin/clang-tidy" -p build --quiet \
-            --extra-arg=-isysroot --extra-arg="$(xcrun --show-sdk-path)" $files
+            --extra-arg=-isysroot --extra-arg="$(xcrun --show-sdk-path)" \
+            --extra-arg=-Wno-c2y-extensions $files
+
+  tidy-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ilammy/msvc-dev-cmd@v1
+      - name: Configure with Ninja for a compile database
+        # The Visual Studio generator emits no compile_commands.json; Ninja with
+        # the MSVC toolchain does, and clang-tidy reads the cl-style entries.
+        run: cmake -B build -G Ninja -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+      - name: Build
+        run: cmake --build build
+      - name: Analyze
+        shell: bash
+        # src/platform/windows builds only on WIN32 and pulls in <windows.h>,
+        # so it is absent from the other tidy jobs' compile databases. The
+        # clang static analyzer is excluded here: on WinRT/COM async code it
+        # produces false positives that vary with the SDK and clang version, so
+        # it is not reproducible between this runner and the denwin gate. The
+        # stable lint checks - which caught the real findings - still run.
+        # -Wno-unused-command-line-argument drops MSVC's /MP, which the compile
+        # database carries but clang-tidy's clang-cl parse ignores.
+        run: |
+          files=$(git ls-files 'src/platform/windows/*.cpp')
+          clang-tidy -p build --checks='-clang-analyzer-*' \
+            --extra-arg=-Wno-unused-command-line-argument $files
 
   test:
     strategy:
