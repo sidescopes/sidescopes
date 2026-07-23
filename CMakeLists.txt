@@ -363,6 +363,7 @@ if(APPLE OR WIN32)
         src/app/cursor_sampler.cpp
         src/app/face_lock.cpp
         src/app/face_lock_controller.cpp
+        src/app/frame_timer.cpp
         src/app/imgui_ui.cpp
         src/app/layout_preset_store.cpp
         src/app/layout_presets.cpp

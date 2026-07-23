@@ -30,6 +30,7 @@
 #include "app/capture_controller.h"
 #include "app/color_readout.h"
 #include "app/context_menu.h"
+#include "app/frame_timer.h"
 #include "app/imgui_ui.h"
 #include "app/overlay_render.h"
 #include "app/param_menu.h"
@@ -138,6 +139,7 @@ bool App::init()
 
         return false;
     }
+    m_frameTimer = std::make_unique<FrameTimer>(*m_graphics);
 
     setupCapture();
     seedAnalysis(m_analysis, startup);
@@ -461,7 +463,7 @@ void App::runFrame()
     m_regionPicker.clearRequest();
 
     pumpEvents();
-    markFrameBodyStart();
+    m_frameTimer->markFrameBodyStart();
     drainAsyncSignals();
     // Capture is a service that dies (lock screen, display sleep); restarting
     // it is our job.
@@ -497,7 +499,7 @@ void App::runFrame()
     drawFrameUi();
 
     ImGui::Render();
-    presentFrame();
+    m_frameTimer->presentFrame();
 
     // Second follow step, right after the vsync wait: the pre-frame geometry
     // is a frame stale by now, and a border moved from it would trail a
@@ -510,41 +512,6 @@ void App::runFrame()
     handleRegionBorderEdit();
     applyRegionPickOutcome(m_regionPicker.poll(m_frameSize, m_cursor.screenSampleColor()));
     commitAnalysisChanges();
-}
-
-void App::markFrameBodyStart()
-{
-    if (diagEnabled(DiagChannel::Perf)) {
-        m_frameBodyStart = std::chrono::steady_clock::now();
-        m_frameBodyStamped = true;
-    }
-}
-
-void App::presentFrame()
-{
-    // Off: a plain present. On: bracket the platform present so the frame
-    // body (build, since markFrameBodyStart) and the present/vsync wait fall
-    // on one line. On Windows the wait is DwmFlush's compositor tick; on
-    // macOS it is the drawable present submit, the swap seam in shared code.
-    // The record toggle lands mid-frame (inside the UI pass), so the first
-    // present after enabling has no stamped body start - that frame logs
-    // nothing rather than timing from a stale stamp.
-    const bool bodyStamped = m_frameBodyStamped;
-    m_frameBodyStamped = false;
-    if (!diagEnabled(DiagChannel::Perf)) {
-        m_graphics->endFrame();
-
-        return;
-    }
-    const auto presentStart = std::chrono::steady_clock::now();
-    m_graphics->endFrame();
-    if (!bodyStamped) {
-        return;
-    }
-    const auto frameEnd = std::chrono::steady_clock::now();
-    const double bodyMs = std::chrono::duration<double, std::milli>(presentStart - m_frameBodyStart).count();
-    const double presentMs = std::chrono::duration<double, std::milli>(frameEnd - presentStart).count();
-    SS_DIAG(Perf, "frame body_ms=%.1f present_ms=%.1f", bodyMs, presentMs);
 }
 
 void App::pumpEvents()

@@ -1,7 +1,6 @@
 #pragma once
 
 #include <atomic>
-#include <chrono>
 #include <cstdint>
 #include <map>
 #include <memory>
@@ -16,6 +15,7 @@
 #include "app/capture_controller.h"
 #include "app/cursor_sampler.h"
 #include "app/face_lock_controller.h"
+#include "app/frame_timer.h"
 #include "app/layout_presets.h"
 #include "app/param_menu.h"
 #include "app/pin_board.h"
@@ -155,14 +155,6 @@ private:
     // --- per-frame ---
     void runFrame();
     void pumpEvents();
-    /// Stamps the frame-body clock for the perf channel, after the event
-    /// wait so an idle wait never counts as frame work. A no-op when perf
-    /// diagnostics are off.
-    void markFrameBodyStart();
-    /// Presents the built frame and, for the perf channel, logs the frame
-    /// body and the present/vsync wait as one line. A no-op present wrapper
-    /// when perf diagnostics are off.
-    void presentFrame();
     void drainAsyncSignals();
     void followWindowDisplay();
     void syncUiScaleToMonitor();
@@ -217,6 +209,9 @@ private:
     GLFWwindow* m_window = nullptr;
     AppCallbackState m_callbackState;
     std::unique_ptr<GraphicsBackend> m_graphics;
+    /// Presents each built frame and times its body and present for the perf
+    /// diagnostics channel. Built once the graphics backend exists.
+    std::unique_ptr<FrameTimer> m_frameTimer;
     VersionInfo m_versionInfo;
     /// Owns the factor the interface is drawn at and the user's size
     /// preference folded into it.
@@ -300,11 +295,6 @@ private:
     uint64_t m_outputVersion = 0;
     AnalysisWorker::Output m_output;
 
-    // Perf-channel frame timing: the frame body's start, stamped only while
-    // the channel records; the flag marks the stamp fresh for this frame so
-    // a mid-frame record toggle never times against a stale start.
-    std::chrono::steady_clock::time_point m_frameBodyStart;
-    bool m_frameBodyStamped = false;
     double m_lastActivity = 0.0;
     double m_nextPreferencesSave = -1.0;
     std::atomic<bool> m_orphanEscape{false};
