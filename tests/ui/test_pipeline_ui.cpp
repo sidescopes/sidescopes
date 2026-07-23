@@ -20,6 +20,8 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <cstdio>
+#include <exception>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -235,7 +237,7 @@ void registerPipelineTests(ImGuiTestEngine* engine)
 }  // namespace sidescopes
 
 int main()
-{
+try {
     using namespace sidescopes;
 
     Pipeline& h = pipeline();
@@ -248,4 +250,8 @@ int main()
     h.worker.start();
 
     return uitest::runSuite("pipeline", registerPipelineTests, /*expectedTests=*/1);
+} catch (const std::exception& error) {
+    std::fprintf(stderr, "pipeline setup failed: %s\n", error.what());
+
+    return 1;
 }
