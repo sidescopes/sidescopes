@@ -178,6 +178,8 @@ if(APPLE)
         src/platform/macos/desktop.mm
         src/platform/macos/face_detection.mm
         src/platform/macos/native_menu.mm
+        src/platform/macos/region_border_view.mm
+        src/platform/macos/region_picker_view.mm
         src/platform/macos/region_selection.mm
         src/platform/macos/screen_capture.mm
     )
