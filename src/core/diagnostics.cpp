@@ -256,18 +256,24 @@ std::string diagDirectory()
     return directory;
 }
 
-void diagEmit(DiagChannel channel, const char* message)
+void diagEmit(DiagChannel channel, const char* message) noexcept
 {
-    DiagState& state = diagState();
-    if (!state.sink || !state.channels[static_cast<std::size_t>(channel)]) {
-        return;
-    }
-    const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - state.start).count();
-    std::fprintf(state.sink, "t=%.6f %s %s\n", seconds, ChannelNames[static_cast<std::size_t>(channel)], message);
-    if (state.flush == DiagFlush::EveryLine ||
-        (state.flush == DiagFlush::Interval && seconds - state.lastFlushSeconds >= FlushIntervalSeconds)) {
-        std::fflush(state.sink);
-        state.lastFlushSeconds = seconds;
+    // Diagnostics are fire-and-forget: the only throwing surface is the sink's
+    // one-time setup, which always runs before any emit, but a logging failure
+    // must never disturb the caller regardless - so the whole path is contained.
+    try {
+        DiagState& state = diagState();
+        if (!state.sink || !state.channels[static_cast<std::size_t>(channel)]) {
+            return;
+        }
+        const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - state.start).count();
+        std::fprintf(state.sink, "t=%.6f %s %s\n", seconds, ChannelNames[static_cast<std::size_t>(channel)], message);
+        if (state.flush == DiagFlush::EveryLine ||
+            (state.flush == DiagFlush::Interval && seconds - state.lastFlushSeconds >= FlushIntervalSeconds)) {
+            std::fflush(state.sink);
+            state.lastFlushSeconds = seconds;
+        }
+    } catch (...) {  // NOLINT(bugprone-empty-catch): a diagnostic must never propagate a failure
     }
 }
 

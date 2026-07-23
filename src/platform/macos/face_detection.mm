@@ -27,8 +27,9 @@ void warmFaceDetection()
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
       static uint8_t blank[64 * 64 * 4] = {};
       CVPixelBufferRef buffer = nullptr;
-      if (CVPixelBufferCreateWithBytes(kCFAllocatorDefault, 64, 64, kCVPixelFormatType_32BGRA, blank, 64 * 4, nullptr,
-                                       nullptr, nullptr, &buffer) != kCVReturnSuccess ||
+      if (CVPixelBufferCreateWithBytes(kCFAllocatorDefault, 64, 64, kCVPixelFormatType_32BGRA, blank,
+                                       static_cast<size_t>(64) * 4, nullptr, nullptr, nullptr,
+                                       &buffer) != kCVReturnSuccess ||
           !buffer) {
           return;
       }

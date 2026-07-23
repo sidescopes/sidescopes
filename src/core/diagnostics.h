@@ -82,7 +82,7 @@ void diagConfigure(const DiagConfig& config);
 /// the sink is closed or the channel is off. Prefer the SS_DIAG macro,
 /// which formats printf-style and skips all evaluation when the channel
 /// is off.
-void diagEmit(DiagChannel channel, const char* message);
+void diagEmit(DiagChannel channel, const char* message) noexcept;
 
 /// Measures a scope's wall time and logs it as one "<name>_ms=<elapsed>"
 /// line when the scope closes - the aggregatable shape performance questions

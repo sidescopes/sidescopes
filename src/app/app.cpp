@@ -119,7 +119,7 @@ DrawnScope drawScopeImage(const ScopeTexture& texture, bool keepAspect, float zo
     if (keepAspect) {
         const float scale = std::max(0.05f, std::min(available.x / static_cast<float>(texture.width()),
                                                      available.y / static_cast<float>(texture.height())));
-        size = ImVec2(texture.width() * scale, texture.height() * scale);
+        size = ImVec2(static_cast<float>(texture.width()) * scale, static_cast<float>(texture.height()) * scale);
     }
     ImVec2 cursor = ImGui::GetCursorPos();
     cursor.x += std::max(0.0f, (available.x - size.x) * 0.5f);
@@ -510,15 +510,16 @@ void strokeHistogramOutline(const DrawnScope& scope, const AnalysisWorker::Outpu
     const bool bands = style == HistogramStyle::PerChannel;
     const int samples = std::clamp(static_cast<int>(scope.size.x), 128, 2 * Histogram::Bins);
     for (int channel = 0; channel < 3; ++channel) {
-        const float* plane = output.histogramOutline.data() + channel * Histogram::Bins;
-        const float bandTop = scope.origin.y + (bands ? channel * scope.size.y / 3.0f : 0.0f);
+        const float* plane = output.histogramOutline.data() + static_cast<std::ptrdiff_t>(channel) * Histogram::Bins;
+        const float bandTop = scope.origin.y + (bands ? static_cast<float>(channel) * scope.size.y / 3.0f : 0.0f);
         const float bandHeight = bands ? scope.size.y / 3.0f : scope.size.y;
         points.clear();
         for (int sample = 0; sample < samples; ++sample) {
             const float binPosition =
-                std::clamp((sample + 0.5f) * Histogram::Bins / samples - 0.5f, 0.0f, Histogram::Bins - 1.0f);
+                std::clamp((static_cast<float>(sample) + 0.5f) * Histogram::Bins / static_cast<float>(samples) - 0.5f,
+                           0.0f, Histogram::Bins - 1.0f);
             const int center = static_cast<int>(binPosition);
-            const float t = binPosition - center;
+            const float t = binPosition - static_cast<float>(center);
             const auto at = [&](int index) { return plane[std::clamp(index, 0, Histogram::Bins - 1)]; };
             const float p0 = at(center - 1);
             const float p1 = at(center);
@@ -535,7 +536,8 @@ void strokeHistogramOutline(const DrawnScope& scope, const AnalysisWorker::Outpu
             // reading of the channel. Kept just inside the band so the stroke
             // survives the clip.
             const float y = std::min(bandTop + (1.0f - height) * bandHeight, bandTop + bandHeight - 1.0f);
-            points.push_back(ImVec2(scope.origin.x + (sample + 0.5f) * scope.size.x / samples, y));
+            points.push_back(ImVec2(
+                scope.origin.x + (static_cast<float>(sample) + 0.5f) * scope.size.x / static_cast<float>(samples), y));
         }
         if (points.size() >= 2) {
             draw->AddPolyline(points.data(), static_cast<int>(points.size()),
@@ -2118,8 +2120,9 @@ std::optional<FloatColor> App::averageFrameColor(const RegionOfInterest& region)
         if (count == 0) {
             return;
         }
-        color = FloatColor{static_cast<float>(sumR / count), static_cast<float>(sumG / count),
-                           static_cast<float>(sumB / count)};
+        const auto samples = static_cast<double>(count);
+        color = FloatColor{static_cast<float>(sumR / samples), static_cast<float>(sumG / samples),
+                           static_cast<float>(sumB / samples)};
     });
 
     return sampled ? color : std::nullopt;
@@ -2951,10 +2954,10 @@ void App::publishSelfWindowMask()
     const double scaleY = m_frameSize->height / geometry->heightPoints;
     // The chrome margins are 100%-scale units like the rest of the interface,
     // so they grow with the monitor's scale.
-    const IntRect selfWindow{static_cast<int>((windowX - geometry->originX - 8 * m_uiScale) * scaleX),
-                             static_cast<int>((windowY - geometry->originY - 42 * m_uiScale) * scaleY),
-                             static_cast<int>((windowW + 16 * m_uiScale) * scaleX),
-                             static_cast<int>((windowH + 58 * m_uiScale) * scaleY)};
+    const IntRect selfWindow{static_cast<int>((windowX - geometry->originX - 8.0f * m_uiScale) * scaleX),
+                             static_cast<int>((windowY - geometry->originY - 42.0f * m_uiScale) * scaleY),
+                             static_cast<int>((static_cast<float>(windowW) + 16.0f * m_uiScale) * scaleX),
+                             static_cast<int>((static_cast<float>(windowH) + 58.0f * m_uiScale) * scaleY)};
     if (selfWindow.x != m_analysis.maskedWindow.x || selfWindow.y != m_analysis.maskedWindow.y ||
         selfWindow.width != m_analysis.maskedWindow.width || selfWindow.height != m_analysis.maskedWindow.height) {
         m_analysis.maskedWindow = selfWindow;
@@ -3079,7 +3082,7 @@ void App::updateAdaptiveDetail(int framebufferWidth)
     int windowW = 0;
     int windowH = 0;
     glfwGetWindowSize(m_window, &windowW, &windowH);
-    const float density = windowW > 0 ? static_cast<float>(framebufferWidth) / windowW : 1.0f;
+    const float density = windowW > 0 ? static_cast<float>(framebufferWidth) / static_cast<float>(windowW) : 1.0f;
     int regionWidth = 0;
     if (m_frameSize) {
         regionWidth = m_analysis.region.toPixels(m_frameSize->width, m_frameSize->height).width;

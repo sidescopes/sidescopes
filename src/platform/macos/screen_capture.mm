@@ -86,8 +86,8 @@ SCStreamConfiguration* makeStreamConfiguration(SCDisplay* display, SCContentFilt
 {
     SCStreamConfiguration* configuration = [[SCStreamConfiguration alloc] init];
     const CGFloat scale = filter.pointPixelScale > 0 ? filter.pointPixelScale : 2.0;
-    configuration.width = static_cast<size_t>(display.width * scale);
-    configuration.height = static_cast<size_t>(display.height * scale);
+    configuration.width = static_cast<size_t>(static_cast<CGFloat>(display.width) * scale);
+    configuration.height = static_cast<size_t>(static_cast<CGFloat>(display.height) * scale);
     configuration.pixelFormat = kCVPixelFormatType_32BGRA;
     configuration.minimumFrameInterval = CMTimeMake(1, maxFramesPerSecond);
     configuration.showsCursor = NO;
@@ -447,8 +447,8 @@ std::optional<CapturedImage> captureDisplayImage(uint32_t displayId)
         SCContentFilter* filter = buildContentFilter(content, display);
         SCStreamConfiguration* configuration = [[SCStreamConfiguration alloc] init];
         const CGFloat scale = filter.pointPixelScale > 0 ? filter.pointPixelScale : 2.0;
-        configuration.width = static_cast<size_t>(display.width * scale);
-        configuration.height = static_cast<size_t>(display.height * scale);
+        configuration.width = static_cast<size_t>(static_cast<CGFloat>(display.width) * scale);
+        configuration.height = static_cast<size_t>(static_cast<CGFloat>(display.height) * scale);
         configuration.showsCursor = NO;
         configuration.pixelFormat = kCVPixelFormatType_32BGRA;
         configuration.colorSpaceName = kCGColorSpaceSRGB;

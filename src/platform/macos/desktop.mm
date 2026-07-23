@@ -87,6 +87,10 @@ std::vector<DesktopWindow> attachCandidateWindows(uint32_t displayId)
 std::optional<WindowGeometry> windowGeometry(uint64_t identity)
 {
     const CGWindowID windowId = static_cast<CGWindowID>(identity);
+    // CGWindowListCreateDescriptionFromArray takes a CFArray whose elements are
+    // window ids encoded directly as pointer values - Apple's documented
+    // contract, so the integer-to-pointer cast is required here.
+    // NOLINTNEXTLINE(performance-no-int-to-ptr)
     const void* ids[1] = {reinterpret_cast<const void*>(static_cast<uintptr_t>(windowId))};
     CFArrayRef idArray = CFArrayCreate(kCFAllocatorDefault, ids, 1, nullptr);
     if (!idArray) {

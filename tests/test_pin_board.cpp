@@ -106,6 +106,7 @@ TEST_CASE("Restoring caps the board at its capacity")
     // A hand-edited preferences file can name more colors than the ring holds;
     // the leading ones fill it and the rest are dropped.
     std::vector<FloatColor> saved;
+    saved.reserve(PinBoard::Maximum + 3);
     for (std::size_t index = 0; index < PinBoard::Maximum + 3; ++index) {
         saved.push_back(gray(static_cast<float>(index)));
     }
@@ -144,6 +145,7 @@ TEST_CASE("Restoring rejects a comparator no restored color answers")
     SECTION("a comparator dropped by the capacity cap selects nothing")
     {
         std::vector<FloatColor> saved;
+        saved.reserve(PinBoard::Maximum + 1);
         for (std::size_t index = 0; index < PinBoard::Maximum + 1; ++index) {
             saved.push_back(gray(static_cast<float>(index)));
         }

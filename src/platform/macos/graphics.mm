@@ -52,7 +52,10 @@ public:
 
     [[nodiscard]] ImTextureID textureId() const override
     {
-        return reinterpret_cast<ImTextureID>((__bridge void*)m_texture);
+        // ARC requires the __bridge to hand the Metal texture out as a raw
+        // pointer; ImTextureID is an integer handle ImGui only passes back.
+        void* handle = (__bridge void*)m_texture;
+        return reinterpret_cast<ImTextureID>(handle);
     }
 
     [[nodiscard]] int width() const override

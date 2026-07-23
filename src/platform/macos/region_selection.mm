@@ -814,7 +814,11 @@ NSCursor* buildPinCursor(const std::optional<FloatColor>& color)
     NSBezierPath* stripes = [NSBezierPath bezierPath];
     stripes.lineWidth = 4.0;
     const NSRect bounds = self.bounds;
-    for (CGFloat x = NSMinX(bounds) - bounds.size.height; x < NSMaxX(bounds); x += 10.0) {
+    // An integer step index keeps the diagonal spacing exact; a CGFloat loop
+    // counter would accumulate rounding across a wide view.
+    const CGFloat start = NSMinX(bounds) - bounds.size.height;
+    for (int step = 0; start + step * 10.0 < NSMaxX(bounds); ++step) {
+        const CGFloat x = start + step * 10.0;
         [stripes moveToPoint:NSMakePoint(x, NSMinY(bounds))];
         [stripes lineToPoint:NSMakePoint(x + bounds.size.height, NSMaxY(bounds))];
     }
@@ -974,7 +978,7 @@ NSCursor* buildPinCursor(const std::optional<FloatColor>& color)
                                                                           isPlanar:NO
                                                                     colorSpaceName:NSDeviceRGBColorSpace
                                                                       bitmapFormat:NSBitmapFormatAlphaNonpremultiplied
-                                                                       bytesPerRow:pixels * 4
+                                                                       bytesPerRow:static_cast<NSInteger>(pixels) * 4
                                                                       bitsPerPixel:32];
         std::memcpy(rep.bitmapData, rgba.data(), rgba.size());
         icons[which] = [[NSImage alloc] initWithSize:NSMakeSize(11, 11)];
