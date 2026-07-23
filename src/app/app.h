@@ -12,6 +12,7 @@
 #include <utility>
 #include <vector>
 
+#include "app/adaptive_detail.h"
 #include "app/attach_controller.h"
 #include "app/capture_controller.h"
 #include "app/face_lock_controller.h"
@@ -105,7 +106,6 @@ private:
     // --- state accessors ---
     [[nodiscard]] std::optional<uint32_t> displayOfWindow() const;
     [[nodiscard]] double scopeParam(std::string_view id, std::string_view key, double fallback) const;
-    [[nodiscard]] std::pair<int, int> currentSize(std::string_view id) const;
     [[nodiscard]] bool pinsAvailable() const;
     void refreshActivatedScope(std::string_view id);
     void toggleScope(std::string_view id);
@@ -174,11 +174,10 @@ private:
     void syncUiScaleToMonitor();
     void publishSelfWindowMask();
     void sampleCursorColor();
+    /// Puts the resolutions the adaptive detail settled on in force, so the
+    /// worker recomputes each scope's image at the size its pane now wants.
+    /// The decision itself is the controller's; only the settings are ours.
     void updateAdaptiveDetail(int framebufferWidth);
-    [[nodiscard]] ImVec2 paneSizePixels(std::string_view id, float density) const;
-    [[nodiscard]] std::pair<int, int> desiredWaveformSize(float density, int regionWidth) const;
-    [[nodiscard]] std::pair<int, int> desiredHistogramSize(float density) const;
-    [[nodiscard]] int desiredVectorscopeSize(float density) const;
 
     // --- frame UI ---
     void drawFrameUi();
@@ -325,12 +324,9 @@ private:
 
     LayoutPresetStore m_presetStore;
 
-    int m_pendingColumns = 0;
-    int m_pendingImageHeight = 0;
-    int m_pendingVectorscope = 0;
-    int m_pendingHistWidth = 0;
-    int m_pendingHistHeight = 0;
-    double m_detailPendingSince = 0.0;
+    /// Owns the debounced choice of what resolution each scope's image is
+    /// computed at; the host puts the resolutions it settles on in force.
+    AdaptiveDetail m_detail;
 
     uint64_t m_outputVersion = 0;
     AnalysisWorker::Output m_output;

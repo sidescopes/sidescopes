@@ -26,6 +26,7 @@
 #include <utility>
 #include <vector>
 
+#include "app/adaptive_detail.h"
 #include "app/app_startup.h"
 #include "app/border_label.h"
 #include "app/capture_controller.h"
@@ -52,7 +53,6 @@
 #include "core/marker_smoother.h"
 #include "core/preferences.h"
 #include "core/region_suggestions.h"
-#include "core/scopes/waveform.h"
 #include "core/trace_intensity.h"
 #include "imgui.h"
 #include "modules/module_registry.h"
@@ -110,7 +110,8 @@ App::App()
       m_regionPicker(m_captureController, m_worker, *m_capture),
       m_scopeRegistry(builtinModules()),
       m_view(m_scopeRegistry),
-      m_shortcuts(m_scopeRegistry)
+      m_shortcuts(m_scopeRegistry),
+      m_detail(m_view, m_analysis)
 {
     m_screenSample = std::make_shared<ScreenSample>();
 }
@@ -312,13 +313,6 @@ double App::scopeParam(std::string_view id, std::string_view key, double fallbac
     const auto value = scope->second.find(std::string{key});
 
     return value != scope->second.end() ? value->second : fallback;
-}
-
-std::pair<int, int> App::currentSize(std::string_view id) const
-{
-    const auto at = m_analysis.imageSizes.find(std::string{id});
-
-    return at != m_analysis.imageSizes.end() ? at->second : std::pair<int, int>{0, 0};
 }
 
 bool App::pinsAvailable() const
@@ -736,106 +730,28 @@ void App::sampleCursorColor()
     }
 }
 
-ImVec2 App::paneSizePixels(std::string_view id, float density) const
-{
-    const ImVec2 points = m_panes->paneSizePoints(id);
-
-    return ImVec2(points.x * density, points.y * density);
-}
-
-std::pair<int, int> App::desiredWaveformSize(float density, int regionWidth) const
-{
-    const std::pair<int, int> waveSize = currentSize(WaveformScopeId);
-    int wantColumns = waveSize.first;
-    int wantHeight = waveSize.second;
-    if (m_view.shows(WaveformScopeId) || m_view.shows(ParadeScopeId)) {
-        const float wfWidth =
-            std::max(paneSizePixels(WaveformScopeId, density).x, paneSizePixels(ParadeScopeId, density).x);
-        const float wfHeight =
-            std::max(paneSizePixels(WaveformScopeId, density).y, paneSizePixels(ParadeScopeId, density).y);
-        wantColumns = wfWidth >= 1400.0f ? 2048 : wfWidth >= 500.0f ? 1024 : 512;
-        if (regionWidth > 0) {
-            wantColumns = std::min(wantColumns, regionWidth >= 2048 ? 2048 : regionWidth >= 1024 ? 1024 : 512);
-        }
-        wantHeight = wfHeight >= 560.0f ? 512 : WaveformLevels;
-    }
-
-    return {wantColumns, wantHeight};
-}
-
-std::pair<int, int> App::desiredHistogramSize(float density) const
-{
-    const std::pair<int, int> histSize = currentSize(HistogramScopeId);
-    int wantHistWidth = histSize.first;
-    int wantHistHeight = histSize.second;
-    if (m_view.shows(HistogramScopeId)) {
-        // Near one texture pixel per screen pixel keeps the outline's width even
-        // on flats and steep slopes alike.
-        const ImVec2 scopePane = paneSizePixels(HistogramScopeId, density);
-        wantHistWidth = scopePane.x >= 1400.0f ? 2048 : scopePane.x >= 500.0f ? 1024 : 512;
-        wantHistHeight = scopePane.y >= 560.0f ? 768 : 384;
-    }
-
-    return {wantHistWidth, wantHistHeight};
-}
-
-int App::desiredVectorscopeSize(float density) const
-{
-    int wantVectorscope = currentSize(VectorscopeScopeId).second;
-    if (m_view.shows(VectorscopeScopeId)) {
-        // Purely a display resolution: accumulation stays on the 256-code grid
-        // and a finer image is interpolated from it, so a sparse region costs
-        // nothing extra.
-        const ImVec2 scopePane = paneSizePixels(VectorscopeScopeId, density);
-        const float extent = std::min(scopePane.x, scopePane.y);
-        wantVectorscope = extent >= 480.0f ? 512 : 256;
-    }
-
-    return wantVectorscope;
-}
-
 void App::updateAdaptiveDetail(int framebufferWidth)
 {
-    // Resolution follows the pane a scope actually gets, and never exceeds what
-    // the region can populate; desired resolutions are debounced so a live
-    // resize does not thrash engine reallocation.
+    const auto paneSize = [this](std::string_view id) {
+        const ImVec2 points = m_panes->paneSizePoints(id);
+
+        return PaneSize{points.x, points.y};
+    };
     int windowW = 0;
     int windowH = 0;
     glfwGetWindowSize(m_window, &windowW, &windowH);
     const float density = windowW > 0 ? static_cast<float>(framebufferWidth) / static_cast<float>(windowW) : 1.0f;
-    int regionWidth = 0;
-    if (m_frameSize) {
-        regionWidth = m_analysis.region.toPixels(m_frameSize->width, m_frameSize->height).width;
+    const ScopePaneSizes panes{paneSize(WaveformScopeId), paneSize(ParadeScopeId), paneSize(HistogramScopeId),
+                               paneSize(VectorscopeScopeId)};
+    const std::optional<DetailSizes> sizes = m_detail.update(panes, density, m_frameSize, glfwGetTime());
+    if (!sizes) {
+        return;
     }
-
-    const std::pair<int, int> waveSize = currentSize(WaveformScopeId);
-    const std::pair<int, int> histSize = currentSize(HistogramScopeId);
-    const std::pair<int, int> vecSize = currentSize(VectorscopeScopeId);
-    const auto [wantColumns, wantHeight] = desiredWaveformSize(density, regionWidth);
-    const auto [wantHistWidth, wantHistHeight] = desiredHistogramSize(density);
-    const int wantVectorscope = desiredVectorscopeSize(density);
-
-    const bool differs = wantColumns != waveSize.first || wantHeight != waveSize.second ||
-                         wantVectorscope != vecSize.second || wantHistWidth != histSize.first ||
-                         wantHistHeight != histSize.second;
-    if (!differs) {
-        m_pendingColumns = 0;
-    } else if (m_pendingColumns != wantColumns || m_pendingImageHeight != wantHeight ||
-               m_pendingVectorscope != wantVectorscope || m_pendingHistWidth != wantHistWidth ||
-               m_pendingHistHeight != wantHistHeight) {
-        m_pendingColumns = wantColumns;
-        m_pendingImageHeight = wantHeight;
-        m_pendingVectorscope = wantVectorscope;
-        m_pendingHistWidth = wantHistWidth;
-        m_pendingHistHeight = wantHistHeight;
-        m_detailPendingSince = glfwGetTime();
-    } else if (glfwGetTime() - m_detailPendingSince > 0.4) {
-        m_analysis.imageSizes[WaveformScopeId] = {wantColumns, wantHeight};
-        m_analysis.imageSizes[ParadeScopeId] = {wantColumns, wantHeight};
-        m_analysis.imageSizes[VectorscopeScopeId] = {wantVectorscope, wantVectorscope};
-        m_analysis.imageSizes[HistogramScopeId] = {wantHistWidth, wantHistHeight};
-        m_analysisDirty = true;
-    }
+    m_analysis.imageSizes[WaveformScopeId] = sizes->waveform;
+    m_analysis.imageSizes[ParadeScopeId] = sizes->waveform;
+    m_analysis.imageSizes[VectorscopeScopeId] = {sizes->vectorscope, sizes->vectorscope};
+    m_analysis.imageSizes[HistogramScopeId] = sizes->histogram;
+    m_analysisDirty = true;
 }
 
 void App::drawFrameUi()

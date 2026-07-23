@@ -34,6 +34,7 @@ add_executable(sidescopes_tests
     test_ui_scaling.cpp
     test_scope_registry.cpp
     test_scope_view.cpp
+    test_adaptive_detail.cpp
     test_capture_controller.cpp
     test_attach_controller.cpp
     test_face_lock.cpp
@@ -53,6 +54,7 @@ target_include_directories(sidescopes_tests PRIVATE support)
 # These are application-level state, not part of the core library the tests
 # link, so their sources compile directly into the test binary.
 target_sources(sidescopes_tests PRIVATE
+    ${CMAKE_SOURCE_DIR}/src/app/adaptive_detail.cpp
     ${CMAKE_SOURCE_DIR}/src/app/attach_controller.cpp
     ${CMAKE_SOURCE_DIR}/src/app/capture_controller.cpp
     ${CMAKE_SOURCE_DIR}/src/app/face_lock.cpp

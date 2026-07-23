@@ -350,6 +350,7 @@ if(APPLE OR WIN32)
     # Application logic shared by both platforms: cohesive controllers lifted
     # out of main.
     target_sources(SideScopes PRIVATE
+        src/app/adaptive_detail.cpp
         src/app/app.cpp
         src/app/app_attach.cpp
         src/app/app_region_pick.cpp
