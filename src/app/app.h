@@ -328,7 +328,7 @@ private:
 
     // --- post-render region handling ---
     void handleRegionPicking();
-    void openRegionPicker();
+    void openRegionPicker(RegionPickerMode mode);
     void waitForBorderFreeFrame();
     struct DisplayFaceScan;
     [[nodiscard]] std::vector<PickerDisplay> buildPickerDisplays();
@@ -364,7 +364,7 @@ private:
     FrameMailbox m_mailbox;
     AnalysisWorker m_worker;
     std::unique_ptr<ScreenCaptureSource> m_capture;
-    std::optional<CaptureController> m_captureController;
+    CaptureController m_captureController;
 
     AnalysisSettings m_analysis;
     bool m_analysisDirty = true;

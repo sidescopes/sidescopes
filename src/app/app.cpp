@@ -1503,6 +1503,8 @@ namespace sidescopes {
 
 App::App()
     : m_worker(m_mailbox),
+      m_capture(createScreenCaptureSource()),
+      m_captureController(*m_capture, m_mailbox),
       m_scopeRegistry(builtinModules()),
       m_view(m_scopeRegistry)
 {
@@ -1608,7 +1610,7 @@ bool App::init()
     m_worker.start();
     warmFaceDetection();
 
-    observeSystemWake([this] { m_captureController->markStale(); });
+    observeSystemWake([this] { m_captureController.markStale(); });
     observeEscapeWithoutKeyWindow([this] { m_orphanEscape.store(true); });
     // A foreground switch reroutes the borders at the top of the next frame:
     // the flag makes the loop route on arrival, and the empty event wakes an
@@ -1738,13 +1740,12 @@ bool App::refreshUiScale()
 
 void App::setupCapture()
 {
-    m_capture = createScreenCaptureSource();
-    m_captureController.emplace(*m_capture, m_mailbox);
-    // The display under this window's center: full-screen capture is a promise
-    // about the screen the user can see the scopes on.
-    if (m_captureController->requestPermission()) {
-        m_captureController->requestDisplay(displayOfWindow().value_or(0));
-        m_captureController->start();
+    // The source and controller are constructed with the App; here they only
+    // start capturing. The display under this window's center: full-screen
+    // capture is a promise about the screen the user can see the scopes on.
+    if (m_captureController.requestPermission()) {
+        m_captureController.requestDisplay(displayOfWindow().value_or(0));
+        m_captureController.start();
     }
 }
 
@@ -2062,7 +2063,7 @@ RegionKind App::regionKind() const
 
 void App::syncRegionBorder()
 {
-    if (m_captureController->capturedDisplay() == 0) {
+    if (m_captureController.capturedDisplay() == 0) {
         return;
     }
     // The border shows only while this application is itself visible - a
@@ -2077,11 +2078,11 @@ void App::syncRegionBorder()
         hideRegionBorder();
     } else {
         const bool attached = regionKind() == RegionKind::Attached;
-        if (!attached && m_captureController->capturedDisplay() != m_displayLabelId) {
-            m_displayLabelId = m_captureController->capturedDisplay();
+        if (!attached && m_captureController.capturedDisplay() != m_displayLabelId) {
+            m_displayLabelId = m_captureController.capturedDisplay();
             m_displayLabel = borderLabelFrom(displayName(m_displayLabelId), "Display");
         }
-        showRegionBorder(m_captureController->capturedDisplay(), m_analysis.region,
+        showRegionBorder(m_captureController.capturedDisplay(), m_analysis.region,
                          attached ? m_attachActiveLabel : m_displayLabel, attached);
     }
 }
@@ -2214,10 +2215,10 @@ bool App::activeWindowMoved(const AttachDecision& decision) const
 // reusing the existing display-switch path.
 void App::captureActiveDisplay(const AttachDecision& decision)
 {
-    if (decision.activeDisplayId != 0 && decision.activeDisplayId != m_captureController->capturedDisplay() &&
-        m_captureController->permissionGranted() && !m_captureController->dead()) {
-        m_captureController->requestDisplay(decision.activeDisplayId);
-        m_captureController->start();
+    if (decision.activeDisplayId != 0 && decision.activeDisplayId != m_captureController.capturedDisplay() &&
+        m_captureController.permissionGranted() && !m_captureController.dead()) {
+        m_captureController.requestDisplay(decision.activeDisplayId);
+        m_captureController.start();
         m_lastActivity = glfwGetTime();
     }
 }
@@ -2362,7 +2363,7 @@ void App::followAttachedWindow()
     captureActiveDisplay(decision);
     SS_DIAG(Attach, "fg=%lld active=%llu display=%u region=%.1f,%.1f,%.1f,%.1f label=%s moving=%d",
             static_cast<long long>(foregroundApplicationPid()),
-            static_cast<unsigned long long>(decision.activeIdentity), m_captureController->capturedDisplay(),
+            static_cast<unsigned long long>(decision.activeIdentity), m_captureController.capturedDisplay(),
             m_analysis.region.leftPercent, m_analysis.region.topPercent, m_analysis.region.rightPercent,
             m_analysis.region.bottomPercent, m_attachActiveLabel.c_str(), m_attachedWindowMoving ? 1 : 0);
     updateFaceLock(decision);
@@ -2422,7 +2423,7 @@ void App::carryLockWithWindow(AppFaceLock& lock, const AttachWindowRect& rect)
     const double dx = rect.x - lock.windowRect->x;
     const double dy = rect.y - lock.windowRect->y;
     if (sameSize && (dx != 0.0 || dy != 0.0) && m_frameSize) {
-        if (const auto geometry = geometryOfDisplay(m_captureController->capturedDisplay())) {
+        if (const auto geometry = geometryOfDisplay(m_captureController.capturedDisplay())) {
             const double scale = m_frameSize->width / geometry->widthPoints;
             face_lock::translate(lock.state, dx * scale, dy * scale);
         }
@@ -2521,7 +2522,7 @@ void App::updateFaceLock(const AttachDecision& decision)
 // it to a detached detection thread, so detection never hitches a frame.
 void App::launchFaceLockProbe(const AttachDecision& decision, const FaceLockState& lock)
 {
-    const auto geometry = geometryOfDisplay(m_captureController->capturedDisplay());
+    const auto geometry = geometryOfDisplay(m_captureController.capturedDisplay());
     if (!geometry || !decision.activeRect) {
         return;
     }
@@ -2653,7 +2654,7 @@ void App::applyFaceLockRegion(const FaceLockState& lock)
     if (!m_frameSize || m_frameSize->width <= 0 || m_frameSize->height <= 0) {
         return;
     }
-    const auto geometry = geometryOfDisplay(m_captureController->capturedDisplay());
+    const auto geometry = geometryOfDisplay(m_captureController.capturedDisplay());
     const auto windowGeom = windowGeometry(m_activeWindowIdentity);
     if (!geometry || !windowGeom || windowGeom->minimized) {
         return;
@@ -2779,7 +2780,7 @@ void App::runFrame()
     drainAsyncSignals();
     // Capture is a service that dies (lock screen, display sleep); restarting
     // it is our job.
-    m_captureController->service(glfwGetTime());
+    m_captureController.service(glfwGetTime());
     // Attached regions: observe the attached windows and route the analysis by
     // the focused window. The border reconciles here every frame in both
     // regimes, so no missed edge can strand it on screen.
@@ -2915,12 +2916,12 @@ void App::followWindowDisplay()
     // With no region drawn and no window attached, capture follows the display
     // this window sits on. A drawn region or an attached window pins capture to
     // its own display regardless of the window.
-    if (m_captureController->permissionGranted() && !m_captureController->dead() && !m_regionPicking &&
-        isFullScreen() && !m_attach.attached()) {
+    if (m_captureController.permissionGranted() && !m_captureController.dead() && !m_regionPicking && isFullScreen() &&
+        !m_attach.attached()) {
         const auto homeDisplay = displayOfWindow();
-        if (homeDisplay && *homeDisplay != m_captureController->capturedDisplay()) {
-            m_captureController->requestDisplay(*homeDisplay);
-            if (m_captureController->start()) {
+        if (homeDisplay && *homeDisplay != m_captureController.capturedDisplay()) {
+            m_captureController.requestDisplay(*homeDisplay);
+            if (m_captureController.start()) {
                 m_lastActivity = glfwGetTime();
             }
         }
@@ -2940,10 +2941,10 @@ void App::publishSelfWindowMask()
 {
     // Publish our own window rectangle (frame pixels, generous chrome margins)
     // so analysis masks it out of change detection.
-    if (!m_frameSize || m_captureController->capturedDisplay() == 0) {
+    if (!m_frameSize || m_captureController.capturedDisplay() == 0) {
         return;
     }
-    const auto geometry = geometryOfDisplay(m_captureController->capturedDisplay());
+    const auto geometry = geometryOfDisplay(m_captureController.capturedDisplay());
     if (!geometry) {
         return;
     }
@@ -2971,7 +2972,7 @@ void App::sampleCursorColor()
     // display it reads the capture stream's frame; on every other display a
     // throttled one-shot sample keeps the readout alive even while capture is
     // paused.
-    if (m_captureController->capturedDisplay() == 0) {
+    if (m_captureController.capturedDisplay() == 0) {
         return;
     }
     const auto cursor = globalCursorPosition();
@@ -2983,9 +2984,9 @@ void App::sampleCursorColor()
         m_lastActivity = glfwGetTime();
     }
     std::optional<FloatColor> sampled;
-    const bool onCapturedDisplay = displayAtPoint(*cursor).value_or(0) == m_captureController->capturedDisplay();
-    if (onCapturedDisplay && !m_captureController->dead() && m_frameSize) {
-        if (const auto geometry = geometryOfDisplay(m_captureController->capturedDisplay())) {
+    const bool onCapturedDisplay = displayAtPoint(*cursor).value_or(0) == m_captureController.capturedDisplay();
+    if (onCapturedDisplay && !m_captureController.dead() && m_frameSize) {
+        if (const auto geometry = geometryOfDisplay(m_captureController.capturedDisplay())) {
             const int pixelX =
                 static_cast<int>((cursor->x - geometry->originX) * m_frameSize->width / geometry->widthPoints);
             const int pixelY =
@@ -3656,7 +3657,7 @@ void App::drawScopePanes()
 
 void App::drawPaneContent()
 {
-    if (!m_captureController->permissionGranted()) {
+    if (!m_captureController.permissionGranted()) {
         drawCaptureHelp("SideScopes cannot see the screen",
                         {
                             "macOS requires the Screen Recording permission.",
@@ -3669,8 +3670,8 @@ void App::drawPaneContent()
 
         return;
     }
-    if (m_captureController->dead()) {
-        const std::string status = m_captureController->status();
+    if (m_captureController.dead()) {
+        const std::string status = m_captureController.status();
         drawCaptureHelp("Screen capture was interrupted", {status, "Reconnecting automatically..."}, false);
 
         return;
@@ -3893,7 +3894,7 @@ void App::drawSettingsWindow()
     const ImGuiIO& io = ImGui::GetIO();
     ImGui::SetNextWindowSize(ImVec2(380, 0), ImGuiCond_FirstUseEver);
     ImGui::Begin("Settings", &m_showSettings, ImGuiWindowFlags_NoCollapse);
-    ImGui::TextWrapped("capture: %s", m_captureController->status().c_str());
+    ImGui::TextWrapped("capture: %s", m_captureController.status().c_str());
     ImGui::Text("analysis %.2f ms | frames %llu | ui %.0f fps", m_output.accumulateMilliseconds,
                 static_cast<unsigned long long>(m_output.framesProcessed), static_cast<double>(io.Framerate));
     ImGui::Separator();
@@ -4423,12 +4424,12 @@ void App::handleRegionPicking()
             m_wantRegionPick.reset();
         }
     }
-    if (!m_regionPicking && m_wantRegionPick && m_captureController->capturedDisplay() != 0) {
-        openRegionPicker();
+    if (!m_regionPicking && m_wantRegionPick && m_captureController.capturedDisplay() != 0) {
+        openRegionPicker(*m_wantRegionPick);
     }
 }
 
-void App::openRegionPicker()
+void App::openRegionPicker(RegionPickerMode mode)
 {
     hideRegionBorder();
     // The previous region's border must not leak into the analyzed frame: its
@@ -4439,9 +4440,9 @@ void App::openRegionPicker()
     }
     const std::vector<PickerDisplay> pickerDisplays = buildPickerDisplays();
     logPickerSuggestions(pickerDisplays);
-    if (beginRegionPick(pickerDisplays, *m_wantRegionPick)) {
+    if (beginRegionPick(pickerDisplays, mode)) {
         m_regionPicking = true;
-        m_regionPickIsPin = *m_wantRegionPick == RegionPickerMode::PinColor;
+        m_regionPickIsPin = mode == RegionPickerMode::PinColor;
         // The streamed display's faces opened with the picker; scan the rest
         // in the background and deliver them as they land.
         launchDisplayFaceScans(pickerDisplays);
@@ -4482,7 +4483,7 @@ std::vector<PickerDisplay> App::buildPickerDisplays()
     // finds. The streamed display's faces come from its live frame right
     // now; the other displays are scanned in the background (see
     // launchDisplayFaceScans) and their suggestions arrive later.
-    const uint32_t streamed = m_captureController->capturedDisplay();
+    const uint32_t streamed = m_captureController.capturedDisplay();
     std::vector<SuggestedRegion> faceSuggestions;
     m_faceCandidates.clear();
     if (supportsFaceDetection()) {
@@ -4543,7 +4544,7 @@ void App::launchDisplayFaceScans(const std::vector<PickerDisplay>& pickerDisplay
     std::erase_if(m_displayFaceScans, [](const std::unique_ptr<DisplayFaceScan>& scan) {
         return !scan->running.load() && !scan->ready.load();
     });
-    const uint32_t streamed = m_captureController->capturedDisplay();
+    const uint32_t streamed = m_captureController.capturedDisplay();
     for (const PickerDisplay& entry : pickerDisplays) {
         if (entry.displayId == streamed) {
             continue;  // scanned already, from the live frame
@@ -4685,9 +4686,9 @@ void App::handleRegionBorderEdit()
     // everything outside its window - the resize limit made visible.
     if (edit.editing && m_attachBorderEditIdentity != 0 && m_attachBorderEditIdentity == m_activeWindowIdentity) {
         const auto windowGeom = windowGeometry(m_activeWindowIdentity);
-        const auto geometry = geometryOfDisplay(m_captureController->capturedDisplay());
+        const auto geometry = geometryOfDisplay(m_captureController.capturedDisplay());
         if (windowGeom && geometry) {
-            showAttachedEditDim(m_captureController->capturedDisplay(), displayPercentRect(*windowGeom, *geometry));
+            showAttachedEditDim(m_captureController.capturedDisplay(), displayPercentRect(*windowGeom, *geometry));
         }
     } else if (!edit.editing && m_attachBorderEditing) {
         hideAttachedEditDim();
@@ -4733,7 +4734,7 @@ void App::toggleRegionAttach()
 // guessing a target.
 void App::attachGlobalRegionToWindow()
 {
-    const uint32_t displayId = m_captureController->capturedDisplay();
+    const uint32_t displayId = m_captureController.capturedDisplay();
     const auto geometry = geometryOfDisplay(displayId);
     if (!geometry || isFullScreen()) {
         return;
@@ -4787,7 +4788,7 @@ void App::applyBorderEdit(const RegionOfInterest& edited)
         if (m_attachBorderEditIdentity != m_activeWindowIdentity) {
             return;
         }
-        const auto geometry = geometryOfDisplay(m_captureController->capturedDisplay());
+        const auto geometry = geometryOfDisplay(m_captureController.capturedDisplay());
         const auto windowGeom = windowGeometry(m_activeWindowIdentity);
         if (!geometry || !windowGeom) {
             return;
@@ -4834,9 +4835,9 @@ void App::pollPinPick(const RegionPickPoll& poll)
     // to average, and a finish just puts things back.
     std::optional<FloatColor> chip;
     if (const auto cursor = globalCursorPosition()) {
-        if (displayAtPoint(*cursor).value_or(0) == m_captureController->capturedDisplay() &&
-            !m_captureController->dead() && m_frameSize) {
-            if (const auto geometry = geometryOfDisplay(m_captureController->capturedDisplay())) {
+        if (displayAtPoint(*cursor).value_or(0) == m_captureController.capturedDisplay() &&
+            !m_captureController.dead() && m_frameSize) {
+            if (const auto geometry = geometryOfDisplay(m_captureController.capturedDisplay())) {
                 // The chip previews exactly what a click will pin: the same point
                 // sample the live cursor readout takes, not an averaged patch.
                 const int pixelX =
@@ -4868,7 +4869,7 @@ void App::pollPinPick(const RegionPickPoll& poll)
 void App::applyPinnedColor(const RegionPickPoll& poll)
 {
     std::optional<FloatColor> pinned;
-    if (poll.displayId == m_captureController->capturedDisplay() && !m_captureController->dead()) {
+    if (poll.displayId == m_captureController.capturedDisplay() && !m_captureController.dead()) {
         if (poll.pinnedPoint && m_frameSize) {
             // A plain pin samples the frame exactly like the live readout; only a
             // dragged rectangle averages, the explicit way to ask for a swatch.
@@ -4907,15 +4908,15 @@ void App::pollRegionPreview(const RegionPickPoll& poll)
     };
     // Live preview only for the captured display: previewing a suggestion on
     // another display would flap the capture stream on every hover.
-    if (poll.preview && poll.displayId == m_captureController->capturedDisplay()) {
+    if (poll.preview && poll.displayId == m_captureController.capturedDisplay()) {
         applyRegion(*poll.preview);
     }
     if (poll.finished || !poll.active) {
         m_regionPicking = false;
         if (poll.confirmed) {
-            if (poll.displayId != 0 && poll.displayId != m_captureController->capturedDisplay()) {
-                m_captureController->requestDisplay(poll.displayId);
-                m_captureController->start();
+            if (poll.displayId != 0 && poll.displayId != m_captureController.capturedDisplay()) {
+                m_captureController.requestDisplay(poll.displayId);
+                m_captureController.start();
             }
             confirmPickedRegion(poll);
         } else if (!m_regionPickSwallowCancel) {
@@ -4989,6 +4990,9 @@ void App::logAttachMapping(const WindowCandidate& picked, const RegionOfInterest
 // window under it; a freehand draw sets the global region.
 void App::confirmPickedRegion(const RegionPickPoll& poll)
 {
+    if (!poll.confirmed) {
+        return;
+    }
     const RegionOfInterest confirmed = *poll.confirmed;
     const WindowCandidate* picked = matchWindowCandidate(poll.displayId, confirmed);
     const auto geometry = geometryOfDisplay(poll.displayId);
