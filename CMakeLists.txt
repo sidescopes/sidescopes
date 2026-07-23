@@ -356,6 +356,7 @@ if(APPLE OR WIN32)
         src/app/context_menu.cpp
         src/app/face_lock.cpp
         src/app/imgui_ui.cpp
+        src/app/layout_preset_store.cpp
         src/app/overlay_render.cpp
         src/app/overlay_style.cpp
         src/app/param_menu.cpp

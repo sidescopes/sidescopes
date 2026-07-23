@@ -496,8 +496,7 @@ void App::setupView(const Preferences& startup)
     m_view.setZoom(startup.vectorscopeZoom);
     m_view.setOrientation(orientationFromInt(startup.layoutOrientation));
     m_view.setWeights(startup.layoutWeights);
-    m_layoutPresets = startup.layoutPresets;
-    m_activePresetSlot = startup.layoutActiveSlot;
+    m_presetStore.restore(startup.layoutPresets, startup.layoutActiveSlot);
     // The stored factor is cleaned to an offered step here, at the app boundary,
     // so core preferences never depend on the app's scaling policy. setupImGui
     // already applied the OS scale at the 1.0 default; fold the preference in now,
@@ -837,8 +836,8 @@ void App::persistPreferences()
     preferences.vectorscopeZoom = m_view.zoom();
     preferences.layoutOrientation = orientationToInt(m_view.orientation());
     preferences.layoutWeights = m_view.weightsSnapshot();
-    preferences.layoutPresets = m_layoutPresets;
-    preferences.layoutActiveSlot = m_activePresetSlot;
+    preferences.layoutPresets = m_presetStore.all();
+    preferences.layoutActiveSlot = m_presetStore.activeSlot();
     preferences.uiScaleFactor = m_userUiScaleFactor;
     preferences.shortcuts = m_shortcuts;
     preferences.scopeShortcuts = m_scopeShortcuts;
@@ -1334,8 +1333,7 @@ std::map<std::string, double> App::currentStackWeights() const
 
 void App::saveLayoutPreset(int slot)
 {
-    m_layoutPresets[static_cast<std::size_t>(slot - 1)] = capturePreset();
-    m_activePresetSlot = slot;
+    m_presetStore.save(slot, capturePreset());
     setStatus("preset " + std::to_string(slot) + " saved");
     m_nextPreferencesSave = glfwGetTime() + 1.0;
 }
@@ -1353,14 +1351,7 @@ LayoutPreset App::capturePreset() const
 
 bool App::activePresetDirty() const
 {
-    if (m_activePresetSlot == 0) {
-        return false;
-    }
-    const LayoutPreset& stored = m_layoutPresets[static_cast<std::size_t>(m_activePresetSlot - 1)];
-    const LayoutPreset live = capturePreset();
-
-    return live.stack != stored.stack || live.orientation != stored.orientation || live.weights != stored.weights ||
-           live.styles != stored.styles;
+    return m_presetStore.isDirty(capturePreset());
 }
 
 void App::drawPresetPicker()
@@ -1370,8 +1361,8 @@ void App::drawPresetPicker()
     // clicking opens the slot list - the mouse mirror of the digit keys.
     const bool dirty = activePresetDirty();
     char preview[8] = "-";
-    if (m_activePresetSlot != 0) {
-        std::snprintf(preview, sizeof(preview), "%d%s", m_activePresetSlot, dirty ? "*" : "");
+    if (m_presetStore.activeSlot() != 0) {
+        std::snprintf(preview, sizeof(preview), "%d%s", m_presetStore.activeSlot(), dirty ? "*" : "");
     }
     if (scopeToggleButton("##preset-picker", preview, false, "Layout presets - digits load, Shift+digits save")) {
         ImGui::OpenPopup("##preset-popup");
@@ -1381,8 +1372,8 @@ void App::drawPresetPicker()
     ImGui::SetNextWindowPos(ImVec2(chipMin.x, chipMax.y + 2.0f));
     if (ImGui::BeginPopup("##preset-popup")) {
         for (int slot = 1; slot <= LayoutPresetSlots; ++slot) {
-            const LayoutPreset& preset = m_layoutPresets[static_cast<std::size_t>(slot - 1)];
-            if (ImGui::Selectable(presetLabel(slot, preset).c_str(), slot == m_activePresetSlot)) {
+            const LayoutPreset& preset = m_presetStore.at(slot);
+            if (ImGui::Selectable(presetLabel(slot, preset).c_str(), slot == m_presetStore.activeSlot())) {
                 if (ImGui::GetIO().KeyShift) {
                     saveLayoutPreset(slot);
                 } else {
@@ -1436,7 +1427,7 @@ void App::applyPresetStyles(const std::map<std::string, std::map<std::string, do
 
 void App::loadLayoutPreset(int slot)
 {
-    const LayoutPreset& preset = m_layoutPresets[static_cast<std::size_t>(slot - 1)];
+    const LayoutPreset& preset = m_presetStore.at(slot);
     if (preset.stack.empty()) {
         setStatus("preset " + std::to_string(slot) + " is empty");
 
@@ -1446,7 +1437,7 @@ void App::loadLayoutPreset(int slot)
     m_view.setOrientation(orientationFromInt(preset.orientation));
     m_view.setWeights(preset.weights);
     applyPresetStyles(preset.styles);
-    m_activePresetSlot = slot;
+    m_presetStore.markLoaded(slot);
     m_analysis.enabledScopes = m_view.enabledScopeIds();
     m_analysisDirty = true;
     setStatus("preset " + std::to_string(slot) + " loaded");
@@ -1525,8 +1516,9 @@ void App::handleContextMenu()
     std::vector<NativeMenuItem> menu;
     std::vector<ParamMenuAction> paramActions;
     const ContextMenuModel model{
-        m_view,          m_scopeRegistry, m_shortcuts,        m_scopeShortcuts,    m_analysis.scopeParams, m_attach,
-        m_layoutPresets, m_pins.empty(),  m_activePresetSlot, m_userUiScaleFactor, isFullScreen()};
+        m_view,        m_scopeRegistry,     m_shortcuts,    m_scopeShortcuts,           m_analysis.scopeParams,
+        m_attach,      m_presetStore.all(), m_pins.empty(), m_presetStore.activeSlot(), m_userUiScaleFactor,
+        isFullScreen()};
     buildContextMenu(model, clickedPane, menu, paramActions);
     const int chosen = showNativeContextMenu(menu);
     dispatchMenuChoice(chosen, paramActions);

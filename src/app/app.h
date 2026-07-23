@@ -16,6 +16,7 @@
 #include "app/attach_controller.h"
 #include "app/capture_controller.h"
 #include "app/face_lock.h"
+#include "app/layout_preset_store.h"
 #include "app/param_menu.h"
 #include "app/pin_board.h"
 #include "app/scope_registry.h"
@@ -454,10 +455,7 @@ private:
     MarkerSmoother m_vectorscopeMarker;
     MarkerSmoother m_waveformMarker;
 
-    std::array<LayoutPreset, LayoutPresetSlots> m_layoutPresets;
-    // The last loaded or saved preset slot, 1-9; 0 when none is active. The
-    // toolbar badge names it, starred when the live layout has drifted.
-    int m_activePresetSlot = 0;
+    LayoutPresetStore m_presetStore;
     std::string m_statusMessage;
     double m_statusUntil = 0.0;
 
