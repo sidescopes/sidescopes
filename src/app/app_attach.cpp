@@ -94,8 +94,7 @@ void App::applyAttachDecision(const AttachDecision& decision)
 {
     setRegion(decision.region ? *decision.region : m_globalRegion);
     if (decision.closedCount > 0) {
-        m_attachDetachNotice = decision.detachedAll ? "window closed - detached" : "window closed - still attached";
-        m_attachNoticeUntil = glfwGetTime() + 5.0;
+        m_panes->showAttachNotice(decision.detachedAll ? "window closed - detached" : "window closed - still attached");
     }
     if (decision.detachedAll) {
         unwatchWindowMotion();
@@ -251,8 +250,7 @@ void App::applyFaceLockOutcome(const FaceLockOutcome& outcome)
             unwatchWindowMotion();
             m_activeWindowIdentity = 0;
         }
-        m_attachDetachNotice = "face lost - region removed";
-        m_attachNoticeUntil = glfwGetTime() + 5.0;
+        m_panes->showAttachNotice("face lost - region removed");
         setRegion(m_globalRegion);
         syncRegionBorder();
         m_lastActivity = glfwGetTime();

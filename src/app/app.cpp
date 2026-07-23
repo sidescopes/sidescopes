@@ -38,6 +38,7 @@
 #include "app/region_geometry.h"
 #include "app/row_layout.h"
 #include "app/scope_layout.h"
+#include "app/scope_pane_renderer.h"
 #include "app/scope_registry.h"
 #include "app/scope_view.h"
 #include "app/settings_window.h"
@@ -51,7 +52,6 @@
 #include "core/marker_smoother.h"
 #include "core/preferences.h"
 #include "core/region_suggestions.h"
-#include "core/scopes/histogram.h"
 #include "core/scopes/waveform.h"
 #include "core/trace_intensity.h"
 #include "imgui.h"
@@ -113,12 +113,12 @@ bool App::init()
     const Preferences startup = loadPreferences(preferencesFilePath());
     m_versionInfo = describeVersion(SIDESCOPES_VERSION, SIDESCOPES_GIT_DESCRIBE);
 
-    MainWindow main = createMainWindow(startup, m_versionInfo, m_callbackState);
-    if (!main.window) {
+    MainWindow mainWindow = createMainWindow(startup, m_versionInfo, m_callbackState);
+    if (!mainWindow.window) {
         return false;
     }
-    m_window = main.window;
-    m_graphics = std::move(main.graphics);
+    m_window = mainWindow.window;
+    m_graphics = std::move(mainWindow.graphics);
     setupImGui();
     if (!m_graphics->init(m_window)) {
         ImGui::DestroyContext();
@@ -131,12 +131,11 @@ bool App::init()
     setupCapture();
     seedAnalysis(m_analysis, startup);
     setupView(startup);
-    m_projectionInstances = createProjectionInstances(m_scopeRegistry);
-    ScopeTextureSet textures = createScopeTextures(*m_graphics, m_scopeRegistry);
-    m_scopeTextures = std::move(textures.textures);
-    m_panePoints = std::move(textures.panePoints);
-    m_paneIds = std::move(textures.paneIds);
-    m_dividerIds = std::move(textures.dividerIds);
+    const ScopePaneContext paneContext{
+        *m_graphics,         m_view,         m_scopeRegistry, m_analysis,  m_output,
+        m_captureController, m_regionPicker, m_pins,          m_shortcuts, m_scopeShortcuts};
+    m_panes = std::make_unique<ScopePaneRenderer>(paneContext, createProjectionInstances(m_scopeRegistry),
+                                                  createScopeTextures(*m_graphics, m_scopeRegistry));
 
     m_shortcuts = startup.shortcuts;
     m_scopeShortcuts = startup.scopeShortcuts;
@@ -313,47 +312,6 @@ std::pair<int, int> App::currentSize(std::string_view id) const
     return at != m_analysis.imageSizes.end() ? at->second : std::pair<int, int>{0, 0};
 }
 
-HistogramStyle App::currentHistogramStyle() const
-{
-    return scopeParam(HistogramScopeId, "style", 0.0) < 0.5 ? HistogramStyle::PerChannel : HistogramStyle::Combined;
-}
-
-void App::setWaveformGain(double gain)
-{
-    m_analysis.scopeParams[WaveformScopeId]["gain"] = gain;
-    m_analysis.scopeParams[ParadeScopeId]["gain"] = gain;
-}
-
-const SsScopeDescriptor* App::descriptorFor(std::string_view id) const
-{
-    const HostScope* hostScope = m_scopeRegistry.byId(id);
-
-    return hostScope != nullptr ? hostScope->descriptor : nullptr;
-}
-
-void App::configureProjectionInstances()
-{
-    // Reconfigures every projection instance from the current settings, through
-    // the same assembleScopeParams the worker uses, so an overlay can never
-    // disagree with its trace.
-    for (auto& [id, instance] : m_projectionInstances) {
-        const SsScopeDescriptor* descriptor = descriptorFor(id);
-        std::vector<SsParamValue> values;
-        const auto params = m_analysis.scopeParams.find(id);
-        if (params != m_analysis.scopeParams.end() && descriptor != nullptr) {
-            values = assembleScopeParams(params->second, *descriptor);
-        }
-        (void)instance.configure(values);
-    }
-}
-
-const ScopeInstance* App::projectionFor(std::string_view id) const
-{
-    const auto at = m_projectionInstances.find(std::string{id});
-
-    return at != m_projectionInstances.end() ? &at->second : nullptr;
-}
-
 std::string App::bindingFor(std::string_view id) const
 {
     return resolveBinding(m_scopeShortcuts, m_scopeRegistry, id);
@@ -378,66 +336,28 @@ bool App::pinsAvailable() const
     return false;
 }
 
-const ScopeImage& App::imageForId(std::string_view id) const
-{
-    static const ScopeImage empty;
-    const auto at = m_output.images.find(std::string{id});
-
-    return at != m_output.images.end() ? at->second : empty;
-}
-
-ScopeTexture& App::textureForId(std::string_view id)
-{
-    return *m_scopeTextures.at(std::string{id});
-}
-
-void App::uploadScope(std::unique_ptr<ScopeTexture>& texture, const ScopeImage& image)
-{
-    if (image.width <= 0 || image.height <= 0) {
-        return;
-    }
-    if (image.rgba.size() < static_cast<std::size_t>(image.width) * static_cast<std::size_t>(image.height) * 4) {
-        return;
-    }
-    if (texture->width() != image.width || texture->height() != image.height) {
-        texture = m_graphics->createScopeTexture(image.width, image.height);
-    }
-    texture->upload(image);
-}
-
-void App::uploadVisibleScopes()
-{
-    for (const std::string& id : m_view.stack()) {
-        const auto texture = m_scopeTextures.find(id);
-        if (texture == m_scopeTextures.end()) {
-            continue;  // the color picker has no texture
-        }
-        uploadScope(texture->second, imageForId(id));
-    }
-}
-
 void App::refreshActivatedScope(std::string_view id)
 {
     // A scope draws the same frame it turns on, but the worker only computes
     // what is enabled, so a newly shown scope's image is stale. Turning it on
     // pushes the settings immediately and waits briefly for the recompute; on
     // timeout the stale image stands in until the recompute lands a frame later.
-    if (m_scopeTextures.find(std::string{id}) == m_scopeTextures.end()) {
+    if (!m_panes->hasTexture(id)) {
         return;  // the color picker asks nothing of the worker
     }
-    const uint64_t staleSequence = imageForId(id).sequence;
+    const uint64_t staleSequence = m_panes->imageFor(id).sequence;
     m_worker.updateSettings(m_analysis);
     const double deadline = glfwGetTime() + 0.08;
     while (glfwGetTime() < deadline) {
-        if (m_worker.fetchOutput(m_outputVersion, m_output) && imageForId(id).sequence != staleSequence &&
-            imageForId(id).width > 0) {
-            uploadVisibleScopes();
+        if (m_worker.fetchOutput(m_outputVersion, m_output) && m_panes->imageFor(id).sequence != staleSequence &&
+            m_panes->imageFor(id).width > 0) {
+            m_panes->uploadVisibleScopes();
 
             return;
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(2));
     }
-    uploadVisibleScopes();  // timeout: a stale image beats none
+    m_panes->uploadVisibleScopes();  // timeout: a stale image beats none
 }
 
 void App::toggleScope(std::string_view id)
@@ -595,7 +515,7 @@ void App::runFrame()
     }
 
     if (m_worker.fetchOutput(m_outputVersion, m_output)) {
-        uploadVisibleScopes();
+        m_panes->uploadVisibleScopes();
         SS_DIAG(Perf, "pass analysis_ms=%.1f", m_output.accumulateMilliseconds);
         m_lastActivity = glfwGetTime();
     }
@@ -814,7 +734,7 @@ void App::sampleCursorColor()
 
 ImVec2 App::paneSizePixels(std::string_view id, float density) const
 {
-    const ImVec2& points = m_panePoints[static_cast<std::size_t>(m_scopeRegistry.indexOf(id))];
+    const ImVec2 points = m_panes->paneSizePoints(id);
 
     return ImVec2(points.x * density, points.y * density);
 }
@@ -912,6 +832,110 @@ void App::updateAdaptiveDetail(int framebufferWidth)
         m_analysis.imageSizes[HistogramScopeId] = {wantHistWidth, wantHistHeight};
         m_analysisDirty = true;
     }
+}
+
+void App::drawFrameUi()
+{
+    ImGui::NewFrame();
+    beginHostWindow();
+
+    // The stacking modifier reads the OS's live key state, not the event-tracked
+    // one: a Shift key-up swallowed by a system overlay leaves the cache stuck
+    // exactly when the user next switches a scope.
+    const ModifierState modifiers = currentModifiers();
+    drawPresetPicker();
+    ImGui::SameLine(0.0f, 8.0f);
+    applyPaneRenderOutcome(m_panes->drawScopeToggles(modifiers.shift));
+    handleShortcuts(modifiers);
+    const PaneRenderInput input{m_uiScale,          isFullScreen(),  pinsAvailable(),
+                                m_vectorscopeColor, m_waveformColor, m_callbackState.monospaceFont};
+    applyPaneRenderOutcome(m_panes->drawRegionToolIcons(input));
+    applyPaneRenderOutcome(m_panes->drawScopePanes(input));
+    m_panes->drawStatusBar(input);
+    handleContextMenu();
+
+    ImGui::End();
+    ImGui::PopStyleVar();
+
+    const SettingsContext settingsCtx{m_showSettings,  m_view,   m_analysis,    m_analysisDirty,
+                                      m_scopeRegistry, m_output, m_versionInfo, m_captureController.status()};
+    drawSettingsWindow(settingsCtx);
+    drawAboutWindow();
+
+    if (ImGui::IsAnyItemActive()) {
+        m_lastActivity = glfwGetTime();
+        m_nextPreferencesSave = glfwGetTime() + 1.0;
+    }
+}
+
+void App::beginHostWindow()
+{
+    const ImGuiViewport* viewport = ImGui::GetMainViewport();
+    ImGui::SetNextWindowPos(viewport->WorkPos);
+    ImGui::SetNextWindowSize(viewport->WorkSize);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(6, 6));
+    ImGui::Begin("##host", nullptr,
+                 ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoBringToFrontOnFocus |
+                     ImGuiWindowFlags_NoSavedSettings);
+}
+
+// Applies a pane-render outcome to host state. The renderer drives the view,
+// the picker, and the pin board itself; what lands here is what only the host
+// can carry out - bringing a scope on screen, dropping every region, and the
+// clocks the whole shell shares.
+void App::applyPaneRenderOutcome(const PaneRenderOutcome& outcome)
+{
+    if (outcome.chosenScope) {
+        chooseScope(outcome.chosenScope->id, outcome.chosenScope->stack);
+    }
+    if (outcome.resetToFullScreen) {
+        resetToFullScreen();
+    }
+    if (outcome.analysisDirty) {
+        m_analysisDirty = true;
+    }
+    if (outcome.activity) {
+        m_lastActivity = glfwGetTime();
+    }
+    if (outcome.preferencesSaveDue) {
+        m_nextPreferencesSave = glfwGetTime() + 1.0;
+    }
+}
+
+void App::drawAboutWindow()
+{
+    if (!m_showAbout) {
+        return;
+    }
+    ImGui::SetNextWindowSize(ImVec2(320, 0), ImGuiCond_FirstUseEver);
+    ImGui::Begin("About SideScopes", &m_showAbout, ImGuiWindowFlags_NoCollapse);
+    // The window title carries the name; the body leads with the version.
+    ImGui::Text("Version %s", m_versionInfo.display.c_str());
+    if (ImGui::IsItemClicked()) {
+        ImGui::SetClipboardText(m_versionInfo.display.c_str());
+    }
+    wrappedTooltip("click to copy");
+    ImGui::Separator();
+    // Clickable link text in the accent color, underlined, opening the
+    // destination in the default browser; the tooltip names the URL.
+    const auto link = [](const char* text, const char* url) {
+        const ImVec4 accent = ImGui::GetStyleColorVec4(ImGuiCol_CheckMark);
+        ImGui::PushStyleColor(ImGuiCol_Text, accent);
+        ImGui::TextUnformatted(text);
+        ImGui::PopStyleColor();
+        const ImVec2 lo = ImGui::GetItemRectMin();
+        const ImVec2 hi = ImGui::GetItemRectMax();
+        ImGui::GetWindowDrawList()->AddLine(ImVec2(lo.x, hi.y), ImVec2(hi.x, hi.y), ImGui::GetColorU32(accent));
+        if (ImGui::IsItemClicked()) {
+            openUrl(url);
+        }
+        wrappedTooltip(url);
+    };
+    link("sidescopes.org", "https://sidescopes.org");
+    link("github.com/sidescopes/sidescopes", "https://github.com/sidescopes/sidescopes");
+    ImGui::Separator();
+    ImGui::TextDisabled("GPL-3.0-or-later");
+    ImGui::End();
 }
 
 void App::handleShortcuts(const ModifierState& modifiers)
@@ -1043,6 +1067,12 @@ std::map<std::string, double> App::currentStackWeights() const
     return weights;
 }
 
+void App::setStatus(std::string message)
+{
+    m_panes->setStatus(std::move(message));
+    m_lastActivity = glfwGetTime();
+}
+
 void App::saveLayoutPreset(int slot)
 {
     m_presetStore.save(slot, capturePreset());
@@ -1171,40 +1201,6 @@ void App::handleViewShortcuts()
     }
 }
 
-// Lazily rasterized textures for the embedded icon set, rebuilt when the
-// framebuffer scale changes the requested pixel size.
-ImTextureID App::iconTextureId(Icon icon, int sizePixels)
-{
-    IconTexture& slot = m_iconTextures[static_cast<std::size_t>(icon)];
-    if (!slot.texture || slot.sizePixels != sizePixels) {
-        ScopeImage image;
-        image.width = sizePixels;
-        image.height = sizePixels;
-        image.rgba = rasterizeIcon(icon, sizePixels);
-        slot.texture = m_graphics->createScopeTexture(sizePixels, sizePixels);
-        slot.texture->upload(image);
-        slot.sizePixels = sizePixels;
-    }
-
-    return slot.texture->textureId();
-}
-
-std::vector<float> App::stackAspects() const
-{
-    // A module's own declaration wins; the host table covers the color
-    // picker and modules that declare nothing.
-    std::vector<float> aspects;
-    aspects.reserve(m_view.stack().size());
-    for (const std::string& scopeId : m_view.stack()) {
-        const HostScope* hostScope = m_scopeRegistry.byId(scopeId);
-        const float declared =
-            hostScope != nullptr && hostScope->descriptor != nullptr ? hostScope->descriptor->preferred_aspect : 0.0f;
-        aspects.push_back(declared > 0.0f ? declared : preferredScopeAspect(scopeId));
-    }
-
-    return aspects;
-}
-
 void App::handleContextMenu()
 {
     // Right-click: the native menu carries the modes and toggles.
@@ -1213,18 +1209,7 @@ void App::handleContextMenu()
         ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel)) {
         return;
     }
-    // Which pane the click landed in decides which options lead the menu.
-    const ImVec2 mouse = ImGui::GetMousePos();
-    int clickedPane = -1;
-    for (std::size_t pane = 0; pane < m_paneRects.size(); ++pane) {
-        const ImVec4& rect = m_paneRects[pane];
-        if (rect.z <= rect.x || rect.w <= rect.y) {
-            continue;
-        }
-        if (mouse.x >= rect.x && mouse.x < rect.z && mouse.y >= rect.y && mouse.y < rect.w) {
-            clickedPane = static_cast<int>(pane);
-        }
-    }
+    const int clickedPane = m_panes->paneAt(ImGui::GetMousePos());
     std::vector<NativeMenuItem> menu;
     std::vector<ParamMenuAction> paramActions;
     const ContextMenuModel model{
@@ -1420,7 +1405,7 @@ void App::commitAnalysisChanges()
 {
     if (m_analysisDirty) {
         m_worker.updateSettings(m_analysis);
-        configureProjectionInstances();
+        m_panes->configureProjections();
         syncRegionBorder();
         m_analysisDirty = false;
         m_lastActivity = glfwGetTime();

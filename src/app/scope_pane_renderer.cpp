@@ -1,4 +1,4 @@
-#include "app/app.h"
+#include "app/scope_pane_renderer.h"
 
 #define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
@@ -14,14 +14,18 @@
 #include <utility>
 #include <vector>
 
+#include "app/capture_controller.h"
 #include "app/color_readout.h"
+#include "app/context_menu.h"
 #include "app/imgui_ui.h"
 #include "app/overlay_render.h"
+#include "app/param_menu.h"
+#include "app/region_picker.h"
 #include "app/row_layout.h"
 #include "app/scope_layout.h"
-#include "app/settings_window.h"
 #include "core/trace_intensity.h"
 #include "imgui.h"
+#include "platform/desktop.h"
 #include "platform/face_detection.h"
 
 namespace sidescopes {
@@ -287,62 +291,48 @@ void drawReadoutChannels(const FloatColor& color, float start, const ReadoutColu
     }
 }
 
+// The status bar's reserved height below the panes: the spacing that parts the
+// strip from the panes, the tallest thing that can stand on its row, and the
+// offset that centres the row between them.
+float statusBarHeight()
+{
+    return ImGui::GetStyle().ItemSpacing.y + iconButtonHeight() + statusRowOffset();
+}
+
 }  // namespace
 
-void App::drawFrameUi()
+ScopePaneRenderer::ScopePaneRenderer(const ScopePaneContext& context, std::map<std::string, ScopeInstance> projections,
+                                     ScopeTextureSet textures)
+    : m_graphics(context.graphics),
+      m_view(context.view),
+      m_registry(context.registry),
+      m_analysis(context.analysis),
+      m_output(context.output),
+      m_capture(context.capture),
+      m_regionPicker(context.regionPicker),
+      m_pins(context.pins),
+      m_shortcuts(context.shortcuts),
+      m_scopeShortcuts(context.scopeShortcuts),
+      m_projections(std::move(projections)),
+      m_scopeTextures(std::move(textures.textures)),
+      m_panePoints(std::move(textures.panePoints)),
+      m_paneIds(std::move(textures.paneIds)),
+      m_dividerIds(std::move(textures.dividerIds))
 {
-    ImGui::NewFrame();
-    beginHostWindow();
-
-    // The stacking modifier reads the OS's live key state, not the event-tracked
-    // one: a Shift key-up swallowed by a system overlay leaves the cache stuck
-    // exactly when the user next switches a scope.
-    const ModifierState modifiers = currentModifiers();
-    drawScopeToggles(modifiers.shift);
-    handleShortcuts(modifiers);
-    drawRegionToolIcons();
-    drawScopePanes();
-    drawStatusBar();
-    handleContextMenu();
-
-    ImGui::End();
-    ImGui::PopStyleVar();
-
-    const SettingsContext settingsCtx{m_showSettings,  m_view,   m_analysis,    m_analysisDirty,
-                                      m_scopeRegistry, m_output, m_versionInfo, m_captureController.status()};
-    drawSettingsWindow(settingsCtx);
-    drawAboutWindow();
-
-    if (ImGui::IsAnyItemActive()) {
-        m_lastActivity = glfwGetTime();
-        m_nextPreferencesSave = glfwGetTime() + 1.0;
-    }
 }
 
-void App::beginHostWindow()
-{
-    const ImGuiViewport* viewport = ImGui::GetMainViewport();
-    ImGui::SetNextWindowPos(viewport->WorkPos);
-    ImGui::SetNextWindowSize(viewport->WorkSize);
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(6, 6));
-    ImGui::Begin("##host", nullptr,
-                 ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoBringToFrontOnFocus |
-                     ImGuiWindowFlags_NoSavedSettings);
-}
-
-void App::drawScopeToggles(bool stackModifier)
+PaneRenderOutcome ScopePaneRenderer::drawScopeToggles(bool stackModifier)
 {
     // Scope toggles are letter chips; switching is the common case, so a plain
     // click shows one scope alone and Shift stacks.
+    PaneRenderOutcome outcome;
     char tooltip[96];
     const auto scopeTooltip = [&](const char* name, const std::string& binding, const char* extra) {
         std::snprintf(tooltip, sizeof(tooltip), "%s - %s to switch, Shift+%s to stack%s", name, binding.c_str(),
                       binding.c_str(), extra);
         return tooltip;
     };
-    drawPresetPicker();
-    ImGui::SameLine(0.0f, 8.0f);
-    for (const HostScope& scope : m_scopeRegistry.scopes()) {
+    for (const HostScope& scope : m_registry.scopes()) {
         if (scope.letter == 0) {
             continue;
         }
@@ -350,19 +340,21 @@ void App::drawScopeToggles(bool stackModifier)
         const char letter[2] = {scope.letter, '\0'};
         if (scopeToggleButton(chrome.buttonId, letter, m_view.shows(scope.id),
                               scopeTooltip(chrome.name, bindingFor(scope.id), chrome.extra))) {
-            chooseScope(scope.id, stackModifier);
+            outcome.chosenScope = ScopeChoice{scope.id, stackModifier};
         }
         ImGui::SameLine(0.0f, 2.0f);
     }
     ImGui::SameLine(0.0f, 8.0f);
+
+    return outcome;
 }
 
-void App::placeRegionToolbox()
+void ScopePaneRenderer::placeRegionToolbox()
 {
     // The brief note after an attached window closed out from under its region
     // stays on the left, by the scopes cluster, clear of the toolbox.
     if (glfwGetTime() < m_attachNoticeUntil) {
-        ImGui::TextDisabled("%s", m_attachDetachNotice.c_str());
+        ImGui::TextDisabled("%s", m_attachNotice.c_str());
         ImGui::SameLine(0.0f, 8.0f);
     }
     // The region toolbox is a constant-width cluster: state dims a tool, it
@@ -382,8 +374,9 @@ void App::placeRegionToolbox()
     }
 }
 
-void App::drawRegionToolIcons()
+PaneRenderOutcome ScopePaneRenderer::drawRegionToolIcons(const PaneRenderInput& input)
 {
+    PaneRenderOutcome outcome;
     char tooltip[96];
     std::snprintf(tooltip, sizeof(tooltip), "Draw a region (%s)", m_shortcuts.drawRegion.c_str());
     const int iconPx = iconPixelSize();
@@ -409,25 +402,20 @@ void App::drawRegionToolIcons()
         }
         ImGui::SameLine(0.0f, 2.0f);
     }
-    const bool fullAlready = isFullScreen();
+    const bool fullAlready = input.regionIsFullScreen;
     if (iconButton("##full-screen", iconTextureId(Icon::Expand, iconPx),
                    fullAlready ? "Reset to full screen (Esc) - already full" : "Reset to full screen (Esc)",
                    fullAlready) &&
         !fullAlready) {
-        resetToFullScreen();
+        outcome.resetToFullScreen = true;
     }
     ImGui::SameLine(0.0f, 2.0f);
     ImGui::NewLine();
+
+    return outcome;
 }
 
-float App::statusBarHeight()
-{
-    // The spacing that parts the strip from the panes, the tallest thing that
-    // can stand on its row, and the offset that centres the row between them.
-    return ImGui::GetStyle().ItemSpacing.y + iconButtonHeight() + statusRowOffset();
-}
-
-void App::drawStatusBar()
+void ScopePaneRenderer::drawStatusBar(const PaneRenderInput& input)
 {
     // The reserved strip under the panes. Output owns its own row - it never
     // paints over the scopes' pixels. Idle, the row spans corner to corner:
@@ -450,34 +438,34 @@ void App::drawStatusBar()
         return;
     }
     ImGui::SameLine(0.0f, 0.0f);
-    drawPinTool();
-    drawCursorReadout(ImGui::GetItemRectMax().x - ImGui::GetWindowPos().x);
+    drawPinTool(input.pinsAvailable);
+    drawCursorReadout(ImGui::GetItemRectMax().x - ImGui::GetWindowPos().x, input.vectorscopeColor);
 }
 
 // The tool that samples a colour sits beside the colour it samples, not among
 // the region tools - those choose what is captured, this one reads it.
-void App::drawPinTool()
+void ScopePaneRenderer::drawPinTool(bool pinsAvailable)
 {
-    const bool pins = pinsAvailable();
     char tooltip[160];
     std::snprintf(tooltip, sizeof(tooltip), "Pin a color (%s)%s", m_shortcuts.pinColor.c_str(),
-                  pins ? " - Shift+click a color to pin several" : " - needs a scope that takes pins");
-    if (iconButton("##pin-color", iconTextureId(Icon::Pipette, iconPixelSize()), tooltip, !pins) && pins) {
+                  pinsAvailable ? " - Shift+click a color to pin several" : " - needs a scope that takes pins");
+    if (iconButton("##pin-color", iconTextureId(Icon::Pipette, iconPixelSize()), tooltip, !pinsAvailable) &&
+        pinsAvailable) {
         m_regionPicker.request(RegionPickerMode::PinColor);
     }
 }
 
-void App::drawCursorReadout(float taken)
+void ScopePaneRenderer::drawCursorReadout(float taken, const std::optional<FloatColor>& color)
 {
     // The colour under the cursor, laid out inwards from its corner: the
     // swatch first, then a named percentage per channel in fixed columns, so
     // no digit coming or going moves anything. The swatch outranks the numbers
     // when the strip runs short, and both give way to whatever already stands
     // on the row.
-    if (!m_vectorscopeColor) {
+    if (!color) {
         return;
     }
-    const FloatColor& color = *m_vectorscopeColor;
+    const FloatColor& live = *color;
     const float swatch = ImGui::GetTextLineHeight();
     const float swatchStart = ImGui::GetWindowContentRegionMax().x - swatch;
     if (swatchStart < taken + 8.0f) {
@@ -486,28 +474,34 @@ void App::drawCursorReadout(float taken)
     const ReadoutColumns columns = measureReadoutColumns();
     const float channelsStart = swatchStart - 6.0f - columns.width;
     if (channelsStart >= taken + 8.0f) {
-        drawReadoutChannels(color, channelsStart, columns);
+        drawReadoutChannels(live, channelsStart, columns);
     }
     ImGui::SameLine(swatchStart);
     ImGui::SetCursorPosY(ImGui::GetCursorPosY() + rowTextDrop());
-    ImGui::ColorButton("##cursor-color", ImVec4(color.r / 255.0f, color.g / 255.0f, color.b / 255.0f, 1.0f),
+    ImGui::ColorButton("##cursor-color", ImVec4(live.r / 255.0f, live.g / 255.0f, live.b / 255.0f, 1.0f),
                        ImGuiColorEditFlags_NoTooltip | ImGuiColorEditFlags_NoDragDrop, ImVec2(swatch, swatch));
 }
 
-void App::setStatus(std::string message)
+void ScopePaneRenderer::setStatus(std::string message)
 {
     m_statusMessage = std::move(message);
     m_statusUntil = glfwGetTime() + 2.0;
-    m_lastActivity = glfwGetTime();
 }
 
-void App::drawScopePanes()
+void ScopePaneRenderer::showAttachNotice(std::string message)
+{
+    m_attachNotice = std::move(message);
+    m_attachNoticeUntil = glfwGetTime() + 5.0;
+}
+
+PaneRenderOutcome ScopePaneRenderer::drawScopePanes(const PaneRenderInput& input)
 {
     // The enabled scopes stack in activation order along the chosen axis, each
     // pane sized by its weight. A scope's pane point and rect live at its own
     // identity index, so the adaptive block and the context menu read back the
     // right pane.
-    m_paneRects.assign(m_scopeRegistry.scopes().size(), ImVec4());
+    Pass pass{input, PaneRenderOutcome{}};
+    m_paneRects.assign(m_registry.scopes().size(), ImVec4());
     // One reservation around every pane path, help pages included: whatever
     // fills the area lives in a child sized to leave the status bar's strip
     // below it, so the bar keeps the foot of the window in every state and a
@@ -515,13 +509,15 @@ void App::drawScopePanes()
     // carries no scrollbar, and neither does this.
     ImGui::BeginChild("##pane-area", ImVec2(0.0f, -statusBarHeight()), ImGuiChildFlags_None,
                       ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
-    drawPaneContent();
+    drawPaneContent(pass);
     ImGui::EndChild();
+
+    return pass.outcome;
 }
 
-void App::drawPaneContent()
+void ScopePaneRenderer::drawPaneContent(Pass& pass)
 {
-    if (!m_captureController.permissionGranted()) {
+    if (!m_capture.permissionGranted()) {
         drawCaptureHelp("SideScopes cannot see the screen",
                         {
                             "macOS requires the Screen Recording permission.",
@@ -534,21 +530,21 @@ void App::drawPaneContent()
 
         return;
     }
-    if (m_captureController.dead()) {
-        const std::string status = m_captureController.status();
+    if (m_capture.dead()) {
+        const std::string status = m_capture.status();
         drawCaptureHelp("Screen capture was interrupted", {status, "Reconnecting automatically..."}, false);
 
         return;
     }
     const std::vector<std::string>& stack = m_view.stack();
     if (stack.size() == 1) {
-        drawScopeById(stack.front());
+        drawScopeById(stack.front(), pass);
     } else if (stack.size() > 1) {
-        drawScopeStack();
+        drawScopeStack(pass);
     }
 }
 
-void App::drawScopeStack()
+void ScopePaneRenderer::drawScopeStack(Pass& pass)
 {
     // Weights split the axis; a divider between each neighboring pair is a thin
     // grab strip that resizes them. Item spacing is zeroed so panes and dividers
@@ -556,12 +552,12 @@ void App::drawScopeStack()
     // keep their normal breathing room.
     const ImVec2 area = ImGui::GetContentRegionAvail();
     const int count = static_cast<int>(m_view.stack().size());
-    const float divider = DividerThickness * m_uiScale;
+    const float divider = DividerThickness * pass.input.uiScale;
     const std::vector<float> weights = m_view.stackWeights();
     const bool sideBySide = resolveSplitDirection(m_view.orientation(), area.x, area.y, weights, stackAspects(),
                                                   divider) == SplitDirection::SideBySide;
     const float axisLength = (sideBySide ? area.x : area.y) - divider * static_cast<float>(count - 1);
-    const std::vector<float> lengths = paneLengths(weights, axisLength, MinPaneLength * m_uiScale);
+    const std::vector<float> lengths = paneLengths(weights, axisLength, MinPaneLength * pass.input.uiScale);
     const ImVec2 spacing = ImGui::GetStyle().ItemSpacing;
 
     ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0.0f, 0.0f));
@@ -570,14 +566,14 @@ void App::drawScopeStack()
         const ImVec2 paneSize = sideBySide ? ImVec2(lengths[index], area.y) : ImVec2(area.x, lengths[index]);
         ImGui::BeginChild(m_paneIds[index].c_str(), paneSize);
         ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, spacing);
-        drawScopeById(m_view.stack()[index]);
+        drawScopeById(m_view.stack()[index], pass);
         ImGui::PopStyleVar();
         ImGui::EndChild();
         if (pane + 1 < count) {
             if (sideBySide) {
                 ImGui::SameLine();
             }
-            drawPaneDivider(pane, sideBySide, divider, area, lengths);
+            drawPaneDivider(pane, sideBySide, divider, area, lengths, pass);
             if (sideBySide) {
                 ImGui::SameLine();
             }
@@ -586,8 +582,24 @@ void App::drawScopeStack()
     ImGui::PopStyleVar();
 }
 
-void App::drawPaneDivider(int leftPane, bool sideBySide, float thickness, const ImVec2& area,
-                          const std::vector<float>& lengths)
+std::vector<float> ScopePaneRenderer::stackAspects() const
+{
+    // A module's own declaration wins; the host table covers the color
+    // picker and modules that declare nothing.
+    std::vector<float> aspects;
+    aspects.reserve(m_view.stack().size());
+    for (const std::string& scopeId : m_view.stack()) {
+        const HostScope* hostScope = m_registry.byId(scopeId);
+        const float declared =
+            hostScope != nullptr && hostScope->descriptor != nullptr ? hostScope->descriptor->preferred_aspect : 0.0f;
+        aspects.push_back(declared > 0.0f ? declared : preferredScopeAspect(scopeId));
+    }
+
+    return aspects;
+}
+
+void ScopePaneRenderer::drawPaneDivider(int leftPane, bool sideBySide, float thickness, const ImVec2& area,
+                                        const std::vector<float>& lengths, Pass& pass)
 {
     const ImVec2 size = sideBySide ? ImVec2(thickness, area.y) : ImVec2(area.x, thickness);
     ImGui::InvisibleButton(m_dividerIds[static_cast<std::size_t>(leftPane)].c_str(), size);
@@ -598,14 +610,15 @@ void App::drawPaneDivider(int leftPane, bool sideBySide, float thickness, const 
     }
     paintDivider(sideBySide, hovered || active);
     if (active) {
-        adjustDividerWeights(leftPane, sideBySide ? ImGui::GetIO().MouseDelta.x : ImGui::GetIO().MouseDelta.y, lengths);
+        adjustDividerWeights(leftPane, sideBySide ? ImGui::GetIO().MouseDelta.x : ImGui::GetIO().MouseDelta.y, lengths,
+                             pass.input.uiScale);
     }
     if (hovered && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
-        equalizeDividerWeights(leftPane);
+        equalizeDividerWeights(leftPane, pass);
     }
 }
 
-void App::paintDivider(bool sideBySide, bool highlighted)
+void ScopePaneRenderer::paintDivider(bool sideBySide, bool highlighted)
 {
     const ImVec2 min = ImGui::GetItemRectMin();
     const ImVec2 max = ImGui::GetItemRectMax();
@@ -620,7 +633,8 @@ void App::paintDivider(bool sideBySide, bool highlighted)
     }
 }
 
-void App::adjustDividerWeights(int leftPane, float deltaPixels, const std::vector<float>& lengths)
+void ScopePaneRenderer::adjustDividerWeights(int leftPane, float deltaPixels, const std::vector<float>& lengths,
+                                             float uiScale)
 {
     if (deltaPixels == 0.0f) {
         return;
@@ -629,12 +643,12 @@ void App::adjustDividerWeights(int leftPane, float deltaPixels, const std::vecto
     const std::string& leftId = m_view.stack()[left];
     const std::string& rightId = m_view.stack()[left + 1];
     const auto [newLeft, newRight] = dragDividerWeights(m_view.weight(leftId), m_view.weight(rightId), lengths[left],
-                                                        lengths[left + 1], deltaPixels, MinPaneLength * m_uiScale);
+                                                        lengths[left + 1], deltaPixels, MinPaneLength * uiScale);
     m_view.setWeight(leftId, newLeft);
     m_view.setWeight(rightId, newRight);
 }
 
-void App::equalizeDividerWeights(int leftPane)
+void ScopePaneRenderer::equalizeDividerWeights(int leftPane, Pass& pass)
 {
     // Double-click reset: the two neighbors share their combined weight evenly,
     // leaving every other pane untouched.
@@ -644,33 +658,33 @@ void App::equalizeDividerWeights(int leftPane)
     const float average = (m_view.weight(leftId) + m_view.weight(rightId)) * 0.5f;
     m_view.setWeight(leftId, average);
     m_view.setWeight(rightId, average);
-    m_nextPreferencesSave = glfwGetTime() + 1.0;
-    m_lastActivity = glfwGetTime();
+    pass.outcome.preferencesSaveDue = true;
+    pass.outcome.activity = true;
 }
 
-void App::drawScopeById(std::string_view id)
+void ScopePaneRenderer::drawScopeById(std::string_view id, Pass& pass)
 {
-    const auto index = static_cast<std::size_t>(m_scopeRegistry.indexOf(id));
+    const auto index = static_cast<std::size_t>(m_registry.indexOf(id));
     m_panePoints[index] = ImGui::GetContentRegionAvail();
     const ImVec2 paneMin = ImGui::GetCursorScreenPos();
     const ImVec2 paneAvail = ImGui::GetContentRegionAvail();
     m_paneRects[index] = ImVec4(paneMin.x, paneMin.y, paneMin.x + paneAvail.x, paneMin.y + paneAvail.y);
     if (id == VectorscopeScopeId) {
-        drawVectorscopePane();
+        drawVectorscopePane(pass);
     } else if (id == HistogramScopeId) {
         const ScopeInstance* instance = projectionFor(HistogramScopeId);
         if (instance != nullptr) {
-            drawHistogram(textureForId(HistogramScopeId), m_output, *instance, currentHistogramStyle(),
-                          m_view.graticule(), m_vectorscopeColor, m_histogramScratch);
+            drawHistogram(textureForId(HistogramScopeId), m_output, *instance, histogramStyle(), m_view.graticule(),
+                          pass.input.vectorscopeColor, m_histogramScratch);
         }
     } else if (id == ColorPickerScopeId) {
-        drawColorPicker(m_vectorscopeColor, m_pins, m_callbackState.monospaceFont);
+        drawColorPicker(pass.input.vectorscopeColor, m_pins, pass.input.monospaceFont);
     } else {
-        drawWaveformPane(id);
+        drawWaveformPane(id, pass);
     }
 }
 
-void App::drawVectorscopePane()
+void ScopePaneRenderer::drawVectorscopePane(Pass& pass)
 {
     const DrawnScope scope = drawScopeImage(textureForId(VectorscopeScopeId), true, static_cast<float>(m_view.zoom()));
     const SsParamInfo* gain = firstParamOfKind(descriptorFor(VectorscopeScopeId), SS_PARAM_INTENSITY);
@@ -680,7 +694,7 @@ void App::drawVectorscopePane()
                                                         static_cast<float>(gain->intensity_shift), m_flash)) {
             m_view.setIntensity(VectorscopeScopeId, adjusted->intensity);
             m_analysis.scopeParams[VectorscopeScopeId][gain->key] = adjusted->gain;
-            m_analysisDirty = true;
+            pass.outcome.analysisDirty = true;
         }
     }
     // Zoomed overlays run past the pane; clip them to it.
@@ -696,8 +710,8 @@ void App::drawVectorscopePane()
         for (const FloatColor& pinned : m_pins.colors()) {
             drawMarkers(scope, instance->markers(toSsColor(pinned)), PinnedPointColor);
         }
-        if (m_vectorscopeColor) {
-            drawMarkers(scope, instance->markers(toSsColor(*m_vectorscopeColor)));
+        if (pass.input.vectorscopeColor) {
+            drawMarkers(scope, instance->markers(toSsColor(*pass.input.vectorscopeColor)));
         }
     }
     draw->PopClipRect();
@@ -707,7 +721,7 @@ void App::drawVectorscopePane()
     }
 }
 
-void App::drawWaveformPane(std::string_view id)
+void ScopePaneRenderer::drawWaveformPane(std::string_view id, Pass& pass)
 {
     // The waveform and its parade share one intensity control; each draws its
     // own instance's scale and cursor markers, and the module's marker layout
@@ -720,7 +734,7 @@ void App::drawWaveformPane(std::string_view id)
                                                         static_cast<float>(gain->intensity_shift), m_flash)) {
             m_view.setIntensity(WaveformScopeId, adjusted->intensity);
             setWaveformGain(adjusted->gain);
-            m_analysisDirty = true;
+            pass.outcome.analysisDirty = true;
         }
     }
     const ScopeInstance* instance = projectionFor(id);
@@ -728,46 +742,146 @@ void App::drawWaveformPane(std::string_view id)
         if (m_view.graticule()) {
             drawGraticule(scope, instance->graticule(), GraticuleStyle{});
         }
-        if (m_waveformColor) {
-            drawMarkers(scope, instance->markers(toSsColor(*m_waveformColor)));
+        if (pass.input.waveformColor) {
+            drawMarkers(scope, instance->markers(toSsColor(*pass.input.waveformColor)));
         }
     }
 }
 
-void App::drawAboutWindow()
+// Lazily rasterized textures for the embedded icon set, rebuilt when the
+// framebuffer scale changes the requested pixel size.
+ImTextureID ScopePaneRenderer::iconTextureId(Icon icon, int sizePixels)
 {
-    if (!m_showAbout) {
+    IconTexture& slot = m_iconTextures[static_cast<std::size_t>(icon)];
+    if (!slot.texture || slot.sizePixels != sizePixels) {
+        ScopeImage image;
+        image.width = sizePixels;
+        image.height = sizePixels;
+        image.rgba = rasterizeIcon(icon, sizePixels);
+        slot.texture = m_graphics.createScopeTexture(sizePixels, sizePixels);
+        slot.texture->upload(image);
+        slot.sizePixels = sizePixels;
+    }
+
+    return slot.texture->textureId();
+}
+
+std::string ScopePaneRenderer::bindingFor(std::string_view id) const
+{
+    return resolveBinding(m_scopeShortcuts, m_registry, id);
+}
+
+const SsScopeDescriptor* ScopePaneRenderer::descriptorFor(std::string_view id) const
+{
+    const HostScope* hostScope = m_registry.byId(id);
+
+    return hostScope != nullptr ? hostScope->descriptor : nullptr;
+}
+
+const ScopeInstance* ScopePaneRenderer::projectionFor(std::string_view id) const
+{
+    const auto at = m_projections.find(std::string{id});
+
+    return at != m_projections.end() ? &at->second : nullptr;
+}
+
+void ScopePaneRenderer::configureProjections()
+{
+    // Reconfigures every projection instance from the current settings, through
+    // the same assembleScopeParams the worker uses, so an overlay can never
+    // disagree with its trace.
+    for (auto& [id, instance] : m_projections) {
+        const SsScopeDescriptor* descriptor = descriptorFor(id);
+        std::vector<SsParamValue> values;
+        const auto params = m_analysis.scopeParams.find(id);
+        if (params != m_analysis.scopeParams.end() && descriptor != nullptr) {
+            values = assembleScopeParams(params->second, *descriptor);
+        }
+        (void)instance.configure(values);
+    }
+}
+
+HistogramStyle ScopePaneRenderer::histogramStyle() const
+{
+    const auto scope = m_analysis.scopeParams.find(HistogramScopeId);
+    if (scope == m_analysis.scopeParams.end()) {
+        return HistogramStyle::PerChannel;
+    }
+    const auto style = scope->second.find("style");
+    const double value = style != scope->second.end() ? style->second : 0.0;
+
+    return value < 0.5 ? HistogramStyle::PerChannel : HistogramStyle::Combined;
+}
+
+void ScopePaneRenderer::setWaveformGain(double gain)
+{
+    m_analysis.scopeParams[WaveformScopeId]["gain"] = gain;
+    m_analysis.scopeParams[ParadeScopeId]["gain"] = gain;
+}
+
+const ScopeImage& ScopePaneRenderer::imageFor(std::string_view id) const
+{
+    static const ScopeImage empty;
+    const auto at = m_output.images.find(std::string{id});
+
+    return at != m_output.images.end() ? at->second : empty;
+}
+
+bool ScopePaneRenderer::hasTexture(std::string_view id) const
+{
+    return m_scopeTextures.find(std::string{id}) != m_scopeTextures.end();
+}
+
+ScopeTexture& ScopePaneRenderer::textureForId(std::string_view id)
+{
+    return *m_scopeTextures.at(std::string{id});
+}
+
+void ScopePaneRenderer::uploadScope(std::unique_ptr<ScopeTexture>& texture, const ScopeImage& image)
+{
+    if (image.width <= 0 || image.height <= 0) {
         return;
     }
-    ImGui::SetNextWindowSize(ImVec2(320, 0), ImGuiCond_FirstUseEver);
-    ImGui::Begin("About SideScopes", &m_showAbout, ImGuiWindowFlags_NoCollapse);
-    // The window title carries the name; the body leads with the version.
-    ImGui::Text("Version %s", m_versionInfo.display.c_str());
-    if (ImGui::IsItemClicked()) {
-        ImGui::SetClipboardText(m_versionInfo.display.c_str());
+    if (image.rgba.size() < static_cast<std::size_t>(image.width) * static_cast<std::size_t>(image.height) * 4) {
+        return;
     }
-    wrappedTooltip("click to copy");
-    ImGui::Separator();
-    // Clickable link text in the accent color, underlined, opening the
-    // destination in the default browser; the tooltip names the URL.
-    const auto link = [](const char* text, const char* url) {
-        const ImVec4 accent = ImGui::GetStyleColorVec4(ImGuiCol_CheckMark);
-        ImGui::PushStyleColor(ImGuiCol_Text, accent);
-        ImGui::TextUnformatted(text);
-        ImGui::PopStyleColor();
-        const ImVec2 lo = ImGui::GetItemRectMin();
-        const ImVec2 hi = ImGui::GetItemRectMax();
-        ImGui::GetWindowDrawList()->AddLine(ImVec2(lo.x, hi.y), ImVec2(hi.x, hi.y), ImGui::GetColorU32(accent));
-        if (ImGui::IsItemClicked()) {
-            openUrl(url);
+    if (texture->width() != image.width || texture->height() != image.height) {
+        texture = m_graphics.createScopeTexture(image.width, image.height);
+    }
+    texture->upload(image);
+}
+
+void ScopePaneRenderer::uploadVisibleScopes()
+{
+    for (const std::string& id : m_view.stack()) {
+        const auto texture = m_scopeTextures.find(id);
+        if (texture == m_scopeTextures.end()) {
+            continue;  // the color picker has no texture
         }
-        wrappedTooltip(url);
-    };
-    link("sidescopes.org", "https://sidescopes.org");
-    link("github.com/sidescopes/sidescopes", "https://github.com/sidescopes/sidescopes");
-    ImGui::Separator();
-    ImGui::TextDisabled("GPL-3.0-or-later");
-    ImGui::End();
+        uploadScope(texture->second, imageFor(id));
+    }
+}
+
+ImVec2 ScopePaneRenderer::paneSizePoints(std::string_view id) const
+{
+    return m_panePoints[static_cast<std::size_t>(m_registry.indexOf(id))];
+}
+
+int ScopePaneRenderer::paneAt(const ImVec2& point) const
+{
+    // Which pane the click landed in decides which options lead the menu.
+    int clickedPane = -1;
+    for (std::size_t pane = 0; pane < m_paneRects.size(); ++pane) {
+        const ImVec4& rect = m_paneRects[pane];
+        if (rect.z <= rect.x || rect.w <= rect.y) {
+            continue;
+        }
+        if (point.x >= rect.x && point.x < rect.z && point.y >= rect.y && point.y < rect.w) {
+            clickedPane = static_cast<int>(pane);
+        }
+    }
+
+    return clickedPane;
 }
 
 }  // namespace sidescopes
