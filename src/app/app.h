@@ -306,19 +306,6 @@ private:
     // --- context menu ---
     void handleContextMenu();
     [[nodiscard]] const std::map<std::string, double>& paramsOf(std::string_view id) const;
-    [[nodiscard]] bool scopeHasOptions(std::string_view id) const;
-    void appendPinOptions(std::vector<NativeMenuItem>& menu);
-    void appendZoomOptions(std::vector<NativeMenuItem>& menu);
-    void appendScopeOptions(std::string_view id, bool flatten, std::vector<NativeMenuItem>& menu,
-                            std::vector<ParamMenuAction>& paramActions);
-    void appendScopesSubmenu(std::vector<NativeMenuItem>& menu);
-    void appendPerScopeOptions(std::vector<NativeMenuItem>& menu, std::vector<ParamMenuAction>& paramActions);
-    void appendLayoutSubmenu(std::vector<NativeMenuItem>& menu);
-    void appendUiScaleSubmenu(std::vector<NativeMenuItem>& menu) const;
-    void appendPresetsSubmenu(std::vector<NativeMenuItem>& menu);
-    void appendRegionAndAppSection(std::vector<NativeMenuItem>& menu);
-    void buildContextMenu(int clickedPane, std::vector<NativeMenuItem>& menu,
-                          std::vector<ParamMenuAction>& paramActions);
     void dispatchMenuChoice(int chosen, const std::vector<ParamMenuAction>& paramActions);
     void dispatchScopeToggleMenu(int chosen);
     void dispatchRegionMenu(int chosen);

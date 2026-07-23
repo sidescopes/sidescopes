@@ -27,6 +27,7 @@
 #include <vector>
 
 #include "app/capture_controller.h"
+#include "app/context_menu.h"
 #include "app/overlay_render.h"
 #include "app/param_menu.h"
 #include "app/pin_board.h"
@@ -61,46 +62,6 @@
 namespace {
 
 using namespace sidescopes;
-
-// Fixed ids for the host actions. Scope parameter choices are dynamic: they
-// carry ids from ParamMenuActionBase upward, resolved through a per-open side
-// table, never through this enum.
-enum MenuAction
-{
-    MenuShowVectorscope = 1,
-    MenuShowWaveform,
-    MenuShowWaveformParade,
-    MenuShowHistogram,
-    MenuShowColorPicker,
-    MenuDrawRegion = 25,
-    MenuAttachFace,
-    MenuZoom1,
-    MenuZoom2,
-    MenuZoom4,
-    MenuAttachWindow = 30,
-    MenuFullScreen,
-    MenuDetachWindow,
-    MenuDetachAll,
-    MenuToggleGraticule = 40,
-    MenuClearPinnedMarkers,
-    MenuPinColor,
-    MenuToggleCaptureVisibility,
-    MenuToggleDiagRecording,
-    MenuShowDiagLog,
-    MenuResetDiagnostics,
-    MenuOpenSettings = 50,
-    MenuAbout,
-    MenuQuit,
-    MenuLayoutAuto = 60,
-    MenuLayoutVertical,
-    MenuLayoutHorizontal,
-    // Preset load ids are MenuLoadPresetBase + slot (1-9); save ids are
-    // MenuSavePresetBase + slot. Both ranges stay clear of ParamMenuActionBase.
-    MenuLoadPresetBase = 70,
-    MenuSavePresetBase = 80,
-    // Interface-size ids are MenuUiScaleBase + the UiScaleSteps index.
-    MenuUiScaleBase = 90,
-};
 
 // ---------------------------------------------------------------------------
 // Rendering helpers
@@ -1404,65 +1365,6 @@ ImGuiKey keyFor(const std::string& name)
     return ImGuiKey_None;
 }
 
-std::string shortcutLabel(const std::string& name)
-{
-    return name == "Escape" ? "Esc" : name;
-}
-
-void menuAction(std::vector<NativeMenuItem>& menu, const char* label, int id, bool checked, std::string shortcut = "")
-{
-    menu.push_back({NativeMenuItem::Kind::Action, label, id, checked, std::move(shortcut)});
-}
-
-void menuSeparator(std::vector<NativeMenuItem>& menu)
-{
-    menu.push_back({NativeMenuItem::Kind::Separator, "", -1, false, ""});
-}
-
-void menuSubmenu(std::vector<NativeMenuItem>& menu, const char* label)
-{
-    menu.push_back({NativeMenuItem::Kind::SubmenuBegin, label, -1, false, ""});
-}
-
-void menuEndSubmenu(std::vector<NativeMenuItem>& menu)
-{
-    menu.push_back({NativeMenuItem::Kind::SubmenuEnd, "", -1, false, ""});
-}
-
-// The lowercase orientation word for a menu summary line.
-const char* orientationName(LayoutOrientation orientation)
-{
-    switch (orientation) {
-    case LayoutOrientation::Vertical:
-        return "vertical";
-    case LayoutOrientation::Horizontal:
-        return "horizontal";
-    case LayoutOrientation::Automatic:
-    default:
-        return "auto";
-    }
-}
-
-// The Presets submenu entry text: "N - empty" for an unused slot, otherwise a
-// short summary like "1 - VWH" from the saved stack tokens, naming the
-// orientation only when the preset pins one - Automatic is the unspoken
-// default.
-std::string presetLabel(int slot, const LayoutPreset& preset)
-{
-    const std::string number = std::to_string(slot);
-    if (preset.stack.empty()) {
-        return number + " - empty";
-    }
-    std::string label = number + " - " + preset.stack;
-    const LayoutOrientation orientation = orientationFromInt(preset.orientation);
-    if (orientation != LayoutOrientation::Automatic) {
-        label += ' ';
-        label += orientationName(orientation);
-    }
-
-    return label;
-}
-
 // Per-scope toolbar chrome, keyed by id: the button id, display name, and
 // tooltip suffix. The shortcut is resolved by id through bindingFor.
 struct ScopeChrome
@@ -1938,12 +1840,7 @@ const ScopeInstance* App::projectionFor(std::string_view id) const
 
 std::string App::bindingFor(std::string_view id) const
 {
-    if (const auto custom = m_scopeShortcuts.find(std::string{id}); custom != m_scopeShortcuts.end()) {
-        return custom->second;
-    }
-    const HostScope* scope = m_scopeRegistry.byId(id);
-
-    return scope != nullptr && scope->letter != 0 ? std::string(1, scope->letter) : std::string{};
+    return resolveBinding(m_scopeShortcuts, m_scopeRegistry, id);
 }
 
 bool App::pinsAvailable() const
@@ -4016,7 +3913,10 @@ void App::handleContextMenu()
     }
     std::vector<NativeMenuItem> menu;
     std::vector<ParamMenuAction> paramActions;
-    buildContextMenu(clickedPane, menu, paramActions);
+    const ContextMenuModel model{
+        m_view,          m_scopeRegistry, m_shortcuts,        m_scopeShortcuts,    m_analysis.scopeParams, m_attach,
+        m_layoutPresets, m_pins.empty(),  m_activePresetSlot, m_userUiScaleFactor, isFullScreen()};
+    buildContextMenu(model, clickedPane, menu, paramActions);
     const int chosen = showNativeContextMenu(menu);
     dispatchMenuChoice(chosen, paramActions);
 }
@@ -4027,212 +3927,6 @@ const std::map<std::string, double>& App::paramsOf(std::string_view id) const
     const auto stored = m_analysis.scopeParams.find(std::string{id});
 
     return stored != m_analysis.scopeParams.end() ? stored->second : noParams;
-}
-
-bool App::scopeHasOptions(std::string_view id) const
-{
-    if (id == VectorscopeScopeId || id == ColorPickerScopeId) {
-        return true;  // host sections: zoom and pins
-    }
-    const HostScope* hostScope = m_scopeRegistry.byId(id);
-
-    return hostScope != nullptr && hostScope->descriptor != nullptr &&
-           firstParamOfKind(hostScope->descriptor, SS_PARAM_CHOICE) != nullptr;
-}
-
-void App::appendPinOptions(std::vector<NativeMenuItem>& menu)
-{
-    // Pins are a scope tool: they mark the vectorscope and the color picker, so
-    // their submenu rides those scopes' own sections.
-    menuSubmenu(menu, "Pins");
-    menuAction(menu, "Pin Colors...", MenuPinColor, false, shortcutLabel(m_shortcuts.pinColor));
-    if (!m_pins.empty()) {
-        menuAction(menu, "Clear Pinned Markers", MenuClearPinnedMarkers, false);
-    }
-    menuEndSubmenu(menu);
-}
-
-void App::appendZoomOptions(std::vector<NativeMenuItem>& menu)
-{
-    // The vectorscope's magnify viewport is a host control, not a module
-    // parameter, so it stays hand-built beside the descriptor choices.
-    menuSubmenu(menu, "Zoom");
-    menuAction(menu, "1x", MenuZoom1, m_view.zoom() == 1, shortcutLabel(m_shortcuts.vectorscopeZoom));
-    menuAction(menu, "2x", MenuZoom2, m_view.zoom() == 2, shortcutLabel(m_shortcuts.vectorscopeZoom));
-    menuAction(menu, "4x", MenuZoom4, m_view.zoom() == 4, shortcutLabel(m_shortcuts.vectorscopeZoom));
-    menuEndSubmenu(menu);
-}
-
-void App::appendScopeOptions(std::string_view id, bool flatten, std::vector<NativeMenuItem>& menu,
-                             std::vector<ParamMenuAction>& paramActions)
-{
-    // A scope's own options: its descriptor's choice submenus, then any host
-    // sections it carries. `flatten` lets a lone choice sit directly under an
-    // enclosing scope-name submenu.
-    const HostScope* hostScope = m_scopeRegistry.byId(id);
-    if (hostScope != nullptr && hostScope->descriptor != nullptr) {
-        appendScopeChoiceMenus(*hostScope->descriptor, paramsOf(id), flatten, menu, paramActions);
-    }
-    if (id == VectorscopeScopeId) {
-        appendZoomOptions(menu);
-        appendPinOptions(menu);
-    } else if (id == ColorPickerScopeId) {
-        appendPinOptions(menu);
-    }
-}
-
-void App::appendScopesSubmenu(std::vector<NativeMenuItem>& menu)
-{
-    menuSubmenu(menu, "Scopes");
-    menuAction(menu, "Vectorscope", MenuShowVectorscope, m_view.shows(VectorscopeScopeId),
-               shortcutLabel(bindingFor(VectorscopeScopeId)));
-    menuAction(menu, "Waveform", MenuShowWaveform, m_view.shows(WaveformScopeId),
-               shortcutLabel(bindingFor(WaveformScopeId)));
-    menuAction(menu, "RGB Parade", MenuShowWaveformParade, m_view.shows(ParadeScopeId),
-               shortcutLabel(bindingFor(ParadeScopeId)));
-    menuAction(menu, "Histogram", MenuShowHistogram, m_view.shows(HistogramScopeId),
-               shortcutLabel(bindingFor(HistogramScopeId)));
-    menuAction(menu, "Color Picker", MenuShowColorPicker, m_view.shows(ColorPickerScopeId),
-               shortcutLabel(bindingFor(ColorPickerScopeId)));
-    menuEndSubmenu(menu);
-}
-
-void App::appendPerScopeOptions(std::vector<NativeMenuItem>& menu, std::vector<ParamMenuAction>& paramActions)
-{
-    // On a background or toolbar click, each visible scope's options ride under
-    // its own name, in toolbar order.
-    for (const HostScope& scope : m_scopeRegistry.scopes()) {
-        if (!m_view.shows(scope.id)) {
-            continue;
-        }
-        // The vectorscope's section already carries the pins; the color picker
-        // shows them only when the vectorscope is gone.
-        if (scope.id == ColorPickerScopeId && m_view.shows(VectorscopeScopeId)) {
-            continue;
-        }
-        if (!scopeHasOptions(scope.id)) {
-            continue;  // the parade offers no options of its own
-        }
-        menuSubmenu(menu, scope.descriptor != nullptr ? scope.descriptor->name : "Color Picker");
-        appendScopeOptions(scope.id, true, menu, paramActions);
-        menuEndSubmenu(menu);
-    }
-}
-
-void App::appendLayoutSubmenu(std::vector<NativeMenuItem>& menu)
-{
-    const LayoutOrientation current = m_view.orientation();
-    menuSubmenu(menu, "Layout");
-    menuAction(menu, "Automatic", MenuLayoutAuto, current == LayoutOrientation::Automatic);
-    menuAction(menu, "Vertical (stacked)", MenuLayoutVertical, current == LayoutOrientation::Vertical);
-    menuAction(menu, "Horizontal (side by side)", MenuLayoutHorizontal, current == LayoutOrientation::Horizontal);
-    menuEndSubmenu(menu);
-}
-
-void App::appendUiScaleSubmenu(std::vector<NativeMenuItem>& menu) const
-{
-    // An ascending zoom-like scale of multipliers on the system scale. The 1.0
-    // step is the OS's own per-monitor scaling unchanged - the home of the
-    // scale, named "Default (100%)" where it sits in the middle rather than a
-    // bare percentage. The checked step is an exact UiScaleSteps value, so the
-    // equality is safe.
-    menuSubmenu(menu, "UI Scaling");
-    for (std::size_t step = 0; step < UiScaleSteps.size(); ++step) {
-        const float factor = UiScaleSteps[step];
-        const bool checked = factor == m_userUiScaleFactor;
-        const int id = MenuUiScaleBase + static_cast<int>(step);
-        if (factor == 1.0f) {
-            menuAction(menu, "Default (100%)", id, checked);
-        } else {
-            char label[16];
-            std::snprintf(label, sizeof(label), "%d%%", static_cast<int>(std::lround(factor * 100.0f)));
-            menuAction(menu, label, id, checked);
-        }
-    }
-    menuEndSubmenu(menu);
-}
-
-void App::appendPresetsSubmenu(std::vector<NativeMenuItem>& menu)
-{
-    // Each slot lists its saved summary or "empty"; the digit hint teaches the
-    // load shortcut. Saving rides a nested submenu with the Shift+digit hint.
-    menuSubmenu(menu, "Presets");
-    for (int slot = 1; slot <= LayoutPresetSlots; ++slot) {
-        const LayoutPreset& preset = m_layoutPresets[static_cast<std::size_t>(slot - 1)];
-        menuAction(menu, presetLabel(slot, preset).c_str(), MenuLoadPresetBase + slot, slot == m_activePresetSlot,
-                   std::to_string(slot));
-    }
-    menuSeparator(menu);
-    menuSubmenu(menu, "Save Current To");
-    for (int slot = 1; slot <= LayoutPresetSlots; ++slot) {
-        menuAction(menu, std::to_string(slot).c_str(), MenuSavePresetBase + slot, false,
-                   "Shift+" + std::to_string(slot));
-    }
-    menuEndSubmenu(menu);
-    menuEndSubmenu(menu);
-}
-
-void App::appendRegionAndAppSection(std::vector<NativeMenuItem>& menu)
-{
-    menuSeparator(menu);
-    menuAction(menu, "Attach to Window...", MenuAttachWindow, false, shortcutLabel(m_shortcuts.attachWindow));
-    menuAction(menu, "Draw Region...", MenuDrawRegion, false, shortcutLabel(m_shortcuts.drawRegion));
-    if (supportsFaceDetection()) {
-        menuAction(menu, "Attach to Face...", MenuAttachFace, false, shortcutLabel(m_shortcuts.attachFace));
-    }
-    menuAction(menu, "Watch Full Screen", MenuFullScreen, isFullScreen(), shortcutLabel(m_shortcuts.fullScreen));
-    if (m_attach.attachedCount() > 1) {
-        if (m_attach.activeIdentity() != 0) {
-            menuAction(menu, "Detach Front Window", MenuDetachWindow, false);
-        }
-        menuAction(menu, "Detach All Windows", MenuDetachAll, false);
-    } else if (m_attach.attached()) {
-        menuAction(menu, "Detach from Window", MenuDetachWindow, false);
-    }
-
-    menuSeparator(menu);
-    menuAction(menu, "Graticule", MenuToggleGraticule, m_view.graticule());
-
-    menuSeparator(menu);
-    // Support tooling in one clearly named place; every checkbox reads
-    // the live truth, so a session started by the environment shows as
-    // switched on and can be switched off here. Reset restores the
-    // standard state however recording or visibility were enabled.
-    menuSubmenu(menu, "Diagnostics");
-    if (captureVisibilityToggleSupported()) {
-        menuAction(menu, "Show in Screen Captures", MenuToggleCaptureVisibility, captureVisible());
-    }
-    menuAction(menu, "Record Diagnostic Log", MenuToggleDiagRecording, diagRecording());
-    menuAction(menu, "Show Diagnostic Log", MenuShowDiagLog, false);
-    menuSeparator(menu);
-    menuAction(menu, "Reset to Defaults", MenuResetDiagnostics, false);
-    menuEndSubmenu(menu);
-    appendUiScaleSubmenu(menu);
-    menuAction(menu, "Settings", MenuOpenSettings, false);
-    menuAction(menu, "About SideScopes", MenuAbout, false);
-    menuAction(menu, "Quit", MenuQuit, false);
-}
-
-void App::buildContextMenu(int clickedPane, std::vector<NativeMenuItem>& menu,
-                           std::vector<ParamMenuAction>& paramActions)
-{
-    // One rule shapes the menu: ownership shows through position and grouping.
-    // The clicked pane's options lead, unprefixed - the click is the context; a
-    // background or toolbar click wraps each scope's options in its own submenu.
-    if (clickedPane >= 0) {
-        const std::string& clickedId = m_scopeRegistry.scopes()[static_cast<std::size_t>(clickedPane)].id;
-        if (scopeHasOptions(clickedId)) {
-            appendScopeOptions(clickedId, false, menu, paramActions);
-            menuSeparator(menu);
-        }
-    }
-    appendScopesSubmenu(menu);
-    if (clickedPane < 0) {
-        appendPerScopeOptions(menu, paramActions);
-    }
-    appendLayoutSubmenu(menu);
-    appendPresetsSubmenu(menu);
-    appendRegionAndAppSection(menu);
 }
 
 void App::dispatchMenuChoice(int chosen, const std::vector<ParamMenuAction>& paramActions)
