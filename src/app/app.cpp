@@ -111,6 +111,7 @@ App::App()
       m_scopeRegistry(builtinModules()),
       m_view(m_scopeRegistry),
       m_shortcuts(m_scopeRegistry),
+      m_presets(m_view, m_scopeRegistry, m_analysis),
       m_detail(m_view, m_analysis)
 {
     m_screenSample = std::make_shared<ScreenSample>();
@@ -264,7 +265,7 @@ void App::setupView(const Preferences& startup)
     m_view.setZoom(startup.vectorscopeZoom);
     m_view.setOrientation(orientationFromInt(startup.layoutOrientation));
     m_view.setWeights(startup.layoutWeights);
-    m_presetStore.restore(startup.layoutPresets, startup.layoutActiveSlot);
+    m_presets.restore(startup.layoutPresets, startup.layoutActiveSlot);
     // The stored factor is cleaned to an offered step here, at the app boundary,
     // so core preferences never depend on the app's scaling policy. setupImGui
     // already applied the OS scale at the 1.0 default; fold the preference in now,
@@ -466,8 +467,8 @@ void App::persistPreferences()
     preferences.vectorscopeZoom = m_view.zoom();
     preferences.layoutOrientation = orientationToInt(m_view.orientation());
     preferences.layoutWeights = m_view.weightsSnapshot();
-    preferences.layoutPresets = m_presetStore.all();
-    preferences.layoutActiveSlot = m_presetStore.activeSlot();
+    preferences.layoutPresets = m_presets.all();
+    preferences.layoutActiveSlot = m_presets.activeSlot();
     preferences.uiScaleFactor = m_userUiScaleFactor;
     preferences.shortcuts = m_shortcuts.bindings();
     preferences.scopeShortcuts = m_shortcuts.scopeOverrides();
@@ -763,7 +764,7 @@ void App::drawFrameUi()
     // one: a Shift key-up swallowed by a system overlay leaves the cache stuck
     // exactly when the user next switches a scope.
     const ModifierState modifiers = currentModifiers();
-    drawPresetPicker();
+    applyPresetOutcome(m_presets.drawPicker());
     ImGui::SameLine(0.0f, 8.0f);
     applyPaneRenderOutcome(m_panes->drawScopeToggles(modifiers.shift));
     applyShortcutAction(m_shortcuts.resolvePressed(shortcutContext(), modifiers, shortcutPressed));
@@ -895,10 +896,10 @@ void App::applyShortcutAction(const ShortcutAction& action)
         resetToFullScreen();
         break;
     case ShortcutAction::Kind::LoadPreset:
-        loadLayoutPreset(action.presetSlot);
+        applyPresetOutcome(m_presets.load(action.presetSlot));
         break;
     case ShortcutAction::Kind::SavePreset:
-        saveLayoutPreset(action.presetSlot);
+        applyPresetOutcome(m_presets.save(action.presetSlot));
         break;
     case ShortcutAction::Kind::HideApplication:
         hideApplication();
@@ -917,135 +918,26 @@ void App::applyShortcutAction(const ShortcutAction& action)
     }
 }
 
-std::map<std::string, double> App::currentStackWeights() const
+// Applies what a preset action decided. The controller has already moved the
+// view and the stored slots; the strip, the worker, and the preferences file
+// are the host's to bring along.
+void App::applyPresetOutcome(const LayoutPresetOutcome& outcome)
 {
-    // A self-contained snapshot: every scope on screen with its current weight,
-    // so a loaded preset reproduces the exact split even for scopes left at the
-    // default weight.
-    std::map<std::string, double> weights;
-    for (const std::string& id : m_view.stack()) {
-        weights[id] = m_view.weight(id);
+    if (!outcome.status.empty()) {
+        setStatus(outcome.status);
     }
-
-    return weights;
+    if (outcome.analysisDirty) {
+        m_analysisDirty = true;
+    }
+    if (outcome.preferencesSaveDue) {
+        m_nextPreferencesSave = glfwGetTime() + 1.0;
+    }
 }
 
 void App::setStatus(std::string message)
 {
     m_panes->setStatus(std::move(message));
     m_lastActivity = glfwGetTime();
-}
-
-void App::saveLayoutPreset(int slot)
-{
-    m_presetStore.save(slot, capturePreset());
-    setStatus("preset " + std::to_string(slot) + " saved");
-    m_nextPreferencesSave = glfwGetTime() + 1.0;
-}
-
-LayoutPreset App::capturePreset() const
-{
-    LayoutPreset preset;
-    preset.stack = m_view.stackTokens();
-    preset.orientation = orientationToInt(m_view.orientation());
-    preset.weights = currentStackWeights();
-    preset.styles = currentStackStyles();
-
-    return preset;
-}
-
-bool App::activePresetDirty() const
-{
-    return m_presetStore.isDirty(capturePreset());
-}
-
-void App::drawPresetPicker()
-{
-    // A chip like the scope letters, leading the row: the label names the
-    // active slot (starred once the live layout drifts; "-" when none), and
-    // clicking opens the slot list - the mouse mirror of the digit keys.
-    const bool dirty = activePresetDirty();
-    char preview[8] = "-";
-    if (m_presetStore.activeSlot() != 0) {
-        std::snprintf(preview, sizeof(preview), "%d%s", m_presetStore.activeSlot(), dirty ? "*" : "");
-    }
-    if (scopeToggleButton("##preset-picker", preview, false, "Layout presets - digits load, Shift+digits save")) {
-        ImGui::OpenPopup("##preset-popup");
-    }
-    const ImVec2 chipMin = ImGui::GetItemRectMin();
-    const ImVec2 chipMax = ImGui::GetItemRectMax();
-    ImGui::SetNextWindowPos(ImVec2(chipMin.x, chipMax.y + 2.0f));
-    if (ImGui::BeginPopup("##preset-popup")) {
-        for (int slot = 1; slot <= LayoutPresetSlots; ++slot) {
-            const LayoutPreset& preset = m_presetStore.at(slot);
-            if (ImGui::Selectable(presetLabel(slot, preset).c_str(), slot == m_presetStore.activeSlot())) {
-                if (ImGui::GetIO().KeyShift) {
-                    saveLayoutPreset(slot);
-                } else {
-                    loadLayoutPreset(slot);
-                }
-            }
-        }
-        ImGui::TextDisabled("click loads - Shift+click saves");
-        ImGui::EndPopup();
-    }
-}
-
-std::map<std::string, std::map<std::string, double>> App::currentStackStyles() const
-{
-    std::map<std::string, std::map<std::string, double>> styles;
-    for (const std::string& scopeId : m_view.stack()) {
-        const HostScope* hostScope = m_scopeRegistry.byId(scopeId);
-        if (hostScope == nullptr || hostScope->descriptor == nullptr) {
-            continue;
-        }
-        const std::map<std::string, double>& params = paramsOf(scopeId);
-        for (uint32_t index = 0; index < hostScope->descriptor->param_count; ++index) {
-            const SsParamInfo& info = hostScope->descriptor->params[index];
-            if (info.kind != SS_PARAM_CHOICE) {
-                continue;
-            }
-            const auto current = params.find(info.key);
-            styles[scopeId][info.key] = current != params.end() ? current->second : info.default_value;
-        }
-    }
-
-    return styles;
-}
-
-void App::applyPresetStyles(const std::map<std::string, std::map<std::string, double>>& styles)
-{
-    for (const auto& [scopeId, params] : styles) {
-        const HostScope* hostScope = m_scopeRegistry.byId(scopeId);
-        if (hostScope == nullptr || hostScope->descriptor == nullptr) {
-            continue;
-        }
-        for (const auto& [key, value] : params) {
-            const SsParamInfo* info = findParam(hostScope->descriptor, key);
-            if (info == nullptr || info->kind != SS_PARAM_CHOICE) {
-                continue;
-            }
-            m_analysis.scopeParams[scopeId][key] = std::clamp(value, info->min_value, info->max_value);
-        }
-    }
-}
-
-void App::loadLayoutPreset(int slot)
-{
-    const LayoutPreset& preset = m_presetStore.at(slot);
-    if (preset.stack.empty()) {
-        setStatus("preset " + std::to_string(slot) + " is empty");
-
-        return;
-    }
-    m_view.restoreStack(preset.stack);
-    m_view.setOrientation(orientationFromInt(preset.orientation));
-    m_view.setWeights(preset.weights);
-    applyPresetStyles(preset.styles);
-    m_presetStore.markLoaded(slot);
-    m_analysis.enabledScopes = m_view.enabledScopeIds();
-    m_analysisDirty = true;
-    setStatus("preset " + std::to_string(slot) + " loaded");
 }
 
 void App::handleContextMenu()
@@ -1059,27 +951,12 @@ void App::handleContextMenu()
     const int clickedPane = m_panes->paneAt(ImGui::GetMousePos());
     std::vector<NativeMenuItem> menu;
     std::vector<ParamMenuAction> paramActions;
-    const ContextMenuModel model{m_view,
-                                 m_scopeRegistry,
-                                 m_shortcuts,
-                                 m_analysis.scopeParams,
-                                 m_attach,
-                                 m_presetStore.all(),
-                                 m_pins.empty(),
-                                 m_presetStore.activeSlot(),
-                                 m_userUiScaleFactor,
-                                 isFullScreen()};
+    const ContextMenuModel model{
+        m_view,         m_scopeRegistry,        m_shortcuts,         m_analysis.scopeParams, m_attach, m_presets.all(),
+        m_pins.empty(), m_presets.activeSlot(), m_userUiScaleFactor, isFullScreen()};
     buildContextMenu(model, clickedPane, menu, paramActions);
     const int chosen = showNativeContextMenu(menu);
     dispatchMenuChoice(chosen, paramActions);
-}
-
-const std::map<std::string, double>& App::paramsOf(std::string_view id) const
-{
-    static const std::map<std::string, double> noParams;
-    const auto stored = m_analysis.scopeParams.find(std::string{id});
-
-    return stored != m_analysis.scopeParams.end() ? stored->second : noParams;
 }
 
 void App::dispatchMenuChoice(int chosen, const std::vector<ParamMenuAction>& paramActions)

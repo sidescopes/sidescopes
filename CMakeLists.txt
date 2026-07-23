@@ -364,6 +364,7 @@ if(APPLE OR WIN32)
         src/app/face_lock_controller.cpp
         src/app/imgui_ui.cpp
         src/app/layout_preset_store.cpp
+        src/app/layout_presets.cpp
         src/app/overlay_render.cpp
         src/app/overlay_style.cpp
         src/app/param_menu.cpp

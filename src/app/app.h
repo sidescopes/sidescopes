@@ -16,7 +16,7 @@
 #include "app/attach_controller.h"
 #include "app/capture_controller.h"
 #include "app/face_lock_controller.h"
-#include "app/layout_preset_store.h"
+#include "app/layout_presets.h"
 #include "app/param_menu.h"
 #include "app/pin_board.h"
 #include "app/region_picker.h"
@@ -192,24 +192,10 @@ private:
     /// Carries out a resolved shortcut: the resolver has already decided what
     /// the key means. Shared with the menu entries driving the same actions.
     void applyShortcutAction(const ShortcutAction& action);
-    void loadLayoutPreset(int slot);
-    void saveLayoutPreset(int slot);
-    [[nodiscard]] std::map<std::string, double> currentStackWeights() const;
-    /// The stacked scopes' choice-parameter values - the style menus' state -
-    /// for a preset to recall alongside the geometry.
-    [[nodiscard]] std::map<std::string, std::map<std::string, double>> currentStackStyles() const;
-    /// The live layout as it would save into a preset slot.
-    [[nodiscard]] LayoutPreset capturePreset() const;
-    /// Whether the live layout has drifted from the active preset slot; false
-    /// when no preset is active.
-    [[nodiscard]] bool activePresetDirty() const;
-    /// The toolbar preset dropdown: the preview names the active slot
-    /// (starred when dirty); the popup loads on click, saves on Shift+click.
-    void drawPresetPicker();
-    /// Applies a preset's stored choice values through the same write the
-    /// style menus use, skipping keys the descriptors no longer declare and
-    /// clamping each value to its parameter's range.
-    void applyPresetStyles(const std::map<std::string, std::map<std::string, double>>& styles);
+    /// Applies a preset outcome to host state: the strip carries what the
+    /// action has to say, and the worker and the preferences file catch up
+    /// with the layout it put on screen.
+    void applyPresetOutcome(const LayoutPresetOutcome& outcome);
     /// Shows @p message in the status strip and keeps the frame loop awake
     /// while it is up.
     void setStatus(std::string message);
@@ -217,7 +203,6 @@ private:
 
     // --- context menu ---
     void handleContextMenu();
-    [[nodiscard]] const std::map<std::string, double>& paramsOf(std::string_view id) const;
     void dispatchMenuChoice(int chosen, const std::vector<ParamMenuAction>& paramActions);
     void dispatchScopeToggleMenu(int chosen);
     void dispatchRegionMenu(int chosen);
@@ -322,7 +307,9 @@ private:
     MarkerSmoother m_vectorscopeMarker;
     MarkerSmoother m_waveformMarker;
 
-    LayoutPresetStore m_presetStore;
+    /// Owns the layout preset slots and what a slot records of - and restores
+    /// to - the live layout; the host applies the outcomes it returns.
+    LayoutPresetController m_presets;
 
     /// Owns the debounced choice of what resolution each scope's image is
     /// computed at; the host puts the resolutions it settles on in force.
