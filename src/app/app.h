@@ -113,7 +113,6 @@ private:
     [[nodiscard]] std::pair<int, int> currentSize(std::string_view id) const;
     [[nodiscard]] HistogramStyle currentHistogramStyle() const;
     void setWaveformGain(double gain);
-    void setWaveformStride(int stride);
     [[nodiscard]] const SsScopeDescriptor* descriptorFor(std::string_view id) const;
     void configureProjectionInstances();
     [[nodiscard]] const ScopeInstance* projectionFor(std::string_view id) const;
@@ -298,9 +297,6 @@ private:
     void drawVectorscopePane();
     void drawWaveformPane(std::string_view id);
     void setStatus(std::string message);
-    void drawSettingsWindow();
-    void drawVectorscopeSettings();
-    void drawWaveformSettings();
     void drawAboutWindow();
 
     // --- context menu ---

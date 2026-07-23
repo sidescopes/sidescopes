@@ -35,6 +35,7 @@
 #include "app/scope_layout.h"
 #include "app/scope_registry.h"
 #include "app/scope_view.h"
+#include "app/settings_window.h"
 #include "app/ui_scaling.h"
 #include "app/version.h"
 #include "app/window_suggestions.h"
@@ -1802,12 +1803,6 @@ void App::setWaveformGain(double gain)
     m_analysis.scopeParams[ParadeScopeId]["gain"] = gain;
 }
 
-void App::setWaveformStride(int stride)
-{
-    m_analysis.scopeParams[WaveformScopeId]["stride"] = stride;
-    m_analysis.scopeParams[ParadeScopeId]["stride"] = stride;
-}
-
 const SsScopeDescriptor* App::descriptorFor(std::string_view id) const
 {
     const HostScope* hostScope = m_scopeRegistry.byId(id);
@@ -3035,7 +3030,9 @@ void App::drawFrameUi()
     ImGui::End();
     ImGui::PopStyleVar();
 
-    drawSettingsWindow();
+    const SettingsContext settingsCtx{m_showSettings,  m_view,   m_analysis,    m_analysisDirty,
+                                      m_scopeRegistry, m_output, m_versionInfo, m_captureController.status()};
+    drawSettingsWindow(settingsCtx);
     drawAboutWindow();
 
     if (ImGui::IsAnyItemActive()) {
@@ -3780,78 +3777,6 @@ void App::drawWaveformPane(std::string_view id)
         if (m_waveformColor) {
             drawMarkers(scope, instance->markers(toSsColor(*m_waveformColor)));
         }
-    }
-}
-
-void App::drawSettingsWindow()
-{
-    if (!m_showSettings) {
-        return;
-    }
-    const ImGuiIO& io = ImGui::GetIO();
-    ImGui::SetNextWindowSize(ImVec2(380, 0), ImGuiCond_FirstUseEver);
-    ImGui::Begin("Settings", &m_showSettings, ImGuiWindowFlags_NoCollapse);
-    ImGui::TextWrapped("capture: %s", m_captureController.status().c_str());
-    ImGui::Text("analysis %.2f ms | frames %llu | ui %.0f fps", m_output.accumulateMilliseconds,
-                static_cast<unsigned long long>(m_output.framesProcessed), static_cast<double>(io.Framerate));
-    ImGui::Separator();
-    drawVectorscopeSettings();
-    drawWaveformSettings();
-    ImGui::TextDisabled("modes and toggles: right-click a scope");
-    ImGui::TextDisabled("%s", m_versionInfo.display.c_str());
-    ImGui::End();
-}
-
-void App::drawVectorscopeSettings()
-{
-    // The intensity and stride sliders read their default, headroom, and range
-    // from the descriptor; the smoothing slider is host state.
-    const SsParamInfo* vectorscopeGain = firstParamOfKind(descriptorFor(VectorscopeScopeId), SS_PARAM_INTENSITY);
-    const SsParamInfo* vectorscopeStrideParam = firstParamOfKind(descriptorFor(VectorscopeScopeId), SS_PARAM_INT);
-    ImGui::TextDisabled("vectorscope");
-    float vectorscopePercent = m_view.intensity(VectorscopeScopeId);
-    if (ImGui::SliderFloat("intensity##v", &vectorscopePercent, 0.0f, 100.0f, "%.0f%%")) {
-        m_view.setIntensity(VectorscopeScopeId, vectorscopePercent);
-        m_analysis.scopeParams[VectorscopeScopeId][vectorscopeGain->key] =
-            traceGainFromIntensity(vectorscopePercent, static_cast<float>(vectorscopeGain->intensity_shift));
-        m_analysisDirty = true;
-    }
-    int vectorscopeStride = static_cast<int>(
-        scopeParam(VectorscopeScopeId, vectorscopeStrideParam->key, vectorscopeStrideParam->default_value));
-    if (ImGui::SliderInt("sampling 1:N##v", &vectorscopeStride, static_cast<int>(vectorscopeStrideParam->min_value),
-                         static_cast<int>(vectorscopeStrideParam->max_value))) {
-        m_analysis.scopeParams[VectorscopeScopeId][vectorscopeStrideParam->key] = vectorscopeStride;
-        m_analysisDirty = true;
-    }
-    float vectorscopeMs = m_view.smoothing(VectorscopeScopeId);
-    if (ImGui::SliderFloat("smoothing ms##v", &vectorscopeMs, 0.0f, 500.0f, "%.0f")) {
-        m_view.setSmoothing(VectorscopeScopeId, vectorscopeMs);
-    }
-}
-
-void App::drawWaveformSettings()
-{
-    // The waveform and its parade share one control, so only the waveform is
-    // shown.
-    const SsParamInfo* waveformGain = firstParamOfKind(descriptorFor(WaveformScopeId), SS_PARAM_INTENSITY);
-    const SsParamInfo* waveformStrideParam = firstParamOfKind(descriptorFor(WaveformScopeId), SS_PARAM_INT);
-    ImGui::TextDisabled("waveform");
-    float waveformPercent = m_view.intensity(WaveformScopeId);
-    if (ImGui::SliderFloat("intensity##w", &waveformPercent, 0.0f, 100.0f, "%.0f%%")) {
-        m_view.setIntensity(WaveformScopeId, waveformPercent);
-        setWaveformGain(traceGainFromIntensity(waveformPercent, static_cast<float>(waveformGain->intensity_shift)));
-        m_analysisDirty = true;
-    }
-    int waveformStride =
-        static_cast<int>(scopeParam(WaveformScopeId, waveformStrideParam->key, waveformStrideParam->default_value));
-    if (ImGui::SliderInt("sampling 1:N##w", &waveformStride, static_cast<int>(waveformStrideParam->min_value),
-                         static_cast<int>(waveformStrideParam->max_value))) {
-        setWaveformStride(waveformStride);
-        m_analysisDirty = true;
-    }
-    float waveformMs = m_view.smoothing(WaveformScopeId);
-    if (ImGui::SliderFloat("smoothing ms##w", &waveformMs, 0.0f, 500.0f, "%.0f")) {
-        m_view.setSmoothing(WaveformScopeId, waveformMs);
     }
 }
 
