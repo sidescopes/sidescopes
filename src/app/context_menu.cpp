@@ -81,7 +81,7 @@ void appendPinOptions(const ContextMenuModel& model, std::vector<NativeMenuItem>
     // Pins are a scope tool: they mark the vectorscope and the color picker, so
     // their submenu rides those scopes' own sections.
     menuSubmenu(menu, "Pins");
-    menuAction(menu, "Pin Colors...", MenuPinColor, false, shortcutLabel(model.shortcuts.pinColor));
+    menuAction(menu, "Pin Colors...", MenuPinColor, false, shortcutLabel(model.shortcuts.bindings().pinColor));
     if (!model.pinsEmpty) {
         menuAction(menu, "Clear Pinned Markers", MenuClearPinnedMarkers, false);
     }
@@ -93,9 +93,12 @@ void appendZoomOptions(const ContextMenuModel& model, std::vector<NativeMenuItem
     // The vectorscope's magnify viewport is a host control, not a module
     // parameter, so it stays hand-built beside the descriptor choices.
     menuSubmenu(menu, "Zoom");
-    menuAction(menu, "1x", MenuZoom1, model.view.zoom() == 1, shortcutLabel(model.shortcuts.vectorscopeZoom));
-    menuAction(menu, "2x", MenuZoom2, model.view.zoom() == 2, shortcutLabel(model.shortcuts.vectorscopeZoom));
-    menuAction(menu, "4x", MenuZoom4, model.view.zoom() == 4, shortcutLabel(model.shortcuts.vectorscopeZoom));
+    menuAction(menu, "1x", MenuZoom1, model.view.zoom() == 1,
+               shortcutLabel(model.shortcuts.bindings().vectorscopeZoom));
+    menuAction(menu, "2x", MenuZoom2, model.view.zoom() == 2,
+               shortcutLabel(model.shortcuts.bindings().vectorscopeZoom));
+    menuAction(menu, "4x", MenuZoom4, model.view.zoom() == 4,
+               shortcutLabel(model.shortcuts.bindings().vectorscopeZoom));
     menuEndSubmenu(menu);
 }
 
@@ -121,15 +124,15 @@ void appendScopesSubmenu(const ContextMenuModel& model, std::vector<NativeMenuIt
 {
     menuSubmenu(menu, "Scopes");
     menuAction(menu, "Vectorscope", MenuShowVectorscope, model.view.shows(VectorscopeScopeId),
-               shortcutLabel(resolveBinding(model.scopeShortcuts, model.registry, VectorscopeScopeId)));
+               shortcutLabel(model.shortcuts.bindingFor(VectorscopeScopeId)));
     menuAction(menu, "Waveform", MenuShowWaveform, model.view.shows(WaveformScopeId),
-               shortcutLabel(resolveBinding(model.scopeShortcuts, model.registry, WaveformScopeId)));
+               shortcutLabel(model.shortcuts.bindingFor(WaveformScopeId)));
     menuAction(menu, "RGB Parade", MenuShowWaveformParade, model.view.shows(ParadeScopeId),
-               shortcutLabel(resolveBinding(model.scopeShortcuts, model.registry, ParadeScopeId)));
+               shortcutLabel(model.shortcuts.bindingFor(ParadeScopeId)));
     menuAction(menu, "Histogram", MenuShowHistogram, model.view.shows(HistogramScopeId),
-               shortcutLabel(resolveBinding(model.scopeShortcuts, model.registry, HistogramScopeId)));
+               shortcutLabel(model.shortcuts.bindingFor(HistogramScopeId)));
     menuAction(menu, "Color Picker", MenuShowColorPicker, model.view.shows(ColorPickerScopeId),
-               shortcutLabel(resolveBinding(model.scopeShortcuts, model.registry, ColorPickerScopeId)));
+               shortcutLabel(model.shortcuts.bindingFor(ColorPickerScopeId)));
     menuEndSubmenu(menu);
 }
 
@@ -212,13 +215,15 @@ void appendPresetsSubmenu(const ContextMenuModel& model, std::vector<NativeMenuI
 void appendRegionAndAppSection(const ContextMenuModel& model, std::vector<NativeMenuItem>& menu)
 {
     menuSeparator(menu);
-    menuAction(menu, "Attach to Window...", MenuAttachWindow, false, shortcutLabel(model.shortcuts.attachWindow));
-    menuAction(menu, "Draw Region...", MenuDrawRegion, false, shortcutLabel(model.shortcuts.drawRegion));
+    menuAction(menu, "Attach to Window...", MenuAttachWindow, false,
+               shortcutLabel(model.shortcuts.bindings().attachWindow));
+    menuAction(menu, "Draw Region...", MenuDrawRegion, false, shortcutLabel(model.shortcuts.bindings().drawRegion));
     if (supportsFaceDetection()) {
-        menuAction(menu, "Attach to Face...", MenuAttachFace, false, shortcutLabel(model.shortcuts.attachFace));
+        menuAction(menu, "Attach to Face...", MenuAttachFace, false,
+                   shortcutLabel(model.shortcuts.bindings().attachFace));
     }
     menuAction(menu, "Watch Full Screen", MenuFullScreen, model.isFullScreen,
-               shortcutLabel(model.shortcuts.fullScreen));
+               shortcutLabel(model.shortcuts.bindings().fullScreen));
     if (model.attach.attachedCount() > 1) {
         if (model.attach.activeIdentity() != 0) {
             menuAction(menu, "Detach Front Window", MenuDetachWindow, false);
@@ -252,17 +257,6 @@ void appendRegionAndAppSection(const ContextMenuModel& model, std::vector<Native
 }
 
 }  // namespace
-
-std::string resolveBinding(const std::map<std::string, std::string>& overrides, const ScopeRegistry& registry,
-                           std::string_view id)
-{
-    if (const auto custom = overrides.find(std::string{id}); custom != overrides.end()) {
-        return custom->second;
-    }
-    const HostScope* scope = registry.byId(id);
-
-    return scope != nullptr && scope->letter != 0 ? std::string(1, scope->letter) : std::string{};
-}
 
 std::string presetLabel(int slot, const LayoutPreset& preset)
 {

@@ -39,6 +39,7 @@ add_executable(sidescopes_tests
     test_face_lock.cpp
     test_face_lock_controller.cpp
     test_region_picker.cpp
+    test_shortcut_resolver.cpp
     test_region_geometry.cpp
     test_icons.cpp
     test_focus_resolution.cpp
@@ -64,6 +65,7 @@ target_sources(sidescopes_tests PRIVATE
     ${CMAKE_SOURCE_DIR}/src/app/scope_layout.cpp
     ${CMAKE_SOURCE_DIR}/src/app/scope_registry.cpp
     ${CMAKE_SOURCE_DIR}/src/app/scope_view.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/shortcut_resolver.cpp
     ${CMAKE_SOURCE_DIR}/src/app/ui_scaling.cpp
     ${CMAKE_SOURCE_DIR}/src/app/version.cpp
     ${CMAKE_SOURCE_DIR}/src/app/window_suggestions.cpp)

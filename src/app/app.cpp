@@ -66,23 +66,34 @@
 
 namespace {
 
-// A shortcut name resolves to the ImGui key it fires on; only Escape and the
-// bare letters are bindable, so anything else never matches a press.
-ImGuiKey keyFor(const std::string& name)
+// A key the resolver names resolves to the ImGui key it fires on: the letters
+// and Escape a binding may hold, plus the preset digits and the comma of the
+// settings chord. Anything else never matches a press.
+ImGuiKey keyFor(std::string_view name)
 {
     if (name == "Escape") {
         return ImGuiKey_Escape;
     }
-    if (name.size() == 1 && name[0] >= 'A' && name[0] <= 'Z') {
+    if (name == "Comma") {
+        return ImGuiKey_Comma;
+    }
+    if (name.size() != 1) {
+        return ImGuiKey_None;
+    }
+    if (name[0] >= 'A' && name[0] <= 'Z') {
         return static_cast<ImGuiKey>(ImGuiKey_A + (name[0] - 'A'));
+    }
+    if (name[0] >= '1' && name[0] <= '9') {
+        return static_cast<ImGuiKey>(ImGuiKey_0 + (name[0] - '0'));
     }
 
     return ImGuiKey_None;
 }
 
-bool shortcutPressed(const std::string& binding)
+// The resolver's key probe, bound to the toolkit here and nowhere else.
+bool shortcutPressed(std::string_view name)
 {
-    const ImGuiKey key = keyFor(binding);
+    const ImGuiKey key = keyFor(name);
 
     return key != ImGuiKey_None && ImGui::IsKeyPressed(key, false);
 }
@@ -98,7 +109,8 @@ App::App()
       m_faceLock(m_attach, m_worker, m_captureController),
       m_regionPicker(m_captureController, m_worker, *m_capture),
       m_scopeRegistry(builtinModules()),
-      m_view(m_scopeRegistry)
+      m_view(m_scopeRegistry),
+      m_shortcuts(m_scopeRegistry)
 {
     m_screenSample = std::make_shared<ScreenSample>();
 }
@@ -131,14 +143,11 @@ bool App::init()
     setupCapture();
     seedAnalysis(m_analysis, startup);
     setupView(startup);
-    const ScopePaneContext paneContext{
-        *m_graphics,         m_view,         m_scopeRegistry, m_analysis,  m_output,
-        m_captureController, m_regionPicker, m_pins,          m_shortcuts, m_scopeShortcuts};
+    m_shortcuts.restore(startup.shortcuts, startup.scopeShortcuts);
+    const ScopePaneContext paneContext{*m_graphics,         m_view,         m_scopeRegistry, m_analysis, m_output,
+                                       m_captureController, m_regionPicker, m_pins,          m_shortcuts};
     m_panes = std::make_unique<ScopePaneRenderer>(paneContext, createProjectionInstances(m_scopeRegistry),
                                                   createScopeTextures(*m_graphics, m_scopeRegistry));
-
-    m_shortcuts = startup.shortcuts;
-    m_scopeShortcuts = startup.scopeShortcuts;
 
     m_worker.start();
     warmFaceDetection();
@@ -312,11 +321,6 @@ std::pair<int, int> App::currentSize(std::string_view id) const
     return at != m_analysis.imageSizes.end() ? at->second : std::pair<int, int>{0, 0};
 }
 
-std::string App::bindingFor(std::string_view id) const
-{
-    return resolveBinding(m_scopeShortcuts, m_scopeRegistry, id);
-}
-
 bool App::pinsAvailable() const
 {
     // Pins mark any scope that declares itself a pin target (plus the host's
@@ -471,8 +475,8 @@ void App::persistPreferences()
     preferences.layoutPresets = m_presetStore.all();
     preferences.layoutActiveSlot = m_presetStore.activeSlot();
     preferences.uiScaleFactor = m_userUiScaleFactor;
-    preferences.shortcuts = m_shortcuts;
-    preferences.scopeShortcuts = m_scopeShortcuts;
+    preferences.shortcuts = m_shortcuts.bindings();
+    preferences.scopeShortcuts = m_shortcuts.scopeOverrides();
     preferences.pins = m_pins.colors();
     preferences.pinComparator = m_pins.comparator();
     glfwGetWindowPos(m_window, &preferences.windowX, &preferences.windowY);
@@ -620,7 +624,7 @@ void App::drainAsyncSignals()
         if (press.escape) {
             dismissEditedBorder();
         } else {
-            triggerShortcut(press.key, press.shift);
+            applyShortcutAction(m_shortcuts.resolveNamed(press.key, press.shift, shortcutContext()));
         }
         m_lastActivity = glfwGetTime();
     }
@@ -846,7 +850,7 @@ void App::drawFrameUi()
     drawPresetPicker();
     ImGui::SameLine(0.0f, 8.0f);
     applyPaneRenderOutcome(m_panes->drawScopeToggles(modifiers.shift));
-    handleShortcuts(modifiers);
+    applyShortcutAction(m_shortcuts.resolvePressed(shortcutContext(), modifiers, shortcutPressed));
     const PaneRenderInput input{m_uiScale,          isFullScreen(),  pinsAvailable(),
                                 m_vectorscopeColor, m_waveformColor, m_callbackState.monospaceFont};
     applyPaneRenderOutcome(m_panes->drawRegionToolIcons(input));
@@ -938,119 +942,62 @@ void App::drawAboutWindow()
     ImGui::End();
 }
 
-void App::handleShortcuts(const ModifierState& modifiers)
+ShortcutContext App::shortcutContext() const
 {
-    // Command, Control, and Option chords belong to the system and the window,
-    // so any of them silences the plain-letter shortcuts. Shift alone stays
-    // meaningful: it stacks.
-    const bool systemChord = modifiers.command || modifiers.control || modifiers.option;
-    handleCommandChords(modifiers);
-    handleControlChords(modifiers);
-    handleLetterShortcuts(modifiers, systemChord);
+    ShortcutContext context;
+    context.wantsTextInput = ImGui::GetIO().WantTextInput;
+    context.faceDetectionSupported = supportsFaceDetection();
+    context.pinsAvailable = pinsAvailable();
+    context.settingsOpen = m_showSettings;
+    context.vectorscopeZoom = m_view.zoom();
+    context.hidesWindowOnCommandW = platformHidesWindowOnCommandW();
+    context.minimizesWindowOnControlW = platformMinimizesWindowOnControlW();
+    context.quitsOnControlQ = platformQuitsOnControlQ();
+
+    return context;
 }
 
-void App::handleCommandChords(const ModifierState& modifiers)
+// Carries out what the resolver decided. Which scope, which tool, which zoom
+// level, which layer to peel - all of that is settled by the time it arrives;
+// what is left is the shell state only the host can reach.
+void App::applyShortcutAction(const ShortcutAction& action)
 {
-    const ImGuiIO& io = ImGui::GetIO();
-    if (platformHidesWindowOnCommandW() && modifiers.command && !modifiers.control && !modifiers.option &&
-        !io.WantTextInput) {
-        // Cmd+W dismisses through the system hide - the exact machinery behind
-        // Cmd+H, so the Dock click or Cmd+Tab restores every window natively,
-        // the border included.
-        if (ImGui::IsKeyPressed(ImGuiKey_W, false)) {
-            hideApplication();
-        }
-        // Cmd+comma opens settings everywhere on macOS.
-        if (ImGui::IsKeyPressed(ImGuiKey_Comma, false)) {
-            m_showSettings = true;
-        }
-    }
-}
-
-void App::handleControlChords(const ModifierState& modifiers)
-{
-    const ImGuiIO& io = ImGui::GetIO();
-    if (platformMinimizesWindowOnControlW() && modifiers.control && !modifiers.command && !modifiers.option &&
-        !io.WantTextInput && ImGui::IsKeyPressed(ImGuiKey_W, false)) {
-        glfwIconifyWindow(m_window);
-    }
-    if (platformQuitsOnControlQ() && modifiers.control && !modifiers.command && !modifiers.option &&
-        !io.WantTextInput && ImGui::IsKeyPressed(ImGuiKey_Q, false)) {
-        glfwSetWindowShouldClose(m_window, GLFW_TRUE);
-    }
-}
-
-void App::handleLetterShortcuts(const ModifierState& modifiers, bool systemChord)
-{
-    const ImGuiIO& io = ImGui::GetIO();
-    if (io.WantTextInput || systemChord) {
-        return;
-    }
-    // Each scope's toggle key is resolved by id; a letterless scope has an empty
-    // binding, which never matches a press.
-    for (const HostScope& scope : m_scopeRegistry.scopes()) {
-        if (shortcutPressed(bindingFor(scope.id))) {
-            chooseScope(scope.id, modifiers.shift);
-        }
-    }
-    for (const std::string& binding :
-         {m_shortcuts.attachWindow, m_shortcuts.drawRegion, m_shortcuts.attachFace, m_shortcuts.pinColor}) {
-        if (shortcutPressed(binding)) {
-            triggerShortcut(binding, modifiers.shift);
-        }
-    }
-    handleViewShortcuts();
-    handlePresetShortcuts(modifiers);
-}
-
-// The single map from a shortcut key to its action, shared by the ImGui
-// press detection above and the border panel's forwarded keys.
-// @return Whether the key matched anything.
-bool App::triggerShortcut(const std::string& key, bool shift)
-{
-    for (const HostScope& scope : m_scopeRegistry.scopes()) {
-        if (!bindingFor(scope.id).empty() && bindingFor(scope.id) == key) {
-            chooseScope(scope.id, shift);
-
-            return true;
-        }
-    }
-    if (key == m_shortcuts.attachWindow) {
-        m_regionPicker.request(RegionPickerMode::AttachWindow);
-    } else if (key == m_shortcuts.drawRegion) {
-        m_regionPicker.request(RegionPickerMode::DrawGlobal);
-    } else if (key == m_shortcuts.attachFace && supportsFaceDetection()) {
-        m_regionPicker.request(RegionPickerMode::AttachFace);
-    } else if (key == m_shortcuts.pinColor && pinsAvailable()) {
-        // One pin tool; each click inside decides between pin-and-close and
-        // Shift's pin-and-continue.
-        m_regionPicker.request(RegionPickerMode::PinColor);
-    } else if (key == m_shortcuts.vectorscopeZoom) {
-        m_view.setZoom(m_view.zoom() >= 4 ? 1 : m_view.zoom() * 2);
-    } else if (key == m_shortcuts.fullScreen) {
+    switch (action.kind) {
+    case ShortcutAction::Kind::ChooseScope:
+        chooseScope(action.scopeId, action.stack);
+        break;
+    case ShortcutAction::Kind::RequestPick:
+        m_regionPicker.request(action.pickMode);
+        break;
+    case ShortcutAction::Kind::SetZoom:
+        m_view.setZoom(action.zoomLevel);
+        break;
+    case ShortcutAction::Kind::CloseSettings:
+        m_showSettings = false;
+        break;
+    case ShortcutAction::Kind::ResetToFullScreen:
         resetToFullScreen();
-    } else {
-        return false;
-    }
-
-    return true;
-}
-
-void App::handlePresetShortcuts(const ModifierState& modifiers)
-{
-    // Digit N loads preset slot N; Shift+N saves the current layout into it. The
-    // guard against text input and system chords is the caller's, shared with
-    // the letter shortcuts.
-    for (int slot = 1; slot <= LayoutPresetSlots; ++slot) {
-        const auto key = static_cast<ImGuiKey>(ImGuiKey_0 + slot);
-        if (!ImGui::IsKeyPressed(key, false)) {
-            continue;
-        }
-        if (modifiers.shift) {
-            saveLayoutPreset(slot);
-        } else {
-            loadLayoutPreset(slot);
-        }
+        break;
+    case ShortcutAction::Kind::LoadPreset:
+        loadLayoutPreset(action.presetSlot);
+        break;
+    case ShortcutAction::Kind::SavePreset:
+        saveLayoutPreset(action.presetSlot);
+        break;
+    case ShortcutAction::Kind::HideApplication:
+        hideApplication();
+        break;
+    case ShortcutAction::Kind::MinimizeWindow:
+        glfwIconifyWindow(m_window);
+        break;
+    case ShortcutAction::Kind::QuitWindow:
+        glfwSetWindowShouldClose(m_window, GLFW_TRUE);
+        break;
+    case ShortcutAction::Kind::OpenSettings:
+        m_showSettings = true;
+        break;
+    case ShortcutAction::Kind::None:
+        break;
     }
 }
 
@@ -1185,22 +1132,6 @@ void App::loadLayoutPreset(int slot)
     setStatus("preset " + std::to_string(slot) + " loaded");
 }
 
-void App::handleViewShortcuts()
-{
-    if (shortcutPressed(m_shortcuts.vectorscopeZoom)) {
-        m_view.setZoom(m_view.zoom() >= 4 ? 1 : m_view.zoom() * 2);
-    }
-    if (shortcutPressed(m_shortcuts.fullScreen)) {
-        // Escape peels back one layer at a time: the settings window first, the
-        // drawn region only when nothing is stacked above it.
-        if (m_showSettings) {
-            m_showSettings = false;
-        } else {
-            resetToFullScreen();
-        }
-    }
-}
-
 void App::handleContextMenu()
 {
     // Right-click: the native menu carries the modes and toggles.
@@ -1212,10 +1143,16 @@ void App::handleContextMenu()
     const int clickedPane = m_panes->paneAt(ImGui::GetMousePos());
     std::vector<NativeMenuItem> menu;
     std::vector<ParamMenuAction> paramActions;
-    const ContextMenuModel model{
-        m_view,        m_scopeRegistry,     m_shortcuts,    m_scopeShortcuts,           m_analysis.scopeParams,
-        m_attach,      m_presetStore.all(), m_pins.empty(), m_presetStore.activeSlot(), m_userUiScaleFactor,
-        isFullScreen()};
+    const ContextMenuModel model{m_view,
+                                 m_scopeRegistry,
+                                 m_shortcuts,
+                                 m_analysis.scopeParams,
+                                 m_attach,
+                                 m_presetStore.all(),
+                                 m_pins.empty(),
+                                 m_presetStore.activeSlot(),
+                                 m_userUiScaleFactor,
+                                 isFullScreen()};
     buildContextMenu(model, clickedPane, menu, paramActions);
     const int chosen = showNativeContextMenu(menu);
     dispatchMenuChoice(chosen, paramActions);
@@ -1275,15 +1212,18 @@ void App::dispatchScopeToggleMenu(int chosen)
 
 void App::dispatchRegionMenu(int chosen)
 {
+    // The region tools are the keys' actions under a different hand, so they
+    // travel the same road; Watch Full Screen is the menu's own, without the
+    // key's peel.
     switch (chosen) {
     case MenuAttachWindow:
-        m_regionPicker.request(RegionPickerMode::AttachWindow);
+        applyShortcutAction(ShortcutAction::pick(RegionPickerMode::AttachWindow));
         break;
     case MenuDrawRegion:
-        m_regionPicker.request(RegionPickerMode::DrawGlobal);
+        applyShortcutAction(ShortcutAction::pick(RegionPickerMode::DrawGlobal));
         break;
     case MenuAttachFace:
-        m_regionPicker.request(RegionPickerMode::AttachFace);
+        applyShortcutAction(ShortcutAction::pick(RegionPickerMode::AttachFace));
         break;
     case MenuFullScreen:
     case MenuDetachAll:
@@ -1293,7 +1233,7 @@ void App::dispatchRegionMenu(int chosen)
         detachActiveWindow();
         break;
     case MenuPinColor:
-        m_regionPicker.request(RegionPickerMode::PinColor);
+        applyShortcutAction(ShortcutAction::pick(RegionPickerMode::PinColor));
         break;
     case MenuClearPinnedMarkers:
         m_pins.clear();
@@ -1354,10 +1294,10 @@ void App::dispatchViewMenu(int chosen)
         m_showAbout = true;
         break;
     case MenuOpenSettings:
-        m_showSettings = true;
+        applyShortcutAction(ShortcutAction::plain(ShortcutAction::Kind::OpenSettings));
         break;
     case MenuQuit:
-        glfwSetWindowShouldClose(m_window, GLFW_TRUE);
+        applyShortcutAction(ShortcutAction::plain(ShortcutAction::Kind::QuitWindow));
         break;
     default:
         break;
@@ -1385,9 +1325,9 @@ void App::dispatchLayoutMenu(int chosen)
         break;
     }
     if (chosen > MenuLoadPresetBase && chosen <= MenuLoadPresetBase + LayoutPresetSlots) {
-        loadLayoutPreset(chosen - MenuLoadPresetBase);
+        applyShortcutAction(ShortcutAction::preset(chosen - MenuLoadPresetBase, false));
     } else if (chosen > MenuSavePresetBase && chosen <= MenuSavePresetBase + LayoutPresetSlots) {
-        saveLayoutPreset(chosen - MenuSavePresetBase);
+        applyShortcutAction(ShortcutAction::preset(chosen - MenuSavePresetBase, true));
     }
 }
 

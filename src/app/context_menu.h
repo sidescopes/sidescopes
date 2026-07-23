@@ -3,13 +3,13 @@
 #include <array>
 #include <map>
 #include <string>
-#include <string_view>
 #include <vector>
 
 #include "app/attach_controller.h"
 #include "app/param_menu.h"
 #include "app/scope_registry.h"
 #include "app/scope_view.h"
+#include "app/shortcut_resolver.h"
 #include "core/preferences.h"
 #include "platform/native_menu.h"
 
@@ -63,8 +63,8 @@ struct ContextMenuModel
 {
     const ScopeView& view;
     const ScopeRegistry& registry;
-    const ShortcutBindings& shortcuts;
-    const std::map<std::string, std::string>& scopeShortcuts;
+    /// The keys every entry that has one is labelled with.
+    const ShortcutResolver& shortcuts;
     const std::map<std::string, std::map<std::string, double>>& scopeParams;
     const AttachController& attach;
     const std::array<LayoutPreset, LayoutPresetSlots>& presets;
@@ -73,11 +73,6 @@ struct ContextMenuModel
     float userUiScaleFactor;
     bool isFullScreen;
 };
-
-/// The scope's keyboard binding: the user's per-id override when set, otherwise
-/// the scope's registry letter, or empty when it has none.
-[[nodiscard]] std::string resolveBinding(const std::map<std::string, std::string>& overrides,
-                                         const ScopeRegistry& registry, std::string_view id);
 
 /// A preset slot's menu label: "N - empty" for an unused slot, otherwise a
 /// short summary like "1 - VWH", naming the orientation only when the preset

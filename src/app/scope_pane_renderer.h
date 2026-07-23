@@ -12,6 +12,7 @@
 #include "app/pin_board.h"
 #include "app/scope_registry.h"
 #include "app/scope_view.h"
+#include "app/shortcut_resolver.h"
 #include "core/analysis_worker.h"
 #include "core/frame.h"
 #include "core/preferences.h"
@@ -48,10 +49,8 @@ struct ScopePaneContext
     RegionPicker& regionPicker;
     /// The pinned reference colors the vectorscope and the picker draw.
     PinBoard& pins;
-    /// The bindings the tool tooltips name their keys by.
-    const ShortcutBindings& shortcuts;
-    /// The per-scope shortcut overrides the chip tooltips resolve through.
-    const std::map<std::string, std::string>& scopeShortcuts;
+    /// The bindings the tool and chip tooltips name their keys by.
+    const ShortcutResolver& shortcuts;
 };
 
 /// What one frame of pane drawing reads from the host: the values it
@@ -191,7 +190,6 @@ private:
     };
 
     [[nodiscard]] ImTextureID iconTextureId(Icon icon, int sizePixels);
-    [[nodiscard]] std::string bindingFor(std::string_view id) const;
     [[nodiscard]] const SsScopeDescriptor* descriptorFor(std::string_view id) const;
     [[nodiscard]] const ScopeInstance* projectionFor(std::string_view id) const;
     [[nodiscard]] HistogramStyle histogramStyle() const;
@@ -230,8 +228,7 @@ private:
     const CaptureController& m_capture;
     RegionPicker& m_regionPicker;
     PinBoard& m_pins;
-    const ShortcutBindings& m_shortcuts;
-    const std::map<std::string, std::string>& m_scopeShortcuts;
+    const ShortcutResolver& m_shortcuts;
 
     std::map<std::string, ScopeInstance> m_projections;
     std::map<std::string, std::unique_ptr<ScopeTexture>> m_scopeTextures;

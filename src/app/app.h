@@ -22,6 +22,7 @@
 #include "app/scope_pane_renderer.h"
 #include "app/scope_registry.h"
 #include "app/scope_view.h"
+#include "app/shortcut_resolver.h"
 #include "app/version.h"
 #include "core/analysis_worker.h"
 #include "core/frame.h"
@@ -105,7 +106,6 @@ private:
     [[nodiscard]] std::optional<uint32_t> displayOfWindow() const;
     [[nodiscard]] double scopeParam(std::string_view id, std::string_view key, double fallback) const;
     [[nodiscard]] std::pair<int, int> currentSize(std::string_view id) const;
-    [[nodiscard]] std::string bindingFor(std::string_view id) const;
     [[nodiscard]] bool pinsAvailable() const;
     void refreshActivatedScope(std::string_view id);
     void toggleScope(std::string_view id);
@@ -188,13 +188,11 @@ private:
     /// shares are stamped. The renderer has already drawn the frame and driven
     /// its own collaborators.
     void applyPaneRenderOutcome(const PaneRenderOutcome& outcome);
-    void handleShortcuts(const ModifierState& modifiers);
-    void handleCommandChords(const ModifierState& modifiers);
-    void handleControlChords(const ModifierState& modifiers);
-    void handleLetterShortcuts(const ModifierState& modifiers, bool systemChord);
-    void handleViewShortcuts();
-    bool triggerShortcut(const std::string& key, bool shift);
-    void handlePresetShortcuts(const ModifierState& modifiers);
+    /// The shell state a shortcut resolution reads, gathered fresh per call.
+    [[nodiscard]] ShortcutContext shortcutContext() const;
+    /// Carries out a resolved shortcut: the resolver has already decided what
+    /// the key means. Shared with the menu entries driving the same actions.
+    void applyShortcutAction(const ShortcutAction& action);
     void loadLayoutPreset(int slot);
     void saveLayoutPreset(int slot);
     [[nodiscard]] std::map<std::string, double> currentStackWeights() const;
@@ -314,8 +312,9 @@ private:
     /// PaneRenderOutcome it returns. Built once the graphics backend exists.
     std::unique_ptr<ScopePaneRenderer> m_panes;
 
-    ShortcutBindings m_shortcuts;
-    std::map<std::string, std::string> m_scopeShortcuts;
+    /// Owns the keyboard bindings and maps a key to the action it means; the
+    /// host applies the ShortcutAction it returns.
+    ShortcutResolver m_shortcuts;
 
     bool m_showSettings = false;
     bool m_showAbout = false;

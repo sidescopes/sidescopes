@@ -244,7 +244,7 @@ void drawCaptureHelp(const char* headline, const std::vector<std::string>& lines
 }
 
 // Per-scope toolbar chrome, keyed by id: the button id, display name, and
-// tooltip suffix. The shortcut is resolved by id through bindingFor.
+// tooltip suffix. The shortcut is resolved by id through the resolver.
 struct ScopeChrome
 {
     const char* buttonId;
@@ -312,7 +312,6 @@ ScopePaneRenderer::ScopePaneRenderer(const ScopePaneContext& context, std::map<s
       m_regionPicker(context.regionPicker),
       m_pins(context.pins),
       m_shortcuts(context.shortcuts),
-      m_scopeShortcuts(context.scopeShortcuts),
       m_projections(std::move(projections)),
       m_scopeTextures(std::move(textures.textures)),
       m_panePoints(std::move(textures.panePoints)),
@@ -339,7 +338,7 @@ PaneRenderOutcome ScopePaneRenderer::drawScopeToggles(bool stackModifier)
         const ScopeChrome chrome = scopeChromeFor(scope.id);
         const char letter[2] = {scope.letter, '\0'};
         if (scopeToggleButton(chrome.buttonId, letter, m_view.shows(scope.id),
-                              scopeTooltip(chrome.name, bindingFor(scope.id), chrome.extra))) {
+                              scopeTooltip(chrome.name, m_shortcuts.bindingFor(scope.id), chrome.extra))) {
             outcome.chosenScope = ScopeChoice{scope.id, stackModifier};
         }
         ImGui::SameLine(0.0f, 2.0f);
@@ -378,7 +377,7 @@ PaneRenderOutcome ScopePaneRenderer::drawRegionToolIcons(const PaneRenderInput& 
 {
     PaneRenderOutcome outcome;
     char tooltip[96];
-    std::snprintf(tooltip, sizeof(tooltip), "Draw a region (%s)", m_shortcuts.drawRegion.c_str());
+    std::snprintf(tooltip, sizeof(tooltip), "Draw a region (%s)", m_shortcuts.bindings().drawRegion.c_str());
     const int iconPx = iconPixelSize();
     placeRegionToolbox();
     if (iconButton("##draw-region", iconTextureId(Icon::Pencil, iconPx), tooltip)) {
@@ -386,7 +385,7 @@ PaneRenderOutcome ScopePaneRenderer::drawRegionToolIcons(const PaneRenderInput& 
     }
     ImGui::SameLine(0.0f, 2.0f);
     std::snprintf(tooltip, sizeof(tooltip), "Attach to a window (%s) - click the window or draw inside it",
-                  m_shortcuts.attachWindow.c_str());
+                  m_shortcuts.bindings().attachWindow.c_str());
     if (iconButton("##attach-window", iconTextureId(Icon::SquarePen, iconPx), tooltip)) {
         m_regionPicker.request(RegionPickerMode::AttachWindow);
     }
@@ -396,7 +395,7 @@ PaneRenderOutcome ScopePaneRenderer::drawRegionToolIcons(const PaneRenderInput& 
     // face is on screen is the picker overlay's answer to give, not the
     // toolbar's.
     if (supportsFaceDetection()) {
-        std::snprintf(tooltip, sizeof(tooltip), "Attach to a face (%s)", m_shortcuts.attachFace.c_str());
+        std::snprintf(tooltip, sizeof(tooltip), "Attach to a face (%s)", m_shortcuts.bindings().attachFace.c_str());
         if (iconButton("##attach-face", iconTextureId(Icon::User, iconPx), tooltip)) {
             m_regionPicker.request(RegionPickerMode::AttachFace);
         }
@@ -447,7 +446,7 @@ void ScopePaneRenderer::drawStatusBar(const PaneRenderInput& input)
 void ScopePaneRenderer::drawPinTool(bool pinsAvailable)
 {
     char tooltip[160];
-    std::snprintf(tooltip, sizeof(tooltip), "Pin a color (%s)%s", m_shortcuts.pinColor.c_str(),
+    std::snprintf(tooltip, sizeof(tooltip), "Pin a color (%s)%s", m_shortcuts.bindings().pinColor.c_str(),
                   pinsAvailable ? " - Shift+click a color to pin several" : " - needs a scope that takes pins");
     if (iconButton("##pin-color", iconTextureId(Icon::Pipette, iconPixelSize()), tooltip, !pinsAvailable) &&
         pinsAvailable) {
@@ -764,11 +763,6 @@ ImTextureID ScopePaneRenderer::iconTextureId(Icon icon, int sizePixels)
     }
 
     return slot.texture->textureId();
-}
-
-std::string ScopePaneRenderer::bindingFor(std::string_view id) const
-{
-    return resolveBinding(m_scopeShortcuts, m_registry, id);
 }
 
 const SsScopeDescriptor* ScopePaneRenderer::descriptorFor(std::string_view id) const
