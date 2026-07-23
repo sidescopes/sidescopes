@@ -347,8 +347,10 @@ if(APPLE OR WIN32)
     # out of main.
     target_sources(SideScopes PRIVATE
         src/app/app.cpp
+        src/app/app_attach.cpp
         src/app/app_region_pick.cpp
         src/app/attach_controller.cpp
+        src/app/border_label.cpp
         src/app/capture_controller.cpp
         src/app/color_readout.cpp
         src/app/context_menu.cpp
