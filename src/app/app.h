@@ -10,6 +10,7 @@
 #include <utility>
 #include <vector>
 
+#include "app/about_window.h"
 #include "app/adaptive_detail.h"
 #include "app/attach_controller.h"
 #include "app/capture_controller.h"
@@ -185,7 +186,6 @@ private:
     /// Shows @p message in the status strip and keeps the frame loop awake
     /// while it is up.
     void setStatus(std::string message);
-    void drawAboutWindow();
 
     // --- context menu ---
     void handleContextMenu();
@@ -277,7 +277,9 @@ private:
     ShortcutResolver m_shortcuts;
 
     bool m_showSettings = false;
-    bool m_showAbout = false;
+
+    /// Owns whether the About window is on screen and everything it shows.
+    AboutWindow m_about;
     PinBoard m_pins;
 
     /// Owns the color under the pointer - the cross-display sample and the

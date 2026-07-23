@@ -24,6 +24,7 @@
 #include <utility>
 #include <vector>
 
+#include "app/about_window.h"
 #include "app/adaptive_detail.h"
 #include "app/app_startup.h"
 #include "app/border_label.h"
@@ -31,7 +32,6 @@
 #include "app/color_readout.h"
 #include "app/context_menu.h"
 #include "app/frame_timer.h"
-#include "app/imgui_ui.h"
 #include "app/overlay_render.h"
 #include "app/param_menu.h"
 #include "app/pin_board.h"
@@ -681,7 +681,7 @@ void App::drawFrameUi()
     const SettingsContext settingsCtx{m_showSettings,  m_view,   m_analysis,    m_analysisDirty,
                                       m_scopeRegistry, m_output, m_versionInfo, m_captureController.status()};
     drawSettingsWindow(settingsCtx);
-    drawAboutWindow();
+    m_about.draw(m_versionInfo);
 
     if (ImGui::IsAnyItemActive()) {
         m_lastActivity = glfwGetTime();
@@ -721,42 +721,6 @@ void App::applyPaneRenderOutcome(const PaneRenderOutcome& outcome)
     if (outcome.preferencesSaveDue) {
         m_nextPreferencesSave = glfwGetTime() + 1.0;
     }
-}
-
-void App::drawAboutWindow()
-{
-    if (!m_showAbout) {
-        return;
-    }
-    ImGui::SetNextWindowSize(ImVec2(320, 0), ImGuiCond_FirstUseEver);
-    ImGui::Begin("About SideScopes", &m_showAbout, ImGuiWindowFlags_NoCollapse);
-    // The window title carries the name; the body leads with the version.
-    ImGui::Text("Version %s", m_versionInfo.display.c_str());
-    if (ImGui::IsItemClicked()) {
-        ImGui::SetClipboardText(m_versionInfo.display.c_str());
-    }
-    wrappedTooltip("click to copy");
-    ImGui::Separator();
-    // Clickable link text in the accent color, underlined, opening the
-    // destination in the default browser; the tooltip names the URL.
-    const auto link = [](const char* text, const char* url) {
-        const ImVec4 accent = ImGui::GetStyleColorVec4(ImGuiCol_CheckMark);
-        ImGui::PushStyleColor(ImGuiCol_Text, accent);
-        ImGui::TextUnformatted(text);
-        ImGui::PopStyleColor();
-        const ImVec2 lo = ImGui::GetItemRectMin();
-        const ImVec2 hi = ImGui::GetItemRectMax();
-        ImGui::GetWindowDrawList()->AddLine(ImVec2(lo.x, hi.y), ImVec2(hi.x, hi.y), ImGui::GetColorU32(accent));
-        if (ImGui::IsItemClicked()) {
-            openUrl(url);
-        }
-        wrappedTooltip(url);
-    };
-    link("sidescopes.org", "https://sidescopes.org");
-    link("github.com/sidescopes/sidescopes", "https://github.com/sidescopes/sidescopes");
-    ImGui::Separator();
-    ImGui::TextDisabled("GPL-3.0-or-later");
-    ImGui::End();
 }
 
 ShortcutContext App::shortcutContext() const
@@ -991,7 +955,7 @@ void App::dispatchViewMenu(int chosen)
         }
         break;
     case MenuAbout:
-        m_showAbout = true;
+        m_about.open();
         break;
     case MenuOpenSettings:
         applyShortcutAction(ShortcutAction::plain(ShortcutAction::Kind::OpenSettings));
