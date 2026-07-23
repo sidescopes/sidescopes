@@ -43,7 +43,7 @@
 #include "app/scope_registry.h"
 #include "app/scope_view.h"
 #include "app/settings_window.h"
-#include "app/ui_scaling.h"
+#include "app/ui_scale.h"
 #include "app/version.h"
 #include "app/window_suggestions.h"
 #include "core/analysis_worker.h"
@@ -215,32 +215,7 @@ void App::setupImGui()
     ImGui::StyleColorsDark();
     applyTheme();
     m_callbackState.monospaceFont = loadInterfaceFont(m_window);
-    refreshUiScale();
-}
-
-void App::applyUiScale(float scale)
-{
-    m_uiScale = scale;
-    // Scaling an already scaled style would compound, so rebuild from the base
-    // theme each time.
-    applyTheme();
-    ImGui::GetStyle().ScaleAllSizes(scale);
-    ImGui::GetStyle().FontScaleMain = scale;
-}
-
-bool App::refreshUiScale()
-{
-    // The OS scale is the baseline - it already carries the monitor's own
-    // recommendation - and the user factor asks for more or less on top. Folding
-    // them in one place keeps the startup and monitor-change sites in step, so a
-    // window crossing displays never loses the preference.
-    const float target = computeUiScale(m_window) * m_userUiScaleFactor;
-    if (target == m_uiScale) {
-        return false;
-    }
-    applyUiScale(target);
-
-    return true;
+    m_uiScale.refresh(m_window);
 }
 
 void App::setupCapture()
@@ -270,8 +245,7 @@ void App::setupView(const Preferences& startup)
     // so core preferences never depend on the app's scaling policy. setupImGui
     // already applied the OS scale at the 1.0 default; fold the preference in now,
     // before the first frame.
-    m_userUiScaleFactor = cleanedUiScaleFactor(startup.uiScaleFactor);
-    refreshUiScale();
+    m_uiScale.restore(startup.uiScaleFactor, m_window);
     // The intensity control is derived from each trace's saved gain; smoothing
     // is the host's own per-scope value, read straight from the preferences.
     const auto startupSmoothing = [&](std::string_view id, double fallback) -> float {
@@ -469,7 +443,7 @@ void App::persistPreferences()
     preferences.layoutWeights = m_view.weightsSnapshot();
     preferences.layoutPresets = m_presets.all();
     preferences.layoutActiveSlot = m_presets.activeSlot();
-    preferences.uiScaleFactor = m_userUiScaleFactor;
+    preferences.uiScaleFactor = m_uiScale.userFactor();
     preferences.shortcuts = m_shortcuts.bindings();
     preferences.scopeShortcuts = m_shortcuts.scopeOverrides();
     preferences.pins = m_pins.colors();
@@ -645,8 +619,8 @@ void App::followWindowDisplay()
 void App::syncUiScaleToMonitor()
 {
     // The window may have moved to a monitor with a different scale; the user
-    // factor rides along through refreshUiScale.
-    if (refreshUiScale()) {
+    // factor rides along through the controller's refresh.
+    if (m_uiScale.refresh(m_window)) {
         m_lastActivity = glfwGetTime();
     }
 }
@@ -669,10 +643,10 @@ void App::publishSelfWindowMask()
     const double scaleY = m_frameSize->height / geometry->heightPoints;
     // The chrome margins are 100%-scale units like the rest of the interface,
     // so they grow with the monitor's scale.
-    const IntRect selfWindow{static_cast<int>((windowX - geometry->originX - 8.0f * m_uiScale) * scaleX),
-                             static_cast<int>((windowY - geometry->originY - 42.0f * m_uiScale) * scaleY),
-                             static_cast<int>((static_cast<float>(windowW) + 16.0f * m_uiScale) * scaleX),
-                             static_cast<int>((static_cast<float>(windowH) + 58.0f * m_uiScale) * scaleY)};
+    const IntRect selfWindow{static_cast<int>((windowX - geometry->originX - 8.0f * m_uiScale.scale()) * scaleX),
+                             static_cast<int>((windowY - geometry->originY - 42.0f * m_uiScale.scale()) * scaleY),
+                             static_cast<int>((static_cast<float>(windowW) + 16.0f * m_uiScale.scale()) * scaleX),
+                             static_cast<int>((static_cast<float>(windowH) + 58.0f * m_uiScale.scale()) * scaleY)};
     if (selfWindow.x != m_analysis.maskedWindow.x || selfWindow.y != m_analysis.maskedWindow.y ||
         selfWindow.width != m_analysis.maskedWindow.width || selfWindow.height != m_analysis.maskedWindow.height) {
         m_analysis.maskedWindow = selfWindow;
@@ -768,7 +742,7 @@ void App::drawFrameUi()
     ImGui::SameLine(0.0f, 8.0f);
     applyPaneRenderOutcome(m_panes->drawScopeToggles(modifiers.shift));
     applyShortcutAction(m_shortcuts.resolvePressed(shortcutContext(), modifiers, shortcutPressed));
-    const PaneRenderInput input{m_uiScale,          isFullScreen(),  pinsAvailable(),
+    const PaneRenderInput input{m_uiScale.scale(),  isFullScreen(),  pinsAvailable(),
                                 m_vectorscopeColor, m_waveformColor, m_callbackState.monospaceFont};
     applyPaneRenderOutcome(m_panes->drawRegionToolIcons(input));
     applyPaneRenderOutcome(m_panes->drawScopePanes(input));
@@ -951,9 +925,16 @@ void App::handleContextMenu()
     const int clickedPane = m_panes->paneAt(ImGui::GetMousePos());
     std::vector<NativeMenuItem> menu;
     std::vector<ParamMenuAction> paramActions;
-    const ContextMenuModel model{
-        m_view,         m_scopeRegistry,        m_shortcuts,         m_analysis.scopeParams, m_attach, m_presets.all(),
-        m_pins.empty(), m_presets.activeSlot(), m_userUiScaleFactor, isFullScreen()};
+    const ContextMenuModel model{m_view,
+                                 m_scopeRegistry,
+                                 m_shortcuts,
+                                 m_analysis.scopeParams,
+                                 m_attach,
+                                 m_presets.all(),
+                                 m_pins.empty(),
+                                 m_presets.activeSlot(),
+                                 m_uiScale.userFactor(),
+                                 isFullScreen()};
     buildContextMenu(model, clickedPane, menu, paramActions);
     const int chosen = showNativeContextMenu(menu);
     dispatchMenuChoice(chosen, paramActions);
@@ -1126,12 +1107,7 @@ void App::dispatchLayoutMenu(int chosen)
 
 void App::dispatchUiScaleMenu(int chosen)
 {
-    const int step = chosen - MenuUiScaleBase;
-    if (step < 0 || step >= static_cast<int>(UiScaleSteps.size())) {
-        return;
-    }
-    m_userUiScaleFactor = UiScaleSteps[static_cast<std::size_t>(step)];
-    refreshUiScale();
+    m_uiScale.selectStep(chosen - MenuUiScaleBase, m_window);
 }
 
 void App::commitAnalysisChanges()

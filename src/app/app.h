@@ -24,6 +24,7 @@
 #include "app/scope_registry.h"
 #include "app/scope_view.h"
 #include "app/shortcut_resolver.h"
+#include "app/ui_scale.h"
 #include "app/version.h"
 #include "core/analysis_worker.h"
 #include "core/frame.h"
@@ -94,12 +95,6 @@ public:
 private:
     // --- startup ---
     void setupImGui();
-    void applyUiScale(float scale);
-    /// Reapplies the interface scale from the current monitor and the user's
-    /// size factor. Returns whether it changed. The one path that folds the OS
-    /// scale and the preference together, so both the startup and the
-    /// monitor-change sites stay in agreement.
-    bool refreshUiScale();
     void setupCapture();
     void setupView(const Preferences& startup);
 
@@ -236,10 +231,9 @@ private:
     AppCallbackState m_callbackState;
     std::unique_ptr<GraphicsBackend> m_graphics;
     VersionInfo m_versionInfo;
-    float m_uiScale = 1.0f;
-    /// User interface-size factor, a multiplier on the OS scale (1.0 = match
-    /// system). One of UiScaleSteps; multiplied into m_uiScale by refreshUiScale.
-    float m_userUiScaleFactor = 1.0f;
+    /// Owns the factor the interface is drawn at and the user's size
+    /// preference folded into it.
+    UiScaleController m_uiScale;
 
     FrameMailbox m_mailbox;
     AnalysisWorker m_worker;
