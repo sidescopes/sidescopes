@@ -98,6 +98,8 @@ enum MenuAction
     // MenuSavePresetBase + slot. Both ranges stay clear of ParamMenuActionBase.
     MenuLoadPresetBase = 70,
     MenuSavePresetBase = 80,
+    // Interface-size ids are MenuUiScaleBase + the UiScaleSteps index.
+    MenuUiScaleBase = 90,
 };
 
 // ---------------------------------------------------------------------------
@@ -336,15 +338,16 @@ ImFont* loadInterfaceFont(GLFWwindow* window)
     ImGuiIO& io = ImGui::GetIO();
     bool loaded = false;
     for (const std::string& path : interfaceFontFiles()) {
-        if (io.Fonts->AddFontFromFileTTF(path.c_str(), 13.0f, &config)) {
+        if (io.Fonts->AddFontFromFileTTF(path.c_str(), InterfaceFontSize, &config)) {
             loaded = true;
             break;
         }
     }
     ImFont* monospace = nullptr;
-    const float monoSize = 13.0f * monospaceFontScale();
+    const float monoSize = InterfaceFontSize * monospaceFontScale();
     for (const std::string& path : monospaceFontFiles()) {
-        if ((monospace = io.Fonts->AddFontFromFileTTF(path.c_str(), monoSize, &config))) {
+        monospace = io.Fonts->AddFontFromFileTTF(path.c_str(), monoSize, &config);
+        if (monospace != nullptr) {
             break;
         }
     }
@@ -1703,10 +1706,7 @@ void App::setupImGui()
     ImGui::StyleColorsDark();
     applyTheme();
     m_callbackState.monospaceFont = loadInterfaceFont(m_window);
-    m_uiScale = computeUiScale(m_window);
-    if (m_uiScale != 1.0f) {
-        applyUiScale(m_uiScale);
-    }
+    refreshUiScale();
 }
 
 void App::applyUiScale(float scale)
@@ -1717,6 +1717,21 @@ void App::applyUiScale(float scale)
     applyTheme();
     ImGui::GetStyle().ScaleAllSizes(scale);
     ImGui::GetStyle().FontScaleMain = scale;
+}
+
+bool App::refreshUiScale()
+{
+    // The OS scale is the baseline - it already carries the monitor's own
+    // recommendation - and the user factor asks for more or less on top. Folding
+    // them in one place keeps the startup and monitor-change sites in step, so a
+    // window crossing displays never loses the preference.
+    const float target = computeUiScale(m_window) * m_userUiScaleFactor;
+    if (target == m_uiScale) {
+        return false;
+    }
+    applyUiScale(target);
+
+    return true;
 }
 
 void App::setupCapture()
@@ -1766,6 +1781,12 @@ void App::setupView(const Preferences& startup)
     m_view.setWeights(startup.layoutWeights);
     m_layoutPresets = startup.layoutPresets;
     m_activePresetSlot = startup.layoutActiveSlot;
+    // The stored factor is cleaned to an offered step here, at the app boundary,
+    // so core preferences never depend on the app's scaling policy. setupImGui
+    // already applied the OS scale at the 1.0 default; fold the preference in now,
+    // before the first frame.
+    m_userUiScaleFactor = cleanedUiScaleFactor(startup.uiScaleFactor);
+    refreshUiScale();
     // The intensity control is derived from each trace's saved gain; smoothing
     // is the host's own per-scope value, read straight from the preferences.
     const auto startupSmoothing = [&](std::string_view id, double fallback) -> float {
@@ -2730,6 +2751,7 @@ void App::persistPreferences()
     preferences.layoutWeights = m_view.weightsSnapshot();
     preferences.layoutPresets = m_layoutPresets;
     preferences.layoutActiveSlot = m_activePresetSlot;
+    preferences.uiScaleFactor = m_userUiScaleFactor;
     preferences.shortcuts = m_shortcuts;
     preferences.scopeShortcuts = m_scopeShortcuts;
     preferences.pins = m_pins.colors();
@@ -2904,10 +2926,9 @@ void App::followWindowDisplay()
 
 void App::syncUiScaleToMonitor()
 {
-    // The window may have moved to a monitor with a different scale.
-    const float currentScale = computeUiScale(m_window);
-    if (currentScale != m_uiScale) {
-        applyUiScale(currentScale);
+    // The window may have moved to a monitor with a different scale; the user
+    // factor rides along through refreshUiScale.
+    if (refreshUiScale()) {
         m_lastActivity = glfwGetTime();
     }
 }
@@ -4104,6 +4125,29 @@ void App::appendLayoutSubmenu(std::vector<NativeMenuItem>& menu)
     menuEndSubmenu(menu);
 }
 
+void App::appendUiScaleSubmenu(std::vector<NativeMenuItem>& menu)
+{
+    // An ascending zoom-like scale of multipliers on the system scale. The 1.0
+    // step is the OS's own per-monitor scaling unchanged - the home of the
+    // scale, named "Default (100%)" where it sits in the middle rather than a
+    // bare percentage. The checked step is an exact UiScaleSteps value, so the
+    // equality is safe.
+    menuSubmenu(menu, "UI Scaling");
+    for (std::size_t step = 0; step < UiScaleSteps.size(); ++step) {
+        const float factor = UiScaleSteps[step];
+        const bool checked = factor == m_userUiScaleFactor;
+        const int id = MenuUiScaleBase + static_cast<int>(step);
+        if (factor == 1.0f) {
+            menuAction(menu, "Default (100%)", id, checked);
+        } else {
+            char label[16];
+            std::snprintf(label, sizeof(label), "%d%%", static_cast<int>(std::lround(factor * 100.0f)));
+            menuAction(menu, label, id, checked);
+        }
+    }
+    menuEndSubmenu(menu);
+}
+
 void App::appendPresetsSubmenu(std::vector<NativeMenuItem>& menu)
 {
     // Each slot lists its saved summary or "empty"; the digit hint teaches the
@@ -4159,6 +4203,7 @@ void App::appendRegionAndAppSection(std::vector<NativeMenuItem>& menu)
     menuSeparator(menu);
     menuAction(menu, "Reset to Defaults", MenuResetDiagnostics, false);
     menuEndSubmenu(menu);
+    appendUiScaleSubmenu(menu);
     menuAction(menu, "Settings", MenuOpenSettings, false);
     menuAction(menu, "About SideScopes", MenuAbout, false);
     menuAction(menu, "Quit", MenuQuit, false);
@@ -4202,6 +4247,7 @@ void App::dispatchMenuChoice(int chosen, const std::vector<ParamMenuAction>& par
     dispatchRegionMenu(chosen);
     dispatchViewMenu(chosen);
     dispatchLayoutMenu(chosen);
+    dispatchUiScaleMenu(chosen);
     m_lastActivity = glfwGetTime();
     m_nextPreferencesSave = glfwGetTime() + 1.0;
 }
@@ -4345,6 +4391,16 @@ void App::dispatchLayoutMenu(int chosen)
     } else if (chosen > MenuSavePresetBase && chosen <= MenuSavePresetBase + LayoutPresetSlots) {
         saveLayoutPreset(chosen - MenuSavePresetBase);
     }
+}
+
+void App::dispatchUiScaleMenu(int chosen)
+{
+    const int step = chosen - MenuUiScaleBase;
+    if (step < 0 || step >= static_cast<int>(UiScaleSteps.size())) {
+        return;
+    }
+    m_userUiScaleFactor = UiScaleSteps[static_cast<std::size_t>(step)];
+    refreshUiScale();
 }
 
 void App::handleRegionPicking()

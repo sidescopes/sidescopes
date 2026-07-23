@@ -10,6 +10,7 @@
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
+#include <cmath>
 
 #include "app/ui_scaling.h"
 
@@ -67,6 +68,43 @@ TEST_CASE("UI scale degrades gracefully on empty windows")
     // Before the first real layout the window can report zero; returning the
     // content scale keeps the factor sane until the window is sized.
     CHECK(uiScaleForWindow(1.5f, 0, 0) == Approx(1.5f));
+}
+
+TEST_CASE("A stored interface-size factor snaps to an offered step")
+{
+    // The exact steps pass through untouched.
+    for (const float step : UiScaleSteps) {
+        CHECK(cleanedUiScaleFactor(step) == Approx(step));
+    }
+    // A value between steps snaps to the nearest.
+    CHECK(cleanedUiScaleFactor(1.30f) == Approx(1.25f));
+    CHECK(cleanedUiScaleFactor(1.40f) == Approx(1.50f));
+    CHECK(cleanedUiScaleFactor(0.6f) == Approx(0.5f));
+    // Above the range clamps to the largest step.
+    CHECK(cleanedUiScaleFactor(4.0f) == Approx(2.0f));
+    // Zero, negative, and NaN are not scales - they fall back to Default (1.0),
+    // not to the smallest step.
+    CHECK(cleanedUiScaleFactor(0.0f) == Approx(1.0f));
+    CHECK(cleanedUiScaleFactor(-1.0f) == Approx(1.0f));
+    CHECK(cleanedUiScaleFactor(std::nanf("")) == Approx(1.0f));
+}
+
+TEST_CASE("Every interface-size step is a visibly distinct font size")
+{
+    // ImGui rounds the baked font size, so the useful test of the step set is
+    // that each one lands on a DIFFERENT integer size, strictly increasing -
+    // the property a free slider or too-fine steps would break. This is why the
+    // preference is discrete, and it is scale-independent of the row-seating
+    // invariants, which round from the line height and hold at any factor.
+    int previous = 0;
+    for (const float step : UiScaleSteps) {
+        const int baked = static_cast<int>(std::lround(InterfaceFontSize * step));
+        CHECK(baked > previous);
+        previous = baked;
+    }
+    // The sizes the current set produces, pinned so a step change is deliberate.
+    CHECK(static_cast<int>(std::lround(InterfaceFontSize * 1.0f)) == 13);
+    CHECK(static_cast<int>(std::lround(InterfaceFontSize * 2.0f)) == 26);
 }
 
 }  // namespace

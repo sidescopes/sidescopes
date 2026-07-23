@@ -52,6 +52,13 @@ void readBool(const std::map<std::string, std::string, std::less<>>& values, con
     }
 }
 
+void readFloat(const std::map<std::string, std::string, std::less<>>& values, const char* key, float& out)
+{
+    if (const auto found = values.find(key); found != values.end()) {
+        out = std::strtof(found->second.c_str(), nullptr);
+    }
+}
+
 // Reads a legacy numeric key straight into a scope parameter slot, leaving the
 // slot's default when the key is absent.
 void readLegacyDouble(const std::map<std::string, std::string, std::less<>>& values, const char* key,
@@ -589,6 +596,7 @@ Preferences loadPreferences(const std::filesystem::path& file)
     readScopeShortcuts(values, preferences);
     readPins(values, preferences);
 
+    readFloat(values, "ui_scale_factor", preferences.uiScaleFactor);
     readInt(values, "window_x", preferences.windowX);
     readInt(values, "window_y", preferences.windowY);
     readInt(values, "window_width", preferences.windowWidth);
@@ -616,6 +624,7 @@ bool savePreferences(const Preferences& preferences, const std::filesystem::path
     out << "scope_stack=" << preferences.scopeStack << '\n'
         << "show_graticule=" << (preferences.showGraticule ? 1 : 0) << '\n'
         << "vectorscope_zoom=" << preferences.vectorscopeZoom << '\n'
+        << "ui_scale_factor=" << preferences.uiScaleFactor << '\n'
         << "window_x=" << preferences.windowX << '\n'
         << "window_y=" << preferences.windowY << '\n'
         << "window_width=" << preferences.windowWidth << '\n'

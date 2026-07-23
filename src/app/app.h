@@ -95,6 +95,11 @@ private:
     [[nodiscard]] bool createMainWindow(const Preferences& startup);
     void setupImGui();
     void applyUiScale(float scale);
+    /// Reapplies the interface scale from the current monitor and the user's
+    /// size factor. Returns whether it changed. The one path that folds the OS
+    /// scale and the preference together, so both the startup and the
+    /// monitor-change sites stay in agreement.
+    bool refreshUiScale();
     void setupCapture();
     void seedAnalysis(const Preferences& startup);
     void setupView(const Preferences& startup);
@@ -309,6 +314,7 @@ private:
     void appendScopesSubmenu(std::vector<NativeMenuItem>& menu);
     void appendPerScopeOptions(std::vector<NativeMenuItem>& menu, std::vector<ParamMenuAction>& paramActions);
     void appendLayoutSubmenu(std::vector<NativeMenuItem>& menu);
+    void appendUiScaleSubmenu(std::vector<NativeMenuItem>& menu);
     void appendPresetsSubmenu(std::vector<NativeMenuItem>& menu);
     void appendRegionAndAppSection(std::vector<NativeMenuItem>& menu);
     void buildContextMenu(int clickedPane, std::vector<NativeMenuItem>& menu,
@@ -318,6 +324,7 @@ private:
     void dispatchRegionMenu(int chosen);
     void dispatchViewMenu(int chosen);
     void dispatchLayoutMenu(int chosen);
+    void dispatchUiScaleMenu(int chosen);
 
     // --- post-render region handling ---
     void handleRegionPicking();
@@ -350,6 +357,9 @@ private:
     std::unique_ptr<GraphicsBackend> m_graphics;
     VersionInfo m_versionInfo;
     float m_uiScale = 1.0f;
+    /// User interface-size factor, a multiplier on the OS scale (1.0 = match
+    /// system). One of UiScaleSteps; multiplied into m_uiScale by refreshUiScale.
+    float m_userUiScaleFactor = 1.0f;
 
     FrameMailbox m_mailbox;
     AnalysisWorker m_worker;

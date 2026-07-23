@@ -94,6 +94,9 @@ struct Preferences
     /// The last loaded or saved preset slot, 1-9; 0 when no preset is active.
     /// Drives the toolbar's preset badge across sessions.
     int layoutActiveSlot = 0;
+    /// User interface-size factor, a multiplier on the OS scale (1.0 = match
+    /// the system). One of the discrete UiScaleSteps; per user, not per display.
+    float uiScaleFactor = 1.0f;
     int windowX = -1;  ///< Negative lets the system place the window.
     int windowY = -1;
     int windowWidth = 440;
