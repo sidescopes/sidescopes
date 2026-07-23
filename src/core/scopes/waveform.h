@@ -61,7 +61,7 @@ public:
     /// image, which a bare color cannot know; x is reported as -1 and callers
     /// draw a horizontal level line. Per-channel lines are trivial for
     /// callers to place themselves: the level of a channel is its own value.
-    [[nodiscard]] NormalizedPoint project(const FloatColor& color) const;
+    [[nodiscard]] static NormalizedPoint project(const FloatColor& color);
 
 private:
     void resize(int columns, int imageHeight);

@@ -3556,7 +3556,7 @@ void drawReadoutChannels(const FloatColor& color, float start, const ReadoutColu
 
 }  // namespace
 
-float App::statusBarHeight() const
+float App::statusBarHeight()
 {
     // The spacing that parts the strip from the panes, the tallest thing that
     // can stand on its row, and the offset that centres the row between them.
@@ -4129,7 +4129,7 @@ void App::appendLayoutSubmenu(std::vector<NativeMenuItem>& menu)
     menuEndSubmenu(menu);
 }
 
-void App::appendUiScaleSubmenu(std::vector<NativeMenuItem>& menu)
+void App::appendUiScaleSubmenu(std::vector<NativeMenuItem>& menu) const
 {
     // An ascending zoom-like scale of multipliers on the system scale. The 1.0
     // step is the OS's own per-monitor scaling unchanged - the home of the
@@ -4971,7 +4971,7 @@ RegionOfInterest quickStartRegion(const RegionOfInterest& window, const DisplayG
 
 // Field diagnosis for the window-pick mapping: every rectangle in the
 // chain, on the suggestions channel.
-void App::logAttachMapping(const WindowCandidate& picked, const RegionOfInterest& start) const
+void App::logAttachMapping(const WindowCandidate& picked, const RegionOfInterest& start)
 {
     SS_DIAG(Suggestions, "pick window=%llu list-rect=%.1f,%.1f %.1fx%.1f suggested=%.2f,%.2f..%.2f,%.2f%%",
             static_cast<unsigned long long>(picked.identity), picked.windowRect.x, picked.windowRect.y,

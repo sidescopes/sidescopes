@@ -200,7 +200,7 @@ private:
 
     [[nodiscard]] const WindowCandidate* matchWindowCandidate(uint32_t displayId, const RegionOfInterest& region) const;
     [[nodiscard]] const FaceCandidate* matchFaceCandidate(uint32_t displayId, const RegionOfInterest& region) const;
-    void logAttachMapping(const WindowCandidate& picked, const RegionOfInterest& start) const;
+    static void logAttachMapping(const WindowCandidate& picked, const RegionOfInterest& start);
     [[nodiscard]] const WindowCandidate* windowContaining(uint32_t displayId, const RegionOfInterest& region) const;
     [[nodiscard]] std::optional<FloatColor> averageFrameColor(const RegionOfInterest& region) const;
     void resetToFullScreen();
@@ -240,7 +240,7 @@ private:
 
     // --- frame UI ---
     void drawFrameUi();
-    void beginHostWindow();
+    static void beginHostWindow();
     void drawScopeToggles(bool stackModifier);
     void handleShortcuts(const ModifierState& modifiers);
     void handleCommandChords(const ModifierState& modifiers);
@@ -257,7 +257,7 @@ private:
     void placeRegionToolbox();
     void drawRegionToolIcons();
     /// The status bar's reserved height below the panes.
-    [[nodiscard]] float statusBarHeight() const;
+    [[nodiscard]] static float statusBarHeight();
     /// The reserved strip under the panes: the pin tool in the left corner,
     /// the live swatch in the right, messages and the readout between them.
     void drawStatusBar();
@@ -291,7 +291,7 @@ private:
     void applyPresetStyles(const std::map<std::string, std::map<std::string, double>>& styles);
     void drawPaneDivider(int leftPane, bool sideBySide, float thickness, const ImVec2& area,
                          const std::vector<float>& lengths);
-    void paintDivider(bool sideBySide, bool highlighted);
+    static void paintDivider(bool sideBySide, bool highlighted);
     void adjustDividerWeights(int leftPane, float deltaPixels, const std::vector<float>& lengths);
     void equalizeDividerWeights(int leftPane);
     void drawScopeById(std::string_view id);
@@ -314,7 +314,7 @@ private:
     void appendScopesSubmenu(std::vector<NativeMenuItem>& menu);
     void appendPerScopeOptions(std::vector<NativeMenuItem>& menu, std::vector<ParamMenuAction>& paramActions);
     void appendLayoutSubmenu(std::vector<NativeMenuItem>& menu);
-    void appendUiScaleSubmenu(std::vector<NativeMenuItem>& menu);
+    void appendUiScaleSubmenu(std::vector<NativeMenuItem>& menu) const;
     void appendPresetsSubmenu(std::vector<NativeMenuItem>& menu);
     void appendRegionAndAppSection(std::vector<NativeMenuItem>& menu);
     void buildContextMenu(int clickedPane, std::vector<NativeMenuItem>& menu,
@@ -335,7 +335,7 @@ private:
     void launchDisplayFaceScans(const std::vector<PickerDisplay>& pickerDisplays);
     void drainDisplayFaceScans();
     void consumeDisplayFaceScan(DisplayFaceScan& scan);
-    void logPickerSuggestions(const std::vector<PickerDisplay>& pickerDisplays);
+    static void logPickerSuggestions(const std::vector<PickerDisplay>& pickerDisplays);
     void handleRegionBorderEdit();
     void pollActiveRegionPick();
     void pollPinPick(const RegionPickPoll& poll);

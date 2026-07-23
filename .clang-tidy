@@ -32,6 +32,8 @@ Checks: >
   modernize-use-override,
   misc-unused-using-decls,
   misc-redundant-expression,
+  readability-convert-member-functions-to-static,
+  readability-make-member-function-const,
   readability-identifier-naming,
   readability-function-size,
   readability-function-cognitive-complexity
