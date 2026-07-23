@@ -26,6 +26,7 @@
 #include <utility>
 #include <vector>
 
+#include "app/app_startup.h"
 #include "app/border_label.h"
 #include "app/capture_controller.h"
 #include "app/color_readout.h"
@@ -51,7 +52,6 @@
 #include "core/preferences.h"
 #include "core/region_suggestions.h"
 #include "core/scopes/histogram.h"
-#include "core/scopes/vectorscope.h"
 #include "core/scopes/waveform.h"
 #include "core/trace_intensity.h"
 #include "imgui.h"
@@ -65,195 +65,6 @@
 #include "sidescopes_version.h"
 
 namespace {
-
-using namespace sidescopes;
-
-void applyTheme()
-{
-    ImGuiStyle& style = ImGui::GetStyle();
-    style.WindowRounding = 8.0f;
-    style.FrameRounding = 4.0f;
-    style.GrabRounding = 4.0f;
-    style.PopupRounding = 6.0f;
-    style.WindowPadding = ImVec2(10, 8);
-    style.FramePadding = ImVec2(8, 4);
-    style.ItemSpacing = ImVec2(8, 6);
-    style.WindowBorderSize = 0.0f;
-    style.FrameBorderSize = 0.0f;
-    ImVec4* colors = style.Colors;
-    const ImVec4 background(0.0f, 0.0f, 0.0f, 1.0f);
-    const ImVec4 panel(0.13f, 0.13f, 0.14f, 1.0f);
-    const ImVec4 hovered(0.20f, 0.20f, 0.22f, 1.0f);
-    const ImVec4 active(0.26f, 0.27f, 0.30f, 1.0f);
-    const ImVec4 accent(0.28f, 0.42f, 0.65f, 1.0f);
-    colors[ImGuiCol_WindowBg] = background;
-    colors[ImGuiCol_PopupBg] = ImVec4(0.10f, 0.10f, 0.11f, 0.98f);
-    colors[ImGuiCol_TitleBg] = colors[ImGuiCol_TitleBgActive] = background;
-    colors[ImGuiCol_FrameBg] = panel;
-    colors[ImGuiCol_FrameBgHovered] = hovered;
-    colors[ImGuiCol_FrameBgActive] = active;
-    colors[ImGuiCol_Button] = panel;
-    colors[ImGuiCol_ButtonHovered] = hovered;
-    colors[ImGuiCol_ButtonActive] = accent;
-    colors[ImGuiCol_SliderGrab] = accent;
-    colors[ImGuiCol_SliderGrabActive] = ImVec4(0.36f, 0.52f, 0.78f, 1.0f);
-    colors[ImGuiCol_CheckMark] = ImVec4(0.55f, 0.70f, 0.95f, 1.0f);
-    colors[ImGuiCol_Text] = ImVec4(0.86f, 0.86f, 0.88f, 1.0f);
-    colors[ImGuiCol_TextDisabled] = ImVec4(0.50f, 0.50f, 0.53f, 1.0f);
-}
-
-// Loads the interface font and its fixed-width companion, returning the
-// monospace font so the picker can align hex codes with it; null when the
-// system had none and the interface font stands in.
-ImFont* loadInterfaceFont(GLFWwindow* window)
-{
-    int windowWidth = 0;
-    int framebufferWidth = 0;
-    glfwGetWindowSize(window, &windowWidth, nullptr);
-    glfwGetFramebufferSize(window, &framebufferWidth, nullptr);
-    ImFontConfig config;
-    config.RasterizerDensity = interfaceFontDensity(windowWidth, framebufferWidth);
-    // ImGui's default range stops at U+00FF, which would drop the delta the
-    // color picker labels its differences with. Latin-1 plus that one glyph.
-    static constexpr ImWchar InterfaceGlyphRanges[] = {0x0020, 0x00FF, 0x0394, 0x0394, 0};
-    config.GlyphRanges = InterfaceGlyphRanges;
-    ImGuiIO& io = ImGui::GetIO();
-    bool loaded = false;
-    for (const std::string& path : interfaceFontFiles()) {
-        if (io.Fonts->AddFontFromFileTTF(path.c_str(), InterfaceFontSize, &config)) {
-            loaded = true;
-            break;
-        }
-    }
-    ImFont* monospace = nullptr;
-    const float monoSize = InterfaceFontSize * monospaceFontScale();
-    for (const std::string& path : monospaceFontFiles()) {
-        monospace = io.Fonts->AddFontFromFileTTF(path.c_str(), monoSize, &config);
-        if (monospace != nullptr) {
-            break;
-        }
-    }
-    (void)loaded;
-
-    return monospace;
-}
-
-// The interface is authored in 100%-scale units. On macOS GLFW window
-// coordinates are already such units - the framebuffer alone carries the
-// Retina factor - so this is 1.0; on Windows the window is sized in
-// physical pixels and the monitor's content scale (1.25, 1.5, ...) says
-// how many of them the interface should treat as one.
-float computeUiScale(GLFWwindow* window)
-{
-    float scaleX = 1.0f;
-    float scaleY = 1.0f;
-    glfwGetWindowContentScale(window, &scaleX, &scaleY);
-    int windowWidth = 0;
-    int framebufferWidth = 0;
-    glfwGetWindowSize(window, &windowWidth, nullptr);
-    glfwGetFramebufferSize(window, &framebufferWidth, nullptr);
-
-    return uiScaleForWindow(scaleX, windowWidth, framebufferWidth);
-}
-
-// Applies the saved window placement and keeps the window on screen.
-//
-// Saved sizes are in the platform's own window units (physical pixels on
-// Windows, points on macOS), so they are restored with an explicit set
-// after creation: passing them through glfwCreateWindow instead would
-// run them through GLFW_SCALE_TO_MONITOR's creation-time scaling on
-// Windows, growing the window by the monitor scale on every launch.
-// Position first, size second - crossing into a differently scaled
-// monitor triggers the hint's automatic resize, and the explicit size
-// must land after it.
-//
-// The rectangle is then clamped into the work area of the monitor it
-// mostly lies on. A window that starts beyond the desktop edge shows
-// its never-composited strip as white while a drag holds the frame
-// loop; a window that never starts off screen has no such strip.
-struct MonitorWorkArea
-{
-    int x;
-    int y;
-    int width;
-    int height;
-};
-
-// The work area of the monitor carrying most of the window; the primary when
-// the window overlaps none.
-MonitorWorkArea monitorMostlyContaining(GLFWmonitor** monitors, int monitorCount, int x, int y, int width, int height)
-{
-    int workX = 0;
-    int workY = 0;
-    int workWidth = 0;
-    int workHeight = 0;
-    glfwGetMonitorWorkarea(monitors[0], &workX, &workY, &workWidth, &workHeight);
-    long long bestOverlap = 0;
-    for (int index = 0; index < monitorCount; ++index) {
-        int monitorX = 0;
-        int monitorY = 0;
-        int monitorWidth = 0;
-        int monitorHeight = 0;
-        glfwGetMonitorWorkarea(monitors[index], &monitorX, &monitorY, &monitorWidth, &monitorHeight);
-        const long long overlapWidth = std::min<long long>(x + width, monitorX + monitorWidth) - std::max(x, monitorX);
-        const long long overlapHeight =
-            std::min<long long>(y + height, monitorY + monitorHeight) - std::max(y, monitorY);
-        const long long overlap = std::max<long long>(overlapWidth, 0) * std::max<long long>(overlapHeight, 0);
-        if (overlap > bestOverlap) {
-            bestOverlap = overlap;
-            workX = monitorX;
-            workY = monitorY;
-            workWidth = monitorWidth;
-            workHeight = monitorHeight;
-        }
-    }
-
-    return {workX, workY, workWidth, workHeight};
-}
-
-void restoreWindowPlacement(GLFWwindow* window, const Preferences& startup)
-{
-    if (startup.windowX >= 0) {
-        glfwSetWindowPos(window, startup.windowX, startup.windowY);
-        glfwSetWindowSize(window, startup.windowWidth, startup.windowHeight);
-    }
-
-    int monitorCount = 0;
-    GLFWmonitor** monitors = glfwGetMonitors(&monitorCount);
-    if (!monitors || monitorCount == 0) {
-        return;
-    }
-
-    int x = 0;
-    int y = 0;
-    int width = 0;
-    int height = 0;
-    glfwGetWindowPos(window, &x, &y);
-    glfwGetWindowSize(window, &width, &height);
-    int frameLeft = 0;
-    int frameTop = 0;
-    int frameRight = 0;
-    int frameBottom = 0;
-    glfwGetWindowFrameSize(window, &frameLeft, &frameTop, &frameRight, &frameBottom);
-
-    const MonitorWorkArea work = monitorMostlyContaining(monitors, monitorCount, x, y, width, height);
-    const int availableWidth = std::max(1, work.width - frameLeft - frameRight);
-    const int availableHeight = std::max(1, work.height - frameTop - frameBottom);
-    const int clampedWidth = std::min(width, availableWidth);
-    const int clampedHeight = std::min(height, availableHeight);
-    const int minX = work.x + frameLeft;
-    const int maxX = work.x + work.width - frameRight - clampedWidth;
-    const int minY = work.y + frameTop;
-    const int maxY = work.y + work.height - frameBottom - clampedHeight;
-    const int clampedX = std::max(minX, std::min(x, maxX));
-    const int clampedY = std::max(minY, std::min(y, maxY));
-    if (clampedWidth != width || clampedHeight != height) {
-        glfwSetWindowSize(window, clampedWidth, clampedHeight);
-    }
-    if (clampedX != x || clampedY != y) {
-        glfwSetWindowPos(window, clampedX, clampedY);
-    }
-}
 
 // A shortcut name resolves to the ImGui key it fires on; only Escape and the
 // bare letters are bindable, so anything else never matches a press.
@@ -302,9 +113,12 @@ bool App::init()
     const Preferences startup = loadPreferences(preferencesFilePath());
     m_versionInfo = describeVersion(SIDESCOPES_VERSION, SIDESCOPES_GIT_DESCRIBE);
 
-    if (!createMainWindow(startup)) {
+    MainWindow main = createMainWindow(startup, m_versionInfo, m_callbackState);
+    if (!main.window) {
         return false;
     }
+    m_window = main.window;
+    m_graphics = std::move(main.graphics);
     setupImGui();
     if (!m_graphics->init(m_window)) {
         ImGui::DestroyContext();
@@ -315,10 +129,14 @@ bool App::init()
     }
 
     setupCapture();
-    seedAnalysis(startup);
+    seedAnalysis(m_analysis, startup);
     setupView(startup);
-    createProjectionInstances();
-    createScopeTextures();
+    m_projectionInstances = createProjectionInstances(m_scopeRegistry);
+    ScopeTextureSet textures = createScopeTextures(*m_graphics, m_scopeRegistry);
+    m_scopeTextures = std::move(textures.textures);
+    m_panePoints = std::move(textures.panePoints);
+    m_paneIds = std::move(textures.paneIds);
+    m_dividerIds = std::move(textures.dividerIds);
 
     m_shortcuts = startup.shortcuts;
     m_scopeShortcuts = startup.scopeShortcuts;
@@ -378,41 +196,6 @@ void App::shutdown()
     glfwTerminate();
 }
 
-bool App::createMainWindow(const Preferences& startup)
-{
-    m_graphics = createGraphicsBackend();
-    m_graphics->setWindowHints();
-    glfwWindowHint(GLFW_FLOATING, GLFW_TRUE);
-    // On Windows the window follows its monitor's scale, so it keeps its
-    // physical size when dragged between differently scaled monitors; macOS
-    // ignores the hint (scaling lives in the framebuffer there).
-    glfwWindowHint(GLFW_SCALE_TO_MONITOR, GLFW_TRUE);
-    // Hidden until the saved placement is applied: geometry settles before the
-    // first paint, and no intermediate rectangle flashes.
-    glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
-    m_window = glfwCreateWindow(startup.windowWidth, startup.windowHeight, "SideScopes", nullptr, nullptr);
-    if (!m_window) {
-        glfwTerminate();
-
-        return false;
-    }
-    // The escape hatch for GLFW's non-capturing C callbacks: they recover the
-    // state through this pointer.
-    glfwSetWindowUserPointer(m_window, &m_callbackState);
-    restoreWindowPlacement(m_window, startup);
-    glfwShowWindow(m_window);
-    // A development build wears its version in the title bar; a release keeps
-    // the plain name.
-    if (m_versionInfo.development) {
-        glfwSetWindowTitle(m_window, ("SideScopes " + m_versionInfo.display).c_str());
-    }
-    glfwSetWindowIconifyCallback(m_window, [](GLFWwindow* iconifyTarget, int) {
-        static_cast<AppCallbackState*>(glfwGetWindowUserPointer(iconifyTarget))->iconifyChanged.store(true);
-    });
-
-    return true;
-}
-
 void App::setupImGui()
 {
     IMGUI_CHECKVERSION();
@@ -461,28 +244,6 @@ void App::setupCapture()
     }
 }
 
-void App::seedAnalysis(const Preferences& startup)
-{
-    // The worker is driven entirely by scope id: each scope's saved parameters
-    // fan out by key straight from the preference map into the module's
-    // declarative vocabulary. Smoothing rides the same map but belongs to the
-    // host, so it is filtered out. The parade shares the waveform's gain and
-    // stride, so both are re-seeded from the waveform.
-    for (const auto& [id, params] : startup.scopeParams) {
-        for (const auto& [key, value] : params) {
-            if (key != "smoothing_ms") {
-                m_analysis.scopeParams[id][key] = value;
-            }
-        }
-    }
-    m_analysis.scopeParams[ParadeScopeId]["gain"] = m_analysis.scopeParams[WaveformScopeId]["gain"];
-    m_analysis.scopeParams[ParadeScopeId]["stride"] = m_analysis.scopeParams[WaveformScopeId]["stride"];
-    m_analysis.imageSizes[VectorscopeScopeId] = {DefaultVectorscopeSize, DefaultVectorscopeSize};
-    m_analysis.imageSizes[WaveformScopeId] = {DefaultWaveformColumns, WaveformLevels};
-    m_analysis.imageSizes[ParadeScopeId] = {DefaultWaveformColumns, WaveformLevels};
-    m_analysis.imageSizes[HistogramScopeId] = {Histogram::ImageWidth, Histogram::Height};
-}
-
 void App::setupView(const Preferences& startup)
 {
     // The file format caps its pin list at the ring's capacity; the two
@@ -520,54 +281,6 @@ void App::setupView(const Preferences& startup)
     m_view.setSmoothing(VectorscopeScopeId, startupSmoothing(VectorscopeScopeId, 75.0));
     m_view.setSmoothing(WaveformScopeId, startupSmoothing(WaveformScopeId, 100.0));
     m_analysis.enabledScopes = m_view.enabledScopeIds();
-}
-
-void App::createProjectionInstances()
-{
-    // Projection instances place the overlays and markers on the main thread:
-    // one module instance per scope, drawing declarative graticule primitives
-    // and cursor markers. They never accumulate. The color picker has no module
-    // instance, so it is skipped here and drawn as host state.
-    for (const HostScope& scope : m_scopeRegistry.scopes()) {
-        if (scope.descriptor != nullptr) {
-            m_projectionInstances.emplace(scope.id, builtinModules().createInstance(scope.id));
-        }
-    }
-}
-
-std::unique_ptr<ScopeTexture> App::createBlankTexture(int width, int height)
-{
-    auto texture = m_graphics->createScopeTexture(width, height);
-    ScopeImage blank;
-    blank.width = width;
-    blank.height = height;
-    blank.rgba.assign(static_cast<std::size_t>(width) * height * 4, 0);
-    for (std::size_t i = 3; i < blank.rgba.size(); i += 4) {
-        blank.rgba[i] = 255;
-    }
-    texture->upload(blank);
-
-    return texture;
-}
-
-void App::createScopeTextures()
-{
-    // One texture per module scope, keyed by id and sized from its descriptor;
-    // the upload path resizes to whatever the worker actually produces. The
-    // color picker has no descriptor and draws no texture.
-    for (const HostScope& scope : m_scopeRegistry.scopes()) {
-        if (!scope.descriptor) {
-            continue;
-        }
-        const int width = scope.descriptor->image_width > 0 ? scope.descriptor->image_width : DefaultVectorscopeSize;
-        const int height = scope.descriptor->image_height > 0 ? scope.descriptor->image_height : DefaultVectorscopeSize;
-        m_scopeTextures[scope.id] = createBlankTexture(width, height);
-    }
-    m_panePoints.assign(m_scopeRegistry.scopes().size(), ImVec2());
-    for (std::size_t i = 0; i < m_scopeRegistry.scopes().size(); ++i) {
-        m_paneIds.push_back("##pane" + std::to_string(i));
-        m_dividerIds.push_back("##divider" + std::to_string(i));
-    }
 }
 
 std::optional<uint32_t> App::displayOfWindow() const

@@ -353,6 +353,7 @@ if(APPLE OR WIN32)
         src/app/app.cpp
         src/app/app_attach.cpp
         src/app/app_region_pick.cpp
+        src/app/app_startup.cpp
         src/app/attach_controller.cpp
         src/app/border_label.cpp
         src/app/capture_controller.cpp

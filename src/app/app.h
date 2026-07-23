@@ -94,7 +94,6 @@ public:
 
 private:
     // --- startup ---
-    [[nodiscard]] bool createMainWindow(const Preferences& startup);
     void setupImGui();
     void applyUiScale(float scale);
     /// Reapplies the interface scale from the current monitor and the user's
@@ -103,11 +102,7 @@ private:
     /// monitor-change sites stay in agreement.
     bool refreshUiScale();
     void setupCapture();
-    void seedAnalysis(const Preferences& startup);
     void setupView(const Preferences& startup);
-    void createProjectionInstances();
-    void createScopeTextures();
-    [[nodiscard]] std::unique_ptr<ScopeTexture> createBlankTexture(int width, int height);
 
     // --- state accessors ---
     [[nodiscard]] std::optional<uint32_t> displayOfWindow() const;
