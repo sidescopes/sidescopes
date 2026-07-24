@@ -623,7 +623,9 @@ void App::drawFrameUi()
     applyPresetOutcome(m_presets.drawPicker());
     ImGui::SameLine(0.0f, 8.0f);
     applyPaneRenderOutcome(m_panes->drawScopeToggles(modifiers.shift));
-    applyShortcutAction(m_shortcuts.resolvePressed(shortcutContext(), modifiers, shortcutPressed));
+    for (const ShortcutAction& action : m_shortcuts.resolvePressed(shortcutContext(), modifiers, shortcutPressed)) {
+        applyShortcutAction(action);
+    }
     const PaneRenderInput input{m_uiScale.scale(),  m_regions.isFullScreen(), pinsAvailable(),
                                 m_vectorscopeColor, m_waveformColor,          m_callbackState.monospaceFont};
     applyPaneRenderOutcome(m_panes->drawRegionToolIcons(input));

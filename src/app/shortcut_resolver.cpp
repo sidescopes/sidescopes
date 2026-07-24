@@ -6,6 +6,7 @@
 #include <array>
 #include <cstddef>
 #include <utility>
+#include <vector>
 
 #include "app/scope_registry.h"
 
@@ -66,15 +67,13 @@ ShortcutAction resolveWindowChord(const ShortcutContext& context, const Modifier
 }
 
 // Digit N loads preset slot N; Shift+N saves the live layout into it.
-ShortcutAction resolvePresetDigit(bool shift, const ShortcutKeyPressed& pressed)
+void appendPresetDigits(bool shift, const ShortcutKeyPressed& pressed, std::vector<ShortcutAction>& actions)
 {
     for (int slot = 1; slot <= LayoutPresetSlots; ++slot) {
         if (pressed(DigitNames[static_cast<std::size_t>(slot - 1)])) {
-            return ShortcutAction::preset(slot, shift);
+            actions.push_back(ShortcutAction::preset(slot, shift));
         }
     }
-
-    return {};
 }
 
 }  // namespace
@@ -141,15 +140,16 @@ int ShortcutResolver::cycledZoom(int current)
     return current >= 4 ? 1 : current * 2;
 }
 
-ShortcutAction ShortcutResolver::resolvePressed(const ShortcutContext& context, const ModifierState& modifiers,
-                                                const ShortcutKeyPressed& pressed) const
+std::vector<ShortcutAction> ShortcutResolver::resolvePressed(const ShortcutContext& context,
+                                                             const ModifierState& modifiers,
+                                                             const ShortcutKeyPressed& pressed) const
 {
     if (context.wantsTextInput) {
         return {};
     }
     ShortcutAction chord = resolveWindowChord(context, modifiers, pressed);
     if (chord.kind != ShortcutAction::Kind::None) {
-        return chord;
+        return {chord};
     }
     // Command, Control, and Option chords belong to the system and the window,
     // so any of them silences the plain keys. Shift alone stays meaningful: it
@@ -194,13 +194,14 @@ ShortcutAction ShortcutResolver::resolveNamed(const std::string& key, bool shift
     return {};
 }
 
-ShortcutAction ShortcutResolver::resolvePlainKeys(const ShortcutContext& context, bool shift,
-                                                  const ShortcutKeyPressed& pressed) const
+std::vector<ShortcutAction> ShortcutResolver::resolvePlainKeys(const ShortcutContext& context, bool shift,
+                                                               const ShortcutKeyPressed& pressed) const
 {
-    ShortcutAction scope = resolveScopeKey(shift, pressed);
-    if (scope.kind != ShortcutAction::Kind::None) {
-        return scope;
-    }
+    // Every group has its say, and each collects every key of its own that is
+    // down: two scope letters in one frame both show their scope, and a letter
+    // beside a digit switches the stack and loads the preset.
+    std::vector<ShortcutAction> actions;
+    appendScopeKeys(shift, pressed, actions);
     // The bound action keys in the order the shell has always checked them; a
     // key whose action is unavailable resolves to nothing and lets the rest of
     // the scan run.
@@ -211,25 +212,25 @@ ShortcutAction ShortcutResolver::resolvePlainKeys(const ShortcutContext& context
         }
         ShortcutAction action = resolveNamed(binding, shift, context);
         if (action.kind != ShortcutAction::Kind::None) {
-            return action;
+            actions.push_back(std::move(action));
         }
     }
+    appendPresetDigits(shift, pressed, actions);
 
-    return resolvePresetDigit(shift, pressed);
+    return actions;
 }
 
-ShortcutAction ShortcutResolver::resolveScopeKey(bool shift, const ShortcutKeyPressed& pressed) const
+void ShortcutResolver::appendScopeKeys(bool shift, const ShortcutKeyPressed& pressed,
+                                       std::vector<ShortcutAction>& actions) const
 {
     // Each scope's key is resolved by id; a letterless scope has an empty
     // binding, which never matches a press.
     for (const HostScope& scope : m_registry.scopes()) {
         const std::string binding = bindingFor(scope.id);
         if (!binding.empty() && pressed(binding)) {
-            return chooseScopeAction(scope.id, shift);
+            actions.push_back(chooseScopeAction(scope.id, shift));
         }
     }
-
-    return {};
 }
 
 }  // namespace sidescopes

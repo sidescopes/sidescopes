@@ -4,6 +4,7 @@
 #include <map>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "core/preferences.h"
 #include "platform/desktop.h"
@@ -118,12 +119,18 @@ public:
     /// registry letter, or empty when it has none.
     [[nodiscard]] std::string bindingFor(std::string_view id) const;
 
-    /// The per-frame scan: the action for whichever bound key @p pressed
-    /// reports down. The window chords go first; the plain keys follow, and
-    /// any Command, Control, or Option chord silences them. @p modifiers is
-    /// the live modifier state - Shift alone stays meaningful, and stacks.
-    [[nodiscard]] ShortcutAction resolvePressed(const ShortcutContext& context, const ModifierState& modifiers,
-                                                const ShortcutKeyPressed& pressed) const;
+    /// The per-frame scan: an action for every bound key @p pressed reports
+    /// down, in the order the shell has always checked them - the scope
+    /// letters, the region tools, the view keys, then the preset digits. One
+    /// frame carries as many presses as the event queue drained while the loop
+    /// was blocked, and a press is edge-triggered, so dropping the ones after
+    /// the first would lose them for good. The window chords go first and
+    /// answer alone; any Command, Control, or Option chord silences the plain
+    /// keys. @p modifiers is the live modifier state - Shift alone stays
+    /// meaningful, and stacks.
+    [[nodiscard]] std::vector<ShortcutAction> resolvePressed(const ShortcutContext& context,
+                                                             const ModifierState& modifiers,
+                                                             const ShortcutKeyPressed& pressed) const;
 
     /// The same mapping by name, for the keys the region border panel
     /// forwards: @p key is a binding's key and @p shift whether Shift composed
@@ -135,9 +142,9 @@ public:
     [[nodiscard]] static int cycledZoom(int current);
 
 private:
-    [[nodiscard]] ShortcutAction resolvePlainKeys(const ShortcutContext& context, bool shift,
-                                                  const ShortcutKeyPressed& pressed) const;
-    [[nodiscard]] ShortcutAction resolveScopeKey(bool shift, const ShortcutKeyPressed& pressed) const;
+    [[nodiscard]] std::vector<ShortcutAction> resolvePlainKeys(const ShortcutContext& context, bool shift,
+                                                               const ShortcutKeyPressed& pressed) const;
+    void appendScopeKeys(bool shift, const ShortcutKeyPressed& pressed, std::vector<ShortcutAction>& actions) const;
 
     const ScopeRegistry& m_registry;
     ShortcutBindings m_bindings;

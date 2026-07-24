@@ -1,8 +1,11 @@
+#include <algorithm>
 #include <catch2/catch_test_macros.hpp>
 #include <cstdint>
 #include <map>
 #include <string>
 #include <string_view>
+#include <utility>
+#include <vector>
 
 #include "app/scope_registry.h"
 #include "app/shortcut_resolver.h"
@@ -105,6 +108,25 @@ ShortcutKeyPressed pressing(std::string_view key)
     return [key](std::string_view name) { return name == key; };
 }
 
+// A key probe reporting all of @p keys down in the same frame, the way a frame
+// that follows a blocking call sees everything the event queue drained.
+ShortcutKeyPressed pressingAll(std::vector<std::string> keys)
+{
+    return [held = std::move(keys)](std::string_view name) {
+        return std::any_of(held.begin(), held.end(), [name](const std::string& key) { return key == name; });
+    };
+}
+
+// The one action a single-key frame resolves to, so the cases that press one
+// key read as plainly as they did before a frame could carry several. A frame
+// that matched nothing answers with a None action.
+ShortcutAction sole(const std::vector<ShortcutAction>& actions)
+{
+    REQUIRE(actions.size() <= 1);
+
+    return actions.empty() ? ShortcutAction{} : actions.front();
+}
+
 // Everything available: faces detectable, a scope taking pins on screen, no
 // settings window, and every platform window chord in force, so a case that
 // cares about one of them turns that one off.
@@ -125,7 +147,7 @@ ShortcutContext readyContext()
 TEST_CASE("A scope letter shows that scope alone")
 {
     const ShortcutResolver resolver = defaultResolver();
-    const ShortcutAction action = resolver.resolvePressed(readyContext(), ModifierState{}, pressing("V"));
+    const ShortcutAction action = sole(resolver.resolvePressed(readyContext(), ModifierState{}, pressing("V")));
 
     REQUIRE(action.kind == ShortcutAction::Kind::ChooseScope);
     CHECK(action.scopeId == AlphaId);
@@ -139,11 +161,52 @@ TEST_CASE("Shift on a scope letter stacks instead of replacing")
     const ShortcutResolver resolver = defaultResolver();
     ModifierState modifiers;
     modifiers.shift = true;
-    const ShortcutAction action = resolver.resolvePressed(readyContext(), modifiers, pressing("W"));
+    const ShortcutAction action = sole(resolver.resolvePressed(readyContext(), modifiers, pressing("W")));
 
     REQUIRE(action.kind == ShortcutAction::Kind::ChooseScope);
     CHECK(action.scopeId == BetaId);
     CHECK(action.stack);
+}
+
+TEST_CASE("Every scope letter a frame carried shows its scope")
+{
+    const ShortcutResolver resolver = defaultResolver();
+    const std::vector<ShortcutAction> actions =
+        resolver.resolvePressed(readyContext(), ModifierState{}, pressingAll({"V", "W"}));
+
+    REQUIRE(actions.size() == 2);
+    CHECK(actions[0].kind == ShortcutAction::Kind::ChooseScope);
+    CHECK(actions[0].scopeId == AlphaId);
+    CHECK(actions[1].kind == ShortcutAction::Kind::ChooseScope);
+    CHECK(actions[1].scopeId == BetaId);
+}
+
+TEST_CASE("Shift stacks every scope letter a frame carried")
+{
+    const ShortcutResolver resolver = defaultResolver();
+    ModifierState modifiers;
+    modifiers.shift = true;
+    const std::vector<ShortcutAction> actions =
+        resolver.resolvePressed(readyContext(), modifiers, pressingAll({"V", "W"}));
+
+    REQUIRE(actions.size() == 2);
+    CHECK(actions[0].stack);
+    CHECK(actions[1].stack);
+}
+
+TEST_CASE("A scope letter and a preset digit both survive one frame")
+{
+    const ShortcutResolver resolver = defaultResolver();
+    const std::vector<ShortcutAction> actions =
+        resolver.resolvePressed(readyContext(), ModifierState{}, pressingAll({"V", "1"}));
+
+    // The groups keep the order the shell has always run them in: the scope
+    // switch first, the preset it loads into second.
+    REQUIRE(actions.size() == 2);
+    CHECK(actions[0].kind == ShortcutAction::Kind::ChooseScope);
+    CHECK(actions[0].scopeId == AlphaId);
+    CHECK(actions[1].kind == ShortcutAction::Kind::LoadPreset);
+    CHECK(actions[1].presetSlot == 1);
 }
 
 TEST_CASE("A per-scope override replaces the registry letter")
@@ -154,9 +217,10 @@ TEST_CASE("A per-scope override replaces the registry letter")
     CHECK(resolver.bindingFor(AlphaId) == "Q");
     CHECK(resolver.bindingFor(BetaId) == "W");
     // The letter the override left behind no longer reaches its scope.
-    CHECK(resolver.resolvePressed(readyContext(), ModifierState{}, pressing("V")).kind == ShortcutAction::Kind::None);
+    CHECK(sole(resolver.resolvePressed(readyContext(), ModifierState{}, pressing("V"))).kind ==
+          ShortcutAction::Kind::None);
 
-    const ShortcutAction action = resolver.resolvePressed(readyContext(), ModifierState{}, pressing("Q"));
+    const ShortcutAction action = sole(resolver.resolvePressed(readyContext(), ModifierState{}, pressing("Q")));
     REQUIRE(action.kind == ShortcutAction::Kind::ChooseScope);
     CHECK(action.scopeId == AlphaId);
 }
@@ -169,7 +233,7 @@ TEST_CASE("A system chord silences the plain keys")
     ModifierState modifiers;
     modifiers.option = true;
 
-    CHECK(resolver.resolvePressed(context, modifiers, pressing("V")).kind == ShortcutAction::Kind::None);
+    CHECK(sole(resolver.resolvePressed(context, modifiers, pressing("V"))).kind == ShortcutAction::Kind::None);
 
     // Command and Control silence them just the same, once their own chords
     // have had their look at the press.
@@ -178,10 +242,10 @@ TEST_CASE("A system chord silences the plain keys")
     context.quitsOnControlQ = false;
     ModifierState command;
     command.command = true;
-    CHECK(resolver.resolvePressed(context, command, pressing("V")).kind == ShortcutAction::Kind::None);
+    CHECK(sole(resolver.resolvePressed(context, command, pressing("V"))).kind == ShortcutAction::Kind::None);
     ModifierState control;
     control.control = true;
-    CHECK(resolver.resolvePressed(context, control, pressing("D")).kind == ShortcutAction::Kind::None);
+    CHECK(sole(resolver.resolvePressed(context, control, pressing("D"))).kind == ShortcutAction::Kind::None);
 }
 
 TEST_CASE("Text input silences every shortcut")
@@ -192,10 +256,10 @@ TEST_CASE("Text input silences every shortcut")
     ModifierState modifiers;
     modifiers.command = true;
 
-    CHECK(resolver.resolvePressed(context, ModifierState{}, pressing("V")).kind == ShortcutAction::Kind::None);
-    CHECK(resolver.resolvePressed(context, ModifierState{}, pressing("3")).kind == ShortcutAction::Kind::None);
+    CHECK(sole(resolver.resolvePressed(context, ModifierState{}, pressing("V"))).kind == ShortcutAction::Kind::None);
+    CHECK(sole(resolver.resolvePressed(context, ModifierState{}, pressing("3"))).kind == ShortcutAction::Kind::None);
     // The window chords stand down with the rest of them.
-    CHECK(resolver.resolvePressed(context, modifiers, pressing("W")).kind == ShortcutAction::Kind::None);
+    CHECK(sole(resolver.resolvePressed(context, modifiers, pressing("W"))).kind == ShortcutAction::Kind::None);
 }
 
 TEST_CASE("Each region key opens its own tool")
@@ -203,19 +267,19 @@ TEST_CASE("Each region key opens its own tool")
     const ShortcutResolver resolver = defaultResolver();
     const ShortcutContext context = readyContext();
 
-    const ShortcutAction attach = resolver.resolvePressed(context, ModifierState{}, pressing("A"));
+    const ShortcutAction attach = sole(resolver.resolvePressed(context, ModifierState{}, pressing("A")));
     REQUIRE(attach.kind == ShortcutAction::Kind::RequestPick);
     CHECK(attach.pickMode == RegionPickerMode::AttachWindow);
 
-    const ShortcutAction draw = resolver.resolvePressed(context, ModifierState{}, pressing("D"));
+    const ShortcutAction draw = sole(resolver.resolvePressed(context, ModifierState{}, pressing("D")));
     REQUIRE(draw.kind == ShortcutAction::Kind::RequestPick);
     CHECK(draw.pickMode == RegionPickerMode::DrawGlobal);
 
-    const ShortcutAction face = resolver.resolvePressed(context, ModifierState{}, pressing("F"));
+    const ShortcutAction face = sole(resolver.resolvePressed(context, ModifierState{}, pressing("F")));
     REQUIRE(face.kind == ShortcutAction::Kind::RequestPick);
     CHECK(face.pickMode == RegionPickerMode::AttachFace);
 
-    const ShortcutAction pin = resolver.resolvePressed(context, ModifierState{}, pressing("P"));
+    const ShortcutAction pin = sole(resolver.resolvePressed(context, ModifierState{}, pressing("P")));
     REQUIRE(pin.kind == ShortcutAction::Kind::RequestPick);
     CHECK(pin.pickMode == RegionPickerMode::PinColor);
 }
@@ -226,9 +290,10 @@ TEST_CASE("The face key stands down where faces cannot be detected")
     ShortcutContext context = readyContext();
     context.faceDetectionSupported = false;
 
-    CHECK(resolver.resolvePressed(context, ModifierState{}, pressing("F")).kind == ShortcutAction::Kind::None);
+    CHECK(sole(resolver.resolvePressed(context, ModifierState{}, pressing("F"))).kind == ShortcutAction::Kind::None);
     // The rest of the tools are unaffected.
-    CHECK(resolver.resolvePressed(context, ModifierState{}, pressing("D")).kind == ShortcutAction::Kind::RequestPick);
+    CHECK(sole(resolver.resolvePressed(context, ModifierState{}, pressing("D"))).kind ==
+          ShortcutAction::Kind::RequestPick);
 }
 
 TEST_CASE("The pin key stands down without a scope that takes pins")
@@ -237,7 +302,7 @@ TEST_CASE("The pin key stands down without a scope that takes pins")
     ShortcutContext context = readyContext();
     context.pinsAvailable = false;
 
-    CHECK(resolver.resolvePressed(context, ModifierState{}, pressing("P")).kind == ShortcutAction::Kind::None);
+    CHECK(sole(resolver.resolvePressed(context, ModifierState{}, pressing("P"))).kind == ShortcutAction::Kind::None);
 }
 
 TEST_CASE("The zoom key cycles through the magnifications")
@@ -246,16 +311,16 @@ TEST_CASE("The zoom key cycles through the magnifications")
     ShortcutContext context = readyContext();
 
     context.vectorscopeZoom = 1;
-    const ShortcutAction first = resolver.resolvePressed(context, ModifierState{}, pressing("Z"));
+    const ShortcutAction first = sole(resolver.resolvePressed(context, ModifierState{}, pressing("Z")));
     REQUIRE(first.kind == ShortcutAction::Kind::SetZoom);
     CHECK(first.zoomLevel == 2);
 
     context.vectorscopeZoom = 2;
-    CHECK(resolver.resolvePressed(context, ModifierState{}, pressing("Z")).zoomLevel == 4);
+    CHECK(sole(resolver.resolvePressed(context, ModifierState{}, pressing("Z"))).zoomLevel == 4);
 
     // The top of the cycle wraps back to unmagnified.
     context.vectorscopeZoom = 4;
-    CHECK(resolver.resolvePressed(context, ModifierState{}, pressing("Z")).zoomLevel == 1);
+    CHECK(sole(resolver.resolvePressed(context, ModifierState{}, pressing("Z"))).zoomLevel == 1);
 }
 
 TEST_CASE("The full-screen key peels the settings window first")
@@ -264,12 +329,12 @@ TEST_CASE("The full-screen key peels the settings window first")
     ShortcutContext context = readyContext();
 
     context.settingsOpen = true;
-    CHECK(resolver.resolvePressed(context, ModifierState{}, pressing("Escape")).kind ==
+    CHECK(sole(resolver.resolvePressed(context, ModifierState{}, pressing("Escape"))).kind ==
           ShortcutAction::Kind::CloseSettings);
 
     // With nothing stacked above them, the regions are what the key drops.
     context.settingsOpen = false;
-    CHECK(resolver.resolvePressed(context, ModifierState{}, pressing("Escape")).kind ==
+    CHECK(sole(resolver.resolvePressed(context, ModifierState{}, pressing("Escape"))).kind ==
           ShortcutAction::Kind::ResetToFullScreen);
 }
 
@@ -278,13 +343,13 @@ TEST_CASE("A preset digit loads its slot and Shift saves into it")
     const ShortcutResolver resolver = defaultResolver();
     const ShortcutContext context = readyContext();
 
-    const ShortcutAction load = resolver.resolvePressed(context, ModifierState{}, pressing("3"));
+    const ShortcutAction load = sole(resolver.resolvePressed(context, ModifierState{}, pressing("3")));
     REQUIRE(load.kind == ShortcutAction::Kind::LoadPreset);
     CHECK(load.presetSlot == 3);
 
     ModifierState modifiers;
     modifiers.shift = true;
-    const ShortcutAction save = resolver.resolvePressed(context, modifiers, pressing("7"));
+    const ShortcutAction save = sole(resolver.resolvePressed(context, modifiers, pressing("7")));
     REQUIRE(save.kind == ShortcutAction::Kind::SavePreset);
     CHECK(save.presetSlot == 7);
 }
@@ -298,19 +363,20 @@ TEST_CASE("The window chords follow the platform that owns them")
     ModifierState control;
     control.control = true;
 
-    CHECK(resolver.resolvePressed(context, command, pressing("W")).kind == ShortcutAction::Kind::HideApplication);
-    CHECK(resolver.resolvePressed(context, command, pressing("Comma")).kind == ShortcutAction::Kind::OpenSettings);
-    CHECK(resolver.resolvePressed(context, control, pressing("W")).kind == ShortcutAction::Kind::MinimizeWindow);
-    CHECK(resolver.resolvePressed(context, control, pressing("Q")).kind == ShortcutAction::Kind::QuitWindow);
+    CHECK(sole(resolver.resolvePressed(context, command, pressing("W"))).kind == ShortcutAction::Kind::HideApplication);
+    CHECK(sole(resolver.resolvePressed(context, command, pressing("Comma"))).kind ==
+          ShortcutAction::Kind::OpenSettings);
+    CHECK(sole(resolver.resolvePressed(context, control, pressing("W"))).kind == ShortcutAction::Kind::MinimizeWindow);
+    CHECK(sole(resolver.resolvePressed(context, control, pressing("Q"))).kind == ShortcutAction::Kind::QuitWindow);
 
     // Where the platform does not claim a chord, the press means nothing.
     context.hidesWindowOnCommandW = false;
     context.minimizesWindowOnControlW = false;
     context.quitsOnControlQ = false;
-    CHECK(resolver.resolvePressed(context, command, pressing("W")).kind == ShortcutAction::Kind::None);
-    CHECK(resolver.resolvePressed(context, command, pressing("Comma")).kind == ShortcutAction::Kind::None);
-    CHECK(resolver.resolvePressed(context, control, pressing("W")).kind == ShortcutAction::Kind::None);
-    CHECK(resolver.resolvePressed(context, control, pressing("Q")).kind == ShortcutAction::Kind::None);
+    CHECK(sole(resolver.resolvePressed(context, command, pressing("W"))).kind == ShortcutAction::Kind::None);
+    CHECK(sole(resolver.resolvePressed(context, command, pressing("Comma"))).kind == ShortcutAction::Kind::None);
+    CHECK(sole(resolver.resolvePressed(context, control, pressing("W"))).kind == ShortcutAction::Kind::None);
+    CHECK(sole(resolver.resolvePressed(context, control, pressing("Q"))).kind == ShortcutAction::Kind::None);
 }
 
 TEST_CASE("A forwarded key resolves through the same map")
@@ -341,9 +407,10 @@ TEST_CASE("The bindings survive the round trip to preferences")
     CHECK(resolver.bindings().drawRegion == "G");
     CHECK(resolver.scopeOverrides().at(BetaId) == "B");
     // The rebound key is the one the tool now answers to.
-    CHECK(resolver.resolvePressed(readyContext(), ModifierState{}, pressing("G")).kind ==
+    CHECK(sole(resolver.resolvePressed(readyContext(), ModifierState{}, pressing("G"))).kind ==
           ShortcutAction::Kind::RequestPick);
-    CHECK(resolver.resolvePressed(readyContext(), ModifierState{}, pressing("D")).kind == ShortcutAction::Kind::None);
+    CHECK(sole(resolver.resolvePressed(readyContext(), ModifierState{}, pressing("D"))).kind ==
+          ShortcutAction::Kind::None);
 }
 
 }  // namespace sidescopes
