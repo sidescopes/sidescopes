@@ -22,11 +22,6 @@ namespace sidescopes {
 
 struct AppCallbackState;
 
-/// Applies the application's dark theme - the base metrics and the color
-/// table - to the ImGui style. The interface scale is applied on top of it, so
-/// this is what every size change rebuilds from.
-void applyTheme();
-
 /// Loads the interface font and its fixed-width companion, returning the
 /// monospace font so the picker can align hex codes with it; null when the
 /// system had none and the interface font stands in.

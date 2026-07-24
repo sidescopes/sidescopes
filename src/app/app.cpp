@@ -31,6 +31,7 @@
 #include "app/color_readout.h"
 #include "app/context_menu.h"
 #include "app/frame_timer.h"
+#include "app/interface_style.h"
 #include "app/overlay_render.h"
 #include "app/param_menu.h"
 #include "app/pin_board.h"

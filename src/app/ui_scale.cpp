@@ -3,8 +3,8 @@
 #include <cstddef>
 
 #include "app/app_startup.h"
+#include "app/interface_style.h"
 #include "app/ui_scaling.h"
-#include "imgui.h"
 
 namespace sidescopes {
 
@@ -21,17 +21,7 @@ float UiScaleController::userFactor() const
 void UiScaleController::apply(float scale)
 {
     m_scale = scale;
-    // ScaleAllSizes multiplies every size in the style, while the theme names
-    // only a handful of them, so re-theming alone leaves the rest compounding on
-    // the previous scale - and its truncation makes the compounding
-    // irreversible. The style goes back to its defaults first, built up exactly
-    // as the startup builds it, so the scale always lands on unscaled sizes.
-    ImGuiStyle& style = ImGui::GetStyle();
-    style = ImGuiStyle();
-    ImGui::StyleColorsDark();
-    applyTheme();
-    style.ScaleAllSizes(scale);
-    style.FontScaleMain = scale;
+    applyInterfaceScale(scale);
 }
 
 bool UiScaleController::refresh(GLFWwindow* window)

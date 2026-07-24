@@ -372,6 +372,7 @@ if(APPLE OR WIN32)
         src/app/hex_font.cpp
         src/app/icon_textures.cpp
         src/app/imgui_ui.cpp
+        src/app/interface_style.cpp
         src/app/layout_preset_store.cpp
         src/app/layout_presets.cpp
         src/app/overlay_render.cpp
