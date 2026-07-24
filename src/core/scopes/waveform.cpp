@@ -58,6 +58,56 @@ ModeFlags modeFlagsFor(WaveformMode mode)
     };
 }
 
+/// The planes a mode actually populates, as one contiguous range of the four.
+/// The three channel planes lead and luma trails, so every mode's working set
+/// is a range rather than a scattered set.
+struct PlaneSpan
+{
+    int first;
+    int count;
+};
+
+// Clearing, scattering, merging and correcting all four planes regardless of
+// mode costs a plane's worth of bin traffic per frame for nothing: at a wide
+// pane that is megabytes, and the plain RGB mode - the default - never draws
+// the luma plane at all. The colored-luma mode tints from the channel planes,
+// so it needs them even though it draws no RGB trace.
+PlaneSpan planeSpanFor(const ModeFlags& flags)
+{
+    if (!flags.rgb && !flags.coloredLuma) {
+        return PlaneSpan{3, 1};
+    }
+
+    return PlaneSpan{0, flags.luma ? 4 : 3};
+}
+
+/// The planes the scatter writes, resolved against a plane set whose first
+/// plane is @p firstPlane. A plane the mode does not draw stays null: the span
+/// holds no storage for it, so no pointer to it is ever formed.
+struct ScatterPlanes
+{
+    uint32_t* red = nullptr;
+    uint32_t* green = nullptr;
+    uint32_t* blue = nullptr;
+    uint32_t* luma = nullptr;
+};
+
+ScatterPlanes scatterPlanesFor(const ModeFlags& flags, uint32_t* bins, int firstPlane, std::size_t planeSize)
+{
+    const auto planeAt = [&](int index) { return bins + static_cast<std::size_t>(index - firstPlane) * planeSize; };
+    ScatterPlanes planes;
+    if (flags.rgb || flags.coloredLuma) {
+        planes.red = planeAt(0);
+        planes.green = planeAt(1);
+        planes.blue = planeAt(2);
+    }
+    if (flags.luma) {
+        planes.luma = planeAt(3);
+    }
+
+    return planes;
+}
+
 // Sum each level's population across a plane's columns.
 void sumLevelDensities(const uint32_t* in, int columns, uint64_t* global)
 {
@@ -238,9 +288,9 @@ void smoothPlane(const uint32_t* corrected, int columns, uint32_t* out)
     // big panes magnified that blur.
     //
     // Walked one level at a time with the three taps held as row pointers.
-    // Column-major traversal restreamed the whole plane once per column -
-    // megabytes, thousands of times, at a wide pane - while the arithmetic
-    // per bin is identical either way.
+    // Column-major traversal reread the whole plane once per column - at a
+    // wide pane that is megabytes restreamed thousands of times - while the
+    // arithmetic per bin is identical either way.
     for (int row = 0; row < WaveformLevels; ++row) {
         const uint32_t* self = corrected + static_cast<std::size_t>(row) * columns;
         const uint32_t* above = row > 0 ? self - columns : nullptr;
@@ -408,14 +458,11 @@ void Waveform::resize(int columns, int imageHeight)
     m_image.rgba.assign(static_cast<std::size_t>(m_columns) * m_imageHeight * 4, 0);
 }
 
-void Waveform::scatterRows(const FrameView& frame, IntRect region, int rowBegin, int rowEnd, uint32_t* bins) const
+void Waveform::scatterRows(const FrameView& frame, IntRect region, int rowBegin, int rowEnd, uint32_t* bins,
+                           int firstPlane) const
 {
     const ModeFlags flags = modeFlagsFor(m_settings.mode);
-    const std::size_t planeSize = this->planeSize();
-    uint32_t* redPlane = bins;
-    uint32_t* greenPlane = bins + planeSize;
-    uint32_t* bluePlane = bins + 2 * planeSize;
-    uint32_t* lumaPlane = bins + 3 * planeSize;
+    const ScatterPlanes planes = scatterPlanesFor(flags, bins, firstPlane, planeSize());
 
     const int stride = m_settings.samplingStride;
     for (int i = rowBegin; i < rowEnd; ++i) {
@@ -440,9 +487,9 @@ void Waveform::scatterRows(const FrameView& frame, IntRect region, int rowBegin,
                 line[next] += rightWeight;
             };
             if (flags.rgb) {
-                splat(redPlane, r);
-                splat(greenPlane, g);
-                splat(bluePlane, b);
+                splat(planes.red, r);
+                splat(planes.green, g);
+                splat(planes.blue, b);
             }
             if (flags.coloredLuma) {
                 // The luma plane carries the density; the channel
@@ -455,12 +502,12 @@ void Waveform::scatterRows(const FrameView& frame, IntRect region, int rowBegin,
                     line[column] += leftWeight * value;
                     line[next] += rightWeight * value;
                 };
-                tintSplat(redPlane, static_cast<uint32_t>(r));
-                tintSplat(greenPlane, static_cast<uint32_t>(g));
-                tintSplat(bluePlane, static_cast<uint32_t>(b));
-                splat(lumaPlane, level);
+                tintSplat(planes.red, static_cast<uint32_t>(r));
+                tintSplat(planes.green, static_cast<uint32_t>(g));
+                tintSplat(planes.blue, static_cast<uint32_t>(b));
+                splat(planes.luma, level);
             } else if (flags.luma) {
-                splat(lumaPlane, luma709(r, g, b));
+                splat(planes.luma, luma709(r, g, b));
             }
         }
     }
@@ -472,21 +519,24 @@ void Waveform::accumulate(const FrameView& frame, IntRect region)
     const int stride = m_settings.samplingStride;
     const int rowCount = region.empty() ? 0 : (region.height + stride - 1) / stride;
 
+    const PlaneSpan span = planeSpanFor(modeFlagsFor(m_settings.mode));
+    const std::size_t spanOffset = static_cast<std::size_t>(span.first) * planeSize();
+    const std::size_t spanCount = static_cast<std::size_t>(span.count) * planeSize();
+
     const int chunks = parallelChunkCount(rowCount, AccumulateRowsPerChunk);
     if (chunks <= 1) {
-        std::fill(m_bins.begin(), m_bins.end(), 0u);
-        scatterRows(frame, region, 0, rowCount, m_bins.data());
+        std::fill_n(m_bins.data() + spanOffset, spanCount, uint32_t{0});
+        scatterRows(frame, region, 0, rowCount, m_bins.data() + spanOffset, span.first);
     } else {
         // Each chunk owns a private plane set it clears and scatters into;
         // integer addition then merges them back to a bit-exact total.
-        const std::size_t binCount = m_bins.size();
-        m_threadBins.resize(binCount * static_cast<std::size_t>(chunks));
+        m_threadBins.resize(spanCount * static_cast<std::size_t>(chunks));
         runParallelChunks(chunks, rowCount, [&](int chunk, int begin, int end) {
-            uint32_t* bins = m_threadBins.data() + static_cast<std::size_t>(chunk) * binCount;
-            std::fill_n(bins, binCount, uint32_t{0});
-            scatterRows(frame, region, begin, end, bins);
+            uint32_t* bins = m_threadBins.data() + static_cast<std::size_t>(chunk) * spanCount;
+            std::fill_n(bins, spanCount, uint32_t{0});
+            scatterRows(frame, region, begin, end, bins, span.first);
         });
-        mergeBins(m_threadBins.data(), binCount, chunks, m_bins.data());
+        mergeBins(m_threadBins.data(), spanCount, chunks, m_bins.data() + spanOffset);
     }
 
     // A column receives one sample per sampled row, so the sampled-row count
@@ -550,7 +600,11 @@ void Waveform::correctBinDensities()
     const std::size_t planeSize = this->planeSize();
     m_smoothed.resize(m_bins.size());
     m_corrected.resize(planeSize);
-    for (int plane = 0; plane < 4; ++plane) {
+    // Only the mode's own planes: a plane it does not draw holds no counts,
+    // and correcting one is the whole per-frame cost of a plane spent on an
+    // image nothing reads.
+    const PlaneSpan span = planeSpanFor(modeFlagsFor(m_settings.mode));
+    for (int plane = span.first; plane < span.first + span.count; ++plane) {
         const uint32_t* in = m_bins.data() + static_cast<std::size_t>(plane) * planeSize;
         uint32_t* out = m_smoothed.data() + static_cast<std::size_t>(plane) * planeSize;
 

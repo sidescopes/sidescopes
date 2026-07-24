@@ -65,7 +65,11 @@ public:
 
 private:
     void resize(int columns, int imageHeight);
-    void scatterRows(const FrameView& frame, IntRect region, int rowBegin, int rowEnd, uint32_t* bins) const;
+    /// Folds sampled rows [@p rowBegin, @p rowEnd) into @p bins, which points
+    /// at plane @p firstPlane of a plane set laid out like m_bins from there
+    /// on. Only the planes the active mode draws are written.
+    void scatterRows(const FrameView& frame, IntRect region, int rowBegin, int rowEnd, uint32_t* bins,
+                     int firstPlane) const;
     void mapBinsToImage(uint64_t sampledRows);
     void correctBinDensities();
     void buildParade(const uint32_t* redPlane, const uint32_t* greenPlane, const uint32_t* bluePlane);
