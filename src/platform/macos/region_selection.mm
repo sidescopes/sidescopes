@@ -106,24 +106,32 @@ NSWindow* g_borderWindow = nil;
 constexpr double BorderAppearSeconds = 0.12;
 constexpr double BorderSettlePoints = 16.0;
 NSRect g_borderTarget = {{0, 0}, {0, 0}};
+/// The size the border band was last painted at. A snap that only moves the
+/// window - the band content is identical - repositions without a redraw; only
+/// a size change forces the band to draw again.
+NSSize g_borderPaintedSize = {0, 0};
 
 void snapBorderFrame(NSRect labelled)
 {
     // The settle onto a moved place, at full opacity: the macOS twin of the
-    // Windows present line, minus the repaint flag AppKit has no analog for.
-    SS_DIAG(Border, "present pos=%ld,%ld size=%ldx%ld alpha=255", static_cast<long>(labelled.origin.x),
+    // Windows present line, now carrying the same repaint flag - a pure move
+    // repositions the drawn band, only a resize redraws it.
+    const BOOL redraw = !NSEqualSizes(labelled.size, g_borderPaintedSize);
+    g_borderPaintedSize = labelled.size;
+    SS_DIAG(Border, "present pos=%ld,%ld size=%ldx%ld repaint=%d alpha=255", static_cast<long>(labelled.origin.x),
             static_cast<long>(labelled.origin.y), static_cast<long>(labelled.size.width),
-            static_cast<long>(labelled.size.height));
+            static_cast<long>(labelled.size.height), redraw ? 1 : 0);
     // A zero-duration group replaces any in-flight entrance animation on
     // BOTH properties. A direct setFrame loses to a running animator frame
     // animation - the window ends at the animation's stale target, and a
     // label strip that arrived meanwhile is clipped off the top, drawing
-    // the region a strip short.
+    // the region a strip short. display: rides the repaint flag: a same-size
+    // move keeps the drawn band, so only a resize asks the view to redraw.
     [NSAnimationContext
         runAnimationGroup:^(NSAnimationContext* context) {
           context.duration = 0;
           g_borderWindow.animator.alphaValue = 1.0;
-          [g_borderWindow.animator setFrame:labelled display:YES];
+          [g_borderWindow.animator setFrame:labelled display:redraw];
         }
         completionHandler:nil];
 }
@@ -131,6 +139,9 @@ void snapBorderFrame(NSRect labelled)
 void animateBorderAppear(NSRect labelled)
 {
     g_borderTarget = labelled;
+    // The entrance draws the band at its full size; a later same-size snap is
+    // then a pure move.
+    g_borderPaintedSize = labelled.size;
     // The entrance seam. The Windows border logs one advance line per
     // WM_TIMER tick of the fade; the macOS entrance is Core-Animation-driven
     // with no per-step callback, so the analog is one line at the start,
