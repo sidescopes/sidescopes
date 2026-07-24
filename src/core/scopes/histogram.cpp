@@ -32,6 +32,55 @@ double splineHeight(const double* plane, int center, const CatmullRomWeights<dou
     return std::clamp(height, 0.0, panelHeight);
 }
 
+// The fill's top edge fades over a few rows rather than one: the pane can
+// magnify the plot, and a single-pixel edge would come back as a ladder on
+// the slopes.
+constexpr double Feather = 2.5;
+
+/// Where one column's fill sits for one channel: the top edge in fractional
+/// rows, and the half-open row range it touches. An empty range is a column
+/// the channel does not reach.
+struct ColumnEdge
+{
+    double top = 0.0;
+    int firstRow = 0;
+    int lastRow = 0;
+};
+
+/// Where every column's fill starts and stops, per channel, laid out channel
+/// by channel. The filled area under a Catmull-Rom spline through the bin
+/// heights, evaluated per image column: a plotted function with no kinks at
+/// the bins. Resolving the edges first is what lets the fill run row by row.
+std::vector<ColumnEdge> columnEdges(const std::vector<double>& heights, int width, int height, bool split)
+{
+    const int bandHeight = split ? height / 3 : height;
+    std::vector<ColumnEdge> edges(static_cast<std::size_t>(width) * 3);
+    for (int x = 0; x < width; ++x) {
+        const double binPosition = std::clamp((x + 0.5) * Histogram::Bins / width - 0.5, 0.0, Histogram::Bins - 1.0);
+        const int center = static_cast<int>(binPosition);
+        const CatmullRomWeights<double> weights = catmullRomWeights(binPosition - center);
+        for (int channel = 0; channel < 3; ++channel) {
+            const double* plane = heights.data() + static_cast<std::ptrdiff_t>(channel) * Histogram::Bins;
+            double columnHeight = splineHeight(plane, center, weights, static_cast<double>(height));
+            if (split) {
+                columnHeight /= 3.0;
+            }
+            if (columnHeight <= 0.0) {
+                continue;
+            }
+            // Red on top, then green, then blue, when split.
+            const int bandBottom = split ? (channel + 1) * bandHeight : height;
+            const double top = bandBottom - columnHeight;
+            ColumnEdge& edge = edges[static_cast<std::size_t>(channel) * width + x];
+            edge.top = top;
+            edge.firstRow = std::max(bandBottom - bandHeight, static_cast<int>(std::floor(top - Feather)));
+            edge.lastRow = bandBottom;
+        }
+    }
+
+    return edges;
+}
+
 }  // namespace
 
 Histogram::Histogram()
@@ -172,55 +221,44 @@ void Histogram::exportOutline(const std::vector<double>& heights)
 
 void Histogram::renderFill(const std::vector<double>& heights)
 {
-    // The filled area under a Catmull-Rom spline through the bin heights,
-    // evaluated per image column with a fractional-coverage top pixel: a
-    // plotted function with no kinks at the bins.
+    // Combined: three channels overlaid over the full height. Per channel:
+    // three stacked bands, each holding one channel's plot. The texture
+    // carries only the dim solid fill - overlaps sum per component, so two
+    // fills make a dim secondary and all three a quiet neutral gray. The
+    // bright outline is NOT baked here: the pane stretches this texture
+    // anisotropically, which would render any baked stroke thick on flats and
+    // thin on slopes; the interface strokes the exported curve at display
+    // resolution instead.
     //
-    // Combined: three channels overlaid over the full height. Per
-    // channel: three stacked bands, each holding one channel's plot.
-    // The texture carries only the dim solid fill - overlaps sum per
-    // component, so two fills make a dim secondary and all three a
-    // quiet neutral gray. The bright outline is NOT baked here: the
-    // pane stretches this texture anisotropically, which would render
-    // any baked stroke thick on flats and thin on slopes; the interface
-    // strokes the exported curve at display resolution instead.
-    const bool split = m_settings.style == HistogramStyle::PerChannel;
-    const int bandHeight = split ? m_height / 3 : m_height;
+    // Written a row at a time. Walking columns instead meant every store in a
+    // column landed a row-stride apart - kilobytes, for adjacent writes - and
+    // opaque alpha was stamped one strided byte per pixel; now the clear lays
+    // it down along the buffer and the fill runs along each row.
     constexpr double FillValue = 118.0;
-    std::fill(m_image.rgba.begin(), m_image.rgba.end(), uint8_t{0});
-    for (int x = 0; x < m_width; ++x) {
-        const double binPosition = std::clamp((x + 0.5) * Bins / m_width - 0.5, 0.0, Bins - 1.0);
-        const int center = static_cast<int>(binPosition);
-        const double t = binPosition - center;
-        const CatmullRomWeights<double> weights = catmullRomWeights(t);
+    const bool split = m_settings.style == HistogramStyle::PerChannel;
+    const std::vector<ColumnEdge> edges = columnEdges(heights, m_width, m_height, split);
+    for (std::size_t i = 0; i + 3 < m_image.rgba.size(); i += 4) {
+        m_image.rgba[i] = 0;
+        m_image.rgba[i + 1] = 0;
+        m_image.rgba[i + 2] = 0;
+        m_image.rgba[i + 3] = 255;
+    }
+    for (int row = 0; row < m_height; ++row) {
+        uint8_t* line = m_image.rgba.data() + static_cast<std::size_t>(row) * m_width * 4;
         for (int channel = 0; channel < 3; ++channel) {
-            const double* plane = heights.data() + static_cast<std::ptrdiff_t>(channel) * Bins;
-            double height = splineHeight(plane, center, weights, static_cast<double>(m_height));
-            if (split) {
-                height /= 3.0;
-            }
-            if (height <= 0.0) {
-                continue;
-            }
-            // Red on top, then green, then blue, when split.
-            const int bandBottom = split ? (channel + 1) * bandHeight : m_height;
-            // The fill's top edge fades over a few rows rather than one:
-            // the pane can magnify the plot, and a single-pixel edge
-            // would come back as a ladder on the slopes.
-            constexpr double Feather = 2.5;
-            const double top = bandBottom - height;
-            const int firstTouched = std::max(bandBottom - bandHeight, static_cast<int>(std::floor(top - Feather)));
-            for (int row = firstTouched; row < bandBottom; ++row) {
-                const double coverage = std::clamp((row + 1.0 - top) / Feather, 0.0, 1.0);
+            const ColumnEdge* channelEdges = edges.data() + static_cast<std::size_t>(channel) * m_width;
+            for (int x = 0; x < m_width; ++x) {
+                const ColumnEdge& edge = channelEdges[x];
+                if (row < edge.firstRow || row >= edge.lastRow) {
+                    continue;
+                }
+                const double coverage = std::clamp((row + 1.0 - edge.top) / Feather, 0.0, 1.0);
                 if (coverage <= 0.0) {
                     continue;
                 }
-                uint8_t* pixel = &m_image.rgba[(static_cast<std::size_t>(row) * m_width + x) * 4 + channel];
+                uint8_t* pixel = line + static_cast<std::size_t>(x) * 4 + channel;
                 *pixel = static_cast<uint8_t>(std::max<double>(*pixel, FillValue * coverage));
             }
-        }
-        for (int row = 0; row < m_height; ++row) {
-            m_image.rgba[(static_cast<std::size_t>(row) * m_width + x) * 4 + 3] = 255;
         }
     }
 }
