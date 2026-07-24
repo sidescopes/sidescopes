@@ -100,6 +100,7 @@ endforeach()
 add_executable(sidescopes_ui_layout_tests
     test_layout_ui.cpp
     ui_test_harness.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/interface_style.cpp
     ${CMAKE_SOURCE_DIR}/src/app/row_layout.cpp)
 target_include_directories(sidescopes_ui_layout_tests PRIVATE ${CMAKE_SOURCE_DIR}/src)
 target_link_libraries(sidescopes_ui_layout_tests PRIVATE sidescopes_imgui_test_engine)

@@ -17,6 +17,7 @@
 #include <vector>
 
 #define IMGUI_DEFINE_MATH_OPERATORS
+#include "app/interface_style.h"
 #include "app/row_layout.h"
 #include "imgui.h"
 #include "imgui_internal.h"
@@ -164,6 +165,43 @@ void rowOriginIgnoresWhichElementComesFirst(ImGuiTestContext* ctx)
     IM_CHECK_EQ(rowProbe().toolFirst, rowProbe().textFirst);
 }
 
+/// SYMPTOM IF BROKEN: a row seats correctly at 100% but an icon or a line of
+/// text drifts off the shared centre line at another interface scale - the
+/// "fine on my display, wrong on a HiDPI one" class the interface-scale bug was.
+///
+/// The seating rules are ratios, not pixel constants, so they must hold at every
+/// scale the UI Scaling menu offers. Each scale rebuilds the style and font; a
+/// frame applies them, the font-height guard proves the scale really took (so a
+/// no-op would not make the rest vacuous), then the same invariants are checked.
+void seatingHoldsAtEveryScale(ImGuiTestContext* ctx)
+{
+    const ImGuiStyle saved = ImGui::GetStyle();
+
+    applyInterfaceScale(1.0f);
+    ctx->Yield();
+    const float baseLine = ImGui::GetTextLineHeight();
+
+    for (const float scale : {0.5f, 1.5f, 2.0f}) {
+        applyInterfaceScale(scale);
+        ctx->Yield();
+
+        // The scaled font actually took effect; without this the checks below
+        // would pass trivially at the unscaled size.
+        IM_CHECK_LE(std::fabs(ImGui::GetTextLineHeight() - baseLine * scale), 1.0f);
+
+        const float side = ImGui::GetTextLineHeight();
+        const ImVec2 min(0.0f, 0.0f);
+        const ImVec2 max(iconButtonWidth(), iconButtonHeight());
+        const ImVec2 glyph = iconGlyphOrigin(min, max, side);
+        IM_CHECK_EQ(glyph.x, std::floor(glyph.x));
+        IM_CHECK_EQ(glyph.y, std::floor(glyph.y));
+        IM_CHECK_EQ(glyph.y - min.y, rowTextDrop());
+    }
+
+    ImGui::GetStyle() = saved;
+    ctx->Yield();
+}
+
 void registerLayoutTests(ImGuiTestEngine* engine)
 {
     ImGuiTest* wholePixels = IM_REGISTER_TEST(engine, "layout", "glyph_seats_on_whole_pixels");
@@ -181,6 +219,9 @@ void registerLayoutTests(ImGuiTestEngine* engine)
     ImGuiTest* origin = IM_REGISTER_TEST(engine, "layout", "row_origin_ignores_first_element");
     origin->GuiFunc = rowOriginGui;
     origin->TestFunc = rowOriginIgnoresWhichElementComesFirst;
+
+    ImGuiTest* scaled = IM_REGISTER_TEST(engine, "layout", "seating_holds_at_every_scale");
+    scaled->TestFunc = seatingHoldsAtEveryScale;
 }
 
 }  // namespace
@@ -190,5 +231,5 @@ int main()
 {
     using namespace sidescopes;
 
-    return uitest::runSuite("layout", registerLayoutTests, /*expectedTests=*/5);
+    return uitest::runSuite("layout", registerLayoutTests, /*expectedTests=*/6);
 }
