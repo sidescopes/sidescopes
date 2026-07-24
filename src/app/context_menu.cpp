@@ -123,16 +123,17 @@ void appendScopeOptions(const ContextMenuModel& model, std::string_view id, bool
 void appendScopesSubmenu(const ContextMenuModel& model, std::vector<NativeMenuItem>& menu)
 {
     menuSubmenu(menu, "Scopes");
-    menuAction(menu, "Vectorscope", MenuShowVectorscope, model.view.stack().shows(VectorscopeScopeId),
-               shortcutLabel(model.shortcuts.bindingFor(VectorscopeScopeId)));
-    menuAction(menu, "Waveform", MenuShowWaveform, model.view.stack().shows(WaveformScopeId),
-               shortcutLabel(model.shortcuts.bindingFor(WaveformScopeId)));
-    menuAction(menu, "RGB Parade", MenuShowWaveformParade, model.view.stack().shows(ParadeScopeId),
-               shortcutLabel(model.shortcuts.bindingFor(ParadeScopeId)));
-    menuAction(menu, "Histogram", MenuShowHistogram, model.view.stack().shows(HistogramScopeId),
-               shortcutLabel(model.shortcuts.bindingFor(HistogramScopeId)));
-    menuAction(menu, "Color Picker", MenuShowColorPicker, model.view.stack().shows(ColorPickerScopeId),
-               shortcutLabel(model.shortcuts.bindingFor(ColorPickerScopeId)));
+    // Every registered scope gets an entry, keyed by its registry index, so a
+    // new module appears here with no edit. A module scope names itself; the
+    // one host scope (the colour picker, which carries no descriptor) is the
+    // single exception.
+    const std::vector<HostScope>& scopes = model.registry.scopes();
+    for (std::size_t index = 0; index < scopes.size(); ++index) {
+        const HostScope& scope = scopes[index];
+        const char* name = scope.descriptor != nullptr ? scope.descriptor->name : "Color Picker";
+        menuAction(menu, name, MenuShowScopeBase + static_cast<int>(index), model.view.stack().shows(scope.id),
+                   shortcutLabel(model.shortcuts.bindingFor(scope.id)));
+    }
     menuEndSubmenu(menu);
 }
 

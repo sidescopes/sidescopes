@@ -815,24 +815,12 @@ void App::dispatchMenuChoice(int chosen, const std::vector<ParamMenuAction>& par
 
 void App::dispatchScopeToggleMenu(int chosen)
 {
-    switch (chosen) {
-    case MenuShowVectorscope:
-        toggleScope(VectorscopeScopeId);
-        break;
-    case MenuShowWaveform:
-        toggleScope(WaveformScopeId);
-        break;
-    case MenuShowWaveformParade:
-        toggleScope(ParadeScopeId);
-        break;
-    case MenuShowHistogram:
-        toggleScope(HistogramScopeId);
-        break;
-    case MenuShowColorPicker:
-        toggleScope(ColorPickerScopeId);
-        break;
-    default:
-        break;
+    // The scope-toggle ids carry the scope's registry index, so this resolves
+    // any registered scope without naming one.
+    const int index = chosen - MenuShowScopeBase;
+    const std::vector<HostScope>& scopes = m_scopeRegistry.scopes();
+    if (index >= 0 && index < static_cast<int>(scopes.size())) {
+        toggleScope(scopes[static_cast<std::size_t>(index)].id);
     }
 }
 

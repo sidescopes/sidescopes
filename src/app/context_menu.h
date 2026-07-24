@@ -20,11 +20,6 @@ namespace sidescopes {
 /// resolved through a per-open side table, never through this enum.
 enum MenuAction
 {
-    MenuShowVectorscope = 1,
-    MenuShowWaveform,
-    MenuShowWaveformParade,
-    MenuShowHistogram,
-    MenuShowColorPicker,
     MenuDrawRegion = 25,
     MenuAttachFace,
     MenuZoom1,
@@ -53,6 +48,10 @@ enum MenuAction
     MenuSavePresetBase = 80,
     // Interface-size ids are MenuUiScaleBase + the UiScaleSteps index.
     MenuUiScaleBase = 90,
+    // Scope-toggle ids are MenuShowScopeBase + the scope's index in the
+    // registry, so every registered scope gets a menu entry with no hardcoded
+    // list. Clear of ParamMenuActionBase.
+    MenuShowScopeBase = 100,
 };
 
 /// The read-only snapshot the context-menu builder reads from the app: the view

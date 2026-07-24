@@ -25,25 +25,16 @@ struct ScopeChrome
     const char* extra;
 };
 
-ScopeChrome scopeChromeFor(std::string_view id)
+ScopeChrome scopeChromeFor(const HostScope& scope)
 {
-    if (id == VectorscopeScopeId) {
-        return {"##toggle-vectorscope", "Vectorscope", ""};
-    }
-    if (id == WaveformScopeId) {
-        return {"##toggle-waveform", "Waveform", "; styles in the right-click menu"};
-    }
-    if (id == ParadeScopeId) {
-        return {"##toggle-waveform-parade", "RGB parade", ""};
-    }
-    if (id == HistogramScopeId) {
-        return {"##toggle-histogram", "Histogram", ""};
-    }
-    if (id == NeutralScopeId) {
-        return {"##toggle-neutral", "Neutral", ""};
-    }
+    // The scope names its own chip through its descriptor; the one host scope
+    // (the colour picker, no descriptor) is the exception. The button id is
+    // shared because each chip is already scoped by PushID(scope.id). The
+    // waveform's style hint is its one per-scope tooltip suffix.
+    const char* name = scope.descriptor != nullptr ? scope.descriptor->name : "Color picker";
+    const char* extra = scope.id == WaveformScopeId ? "; styles in the right-click menu" : "";
 
-    return {"##toggle-color-picker", "Color picker", ""};
+    return {"##scope-toggle", name, extra};
 }
 
 }  // namespace
@@ -77,7 +68,7 @@ PaneRenderOutcome Toolbar::drawScopeToggles(bool stackModifier)
         // id (every scope without its own case falls back to one) can never
         // collide with another chip.
         ImGui::PushID(scope.id.c_str());
-        const ScopeChrome chrome = scopeChromeFor(scope.id);
+        const ScopeChrome chrome = scopeChromeFor(scope);
         const char letter[2] = {scope.letter, '\0'};
         if (scopeToggleButton(chrome.buttonId, letter, m_view.stack().shows(scope.id),
                               scopeTooltip(chrome.name, m_shortcuts.bindingFor(scope.id), chrome.extra))) {
