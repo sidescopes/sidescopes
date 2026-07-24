@@ -44,6 +44,7 @@
 #include "app/scope_view.h"
 #include "app/settings_window.h"
 #include "app/ui_scale.h"
+#include "app/ui_scaling.h"
 #include "app/version.h"
 #include "app/window_suggestions.h"
 #include "core/analysis_worker.h"
@@ -636,6 +637,7 @@ void App::drawFrameUi()
 
     ImGui::End();
     ImGui::PopStyleVar();
+    applyPendingUiScale();
 
     const SettingsContext settingsCtx{m_showSettings,  m_view,   m_analysis,    m_analysisDirty,
                                       m_scopeRegistry, m_output, m_versionInfo, m_captureController.status()};
@@ -956,7 +958,22 @@ void App::dispatchLayoutMenu(int chosen)
 
 void App::dispatchUiScaleMenu(int chosen)
 {
-    m_uiScale.selectStep(chosen - MenuUiScaleBase, m_window);
+    // Only record the step here - the native menu runs inside the host window's
+    // WindowPadding push, and selectStep rebuilds the whole style. applyPending-
+    // UiScale runs it once that push is popped.
+    const int step = chosen - MenuUiScaleBase;
+    if (step >= 0 && step < static_cast<int>(UiScaleSteps.size())) {
+        m_pendingUiScaleStep = step;
+    }
+}
+
+void App::applyPendingUiScale()
+{
+    if (m_pendingUiScaleStep < 0) {
+        return;
+    }
+    m_uiScale.selectStep(m_pendingUiScaleStep, m_window);
+    m_pendingUiScaleStep = -1;
 }
 
 void App::commitAnalysisChanges()

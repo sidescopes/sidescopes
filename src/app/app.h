@@ -160,6 +160,11 @@ private:
     // --- frame UI ---
     void drawFrameUi();
     static void beginHostWindow();
+    /// Applies an interface-size step chosen from the context menu, deferred to
+    /// after the host window's PopStyleVar. Applying it inside that push - where
+    /// the menu runs - rebuilds the whole style, and the matching pop then
+    /// restores the pre-change WindowPadding over it. A no-op when none is due.
+    void applyPendingUiScale();
     /// Applies a pane-render outcome to host state: a chosen scope comes on
     /// screen, the reset tool drops every region, and the clocks the shell
     /// shares are stamped. The renderer has already drawn the frame and driven
@@ -209,6 +214,9 @@ private:
     /// Owns the factor the interface is drawn at and the user's size
     /// preference folded into it.
     UiScaleController m_uiScale;
+    /// The interface-size step the context menu chose this frame, or -1. Held
+    /// until applyPendingUiScale runs it past the host window's PopStyleVar.
+    int m_pendingUiScaleStep = -1;
 
     FrameMailbox m_mailbox;
     AnalysisWorker m_worker;
