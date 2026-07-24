@@ -45,6 +45,24 @@ constexpr double PinCursorGap = 2.0;
 constexpr double PinSwatchOffset = 7.0;  // from the hotspot, points
 constexpr double PinSwatchSize = 13.0;
 
+// The crosshair's four arms, drawn in one pass at one width and tone; the
+// two-tone look comes from a wide dark pass under a narrow light one.
+void strokePinCrosshair(CGFloat centerX, CGFloat centerY, CGFloat width, NSColor* tone)
+{
+    NSBezierPath* arms = [NSBezierPath bezierPath];
+    arms.lineWidth = width;
+    [arms moveToPoint:NSMakePoint(centerX, centerY + PinCursorGap)];
+    [arms lineToPoint:NSMakePoint(centerX, centerY + PinCursorArm)];
+    [arms moveToPoint:NSMakePoint(centerX, centerY - PinCursorGap)];
+    [arms lineToPoint:NSMakePoint(centerX, centerY - PinCursorArm)];
+    [arms moveToPoint:NSMakePoint(centerX + PinCursorGap, centerY)];
+    [arms lineToPoint:NSMakePoint(centerX + PinCursorArm, centerY)];
+    [arms moveToPoint:NSMakePoint(centerX - PinCursorGap, centerY)];
+    [arms lineToPoint:NSMakePoint(centerX - PinCursorArm, centerY)];
+    [tone setStroke];
+    [arms stroke];
+}
+
 NSCursor* buildPinCursor(const std::optional<FloatColor>& color)
 {
     const CGFloat side = PinCursorHotspot + PinSwatchOffset + PinSwatchSize + 2;
@@ -55,22 +73,8 @@ NSCursor* buildPinCursor(const std::optional<FloatColor>& color)
     // top, the swatch hangs below-right of it.
     const CGFloat centerX = PinCursorHotspot;
     const CGFloat centerY = side - PinCursorHotspot;
-    const auto stroke = [&](CGFloat width, NSColor* tone) {
-        NSBezierPath* arms = [NSBezierPath bezierPath];
-        arms.lineWidth = width;
-        [arms moveToPoint:NSMakePoint(centerX, centerY + PinCursorGap)];
-        [arms lineToPoint:NSMakePoint(centerX, centerY + PinCursorArm)];
-        [arms moveToPoint:NSMakePoint(centerX, centerY - PinCursorGap)];
-        [arms lineToPoint:NSMakePoint(centerX, centerY - PinCursorArm)];
-        [arms moveToPoint:NSMakePoint(centerX + PinCursorGap, centerY)];
-        [arms lineToPoint:NSMakePoint(centerX + PinCursorArm, centerY)];
-        [arms moveToPoint:NSMakePoint(centerX - PinCursorGap, centerY)];
-        [arms lineToPoint:NSMakePoint(centerX - PinCursorArm, centerY)];
-        [tone setStroke];
-        [arms stroke];
-    };
-    stroke(3.2, [NSColor colorWithWhite:0.1 alpha:0.85]);
-    stroke(1.5, [NSColor colorWithWhite:0.8 alpha:0.95]);
+    strokePinCrosshair(centerX, centerY, 3.2, [NSColor colorWithWhite:0.1 alpha:0.85]);
+    strokePinCrosshair(centerX, centerY, 1.5, [NSColor colorWithWhite:0.8 alpha:0.95]);
     if (color) {
         const NSRect swatch = NSMakeRect(centerX + PinSwatchOffset, centerY - PinSwatchOffset - PinSwatchSize,
                                          PinSwatchSize, PinSwatchSize);

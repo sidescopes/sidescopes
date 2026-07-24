@@ -5,6 +5,26 @@
 #include "platform/desktop.h"
 
 namespace sidescopes {
+namespace {
+
+// Clickable link text in the accent color, underlined, opening the
+// destination in the default browser; the tooltip names the URL.
+void drawLink(const char* text, const char* url)
+{
+    const ImVec4 accent = ImGui::GetStyleColorVec4(ImGuiCol_CheckMark);
+    ImGui::PushStyleColor(ImGuiCol_Text, accent);
+    ImGui::TextUnformatted(text);
+    ImGui::PopStyleColor();
+    const ImVec2 lo = ImGui::GetItemRectMin();
+    const ImVec2 hi = ImGui::GetItemRectMax();
+    ImGui::GetWindowDrawList()->AddLine(ImVec2(lo.x, hi.y), ImVec2(hi.x, hi.y), ImGui::GetColorU32(accent));
+    if (ImGui::IsItemClicked()) {
+        openUrl(url);
+    }
+    wrappedTooltip(url);
+}
+
+}  // namespace
 
 void AboutWindow::open()
 {
@@ -25,23 +45,8 @@ void AboutWindow::draw(const VersionInfo& version)
     }
     wrappedTooltip("click to copy");
     ImGui::Separator();
-    // Clickable link text in the accent color, underlined, opening the
-    // destination in the default browser; the tooltip names the URL.
-    const auto link = [](const char* text, const char* url) {
-        const ImVec4 accent = ImGui::GetStyleColorVec4(ImGuiCol_CheckMark);
-        ImGui::PushStyleColor(ImGuiCol_Text, accent);
-        ImGui::TextUnformatted(text);
-        ImGui::PopStyleColor();
-        const ImVec2 lo = ImGui::GetItemRectMin();
-        const ImVec2 hi = ImGui::GetItemRectMax();
-        ImGui::GetWindowDrawList()->AddLine(ImVec2(lo.x, hi.y), ImVec2(hi.x, hi.y), ImGui::GetColorU32(accent));
-        if (ImGui::IsItemClicked()) {
-            openUrl(url);
-        }
-        wrappedTooltip(url);
-    };
-    link("sidescopes.org", "https://sidescopes.org");
-    link("github.com/sidescopes/sidescopes", "https://github.com/sidescopes/sidescopes");
+    drawLink("sidescopes.org", "https://sidescopes.org");
+    drawLink("github.com/sidescopes/sidescopes", "https://github.com/sidescopes/sidescopes");
     ImGui::Separator();
     ImGui::TextDisabled("GPL-3.0-or-later");
     ImGui::End();

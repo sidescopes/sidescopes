@@ -218,31 +218,34 @@ void paintBorderEdgeRing(Gdiplus::Graphics& canvas, const Gdiplus::RectF& region
         &dashPen, Gdiplus::RectF(region.X - ring / 2, region.Y - ring / 2, region.Width + ring, region.Height + ring));
 }
 
+// One handle dot: a light circle over a dark rim, centered on the point.
+void paintHandleDot(Gdiplus::Graphics& canvas, Gdiplus::REAL x, Gdiplus::REAL y, double scale)
+{
+    const auto radius = static_cast<Gdiplus::REAL>(HandleRadius * scale);
+    const Gdiplus::RectF circle(x - radius, y - radius, radius * 2, radius * 2);
+    Gdiplus::SolidBrush fill(Gdiplus::Color(255, 199, 199, 199));
+    canvas.FillEllipse(&fill, circle);
+    // A dark rim beneath the near-white ring keeps the dot visible on
+    // a bright sky; the ring matches the measurement line, so the dots
+    // and the line read as one instrument.
+    Gdiplus::Pen rim(Gdiplus::Color(179, 26, 26, 26), static_cast<Gdiplus::REAL>(2.0 * scale));
+    canvas.DrawEllipse(&rim, circle);
+    Gdiplus::Pen bright(Gdiplus::Color(242, 247, 247, 247), static_cast<Gdiplus::REAL>(1.0 * scale));
+    canvas.DrawEllipse(&bright, circle);
+}
+
 // Eight handle dots - corners and edge midpoints - centered on the
 // measurement line: small gray circles straddling the selection edge.
 void paintBorderHandles(Gdiplus::Graphics& canvas, const Gdiplus::RectF& region, double scale)
 {
-    const auto radius = static_cast<Gdiplus::REAL>(HandleRadius * scale);
-    const auto handle = [&](Gdiplus::REAL x, Gdiplus::REAL y) {
-        const Gdiplus::RectF circle(x - radius, y - radius, radius * 2, radius * 2);
-        Gdiplus::SolidBrush fill(Gdiplus::Color(255, 199, 199, 199));
-        canvas.FillEllipse(&fill, circle);
-        // A dark rim beneath the near-white ring keeps the dot visible on
-        // a bright sky; the ring matches the measurement line, so the dots
-        // and the line read as one instrument.
-        Gdiplus::Pen rim(Gdiplus::Color(179, 26, 26, 26), static_cast<Gdiplus::REAL>(2.0 * scale));
-        canvas.DrawEllipse(&rim, circle);
-        Gdiplus::Pen bright(Gdiplus::Color(242, 247, 247, 247), static_cast<Gdiplus::REAL>(1.0 * scale));
-        canvas.DrawEllipse(&bright, circle);
-    };
-    handle(region.X, region.Y);
-    handle(region.X + region.Width / 2, region.Y);
-    handle(region.GetRight(), region.Y);
-    handle(region.X, region.Y + region.Height / 2);
-    handle(region.GetRight(), region.Y + region.Height / 2);
-    handle(region.X, region.GetBottom());
-    handle(region.X + region.Width / 2, region.GetBottom());
-    handle(region.GetRight(), region.GetBottom());
+    paintHandleDot(canvas, region.X, region.Y, scale);
+    paintHandleDot(canvas, region.X + region.Width / 2, region.Y, scale);
+    paintHandleDot(canvas, region.GetRight(), region.Y, scale);
+    paintHandleDot(canvas, region.X, region.Y + region.Height / 2, scale);
+    paintHandleDot(canvas, region.GetRight(), region.Y + region.Height / 2, scale);
+    paintHandleDot(canvas, region.X, region.GetBottom(), scale);
+    paintHandleDot(canvas, region.X + region.Width / 2, region.GetBottom(), scale);
+    paintHandleDot(canvas, region.GetRight(), region.GetBottom(), scale);
 }
 
 // The hover-revealed close button, in the handles' own visual

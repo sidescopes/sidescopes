@@ -21,6 +21,28 @@ RegionOfInterest g_borderEditRegion;
 
 }  // namespace sidescopes
 
+namespace {
+
+// One handle dot: a light circle over a dark rim, centered on the point.
+void drawHandleDot(CGFloat x, CGFloat y)
+{
+    const NSRect circle = NSMakeRect(x - sidescopes::HandleRadius, y - sidescopes::HandleRadius,
+                                     sidescopes::HandleRadius * 2, sidescopes::HandleRadius * 2);
+    NSBezierPath* dot = [NSBezierPath bezierPathWithOvalInRect:circle];
+    [[NSColor colorWithWhite:0.78 alpha:1.0] setFill];
+    [dot fill];
+    // A dark rim beneath the near-white ring keeps the dot visible on a
+    // bright sky; the ring matches the measurement line.
+    [[NSColor colorWithWhite:0.1 alpha:0.7] setStroke];
+    dot.lineWidth = 2.0;
+    [dot stroke];
+    [[NSColor colorWithWhite:0.97 alpha:0.95] setStroke];
+    dot.lineWidth = 1.0;
+    [dot stroke];
+}
+
+}  // namespace
+
 @implementation SidescopesBorderPanel
 
 - (BOOL)canBecomeKeyWindow
@@ -203,29 +225,14 @@ RegionOfInterest g_borderEditRegion;
 - (void)drawHandles:(NSRect)region
 {
     const NSRect lane = region;
-    const auto handle = [&](CGFloat x, CGFloat y) {
-        const NSRect circle = NSMakeRect(x - sidescopes::HandleRadius, y - sidescopes::HandleRadius,
-                                         sidescopes::HandleRadius * 2, sidescopes::HandleRadius * 2);
-        NSBezierPath* dot = [NSBezierPath bezierPathWithOvalInRect:circle];
-        [[NSColor colorWithWhite:0.78 alpha:1.0] setFill];
-        [dot fill];
-        // A dark rim beneath the near-white ring keeps the dot visible on a
-        // bright sky; the ring matches the measurement line.
-        [[NSColor colorWithWhite:0.1 alpha:0.7] setStroke];
-        dot.lineWidth = 2.0;
-        [dot stroke];
-        [[NSColor colorWithWhite:0.97 alpha:0.95] setStroke];
-        dot.lineWidth = 1.0;
-        [dot stroke];
-    };
-    handle(NSMinX(lane), NSMinY(lane));
-    handle(NSMidX(lane), NSMinY(lane));
-    handle(NSMaxX(lane), NSMinY(lane));
-    handle(NSMinX(lane), NSMidY(lane));
-    handle(NSMaxX(lane), NSMidY(lane));
-    handle(NSMinX(lane), NSMaxY(lane));
-    handle(NSMidX(lane), NSMaxY(lane));
-    handle(NSMaxX(lane), NSMaxY(lane));
+    drawHandleDot(NSMinX(lane), NSMinY(lane));
+    drawHandleDot(NSMidX(lane), NSMinY(lane));
+    drawHandleDot(NSMaxX(lane), NSMinY(lane));
+    drawHandleDot(NSMinX(lane), NSMidY(lane));
+    drawHandleDot(NSMaxX(lane), NSMidY(lane));
+    drawHandleDot(NSMinX(lane), NSMaxY(lane));
+    drawHandleDot(NSMidX(lane), NSMaxY(lane));
+    drawHandleDot(NSMaxX(lane), NSMaxY(lane));
 }
 
 // The hover-revealed close button, in the handles' own visual language: a dark
