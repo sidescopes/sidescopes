@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "core/analysis_worker.h"
+#include "core/frame.h"
 #include "core/region_suggestions.h"
 #include "platform/region_selection.h"
 
@@ -39,6 +40,9 @@ struct RegionOverlayStubs
 
     /// What the picker overlay was told.
     int pickCancels = 0;
+    /// The pin tool's cursor chip, pushed every poll: empty when the sample
+    /// could not be taken.
+    std::optional<FloatColor> chipColor;
     std::optional<RegionPickerMode> lastMode;
     std::vector<PickerDisplay> lastDisplays;
     std::map<uint32_t, std::vector<SuggestedRegion>> deliveredFaces;

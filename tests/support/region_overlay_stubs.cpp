@@ -40,8 +40,9 @@ void setRegionPickMode(RegionPickerMode mode)
     g_overlays.lastMode = mode;
 }
 
-void setRegionPickChipColor(const std::optional<FloatColor>&)
+void setRegionPickChipColor(const std::optional<FloatColor>& color)
 {
+    g_overlays.chipColor = color;
 }
 
 void updatePickerFaces(uint32_t displayId, const std::vector<SuggestedRegion>& faces)

@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -97,6 +98,12 @@ FrameBuffer makeSplitFrameBuffer(int width, int height, Color left, Color right,
 
     return frame;
 }
+
+// The one-shot grab of a display off the capture stream: square, and a
+// different size from the streamed frame so the suggestions it produces
+// cannot be confused with the streamed display's.
+constexpr int ScannedSide = 200;
+constexpr std::size_t ScannedPixels = static_cast<std::size_t>(ScannedSide) * ScannedSide * 4;
 
 // An on-screen window at a rectangle in desktop points.
 DesktopWindow makeWindow(uint64_t identity, std::string application, double x, double y, double width, double height)
@@ -519,6 +526,126 @@ TEST_CASE("A picker opened without face detection scans nothing")
     REQUIRE(regionOverlayStubs().lastDisplays.size() == 1);
     CHECK(regionOverlayStubs().lastDisplays[0].faces.empty());
     CHECK_FALSE(fix.picker.scansRunning());
+
+    fix.worker.stop();
+}
+
+TEST_CASE("A display off the capture stream is scanned in the background")
+{
+    PickerFixture fix;
+    fix.worker.start();
+    fix.source.targets.push_back(makeTarget(StreamedDisplay + 1, "Second display"));
+    desktopStubs().displayGeometry = DisplayGeometry{0.0, 0.0, 320.0, 320.0};
+    desktopStubs().faceDetectionSupported = true;
+    desktopStubs().faces.clear();
+    desktopStubs().faces.push_back(IntRect{50, 25, 100, 100});
+    desktopStubs().displayImage = CapturedImage{std::vector<uint8_t>(ScannedPixels, 8), ScannedSide, ScannedSide};
+    publishAndAwait(fix, makeSolidFrameBuffer(640, 640, Color{10, 10, 10}, 1), 1);
+
+    // The picker opens on the streamed display's faces alone: the other
+    // display is scanned without holding the overlay back.
+    openPick(fix, RegionPickerMode::AttachFace);
+    REQUIRE(regionOverlayStubs().lastDisplays.size() == 2);
+    CHECK(regionOverlayStubs().lastDisplays[0].facesScanned);
+    CHECK_FALSE(regionOverlayStubs().lastDisplays[1].facesScanned);
+    CHECK(regionOverlayStubs().deliveredFaces.empty());
+
+    while (fix.picker.scansRunning()) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    fix.picker.drainFaceScans();
+
+    // The landed scan reaches the open overlay, measured on the grabbed
+    // frame: the 100-wide box inset a tenth is 30..70 percent of 200 pixels.
+    REQUIRE(regionOverlayStubs().deliveredFaces.count(StreamedDisplay + 1) == 1);
+    const std::vector<SuggestedRegion>& delivered = regionOverlayStubs().deliveredFaces[StreamedDisplay + 1];
+    REQUIRE(delivered.size() == 1);
+    CHECK_THAT(delivered[0].region.leftPercent, WithinAbs(30.0, 1e-9));
+    CHECK_THAT(delivered[0].region.rightPercent, WithinAbs(70.0, 1e-9));
+
+    // And a pick confirmed there resolves to a candidate on that display.
+    const FaceCandidate* candidate = fix.picker.matchFaceCandidate(StreamedDisplay + 1, delivered[0].region);
+    REQUIRE(candidate != nullptr);
+    CHECK(candidate->displayId == StreamedDisplay + 1);
+    CHECK(candidate->frameWidth == ScannedSide);
+
+    // A second drain has nothing left to deliver.
+    regionOverlayStubs().deliveredFaces.clear();
+    fix.picker.drainFaceScans();
+    CHECK(regionOverlayStubs().deliveredFaces.empty());
+
+    fix.worker.stop();
+}
+
+TEST_CASE("A scan that lands after its picker closed is dropped")
+{
+    PickerFixture fix;
+    fix.worker.start();
+    fix.source.targets.push_back(makeTarget(StreamedDisplay + 1, "Second display"));
+    desktopStubs().displayGeometry = DisplayGeometry{0.0, 0.0, 320.0, 320.0};
+    desktopStubs().faceDetectionSupported = true;
+    desktopStubs().faces.clear();
+    desktopStubs().faces.push_back(IntRect{50, 25, 100, 100});
+    desktopStubs().displayImage = CapturedImage{std::vector<uint8_t>(ScannedPixels, 8), ScannedSide, ScannedSide};
+    publishAndAwait(fix, makeSolidFrameBuffer(640, 640, Color{10, 10, 10}, 1), 1);
+
+    openPick(fix, RegionPickerMode::AttachFace);
+    RegionPickPoll poll;
+    poll.finished = true;
+    poll.displayId = StreamedDisplay;
+    (void)fix.picker.processPoll(poll, std::nullopt, std::nullopt);
+    REQUIRE_FALSE(fix.picker.active());
+
+    while (fix.picker.scansRunning()) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    fix.picker.drainFaceScans();
+
+    // The overlay is gone; the boxes must not be pushed into whatever opens
+    // next, and the finished scan's record is retired.
+    CHECK(regionOverlayStubs().deliveredFaces.empty());
+    CHECK_FALSE(fix.picker.scansRunning());
+
+    fix.worker.stop();
+}
+
+TEST_CASE("The pin chip previews the colour under the cursor")
+{
+    PickerFixture fix;
+    fix.worker.start();
+    desktopStubs().displayGeometry = DisplayGeometry{0.0, 0.0, 64.0, 64.0};
+    const AnalysisWorker::FrameSize frameSize{64, 64};
+    publishAndAwait(fix, makeSplitFrameBuffer(64, 64, Color{0, 0, 0}, Color{255, 255, 255}, 1), 1);
+
+    RegionPickPoll poll;
+    poll.active = true;
+    poll.pinMode = true;
+    poll.displayId = StreamedDisplay;
+
+    // On the captured display the chip is the frame's own pixel under the
+    // cursor - exactly what a click would pin, not an averaged patch.
+    desktopStubs().cursor = DesktopPoint{48.0, 32.0};
+    desktopStubs().cursorDisplay = StreamedDisplay;
+    (void)fix.picker.processPoll(poll, frameSize, std::nullopt);
+    REQUIRE(regionOverlayStubs().chipColor.has_value());
+    CHECK_THAT(regionOverlayStubs().chipColor->r, WithinAbs(255.0f, 1.0f));
+
+    desktopStubs().cursor = DesktopPoint{16.0, 32.0};
+    (void)fix.picker.processPoll(poll, frameSize, std::nullopt);
+    REQUIRE(regionOverlayStubs().chipColor.has_value());
+    CHECK_THAT(regionOverlayStubs().chipColor->r, WithinAbs(0.0f, 1.0f));
+
+    // On another display the throttled cross-display sample stands in, so the
+    // readout keeps working while capture is elsewhere.
+    desktopStubs().cursorDisplay = StreamedDisplay + 1;
+    (void)fix.picker.processPoll(poll, frameSize, FloatColor{11.0f, 22.0f, 33.0f});
+    REQUIRE(regionOverlayStubs().chipColor.has_value());
+    CHECK_THAT(regionOverlayStubs().chipColor->g, WithinAbs(22.0f, 1e-3f));
+
+    // With no cursor to read there is nothing to preview.
+    desktopStubs().cursor.reset();
+    (void)fix.picker.processPoll(poll, frameSize, std::nullopt);
+    CHECK_FALSE(regionOverlayStubs().chipColor.has_value());
 
     fix.worker.stop();
 }
