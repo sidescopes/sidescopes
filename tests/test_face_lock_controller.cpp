@@ -13,50 +13,25 @@
 #include "core/analysis_worker.h"
 #include "core/frame.h"
 #include "core/frame_mailbox.h"
+#include "desktop_stubs.h"
 #include "fake_capture.h"
 #include "platform/desktop.h"
-#include "platform/face_detection.h"
 #include "test_frame.h"
 
-// The controller reaches the platform desktop and detection seams and the GLFW
-// wake directly, but the test binary links neither a desktop backend nor a
-// windowing library. It provides its own: the geometry doubles are settable so
-// the adopt path can map a real region, and detection is never reached through
-// the injectable ingest seam.
-extern "C" void glfwPostEmptyEvent(void)
-{
-}
-
 namespace sidescopes {
-
-namespace {
-std::optional<WindowGeometry> g_windowGeometry;
-std::optional<DisplayGeometry> g_displayGeometry;
-}  // namespace
-
-std::optional<WindowGeometry> windowGeometry(uint64_t)
-{
-    return g_windowGeometry;
-}
-
-std::optional<DisplayGeometry> geometryOfDisplay(uint32_t)
-{
-    return g_displayGeometry;
-}
-
-std::vector<IntRect> detectFaces(const FrameView&, float)
-{
-    return {};
-}
-
 namespace {
 
 using Catch::Matchers::WithinAbs;
+using test::desktopStubs;
 using test::FakeCaptureSource;
 using test::makeSolidFrameBuffer;
+using test::makeTarget;
+
+constexpr uint32_t StreamedDisplay = 3;
 
 // The controller plus everything it is constructed with, in declaration order
-// so the refs it stores outlive nothing.
+// so the refs it stores outlive nothing. The scripted desktop is reset here,
+// since one serves the whole binary.
 struct ControllerFixture
 {
     FakeCaptureSource source;
@@ -65,6 +40,33 @@ struct ControllerFixture
     CaptureController capture{source, mailbox};
     AttachController attach;
     FaceLockController controller{attach, worker, capture};
+
+    ControllerFixture()
+    {
+        desktopStubs().reset();
+    }
+
+    ~ControllerFixture()
+    {
+        // The detection probe holds a pointer into the controller, so it must
+        // not outlive it.
+        while (controller.probeRunning()) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+    }
+
+    ControllerFixture(const ControllerFixture&) = delete;
+    ControllerFixture& operator=(const ControllerFixture&) = delete;
+
+    // Starts the capture stream on StreamedDisplay, which the probe and the
+    // region mapping read the display geometry against.
+    void startCapture()
+    {
+        source.targets = {makeTarget(StreamedDisplay, "Test display")};
+        REQUIRE(capture.requestPermission());
+        capture.requestDisplay(StreamedDisplay);
+        REQUIRE(capture.start());
+    }
 };
 
 // A per-frame verdict naming @p identity as the active window.
@@ -118,8 +120,8 @@ TEST_CASE("A settled move adopts and maps the region through the window")
     ControllerFixture fix;
     // A frame twice the display's point size, with a full-window display and
     // window so the mapping is easy to read back.
-    g_displayGeometry = DisplayGeometry{0.0, 0.0, 1000.0, 500.0};
-    g_windowGeometry = WindowGeometry{0.0, 0.0, 1000.0, 500.0, false, ""};
+    desktopStubs().displayGeometry = DisplayGeometry{0.0, 0.0, 1000.0, 500.0};
+    desktopStubs().windowGeometry = WindowGeometry{0.0, 0.0, 1000.0, 500.0, false, ""};
     const AnalysisWorker::FrameSize frameSize{2000, 1000};
     fix.controller.addLock(1, foreheadLock(), 0.0);
 

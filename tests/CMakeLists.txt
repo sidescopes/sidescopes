@@ -52,8 +52,11 @@ add_executable(sidescopes_tests
     test_version.cpp
 )
 
-# The shared test support headers (frame builders, image probes, temp files).
+# The shared test support headers (frame builders, image probes, temp files)
+# and the scripted platform seams several suites drive the controllers
+# through.
 target_include_directories(sidescopes_tests PRIVATE support)
+target_sources(sidescopes_tests PRIVATE support/desktop_stubs.cpp)
 
 # These are application-level state, not part of the core library the tests
 # link, so their sources compile directly into the test binary.
