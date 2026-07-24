@@ -187,17 +187,8 @@ std::vector<PickerDisplay> RegionPicker::buildPickerDisplays()
     std::vector<SuggestedRegion> faceSuggestions;
     m_faceCandidates.clear();
     if (supportsFaceDetection()) {
-        (void)m_worker.withLatestFrame([&](const FrameView& view) {
-            const auto geometry = geometryOfDisplay(streamed);
-            const float pixelsPerPoint = geometry ? static_cast<float>(view.width / geometry->widthPoints) : 1.0f;
-            const std::vector<IntRect> faces = detectFaces(view, pixelsPerPoint);
-            faceSuggestions = buildFaceSuggestions(faces, view.width, view.height);
-            // The raw boxes are remembered too, one candidate each: a confirmed
-            // face pick anchors its lock on the detector's box, not the inset.
-            const std::vector<FaceCandidate> candidates = buildFaceCandidates(faces, streamed, view.width, view.height);
-            m_faceCandidates.insert(m_faceCandidates.end(), candidates.begin(), candidates.end());
-            SS_DIAG(Suggestions, "display %u faces=%zu (streamed)", streamed, faceSuggestions.size());
-        });
+        (void)m_worker.withLatestFrame(
+            [&](const FrameView& view) { faceSuggestions = scanStreamedDisplayFaces(view, streamed); });
     }
 
     std::vector<PickerDisplay> pickerDisplays;
@@ -226,6 +217,23 @@ std::vector<PickerDisplay> RegionPicker::buildPickerDisplays()
     }
 
     return pickerDisplays;
+}
+
+// The faces in the streamed display's live frame, as the suggestions the
+// picker draws for it.
+std::vector<SuggestedRegion> RegionPicker::scanStreamedDisplayFaces(const FrameView& view, uint32_t streamed)
+{
+    const auto geometry = geometryOfDisplay(streamed);
+    const float pixelsPerPoint = geometry ? static_cast<float>(view.width / geometry->widthPoints) : 1.0f;
+    const std::vector<IntRect> faces = detectFaces(view, pixelsPerPoint);
+    std::vector<SuggestedRegion> faceSuggestions = buildFaceSuggestions(faces, view.width, view.height);
+    // The raw boxes are remembered too, one candidate each: a confirmed
+    // face pick anchors its lock on the detector's box, not the inset.
+    const std::vector<FaceCandidate> candidates = buildFaceCandidates(faces, streamed, view.width, view.height);
+    m_faceCandidates.insert(m_faceCandidates.end(), candidates.begin(), candidates.end());
+    SS_DIAG(Suggestions, "display %u faces=%zu (streamed)", streamed, faceSuggestions.size());
+
+    return faceSuggestions;
 }
 
 // One detached scan per non-streamed display, following the face-lock probe's
@@ -526,44 +534,51 @@ RegionPickOutcome RegionPicker::processRegionPoll(const RegionPickPoll& poll)
     return outcome;
 }
 
+// Averages a display-percent region of one frame, on a stride that caps the
+// work on huge drags.
+std::optional<FloatColor> RegionPicker::averageRegionColor(const FrameView& view, const RegionOfInterest& region)
+{
+    const int left = std::clamp(static_cast<int>(region.leftPercent / 100.0 * view.width), 0, view.width);
+    const int right = std::clamp(static_cast<int>(region.rightPercent / 100.0 * view.width), 0, view.width);
+    const int top = std::clamp(static_cast<int>(region.topPercent / 100.0 * view.height), 0, view.height);
+    const int bottom = std::clamp(static_cast<int>(region.bottomPercent / 100.0 * view.height), 0, view.height);
+    if (right <= left || bottom <= top) {
+        return std::nullopt;
+    }
+    // A stride caps the work on huge drags; the average barely moves past a
+    // hundred thousand samples.
+    const long long pixels = static_cast<long long>(right - left) * (bottom - top);
+    const int stride = std::max(1, static_cast<int>(std::sqrt(static_cast<double>(pixels) / 100000.0)));
+    double sumR = 0;
+    double sumG = 0;
+    double sumB = 0;
+    long long count = 0;
+    for (int y = top; y < bottom; y += stride) {
+        for (int x = left; x < right; x += stride) {
+            const uint8_t* pixel = view.pixelAt(x, y);
+            sumB += pixel[0];
+            sumG += pixel[1];
+            sumR += pixel[2];
+            ++count;
+        }
+    }
+    if (count == 0) {
+        return std::nullopt;
+    }
+    const auto samples = static_cast<double>(count);
+
+    return FloatColor{static_cast<float>(sumR / samples), static_cast<float>(sumG / samples),
+                      static_cast<float>(sumB / samples)};
+}
+
 std::optional<FloatColor> RegionPicker::averageFrameColor(const RegionOfInterest& region) const
 {
     // Averages a display-percent region of the latest frame: a dragged pin's
     // sample. A drag is the explicit request to average textured pixels; a
     // plain click samples a point instead, matching the live readout.
     std::optional<FloatColor> color;
-    const bool sampled = m_worker.withLatestFrame([&](const FrameView& view) {
-        const int left = std::clamp(static_cast<int>(region.leftPercent / 100.0 * view.width), 0, view.width);
-        const int right = std::clamp(static_cast<int>(region.rightPercent / 100.0 * view.width), 0, view.width);
-        const int top = std::clamp(static_cast<int>(region.topPercent / 100.0 * view.height), 0, view.height);
-        const int bottom = std::clamp(static_cast<int>(region.bottomPercent / 100.0 * view.height), 0, view.height);
-        if (right <= left || bottom <= top) {
-            return;
-        }
-        // A stride caps the work on huge drags; the average barely moves past a
-        // hundred thousand samples.
-        const long long pixels = static_cast<long long>(right - left) * (bottom - top);
-        const int stride = std::max(1, static_cast<int>(std::sqrt(static_cast<double>(pixels) / 100000.0)));
-        double sumR = 0;
-        double sumG = 0;
-        double sumB = 0;
-        long long count = 0;
-        for (int y = top; y < bottom; y += stride) {
-            for (int x = left; x < right; x += stride) {
-                const uint8_t* pixel = view.pixelAt(x, y);
-                sumB += pixel[0];
-                sumG += pixel[1];
-                sumR += pixel[2];
-                ++count;
-            }
-        }
-        if (count == 0) {
-            return;
-        }
-        const auto samples = static_cast<double>(count);
-        color = FloatColor{static_cast<float>(sumR / samples), static_cast<float>(sumG / samples),
-                           static_cast<float>(sumB / samples)};
-    });
+    const bool sampled =
+        m_worker.withLatestFrame([&](const FrameView& view) { color = averageRegionColor(view, region); });
 
     return sampled ? color : std::nullopt;
 }

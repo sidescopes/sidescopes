@@ -159,6 +159,7 @@ private:
     void openRegionPicker(RegionPickerMode mode, bool regionIsFullScreen);
     void waitForBorderFreeFrame();
     [[nodiscard]] std::vector<PickerDisplay> buildPickerDisplays();
+    [[nodiscard]] std::vector<SuggestedRegion> scanStreamedDisplayFaces(const FrameView& view, uint32_t streamed);
     void launchDisplayFaceScans(const std::vector<PickerDisplay>& pickerDisplays);
     void consumeDisplayFaceScan(DisplayFaceScan& scan);
     static void logPickerSuggestions(const std::vector<PickerDisplay>& pickerDisplays);
@@ -168,6 +169,8 @@ private:
     void applyPinnedColor(const RegionPickPoll& poll, std::optional<AnalysisWorker::FrameSize> frameSize,
                           std::optional<FloatColor> screenSampleColor, RegionPickOutcome& outcome);
     [[nodiscard]] RegionPickOutcome processRegionPoll(const RegionPickPoll& poll);
+    [[nodiscard]] static std::optional<FloatColor> averageRegionColor(const FrameView& view,
+                                                                      const RegionOfInterest& region);
     [[nodiscard]] std::optional<FloatColor> averageFrameColor(const RegionOfInterest& region) const;
 
     CaptureController& m_capture;

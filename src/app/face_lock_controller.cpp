@@ -77,6 +77,39 @@ IntRect faceLockRoi(const FaceLockState& lock, const AttachWindowRect& window, c
                    static_cast<int>(bottom - top)};
 }
 
+/// One probe's input, lifted out of a frame: the searched rectangle, the
+/// frame's pixel density for the detector's density floor, and the rectangle's
+/// pixels. The pixels are empty when the rectangle has no area.
+struct ProbeCrop
+{
+    IntRect roi;
+    float pixelsPerPoint = 1.0f;
+    std::vector<uint8_t> pixels;
+};
+
+// Copies the lock's search rectangle out of the frame, tightly packed, so the
+// detection thread reads pixels nothing else is writing.
+ProbeCrop cropProbeRoi(const FrameView& view, const FaceLockState& lock, const AttachWindowRect& windowRect,
+                       const DisplayGeometry& geometry)
+{
+    ProbeCrop crop;
+    crop.roi = faceLockRoi(lock, windowRect, geometry, view.width, view.height);
+    if (crop.roi.width <= 0 || crop.roi.height <= 0) {
+        return crop;
+    }
+    crop.pixelsPerPoint = static_cast<float>(view.width / geometry.widthPoints);
+    const std::size_t rowBytes = static_cast<std::size_t>(crop.roi.width) * 4;
+    crop.pixels.resize(rowBytes * static_cast<std::size_t>(crop.roi.height));
+    for (int row = 0; row < crop.roi.height; ++row) {
+        std::memcpy(crop.pixels.data() + rowBytes * static_cast<std::size_t>(row),
+                    view.bgra + static_cast<std::size_t>(crop.roi.y + row) * view.strideBytes +
+                        static_cast<std::size_t>(crop.roi.x) * 4,
+                    rowBytes);
+    }
+
+    return crop;
+}
+
 }  // namespace
 
 FaceLockController::FaceLockController(AttachController& attach, AnalysisWorker& worker, CaptureController& capture)
@@ -255,6 +288,32 @@ void FaceLockController::carryLockWithWindow(Lock& lock, const AttachWindowRect&
     lock.windowRect = rect;
 }
 
+// The grid the stability comparison runs on: three bytes per tap, taken at the
+// centre of each cell of an even grid over the region.
+std::vector<uint8_t> FaceLockController::sampleContentGrid(const FrameView& view, const RegionOfInterest& region)
+{
+    constexpr int GridSide = 16;
+
+    std::vector<uint8_t> samples;
+    samples.reserve(static_cast<std::size_t>(GridSide) * GridSide * 3);
+    const double left = region.leftPercent / 100.0 * view.width;
+    const double top = region.topPercent / 100.0 * view.height;
+    const double width = (region.rightPercent - region.leftPercent) / 100.0 * view.width;
+    const double height = (region.bottomPercent - region.topPercent) / 100.0 * view.height;
+    for (int gridY = 0; gridY < GridSide; ++gridY) {
+        for (int gridX = 0; gridX < GridSide; ++gridX) {
+            const int px = std::clamp(static_cast<int>(left + (gridX + 0.5) * width / GridSide), 0, view.width - 1);
+            const int py = std::clamp(static_cast<int>(top + (gridY + 0.5) * height / GridSide), 0, view.height - 1);
+            const uint8_t* pixel = view.pixelAt(px, py);
+            samples.push_back(pixel[0]);
+            samples.push_back(pixel[1]);
+            samples.push_back(pixel[2]);
+        }
+    }
+
+    return samples;
+}
+
 // A cheap content-stability probe over the face-locked region: a sparse grid
 // of pixels compared frame to frame. Any considerable change - a pan, a zoom,
 // even a develop-slider drag - hides the border until the content settles;
@@ -263,30 +322,12 @@ void FaceLockController::carryLockWithWindow(Lock& lock, const AttachWindowRect&
 void FaceLockController::probeContentChange(const RegionOfInterest& region,
                                             std::optional<AnalysisWorker::FrameSize> frameSize, double now)
 {
-    constexpr int GridSide = 16;
-
     if (!frameSize) {
         return;
     }
     std::vector<uint8_t> samples;
-    samples.reserve(static_cast<std::size_t>(GridSide) * GridSide * 3);
-    const bool sampled = m_worker.withLatestFrame([&](const FrameView& view) {
-        const double left = region.leftPercent / 100.0 * view.width;
-        const double top = region.topPercent / 100.0 * view.height;
-        const double width = (region.rightPercent - region.leftPercent) / 100.0 * view.width;
-        const double height = (region.bottomPercent - region.topPercent) / 100.0 * view.height;
-        for (int gridY = 0; gridY < GridSide; ++gridY) {
-            for (int gridX = 0; gridX < GridSide; ++gridX) {
-                const int px = std::clamp(static_cast<int>(left + (gridX + 0.5) * width / GridSide), 0, view.width - 1);
-                const int py =
-                    std::clamp(static_cast<int>(top + (gridY + 0.5) * height / GridSide), 0, view.height - 1);
-                const uint8_t* pixel = view.pixelAt(px, py);
-                samples.push_back(pixel[0]);
-                samples.push_back(pixel[1]);
-                samples.push_back(pixel[2]);
-            }
-        }
-    });
+    const bool sampled =
+        m_worker.withLatestFrame([&](const FrameView& view) { samples = sampleContentGrid(view, region); });
     if (!sampled || samples.empty()) {
         return;
     }
@@ -331,27 +372,15 @@ void FaceLockController::launchProbe(const AttachDecision& decision, const FaceL
     if (!geometry || !decision.activeRect) {
         return;
     }
-    auto pixels = std::make_shared<std::vector<uint8_t>>();
-    IntRect roi;
-    float pixelsPerPoint = 1.0f;
-    const bool copied = m_worker.withLatestFrame([&](const FrameView& view) {
-        roi = faceLockRoi(lock, *decision.activeRect, *geometry, view.width, view.height);
-        if (roi.width <= 0 || roi.height <= 0) {
-            return;
-        }
-        pixelsPerPoint = static_cast<float>(view.width / geometry->widthPoints);
-        const std::size_t rowBytes = static_cast<std::size_t>(roi.width) * 4;
-        pixels->resize(rowBytes * static_cast<std::size_t>(roi.height));
-        for (int row = 0; row < roi.height; ++row) {
-            std::memcpy(pixels->data() + rowBytes * static_cast<std::size_t>(row),
-                        view.bgra + static_cast<std::size_t>(roi.y + row) * view.strideBytes +
-                            static_cast<std::size_t>(roi.x) * 4,
-                        rowBytes);
-        }
-    });
-    if (!copied || pixels->empty()) {
+    ProbeCrop crop;
+    const bool copied = m_worker.withLatestFrame(
+        [&](const FrameView& view) { crop = cropProbeRoi(view, lock, *decision.activeRect, *geometry); });
+    if (!copied || crop.pixels.empty()) {
         return;
     }
+    auto pixels = std::make_shared<std::vector<uint8_t>>(std::move(crop.pixels));
+    const IntRect roi = crop.roi;
+    const float pixelsPerPoint = crop.pixelsPerPoint;
     m_probe.forWindowIdentity = decision.activeIdentity;
     m_probe.roi = roi;
     m_probe.running.store(true);

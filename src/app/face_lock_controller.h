@@ -141,6 +141,7 @@ private:
         IntRect roi;  ///< the searched rectangle, for judging edge-clipped boxes
     };
 
+    [[nodiscard]] static std::vector<uint8_t> sampleContentGrid(const FrameView& view, const RegionOfInterest& region);
     void carryLockWithWindow(Lock& lock, const AttachWindowRect& rect,
                              std::optional<AnalysisWorker::FrameSize> frameSize);
     void launchProbe(const AttachDecision& decision, const FaceLockState& lock);
