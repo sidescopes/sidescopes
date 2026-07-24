@@ -482,10 +482,12 @@ std::string legacyScopeLetters(int visibleScopes, int storedWaveformMode)
 }
 
 // Cleans a stack token string, each token once, in order, defaulting to the
-// vectorscope. A bracketed `[id]` token passes through untouched for the
-// registry to resolve; a bare letter is kept only when it names a built-in.
-// The retired L (a separate luma waveform) becomes the waveform in its Luma
-// style, unless an RGB waveform is already stacked, which keeps the letter.
+// vectorscope. Both a bracketed `[id]` token and a bare letter pass through
+// for the registry to resolve which scope they name - core does not know the
+// scope set, so it never judges which letters are valid, only the token FORMAT
+// (an uppercase letter or a bracketed id). The retired L (a separate luma
+// waveform) becomes the waveform in its Luma style, unless an RGB waveform is
+// already stacked, which keeps the letter.
 std::string cleanedScopeStack(const std::string& stack, Preferences& preferences)
 {
     const bool hadWaveform = stack.find('W') != std::string::npos;
@@ -509,8 +511,8 @@ std::string cleanedScopeStack(const std::string& stack, Preferences& preferences
                 letter = 'W';
                 preferences.scopeParams[WaveformId]["mode"] = 1.0;
             }
-            if (std::string_view("VWRHC").find(letter) == std::string_view::npos) {
-                continue;
+            if (letter < 'A' || letter > 'Z') {
+                continue;  // not a scope-letter token; ids arrive bracketed
             }
             token = std::string(1, letter);
         }

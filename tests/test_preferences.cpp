@@ -193,10 +193,22 @@ TEST_CASE("Preferences fold the retired luma scope into the waveform style")
 TEST_CASE("Preferences never load an empty scope set")
 {
     const TempFile file("empty-scopes.txt");
-    file.write("scope_stack=XYZ\n");  // no known scope letters
+    file.write("scope_stack=xyz\n");  // non-token characters drop out, leaving nothing
 
     const Preferences loaded = loadPreferences(file.path());
     CHECK(loaded.scopeStack == "V");
+}
+
+TEST_CASE("Preferences keep a scope letter core does not know")
+{
+    // Core no longer whitelists a fixed scope set: any uppercase letter
+    // survives cleaning for the registry to resolve, so a scope added after
+    // this code (here N) still round-trips through the file.
+    const TempFile file("new-scope-letter.txt");
+    file.write("scope_stack=N\n");
+
+    const Preferences loaded = loadPreferences(file.path());
+    CHECK(loaded.scopeStack == "N");
 }
 
 TEST_CASE("Preferences deduplicate scope letters")

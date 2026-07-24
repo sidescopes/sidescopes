@@ -4,6 +4,7 @@
 #include <vector>
 
 #include "app/scope_registry.h"
+#include "app/stack_tokens.h"
 #include "modules/module_registry.h"
 #include "sidescopes/module.h"
 
@@ -150,6 +151,17 @@ TEST_CASE("A colliding letter registers the scope letterless but reachable")
 
     // 'W' resolves to the first claimant, never the letterless collider.
     CHECK(registry.byLetter('W') == holder);
+}
+
+TEST_CASE("A built-in scope beyond the original set round-trips through the stack")
+{
+    // The regression guard for the persistence bug: the neutral scope arrived
+    // after the fixed V/W/R/H/C set, and its letter must survive the save/load
+    // token layer so a saved stack brings it back, not the vectorscope.
+    const ScopeRegistry registry{builtinModules()};
+    REQUIRE(registry.byId(NeutralScopeId) != nullptr);
+    CHECK(parseStackTokens(registry, "N") == std::vector<std::string>{NeutralScopeId});
+    CHECK(formatStackTokens(registry, {NeutralScopeId}) == "N");
 }
 
 }  // namespace sidescopes
