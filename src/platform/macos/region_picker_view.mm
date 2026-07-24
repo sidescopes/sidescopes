@@ -365,14 +365,23 @@
         [self dragInPickMode:event];
         return;
     }
+    const NSRect previous = [self selectionRect];
     self.dragCurrent = [self convertPoint:event.locationInWindow fromView:nil];
     // A real drag only starts after a few points of travel, so a stray
     // click never flashes a tiny manual selection.
     if (!self.dragging &&
         (std::abs(self.dragCurrent.x - self.dragStart.x) > 4 || std::abs(self.dragCurrent.y - self.dragStart.y) > 4)) {
         self.dragging = YES;
+        self.needsDisplay = YES;  // full: the banner leaves
+        return;
     }
-    self.needsDisplay = YES;
+    if (!self.dragging) {
+        return;
+    }
+    // Only the band between the old and new selection flips dimmed/clear; the
+    // dim beyond it is untouched, so repaint that union, not the whole overlay.
+    const NSRect changed = NSUnionRect(previous, [self selectionRect]);
+    [self setNeedsDisplayInRect:NSInsetRect(changed, -4, -4)];
 }
 
 // A drag in window mode draws an attached region within the window under
