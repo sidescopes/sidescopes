@@ -21,11 +21,17 @@ float UiScaleController::userFactor() const
 void UiScaleController::apply(float scale)
 {
     m_scale = scale;
-    // Scaling an already scaled style would compound, so rebuild from the base
-    // theme each time.
+    // ScaleAllSizes multiplies every size in the style, while the theme names
+    // only a handful of them, so re-theming alone leaves the rest compounding on
+    // the previous scale - and its truncation makes the compounding
+    // irreversible. The style goes back to its defaults first, built up exactly
+    // as the startup builds it, so the scale always lands on unscaled sizes.
+    ImGuiStyle& style = ImGui::GetStyle();
+    style = ImGuiStyle();
+    ImGui::StyleColorsDark();
     applyTheme();
-    ImGui::GetStyle().ScaleAllSizes(scale);
-    ImGui::GetStyle().FontScaleMain = scale;
+    style.ScaleAllSizes(scale);
+    style.FontScaleMain = scale;
 }
 
 bool UiScaleController::refresh(GLFWwindow* window)
