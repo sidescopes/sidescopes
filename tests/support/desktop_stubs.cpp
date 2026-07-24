@@ -1,5 +1,6 @@
 #include "desktop_stubs.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <vector>
@@ -65,7 +66,7 @@ bool supportsFaceDetection()
 
 std::vector<IntRect> detectFaces(const FrameView& view, float pixelsPerPoint)
 {
-    g_stubs.recordDetection(view.width, view.height, pixelsPerPoint);
+    g_stubs.recordDetection(view, pixelsPerPoint);
 
     return g_stubs.faces;
 }
@@ -86,13 +87,19 @@ void DesktopStubs::reset()
     m_detected = DetectorCall{};
 }
 
-void DesktopStubs::recordDetection(int width, int height, float pixelsPerPoint)
+void DesktopStubs::recordDetection(const FrameView& view, float pixelsPerPoint)
 {
     const std::lock_guard lock(m_mutex);
     ++m_detected.calls;
-    m_detected.width = width;
-    m_detected.height = height;
+    m_detected.width = view.width;
+    m_detected.height = view.height;
     m_detected.pixelsPerPoint = pixelsPerPoint;
+    m_detected.firstPixel = {};
+    if (view.bgra != nullptr && view.width > 0 && view.height > 0) {
+        for (std::size_t byte = 0; byte < m_detected.firstPixel.size(); ++byte) {
+            m_detected.firstPixel[byte] = view.bgra[byte];
+        }
+    }
 }
 
 DetectorCall DesktopStubs::detectorCall() const

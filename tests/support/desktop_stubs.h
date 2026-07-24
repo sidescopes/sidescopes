@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <mutex>
 #include <optional>
@@ -18,7 +19,9 @@ namespace sidescopes::test {
 // first.
 
 /// What one detector call was handed, so a caller that hands the detector a
-/// cropped region can be judged on the crop itself. Written from the probe
+/// cropped region can be judged on the crop itself: its size, its density, and
+/// its first pixel, which over a frame whose pixels encode their coordinates
+/// says where in that frame the crop was taken from. Written from the probe
 /// threads the controllers detach, so it is read back under the same lock.
 struct DetectorCall
 {
@@ -26,6 +29,7 @@ struct DetectorCall
     int width = 0;
     int height = 0;
     float pixelsPerPoint = 0.0f;
+    std::array<uint8_t, 4> firstPixel{};
 };
 
 /// The scripted desktop: what it reports and what the detector finds. One
@@ -49,7 +53,7 @@ public:
     void reset();
 
     /// Records one detector call; safe from a detached probe thread.
-    void recordDetection(int width, int height, float pixelsPerPoint);
+    void recordDetection(const FrameView& view, float pixelsPerPoint);
 
     /// What the detector was handed last, and how often it was called.
     [[nodiscard]] DetectorCall detectorCall() const;
