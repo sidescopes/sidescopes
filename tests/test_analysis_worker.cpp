@@ -76,6 +76,32 @@ TEST_CASE("AnalysisWorker produces scope images from published frames")
     CHECK(output.framesProcessed == 1);
 }
 
+TEST_CASE("AnalysisWorker applies settings that arrive before the first frame")
+{
+    FrameMailbox mailbox;
+    AnalysisWorker worker(mailbox);
+    AnalysisSettings settings;
+    settings.enabledScopes = {VectorscopeId};
+    worker.updateSettings(settings);
+    worker.start();
+
+    // Let the worker consume the settings on a frameless pass - the case that
+    // used to advance the settings version without configuring the scopes, so
+    // the first frame after it published an output with no images.
+    std::this_thread::sleep_for(50ms);
+    uint64_t seen = 0;
+    AnalysisWorker::Output output;
+    REQUIRE_FALSE(worker.fetchOutput(seen, output));  // no frame yet, nothing produced
+
+    mailbox.publish(makeSolidFrameBuffer(64, 64, Color{191, 0, 0}, 1));
+    REQUIRE(waitFor([&] { return worker.fetchOutput(seen, output); }));
+
+    // The pre-frame settings must still be in force: the first output carries
+    // the vectorscope image they asked for, not an empty map.
+    REQUIRE(output.images.count(VectorscopeId) == 1);
+    CHECK(pixelLit(output.images.at(VectorscopeId), 109, 43));
+}
+
 TEST_CASE("AnalysisWorker skips frames with unchanged content")
 {
     FrameMailbox mailbox;

@@ -314,6 +314,17 @@ void AnalysisWorker::run()
     while (!m_stopRequested.load(std::memory_order_relaxed)) {
         const bool newFrame = takeLatestFrame();
         const bool settingsChanged = syncSettings(settings, seenSettingsVersion);
+        // A settings change is applied the moment it is seen, before the work
+        // gate below. Consumed on a frameless pass it would otherwise advance
+        // the settings version without reconfiguring the scopes, so the first
+        // frame after it would run the default - on startup, empty - scope set
+        // and publish an output with no images.
+        if (settingsChanged) {
+            configureScopes(scopes, settings);
+            // Rebuild the enabled-id lookup once per settings change, not per
+            // scope per pass.
+            enabledScopes = std::set<std::string>(settings.enabledScopes.begin(), settings.enabledScopes.end());
+        }
         if (!hasWork(newFrame, settingsChanged)) {
             continue;
         }
@@ -333,13 +344,6 @@ void AnalysisWorker::run()
             continue;
         }
         lastContentHash = contentHash;
-
-        if (settingsChanged) {
-            configureScopes(scopes, settings);
-            // Rebuild the enabled-id lookup once per settings change, not per
-            // scope per pass.
-            enabledScopes = std::set<std::string>(settings.enabledScopes.begin(), settings.enabledScopes.end());
-        }
 
         const SsFrameView boundaryFrame = toBoundaryFrame(view);
         const SsRect boundaryRegion{region.x, region.y, region.width, region.height};
