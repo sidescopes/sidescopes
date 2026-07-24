@@ -47,6 +47,23 @@ bool ScopeStack::choose(std::string_view id, bool stack)
     return !wasShown;
 }
 
+void ScopeStack::reorder(const std::vector<std::string>& order)
+{
+    if (order.size() != m_ids.size()) {
+        return;
+    }
+    // Same scopes, in a new sequence: sort both and compare so any order that
+    // adds, drops, or repeats a scope is rejected outright.
+    std::vector<std::string> want = order;
+    std::vector<std::string> have = m_ids;
+    std::sort(want.begin(), want.end());
+    std::sort(have.begin(), have.end());
+    if (want != have) {
+        return;
+    }
+    m_ids = order;
+}
+
 std::vector<std::string> ScopeStack::enabledScopeIds() const
 {
     std::vector<std::string> ids;

@@ -33,6 +33,11 @@ public:
     /// @return Whether @p id became newly visible.
     bool choose(std::string_view id, bool stack);
 
+    /// Reorders the scopes on screen to @p order. Applied only when @p order is
+    /// a permutation of the scopes already shown, so a drag that raced a change
+    /// to the stack is ignored rather than dropping or duplicating a scope.
+    void reorder(const std::vector<std::string>& order);
+
     /// @return The scope ids the worker should compute for what is on screen:
     ///         the visible scopes minus the host-only ones (the color picker
     ///         reads the sampled cursor color, so it asks nothing of the

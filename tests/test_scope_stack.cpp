@@ -124,6 +124,47 @@ TEST_CASE("Choosing solos a scope unless stacking")
     }
 }
 
+TEST_CASE("Reordering permutes the shown scopes")
+{
+    ScopeStack stack{registry()};
+    stack.restore("VWH");
+    REQUIRE(stack.ids() == std::vector<std::string>{VectorscopeScopeId, WaveformScopeId, HistogramScopeId});
+
+    stack.reorder({HistogramScopeId, VectorscopeScopeId, WaveformScopeId});
+    CHECK(stack.ids() == std::vector<std::string>{HistogramScopeId, VectorscopeScopeId, WaveformScopeId});
+    // The new order is what persists.
+    CHECK(stack.tokens() == "HVW");
+}
+
+TEST_CASE("Reordering rejects anything but a permutation")
+{
+    ScopeStack stack{registry()};
+    stack.restore("VW");
+    const std::vector<std::string> original{VectorscopeScopeId, WaveformScopeId};
+    REQUIRE(stack.ids() == original);
+
+    SECTION("a different size is ignored")
+    {
+        stack.reorder({VectorscopeScopeId});
+        CHECK(stack.ids() == original);
+        stack.reorder({VectorscopeScopeId, WaveformScopeId, HistogramScopeId});
+        CHECK(stack.ids() == original);
+    }
+
+    SECTION("a changed set is ignored")
+    {
+        // Right count, wrong members: a drag that raced a toggle underneath it.
+        stack.reorder({VectorscopeScopeId, HistogramScopeId});
+        CHECK(stack.ids() == original);
+    }
+
+    SECTION("a repeated scope is ignored")
+    {
+        stack.reorder({VectorscopeScopeId, VectorscopeScopeId});
+        CHECK(stack.ids() == original);
+    }
+}
+
 TEST_CASE("The enabled ids cover the whole stack")
 {
     ScopeStack stack{registry()};
