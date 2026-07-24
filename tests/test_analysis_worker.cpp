@@ -102,6 +102,41 @@ TEST_CASE("AnalysisWorker applies settings that arrive before the first frame")
     CHECK(pixelLit(output.images.at(VectorscopeId), 109, 43));
 }
 
+TEST_CASE("AnalysisWorker survives rapid settings churn before a frame")
+{
+    FrameMailbox mailbox;
+    AnalysisWorker worker(mailbox);
+    worker.start();
+
+    // Several settings arrive back to back before any frame, each consumed on
+    // its own frameless pass, so only the last enabled set may reach the first
+    // output.
+    AnalysisSettings settings;
+    settings.enabledScopes = {WaveformId};
+    worker.updateSettings(settings);
+    settings.enabledScopes = {HistogramId};
+    worker.updateSettings(settings);
+    settings.enabledScopes = {VectorscopeId};
+    worker.updateSettings(settings);
+
+    // Let the churn drain on frameless passes - the ordering that used to
+    // advance the settings version without configuring the scopes, so the
+    // first frame after it published an output with no images.
+    std::this_thread::sleep_for(50ms);
+
+    mailbox.publish(makeSolidFrameBuffer(64, 64, Color{191, 0, 0}, 1));
+    uint64_t seen = 0;
+    AnalysisWorker::Output output;
+    REQUIRE(waitFor([&] { return worker.fetchOutput(seen, output); }));
+
+    // The last push wins: the first output holds the vectorscope it asked for
+    // and none of the scopes the earlier pushes named.
+    REQUIRE(output.images.count(VectorscopeId) == 1);
+    CHECK(pixelLit(output.images.at(VectorscopeId), 109, 43));
+    CHECK(output.images.count(WaveformId) == 0);
+    CHECK(output.images.count(HistogramId) == 0);
+}
+
 TEST_CASE("AnalysisWorker skips frames with unchanged content")
 {
     FrameMailbox mailbox;
@@ -177,6 +212,32 @@ TEST_CASE("AnalysisWorker recomputes on settings changes without a new frame")
     REQUIRE(waitFor([&] { return worker.fetchOutput(seen, output); }));
     CHECK(pixelLit(output.images.at(VectorscopeId), 100, 43));  // BT.601 target
     CHECK(output.framesProcessed == 1);                         // same frame, reanalyzed
+}
+
+TEST_CASE("AnalysisWorker keeps the scope set across a content-only pass")
+{
+    FrameMailbox mailbox;
+    AnalysisWorker worker(mailbox);
+    AnalysisSettings settings;
+    settings.enabledScopes = {VectorscopeId};
+    worker.updateSettings(settings);
+    worker.start();
+
+    // Frame A configures the scopes and fills the vectorscope with 75% red.
+    mailbox.publish(makeSolidFrameBuffer(64, 64, Color{191, 0, 0}, 1));
+    uint64_t seen = 0;
+    AnalysisWorker::Output output;
+    REQUIRE(waitFor([&] { return worker.fetchOutput(seen, output); }));
+    REQUIRE(pixelLit(output.images.at(VectorscopeId), 109, 43));  // 75% red, BT.709
+
+    // Frame B changes only the content, not the settings. The enabled set
+    // persists when settingsChanged is false, so the vectorscope recomputes for
+    // the new frame instead of dropping out of the output.
+    mailbox.publish(makeSolidFrameBuffer(64, 64, Color{0, 191, 0}, 2));
+    REQUIRE(waitFor([&] { return worker.fetchOutput(seen, output) && output.framesProcessed == 2; }));
+    REQUIRE(output.images.count(VectorscopeId) == 1);
+    CHECK(brightestPixel(output.images.at(VectorscopeId)) != std::pair<int, int>{-1, -1});  // still lit
+    CHECK_FALSE(pixelLit(output.images.at(VectorscopeId), 109, 43));                        // recomputed off 75% red
 }
 
 TEST_CASE("AnalysisWorker samples a cursor color from the latest frame")
