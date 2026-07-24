@@ -153,7 +153,7 @@ jobs:
         run: ctest --test-dir build -C Release --output-on-failure --timeout 120
 
   # Address+UB and thread sanitizers exercise the test suite; the analysis
-  # worker's lock-free frame handoff is exactly what TSan exists to audit.
+  # worker's cross-thread frame handoff is exactly what TSan exists to audit.
   sanitize:
     strategy:
       fail-fast: false
@@ -172,3 +172,24 @@ jobs:
         run: cmake --build build
       - name: Test
         run: ctest --test-dir build --output-on-failure --timeout 120
+
+  # AddressSanitizer over the UI suites, which the portable sanitize job does
+  # not build. The pipeline suite drives the worker's frame handoff across
+  # threads, so a crash there arrives with a symbolicated backtrace and
+  # a faulting line instead of a bare SEGFAULT. macOS only, where Dear ImGui is.
+  ui-test-asan:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - name: Configure
+        run: >
+          cmake -B build -DSIDESCOPES_WERROR=ON -DSIDESCOPES_UI_TESTS=ON
+          -DCMAKE_BUILD_TYPE=RelWithDebInfo
+          -DSIDESCOPES_SANITIZE=address
+      - name: Build
+        run: cmake --build build
+      - name: Test
+        # 300s per test: AddressSanitizer runs the suites well past the 120s
+        # the other jobs allow.
+        run: ctest --test-dir build --output-on-failure --timeout 300 -R sidescopes_ui --no-tests=error
