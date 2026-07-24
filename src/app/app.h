@@ -254,12 +254,6 @@ private:
     ScopeRegistry m_scopeRegistry;
     ScopeView m_view;
 
-    /// Draws the scopes' side of the window and owns what only that drawing
-    /// needs - the textures, the projections the overlays come from, the pane
-    /// geometry, and the transient lines; the host applies the
-    /// PaneRenderOutcome it returns. Built once the graphics backend exists.
-    std::unique_ptr<ScopePaneRenderer> m_panes;
-
     /// Owns the keyboard bindings and maps a key to the action it means; the
     /// host applies the ShortcutAction it returns.
     ShortcutResolver m_shortcuts;
@@ -284,6 +278,15 @@ private:
 
     uint64_t m_outputVersion = 0;
     AnalysisWorker::Output m_output;
+
+    /// Draws the scopes' side of the window and owns what only that drawing
+    /// needs - the textures, the projections the overlays come from, the pane
+    /// geometry, and the transient lines; the host applies the
+    /// PaneRenderOutcome it returns. Built once the graphics backend exists.
+    /// Declared after every member it binds - the pins, the bindings, the
+    /// worker output - because members die in reverse declaration order and it
+    /// holds them by reference.
+    std::unique_ptr<ScopePaneRenderer> m_panes;
 
     double m_lastActivity = 0.0;
     double m_nextPreferencesSave = -1.0;
