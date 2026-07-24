@@ -15,6 +15,12 @@ add_executable(sidescopes_bench
     bench_color.cpp
 )
 
+# The performance harness is its own executable rather than a Catch2 case: it
+# sweeps dimensions and prints JSON, which a benchmark reporter cannot express.
+add_executable(sidescopes_perf
+    perf_harness.cpp
+)
+
 # In dynamic module mode the engines live only in the loadable bundles, so the
 # bench compiles their sources directly, as the tests do.
 if(SIDESCOPES_MODULES_DYNAMIC)
@@ -22,16 +28,29 @@ if(SIDESCOPES_MODULES_DYNAMIC)
         ${CMAKE_SOURCE_DIR}/src/core/scopes/vectorscope.cpp
         ${CMAKE_SOURCE_DIR}/src/core/scopes/waveform.cpp
         ${CMAKE_SOURCE_DIR}/src/core/scopes/histogram.cpp)
+    target_sources(sidescopes_perf PRIVATE
+        ${CMAKE_SOURCE_DIR}/src/core/scopes/vectorscope.cpp
+        ${CMAKE_SOURCE_DIR}/src/core/scopes/waveform.cpp
+        ${CMAKE_SOURCE_DIR}/src/core/scopes/histogram.cpp
+        ${CMAKE_SOURCE_DIR}/src/core/scopes/neutral.cpp)
 endif()
 
 target_link_libraries(sidescopes_bench PRIVATE
     ${SIDESCOPES_MODULE_LINK_LIBS} sidescopes_core Catch2::Catch2WithMain)
+target_link_libraries(sidescopes_perf PRIVATE
+    ${SIDESCOPES_MODULE_LINK_LIBS} sidescopes_core)
 
 if(SIDESCOPES_MODULES_DYNAMIC)
     add_dependencies(sidescopes_bench
         sidescopes_module_vectorscope
         sidescopes_module_waveform
         sidescopes_module_histogram)
+    add_dependencies(sidescopes_perf
+        sidescopes_module_vectorscope
+        sidescopes_module_waveform
+        sidescopes_module_histogram
+        sidescopes_module_neutral)
 endif()
 
 sidescopes_target_defaults(sidescopes_bench)
+sidescopes_target_defaults(sidescopes_perf)
