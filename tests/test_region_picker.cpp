@@ -416,6 +416,32 @@ TEST_CASE("A plain pin ends the errand and a kept-open one does not")
     fix.worker.stop();
 }
 
+TEST_CASE("The pin tool closing ends the pick without touching the region")
+{
+    PickerFixture fix;
+    fix.worker.start();
+    const AnalysisWorker::FrameSize frameSize{64, 64};
+    publishAndAwait(fix, makeSolidFrameBuffer(64, 64, Color{200, 50, 30}, 1), 1);
+    openPick(fix, RegionPickerMode::PinColor);
+
+    // Escape on the pin overlay: the errand is over, and the region the scopes
+    // were reading is left exactly as it was.
+    RegionPickPoll poll;
+    poll.pinMode = true;
+    poll.finished = true;
+    poll.displayId = StreamedDisplay;
+    const RegionPickOutcome outcome = fix.picker.processPoll(poll, frameSize, std::nullopt);
+
+    CHECK(outcome.ended);
+    CHECK(outcome.activity);
+    CHECK_FALSE(outcome.cancelled);
+    CHECK_FALSE(outcome.previewRegion.has_value());
+    CHECK_FALSE(outcome.pinColor.has_value());
+    CHECK_FALSE(fix.picker.active());
+
+    fix.worker.stop();
+}
+
 TEST_CASE("A confirmed window pick resolves back to the window it names")
 {
     PickerFixture fix;

@@ -503,6 +503,23 @@ TEST_CASE("The adaptive-image extension sizes the vectorscope by its height")
     CHECK(resized.height == 384);
 }
 
+TEST_CASE("The adaptive-image extension resizes the histogram's plot")
+{
+    ScopeInstance histogram = builtinModules().createInstance("org.sidescopes.histogram");
+    REQUIRE(histogram.valid());
+    CHECK(histogram.getExtension("sidescopes.not-an-extension") == nullptr);
+
+    // The histogram's bins are fixed at 256 codes; what the host sizes is the
+    // plot it strokes them into.
+    const auto* adaptive = static_cast<const SsAdaptiveImageExtension*>(histogram.getExtension(AdaptiveImageExtension));
+    REQUIRE(adaptive != nullptr);
+    adaptive->setImageSize(histogram.raw(), 1024, 384);
+
+    const SsImageView resized = histogram.image();
+    CHECK(resized.width == 1024);
+    CHECK(resized.height == 384);
+}
+
 TEST_CASE("A module refuses to create a scope it does not own")
 {
     // Creation is inert and answers null for an unknown id, which is what

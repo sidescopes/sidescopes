@@ -362,6 +362,44 @@ TEST_CASE("The probe searches the patch around the anchor")
     fix.worker.stop();
 }
 
+TEST_CASE("A landed probe is drained on the next step at its own cadence")
+{
+    ControllerFixture fix;
+    fix.startCapture();
+    fix.worker.start();
+    desktopStubs().displayGeometry = DisplayGeometry{0.0, 0.0, 1000.0, 500.0};
+    // The detector's box is in the crop's own coordinates: 450,350 once the
+    // searched patch's origin at 250,150 is added back, which is exactly the
+    // anchor. A box that never had that origin added would land nowhere near
+    // it, and the lock would go hunting instead of holding.
+    desktopStubs().faces.clear();
+    desktopStubs().faces.push_back(IntRect{200, 200, 100, 100});
+    publishAndAwait(fix, makeCoordinateFrameBuffer(2000, 1000, 1), 1);
+    fix.attachWindow(1, AttachWindowRect{0.0, 0.0, 1000.0, 500.0});
+    fix.controller.addLock(
+        1, face_lock::makeLock(FaceAnchor{500.0, 400.0, 100.0}, LockRect{450.0, 350.0, 550.0, 450.0}), 0.0);
+
+    const AttachDecision decision = attachedDecision(1, AttachWindowRect{0.0, 0.0, 1000.0, 500.0});
+    constexpr AnalysisWorker::FrameSize FrameSize{2000, 1000};
+    (void)fix.controller.update(decision, FrameSize, 1, RegionOfInterest{}, false, 1.0);
+    awaitProbe(fix);
+
+    // Still inside the probe period: the landed result is taken in, and no
+    // second probe is started on top of it.
+    (void)fix.controller.update(decision, FrameSize, 1, RegionOfInterest{}, false, 1.1);
+    awaitProbe(fix);
+    CHECK(desktopStubs().detectorCall().calls == 1);
+    CHECK_FALSE(fix.controller.hunting());
+    CHECK(fix.controller.contains(1));
+
+    // Past the period the next probe goes out.
+    (void)fix.controller.update(decision, FrameSize, 1, RegionOfInterest{}, false, 1.5);
+    awaitProbe(fix);
+    CHECK(desktopStubs().detectorCall().calls == 2);
+
+    fix.worker.stop();
+}
+
 TEST_CASE("The probe never searches past the attached window")
 {
     ControllerFixture fix;
