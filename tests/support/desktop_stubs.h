@@ -48,6 +48,9 @@ public:
     bool faceDetectionSupported = false;
     std::vector<IntRect> faces;
 
+    bool applicationHidden = false;
+    std::string displayName = "Test display";
+
     /// Puts every answer back to its empty default and forgets what the
     /// detector was handed.
     void reset();

@@ -2,7 +2,6 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <chrono>
 #include <cstdint>
-#include <map>
 #include <optional>
 #include <string>
 #include <thread>
@@ -16,70 +15,10 @@
 #include "desktop_stubs.h"
 #include "fake_capture.h"
 #include "platform/desktop.h"
+#include "region_overlay_stubs.h"
 #include "test_frame.h"
 
 namespace sidescopes {
-
-namespace {
-
-// What the picker overlay was told. The desktop and detector seams are shared
-// with the other suites through desktop_stubs; the picker overlay is this
-// suite's alone, so its script and its record live here.
-struct PickerOverlay
-{
-    bool opens = true;
-    RegionPickPoll poll;
-
-    int cancels = 0;
-    std::optional<RegionPickerMode> lastMode;
-    std::vector<PickerDisplay> lastDisplays;
-    std::map<uint32_t, std::vector<SuggestedRegion>> deliveredFaces;
-
-    void reset()
-    {
-        *this = PickerOverlay{};
-    }
-};
-
-PickerOverlay g_overlay;
-
-}  // namespace
-
-bool beginRegionPick(const std::vector<PickerDisplay>& displays, RegionPickerMode mode)
-{
-    g_overlay.lastDisplays = displays;
-    g_overlay.lastMode = mode;
-
-    return g_overlay.opens;
-}
-
-RegionPickPoll pollRegionPick()
-{
-    return g_overlay.poll;
-}
-
-void cancelRegionPick()
-{
-    ++g_overlay.cancels;
-}
-
-void setRegionPickMode(RegionPickerMode mode)
-{
-    g_overlay.lastMode = mode;
-}
-
-void setRegionPickChipColor(const std::optional<FloatColor>&)
-{
-}
-
-void updatePickerFaces(uint32_t displayId, const std::vector<SuggestedRegion>& faces)
-{
-    g_overlay.deliveredFaces[displayId] = faces;
-}
-
-void hideRegionBorder()
-{
-}
 
 namespace {
 
@@ -88,6 +27,7 @@ using test::desktopStubs;
 using test::FakeCaptureSource;
 using test::makeSolidFrameBuffer;
 using test::makeTarget;
+using test::regionOverlayStubs;
 
 constexpr uint32_t StreamedDisplay = 7;
 
@@ -107,7 +47,7 @@ struct PickerFixture
     PickerFixture()
     {
         desktopStubs().reset();
-        g_overlay.reset();
+        regionOverlayStubs().reset();
         source.targets = {makeTarget(StreamedDisplay, "Test display")};
         REQUIRE(capture.requestPermission());
         capture.requestDisplay(StreamedDisplay);
@@ -295,15 +235,15 @@ TEST_CASE("Choosing another region tool switches the open pick's mode")
     (void)fix.picker.openIfRequested(true);
 
     CHECK(fix.picker.active());
-    CHECK(g_overlay.cancels == 0);
-    REQUIRE(g_overlay.lastMode.has_value());
-    CHECK(*g_overlay.lastMode == RegionPickerMode::AttachWindow);
+    CHECK(regionOverlayStubs().pickCancels == 0);
+    REQUIRE(regionOverlayStubs().lastMode.has_value());
+    CHECK(*regionOverlayStubs().lastMode == RegionPickerMode::AttachWindow);
 }
 
 TEST_CASE("A pick is not opened while nothing is being captured")
 {
     desktopStubs().reset();
-    g_overlay.reset();
+    regionOverlayStubs().reset();
     FakeCaptureSource source;
     FrameMailbox mailbox;
     AnalysisWorker worker{mailbox};
@@ -318,13 +258,13 @@ TEST_CASE("A pick is not opened while nothing is being captured")
 
     CHECK_FALSE(outcome.activity);
     CHECK_FALSE(picker.active());
-    CHECK_FALSE(g_overlay.lastMode.has_value());
+    CHECK_FALSE(regionOverlayStubs().lastMode.has_value());
 }
 
 TEST_CASE("A request the overlay refuses is not retried")
 {
     PickerFixture fix;
-    g_overlay.opens = false;
+    regionOverlayStubs().pickOpens = false;
 
     // The overlay could not be shown; the request is spent either way, so the
     // next frame does not try again.
@@ -333,9 +273,9 @@ TEST_CASE("A request the overlay refuses is not retried")
     CHECK(first.activity);
     CHECK_FALSE(fix.picker.active());
 
-    g_overlay.lastMode.reset();
+    regionOverlayStubs().lastMode.reset();
     (void)fix.picker.openIfRequested(true);
-    CHECK_FALSE(g_overlay.lastMode.has_value());
+    CHECK_FALSE(regionOverlayStubs().lastMode.has_value());
 }
 
 TEST_CASE("A pin poll returns the sampled colour for the host to pin")
@@ -460,11 +400,11 @@ TEST_CASE("A plain pin ends the errand and a kept-open one does not")
     poll.pinnedPoint = DisplayPoint{50.0, 50.0};
     poll.pinnedKeepOpen = true;
     (void)fix.picker.processPoll(poll, frameSize, std::nullopt);
-    CHECK(g_overlay.cancels == 0);
+    CHECK(regionOverlayStubs().pickCancels == 0);
 
     poll.pinnedKeepOpen = false;
     (void)fix.picker.processPoll(poll, frameSize, std::nullopt);
-    CHECK(g_overlay.cancels == 1);
+    CHECK(regionOverlayStubs().pickCancels == 1);
 
     fix.worker.stop();
 }
@@ -542,15 +482,15 @@ TEST_CASE("The streamed display's faces open with the picker as candidates")
     CHECK_THAT(detected.pixelsPerPoint, WithinAbs(2.0f, 1e-6f));
 
     // The overlay opened with the inset crop of that box as its suggestion.
-    REQUIRE(g_overlay.lastDisplays.size() == 1);
-    REQUIRE(g_overlay.lastDisplays[0].faces.size() == 1);
-    CHECK(g_overlay.lastDisplays[0].facesScanned);
-    CHECK_THAT(g_overlay.lastDisplays[0].faces[0].region.leftPercent, WithinAbs(26.25, 1e-9));
+    REQUIRE(regionOverlayStubs().lastDisplays.size() == 1);
+    REQUIRE(regionOverlayStubs().lastDisplays[0].faces.size() == 1);
+    CHECK(regionOverlayStubs().lastDisplays[0].facesScanned);
+    CHECK_THAT(regionOverlayStubs().lastDisplays[0].faces[0].region.leftPercent, WithinAbs(26.25, 1e-9));
 
     // Confirming that suggestion resolves back to the detector's own box, which
     // is what a face lock anchors on.
     const FaceCandidate* candidate =
-        fix.picker.matchFaceCandidate(StreamedDisplay, g_overlay.lastDisplays[0].faces[0].region);
+        fix.picker.matchFaceCandidate(StreamedDisplay, regionOverlayStubs().lastDisplays[0].faces[0].region);
     REQUIRE(candidate != nullptr);
     CHECK(candidate->box.x == 160);
     CHECK(candidate->box.width == 80);
@@ -576,8 +516,8 @@ TEST_CASE("A picker opened without face detection scans nothing")
     openPick(fix, RegionPickerMode::AttachFace);
 
     CHECK(desktopStubs().detectorCall().calls == 0);
-    REQUIRE(g_overlay.lastDisplays.size() == 1);
-    CHECK(g_overlay.lastDisplays[0].faces.empty());
+    REQUIRE(regionOverlayStubs().lastDisplays.size() == 1);
+    CHECK(regionOverlayStubs().lastDisplays[0].faces.empty());
     CHECK_FALSE(fix.picker.scansRunning());
 
     fix.worker.stop();

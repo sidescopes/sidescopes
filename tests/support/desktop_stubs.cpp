@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <string>
 #include <vector>
 
 #include "core/frame.h"
@@ -59,6 +60,16 @@ std::optional<CapturedImage> captureDisplayImage(uint32_t)
     return g_stubs.displayImage;
 }
 
+bool applicationHidden()
+{
+    return g_stubs.applicationHidden;
+}
+
+std::string displayName(uint32_t)
+{
+    return g_stubs.displayName;
+}
+
 bool supportsFaceDetection()
 {
     return g_stubs.faceDetectionSupported;
@@ -83,6 +94,8 @@ void DesktopStubs::reset()
     displayImage.reset();
     faceDetectionSupported = false;
     faces.clear();
+    applicationHidden = false;
+    displayName = "Test display";
     const std::lock_guard lock(m_mutex);
     m_detected = DetectorCall{};
 }
