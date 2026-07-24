@@ -17,10 +17,11 @@ enum class Icon
     User,
     Pipette,
     Expand,
+    ChartColumn,
 };
 
 /// The number of icons in the set, for texture caches sized by Icon.
-constexpr std::size_t IconCount = 7;
+constexpr std::size_t IconCount = 8;
 
 /// Rasterizes @p icon into a tightly packed RGBA8 square of
 /// @p sizePixels a side: near-white strokes on transparency, ready to

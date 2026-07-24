@@ -2,6 +2,7 @@
 
 #include <optional>
 #include <string>
+#include <vector>
 
 #include "core/frame.h"
 #include "imgui.h"
@@ -49,6 +50,10 @@ struct PaneRenderOutcome
     /// A chip chose a scope: the host shows it, which may wait briefly for the
     /// worker to fill its image.
     std::optional<ScopeChoice> chosenScope;
+    /// A drag in the selector reordered the scopes on screen: the host applies
+    /// the new sequence, which reflows the panes. Set only when the order
+    /// actually changed.
+    std::optional<std::vector<std::string>> reorderedStack;
     /// The reset tool: the host drops every region and attachment.
     bool resetToFullScreen = false;
     /// A scope parameter changed: the host pushes the settings to the worker.

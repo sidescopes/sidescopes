@@ -1,6 +1,8 @@
 #pragma once
 
 #include <string>
+#include <string_view>
+#include <vector>
 
 #include "app/icon_textures.h"
 #include "app/pane_render.h"
@@ -26,9 +28,9 @@ public:
     Toolbar(const ScopeRegistry& registry, ScopeView& view, const ShortcutResolver& shortcuts, RegionPicker& picker,
             IconTextures& icons);
 
-    /// The scope letter chips, one per scope the registry lettered. Switching
-    /// is the common case, so a plain click shows one scope alone and
-    /// @p stackModifier stacks.
+    /// The scope selector: an icon button whose popup checklists every scope,
+    /// the ones on screen leading in pane order and draggable to rearrange
+    /// them. @p stackModifier is unused - the menu always toggles.
     [[nodiscard]] PaneRenderOutcome drawScopeToggles(bool stackModifier);
 
     /// The region toolbox: draw, attach to a window, attach to a face, and the
@@ -41,6 +43,39 @@ public:
     void showAttachNotice(std::string message);
 
 private:
+    /// The column geometry the scope menu lays its rows on: where the name
+    /// starts, the total row width, and the margin the keys keep from the right
+    /// edge - so names left-align and the keys right-align clear of the border.
+    struct ScopeMenuColumns
+    {
+        float nameX;
+        float width;
+        float rightPad;
+    };
+
+    /// Measures the menu's columns from the widest scope name and key.
+    [[nodiscard]] ScopeMenuColumns scopeColumns() const;
+
+    /// Fills the open scope popup: the scopes on screen first, then a rule and
+    /// the rest. Records any drag reorder and toggle in @p outcome.
+    void appendScopeMenu(PaneRenderOutcome& outcome);
+
+    /// Draws the on-screen scopes as draggable rows and lands any reorder.
+    /// @return Whether a drop changed the order.
+    bool appendShownScopes(std::vector<std::string>& shown, const ScopeMenuColumns& cols, PaneRenderOutcome& outcome);
+
+    /// Draws one not-yet-shown scope as a row that adds it when clicked.
+    /// @return Whether the row was clicked.
+    bool drawAddRow(const std::string& id, const ScopeMenuColumns& cols);
+
+    /// Draws @p id's keyboard letter over the row just drawn, right-aligned a
+    /// margin of @p rightPad in from the row's edge.
+    void drawRowKey(std::string_view id, float rightPad) const;
+
+    /// A scope's display name by id, or empty when the registry does not know
+    /// it.
+    [[nodiscard]] const char* scopeName(std::string_view id) const;
+
     /// Seats the constant-width region toolbox: right-aligned beside the
     /// scopes, flush left on its own wrapped row, attach notice on the left.
     void placeRegionToolbox() const;

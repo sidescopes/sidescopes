@@ -671,6 +671,11 @@ void App::applyPaneRenderOutcome(const PaneRenderOutcome& outcome)
     if (outcome.chosenScope) {
         chooseScope(outcome.chosenScope->id, outcome.chosenScope->stack);
     }
+    if (outcome.reorderedStack) {
+        // A view-only rearrangement: the scope set is unchanged, so the panes
+        // reflow from the new stack order with no worker recompute.
+        m_view.stack().reorder(*outcome.reorderedStack);
+    }
     if (outcome.resetToFullScreen) {
         applyRegionOutcome(m_regions.resetToFullScreen());
     }

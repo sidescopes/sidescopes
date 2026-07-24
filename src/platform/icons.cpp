@@ -53,6 +53,9 @@ constexpr const char* PencilSvg =
 constexpr const char* UserSvg =
     R"svg(<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#f7f7f7" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2" /><circle cx="12" cy="7" r="4" /></svg>)svg";
 
+constexpr const char* ChartColumnSvg =
+    R"svg(<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#f7f7f7" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v16a2 2 0 0 0 2 2h16" /><path d="M18 17V9" /><path d="M13 17V5" /><path d="M8 17v-3" /></svg>)svg";
+
 const char* sourceFor(Icon icon)
 {
     switch (icon) {
@@ -70,6 +73,8 @@ const char* sourceFor(Icon icon)
         return PipetteSvg;
     case Icon::Expand:
         return ExpandSvg;
+    case Icon::ChartColumn:
+        return ChartColumnSvg;
     }
 
     return PinSvg;
