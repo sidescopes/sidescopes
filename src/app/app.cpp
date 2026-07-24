@@ -103,7 +103,8 @@ bool shortcutPressed(std::string_view name)
 namespace sidescopes {
 
 App::App()
-    : m_worker(m_mailbox),
+    : m_uiScale(computeUiScale, applyInterfaceScale),
+      m_worker(m_mailbox),
       m_capture(createScreenCaptureSource()),
       m_captureController(*m_capture, m_mailbox),
       m_faceLock(m_attach, m_worker, m_captureController),

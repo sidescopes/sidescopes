@@ -1,5 +1,7 @@
 #pragma once
 
+#include <functional>
+
 struct GLFWwindow;
 
 namespace sidescopes {
@@ -13,6 +15,17 @@ namespace sidescopes {
 class UiScaleController
 {
 public:
+    /// Reads the OS scale for a window - the monitor's own recommendation.
+    using ScaleProbe = std::function<float(GLFWwindow*)>;
+    /// Applies a folded interface scale to the live ImGui style.
+    using StyleSink = std::function<void(float)>;
+
+    /// @param probe reads a window's OS scale; @param sink applies the folded
+    /// scale to the style. Injected so the fold-and-guard logic is reachable
+    /// without a window or an ImGui context - the app passes the real
+    /// computeUiScale and applyInterfaceScale.
+    UiScaleController(ScaleProbe probe, StyleSink sink);
+
     /// @return The factor the interface is drawn at right now.
     [[nodiscard]] float scale() const;
 
@@ -37,6 +50,8 @@ public:
 private:
     void apply(float scale);
 
+    ScaleProbe m_probe;
+    StyleSink m_sink;
     float m_scale = 1.0f;
     /// User interface-size factor, a multiplier on the OS scale (1.0 = match
     /// system). One of UiScaleSteps; multiplied into m_scale by refresh.

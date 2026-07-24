@@ -32,6 +32,7 @@ add_executable(sidescopes_tests
     test_overlay_style.cpp
     test_scope_layout.cpp
     test_layout_preset_store.cpp
+    test_ui_scale.cpp
     test_ui_scaling.cpp
     test_scope_registry.cpp
     test_pane_layout.cpp
@@ -87,6 +88,7 @@ target_sources(sidescopes_tests PRIVATE
     ${CMAKE_SOURCE_DIR}/src/app/shortcut_resolver.cpp
     ${CMAKE_SOURCE_DIR}/src/app/stack_tokens.cpp
     ${CMAKE_SOURCE_DIR}/src/app/trace_params.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/ui_scale.cpp
     ${CMAKE_SOURCE_DIR}/src/app/ui_scaling.cpp
     ${CMAKE_SOURCE_DIR}/src/app/version.cpp
     ${CMAKE_SOURCE_DIR}/src/app/window_suggestions.cpp)
