@@ -106,6 +106,18 @@ target_link_libraries(sidescopes_ui_layout_tests PRIVATE sidescopes_imgui_test_e
 sidescopes_target_defaults(sidescopes_ui_layout_tests)
 add_test(NAME sidescopes_ui_layout COMMAND sidescopes_ui_layout_tests)
 
+# The interface-scale suite asserts applyInterfaceScale never compounds the
+# style across repeated scale changes - the ImGui-only unit behind the UI
+# Scaling menu, driven headlessly against the hooked build.
+add_executable(sidescopes_ui_scale_tests
+    test_scale_ui.cpp
+    ui_test_harness.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/interface_style.cpp)
+target_include_directories(sidescopes_ui_scale_tests PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(sidescopes_ui_scale_tests PRIVATE sidescopes_imgui_test_engine)
+sidescopes_target_defaults(sidescopes_ui_scale_tests)
+add_test(NAME sidescopes_ui_scale COMMAND sidescopes_ui_scale_tests)
+
 # In the dynamic module configuration the engines live only in the loaded
 # MODULE bundles, so - as in tests/CMakeLists.txt - compile their sources in to
 # supply the symbols core's shared graticule references, and wait for the
