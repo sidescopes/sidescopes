@@ -236,15 +236,20 @@ void smoothPlane(const uint32_t* corrected, int columns, uint32_t* out)
     // flat-field and the dead-code reconstruction above - a wider
     // kernel here only blurred what they had already repaired, and
     // big panes magnified that blur.
-    for (int column = 0; column < columns; ++column) {
-        for (int row = 0; row < WaveformLevels; ++row) {
-            const auto at = [&](int level) -> uint32_t {
-                if (level < 0 || level >= WaveformLevels) {
-                    return 0;
-                }
-                return corrected[static_cast<std::size_t>(level) * columns + column];
-            };
-            out[static_cast<std::size_t>(row) * columns + column] = (at(row - 1) + 4 * at(row) + at(row + 1) + 3) / 6;
+    //
+    // Walked one level at a time with the three taps held as row pointers.
+    // Column-major traversal restreamed the whole plane once per column -
+    // megabytes, thousands of times, at a wide pane - while the arithmetic
+    // per bin is identical either way.
+    for (int row = 0; row < WaveformLevels; ++row) {
+        const uint32_t* self = corrected + static_cast<std::size_t>(row) * columns;
+        const uint32_t* above = row > 0 ? self - columns : nullptr;
+        const uint32_t* below = row + 1 < WaveformLevels ? self + columns : nullptr;
+        uint32_t* line = out + static_cast<std::size_t>(row) * columns;
+        for (int column = 0; column < columns; ++column) {
+            const uint32_t lower = above != nullptr ? above[column] : 0u;
+            const uint32_t upper = below != nullptr ? below[column] : 0u;
+            line[column] = (lower + 4 * self[column] + upper + 3) / 6;
         }
     }
     // Horizontal 1-2-1 within each row, in place.
