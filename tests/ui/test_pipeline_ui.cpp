@@ -197,7 +197,11 @@ void endToEnd(ImGuiTestContext* ctx)
 
     uint64_t seen = 0;
     AnalysisWorker::Output out;
-    IM_CHECK(pumpUntil(ctx, [&] { return h.worker.fetchOutput(seen, out); }));
+    // Wait for the vectorscope image itself, not just any new output version:
+    // the read below indexes it, so a version that predates its first fill
+    // would dereference an empty image.
+    IM_CHECK(pumpUntil(
+        ctx, [&] { return h.worker.fetchOutput(seen, out) && imagePopulated(imageFor(out, VectorscopeScopeId)); }));
     // 75% red lands on the default BT.709 target (bin 109, 43).
     IM_CHECK(pixelLit(imageFor(out, VectorscopeScopeId), 109, 43));
     // The waveform is off, so its image never populated.
