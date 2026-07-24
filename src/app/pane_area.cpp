@@ -420,10 +420,40 @@ void PaneArea::drawScopeById(std::string_view id, Pass& pass)
             drawHistogram(textureForId(HistogramScopeId), m_output, *instance, histogramStyle(), m_view.graticule(),
                           pass.input.vectorscopeColor, m_histogramScratch);
         }
+    } else if (id == NeutralScopeId) {
+        drawNeutralPane(pass);
     } else if (id == ColorPickerScopeId) {
         drawColorPicker(pass.input.vectorscopeColor, m_pins, pass.input.monospaceFont);
     } else {
         drawWaveformPane(id, pass);
+    }
+}
+
+void PaneArea::drawNeutralPane(Pass& pass)
+{
+    // A square polar plot like the vectorscope: keep its aspect so the plane
+    // never stretches, and glue the graticule and cursor marker to the centred
+    // square rather than the pane.
+    const DrawnScope scope = drawScopeImage(textureForId(NeutralScopeId), true);
+    const SsParamInfo* gain = firstParamOfKind(descriptorFor(NeutralScopeId), SS_PARAM_INTENSITY);
+    TraceParams& traces = m_view.traces();
+    if (gain != nullptr) {
+        if (const auto adjusted = traceIntensityGesture(scope, NeutralScopeId, traces.intensity(NeutralScopeId),
+                                                        static_cast<float>(gain->default_value),
+                                                        static_cast<float>(gain->intensity_shift), m_flash)) {
+            traces.setIntensity(NeutralScopeId, adjusted->intensity);
+            m_analysis.scopeParams[NeutralScopeId][gain->key] = adjusted->gain;
+            pass.outcome.analysisDirty = true;
+        }
+    }
+    const ScopeInstance* instance = projectionFor(NeutralScopeId);
+    if (instance != nullptr) {
+        if (m_view.graticule()) {
+            drawGraticule(scope, instance->graticule(), GraticuleStyle{});
+        }
+        if (pass.input.vectorscopeColor) {
+            drawMarkers(scope, instance->markers(toSsColor(*pass.input.vectorscopeColor)));
+        }
     }
 }
 

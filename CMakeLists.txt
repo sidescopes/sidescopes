@@ -146,6 +146,9 @@ sidescopes_add_module(sidescopes_module_waveform
 sidescopes_add_module(sidescopes_module_histogram
     src/modules/histogram_module.cpp
     src/core/scopes/histogram.cpp)
+sidescopes_add_module(sidescopes_module_neutral
+    src/modules/neutral_module.cpp
+    src/core/scopes/neutral.cpp)
 
 # Consumers (app, tests) link these ahead of core. In static mode the module
 # libs carry the built-in entries the registry references and the engines the
@@ -166,7 +169,7 @@ else()
     # WHOLE_ARCHIVE maps to --whole-archive / -force_load / /WHOLEARCHIVE per
     # toolchain (ld64 and MSVC already tolerated the cycle; GNU ld did not).
     set(SIDESCOPES_MODULE_LINK_LIBS
-        "$<LINK_LIBRARY:WHOLE_ARCHIVE,sidescopes_module_vectorscope,sidescopes_module_waveform,sidescopes_module_histogram>")
+        "$<LINK_LIBRARY:WHOLE_ARCHIVE,sidescopes_module_vectorscope,sidescopes_module_waveform,sidescopes_module_histogram,sidescopes_module_neutral>")
 endif()
 
 if(APPLE)
@@ -424,7 +427,8 @@ if(APPLE OR WIN32)
         add_dependencies(SideScopes
             sidescopes_module_vectorscope
             sidescopes_module_waveform
-            sidescopes_module_histogram)
+            sidescopes_module_histogram
+            sidescopes_module_neutral)
     endif()
 endif()
 

@@ -39,6 +39,9 @@ ScopeChrome scopeChromeFor(std::string_view id)
     if (id == HistogramScopeId) {
         return {"##toggle-histogram", "Histogram", ""};
     }
+    if (id == NeutralScopeId) {
+        return {"##toggle-neutral", "Neutral", ""};
+    }
 
     return {"##toggle-color-picker", "Color picker", ""};
 }
@@ -70,12 +73,17 @@ PaneRenderOutcome Toolbar::drawScopeToggles(bool stackModifier)
         if (scope.letter == 0) {
             continue;
         }
+        // Scope the button id by the scope's own id, so a shared chrome button
+        // id (every scope without its own case falls back to one) can never
+        // collide with another chip.
+        ImGui::PushID(scope.id.c_str());
         const ScopeChrome chrome = scopeChromeFor(scope.id);
         const char letter[2] = {scope.letter, '\0'};
         if (scopeToggleButton(chrome.buttonId, letter, m_view.stack().shows(scope.id),
                               scopeTooltip(chrome.name, m_shortcuts.bindingFor(scope.id), chrome.extra))) {
             outcome.chosenScope = ScopeChoice{scope.id, stackModifier};
         }
+        ImGui::PopID();
         ImGui::SameLine(0.0f, 2.0f);
     }
     ImGui::SameLine(0.0f, 8.0f);

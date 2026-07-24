@@ -118,6 +118,7 @@ private:
     void equalizeDividerWeights(int leftPane, Pass& pass);
     void drawScopeById(std::string_view id, Pass& pass);
     void drawVectorscopePane(Pass& pass);
+    void drawNeutralPane(Pass& pass);
     void drawWaveformPane(std::string_view id, Pass& pass);
 
     GraphicsBackend& m_graphics;

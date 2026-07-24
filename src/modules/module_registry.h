@@ -169,6 +169,7 @@ ModuleRegistry& builtinModules();
 extern const SsModuleEntry VectorscopeModuleEntry;
 extern const SsModuleEntry WaveformModuleEntry;
 extern const SsModuleEntry HistogramModuleEntry;
+extern const SsModuleEntry NeutralModuleEntry;
 #endif
 
 /// Instance extension: the host drives adaptive display resolution through

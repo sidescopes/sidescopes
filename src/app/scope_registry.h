@@ -17,6 +17,7 @@ inline constexpr char VectorscopeScopeId[] = "org.sidescopes.vectorscope";
 inline constexpr char WaveformScopeId[] = "org.sidescopes.waveform";
 inline constexpr char ParadeScopeId[] = "org.sidescopes.parade";
 inline constexpr char HistogramScopeId[] = "org.sidescopes.histogram";
+inline constexpr char NeutralScopeId[] = "org.sidescopes.neutral";
 
 /// The host color picker's reserved scope id; it has no module descriptor and
 /// asks nothing of the analysis worker.
