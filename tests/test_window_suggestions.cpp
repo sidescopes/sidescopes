@@ -151,4 +151,39 @@ TEST_CASE("A window overspilling the display is clamped to it")
     CHECK(suggestions[0].region.bottomPercent == Approx(100.0));
 }
 
+TEST_CASE("A window rectangle maps into its display's percentages")
+{
+    // What the picker's window candidates and the attached border's dim are
+    // both measured with: a window at 100,50 sized 400x200 covers a tenth in
+    // from each of the display's left and top edges.
+    const RegionOfInterest region = displayPercentRect(WindowGeometry{100.0, 50.0, 400.0, 200.0, false, ""}, Display);
+
+    CHECK(region.leftPercent == Approx(10.0));
+    CHECK(region.topPercent == Approx(10.0));
+    CHECK(region.rightPercent == Approx(50.0));
+    CHECK(region.bottomPercent == Approx(50.0));
+}
+
+TEST_CASE("A window rectangle is measured from its own display's origin")
+{
+    // The second display starts 1000 points along the desktop, so a window at
+    // its own left edge is at nought percent, not a hundred.
+    constexpr DisplayGeometry Secondary{1000.0, 0.0, 1000.0, 500.0};
+    const RegionOfInterest region = displayPercentRect(WindowGeometry{1000.0, 0.0, 500.0, 250.0, false, ""}, Secondary);
+
+    CHECK(region.leftPercent == Approx(0.0));
+    CHECK(region.topPercent == Approx(0.0));
+    CHECK(region.rightPercent == Approx(50.0));
+    CHECK(region.bottomPercent == Approx(50.0));
+
+    // A window that overhangs its display clamps rather than reporting past
+    // the edges - a region outside the frame has no pixels to read.
+    const RegionOfInterest overhang =
+        displayPercentRect(WindowGeometry{900.0, -100.0, 400.0, 800.0, false, ""}, Secondary);
+    CHECK(overhang.leftPercent == Approx(0.0));
+    CHECK(overhang.topPercent == Approx(0.0));
+    CHECK(overhang.rightPercent == Approx(30.0));
+    CHECK(overhang.bottomPercent == Approx(100.0));
+}
+
 }  // namespace sidescopes

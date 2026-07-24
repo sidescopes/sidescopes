@@ -31,6 +31,7 @@ add_executable(sidescopes_tests
     test_param_menu.cpp
     test_overlay_style.cpp
     test_scope_layout.cpp
+    test_layout_preset_store.cpp
     test_ui_scaling.cpp
     test_scope_registry.cpp
     test_pane_layout.cpp
@@ -48,6 +49,7 @@ add_executable(sidescopes_tests
     test_region_geometry.cpp
     test_icons.cpp
     test_focus_resolution.cpp
+    test_border_label.cpp
     test_window_suggestions.cpp
     test_version.cpp
 )
@@ -63,9 +65,11 @@ target_sources(sidescopes_tests PRIVATE support/desktop_stubs.cpp)
 target_sources(sidescopes_tests PRIVATE
     ${CMAKE_SOURCE_DIR}/src/app/adaptive_detail.cpp
     ${CMAKE_SOURCE_DIR}/src/app/attach_controller.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/border_label.cpp
     ${CMAKE_SOURCE_DIR}/src/app/capture_controller.cpp
     ${CMAKE_SOURCE_DIR}/src/app/face_lock.cpp
     ${CMAKE_SOURCE_DIR}/src/app/face_lock_controller.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/layout_preset_store.cpp
     ${CMAKE_SOURCE_DIR}/src/app/region_geometry.cpp
     ${CMAKE_SOURCE_DIR}/src/app/overlay_style.cpp
     ${CMAKE_SOURCE_DIR}/src/app/param_menu.cpp
