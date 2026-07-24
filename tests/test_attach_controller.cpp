@@ -1,5 +1,8 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
+#include <cstdint>
+#include <optional>
+#include <vector>
 
 #include "app/attach_controller.h"
 
@@ -458,6 +461,70 @@ TEST_CASE("A window moved while hidden leaves the region screen-glued")
     // screen position and only the emitted mapping clips to the window.
     REQUIRE(landed.region.has_value());
     checkRegion(*landed.region, 40.0, 15.0, 45.0, 35.0);
+}
+
+TEST_CASE("The attached set answers which windows it holds")
+{
+    AttachController controller;
+    CHECK(controller.attachedIdentities().empty());
+    CHECK_FALSE(controller.isAttached(42));
+
+    controller.attach(42, EditorPid, "Editor", EditorWindow, PrimaryDisplay, WholeEditor);
+    controller.attach(7, EditorPid, "Editor", SecondWindow, PrimaryDisplay, WholeSecond);
+
+    // The focus routing asks the desktop which of these is frontmost, so the
+    // list is the whole attached set in the order it was built.
+    const std::vector<uint64_t> identities = controller.attachedIdentities();
+    REQUIRE(identities.size() == 2);
+    CHECK(identities[0] == 42);
+    CHECK(identities[1] == 7);
+    CHECK(controller.isAttached(42));
+    CHECK(controller.isAttached(7));
+    CHECK_FALSE(controller.isAttached(99));
+
+    controller.remove(42);
+    CHECK(controller.attachedIdentities() == std::vector<uint64_t>{7});
+    CHECK_FALSE(controller.isAttached(42));
+}
+
+TEST_CASE("A window with no area keeps its own rectangle as the region")
+{
+    AttachController controller;
+
+    // A window the desktop reports as empty - mid-open, or collapsed - has no
+    // inside to clamp a region into, so the region becomes the window itself
+    // and the arithmetic never divides by its size.
+    const AttachWindowRect empty{300.0, 400.0, 0.0, 0.0};
+    const RegionOfInterest region = controller.attach(42, EditorPid, "Editor", empty, PrimaryDisplay, WholeEditor);
+
+    checkRegion(region, 30.0, 40.0, 30.0, 40.0);
+    CHECK(controller.isAttached(42));
+}
+
+TEST_CASE("A display with no area falls back to the whole display")
+{
+    AttachController controller;
+
+    // A display the desktop reports as empty leaves nothing to measure
+    // percentages against; the region comes back at its full-screen default
+    // rather than as an infinity.
+    constexpr AttachDisplayRect EmptyDisplay{0.0, 0.0, 0.0, 0.0};
+    const RegionOfInterest region = controller.attach(42, EditorPid, "Editor", EditorWindow, EmptyDisplay, WholeEditor);
+
+    checkRegion(region, 0.0, 0.0, 100.0, 100.0);
+}
+
+TEST_CASE("An unattached window's name is empty")
+{
+    AttachController controller;
+    CHECK(controller.activeApplicationName().empty());
+
+    controller.attach(42, EditorPid, "Editor", EditorWindow, PrimaryDisplay, WholeEditor);
+    CHECK(controller.activeApplicationName() == "Editor");
+
+    // Focusing away from every attached window leaves no active name to wear.
+    (void)controller.observe({visibleWindow(42, EditorWindow)}, std::nullopt);
+    CHECK(controller.activeApplicationName().empty());
 }
 
 }  // namespace sidescopes
