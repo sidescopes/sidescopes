@@ -51,6 +51,12 @@ public:
     bool applicationHidden = false;
     std::string displayName = "Test display";
 
+    /// The one-shot screen read the cursor readout falls back to off the
+    /// captured display: what it answers, and how often it was asked - the
+    /// caller owns the pacing, so the count is the throttle made visible.
+    std::optional<FloatColor> screenSample;
+    int screenSampleRequests = 0;
+
     /// Puts every answer back to its empty default and forgets what the
     /// detector was handed.
     void reset();

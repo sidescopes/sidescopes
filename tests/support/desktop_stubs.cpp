@@ -2,8 +2,10 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "core/frame.h"
@@ -60,6 +62,17 @@ std::optional<CapturedImage> captureDisplayImage(uint32_t)
     return g_stubs.displayImage;
 }
 
+void sampleScreenColorAsync(DesktopPoint, std::function<void(std::optional<FloatColor>)> callback)
+{
+    // The seam takes the callback by value because a real implementation hands
+    // it to whatever reads the screen; taking ownership here mirrors that. It
+    // allows a synchronous answer where the read is immediate, which is what
+    // the tests use.
+    ++g_stubs.screenSampleRequests;
+    const std::function<void(std::optional<FloatColor>)> reader = std::move(callback);
+    reader(g_stubs.screenSample);
+}
+
 bool applicationHidden()
 {
     return g_stubs.applicationHidden;
@@ -96,6 +109,8 @@ void DesktopStubs::reset()
     faces.clear();
     applicationHidden = false;
     displayName = "Test display";
+    screenSample.reset();
+    screenSampleRequests = 0;
     const std::lock_guard lock(m_mutex);
     m_detected = DetectorCall{};
 }
