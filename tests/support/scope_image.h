@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <utility>
 #include <vector>
 
@@ -37,6 +38,11 @@ inline std::pair<int, int> brightestPixel(const uint8_t* rgba, int width, int he
 
 inline std::pair<int, int> brightestPixel(const ScopeImage& image)
 {
+    if (image.rgba.size() < static_cast<std::size_t>(image.width) * image.height * 4) {
+        std::fprintf(stderr, "scope-image probe: brightestPixel on %dx%d image with %zu rgba bytes\n", image.width,
+                     image.height, image.rgba.size());
+        return {-1, -1};
+    }
     return brightestPixel(image.rgba.data(), image.width, image.height);
 }
 
@@ -70,9 +76,29 @@ inline int brightestRow(const SsImageView& image, int channel)
     return brightestRow(image.rgba, image.width, image.height, channel);
 }
 
+// Whether (px, py) is a real pixel of @p image whose four RGBA bytes are backed
+// by the buffer. A degenerate image - empty or short rgba, or a coordinate off
+// the grid - is reported by name so the per-pixel probes fail legibly instead
+// of dereferencing past the buffer into a wild near-null read.
+inline bool probeInBounds(const ScopeImage& image, int px, int py)
+{
+    if (px >= 0 && py >= 0 && px < image.width && py < image.height) {
+        const std::size_t offset = (static_cast<std::size_t>(py) * image.width + px) * 4;
+        if (image.rgba.size() >= offset + 4) {
+            return true;
+        }
+    }
+    std::fprintf(stderr, "scope-image probe: pixel (%d,%d) outside %dx%d image with %zu rgba bytes\n", px, py,
+                 image.width, image.height, image.rgba.size());
+    return false;
+}
+
 // Whether any channel is lit at a pixel.
 inline bool pixelLit(const ScopeImage& image, int px, int py)
 {
+    if (!probeInBounds(image, px, py)) {
+        return false;
+    }
     const uint8_t* rgba = image.rgba.data() + (static_cast<std::size_t>(py) * image.width + px) * 4;
     return rgba[0] + rgba[1] + rgba[2] > 0;
 }
@@ -80,6 +106,9 @@ inline bool pixelLit(const ScopeImage& image, int px, int py)
 // One channel byte at a pixel (0=r, 1=g, 2=b, 3=a).
 inline uint8_t channelAt(const ScopeImage& image, int px, int py, int channel)
 {
+    if (!probeInBounds(image, px, py)) {
+        return 0;
+    }
     return image.rgba[(static_cast<std::size_t>(py) * image.width + px) * 4 + channel];
 }
 
@@ -88,6 +117,11 @@ inline uint8_t channelAt(const ScopeImage& image, int px, int py, int channel)
 // peaks sit.
 inline std::vector<int> peakRows(const ScopeImage& image, int channel)
 {
+    if (image.rgba.size() < static_cast<std::size_t>(image.width) * image.height * 4) {
+        std::fprintf(stderr, "scope-image probe: peakRows on %dx%d image with %zu rgba bytes\n", image.width,
+                     image.height, image.rgba.size());
+        return {};
+    }
     std::vector<int> brightness(static_cast<std::size_t>(image.height), 0);
     for (int py = 0; py < image.height; ++py) {
         int rowMax = 0;
