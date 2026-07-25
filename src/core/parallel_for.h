@@ -11,7 +11,17 @@ namespace sidescopes {
 /// Upper bound on the worker threads a single accumulate or compose pass may
 /// use, the calling thread included. The analysis worker already runs off the
 /// UI thread, so this caps the nested fan-out below a typical core count.
-inline constexpr int MaxParallelChunks = 8;
+///
+/// Four, not eight, because each chunk clears and merges its own private bin
+/// set and that memory is what the extra threads actually cost. A waveform at
+/// a 2048-column pane owns six megabytes a chunk: fifty megabytes cleared and
+/// merged per pass across eight chunks against twenty-five across four, thirty
+/// times a second. Measured over the whole analysis thread, the last four
+/// chunks bought 14% more frames for 87% more CPU on a four-core i5-8350U, and
+/// on an eighteen-core M5 Pro - which has no hyperthreading to blame - they
+/// bought nothing at all below saturation and cost 22% more CPU for the same
+/// output. Frames per core, i5-8350U: 9.3 at eight chunks, 15.3 at four.
+inline constexpr int MaxParallelChunks = 4;
 
 /// The number of contiguous chunks to split @p rowCount rows across. Bounded
 /// by the hardware thread count and MaxParallelChunks, and forced to one when
