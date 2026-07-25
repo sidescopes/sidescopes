@@ -115,9 +115,28 @@ CursorSample CursorSampler::update(std::optional<AnalysisWorker::FrameSize> fram
     const bool inRegion =
         pixel && frameSize &&
         region.toPixels(frameSize->displayWidth, frameSize->displayHeight).contains(pixel->x, pixel->y);
-    advanceMarkers(inRegion ? sampled : std::nullopt, smoothing, deltaSeconds, sample);
+    advanceMarkers(markerTarget(sampled, inRegion, now), smoothing, deltaSeconds, sample);
 
     return sample;
+}
+
+std::optional<FloatColor> CursorSampler::markerTarget(const std::optional<FloatColor>& sampled, bool inRegion,
+                                                      double now)
+{
+    if (!inRegion) {
+        // Nothing to travel towards, and the next arrival takes its colour
+        // where the pointer comes back rather than where it left.
+        m_markerTarget.reset();
+        m_nextMarkerSample = 0.0;
+
+        return std::nullopt;
+    }
+    if (now >= m_nextMarkerSample || !m_markerTarget) {
+        m_markerTarget = sampled;
+        m_nextMarkerSample = now + MarkerSampleSeconds;
+    }
+
+    return m_markerTarget;
 }
 
 void CursorSampler::advanceMarkers(const std::optional<FloatColor>& target, CursorSmoothing smoothing,

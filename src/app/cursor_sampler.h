@@ -13,6 +13,15 @@ namespace sidescopes {
 
 class CaptureController;
 
+/// How often a marker takes a new colour to travel towards. The pointer crosses
+/// a photograph faster than a marker means anything at: sampled every frame, a
+/// marker chases thirty colours a second and reads as jumping about rather than
+/// as a reading. Twelve a second is a third of that, and still short enough
+/// against the traces' own smoothing - 75 ms on the vectorscope, 100 on the
+/// waveform - that a new colour arrives while the marker is still travelling,
+/// so it keeps moving continuously instead of stepping and settling.
+inline constexpr double MarkerSampleSeconds = 1.0 / 12.0;
+
 /// How fast each trace's marker follows the pointer, in milliseconds: the
 /// per-scope smoothing the drawing asks for. Passed in rather than read from a
 /// view, because the sample is host-wide truth while the smoothing belongs to
@@ -112,6 +121,12 @@ private:
     /// capture stream's own newest frame.
     [[nodiscard]] std::optional<FloatColor> sampleCapturedFrame(DisplayPixel pixel) const;
 
+    /// The colour the markers are travelling towards: @p sampled taken afresh
+    /// when the sampling interval is up, the one they were already following
+    /// until then, and nothing at all while the pointer is outside the region.
+    [[nodiscard]] std::optional<FloatColor> markerTarget(const std::optional<FloatColor>& sampled, bool inRegion,
+                                                         double now);
+
     /// Advances both trace markers one frame towards @p target, or takes them
     /// off the traces when it is empty, and reports through @p sample whether
     /// either moved.
@@ -135,6 +150,11 @@ private:
 
     std::shared_ptr<ScreenSample> m_screenSample = std::make_shared<ScreenSample>();
     double m_nextScreenSample = 0.0;
+    /// The colour the markers are travelling towards, and when the next one is
+    /// due: what makes a marker a reading taken twelve times a second rather
+    /// than a point chasing every frame's pixel.
+    std::optional<FloatColor> m_markerTarget;
+    double m_nextMarkerSample = 0.0;
     /// The colours the previous frame drew, so a frame is only spent when one of
     /// them actually moves.
     std::optional<FloatColor> m_lastVectorscopeColor;

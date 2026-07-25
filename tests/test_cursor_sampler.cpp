@@ -340,6 +340,47 @@ TEST_CASE("A marker that comes back appears where the pointer is")
     CHECK_THAT(back.vectorscopeColor->g, WithinAbs(200.0f, 1.0f));
 }
 
+TEST_CASE("A marker takes a new colour at its own interval")
+{
+    // Sampled every frame, a marker chases thirty colours a second across a
+    // photograph and reads as jumping about. It takes a new one twelve times a
+    // second instead, and travels towards that one in between.
+    SamplerFixture fix;
+    desktopStubs().cursorDisplay = StreamedDisplay;
+    desktopStubs().cursor = DesktopPoint{8.0, 8.0};
+
+    const CursorSample first = fix.sampler.update(FrameSize, Quadrant, Instant, 1.0, 1.0f / 60.0f);
+    REQUIRE(first.vectorscopeColor.has_value());
+    CHECK_THAT(first.vectorscopeColor->r, WithinAbs(200.0f, 1.0f));
+
+    // A different colour under the pointer, well inside the interval: the
+    // marker is still travelling towards the one it took.
+    fix.mailbox.publish(makeSolidFrameBuffer(64, 64, Color{20, 200, 90}, 2));
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (fix.worker.consumedFrameSequence() != 2 && std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+    REQUIRE(fix.worker.consumedFrameSequence() == 2);
+
+    const CursorSample within =
+        fix.sampler.update(FrameSize, Quadrant, Instant, 1.0 + MarkerSampleSeconds / 2.0, 1.0f / 60.0f);
+    REQUIRE(within.vectorscopeColor.has_value());
+    CHECK_THAT(within.vectorscopeColor->r, WithinAbs(200.0f, 1.0f));
+    CHECK_FALSE(within.changed);
+
+    // Past the interval it takes the new one.
+    const CursorSample after =
+        fix.sampler.update(FrameSize, Quadrant, Instant, 1.0 + MarkerSampleSeconds + 0.001, 1.0f / 60.0f);
+    REQUIRE(after.vectorscopeColor.has_value());
+    CHECK_THAT(after.vectorscopeColor->g, WithinAbs(200.0f, 1.0f));
+    CHECK(after.changed);
+
+    // The readout is not on that interval: it is a reading of a point, and it
+    // followed the colour the moment the frame under the pointer changed.
+    REQUIRE(within.readoutColor.has_value());
+    CHECK_THAT(within.readoutColor->g, WithinAbs(200.0f, 1.0f));
+}
+
 TEST_CASE("The readout reports its own movement")
 {
     // The readout carries no motion - a swatch and a number look the same at a
