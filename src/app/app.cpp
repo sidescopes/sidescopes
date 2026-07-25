@@ -104,24 +104,23 @@ bool shortcutPressed(std::string_view name)
 namespace sidescopes {
 namespace {
 
-// Waits until @p due, processing events as they arrive rather than returning on
-// the first one.
+// Waits until @p due, then handles everything that arrived in one go.
 //
 // glfwWaitEventsTimeout is a timeout, not a floor: it returns the moment an
 // event lands, so a stream of them - a pointer crossing a photograph delivers
 // one per movement - ran the loop at the event rate instead of the frame rate.
 // Measured at sixty-five frames a second against a sixty-frame cap, for scope
-// images that arrive thirty times a second at best. Events are still handled
-// the moment they arrive; only the redraw waits, which is what pacing a frame
-// means.
+// images that arrive thirty times a second at best.
+//
+// Sleeping through the period rather than waking on each event costs nothing in
+// responsiveness - the events belong to the same frame either way - and saves
+// the wake itself, which is most of what a wandering pointer costs: measured at
+// sixty wakes a second against one.
 void waitOutFramePeriod(double due)
 {
-    for (;;) {
-        const double left = due - glfwGetTime();
-        if (left <= 0.0) {
-            break;
-        }
-        glfwWaitEventsTimeout(left);
+    const double left = due - glfwGetTime();
+    if (left > 0.0) {
+        std::this_thread::sleep_for(std::chrono::duration<double>(left));
     }
     glfwPollEvents();
 }
