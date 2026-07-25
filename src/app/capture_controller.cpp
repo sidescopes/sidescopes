@@ -122,8 +122,47 @@ bool CaptureController::dead() const
     return m_dead.load();
 }
 
+void CaptureController::suspend()
+{
+    if (m_suspended) {
+        return;
+    }
+    m_suspended = true;
+    if (m_running) {
+        m_source.stop();
+        m_running = false;
+    }
+    // Stopping the stream can land the source's status callback, which marks
+    // it dead; a stream stopped on purpose has not died, and clearing the mark
+    // after the stop is what keeps resume() from restarting twice.
+    m_dead.store(false);
+    setStatus("paused - the window is out of sight");
+}
+
+void CaptureController::resume()
+{
+    if (!m_suspended) {
+        return;
+    }
+    m_suspended = false;
+    m_stale.store(false);
+    m_dead.store(false);
+    (void)start();
+}
+
+bool CaptureController::suspended() const
+{
+    return m_suspended;
+}
+
 void CaptureController::service(double now)
 {
+    // A suspended stream is stopped because nothing is on screen to show it.
+    // Leave it alone: the marks it would be revived on are cleared by resume(),
+    // which is the restart.
+    if (m_suspended) {
+        return;
+    }
     // Waking the display or unlocking the session can leave the stream a
     // zombie: it either stops delivering without an error, or a retry that
     // ran while the screen was locked bound a stream to the wrong session.

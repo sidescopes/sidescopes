@@ -155,4 +155,98 @@ TEST_CASE("A stale mark restarts the stream after a one-second backoff")
     CHECK_FALSE(controller.dead());
 }
 
+TEST_CASE("suspend stops the stream and service leaves it stopped")
+{
+    FakeCaptureSource source;
+    source.targets = {makeTarget(4, "main")};
+    FrameMailbox mailbox;
+    CaptureController controller(source, mailbox);
+    REQUIRE(controller.requestPermission());
+    REQUIRE(controller.start());
+
+    controller.suspend();
+    CHECK(controller.suspended());
+    CHECK(source.stopCount == 1);
+    // A stream stopped on purpose has not died, or service would revive it.
+    CHECK_FALSE(controller.dead());
+    CHECK(controller.status().find("out of sight") != std::string::npos);
+
+    // However long the frame loop runs, a suspended controller starts nothing.
+    controller.service(100.0);
+    controller.service(200.0);
+    CHECK(source.startCount == 1);
+    CHECK(source.stopCount == 1);
+
+    controller.resume();
+    CHECK_FALSE(controller.suspended());
+    CHECK(source.startCount == 2);
+    CHECK(controller.capturedDisplay() == 4);
+    CHECK(controller.status() == "capturing main");
+}
+
+TEST_CASE("suspending twice or resuming unsuspended does nothing")
+{
+    FakeCaptureSource source;
+    source.targets = {makeTarget(4, "main")};
+    FrameMailbox mailbox;
+    CaptureController controller(source, mailbox);
+    REQUIRE(controller.requestPermission());
+    REQUIRE(controller.start());
+
+    // The frame loop asks every frame, so both calls must be idempotent.
+    controller.resume();
+    CHECK(source.startCount == 1);
+
+    controller.suspend();
+    controller.suspend();
+    CHECK(source.stopCount == 1);
+
+    controller.resume();
+    controller.resume();
+    CHECK(source.startCount == 2);
+}
+
+TEST_CASE("a wake during a suspension is answered by the resume itself")
+{
+    FakeCaptureSource source;
+    source.targets = {makeTarget(4, "main")};
+    FrameMailbox mailbox;
+    CaptureController controller(source, mailbox);
+    REQUIRE(controller.requestPermission());
+    REQUIRE(controller.start());
+    controller.suspend();
+
+    // The display slept and woke while the window was away. The resume starts a
+    // fresh stream, which is exactly what the stale mark was asking for, so it
+    // must not buy a second restart afterwards.
+    controller.markStale();
+    controller.resume();
+    CHECK(source.startCount == 2);
+    CHECK_FALSE(controller.dead());
+
+    controller.service(500.0);
+    CHECK(source.startCount == 2);
+    CHECK_FALSE(controller.dead());
+}
+
+TEST_CASE("a stream that dies while suspended is not restarted until it returns")
+{
+    FakeCaptureSource source;
+    source.targets = {makeTarget(4, "main")};
+    FrameMailbox mailbox;
+    CaptureController controller(source, mailbox);
+    REQUIRE(controller.requestPermission());
+    REQUIRE(controller.start());
+    controller.suspend();
+
+    // The backend reports the stop from its own thread after suspend returned.
+    source.fireStatus("capture stopped");
+    controller.service(600.0);
+    CHECK(source.startCount == 1);
+
+    controller.resume();
+    CHECK(source.startCount == 2);
+    CHECK_FALSE(controller.dead());
+}
+
 }  // namespace sidescopes

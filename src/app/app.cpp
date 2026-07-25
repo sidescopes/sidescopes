@@ -75,6 +75,11 @@ namespace {
 // in; only frames nobody asked for are dropped.
 constexpr double ContentRedrawSeconds = 1.0 / 60.0;
 
+// How long the window must stay out of sight before the pipeline is suspended.
+// Long enough that stepping through the application switcher, or a hide the
+// user immediately undoes, does not pay for a stream restart on the way back.
+constexpr double OutOfSightPauseSeconds = 0.75;
+
 // A key the resolver names resolves to the ImGui key it fires on: the letters
 // and Escape a binding may hold, plus the preset digits and the comma of the
 // settings chord. Anything else never matches a press.
@@ -434,6 +439,7 @@ void App::runFrame()
     drainAsyncSignals();
     // Capture is a service that dies (lock screen, display sleep); restarting
     // it is our job.
+    servicePipelineVisibility(glfwGetTime());
     m_captureController.service(glfwGetTime());
     // Attached regions: observe the attached windows and route the analysis by
     // the focused window. The border reconciles here every frame in both
@@ -479,6 +485,39 @@ void App::runFrame()
     applyBorderEditOutcome(m_regions.pollBorderEdit(m_activeWindowIdentity));
     applyRegionPickOutcome(m_regionPicker.poll(m_frameSize, m_cursor.screenSampleColor()));
     commitAnalysisChanges();
+}
+
+void App::servicePipelineVisibility(double now)
+{
+    // Nothing on screen to show, nothing worth computing. Suspending capture
+    // stops the whole pipeline behind it - the backend's own work, the
+    // per-frame copy, change detection, the analysis pass - and with no output
+    // arriving the frame loop falls to its idle tick as well. A scope that
+    // lives beside an editor spends much of its life behind that editor, so
+    // this is the difference between a tool that rests and one that does not.
+    const bool outOfSight = applicationHidden() || glfwGetWindowAttrib(m_window, GLFW_ICONIFIED) != 0 ||
+                            glfwGetWindowAttrib(m_window, GLFW_VISIBLE) == 0;
+    // The picker paints its own full-screen overlay and the face probe reads
+    // frames on its own thread; neither may lose the stream underneath it.
+    const bool needsFrames = m_regionPicker.active() || m_regionPicker.scansRunning() || m_faceLock.probeRunning();
+    if (!outOfSight || needsFrames) {
+        if (m_captureController.suspended()) {
+            SS_DIAG(Perf, "pipeline resumed");
+            m_captureController.resume();
+        }
+        m_outOfSightSince = 0.0;
+
+        return;
+    }
+    if (m_outOfSightSince == 0.0) {
+        m_outOfSightSince = now;
+    }
+    // Coming back costs a stream restart, so a flick through the application
+    // switcher must not buy one.
+    if (now - m_outOfSightSince > OutOfSightPauseSeconds && !m_captureController.suspended()) {
+        SS_DIAG(Perf, "pipeline suspended - out of sight");
+        m_captureController.suspend();
+    }
 }
 
 void App::pumpEvents()

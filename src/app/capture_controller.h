@@ -52,6 +52,21 @@ public:
     /// @return Whether the stream has died and awaits a restart.
     [[nodiscard]] bool dead() const;
 
+    /// Stops capturing until resume(), because nothing is on screen to show
+    /// it. The whole pipeline goes with the stream: the backend's own work,
+    /// the per-frame copy into the mailbox, change detection, and the analysis
+    /// pass. service() leaves a suspended controller alone rather than reading
+    /// the stopped stream as one that died.
+    void suspend();
+
+    /// Starts capturing again after a suspend(). This start is also the
+    /// restart a wake or unlock during the pause would have asked for, so the
+    /// stale and dead marks are cleared rather than acted on twice.
+    void resume();
+
+    /// @return Whether capture is suspended.
+    [[nodiscard]] bool suspended() const;
+
     /// Once per frame: consumes a stale mark, then restarts a dead stream
     /// after its backoff. @p now is the frame clock in seconds; the
     /// controller never reads the clock itself, so tests drive time here.
@@ -80,6 +95,9 @@ private:
     // Whether a stream is running, so start() stops the old one first only
     // when there is one; the first start has nothing to stop.
     bool m_running = false;
+    // Whether the stream is stopped on purpose, which service() must not
+    // mistake for a stream to revive.
+    bool m_suspended = false;
     // The frame-clock deadline a dead stream waits out before a restart.
     double m_nextRetry = 0.0;
 };

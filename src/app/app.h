@@ -146,6 +146,9 @@ private:
 
     // --- per-frame ---
     void runFrame();
+    /// Suspends the capture stream - and the whole pipeline behind it - while
+    /// the window is out of sight, and resumes it when the window returns.
+    void servicePipelineVisibility(double now);
     void pumpEvents();
     void drainAsyncSignals();
     void followWindowDisplay();
@@ -300,6 +303,9 @@ private:
     /// When the previous frame's event pump returned, so the redraw cap can
     /// target a frame period rather than add a delay to one.
     double m_lastFrameStart = 0.0;
+    /// When the window went out of sight, or zero while it is in sight; the
+    /// pipeline is suspended once it has been gone long enough to mean it.
+    double m_outOfSightSince = 0.0;
     double m_nextPreferencesSave = -1.0;
     std::atomic<bool> m_orphanEscape{false};
 
