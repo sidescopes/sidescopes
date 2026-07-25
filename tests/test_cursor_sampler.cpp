@@ -276,14 +276,14 @@ TEST_CASE("Nothing is sampled without a capture stream or a pointer")
     CHECK(desktopStubs().screenSampleRequests == 0);
 }
 
-TEST_CASE("A marker stands only for a colour inside the region")
+TEST_CASE("A region-scoped marker stands only for a colour inside it")
 {
-    // A marker says "this colour sits here in the distribution you are looking
-    // at", so a sample from outside the region cannot support one - and outside
-    // the region is where most of a session's pointer travel happens, over
-    // window chrome and editor sliders. The readout keeps following it, because
-    // a swatch and a hex code claim nothing about the distribution.
+    // The other reading of MarkersFollowRegion: a marker as an assertion about
+    // the distribution on screen, which a sample from window chrome cannot
+    // support. The readout keeps following the pointer either way, because a
+    // swatch and a hex code claim nothing about a distribution.
     SamplerFixture fix;
+    fix.sampler.setMarkersFollowRegion(true);
     desktopStubs().cursorDisplay = StreamedDisplay;
     desktopStubs().screenSample = FloatColor{11.0f, 22.0f, 33.0f};
 
@@ -312,11 +312,13 @@ TEST_CASE("A marker stands only for a colour inside the region")
 
 TEST_CASE("A marker that comes back appears where the pointer is")
 {
-    // Leaving the region ends the marker rather than freezing it, so the
-    // smoothing has nothing to ease from when the pointer returns: the marker
-    // must appear at the colour under it, not sweep across the trace from the
-    // colour it was showing when it left.
+    // A marker that stops being drawn - the pointer off screen, or outside the
+    // region while markers are scoped to it - ends rather than freezes, so the
+    // smoothing has nothing to ease from when it returns: it must appear at the
+    // colour under the pointer, not sweep across the trace from the colour it
+    // was showing when it left.
     SamplerFixture fix;
+    fix.sampler.setMarkersFollowRegion(true);
     desktopStubs().cursorDisplay = StreamedDisplay;
     constexpr CursorSmoothing Smoothed{200.0f, 200.0f};
 
@@ -396,23 +398,23 @@ TEST_CASE("The loop's readout cadence matches the rate the pointer is probed at"
     CHECK(ReadoutRedrawSeconds == ReadoutSampleSeconds);
 }
 
-TEST_CASE("Markers can be made to follow the pointer anywhere")
+TEST_CASE("Markers follow the pointer wherever it goes")
 {
-    // Whether a marker stands only for a colour inside the region is an open
-    // decision - MarkersFollowRegion is the whole of it - so both readings are
-    // exercised rather than only the one in force.
+    // The region and the pointer are separate inputs: the region decides what
+    // the traces are built from, and a marker is a live probe of what is under
+    // the pointer - worth having with no region drawn at all.
     SamplerFixture fix;
     desktopStubs().cursorDisplay = StreamedDisplay;
     desktopStubs().cursor = DesktopPoint{48.0, 48.0};
 
-    fix.sampler.setMarkersFollowRegion(true);
-    CHECK_FALSE(fix.sampler.update(FrameSize, Quadrant, Instant, 1.0, 1.0f / 60.0f).vectorscopeColor.has_value());
+    const CursorSample outside = fix.sampler.update(FrameSize, Quadrant, Instant, 1.0, 1.0f / 60.0f);
+    REQUIRE(outside.vectorscopeColor.has_value());
+    CHECK_THAT(outside.vectorscopeColor->r, WithinAbs(200.0f, 1.0f));
+    CHECK(outside.changed);
 
-    fix.sampler.setMarkersFollowRegion(false);
-    const CursorSample global = fix.sampler.update(FrameSize, Quadrant, Instant, 2.0, 1.0f / 60.0f);
-    REQUIRE(global.vectorscopeColor.has_value());
-    CHECK_THAT(global.vectorscopeColor->r, WithinAbs(200.0f, 1.0f));
-    CHECK(global.changed);
+    // And the scope is one predicate, so the other reading of it still works.
+    fix.sampler.setMarkersFollowRegion(true);
+    CHECK_FALSE(fix.sampler.update(FrameSize, Quadrant, Instant, 2.0, 1.0f / 60.0f).vectorscopeColor.has_value());
 }
 
 TEST_CASE("The readout reports its own movement")
@@ -424,9 +426,8 @@ TEST_CASE("The readout reports its own movement")
     desktopStubs().cursorDisplay = StreamedDisplay;
     desktopStubs().cursor = DesktopPoint{48.0, 48.0};
 
-    // The first sample brings the readout into existence.
+    // The first sample brings both into existence.
     CHECK(fix.sampler.update(FrameSize, Quadrant, Instant, 1.0, 1.0f / 60.0f).readoutChanged);
-    CHECK_FALSE(fix.sampler.update(FrameSize, Quadrant, Instant, 1.1, 1.0f / 60.0f).readoutChanged);
 
     fix.mailbox.publish(makeSolidFrameBuffer(64, 64, Color{20, 200, 90}, 2));
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
@@ -435,11 +436,15 @@ TEST_CASE("The readout reports its own movement")
     }
     REQUIRE(fix.worker.consumedFrameSequence() == 2);
 
-    const CursorSample moved = fix.sampler.update(FrameSize, Quadrant, Instant, 1.2, 1.0f / 60.0f);
-    CHECK(moved.readoutChanged);
-    // Outside the region, so the marker that used to carry this frame is not
-    // involved at all.
-    CHECK_FALSE(moved.changed);
+    // The readout's interval is the slower of the two, so the marker takes the
+    // new colour first and reports its own move while the readout waits its
+    // turn - which is what the two separate signals are for.
+    const CursorSample marker =
+        fix.sampler.update(FrameSize, Quadrant, Instant, 1.0 + MarkerSampleSeconds + 0.001, 1.0f / 60.0f);
+    CHECK(marker.changed);
+    CHECK_FALSE(marker.readoutChanged);
+    CHECK(fix.sampler.update(FrameSize, Quadrant, Instant, 1.0 + ReadoutSampleSeconds + 0.001, 1.0f / 60.0f)
+              .readoutChanged);
 }
 
 TEST_CASE("The last cross-display sample is what the pin tool reads")

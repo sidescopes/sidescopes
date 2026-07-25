@@ -31,13 +31,15 @@ inline constexpr double MarkerSampleSeconds = 1.0 / 12.0;
 inline constexpr double ReadoutSampleSeconds = 1.0 / 8.0;
 
 /// Whether a marker stands only for a colour taken inside the region the scopes
-/// are reading. This constant is the whole of that decision, and both readings
-/// of it are defensible: region-only says a marker asserts "this colour sits
-/// here in the distribution you are looking at", which a sample from window
-/// chrome or an editor slider cannot support; global says a pointer anywhere on
-/// screen can be placed on the traces, which is what the application is worth
-/// opening for before any region has been drawn.
-inline constexpr bool MarkersFollowRegion = true;
+/// are reading.
+///
+/// It does not: the region and the pointer are separate inputs. The region
+/// decides what the traces are BUILT from, and a marker is a live probe of what
+/// is under the pointer, which is worth having with no region drawn at all -
+/// hovering over a face to see whether it sits on the skin-tone line is a
+/// reading in itself. The readout and the colour picker's swatch follow the same
+/// rule, so all three agree about what the pointer means.
+inline constexpr bool MarkersFollowRegion = false;
 
 /// How fast each trace's marker follows the pointer, in milliseconds: the
 /// per-scope smoothing the drawing asks for. Passed in rather than read from a
@@ -49,9 +51,8 @@ struct CursorSmoothing
     float waveformMs = 0.0f;
 };
 
-/// What one cursor sample yielded: the marker colors, which follow the pointer
-/// as far as MarkersFollowRegion allows, the readout color, which follows it
-/// anywhere, and whether either moved.
+/// What one cursor sample yielded: the marker colors and the readout color,
+/// which all follow the pointer wherever it goes, and whether either moved.
 struct CursorSample
 {
     /// The color a trace marks, smoothed at that trace's own rhythm. Empty
@@ -96,11 +97,11 @@ public:
     CursorSampler(const CaptureController& capture, const AnalysisWorker& worker);
 
     /// One per-frame step. @p frameSize is the captured frame the pointer is
-    /// mapped into, @p region the region the scopes are reading, which is what
-    /// decides whether the pointer has a marker at all, @p smoothing how fast
-    /// each trace follows it, @p now the frame clock the off-display sample is
-    /// throttled against, and @p deltaSeconds the frame's own length, which the
-    /// smoothing advances by.
+    /// mapped into, @p region the region the scopes are reading, which decides
+    /// whether the pointer carries a marker when markers are scoped to it,
+    /// @p smoothing how fast each trace follows it, @p now the frame clock the
+    /// off-display sample is throttled against, and @p deltaSeconds the frame's
+    /// own length, which the smoothing advances by.
     [[nodiscard]] CursorSample update(std::optional<AnalysisWorker::FrameSize> frameSize,
                                       const RegionOfInterest& region, CursorSmoothing smoothing, double now,
                                       float deltaSeconds);
@@ -110,8 +111,9 @@ public:
     [[nodiscard]] std::optional<FloatColor> screenSampleColor() const;
 
     /// Switches the marker scope - see MarkersFollowRegion, which is what this
-    /// starts as. Exists so both readings of an open decision can be exercised;
-    /// the application itself never calls it.
+    /// starts as. The application itself never calls it; it exists so the scope
+    /// is one predicate rather than a shape, and so both readings stay
+    /// exercised.
     void setMarkersFollowRegion(bool followRegion)
     {
         m_markersFollowRegion = followRegion;
