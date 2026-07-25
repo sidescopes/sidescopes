@@ -131,25 +131,66 @@ TEST_CASE("A dead capture stream reads the screen instead of a stale frame")
     CHECK(desktopStubs().screenSampleRequests == 1);
 }
 
-TEST_CASE("Only a real pointer move counts as interaction")
+TEST_CASE("Only a marker that moves counts as interaction")
 {
+    // What these samples feed is a marker drawn at the cursor's COLOUR, so the
+    // colour is what has to change for a frame to be worth spending. The frame
+    // here is one solid colour, which is what sliding across a flat area of a
+    // photograph looks like: the pointer travels and the marker does not move.
     SamplerFixture fix;
     desktopStubs().cursorDisplay = StreamedDisplay;
 
-    // The first reading is a move from nowhere.
+    // The first reading brings a marker into existence.
     desktopStubs().cursor = DesktopPoint{32.0, 32.0};
-    CHECK(fix.sampler.update(FrameSize, Instant, 1.0, 1.0f / 60.0f).moved);
+    CHECK(fix.sampler.update(FrameSize, Instant, 1.0, 1.0f / 60.0f).changed);
 
     // A pointer sitting still must not keep the application awake.
-    CHECK_FALSE(fix.sampler.update(FrameSize, Instant, 1.1, 1.0f / 60.0f).moved);
+    CHECK_FALSE(fix.sampler.update(FrameSize, Instant, 1.1, 1.0f / 60.0f).changed);
 
-    // Neither does a twitch below the threshold, which is what a shaky
-    // reading of a stationary pointer looks like.
-    desktopStubs().cursor = DesktopPoint{32.2, 32.2};
-    CHECK_FALSE(fix.sampler.update(FrameSize, Instant, 1.2, 1.0f / 60.0f).moved);
+    // Nor must a pointer travelling across a uniform frame - this is the case
+    // that was waking the loop sixty-five times a second for a picture that
+    // never changed.
+    for (const double x : {40.0, 48.0, 56.0, 20.0}) {
+        desktopStubs().cursor = DesktopPoint{x, 32.0};
+        CHECK_FALSE(fix.sampler.update(FrameSize, Instant, 1.2, 1.0f / 60.0f).changed);
+    }
 
-    desktopStubs().cursor = DesktopPoint{40.0, 32.0};
-    CHECK(fix.sampler.update(FrameSize, Instant, 1.3, 1.0f / 60.0f).moved);
+    // But a colour that really changes under the pointer does wake it.
+    fix.mailbox.publish(makeSolidFrameBuffer(64, 64, Color{20, 200, 90}, 2));
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (fix.worker.consumedFrameSequence() != 2 && std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+    REQUIRE(fix.worker.consumedFrameSequence() == 2);
+    CHECK(fix.sampler.update(FrameSize, Instant, 1.3, 1.0f / 60.0f).changed);
+}
+
+TEST_CASE("A marker still easing towards its colour keeps redrawing")
+{
+    // With smoothing on, the marker travels for several frames after the colour
+    // under the pointer changes, and every one of those frames has to be drawn.
+    // Waking only on the raw sample would freeze the marker part way.
+    SamplerFixture fix;
+    desktopStubs().cursorDisplay = StreamedDisplay;
+    constexpr CursorSmoothing Smoothed{200.0f, 200.0f};
+
+    desktopStubs().cursor = DesktopPoint{32.0, 32.0};
+    REQUIRE(fix.sampler.update(FrameSize, Smoothed, 1.0, 1.0f / 60.0f).changed);
+
+    // The pointer never moves again; the marker is still on its way.
+    int easingFrames = 0;
+    for (int i = 0; i < 60; ++i) {
+        if (fix.sampler.update(FrameSize, Smoothed, 1.0 + 0.016 * i, 1.0f / 60.0f).changed) {
+            ++easingFrames;
+        }
+    }
+    CHECK(easingFrames > 0);
+
+    // And it does settle, rather than creeping towards its target for ever.
+    for (int i = 0; i < 400; ++i) {
+        (void)fix.sampler.update(FrameSize, Smoothed, 2.0 + 0.016 * i, 1.0f / 60.0f);
+    }
+    CHECK_FALSE(fix.sampler.update(FrameSize, Smoothed, 12.0, 1.0f / 60.0f).changed);
 }
 
 TEST_CASE("Nothing is sampled without a capture stream or a pointer")
@@ -165,7 +206,7 @@ TEST_CASE("Nothing is sampled without a capture stream or a pointer")
 
     // No display is being watched, so there is no readout to keep alive.
     const CursorSample noCapture = sampler.update(FrameSize, Instant, 1.0, 1.0f / 60.0f);
-    CHECK_FALSE(noCapture.moved);
+    CHECK_FALSE(noCapture.changed);
     CHECK_FALSE(noCapture.vectorscopeColor.has_value());
     CHECK(desktopStubs().screenSampleRequests == 0);
 
@@ -173,7 +214,7 @@ TEST_CASE("Nothing is sampled without a capture stream or a pointer")
     SamplerFixture fix;
     desktopStubs().cursor.reset();
     const CursorSample noCursor = fix.sampler.update(FrameSize, Instant, 1.0, 1.0f / 60.0f);
-    CHECK_FALSE(noCursor.moved);
+    CHECK_FALSE(noCursor.changed);
     CHECK_FALSE(noCursor.vectorscopeColor.has_value());
     CHECK(desktopStubs().screenSampleRequests == 0);
 }

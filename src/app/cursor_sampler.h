@@ -30,8 +30,16 @@ struct CursorSample
 {
     std::optional<FloatColor> vectorscopeColor;
     std::optional<FloatColor> waveformColor;
-    /// The pointer moved: the host stamps its activity clock.
-    bool moved = false;
+    /// A marker moved: the host stamps its activity clock so the frame loop
+    /// redraws at the moving cadence.
+    ///
+    /// The colour, not the pointer. What these samples feed is a marker drawn at
+    /// the cursor's COLOUR on the vectorscope and waveform, so it only moves when
+    /// that colour changes - sliding across a flat area of a photograph moves the
+    /// pointer hundreds of times and the marker not at all. Waking on the pointer
+    /// instead measured a jump from ten frames a second to sixty-five for a
+    /// picture that never changed.
+    bool changed = false;
 };
 
 /// Reads the color under the pointer wherever it is and smooths it per trace.
@@ -88,7 +96,10 @@ private:
 
     std::shared_ptr<ScreenSample> m_screenSample = std::make_shared<ScreenSample>();
     double m_nextScreenSample = 0.0;
-    DesktopPoint m_lastCursor{-1.0, -1.0};
+    /// The marker colours the previous frame drew, so a frame is only spent when
+    /// one of them actually moves.
+    std::optional<FloatColor> m_lastVectorscopeColor;
+    std::optional<FloatColor> m_lastWaveformColor;
 };
 
 }  // namespace sidescopes

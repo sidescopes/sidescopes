@@ -6,6 +6,28 @@
 
 namespace sidescopes {
 
+namespace {
+
+// Whether a marker's colour moved enough to be worth a frame. An eighth of a
+// 0-255 code: below that the marker lands on the same pixel of the scope, and
+// the smoothing would otherwise creep towards its target for ever at sixty
+// frames a second, never quite arriving.
+bool markerMoved(const std::optional<FloatColor>& before, const std::optional<FloatColor>& after)
+{
+    if (before.has_value() != after.has_value()) {
+        return true;
+    }
+    if (!after) {
+        return false;
+    }
+    constexpr float Threshold = 1.0f / (255.0f * 8.0f);
+
+    return std::abs(before->r - after->r) > Threshold || std::abs(before->g - after->g) > Threshold ||
+           std::abs(before->b - after->b) > Threshold;
+}
+
+}  // namespace
+
 CursorSampler::CursorSampler(const CaptureController& capture, const AnalysisWorker& worker)
     : m_capture(capture),
       m_worker(worker)
@@ -64,10 +86,6 @@ CursorSample CursorSampler::update(std::optional<AnalysisWorker::FrameSize> fram
     if (!cursor) {
         return sample;
     }
-    if (std::abs(cursor->x - m_lastCursor.x) + std::abs(cursor->y - m_lastCursor.y) > 0.5) {
-        m_lastCursor = *cursor;
-        sample.moved = true;
-    }
     const bool onCapturedDisplay = displayAtPoint(*cursor).value_or(0) == m_capture.capturedDisplay();
     std::optional<FloatColor> sampled;
     if (onCapturedDisplay && !m_capture.dead() && frameSize) {
@@ -80,6 +98,13 @@ CursorSample CursorSampler::update(std::optional<AnalysisWorker::FrameSize> fram
         m_waveformMarker.setTimeConstant(smoothing.waveformMs);
         sample.vectorscopeColor = m_vectorscopeMarker.update(*sampled, deltaSeconds);
         sample.waveformColor = m_waveformMarker.update(*sampled, deltaSeconds);
+        // The smoothed value, not the raw one: a marker easing towards a colour
+        // it has not reached yet still has to be redrawn, and one that has
+        // arrived does not.
+        sample.changed = markerMoved(m_lastVectorscopeColor, sample.vectorscopeColor) ||
+                         markerMoved(m_lastWaveformColor, sample.waveformColor);
+        m_lastVectorscopeColor = sample.vectorscopeColor;
+        m_lastWaveformColor = sample.waveformColor;
     }
 
     return sample;

@@ -118,6 +118,17 @@ public:
 
     [[nodiscard]] std::optional<FrameSize> latestFrameSize() const;
 
+    /// Called on the analysis thread the moment a pass publishes new images, so
+    /// a host that is waiting for events can stop waiting - which is what lets
+    /// that wait be slow: the loop sleeps only while nothing is happening.
+    ///
+    /// Without it the host only discovers new output on its next tick, which
+    /// makes the idle wait a lag on the scopes themselves: nudge a slider while
+    /// the application is idling and the trace would not move until the tick
+    /// came round. With it the wait can be as slow as nothing-is-happening
+    /// deserves, because something happening ends it immediately.
+    void setOutputCallback(std::function<void()> callback);
+
     /// Runs @p reader on the most recent frame under the frame lock; returns
     /// false when no frame has arrived yet. Intended for occasional,
     /// interactive work (the picker's photo detection), not per-frame use.
@@ -157,6 +168,7 @@ private:
     AnalysisSettings m_settings;
     uint64_t m_settingsVersion = 1;
 
+    std::function<void()> m_outputCallback;
     mutable std::mutex m_frameMutex;
     FrameBuffer m_latestFrame;
     bool m_hasFrame = false;

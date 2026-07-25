@@ -109,6 +109,12 @@ bool AnalysisWorker::withLatestFrame(const std::function<void(const FrameView&)>
     return true;
 }
 
+void AnalysisWorker::setOutputCallback(std::function<void()> callback)
+{
+    // Set before start(), so the analysis thread never sees it change.
+    m_outputCallback = std::move(callback);
+}
+
 std::optional<AnalysisWorker::FrameSize> AnalysisWorker::latestFrameSize() const
 {
     std::lock_guard lock(m_frameMutex);
@@ -399,6 +405,9 @@ void AnalysisWorker::run()
 
         std::lock_guard lock(m_outputMutex);
         writeOutput(m_output, scopes, enabledScopes, elapsedMs, framesProcessed);
+        if (m_outputCallback) {
+            m_outputCallback();
+        }
     }
 }
 

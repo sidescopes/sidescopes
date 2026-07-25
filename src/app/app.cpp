@@ -102,6 +102,31 @@ bool shortcutPressed(std::string_view name)
 }  // namespace
 
 namespace sidescopes {
+namespace {
+
+// Waits until @p due, processing events as they arrive rather than returning on
+// the first one.
+//
+// glfwWaitEventsTimeout is a timeout, not a floor: it returns the moment an
+// event lands, so a stream of them - a pointer crossing a photograph delivers
+// one per movement - ran the loop at the event rate instead of the frame rate.
+// Measured at sixty-five frames a second against a sixty-frame cap, for scope
+// images that arrive thirty times a second at best. Events are still handled
+// the moment they arrive; only the redraw waits, which is what pacing a frame
+// means.
+void waitOutFramePeriod(double due)
+{
+    for (;;) {
+        const double left = due - glfwGetTime();
+        if (left <= 0.0) {
+            break;
+        }
+        glfwWaitEventsTimeout(left);
+    }
+    glfwPollEvents();
+}
+
+}  // namespace
 
 App::App()
     : m_uiScale(computeUiScale, applyInterfaceScale),
@@ -155,6 +180,7 @@ bool App::init()
     m_panes = std::make_unique<ScopePaneRenderer>(paneContext, createProjectionInstances(m_scopeRegistry),
                                                   createScopeTextures(*m_graphics, m_scopeRegistry));
 
+    m_worker.setOutputCallback([] { glfwPostEmptyEvent(); });
     m_worker.start();
     warmFaceDetection();
 
@@ -537,12 +563,16 @@ void App::pumpEvents()
         idleWaitWatchingAttachedWindow();
         break;
     case FrameWait::Idle:
-    case FrameWait::UntilFramePeriod:
+        // Woken by any event, which is what keeps the application feeling
+        // instant while nothing is happening.
         if (wait.seconds > 0.0) {
             glfwWaitEventsTimeout(wait.seconds);
         } else {
             glfwPollEvents();
         }
+        break;
+    case FrameWait::UntilFramePeriod:
+        waitOutFramePeriod(now + wait.seconds);
         break;
     }
     m_lastFrameStart = glfwGetTime();
@@ -639,7 +669,7 @@ void App::publishSelfWindowMask()
 }
 
 // Applies a cursor sample to host state: the smoothed colors flow on to this
-// frame's drawing, and a moved pointer counts as interaction.
+// frame's drawing, and a marker that moved counts as interaction.
 void App::sampleCursorColor()
 {
     const CursorSmoothing smoothing{m_view.traces().smoothing(VectorscopeScopeId),
@@ -647,7 +677,7 @@ void App::sampleCursorColor()
     const CursorSample sample = m_cursor.update(m_frameSize, smoothing, glfwGetTime(), ImGui::GetIO().DeltaTime);
     m_vectorscopeColor = sample.vectorscopeColor;
     m_waveformColor = sample.waveformColor;
-    if (sample.moved) {
+    if (sample.changed) {
         m_lastActivity = glfwGetTime();
     }
 }

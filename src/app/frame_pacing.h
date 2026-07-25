@@ -7,10 +7,10 @@ namespace sidescopes {
 /// the display's refresh rate spends whole frames on an identical image -
 /// measured on a 120 Hz panel, 120 frames a second against 30 analysis passes,
 /// three of every four redrawing nothing new.
-inline constexpr double ContentRedrawSeconds = 1.0 / 60.0;
+inline constexpr double ContentRedrawSeconds = 1.0 / 30.0;
 
 /// How long the loop waits for events when nothing at all is happening.
-inline constexpr double IdleWaitSeconds = 0.1;
+inline constexpr double IdleWaitSeconds = 0.5;
 
 /// How long since the last activity counts as nothing happening.
 inline constexpr double IdleAfterSeconds = 0.5;
