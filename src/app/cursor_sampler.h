@@ -22,6 +22,23 @@ class CaptureController;
 /// so it keeps moving continuously instead of stepping and settling.
 inline constexpr double MarkerSampleSeconds = 1.0 / 12.0;
 
+/// How often the readout takes a new colour. It has the same complaint as the
+/// marker and less reason to move at all: a swatch and three percentages
+/// following the pointer thirty times a second flicker through every pixel on
+/// the way to the one being looked at, and each of those readings costs a frame.
+/// Eight a second is under a sixth of a second to land on a colour deliberately
+/// pointed at, and a quarter of the probes.
+inline constexpr double ReadoutSampleSeconds = 1.0 / 8.0;
+
+/// Whether a marker stands only for a colour taken inside the region the scopes
+/// are reading. This constant is the whole of that decision, and both readings
+/// of it are defensible: region-only says a marker asserts "this colour sits
+/// here in the distribution you are looking at", which a sample from window
+/// chrome or an editor slider cannot support; global says a pointer anywhere on
+/// screen can be placed on the traces, which is what the application is worth
+/// opening for before any region has been drawn.
+inline constexpr bool MarkersFollowRegion = true;
+
 /// How fast each trace's marker follows the pointer, in milliseconds: the
 /// per-scope smoothing the drawing asks for. Passed in rather than read from a
 /// view, because the sample is host-wide truth while the smoothing belongs to
@@ -32,17 +49,15 @@ struct CursorSmoothing
     float waveformMs = 0.0f;
 };
 
-/// What one cursor sample yielded: the marker colors, which exist only while
-/// the pointer is over the region the scopes read, the readout color, which
-/// follows the pointer anywhere, and whether a marker moved.
+/// What one cursor sample yielded: the marker colors, which follow the pointer
+/// as far as MarkersFollowRegion allows, the readout color, which follows it
+/// anywhere, and whether either moved.
 struct CursorSample
 {
     /// The color a trace marks, smoothed at that trace's own rhythm. Empty
-    /// until a sample lands, and empty whenever the pointer is outside the
-    /// region: a marker says "this color sits here in the distribution you are
-    /// looking at", which a sample from outside the region cannot support.
-    /// Absent rather than frozen - a marker left where the pointer last was is
-    /// stale and plausible at once.
+    /// until a sample lands, and empty wherever the pointer carries no marker -
+    /// absent rather than frozen, since a marker left where the pointer last
+    /// was is stale and plausible at once.
     std::optional<FloatColor> vectorscopeColor;
     std::optional<FloatColor> waveformColor;
     /// The color under the pointer wherever it is, for the readout: the swatch,
@@ -94,6 +109,14 @@ public:
     /// picker's pin tool each poll.
     [[nodiscard]] std::optional<FloatColor> screenSampleColor() const;
 
+    /// Switches the marker scope - see MarkersFollowRegion, which is what this
+    /// starts as. Exists so both readings of an open decision can be exercised;
+    /// the application itself never calls it.
+    void setMarkersFollowRegion(bool followRegion)
+    {
+        m_markersFollowRegion = followRegion;
+    }
+
 private:
     // The freshest cross-display sample: the async sampler's callback may land
     // on any thread, and may still be in flight at shutdown, so the state it
@@ -121,10 +144,20 @@ private:
     /// capture stream's own newest frame.
     [[nodiscard]] std::optional<FloatColor> sampleCapturedFrame(DisplayPixel pixel) const;
 
+    /// The colour under the pointer, from the capture stream where it reaches
+    /// and from a one-shot screen read where it does not.
+    [[nodiscard]] std::optional<FloatColor> probeColor(DesktopPoint cursor, const std::optional<DisplayPixel>& pixel,
+                                                       double now);
+
+    /// Advances the readout one frame, taking @p probed as its new target when
+    /// one is due, and reports it through @p sample.
+    void updateReadout(const std::optional<FloatColor>& probed, CursorSmoothing smoothing, double now,
+                       float deltaSeconds, CursorSample& sample);
+
     /// The colour the markers are travelling towards: @p sampled taken afresh
     /// when the sampling interval is up, the one they were already following
-    /// until then, and nothing at all while the pointer is outside the region.
-    [[nodiscard]] std::optional<FloatColor> markerTarget(const std::optional<FloatColor>& sampled, bool inRegion,
+    /// until then, and nothing at all while @p markersLive is false.
+    [[nodiscard]] std::optional<FloatColor> markerTarget(const std::optional<FloatColor>& sampled, bool markersLive,
                                                          double now);
 
     /// Advances both trace markers one frame towards @p target, or takes them
@@ -150,11 +183,14 @@ private:
 
     std::shared_ptr<ScreenSample> m_screenSample = std::make_shared<ScreenSample>();
     double m_nextScreenSample = 0.0;
-    /// The colour the markers are travelling towards, and when the next one is
-    /// due: what makes a marker a reading taken twelve times a second rather
-    /// than a point chasing every frame's pixel.
+    /// The colours the markers and the readout are travelling towards, and when
+    /// each is due a new one: what makes them readings taken a dozen times a
+    /// second rather than points chasing every frame's pixel.
     std::optional<FloatColor> m_markerTarget;
     double m_nextMarkerSample = 0.0;
+    std::optional<FloatColor> m_readoutTarget;
+    double m_nextReadoutSample = 0.0;
+    bool m_markersFollowRegion = MarkersFollowRegion;
     /// The colours the previous frame drew, so a frame is only spent when one of
     /// them actually moves.
     std::optional<FloatColor> m_lastVectorscopeColor;

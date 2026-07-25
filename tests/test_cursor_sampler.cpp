@@ -7,6 +7,7 @@
 
 #include "app/capture_controller.h"
 #include "app/cursor_sampler.h"
+#include "app/frame_pacing.h"
 #include "core/analysis_worker.h"
 #include "core/frame.h"
 #include "core/frame_mailbox.h"
@@ -132,7 +133,8 @@ TEST_CASE("A narrowed capture still reads the point the cursor is over")
     // one-shot screen sampler rather than reporting a pixel from inside the
     // region.
     desktopStubs().cursor = DesktopPoint{4.0, 4.0};
-    const CursorSample outside = fix.sampler.update(NarrowedFrameSize, CroppedRegion, Instant, 1.1, 1.0f / 60.0f);
+    const CursorSample outside =
+        fix.sampler.update(NarrowedFrameSize, CroppedRegion, Instant, 1.0 + ReadoutSampleSeconds + 0.001, 1.0f / 60.0f);
     REQUIRE(outside.readoutColor.has_value());
     CHECK_THAT(outside.readoutColor->g, WithinAbs(22.0f, 1e-3f));
     CHECK(desktopStubs().screenSampleRequests == 1);
@@ -375,10 +377,42 @@ TEST_CASE("A marker takes a new colour at its own interval")
     CHECK_THAT(after.vectorscopeColor->g, WithinAbs(200.0f, 1.0f));
     CHECK(after.changed);
 
-    // The readout is not on that interval: it is a reading of a point, and it
-    // followed the colour the moment the frame under the pointer changed.
-    REQUIRE(within.readoutColor.has_value());
-    CHECK_THAT(within.readoutColor->g, WithinAbs(200.0f, 1.0f));
+    // The readout keeps a slower interval of its own - it has the same
+    // complaint and less reason to move at all - so it is still showing the
+    // colour it took, and picks the new one up at its own turn.
+    REQUIRE(after.readoutColor.has_value());
+    CHECK_THAT(after.readoutColor->r, WithinAbs(200.0f, 1.0f));
+    CHECK(ReadoutSampleSeconds > MarkerSampleSeconds);
+    const CursorSample readout =
+        fix.sampler.update(FrameSize, Quadrant, Instant, 1.0 + ReadoutSampleSeconds + 0.001, 1.0f / 60.0f);
+    REQUIRE(readout.readoutColor.has_value());
+    CHECK_THAT(readout.readoutColor->g, WithinAbs(200.0f, 1.0f));
+}
+
+TEST_CASE("The loop's readout cadence matches the rate the pointer is probed at")
+{
+    // A frame drawn between two probes redraws a swatch that cannot have
+    // changed; a probe taken between two frames is a reading nothing shows.
+    CHECK(ReadoutRedrawSeconds == ReadoutSampleSeconds);
+}
+
+TEST_CASE("Markers can be made to follow the pointer anywhere")
+{
+    // Whether a marker stands only for a colour inside the region is an open
+    // decision - MarkersFollowRegion is the whole of it - so both readings are
+    // exercised rather than only the one in force.
+    SamplerFixture fix;
+    desktopStubs().cursorDisplay = StreamedDisplay;
+    desktopStubs().cursor = DesktopPoint{48.0, 48.0};
+
+    fix.sampler.setMarkersFollowRegion(true);
+    CHECK_FALSE(fix.sampler.update(FrameSize, Quadrant, Instant, 1.0, 1.0f / 60.0f).vectorscopeColor.has_value());
+
+    fix.sampler.setMarkersFollowRegion(false);
+    const CursorSample global = fix.sampler.update(FrameSize, Quadrant, Instant, 2.0, 1.0f / 60.0f);
+    REQUIRE(global.vectorscopeColor.has_value());
+    CHECK_THAT(global.vectorscopeColor->r, WithinAbs(200.0f, 1.0f));
+    CHECK(global.changed);
 }
 
 TEST_CASE("The readout reports its own movement")

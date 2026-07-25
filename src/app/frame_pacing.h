@@ -11,10 +11,14 @@ inline constexpr double ContentRedrawSeconds = 1.0 / 30.0;
 
 /// The frame period the loop aims at when the colour readout is the only thing
 /// following the pointer. A swatch and a percentage carry no motion, so they
-/// read the same at a third of the rate a marker easing across a trace needs -
-/// and the pointer is outside the region, where no marker is drawn, for most of
-/// a working session.
-inline constexpr double ReadoutRedrawSeconds = 1.0 / 10.0;
+/// read the same at a fraction of the rate a marker easing across a trace
+/// needs - and the pointer is outside the region, where no marker need be
+/// drawn, for most of a working session.
+///
+/// It matches ReadoutSampleSeconds in cursor_sampler.h, which is what a test
+/// pins: a frame drawn between two probes of the pointer redraws a swatch that
+/// cannot have changed.
+inline constexpr double ReadoutRedrawSeconds = 1.0 / 8.0;
 
 /// How long the loop waits for events when nothing at all is happening.
 inline constexpr double IdleWaitSeconds = 0.5;

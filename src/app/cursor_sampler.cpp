@@ -95,35 +95,59 @@ CursorSample CursorSampler::update(std::optional<AnalysisWorker::FrameSize> fram
     const bool onCapturedDisplay = displayAtPoint(*cursor).value_or(0) == m_capture.capturedDisplay();
     const std::optional<DisplayPixel> pixel =
         onCapturedDisplay && frameSize ? displayPixelOf(*cursor, *frameSize) : std::nullopt;
-    std::optional<FloatColor> sampled;
-    if (pixel && !m_capture.dead()) {
-        sampled = sampleCapturedFrame(*pixel);
-    }
-    if (!sampled) {
-        // Either another display, or a point the capture no longer carries:
-        // narrowed to the analysis region, the stream holds nothing outside it.
-        sampled = sampleOtherDisplay(*cursor, now);
-    }
-    if (!sampled) {
-        return sample;
-    }
-    m_readout.setTimeConstant(smoothing.vectorscopeMs);
-    sample.readoutColor = m_readout.update(*sampled, deltaSeconds);
-    sample.readoutChanged = markerMoved(m_lastReadoutColor, sample.readoutColor);
-    m_lastReadoutColor = sample.readoutColor;
-
     const bool inRegion =
         pixel && frameSize &&
         region.toPixels(frameSize->displayWidth, frameSize->displayHeight).contains(pixel->x, pixel->y);
-    advanceMarkers(markerTarget(sampled, inRegion, now), smoothing, deltaSeconds, sample);
+    const bool markersLive = inRegion || !m_markersFollowRegion;
+
+    // Where the pointer is costs arithmetic; what colour is under it costs a
+    // frame read, or a one-shot screen capture wherever the capture does not
+    // reach. Nothing but the readout and the two markers reads that colour, so
+    // it is taken when one of them is due for a new one and not otherwise.
+    std::optional<FloatColor> probed;
+    if (now >= m_nextReadoutSample || (markersLive && now >= m_nextMarkerSample)) {
+        probed = probeColor(*cursor, pixel, now);
+    }
+    updateReadout(probed, smoothing, now, deltaSeconds, sample);
+    advanceMarkers(markerTarget(probed, markersLive, now), smoothing, deltaSeconds, sample);
 
     return sample;
 }
 
-std::optional<FloatColor> CursorSampler::markerTarget(const std::optional<FloatColor>& sampled, bool inRegion,
+std::optional<FloatColor> CursorSampler::probeColor(DesktopPoint cursor, const std::optional<DisplayPixel>& pixel,
+                                                    double now)
+{
+    if (pixel && !m_capture.dead()) {
+        if (const std::optional<FloatColor> onDisplay = sampleCapturedFrame(*pixel)) {
+            return onDisplay;
+        }
+    }
+
+    // Either another display, or a point the capture no longer carries:
+    // narrowed to the analysis region, the stream holds nothing outside it.
+    return sampleOtherDisplay(cursor, now);
+}
+
+void CursorSampler::updateReadout(const std::optional<FloatColor>& probed, CursorSmoothing smoothing, double now,
+                                  float deltaSeconds, CursorSample& sample)
+{
+    if (probed && now >= m_nextReadoutSample) {
+        m_readoutTarget = probed;
+        m_nextReadoutSample = now + ReadoutSampleSeconds;
+    }
+    if (!m_readoutTarget) {
+        return;
+    }
+    m_readout.setTimeConstant(smoothing.vectorscopeMs);
+    sample.readoutColor = m_readout.update(*m_readoutTarget, deltaSeconds);
+    sample.readoutChanged = markerMoved(m_lastReadoutColor, sample.readoutColor);
+    m_lastReadoutColor = sample.readoutColor;
+}
+
+std::optional<FloatColor> CursorSampler::markerTarget(const std::optional<FloatColor>& sampled, bool markersLive,
                                                       double now)
 {
-    if (!inRegion) {
+    if (!markersLive) {
         // Nothing to travel towards, and the next arrival takes its colour
         // where the pointer comes back rather than where it left.
         m_markerTarget.reset();
@@ -131,7 +155,7 @@ std::optional<FloatColor> CursorSampler::markerTarget(const std::optional<FloatC
 
         return std::nullopt;
     }
-    if (now >= m_nextMarkerSample || !m_markerTarget) {
+    if (sampled && now >= m_nextMarkerSample) {
         m_markerTarget = sampled;
         m_nextMarkerSample = now + MarkerSampleSeconds;
     }
@@ -142,10 +166,9 @@ std::optional<FloatColor> CursorSampler::markerTarget(const std::optional<FloatC
 void CursorSampler::advanceMarkers(const std::optional<FloatColor>& target, CursorSmoothing smoothing,
                                    float deltaSeconds, CursorSample& sample)
 {
-    // A marker only ever stands for a colour inside the region the scopes are
-    // reading. Outside it there is no marker rather than a stale one, and the
-    // smoothing forgets where it was so the next one appears where the pointer
-    // is instead of sweeping there.
+    // Where the pointer carries no marker there is none rather than a stale
+    // one, and the smoothing forgets where it was so the next marker appears
+    // where the pointer is instead of sweeping there.
     if (target) {
         m_vectorscopeMarker.setTimeConstant(smoothing.vectorscopeMs);
         m_waveformMarker.setTimeConstant(smoothing.waveformMs);
