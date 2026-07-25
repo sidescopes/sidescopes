@@ -32,20 +32,26 @@ FloatColor averageNeighborhood(const FrameView& frame, int px, int py, int radiu
 
 FloatColor MarkerSmoother::update(const FloatColor& target, float elapsedSeconds)
 {
+    if (!m_value) {
+        m_value = target;
+
+        return target;
+    }
     const float tauSeconds = m_timeConstantMs / 1000.0f;
     const float alpha = tauSeconds <= 0.0f ? 1.0f : 1.0f - std::exp(-elapsedSeconds / tauSeconds);
 
-    m_value.r += alpha * (target.r - m_value.r);
-    m_value.g += alpha * (target.g - m_value.g);
-    m_value.b += alpha * (target.b - m_value.b);
+    m_value->r += alpha * (target.r - m_value->r);
+    m_value->g += alpha * (target.g - m_value->g);
+    m_value->b += alpha * (target.b - m_value->b);
 
-    const bool nearTarget = std::fabs(target.r - m_value.r) < SnapWindow &&
-                            std::fabs(target.g - m_value.g) < SnapWindow &&
-                            std::fabs(target.b - m_value.b) < SnapWindow;
+    const bool nearTarget = std::fabs(target.r - m_value->r) < SnapWindow &&
+                            std::fabs(target.g - m_value->g) < SnapWindow &&
+                            std::fabs(target.b - m_value->b) < SnapWindow;
     if (nearTarget) {
         m_value = target;
     }
-    return m_value;
+
+    return *m_value;
 }
 
 }  // namespace sidescopes

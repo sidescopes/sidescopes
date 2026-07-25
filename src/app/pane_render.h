@@ -24,10 +24,13 @@ struct PaneRenderInput
     /// Whether a scope that takes pins is on screen; without one the pin tool
     /// stands down.
     bool pinsAvailable;
-    /// The smoothed color under the cursor, per trace, empty until a sample
-    /// lands.
+    /// The smoothed color each trace marks, empty until a sample lands and
+    /// whenever the pointer is outside the region the scopes read.
     const std::optional<FloatColor>& vectorscopeColor;
     const std::optional<FloatColor>& waveformColor;
+    /// The smoothed color under the cursor wherever it is, which the readout
+    /// and the color picker show; empty until a sample lands.
+    const std::optional<FloatColor>& readoutColor;
     /// The fixed-width companion font the picker aligns hex codes with; null
     /// when the system had none.
     ImFont* monospaceFont;

@@ -423,7 +423,7 @@ void PaneArea::drawScopeById(std::string_view id, Pass& pass)
     } else if (id == NeutralScopeId) {
         drawNeutralPane(pass);
     } else if (id == ColorPickerScopeId) {
-        drawColorPicker(pass.input.vectorscopeColor, m_pins, pass.input.monospaceFont);
+        drawColorPicker(pass.input.readoutColor, m_pins, pass.input.monospaceFont);
     } else {
         drawWaveformPane(id, pass);
     }

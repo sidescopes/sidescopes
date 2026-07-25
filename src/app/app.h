@@ -322,6 +322,7 @@ private:
     // methods a single frame runs through.
     std::optional<FloatColor> m_vectorscopeColor;
     std::optional<FloatColor> m_waveformColor;
+    std::optional<FloatColor> m_readoutColor;
     std::optional<AnalysisWorker::FrameSize> m_frameSize;
 };
 

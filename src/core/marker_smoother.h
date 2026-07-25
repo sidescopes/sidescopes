@@ -27,11 +27,23 @@ public:
 
     FloatColor update(const FloatColor& target, float elapsedSeconds);
 
+    /// Forgets what it was smoothing, so the next update lands on its target
+    /// rather than easing towards it from where the last one left off. What a
+    /// marker that stopped being drawn needs: it comes back at the colour under
+    /// the pointer instead of sweeping across the trace from the colour it left
+    /// on.
+    void forget()
+    {
+        m_value.reset();
+    }
+
 private:
     static constexpr float SnapWindow = 0.75f;
 
     float m_timeConstantMs = 100.0f;
-    FloatColor m_value{128.0f, 128.0f, 128.0f};
+    /// Empty only after forget(): the value eased from, mid-gray until the
+    /// first marker has anywhere else to come from.
+    std::optional<FloatColor> m_value{FloatColor{128.0f, 128.0f, 128.0f}};
 };
 
 }  // namespace sidescopes

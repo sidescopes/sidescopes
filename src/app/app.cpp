@@ -446,9 +446,8 @@ void App::persistPreferences()
 void App::runFrame()
 {
     // Frame-scoped signals start clear each iteration, exactly as fresh locals
-    // would; the phase methods below fill them in.
-    m_vectorscopeColor.reset();
-    m_waveformColor.reset();
+    // would; the phase methods below fill them in. The cursor colors need no
+    // clearing here: the sampler writes all three every frame that draws.
     m_regionPicker.clearRequest();
 
     pumpEvents();
@@ -675,10 +674,12 @@ void App::sampleCursorColor()
 {
     const CursorSmoothing smoothing{m_view.traces().smoothing(VectorscopeScopeId),
                                     m_view.traces().smoothing(WaveformScopeId)};
-    const CursorSample sample = m_cursor.update(m_frameSize, smoothing, glfwGetTime(), ImGui::GetIO().DeltaTime);
+    const CursorSample sample =
+        m_cursor.update(m_frameSize, m_analysis.region, smoothing, glfwGetTime(), ImGui::GetIO().DeltaTime);
     m_vectorscopeColor = sample.vectorscopeColor;
     m_waveformColor = sample.waveformColor;
-    if (sample.changed) {
+    m_readoutColor = sample.readoutColor;
+    if (sample.changed || sample.readoutChanged) {
         m_lastActivity = glfwGetTime();
     }
 }
@@ -723,8 +724,9 @@ void App::drawFrameUi()
     for (const ShortcutAction& action : m_shortcuts.resolvePressed(shortcutContext(), modifiers, shortcutPressed)) {
         applyShortcutAction(action);
     }
-    const PaneRenderInput input{m_uiScale.scale(),  m_regions.isFullScreen(), pinsAvailable(),
-                                m_vectorscopeColor, m_waveformColor,          m_callbackState.monospaceFont};
+    const PaneRenderInput input{
+        m_uiScale.scale(), m_regions.isFullScreen(),     pinsAvailable(), m_vectorscopeColor, m_waveformColor,
+        m_readoutColor,    m_callbackState.monospaceFont};
     applyPaneRenderOutcome(m_panes->drawRegionToolIcons(input));
     applyPaneRenderOutcome(m_panes->drawScopePanes(input));
     m_panes->drawStatusBar(input);

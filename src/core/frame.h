@@ -36,6 +36,13 @@ struct IntRect
     /// Intersection with the rectangle [0, 0, frameWidth, frameHeight). The
     /// result may be empty; callers must handle that.
     [[nodiscard]] IntRect clampedTo(int frameWidth, int frameHeight) const;
+
+    /// Whether the point (@p pointX, @p pointY) lies inside, taking the
+    /// rectangle as half-open so adjacent rectangles never both claim a point.
+    [[nodiscard]] bool contains(int pointX, int pointY) const
+    {
+        return pointX >= x && pointY >= y && pointX < x + width && pointY < y + height;
+    }
 };
 
 /// 8-bit display-encoded color, as captured.

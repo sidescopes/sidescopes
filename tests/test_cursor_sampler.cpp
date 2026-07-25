@@ -64,6 +64,12 @@ struct SamplerFixture
 };
 
 constexpr AnalysisWorker::FrameSize FrameSize{64, 64, 64, 64};
+// The whole captured display: every point on it carries a marker.
+constexpr RegionOfInterest WholeDisplay{0.0, 0.0, 100.0, 100.0};
+// The top-left quarter of it, in display pixels [0,32).
+constexpr RegionOfInterest Quadrant{0.0, 0.0, 50.0, 50.0};
+// The region a narrowed capture was narrowed to: display pixels [24,40).
+constexpr RegionOfInterest CroppedRegion{37.5, 37.5, 62.5, 62.5};
 // The same display captured as a 16x16 crop at 24,24: what the stream delivers
 // once the analysis region is small enough to narrow to.
 constexpr AnalysisWorker::FrameSize NarrowedFrameSize{16, 16, 64, 64};
@@ -88,7 +94,7 @@ TEST_CASE("The readout takes its colour from the capture stream's own frame")
     desktopStubs().cursor = DesktopPoint{32.0, 32.0};
     desktopStubs().cursorDisplay = StreamedDisplay;
 
-    const CursorSample sample = fix.sampler.update(FrameSize, Instant, 1.0, 1.0f / 60.0f);
+    const CursorSample sample = fix.sampler.update(FrameSize, WholeDisplay, Instant, 1.0, 1.0f / 60.0f);
 
     REQUIRE(sample.vectorscopeColor.has_value());
     REQUIRE(sample.waveformColor.has_value());
@@ -117,7 +123,7 @@ TEST_CASE("A narrowed capture still reads the point the cursor is over")
 
     // Inside the crop: the stream's own pixels answer.
     desktopStubs().cursor = DesktopPoint{32.0, 32.0};
-    const CursorSample inside = fix.sampler.update(NarrowedFrameSize, Instant, 1.0, 1.0f / 60.0f);
+    const CursorSample inside = fix.sampler.update(NarrowedFrameSize, CroppedRegion, Instant, 1.0, 1.0f / 60.0f);
     REQUIRE(inside.vectorscopeColor.has_value());
     CHECK_THAT(inside.vectorscopeColor->b, WithinAbs(255.0f, 1.0f));
     CHECK(desktopStubs().screenSampleRequests == 0);
@@ -126,9 +132,9 @@ TEST_CASE("A narrowed capture still reads the point the cursor is over")
     // one-shot screen sampler rather than reporting a pixel from inside the
     // region.
     desktopStubs().cursor = DesktopPoint{4.0, 4.0};
-    const CursorSample outside = fix.sampler.update(NarrowedFrameSize, Instant, 1.1, 1.0f / 60.0f);
-    REQUIRE(outside.vectorscopeColor.has_value());
-    CHECK_THAT(outside.vectorscopeColor->g, WithinAbs(22.0f, 1e-3f));
+    const CursorSample outside = fix.sampler.update(NarrowedFrameSize, CroppedRegion, Instant, 1.1, 1.0f / 60.0f);
+    REQUIRE(outside.readoutColor.has_value());
+    CHECK_THAT(outside.readoutColor->g, WithinAbs(22.0f, 1e-3f));
     CHECK(desktopStubs().screenSampleRequests == 1);
 }
 
@@ -139,21 +145,21 @@ TEST_CASE("A cursor on another display falls back to a throttled screen read")
     desktopStubs().cursorDisplay = StreamedDisplay + 1;
     desktopStubs().screenSample = FloatColor{11.0f, 22.0f, 33.0f};
 
-    const CursorSample first = fix.sampler.update(FrameSize, Instant, 1.0, 1.0f / 60.0f);
-    REQUIRE(first.vectorscopeColor.has_value());
-    CHECK_THAT(first.vectorscopeColor->g, WithinAbs(22.0f, 1e-3f));
+    const CursorSample first = fix.sampler.update(FrameSize, WholeDisplay, Instant, 1.0, 1.0f / 60.0f);
+    REQUIRE(first.readoutColor.has_value());
+    CHECK_THAT(first.readoutColor->g, WithinAbs(22.0f, 1e-3f));
     CHECK(desktopStubs().screenSampleRequests == 1);
 
     // Reading the screen is expensive, so a second frame within the throttle
     // reuses the sample that already landed rather than asking again.
     desktopStubs().cursor = DesktopPoint{501.0, 32.0};
-    const CursorSample throttled = fix.sampler.update(FrameSize, Instant, 1.02, 1.0f / 60.0f);
-    REQUIRE(throttled.vectorscopeColor.has_value());
-    CHECK_THAT(throttled.vectorscopeColor->g, WithinAbs(22.0f, 1e-3f));
+    const CursorSample throttled = fix.sampler.update(FrameSize, WholeDisplay, Instant, 1.02, 1.0f / 60.0f);
+    REQUIRE(throttled.readoutColor.has_value());
+    CHECK_THAT(throttled.readoutColor->g, WithinAbs(22.0f, 1e-3f));
     CHECK(desktopStubs().screenSampleRequests == 1);
 
     // Past the throttle it asks again.
-    (void)fix.sampler.update(FrameSize, Instant, 1.2, 1.0f / 60.0f);
+    (void)fix.sampler.update(FrameSize, WholeDisplay, Instant, 1.2, 1.0f / 60.0f);
     CHECK(desktopStubs().screenSampleRequests == 2);
 }
 
@@ -172,10 +178,10 @@ TEST_CASE("A dead capture stream reads the screen instead of a stale frame")
 
     // The frame in hand is whatever the stream last delivered before it died,
     // so the readout goes to the screen even on the captured display.
-    const CursorSample sample = fix.sampler.update(FrameSize, Instant, 1.0, 1.0f / 60.0f);
+    const CursorSample sample = fix.sampler.update(FrameSize, WholeDisplay, Instant, 1.0, 1.0f / 60.0f);
 
-    REQUIRE(sample.vectorscopeColor.has_value());
-    CHECK_THAT(sample.vectorscopeColor->r, WithinAbs(11.0f, 1e-3f));
+    REQUIRE(sample.readoutColor.has_value());
+    CHECK_THAT(sample.readoutColor->r, WithinAbs(11.0f, 1e-3f));
     CHECK(desktopStubs().screenSampleRequests == 1);
 }
 
@@ -190,17 +196,17 @@ TEST_CASE("Only a marker that moves counts as interaction")
 
     // The first reading brings a marker into existence.
     desktopStubs().cursor = DesktopPoint{32.0, 32.0};
-    CHECK(fix.sampler.update(FrameSize, Instant, 1.0, 1.0f / 60.0f).changed);
+    CHECK(fix.sampler.update(FrameSize, WholeDisplay, Instant, 1.0, 1.0f / 60.0f).changed);
 
     // A pointer sitting still must not keep the application awake.
-    CHECK_FALSE(fix.sampler.update(FrameSize, Instant, 1.1, 1.0f / 60.0f).changed);
+    CHECK_FALSE(fix.sampler.update(FrameSize, WholeDisplay, Instant, 1.1, 1.0f / 60.0f).changed);
 
     // Nor must a pointer travelling across a uniform frame - this is the case
     // that was waking the loop sixty-five times a second for a picture that
     // never changed.
     for (const double x : {40.0, 48.0, 56.0, 20.0}) {
         desktopStubs().cursor = DesktopPoint{x, 32.0};
-        CHECK_FALSE(fix.sampler.update(FrameSize, Instant, 1.2, 1.0f / 60.0f).changed);
+        CHECK_FALSE(fix.sampler.update(FrameSize, WholeDisplay, Instant, 1.2, 1.0f / 60.0f).changed);
     }
 
     // But a colour that really changes under the pointer does wake it.
@@ -210,7 +216,7 @@ TEST_CASE("Only a marker that moves counts as interaction")
         std::this_thread::sleep_for(std::chrono::milliseconds(2));
     }
     REQUIRE(fix.worker.consumedFrameSequence() == 2);
-    CHECK(fix.sampler.update(FrameSize, Instant, 1.3, 1.0f / 60.0f).changed);
+    CHECK(fix.sampler.update(FrameSize, WholeDisplay, Instant, 1.3, 1.0f / 60.0f).changed);
 }
 
 TEST_CASE("A marker still easing towards its colour keeps redrawing")
@@ -223,12 +229,12 @@ TEST_CASE("A marker still easing towards its colour keeps redrawing")
     constexpr CursorSmoothing Smoothed{200.0f, 200.0f};
 
     desktopStubs().cursor = DesktopPoint{32.0, 32.0};
-    REQUIRE(fix.sampler.update(FrameSize, Smoothed, 1.0, 1.0f / 60.0f).changed);
+    REQUIRE(fix.sampler.update(FrameSize, WholeDisplay, Smoothed, 1.0, 1.0f / 60.0f).changed);
 
     // The pointer never moves again; the marker is still on its way.
     int easingFrames = 0;
     for (int i = 0; i < 60; ++i) {
-        if (fix.sampler.update(FrameSize, Smoothed, 1.0 + 0.016 * i, 1.0f / 60.0f).changed) {
+        if (fix.sampler.update(FrameSize, WholeDisplay, Smoothed, 1.0 + 0.016 * i, 1.0f / 60.0f).changed) {
             ++easingFrames;
         }
     }
@@ -236,9 +242,9 @@ TEST_CASE("A marker still easing towards its colour keeps redrawing")
 
     // And it does settle, rather than creeping towards its target for ever.
     for (int i = 0; i < 400; ++i) {
-        (void)fix.sampler.update(FrameSize, Smoothed, 2.0 + 0.016 * i, 1.0f / 60.0f);
+        (void)fix.sampler.update(FrameSize, WholeDisplay, Smoothed, 2.0 + 0.016 * i, 1.0f / 60.0f);
     }
-    CHECK_FALSE(fix.sampler.update(FrameSize, Smoothed, 12.0, 1.0f / 60.0f).changed);
+    CHECK_FALSE(fix.sampler.update(FrameSize, WholeDisplay, Smoothed, 12.0, 1.0f / 60.0f).changed);
 }
 
 TEST_CASE("Nothing is sampled without a capture stream or a pointer")
@@ -253,18 +259,112 @@ TEST_CASE("Nothing is sampled without a capture stream or a pointer")
     REQUIRE(capture.capturedDisplay() == 0);
 
     // No display is being watched, so there is no readout to keep alive.
-    const CursorSample noCapture = sampler.update(FrameSize, Instant, 1.0, 1.0f / 60.0f);
+    const CursorSample noCapture = sampler.update(FrameSize, WholeDisplay, Instant, 1.0, 1.0f / 60.0f);
     CHECK_FALSE(noCapture.changed);
     CHECK_FALSE(noCapture.vectorscopeColor.has_value());
+    CHECK_FALSE(noCapture.readoutColor.has_value());
     CHECK(desktopStubs().screenSampleRequests == 0);
 
     // Nor when the platform cannot say where the pointer is.
     SamplerFixture fix;
     desktopStubs().cursor.reset();
-    const CursorSample noCursor = fix.sampler.update(FrameSize, Instant, 1.0, 1.0f / 60.0f);
+    const CursorSample noCursor = fix.sampler.update(FrameSize, WholeDisplay, Instant, 1.0, 1.0f / 60.0f);
     CHECK_FALSE(noCursor.changed);
-    CHECK_FALSE(noCursor.vectorscopeColor.has_value());
+    CHECK_FALSE(noCursor.readoutColor.has_value());
     CHECK(desktopStubs().screenSampleRequests == 0);
+}
+
+TEST_CASE("A marker stands only for a colour inside the region")
+{
+    // A marker says "this colour sits here in the distribution you are looking
+    // at", so a sample from outside the region cannot support one - and outside
+    // the region is where most of a session's pointer travel happens, over
+    // window chrome and editor sliders. The readout keeps following it, because
+    // a swatch and a hex code claim nothing about the distribution.
+    SamplerFixture fix;
+    desktopStubs().cursorDisplay = StreamedDisplay;
+    desktopStubs().screenSample = FloatColor{11.0f, 22.0f, 33.0f};
+
+    desktopStubs().cursor = DesktopPoint{8.0, 8.0};
+    const CursorSample inside = fix.sampler.update(FrameSize, Quadrant, Instant, 1.0, 1.0f / 60.0f);
+    REQUIRE(inside.vectorscopeColor.has_value());
+    REQUIRE(inside.waveformColor.has_value());
+    REQUIRE(inside.readoutColor.has_value());
+    CHECK_THAT(inside.vectorscopeColor->r, WithinAbs(200.0f, 1.0f));
+
+    desktopStubs().cursor = DesktopPoint{48.0, 48.0};
+    const CursorSample outside = fix.sampler.update(FrameSize, Quadrant, Instant, 1.1, 1.0f / 60.0f);
+    CHECK_FALSE(outside.vectorscopeColor.has_value());
+    CHECK_FALSE(outside.waveformColor.has_value());
+    REQUIRE(outside.readoutColor.has_value());
+    CHECK_THAT(outside.readoutColor->r, WithinAbs(200.0f, 1.0f));
+
+    // Leaving is itself a change - the marker has to be taken off the trace -
+    // but travelling on outside the region is not. That second part is the
+    // baseline the application idles at while the user works in the editor
+    // beside it: the pointer moves all day and no marker is being asked for.
+    CHECK(outside.changed);
+    desktopStubs().cursor = DesktopPoint{60.0, 40.0};
+    CHECK_FALSE(fix.sampler.update(FrameSize, Quadrant, Instant, 1.2, 1.0f / 60.0f).changed);
+}
+
+TEST_CASE("A marker that comes back appears where the pointer is")
+{
+    // Leaving the region ends the marker rather than freezing it, so the
+    // smoothing has nothing to ease from when the pointer returns: the marker
+    // must appear at the colour under it, not sweep across the trace from the
+    // colour it was showing when it left.
+    SamplerFixture fix;
+    desktopStubs().cursorDisplay = StreamedDisplay;
+    constexpr CursorSmoothing Smoothed{200.0f, 200.0f};
+
+    desktopStubs().cursor = DesktopPoint{8.0, 8.0};
+    for (int step = 0; step < 200; ++step) {
+        (void)fix.sampler.update(FrameSize, Quadrant, Smoothed, 1.0 + 0.016 * step, 1.0f / 60.0f);
+    }
+    desktopStubs().cursor = DesktopPoint{48.0, 48.0};
+    REQUIRE_FALSE(fix.sampler.update(FrameSize, Quadrant, Smoothed, 5.0, 1.0f / 60.0f).vectorscopeColor.has_value());
+
+    // A different colour under the pointer on the way back in.
+    fix.mailbox.publish(makeSolidFrameBuffer(64, 64, Color{20, 200, 90}, 2));
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (fix.worker.consumedFrameSequence() != 2 && std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+    REQUIRE(fix.worker.consumedFrameSequence() == 2);
+    desktopStubs().cursor = DesktopPoint{8.0, 8.0};
+    const CursorSample back = fix.sampler.update(FrameSize, Quadrant, Smoothed, 5.1, 1.0f / 60.0f);
+
+    REQUIRE(back.vectorscopeColor.has_value());
+    CHECK_THAT(back.vectorscopeColor->r, WithinAbs(20.0f, 1.0f));
+    CHECK_THAT(back.vectorscopeColor->g, WithinAbs(200.0f, 1.0f));
+}
+
+TEST_CASE("The readout reports its own movement")
+{
+    // The readout carries no motion - a swatch and a number look the same at a
+    // third of the frame rate - so the host follows it at its own pace, and
+    // that needs a signal separate from the marker's.
+    SamplerFixture fix;
+    desktopStubs().cursorDisplay = StreamedDisplay;
+    desktopStubs().cursor = DesktopPoint{48.0, 48.0};
+
+    // The first sample brings the readout into existence.
+    CHECK(fix.sampler.update(FrameSize, Quadrant, Instant, 1.0, 1.0f / 60.0f).readoutChanged);
+    CHECK_FALSE(fix.sampler.update(FrameSize, Quadrant, Instant, 1.1, 1.0f / 60.0f).readoutChanged);
+
+    fix.mailbox.publish(makeSolidFrameBuffer(64, 64, Color{20, 200, 90}, 2));
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (fix.worker.consumedFrameSequence() != 2 && std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+    REQUIRE(fix.worker.consumedFrameSequence() == 2);
+
+    const CursorSample moved = fix.sampler.update(FrameSize, Quadrant, Instant, 1.2, 1.0f / 60.0f);
+    CHECK(moved.readoutChanged);
+    // Outside the region, so the marker that used to carry this frame is not
+    // involved at all.
+    CHECK_FALSE(moved.changed);
 }
 
 TEST_CASE("The last cross-display sample is what the pin tool reads")
@@ -275,7 +375,7 @@ TEST_CASE("The last cross-display sample is what the pin tool reads")
     desktopStubs().cursor = DesktopPoint{500.0, 32.0};
     desktopStubs().cursorDisplay = StreamedDisplay + 1;
     desktopStubs().screenSample = FloatColor{11.0f, 22.0f, 33.0f};
-    (void)fix.sampler.update(FrameSize, Instant, 1.0, 1.0f / 60.0f);
+    (void)fix.sampler.update(FrameSize, WholeDisplay, Instant, 1.0, 1.0f / 60.0f);
 
     // The picker's pin poll is handed this each frame, so a colour pinned on
     // another display is the one the readout was already showing.

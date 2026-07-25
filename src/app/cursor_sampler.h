@@ -23,13 +23,23 @@ struct CursorSmoothing
     float waveformMs = 0.0f;
 };
 
-/// What one cursor sample yielded: the color under the pointer smoothed at
-/// each trace's own rhythm, empty until a sample lands, and whether the
-/// pointer moved far enough to count as interaction.
+/// What one cursor sample yielded: the marker colors, which exist only while
+/// the pointer is over the region the scopes read, the readout color, which
+/// follows the pointer anywhere, and whether a marker moved.
 struct CursorSample
 {
+    /// The color a trace marks, smoothed at that trace's own rhythm. Empty
+    /// until a sample lands, and empty whenever the pointer is outside the
+    /// region: a marker says "this color sits here in the distribution you are
+    /// looking at", which a sample from outside the region cannot support.
+    /// Absent rather than frozen - a marker left where the pointer last was is
+    /// stale and plausible at once.
     std::optional<FloatColor> vectorscopeColor;
     std::optional<FloatColor> waveformColor;
+    /// The color under the pointer wherever it is, for the readout: the swatch,
+    /// the channel percentages and the color picker's own pane, which measure a
+    /// point on screen rather than a place in a distribution.
+    std::optional<FloatColor> readoutColor;
     /// A marker moved: the host stamps its activity clock so the frame loop
     /// redraws at the moving cadence.
     ///
@@ -40,6 +50,10 @@ struct CursorSample
     /// instead measured a jump from ten frames a second to sixty-five for a
     /// picture that never changed.
     bool changed = false;
+    /// The readout's colour moved. Its own signal because a swatch and a
+    /// number carry no motion: the host follows them at a slower cadence than
+    /// a marker easing across a trace.
+    bool readoutChanged = false;
 };
 
 /// Reads the color under the pointer wherever it is and smooths it per trace.
@@ -58,11 +72,14 @@ public:
     CursorSampler(const CaptureController& capture, const AnalysisWorker& worker);
 
     /// One per-frame step. @p frameSize is the captured frame the pointer is
-    /// mapped into, @p smoothing how fast each trace follows it, @p now the
-    /// frame clock the off-display sample is throttled against, and
-    /// @p deltaSeconds the frame's own length, which the smoothing advances by.
-    [[nodiscard]] CursorSample update(std::optional<AnalysisWorker::FrameSize> frameSize, CursorSmoothing smoothing,
-                                      double now, float deltaSeconds);
+    /// mapped into, @p region the region the scopes are reading, which is what
+    /// decides whether the pointer has a marker at all, @p smoothing how fast
+    /// each trace follows it, @p now the frame clock the off-display sample is
+    /// throttled against, and @p deltaSeconds the frame's own length, which the
+    /// smoothing advances by.
+    [[nodiscard]] CursorSample update(std::optional<AnalysisWorker::FrameSize> frameSize,
+                                      const RegionOfInterest& region, CursorSmoothing smoothing, double now,
+                                      float deltaSeconds);
 
     /// The throttled cross-display sample under its lock, passed to the
     /// picker's pin tool each poll.
@@ -78,10 +95,28 @@ private:
         std::optional<FloatColor> color;
     };
 
+    /// A point on the captured display, in that display's own pixels - the
+    /// coordinates the region and every frame mapping are stated in.
+    struct DisplayPixel
+    {
+        int x = 0;
+        int y = 0;
+    };
+
+    /// Where @p cursor sits in the captured display's own pixels, or nothing
+    /// when that display's geometry is unknown.
+    [[nodiscard]] std::optional<DisplayPixel> displayPixelOf(DesktopPoint cursor,
+                                                             AnalysisWorker::FrameSize frameSize) const;
+
     /// The sample under the pointer on the captured display, read out of the
     /// capture stream's own newest frame.
-    [[nodiscard]] std::optional<FloatColor> sampleCapturedFrame(DesktopPoint cursor,
-                                                                AnalysisWorker::FrameSize frameSize) const;
+    [[nodiscard]] std::optional<FloatColor> sampleCapturedFrame(DisplayPixel pixel) const;
+
+    /// Advances both trace markers one frame towards @p target, or takes them
+    /// off the traces when it is empty, and reports through @p sample whether
+    /// either moved.
+    void advanceMarkers(const std::optional<FloatColor>& target, CursorSmoothing smoothing, float deltaSeconds,
+                        CursorSample& sample);
 
     /// The sample under the pointer anywhere else: a throttled one-shot screen
     /// read whose result lands asynchronously, so this returns the freshest
@@ -93,13 +128,18 @@ private:
 
     MarkerSmoother m_vectorscopeMarker;
     MarkerSmoother m_waveformMarker;
+    /// The readout's own smoothing, at the vectorscope's rhythm: the swatch and
+    /// the picker's hex have always eased at that rate, and they keep it now
+    /// that the marker they used to borrow it from can be absent.
+    MarkerSmoother m_readout;
 
     std::shared_ptr<ScreenSample> m_screenSample = std::make_shared<ScreenSample>();
     double m_nextScreenSample = 0.0;
-    /// The marker colours the previous frame drew, so a frame is only spent when
-    /// one of them actually moves.
+    /// The colours the previous frame drew, so a frame is only spent when one of
+    /// them actually moves.
     std::optional<FloatColor> m_lastVectorscopeColor;
     std::optional<FloatColor> m_lastWaveformColor;
+    std::optional<FloatColor> m_lastReadoutColor;
 };
 
 }  // namespace sidescopes
