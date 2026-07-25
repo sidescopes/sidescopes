@@ -202,6 +202,29 @@ void seatingHoldsAtEveryScale(ImGuiTestContext* ctx)
     ctx->Yield();
 }
 
+/// SYMPTOM IF BROKEN: with no region selected, the note telling the user how to
+/// fill the scopes pushes the live colour readout off a narrow window - the one
+/// reading that still works with nothing selected.
+///
+/// The note gives way rather than pushing, so the rule is stated at the exact
+/// width where both stop fitting, from both sides of it.
+void theStandingNoteGivesWayBeforeTheReadout(ImGuiTestContext*)
+{
+    constexpr float Tool = 24.0f;
+    constexpr float Note = 200.0f;
+    constexpr float Swatch = 14.0f;
+    const float exact = Tool + StatusRowSeparation + Note + StatusRowSeparation + Swatch;
+
+    IM_CHECK(statusNoteFits(Tool, Note, Swatch, exact));
+    IM_CHECK(statusNoteFits(Tool, Note, Swatch, exact + 1.0f));
+    IM_CHECK(!statusNoteFits(Tool, Note, Swatch, exact - 1.0f));
+
+    // The swatch is what the note yields to: a row that fits the note alone
+    // still drops it when the swatch has to stand on the same line.
+    IM_CHECK(statusNoteFits(Tool, Note, 0.0f, exact - Swatch));
+    IM_CHECK(!statusNoteFits(Tool, Note, Swatch, exact - Swatch));
+}
+
 void registerLayoutTests(ImGuiTestEngine* engine)
 {
     ImGuiTest* wholePixels = IM_REGISTER_TEST(engine, "layout", "glyph_seats_on_whole_pixels");
@@ -222,6 +245,9 @@ void registerLayoutTests(ImGuiTestEngine* engine)
 
     ImGuiTest* scaled = IM_REGISTER_TEST(engine, "layout", "seating_holds_at_every_scale");
     scaled->TestFunc = seatingHoldsAtEveryScale;
+
+    ImGuiTest* note = IM_REGISTER_TEST(engine, "layout", "standing_note_gives_way_to_readout");
+    note->TestFunc = theStandingNoteGivesWayBeforeTheReadout;
 }
 
 }  // namespace
@@ -231,5 +257,5 @@ int main()
 {
     using namespace sidescopes;
 
-    return uitest::runSuite("layout", registerLayoutTests, /*expectedTests=*/6);
+    return uitest::runSuite("layout", registerLayoutTests, /*expectedTests=*/7);
 }

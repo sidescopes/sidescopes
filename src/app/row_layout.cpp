@@ -49,4 +49,9 @@ float statusRowOffset()
     return std::max(0.0f, std::round((style.WindowPadding.y - style.ItemSpacing.y) / 2.0f));
 }
 
+bool statusNoteFits(float taken, float noteWidth, float swatchWidth, float rowWidth)
+{
+    return taken + StatusRowSeparation + noteWidth + StatusRowSeparation + swatchWidth <= rowWidth;
+}
+
 }  // namespace sidescopes

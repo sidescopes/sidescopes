@@ -63,4 +63,17 @@ struct ReadoutColumns
 /// own height still lands off centre in the visible gap.
 [[nodiscard]] float statusRowOffset();
 
+/// The gap the status row keeps between neighbours that are not part of one
+/// reading.
+inline constexpr float StatusRowSeparation = 8.0f;
+
+/// Whether a standing note of @p noteWidth fits on a status row @p rowWidth
+/// wide: after @p taken, which is what already stands on the row, and clear of
+/// the live swatch of @p swatchWidth in the right corner.
+///
+/// The note gives way rather than pushing. What it says can be read from the
+/// toolbox above it, while the colour under the pointer has nowhere else to
+/// go - so a row too narrow for both keeps the reading and drops the words.
+[[nodiscard]] bool statusNoteFits(float taken, float noteWidth, float swatchWidth, float rowWidth);
+
 }  // namespace sidescopes
