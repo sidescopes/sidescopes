@@ -21,6 +21,17 @@ constexpr float CloudMaxAlpha = 150.0f;
 constexpr float DotRadiusFraction = 0.022f;
 constexpr float DotRingWidth = 1.6f;
 
+// The splat's weights, in quarter units: a whole sample on the centre cell, a
+// half on each edge neighbour, a quarter on each corner.
+constexpr uint32_t CloudWhole = 4;
+
+// Fixed-point scale for the running a*/b* sums. Chroma lands within about +/-128
+// of neutral, so a twelve-bit fraction leaves a quantization of one part in four
+// thousand per sample - four orders of magnitude below the movement the sampling
+// budget already permits - while making the sums exact integers a chunked merge
+// can add in any order.
+constexpr double ChromaSumScale = 4096.0;
+
 int clampInt(int value, int low, int high)
 {
     return std::max(low, std::min(high, value));
@@ -66,7 +77,7 @@ void Neutral::resize(int size)
         return;
     }
     m_imageSize = size;
-    m_cloud.assign(static_cast<std::size_t>(size) * size, 0.0f);
+    m_cloud.assign(static_cast<std::size_t>(size) * size, 0u);
     m_image.width = size;
     m_image.height = size;
     m_image.rgba.assign(static_cast<std::size_t>(size) * size * 4, 0);
@@ -92,9 +103,9 @@ NormalizedPoint Neutral::project(const FloatColor& color) const
 void Neutral::accumulate(const FrameView& frame, IntRect region)
 {
     region = region.clampedTo(frame.width, frame.height);
-    std::fill(m_cloud.begin(), m_cloud.end(), 0.0f);
-    double sumA = 0.0;
-    double sumB = 0.0;
+    std::fill(m_cloud.begin(), m_cloud.end(), 0u);
+    int64_t sumA = 0;
+    int64_t sumB = 0;
     uint64_t count = 0;
     uint64_t neutral = 0;
     const long long planeBins = static_cast<long long>(m_imageSize) * m_imageSize;
@@ -109,8 +120,8 @@ void Neutral::accumulate(const FrameView& frame, IntRect region)
             // channel arrives as a code, and it does not evaluate the
             // transfer function once per channel per pixel.
             const LabColor lab = labFromSrgb8(Color{pixel[2], pixel[1], pixel[0]});
-            sumA += lab.a;
-            sumB += lab.b;
+            sumA += std::llround(static_cast<double>(lab.a) * ChromaSumScale);
+            sumB += std::llround(static_cast<double>(lab.b) * ChromaSumScale);
             ++count;
             if (chromaOf(lab) <= m_settings.neutralChroma) {
                 splatNeutral(projectAb(lab.a, lab.b));
@@ -121,9 +132,11 @@ void Neutral::accumulate(const FrameView& frame, IntRect region)
 
     m_hasData = count > 0;
     m_neutralCount = neutral;
-    m_average = count > 0 ? projectAb(static_cast<float>(sumA / static_cast<double>(count)),
-                                      static_cast<float>(sumB / static_cast<double>(count)))
-                          : NormalizedPoint{0.5f, 0.5f};
+    m_average =
+        count > 0
+            ? projectAb(static_cast<float>(static_cast<double>(sumA) / (ChromaSumScale * static_cast<double>(count))),
+                        static_cast<float>(static_cast<double>(sumB) / (ChromaSumScale * static_cast<double>(count))))
+            : NormalizedPoint{0.5f, 0.5f};
     renderImage();
 }
 
@@ -143,7 +156,7 @@ void Neutral::splatNeutral(NormalizedPoint at)
             if (x < 0 || x >= m_imageSize) {
                 continue;
             }
-            const float weight = (dx == 0 && dy == 0) ? 1.0f : (dx == 0 || dy == 0) ? 0.5f : 0.25f;
+            const uint32_t weight = (dx == 0 && dy == 0) ? CloudWhole : (dx == 0 || dy == 0) ? CloudWhole / 2 : 1;
             m_cloud[static_cast<std::size_t>(y) * m_imageSize + x] += weight;
         }
     }
@@ -173,18 +186,18 @@ void Neutral::blendPixel(int x, int y, uint8_t r, uint8_t g, uint8_t b, float al
 
 void Neutral::drawCloud()
 {
-    const float maxDensity = m_cloud.empty() ? 0.0f : *std::max_element(m_cloud.begin(), m_cloud.end());
-    if (maxDensity <= 0.0f) {
+    const uint32_t peak = m_cloud.empty() ? 0u : *std::max_element(m_cloud.begin(), m_cloud.end());
+    if (peak == 0u) {
         return;
     }
-    const float scale = m_settings.gain / maxDensity;
+    const float scale = m_settings.gain / static_cast<float>(peak);
     for (int y = 0; y < m_imageSize; ++y) {
         for (int x = 0; x < m_imageSize; ++x) {
-            const float density = m_cloud[static_cast<std::size_t>(y) * m_imageSize + x];
-            if (density <= 0.0f) {
+            const uint32_t density = m_cloud[static_cast<std::size_t>(y) * m_imageSize + x];
+            if (density == 0u) {
                 continue;
             }
-            const float alpha = std::min(1.0f, density * scale) * (CloudMaxAlpha / 255.0f);
+            const float alpha = std::min(1.0f, static_cast<float>(density) * scale) * (CloudMaxAlpha / 255.0f);
             blendPixel(x, y, CloudR, CloudG, CloudB, alpha);
         }
     }

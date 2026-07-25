@@ -125,7 +125,11 @@ private:
     NeutralSettings m_settings;
     int m_imageSize = DefaultNeutralSize;
     float m_axisRange = 40.0f;
-    std::vector<float> m_cloud;  // m_imageSize x m_imageSize near-neutral density
+    // m_imageSize x m_imageSize near-neutral density, in quarter units so the
+    // splat's 1, 1/2 and 1/4 weights are whole numbers. Integers because a
+    // chunked accumulate has to merge bit-exactly however many chunks it used,
+    // and float addition is not associative.
+    std::vector<uint32_t> m_cloud;
     NormalizedPoint m_average{0.5f, 0.5f};
     uint64_t m_neutralCount = 0;
     bool m_hasData = false;
