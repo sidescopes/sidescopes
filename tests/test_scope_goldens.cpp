@@ -27,6 +27,7 @@
 #endif
 
 #include "core/scopes/histogram.h"
+#include "core/scopes/neutral.h"
 #include "core/scopes/vectorscope.h"
 #include "core/scopes/waveform.h"
 #include "scope_image.h"
@@ -196,6 +197,37 @@ TEST_CASE("Histogram renderings match their goldens")
     Histogram onBars;
     onBars.accumulate(bars.view(), IntRect{0, 0, 64, 16});
     checkGolden("histogram-bars-per-channel", onBars.image(), 0xdbb1d3981074b0e2ULL);
+}
+
+TEST_CASE("Golden: the neutral scope over a region tall enough to be chunked")
+{
+    // The neutral scope had no golden, which mattered the moment its pass was
+    // split across chunks: these goldens run on three runners with different core
+    // counts, so a result that depended on how many chunks the machine chose
+    // would disagree between them. That is the only cross-runner check there is
+    // for chunk-count invariance, and this frame is deliberately tall enough to
+    // be split.
+    //
+    // The content is a tinted ramp with a near-neutral band, so both halves of
+    // the scope are exercised: the cloud gets samples inside the neutral chroma
+    // threshold, and the average dot gets a cast to sit off centre.
+    TestFrame frame(96, 400, 0);
+    for (int y = 0; y < 400; ++y) {
+        const auto level = static_cast<uint8_t>(40 + (y * 180) / 400);
+        // A warm cast on most rows, a near-neutral band on every fifth.
+        const Color tint = (y % 5 == 0)
+                               ? Color{level, level, level}
+                               : Color{static_cast<uint8_t>(level + 12), level, static_cast<uint8_t>(level - 10)};
+        frame.fillRows(y, y + 1, tint);
+    }
+
+    Neutral neutral;
+    NeutralSettings settings;
+    settings.range = NeutralRange::Normal;
+    neutral.configure(settings);
+    neutral.accumulate(frame.view(), IntRect{0, 0, 96, 400});
+
+    checkGolden("neutral-tinted-ramp", neutral.image(), 0xfcc3efad28f771d8ULL);
 }
 
 }  // namespace sidescopes

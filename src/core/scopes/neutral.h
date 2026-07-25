@@ -6,6 +6,7 @@
 
 #include "core/frame.h"
 #include "core/scopes/graticule.h"
+#include "core/scopes/sampling.h"
 #include "core/scopes/scope_types.h"
 
 namespace sidescopes {
@@ -116,7 +117,19 @@ public:
 private:
     void resize(int size);
     void renderImage();
-    void splatNeutral(NormalizedPoint at);
+
+    /// The running totals a chunk accumulates, merged by plain addition.
+    struct ChromaTotals
+    {
+        int64_t sumA = 0;
+        int64_t sumB = 0;
+        uint64_t count = 0;
+        uint64_t neutral = 0;
+    };
+
+    void scatterRows(const FrameView& frame, IntRect region, const SampleGrid& grid, int rowBegin, int rowEnd,
+                     uint32_t* cloud, ChromaTotals& totals) const;
+    void splatInto(uint32_t* cloud, NormalizedPoint at) const;
     void drawCloud();
     void drawDot();
     void blendPixel(int x, int y, uint8_t r, uint8_t g, uint8_t b, float alpha);
@@ -130,6 +143,8 @@ private:
     // chunked accumulate has to merge bit-exactly however many chunks it used,
     // and float addition is not associative.
     std::vector<uint32_t> m_cloud;
+    // Per-chunk private clouds, merged into m_cloud by integer addition.
+    std::vector<uint32_t> m_threadCloud;
     NormalizedPoint m_average{0.5f, 0.5f};
     uint64_t m_neutralCount = 0;
     bool m_hasData = false;

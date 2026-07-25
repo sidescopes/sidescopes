@@ -4,6 +4,7 @@
 #include <cmath>
 
 #include "core/color_lab.h"
+#include "core/parallel_for.h"
 #include "core/scopes/sampling.h"
 
 namespace sidescopes {
@@ -31,6 +32,9 @@ constexpr uint32_t CloudWhole = 4;
 // budget already permits - while making the sums exact integers a chunked merge
 // can add in any order.
 constexpr double ChromaSumScale = 4096.0;
+
+// Below this a chunk does not earn the thread that would run it.
+constexpr int AccumulateRowsPerChunk = 64;
 
 int clampInt(int value, int low, int high)
 {
@@ -100,35 +104,68 @@ NormalizedPoint Neutral::project(const FloatColor& color) const
     return projectAb(lab.a, lab.b);
 }
 
-void Neutral::accumulate(const FrameView& frame, IntRect region)
+void Neutral::scatterRows(const FrameView& frame, IntRect region, const SampleGrid& grid, int rowBegin, int rowEnd,
+                          uint32_t* cloud, ChromaTotals& totals) const
 {
-    region = region.clampedTo(frame.width, frame.height);
-    std::fill(m_cloud.begin(), m_cloud.end(), 0u);
-    int64_t sumA = 0;
-    int64_t sumB = 0;
-    uint64_t count = 0;
-    uint64_t neutral = 0;
-    const long long planeBins = static_cast<long long>(m_imageSize) * m_imageSize;
-    const long long budget = std::min(budgetForBins(planeBins, NeutralMinSamplesPerBin), SampleBudget);
-    const SampleGrid grid = sampleGridFor(m_settings.samplingStride, region, budget);
-    for (int row = 0; row < grid.rows; ++row) {
+    for (int row = rowBegin; row < rowEnd; ++row) {
         const int py = sampleRowOf(grid, region, row);
         const uint8_t* pixel = frame.pixelAt(region.x, py);
-        const uint8_t* rowEnd = frame.pixelAt(region.x + region.width, py);
-        for (; pixel < rowEnd; pixel += static_cast<std::ptrdiff_t>(4) * grid.columnStride) {
+        const uint8_t* rowFinish = frame.pixelAt(region.x + region.width, py);
+        for (; pixel < rowFinish; pixel += static_cast<std::ptrdiff_t>(4) * grid.columnStride) {
             // The byte-sourced conversion: bit-identical here, where every
             // channel arrives as a code, and it does not evaluate the
             // transfer function once per channel per pixel.
             const LabColor lab = labFromSrgb8(Color{pixel[2], pixel[1], pixel[0]});
-            sumA += std::llround(static_cast<double>(lab.a) * ChromaSumScale);
-            sumB += std::llround(static_cast<double>(lab.b) * ChromaSumScale);
-            ++count;
+            totals.sumA += std::llround(static_cast<double>(lab.a) * ChromaSumScale);
+            totals.sumB += std::llround(static_cast<double>(lab.b) * ChromaSumScale);
+            ++totals.count;
             if (chromaOf(lab) <= m_settings.neutralChroma) {
-                splatNeutral(projectAb(lab.a, lab.b));
-                ++neutral;
+                splatInto(cloud, projectAb(lab.a, lab.b));
+                ++totals.neutral;
             }
         }
     }
+}
+
+void Neutral::accumulate(const FrameView& frame, IntRect region)
+{
+    region = region.clampedTo(frame.width, frame.height);
+    const long long planeBins = static_cast<long long>(m_imageSize) * m_imageSize;
+    const long long budget = std::min(budgetForBins(planeBins, NeutralMinSamplesPerBin), SampleBudget);
+    const SampleGrid grid = sampleGridFor(m_settings.samplingStride, region, budget);
+
+    // This is the one engine that converts every sample to L*a*b*, which made it
+    // cost more per pass than the other four together - measured at 12.75 ms on a
+    // 1200x800 region against 9.58 for the rest of them. Every chunk owns a
+    // private cloud and its own totals; integers merge in any order, so the
+    // result does not depend on how many chunks the machine chose.
+    const std::size_t cloudCells = m_cloud.size();
+    const int chunks = parallelChunkCount(grid.rows, AccumulateRowsPerChunk);
+    ChromaTotals totals;
+    if (chunks <= 1) {
+        std::fill(m_cloud.begin(), m_cloud.end(), 0u);
+        scatterRows(frame, region, grid, 0, grid.rows, m_cloud.data(), totals);
+    } else {
+        m_threadCloud.resize(cloudCells * static_cast<std::size_t>(chunks));
+        std::vector<ChromaTotals> perChunk(static_cast<std::size_t>(chunks));
+        runParallelChunks(chunks, grid.rows, [&](int chunk, int begin, int end) {
+            uint32_t* cloud = m_threadCloud.data() + static_cast<std::size_t>(chunk) * cloudCells;
+            std::fill_n(cloud, cloudCells, 0u);
+            scatterRows(frame, region, grid, begin, end, cloud, perChunk[static_cast<std::size_t>(chunk)]);
+        });
+        mergeBins(m_threadCloud.data(), cloudCells, chunks, m_cloud.data());
+        for (const ChromaTotals& chunkTotals : perChunk) {
+            totals.sumA += chunkTotals.sumA;
+            totals.sumB += chunkTotals.sumB;
+            totals.count += chunkTotals.count;
+            totals.neutral += chunkTotals.neutral;
+        }
+    }
+
+    const int64_t sumA = totals.sumA;
+    const int64_t sumB = totals.sumB;
+    const uint64_t count = totals.count;
+    const uint64_t neutral = totals.neutral;
 
     m_hasData = count > 0;
     m_neutralCount = neutral;
@@ -140,7 +177,7 @@ void Neutral::accumulate(const FrameView& frame, IntRect region)
     renderImage();
 }
 
-void Neutral::splatNeutral(NormalizedPoint at)
+void Neutral::splatInto(uint32_t* cloud, NormalizedPoint at) const
 {
     const int cx =
         clampInt(static_cast<int>(std::lround(at.x * static_cast<float>(m_imageSize - 1))), 0, m_imageSize - 1);
@@ -157,7 +194,7 @@ void Neutral::splatNeutral(NormalizedPoint at)
                 continue;
             }
             const uint32_t weight = (dx == 0 && dy == 0) ? CloudWhole : (dx == 0 || dy == 0) ? CloudWhole / 2 : 1;
-            m_cloud[static_cast<std::size_t>(y) * m_imageSize + x] += weight;
+            cloud[static_cast<std::size_t>(y) * m_imageSize + x] += weight;
         }
     }
 }
