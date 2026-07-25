@@ -599,8 +599,10 @@ void App::publishSelfWindowMask()
     int windowX = 0, windowY = 0, windowW = 0, windowH = 0;
     glfwGetWindowPos(m_window, &windowX, &windowY);
     glfwGetWindowSize(m_window, &windowW, &windowH);
-    const double scaleX = m_frameSize->width / geometry->widthPoints;
-    const double scaleY = m_frameSize->height / geometry->heightPoints;
+    // Display pixels per point, not FRAME pixels per point: the mask is stated
+    // in display pixels so it survives a capture narrowed to part of one.
+    const double scaleX = m_frameSize->displayWidth / geometry->widthPoints;
+    const double scaleY = m_frameSize->displayHeight / geometry->heightPoints;
     // The chrome margins are 100%-scale units like the rest of the interface,
     // so they grow with the monitor's scale.
     const IntRect selfWindow{static_cast<int>((windowX - geometry->originX - 8.0f * m_uiScale.scale()) * scaleX),

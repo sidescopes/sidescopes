@@ -62,6 +62,44 @@ struct FrameView
     int height = 0;
     ColorSpaceHint colorSpace = ColorSpaceHint::Unknown;
     uint64_t sequence = 0;
+    /// Where this frame's top-left pixel sits on the display it came from, and
+    /// how large that display is in pixels. A frame covering its whole display
+    /// leaves all four at zero, which reads as "the frame IS the display".
+    ///
+    /// A capture narrowed to a sub-rectangle sets them, so a region expressed
+    /// against the display still resolves to the same content: the region is
+    /// measured in display pixels and then mapped through fromDisplay. Without
+    /// this a narrowed frame would silently re-measure a percentage region
+    /// against the crop, and every scope would read the wrong pixels for as
+    /// long as it took the two to agree again.
+    int sourceX = 0;
+    int sourceY = 0;
+    int sourceWidth = 0;
+    int sourceHeight = 0;
+
+    /// The display's pixel extents, which for an uncropped frame are its own.
+    [[nodiscard]] int displayWidth() const
+    {
+        return sourceWidth > 0 ? sourceWidth : width;
+    }
+
+    [[nodiscard]] int displayHeight() const
+    {
+        return sourceHeight > 0 ? sourceHeight : height;
+    }
+
+    /// Whether this frame covers less than the display it came from.
+    [[nodiscard]] bool cropped() const
+    {
+        return sourceX != 0 || sourceY != 0 || displayWidth() != width || displayHeight() != height;
+    }
+
+    /// Moves @p rect from display pixels into this frame's own pixels. The
+    /// identity for an uncropped frame.
+    [[nodiscard]] IntRect fromDisplay(IntRect rect) const
+    {
+        return IntRect{rect.x - sourceX, rect.y - sourceY, rect.width, rect.height};
+    }
 
     [[nodiscard]] const uint8_t* pixelAt(int px, int py) const
     {

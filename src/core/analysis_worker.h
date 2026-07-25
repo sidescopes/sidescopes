@@ -54,8 +54,10 @@ struct AnalysisSettings
     /// color-picker-only view asks nothing of the worker).
     std::vector<std::string> enabledScopes;
     RegionOfInterest region;
-    /// The application's own window in frame pixels, masked out of change
-    /// detection so its own redraws never re-trigger analysis.
+    /// The application's own window in DISPLAY pixels, masked out of change
+    /// detection so its own redraws never re-trigger analysis. Display rather
+    /// than frame pixels because a narrowed capture moves the frame's origin;
+    /// FrameView::fromDisplay does that mapping.
     IntRect maskedWindow;
 };
 
@@ -108,6 +110,10 @@ public:
     {
         int width = 0;
         int height = 0;
+        /// The display's own pixel extents, which equal width and height until
+        /// the capture is narrowed to part of it.
+        int displayWidth = 0;
+        int displayHeight = 0;
     };
 
     [[nodiscard]] std::optional<FrameSize> latestFrameSize() const;

@@ -21,10 +21,27 @@ struct FrameBuffer
     int height = 0;
     ColorSpaceHint colorSpace = ColorSpaceHint::Unknown;
     uint64_t sequence = 0;
+    /// Where these pixels sit on their display, and how large it is; all zero
+    /// for a frame that covers the whole display. See FrameView.
+    int sourceX = 0;
+    int sourceY = 0;
+    int sourceWidth = 0;
+    int sourceHeight = 0;
 
     [[nodiscard]] FrameView view() const
     {
-        return FrameView{data.data(), strideBytes, width, height, colorSpace, sequence};
+        return FrameView{data.data(), strideBytes, width,   height,      colorSpace,
+                         sequence,    sourceX,     sourceY, sourceWidth, sourceHeight};
+    }
+
+    [[nodiscard]] int displayWidth() const
+    {
+        return sourceWidth > 0 ? sourceWidth : width;
+    }
+
+    [[nodiscard]] int displayHeight() const
+    {
+        return sourceHeight > 0 ? sourceHeight : height;
     }
 };
 

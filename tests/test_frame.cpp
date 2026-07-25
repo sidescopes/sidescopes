@@ -1,6 +1,8 @@
 #include <array>
 #include <catch2/catch_test_macros.hpp>
+#include <cstddef>
 
+#include "core/analysis_worker.h"
 #include "core/frame.h"
 
 namespace sidescopes {
@@ -75,6 +77,81 @@ TEST_CASE("FrameView reads BGRA pixels as RGB colors")
     CHECK(mixed.r == 17);
     CHECK(mixed.g == 34);
     CHECK(mixed.b == 51);
+}
+
+TEST_CASE("A frame that covers its whole display reports itself as the display")
+{
+    std::array<uint8_t, std::size_t{4} * 4 * 4> pixels{};
+    const FrameView whole{pixels.data(), 4 * 4, 4, 4, ColorSpaceHint::Srgb, 1};
+
+    CHECK(whole.displayWidth() == 4);
+    CHECK(whole.displayHeight() == 4);
+    CHECK_FALSE(whole.cropped());
+    // The identity, which is what keeps an uncropped capture behaving exactly
+    // as it did before frames could describe a crop.
+    const IntRect rect{1, 2, 2, 1};
+    const IntRect mapped = whole.fromDisplay(rect);
+    CHECK(mapped.x == rect.x);
+    CHECK(mapped.y == rect.y);
+    CHECK(mapped.width == rect.width);
+    CHECK(mapped.height == rect.height);
+}
+
+TEST_CASE("A narrowed frame maps display coordinates onto its own pixels")
+{
+    // Forty by thirty pixels taken from (100, 60) of a 1000x800 display.
+    std::array<uint8_t, std::size_t{40} * 30 * 4> pixels{};
+    const FrameView crop{pixels.data(), 40 * 4, 40, 30, ColorSpaceHint::Srgb, 7, 100, 60, 1000, 800};
+
+    CHECK(crop.displayWidth() == 1000);
+    CHECK(crop.displayHeight() == 800);
+    CHECK(crop.cropped());
+
+    // A rectangle stated in display pixels lands where those pixels actually
+    // are inside this frame.
+    const IntRect mapped = crop.fromDisplay(IntRect{110, 70, 20, 10});
+    CHECK(mapped.x == 10);
+    CHECK(mapped.y == 10);
+    CHECK(mapped.width == 20);
+    CHECK(mapped.height == 10);
+
+    // The crop's own origin maps to its top-left corner.
+    CHECK(crop.fromDisplay(IntRect{100, 60, 1, 1}).x == 0);
+    CHECK(crop.fromDisplay(IntRect{100, 60, 1, 1}).y == 0);
+}
+
+TEST_CASE("A narrowed frame resolves a region to the same display pixels")
+{
+    // The whole point of the mapping: a region stated as a share of the display
+    // must select the same content whether or not the capture was narrowed. Here
+    // the region is the middle fifth of a 1000x800 display, and the capture has
+    // been narrowed to exactly that.
+    RegionOfInterest middle;
+    middle.leftPercent = 40.0;
+    middle.topPercent = 40.0;
+    middle.rightPercent = 60.0;
+    middle.bottomPercent = 60.0;
+
+    const IntRect onDisplay = middle.toPixels(1000, 800);
+    CHECK(onDisplay.x == 400);
+    CHECK(onDisplay.y == 320);
+    CHECK(onDisplay.width == 200);
+    CHECK(onDisplay.height == 160);
+
+    std::array<uint8_t, 8> tiny{};
+    const FrameView narrowed{tiny.data(), 200 * 4, 200, 160, ColorSpaceHint::Srgb, 3, 400, 320, 1000, 800};
+    // Resolved against the display, then moved into the frame: the whole frame.
+    const IntRect inFrame = narrowed.fromDisplay(middle.toPixels(narrowed.displayWidth(), narrowed.displayHeight()));
+    CHECK(inFrame.x == 0);
+    CHECK(inFrame.y == 0);
+    CHECK(inFrame.width == 200);
+    CHECK(inFrame.height == 160);
+
+    // Read against the frame's own extents instead - the bug this guards - and
+    // the region would collapse to a fifth of the crop, well inside it.
+    const IntRect wrong = middle.toPixels(narrowed.width, narrowed.height);
+    CHECK(wrong.width == 40);
+    CHECK(wrong.x == 80);
 }
 
 }  // namespace sidescopes

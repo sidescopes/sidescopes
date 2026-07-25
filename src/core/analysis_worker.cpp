@@ -115,7 +115,8 @@ std::optional<AnalysisWorker::FrameSize> AnalysisWorker::latestFrameSize() const
     if (!m_hasFrame) {
         return std::nullopt;
     }
-    return FrameSize{m_latestFrame.width, m_latestFrame.height};
+    return FrameSize{m_latestFrame.width, m_latestFrame.height, m_latestFrame.displayWidth(),
+                     m_latestFrame.displayHeight()};
 }
 
 uint64_t AnalysisWorker::consumedFrameSequence() const
@@ -333,13 +334,17 @@ void AnalysisWorker::run()
         // only writer, and readers on other threads take the mutex only for
         // the brief sampling reads that tolerate the previous frame.
         const FrameView view = m_latestFrame.view();
-        const IntRect region = settings.region.toPixels(view.width, view.height).clampedTo(view.width, view.height);
+        // Measured against the DISPLAY, then moved into this frame's pixels:
+        // a narrowed capture must analyse the same content, not the same
+        // percentages of a smaller frame.
+        const IntRect region = view.fromDisplay(settings.region.toPixels(view.displayWidth(), view.displayHeight()))
+                                   .clampedTo(view.width, view.height);
 
         // The hash is computed on every pass — including settings-only ones —
         // so it always corresponds to the current region and mask. Skipping
         // it on any path leaves a stale value that defeats the next
         // unchanged-content comparison.
-        const uint64_t contentHash = hashRegion(view, region, settings.maskedWindow);
+        const uint64_t contentHash = hashRegion(view, region, view.fromDisplay(settings.maskedWindow));
         if (!settingsChanged && contentHash == lastContentHash) {
             continue;
         }
