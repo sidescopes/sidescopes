@@ -1,6 +1,7 @@
 #include "app/adaptive_detail.h"
 
 #include <algorithm>
+#include <initializer_list>
 #include <string>
 
 #include "app/scope_view.h"
@@ -20,7 +21,24 @@ PaneSize scaled(const PaneSize& pane, float density)
 ScopePaneSizes inPixels(const ScopePaneSizes& panes, float density)
 {
     return ScopePaneSizes{scaled(panes.waveform, density), scaled(panes.parade, density),
-                          scaled(panes.histogram, density), scaled(panes.vectorscope, density)};
+                          scaled(panes.histogram, density), scaled(panes.vectorscope, density),
+                          scaled(panes.neutral, density)};
+}
+
+// The finest offered resolution the pane can actually show. A texture finer
+// than the pane it is drawn into is detail the display throws away; a coarser
+// one is detail the display invents, which is what a large scope looked like
+// while these ladders stopped short of the panes people give them.
+int resolutionForPane(float paneExtentPixels, std::initializer_list<int> ladder)
+{
+    int chosen = *ladder.begin();
+    for (const int step : ladder) {
+        if (static_cast<float>(step) <= paneExtentPixels) {
+            chosen = step;
+        }
+    }
+
+    return chosen;
 }
 
 }  // namespace
@@ -87,6 +105,27 @@ int AdaptiveDetail::desiredVectorscopeSize(const ScopePaneSizes& panePixels) con
     return wantVectorscope;
 }
 
+int AdaptiveDetail::desiredNeutralSize(const ScopePaneSizes& panePixels) const
+{
+    int wantNeutral = currentSize(NeutralScopeId).second;
+    if (m_view.stack().shows(NeutralScopeId)) {
+        // The cloud is accumulated at this resolution, so this is real detail
+        // and not interpolation. It stops at a thousand because every sample is
+        // splatted over three pixels, and past that the plane would resolve
+        // structure the splat has already spread.
+        const PaneSize scopePane = panePixels.neutral;
+        wantNeutral = resolutionForPane(std::min(scopePane.width, scopePane.height), {256, 512, 1024});
+    }
+
+    return wantNeutral;
+}
+
+DetailSizes AdaptiveDetail::inForce() const
+{
+    return DetailSizes{currentSize(WaveformScopeId), currentSize(HistogramScopeId),
+                       currentSize(VectorscopeScopeId).second, currentSize(NeutralScopeId).second};
+}
+
 std::optional<DetailSizes> AdaptiveDetail::update(const ScopePaneSizes& panes, float density,
                                                   std::optional<AnalysisWorker::FrameSize> frameSize, double now)
 {
@@ -98,30 +137,16 @@ std::optional<DetailSizes> AdaptiveDetail::update(const ScopePaneSizes& panes, f
         regionWidth = m_analysis.region.toPixels(frameSize->width, frameSize->height).width;
     }
     const ScopePaneSizes panePixels = inPixels(panes, density);
+    const DetailSizes wanted{desiredWaveformSize(panePixels, regionWidth), desiredHistogramSize(panePixels),
+                             desiredVectorscopeSize(panePixels), desiredNeutralSize(panePixels)};
 
-    const std::pair<int, int> waveSize = currentSize(WaveformScopeId);
-    const std::pair<int, int> histSize = currentSize(HistogramScopeId);
-    const std::pair<int, int> vecSize = currentSize(VectorscopeScopeId);
-    const auto [wantColumns, wantHeight] = desiredWaveformSize(panePixels, regionWidth);
-    const auto [wantHistWidth, wantHistHeight] = desiredHistogramSize(panePixels);
-    const int wantVectorscope = desiredVectorscopeSize(panePixels);
-
-    const bool differs = wantColumns != waveSize.first || wantHeight != waveSize.second ||
-                         wantVectorscope != vecSize.second || wantHistWidth != histSize.first ||
-                         wantHistHeight != histSize.second;
-    if (!differs) {
-        m_pendingColumns = 0;
+    if (wanted == inForce()) {
+        m_pending.reset();
 
         return std::nullopt;
     }
-    if (m_pendingColumns != wantColumns || m_pendingImageHeight != wantHeight ||
-        m_pendingVectorscope != wantVectorscope || m_pendingHistWidth != wantHistWidth ||
-        m_pendingHistHeight != wantHistHeight) {
-        m_pendingColumns = wantColumns;
-        m_pendingImageHeight = wantHeight;
-        m_pendingVectorscope = wantVectorscope;
-        m_pendingHistWidth = wantHistWidth;
-        m_pendingHistHeight = wantHistHeight;
+    if (!m_pending || *m_pending != wanted) {
+        m_pending = wanted;
         m_pendingSince = now;
 
         return std::nullopt;
@@ -130,7 +155,7 @@ std::optional<DetailSizes> AdaptiveDetail::update(const ScopePaneSizes& panes, f
         return std::nullopt;
     }
 
-    return DetailSizes{{wantColumns, wantHeight}, {wantHistWidth, wantHistHeight}, wantVectorscope};
+    return wanted;
 }
 
 }  // namespace sidescopes

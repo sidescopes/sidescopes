@@ -12,6 +12,11 @@ namespace sidescopes {
 
 inline constexpr int DefaultNeutralSize = 256;
 
+/// The largest plane the cloud is accumulated at. Every sample is splatted over
+/// three pixels, so past this the plane resolves structure the splat has already
+/// spread - and a square image is memory in both axes.
+inline constexpr int MaximumNeutralSize = 1024;
+
 /// How wide a slice of the a*/b* plane the scope shows, as the half-extent in
 /// CIELAB units from neutral to each edge. Everyday casts sit inside Normal;
 /// Fine magnifies a subtle one, Wide keeps a strong cast on screen.

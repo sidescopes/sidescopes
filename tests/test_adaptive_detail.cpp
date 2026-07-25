@@ -6,6 +6,7 @@
 #include "app/scope_registry.h"
 #include "app/scope_view.h"
 #include "core/analysis_worker.h"
+#include "core/scopes/neutral.h"
 #include "core/scopes/waveform.h"
 #include "modules/module_registry.h"
 
@@ -22,8 +23,10 @@ const ScopeRegistry& registry()
 }
 
 // Panes clearing every threshold, and panes clearing none of them.
-constexpr ScopePaneSizes LargePanes{{1600.0f, 700.0f}, {1600.0f, 700.0f}, {1600.0f, 700.0f}, {700.0f, 700.0f}};
-constexpr ScopePaneSizes SmallPanes{{400.0f, 300.0f}, {400.0f, 300.0f}, {400.0f, 300.0f}, {300.0f, 300.0f}};
+constexpr ScopePaneSizes LargePanes{
+    {1600.0f, 700.0f}, {1600.0f, 700.0f}, {1600.0f, 700.0f}, {700.0f, 700.0f}, {700.0f, 700.0f}};
+constexpr ScopePaneSizes SmallPanes{
+    {400.0f, 300.0f}, {400.0f, 300.0f}, {400.0f, 300.0f}, {300.0f, 300.0f}, {300.0f, 300.0f}};
 
 // The controller plus the state it reads, in declaration order so the refs it
 // stores outlive nothing.
@@ -102,7 +105,7 @@ TEST_CASE("Each scope's resolution follows its own pane")
     CHECK(fixture.detail.desiredWaveformSize(LargePanes, 0) == std::pair<int, int>{2048, 512});
     CHECK(fixture.detail.desiredWaveformSize(SmallPanes, 0) == std::pair<int, int>{512, WaveformLevels});
 
-    constexpr ScopePaneSizes MidPanes{{800.0f, 400.0f}, {}, {800.0f, 400.0f}, {400.0f, 400.0f}};
+    constexpr ScopePaneSizes MidPanes{{800.0f, 400.0f}, {}, {800.0f, 400.0f}, {400.0f, 400.0f}, {400.0f, 400.0f}};
     CHECK(fixture.detail.desiredWaveformSize(MidPanes, 0) == std::pair<int, int>{1024, WaveformLevels});
     // A narrow region cannot populate more columns than it has pixels.
     CHECK(fixture.detail.desiredWaveformSize(LargePanes, 1500).first == 1024);
@@ -113,6 +116,40 @@ TEST_CASE("Each scope's resolution follows its own pane")
     // The vectorscope is square, so its shorter side decides.
     CHECK(fixture.detail.desiredVectorscopeSize(LargePanes) == 512);
     CHECK(fixture.detail.desiredVectorscopeSize(MidPanes) == 256);
+}
+
+TEST_CASE("The neutral plane follows its pane, which nothing used to")
+{
+    // The plane was fixed at its module default however large a pane it got, so
+    // a neutral scope filling a second monitor was a 256-pixel image stretched
+    // eightfold. Its cloud is accumulated at this resolution, so the ladder buys
+    // real detail rather than interpolation.
+    DetailFixture fixture;
+    fixture.view.stack().choose(NeutralScopeId, true);
+
+    constexpr ScopePaneSizes Huge{{}, {}, {}, {}, {2400.0f, 2100.0f}};
+    constexpr ScopePaneSizes Mid{{}, {}, {}, {}, {700.0f, 700.0f}};
+    constexpr ScopePaneSizes Tiny{{}, {}, {}, {}, {300.0f, 300.0f}};
+
+    CHECK(fixture.detail.desiredNeutralSize(Huge) == MaximumNeutralSize);
+    CHECK(fixture.detail.desiredNeutralSize(Mid) == 512);
+    CHECK(fixture.detail.desiredNeutralSize(Tiny) == 256);
+
+    // Square, so the shorter side decides: a wide, shallow pane gets the step
+    // its height can show, not its width.
+    constexpr ScopePaneSizes Wide{{}, {}, {}, {}, {2400.0f, 300.0f}};
+    CHECK(fixture.detail.desiredNeutralSize(Wide) == 256);
+}
+
+TEST_CASE("The neutral plane keeps its resolution while it is off screen")
+{
+    DetailFixture fixture;
+    fixture.analysis.imageSizes[NeutralScopeId] = {512, 512};
+
+    // Nothing is drawing it, so however large a pane it is measured at, the
+    // resolution in force stands.
+    constexpr ScopePaneSizes Huge{{}, {}, {}, {}, {2400.0f, 2100.0f}};
+    CHECK(fixture.detail.desiredNeutralSize(Huge) == 512);
 }
 
 TEST_CASE("A scope off screen keeps the resolution in force")

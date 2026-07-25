@@ -54,8 +54,9 @@ void Neutral::configure(const NeutralSettings& settings)
     m_settings.gain = std::max(0.0f, settings.gain);
     m_settings.samplingStride = clampInt(settings.samplingStride, 1, 8);
     m_settings.neutralChroma = std::max(0.0f, settings.neutralChroma);
+    m_settings.size = clampInt(settings.size, 16, MaximumNeutralSize);
     m_axisRange = axisRange();
-    resize(std::max(16, settings.size));
+    resize(m_settings.size);
     renderImage();
 }
 

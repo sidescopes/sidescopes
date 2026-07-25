@@ -26,6 +26,7 @@ struct ScopePaneSizes
     PaneSize parade;
     PaneSize histogram;
     PaneSize vectorscope;
+    PaneSize neutral;
 };
 
 /// The scope image resolutions one step settled on, for the host to put in
@@ -38,6 +39,10 @@ struct DetailSizes
     std::pair<int, int> histogram;
     /// The vectorscope image, square.
     int vectorscope = 0;
+    /// The neutral plane, square.
+    int neutral = 0;
+
+    [[nodiscard]] bool operator==(const DetailSizes&) const = default;
 };
 
 /// How long the desired resolutions must sit still before they are applied. A
@@ -81,21 +86,27 @@ public:
     /// Stays at the resolution in force while it is off screen.
     [[nodiscard]] int desiredVectorscopeSize(const ScopePaneSizes& panePixels) const;
 
+    /// The neutral plane's desired edge for the pane in @p panePixels. Unlike
+    /// the vectorscope's, this is not only a display resolution: the
+    /// near-neutral cloud is accumulated at it, so a larger plane resolves the
+    /// cloud more finely rather than interpolating it. Stays at the resolution
+    /// in force while it is off screen.
+    [[nodiscard]] int desiredNeutralSize(const ScopePaneSizes& panePixels) const;
+
 private:
     /// @return The image size @p id is computed at right now, {0, 0} for a
     ///         scope left at its module's default.
     [[nodiscard]] std::pair<int, int> currentSize(std::string_view id) const;
+
+    /// The resolutions in force, as one value to compare a desired set against.
+    [[nodiscard]] DetailSizes inForce() const;
 
     const ScopeView& m_view;
     const AnalysisSettings& m_analysis;
 
     // The resolutions waiting out the settle time, and when they were first
     // asked for.
-    int m_pendingColumns = 0;
-    int m_pendingImageHeight = 0;
-    int m_pendingVectorscope = 0;
-    int m_pendingHistWidth = 0;
-    int m_pendingHistHeight = 0;
+    std::optional<DetailSizes> m_pending;
     double m_pendingSince = 0.0;
 };
 
