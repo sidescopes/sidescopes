@@ -153,8 +153,10 @@ struct WorkerScope
     const SsOutlineExtension* outline = nullptr;
 };
 
-// One instance of every registered built-in scope, created on the calling
-// (worker) thread, which therefore owns them.
+// A record for every registered built-in scope, with no instance yet: an
+// instance is what allocates a scope's bin and plane sets, and a scope nobody is
+// looking at should not own any. Records are cheap and their order is the
+// registry's, so the per-pass loops are unchanged.
 std::vector<WorkerScope> makeWorkerScopes()
 {
     std::vector<WorkerScope> scopes;
@@ -163,15 +165,43 @@ std::vector<WorkerScope> makeWorkerScopes()
         WorkerScope scope;
         scope.id = registered.descriptor->id;
         scope.descriptor = registered.descriptor;
+        scopes.push_back(std::move(scope));
+    }
+
+    return scopes;
+}
+
+// Gives every enabled scope an instance and takes it away from the rest, so the
+// memory a scope needs is owned exactly while it is on screen. Every registered
+// scope used to be instantiated at startup, which on a full registry is tens of
+// megabytes of plane sets - the parade alone is a second complete waveform - paid
+// by a session showing one histogram.
+//
+// Called on a settings change, before the scopes are configured, so a scope that
+// has just appeared is instantiated in time to receive its parameters. Dropping
+// an instance drops whatever it had accumulated, which is right: a scope coming
+// back on screen re-reads the region from the next frame.
+void syncScopeInstances(std::vector<WorkerScope>& scopes, const std::vector<std::string>& enabled)
+{
+    const ModuleRegistry& registry = builtinModules();
+    for (WorkerScope& scope : scopes) {
+        const bool wanted = std::find(enabled.begin(), enabled.end(), scope.id) != enabled.end();
+        if (wanted == scope.instance.valid()) {
+            continue;
+        }
+        if (!wanted) {
+            scope.instance = ScopeInstance{};
+            scope.adaptive = nullptr;
+            scope.outline = nullptr;
+            continue;
+        }
         scope.instance = registry.createInstance(scope.id);
         if (scope.instance.valid()) {
             scope.adaptive =
                 static_cast<const SsAdaptiveImageExtension*>(scope.instance.getExtension(AdaptiveImageExtension));
             scope.outline = static_cast<const SsOutlineExtension*>(scope.instance.getExtension(OutlineExtension));
         }
-        scopes.push_back(std::move(scope));
     }
-    return scopes;
 }
 
 SsFrameView toBoundaryFrame(const FrameView& view)
@@ -220,6 +250,19 @@ void configureScopes(std::vector<WorkerScope>& scopes, const AnalysisSettings& s
             scope.adaptive->setImageSize(scope.instance.raw(), size->second.first, size->second.second);
         }
     }
+}
+
+// Everything a settings change has to do before any frame is analysed, in the
+// order it has to happen: instances first, because a scope that has just been
+// shown must exist before it can be configured or it would run its module
+// defaults for a pass; then the parameters; then the enabled-id lookup the
+// per-pass loop reads, rebuilt once here rather than per scope per pass.
+void applySettings(std::vector<WorkerScope>& scopes, const AnalysisSettings& settings,
+                   std::set<std::string>& enabledScopes)
+{
+    syncScopeInstances(scopes, settings.enabledScopes);
+    configureScopes(scopes, settings);
+    enabledScopes = std::set<std::string>(settings.enabledScopes.begin(), settings.enabledScopes.end());
 }
 
 // Runs each enabled scope over the region, returning the wall time the pass
@@ -321,10 +364,7 @@ void AnalysisWorker::run()
         // frame after it would run the default - on startup, empty - scope set
         // and publish an output with no images.
         if (settingsChanged) {
-            configureScopes(scopes, settings);
-            // Rebuild the enabled-id lookup once per settings change, not per
-            // scope per pass.
-            enabledScopes = std::set<std::string>(settings.enabledScopes.begin(), settings.enabledScopes.end());
+            applySettings(scopes, settings, enabledScopes);
         }
         if (!hasWork(newFrame, settingsChanged)) {
             continue;
