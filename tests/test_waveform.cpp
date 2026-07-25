@@ -467,4 +467,47 @@ TEST_CASE("A waveform wide enough to need every row gets every row")
     CHECK(bottomLit);
 }
 
+TEST_CASE("A narrow waveform really does thin, through its own accumulate")
+{
+    // The sibling test above proves a wide waveform sees every row. This proves
+    // the other half - that a narrow one thins - and it goes through the scope's
+    // own accumulate rather than the policy function, because the policy holding
+    // is no use if the waveform stops asking it. Reverting the waveform to opting
+    // out of the budget passes every other test in the suite.
+    constexpr int Columns = 512;
+    constexpr int Width = 3000;
+    constexpr int Height = 1500;
+    const IntRect region{0, 0, Width, Height};
+    const long long budget = budgetForBins(static_cast<long long>(Columns) * WaveformLevels, WaveformMinSamplesPerBin);
+    REQUIRE(static_cast<long long>(Width) * Height > budget);
+
+    const SampleGrid thinned = sampleGridFor(1, region, budget);
+    REQUIRE(thinned.rowStride > 1);
+
+    // Black on exactly the rows a thinned pass visits, white everywhere else. A
+    // waveform that thins sees black alone; one that reads every row sees white.
+    TestFrame frame(Width, Height, 0);
+    frame.fill(Color{255, 255, 255});
+    for (int index = 0; index < thinned.rows; ++index) {
+        const int row = sampleRowOf(thinned, region, index);
+        frame.fillRows(row, row + 1, Color{0, 0, 0});
+    }
+
+    Waveform waveform;
+    WaveformSettings settings;
+    settings.columns = Columns;
+    settings.mode = WaveformMode::Luma;
+    waveform.configure(settings);
+    waveform.accumulate(frame.view(), region);
+
+    const ScopeImage& image = waveform.image();
+    // Level 255 sits in row zero and level 0 at the bottom, and the trace is in
+    // the colour channels - the image is opaque throughout. A pass that saw only
+    // black has its mass at the bottom and nothing at the top; one that read
+    // every row would light the top too.
+    const int column = image.width / 2;
+    CHECK(channelAt(image, column, 0, 1) == 0);
+    CHECK(channelAt(image, column, image.height - 1, 1) > 0);
+}
+
 }  // namespace sidescopes

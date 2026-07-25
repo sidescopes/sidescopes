@@ -10,6 +10,7 @@
 #include <utility>
 
 #include "core/scopes/neutral.h"
+#include "core/scopes/sampling.h"
 #include "scope_image.h"
 #include "test_frame.h"
 
@@ -121,6 +122,48 @@ TEST_CASE("Neutral graticule is the crosshair, two rings, and four labels")
     CHECK(graticule.lines.size() == 2);
     CHECK(graticule.circles.size() == 2);
     CHECK(graticule.labels.size() == 4);
+}
+
+TEST_CASE("A large neutral plane keeps the sample ceiling, through its own accumulate")
+{
+    // The neutral scope is alone in converting every sample to L*a*b*, so its
+    // budget takes the smaller of its bin count's demand and the global ceiling -
+    // otherwise a plane following a full-screen pane would ask for twenty-five
+    // million samples and cost five times what it costs today. This goes through
+    // accumulate rather than the policy, because removing the ceiling from the
+    // scope passes every other test in the suite.
+    constexpr int Plane = 1024;
+    constexpr int Width = 3000;
+    constexpr int Height = 1500;
+    const IntRect region{0, 0, Width, Height};
+
+    const long long demanded = budgetForBins(static_cast<long long>(Plane) * Plane, NeutralMinSamplesPerBin);
+    REQUIRE(demanded > SampleBudget);
+    const SampleGrid capped = sampleGridFor(1, region, SampleBudget);
+    const SampleGrid uncapped = sampleGridFor(1, region, demanded);
+    // The two must differ, or the test cannot tell them apart.
+    REQUIRE(capped.rowStride > uncapped.rowStride);
+
+    // Neutral grey on exactly the rows a capped pass visits, saturated blue on
+    // the rest. A capped pass sees grey alone and reports no cast; one that read
+    // every row would be pulled cool.
+    TestFrame frame(Width, Height, 0);
+    frame.fill(Color{0, 40, 255});
+    for (int index = 0; index < capped.rows; ++index) {
+        const int row = sampleRowOf(capped, region, index);
+        frame.fillRows(row, row + 1, Color{128, 128, 128});
+    }
+
+    Neutral neutral;
+    NeutralSettings settings;
+    settings.size = Plane;
+    neutral.configure(settings);
+    neutral.accumulate(frame.view(), region);
+
+    // Grey sits at the centre of both axes; any blue at all drags b* cool, which
+    // is left of centre.
+    CHECK(neutral.averagePoint().x == Catch::Approx(0.5f).margin(0.01f));
+    CHECK(neutral.averagePoint().y == Catch::Approx(0.5f).margin(0.01f));
 }
 
 }  // namespace sidescopes

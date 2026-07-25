@@ -178,7 +178,7 @@ TEST_CASE("A scope with fixed bins stops costing more as the region grows")
     // the region is, so its budget does not grow with one. This is what makes it
     // cheap behind a full-screen region, where it was taking every second row of
     // a 7.7 million pixel frame to fill bins that were already saturated.
-    constexpr long long HistogramBins = 256 * 3;
+    constexpr long long HistogramBins = 256LL * 3;
     const long long budget = budgetForBins(HistogramBins, HistogramMinSamplesPerBin);
     CHECK(budget == 768'000);
 

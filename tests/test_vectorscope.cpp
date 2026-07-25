@@ -6,6 +6,7 @@
 #include <utility>
 #include <vector>
 
+#include "core/scopes/sampling.h"
 #include "core/scopes/vectorscope.h"
 #include "scope_image.h"
 #include "test_frame.h"
@@ -304,6 +305,57 @@ TEST_CASE("Vectorscope clamps an out-of-range sampling stride to eight")
     maxStride.accumulate(frame.view(), IntRect{0, 0, 64, 64});
 
     CHECK(clamped.image().rgba == maxStride.image().rgba);
+}
+
+TEST_CASE("The vectorscope thins to its own budget, not the global ceiling")
+{
+    // Its bins are the fixed 256x256 code grid, so like the histogram its budget
+    // does not grow with the region and sits below the global ceiling. Reverting
+    // that wiring changes nothing observable either - only the cost - so this is
+    // what stands between the saving and a silent regression.
+    constexpr int Width = 3000;
+    constexpr int Height = 1500;
+    const IntRect region{0, 0, Width, Height};
+    const long long own = budgetForBins(256LL * 256, VectorscopeMinSamplesPerBin);
+    const SampleGrid mine = sampleGridFor(1, region, own);
+    const SampleGrid global = sampleGridFor(1, region, SampleBudget);
+    REQUIRE(mine.rowStride > global.rowStride);
+
+    // Neutral grey on exactly the rows its own budget visits, saturated red on
+    // the rest. Grey carries no chroma and lands at the centre; any red at all
+    // lands far out towards the red target.
+    TestFrame frame(Width, Height, 0);
+    frame.fill(Color{220, 20, 20});
+    for (int index = 0; index < mine.rows; ++index) {
+        const int row = sampleRowOf(mine, region, index);
+        frame.fillRows(row, row + 1, Color{128, 128, 128});
+    }
+
+    Vectorscope vectorscope;
+    vectorscope.configure(VectorscopeSettings{});
+    vectorscope.accumulate(frame.view(), region);
+
+    const ScopeImage& image = vectorscope.image();
+    const int centre = image.width / 2;
+    CHECK(pixelLit(image, centre, centre));
+
+    // Every lit pixel anywhere in the image, not four sampled directions: red
+    // lands at its own angle, and probing the cardinals alone misses it.
+    int furthest = 0;
+    for (int py = 0; py < image.height; ++py) {
+        for (int px = 0; px < image.width; ++px) {
+            if (pixelLit(image, px, py)) {
+                const int dx = px - centre;
+                const int dy = py - centre;
+                furthest = std::max(furthest, dx * dx + dy * dy);
+            }
+        }
+    }
+    // Grey alone stays at the centre, spread only by the splat and the
+    // reconstruction. Reading the red rows too would light a bin a third of the
+    // way out towards the red target.
+    const int allowed = image.width / 16;
+    CHECK(furthest < allowed * allowed);
 }
 
 }  // namespace sidescopes

@@ -1,8 +1,11 @@
+#include <algorithm>
 #include <catch2/catch_test_macros.hpp>
 #include <cstdlib>
 #include <vector>
 
 #include "core/scopes/histogram.h"
+#include "core/scopes/sampling.h"
+#include "scope_image.h"
 #include "test_frame.h"
 
 namespace sidescopes {
@@ -271,6 +274,54 @@ TEST_CASE("Histogram leaves a gap between two populated tones dark")
     CHECK(barHeight(scope.image(), 40, 1) > 0);
     CHECK(barHeight(scope.image(), 210, 1) > 0);
     CHECK(barHeight(scope.image(), 125, 1) == 0);  // squarely in the gap
+}
+
+TEST_CASE("The histogram thins to its own budget, not the global ceiling")
+{
+    // The histogram's bins are fixed at 768 whatever the region, so its budget is
+    // an order of magnitude below the global ceiling and it thins much harder
+    // than any other scope. Nothing observable changes if that wiring is reverted
+    // - only the cost - so this is the only thing standing between the saving and
+    // a silent regression.
+    constexpr int Width = 3000;
+    constexpr int Height = 1500;
+    const IntRect region{0, 0, Width, Height};
+    const long long own = budgetForBins(256LL * 3, HistogramMinSamplesPerBin);
+    const SampleGrid mine = sampleGridFor(1, region, own);
+    const SampleGrid global = sampleGridFor(1, region, SampleBudget);
+    // The two must disagree, or this frame cannot tell them apart.
+    REQUIRE(mine.rowStride > global.rowStride);
+
+    // Black on exactly the rows the histogram's own budget visits, white on the
+    // rest. Sampling to its own budget sees one code; sampling to the global one
+    // sees both, and lights both ends of the code axis.
+    TestFrame frame(Width, Height, 0);
+    frame.fill(Color{255, 255, 255});
+    for (int index = 0; index < mine.rows; ++index) {
+        const int row = sampleRowOf(mine, region, index);
+        frame.fillRows(row, row + 1, Color{0, 0, 0});
+    }
+
+    Histogram histogram;
+    histogram.configure(HistogramSettings{});
+    histogram.accumulate(frame.view(), region);
+
+    const ScopeImage& image = histogram.image();
+    const int edge = std::max(1, image.width / 50);
+    const auto litWithin = [&image](int from, int to) {
+        for (int px = from; px < to; ++px) {
+            for (int py = 0; py < image.height; ++py) {
+                if (pixelLit(image, px, py)) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    };
+
+    // Whichever end code zero sits at, exactly one end carries mass - never both.
+    CHECK(litWithin(0, edge) != litWithin(image.width - edge, image.width));
 }
 
 }  // namespace sidescopes
