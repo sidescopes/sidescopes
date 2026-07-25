@@ -363,8 +363,13 @@ TEST_CASE("Waveform clamps the column and level budgets to their ranges")
     large.imageHeight = 9999;
     tooLarge.configure(large);
     tooLarge.accumulate(frame.view(), IntRect{0, 0, 64, 64});
-    CHECK(tooLarge.image().width == 2048);
-    CHECK(tooLarge.image().height == 768);
+    // The ceilings moved up when the image was allowed to follow its pane: a
+    // scope filling a second monitor was being magnified by the display, and
+    // columns carry one sample per place in the region, so a wide pane deserves
+    // them. Height only resolves the level spline, the levels themselves being
+    // fixed at 256 by eight-bit input.
+    CHECK(tooLarge.image().width == MaximumWaveformColumns);
+    CHECK(tooLarge.image().height == MaximumWaveformHeight);
 
     Waveform tooSmall;
     WaveformSettings small;

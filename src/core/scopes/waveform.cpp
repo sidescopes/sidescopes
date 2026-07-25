@@ -442,8 +442,8 @@ void Waveform::configure(const WaveformSettings& settings)
 {
     m_settings = settings;
     m_settings.samplingStride = std::clamp(m_settings.samplingStride, 1, 8);
-    m_settings.columns = std::clamp(m_settings.columns, 256, 2048);
-    m_settings.imageHeight = std::clamp(m_settings.imageHeight, WaveformLevels, 768);
+    m_settings.columns = std::clamp(m_settings.columns, 256, MaximumWaveformColumns);
+    m_settings.imageHeight = std::clamp(m_settings.imageHeight, WaveformLevels, MaximumWaveformHeight);
     if (m_settings.columns != m_columns || m_settings.imageHeight != m_imageHeight) {
         resize(m_settings.columns, m_settings.imageHeight);
     }

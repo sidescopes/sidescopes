@@ -5,6 +5,7 @@
 #include <string>
 
 #include "app/scope_view.h"
+#include "core/scopes/neutral.h"
 #include "core/scopes/waveform.h"
 
 namespace sidescopes {
@@ -25,15 +26,35 @@ ScopePaneSizes inPixels(const ScopePaneSizes& panes, float density)
                           scaled(panes.neutral, density)};
 }
 
-// The finest offered resolution the pane can actually show. A texture finer
-// than the pane it is drawn into is detail the display throws away; a coarser
-// one is detail the display invents, which is what a large scope looked like
-// while these ladders stopped short of the panes people give them.
-int resolutionForPane(float paneExtentPixels, std::initializer_list<int> ladder)
+// How much the display may magnify a scope texture before the softness shows.
+// A trace is smooth, so a little magnification is invisible - and letting a
+// small scope keep a small image is what keeps a small scope cheap. Past this
+// factor the texture is visibly stretched, which is what a scope filling a
+// second monitor looked like while these ladders stopped part way up.
+constexpr float MagnificationTolerance = 1.4f;
+
+// The smallest offered resolution that covers the pane to within @p tolerance.
+// Rounding up rather than down also buys free supersampling, which is what the
+// hand-written thresholds this replaces were already doing.
+int resolutionCovering(float paneExtentPixels, std::initializer_list<int> ladder)
+{
+    const float wanted = paneExtentPixels / MagnificationTolerance;
+    for (const int step : ladder) {
+        if (static_cast<float>(step) >= wanted) {
+            return step;
+        }
+    }
+
+    return *(ladder.end() - 1);
+}
+
+// The largest offered resolution the region can actually populate: there is no
+// point resolving more columns than the region has pixels to put in them.
+int resolutionWithin(int regionWidth, std::initializer_list<int> ladder)
 {
     int chosen = *ladder.begin();
     for (const int step : ladder) {
-        if (static_cast<float>(step) <= paneExtentPixels) {
+        if (step <= regionWidth) {
             chosen = step;
         }
     }
@@ -64,10 +85,16 @@ std::pair<int, int> AdaptiveDetail::desiredWaveformSize(const ScopePaneSizes& pa
     if (m_view.stack().shows(WaveformScopeId) || m_view.stack().shows(ParadeScopeId)) {
         const float wfWidth = std::max(panePixels.waveform.width, panePixels.parade.width);
         const float wfHeight = std::max(panePixels.waveform.height, panePixels.parade.height);
-        wantColumns = wfWidth >= 1400.0f ? 2048 : wfWidth >= 500.0f ? 1024 : 512;
+        wantColumns = resolutionCovering(wfWidth, {512, 1024, 2048, MaximumWaveformColumns});
         if (regionWidth > 0) {
-            wantColumns = std::min(wantColumns, regionWidth >= 2048 ? 2048 : regionWidth >= 1024 ? 1024 : 512);
+            wantColumns =
+                std::min(wantColumns, resolutionWithin(regionWidth, {512, 1024, 2048, MaximumWaveformColumns}));
         }
+        // Height only draws a finer spline through levels that eight-bit input
+        // fixes at 256, and it is priced like real data: doubling it cost 14 ms
+        // a pass over a whole display for 2.5% more resolved detail, against
+        // 4.5% for free from the columns. So this threshold stays where
+        // measurement put it while the columns follow the pane.
         wantHeight = wfHeight >= 560.0f ? 512 : WaveformLevels;
     }
 
@@ -83,7 +110,10 @@ std::pair<int, int> AdaptiveDetail::desiredHistogramSize(const ScopePaneSizes& p
         // Near one texture pixel per screen pixel keeps the outline's width even
         // on flats and steep slopes alike.
         const PaneSize scopePane = panePixels.histogram;
-        wantHistWidth = scopePane.width >= 1400.0f ? 2048 : scopePane.width >= 500.0f ? 1024 : 512;
+        wantHistWidth = resolutionCovering(scopePane.width, {512, 1024, 2048, 3072, 4096});
+        // The bright outline is stroked by the interface at display resolution,
+        // so the texture carries only the dim fill and its height is the least
+        // visible of these; left where it was.
         wantHistHeight = scopePane.height >= 560.0f ? 768 : 384;
     }
 
@@ -96,7 +126,12 @@ int AdaptiveDetail::desiredVectorscopeSize(const ScopePaneSizes& panePixels) con
     if (m_view.stack().shows(VectorscopeScopeId)) {
         // Purely a display resolution: accumulation stays on the 256-code grid
         // and a finer image is interpolated from it, so a sparse region costs
-        // nothing extra.
+        // nothing extra. This does NOT follow the pane past its step, because
+        // measurement says a finer image resolves nothing the reconstruction
+        // has not already spread: on a photograph 256, 512 and 1024 magnify to
+        // the same detail, and on saturated content 1024 reads softer than 512
+        // while costing five milliseconds a pass more. A vectorscope that looks
+        // soft on a large pane is limited by its code grid, not by this.
         const PaneSize scopePane = panePixels.vectorscope;
         const float extent = std::min(scopePane.width, scopePane.height);
         wantVectorscope = extent >= 480.0f ? 512 : 256;
@@ -114,7 +149,7 @@ int AdaptiveDetail::desiredNeutralSize(const ScopePaneSizes& panePixels) const
         // splatted over three pixels, and past that the plane would resolve
         // structure the splat has already spread.
         const PaneSize scopePane = panePixels.neutral;
-        wantNeutral = resolutionForPane(std::min(scopePane.width, scopePane.height), {256, 512, 1024});
+        wantNeutral = resolutionCovering(std::min(scopePane.width, scopePane.height), {256, 512, MaximumNeutralSize});
     }
 
     return wantNeutral;

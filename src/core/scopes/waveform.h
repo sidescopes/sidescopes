@@ -12,6 +12,17 @@ namespace sidescopes {
 inline constexpr int DefaultWaveformColumns = 1024;
 inline constexpr int WaveformLevels = 256;
 
+/// The widest and tallest image the waveform is computed at. Columns carry real
+/// data - one per place in the region - so a wide pane deserves them, and this
+/// is the step a scope filling a 4K display reaches. It stops there because the
+/// cost is four private plane sets per parallel pass: 66 MB at this width
+/// against 44 at the 2048 it used to stop at, and a wider one buys nothing any
+/// current display can show. Height only resolves the level spline, the levels
+/// themselves being fixed at 256 by eight-bit input, so it is worth far less
+/// per megabyte and does not follow the pane.
+inline constexpr int MaximumWaveformColumns = 3072;
+inline constexpr int MaximumWaveformHeight = 768;
+
 struct WaveformSettings
 {
     /// Trace gain applied to normalized bin densities before log mapping.

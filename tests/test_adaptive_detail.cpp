@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 #include <optional>
+#include <string_view>
 #include <utility>
 
 #include "app/adaptive_detail.h"
@@ -139,6 +140,37 @@ TEST_CASE("The neutral plane follows its pane, which nothing used to")
     // its height can show, not its width.
     constexpr ScopePaneSizes Wide{{}, {}, {}, {}, {2400.0f, 300.0f}};
     CHECK(fixture.detail.desiredNeutralSize(Wide) == 256);
+}
+
+TEST_CASE("A scope filling a second monitor is resolved, not magnified")
+{
+    // The reported symptom: scopes read sharp at small and medium sizes and
+    // visibly soft once enlarged, because every ladder here stopped well below
+    // what a full-screen pane covers. Each of these panes is what a scope gets
+    // filling a 4K display, and each has to reach the top of its ladder.
+    DetailFixture fixture;
+    // Replace the stack, then add: stacking a scope already shown toggles it off.
+    fixture.view.stack().choose(WaveformScopeId, false);
+    for (const std::string_view id : {HistogramScopeId, VectorscopeScopeId, NeutralScopeId}) {
+        fixture.view.stack().choose(id, true);
+    }
+
+    constexpr ScopePaneSizes FullScreen{
+        {3840.0f, 2160.0f}, {3840.0f, 2160.0f}, {3840.0f, 2160.0f}, {2160.0f, 2160.0f}, {2160.0f, 2160.0f}};
+
+    // Given a region wide enough to populate them, the waveform takes every
+    // column the pane can show, and the neutral plane every pixel: both carry
+    // real data. Height and the vectorscope image do not follow the pane -
+    // measurement says neither resolves anything a large pane can show - so
+    // they stay at the steps their thresholds pick.
+    CHECK(fixture.detail.desiredWaveformSize(FullScreen, 3840).first == MaximumWaveformColumns);
+    CHECK(fixture.detail.desiredWaveformSize(FullScreen, 3840).second == 512);
+    CHECK(fixture.detail.desiredHistogramSize(FullScreen).first == 3072);
+    CHECK(fixture.detail.desiredNeutralSize(FullScreen) == MaximumNeutralSize);
+
+    // And the cost stays proportional to the region, not just the pane: the
+    // same pane over a small region resolves only what that region can fill.
+    CHECK(fixture.detail.desiredWaveformSize(FullScreen, 800).first == 512);
 }
 
 TEST_CASE("The neutral plane keeps its resolution while it is off screen")
