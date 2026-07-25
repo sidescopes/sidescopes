@@ -63,7 +63,22 @@ struct SamplerFixture
     SamplerFixture& operator=(const SamplerFixture&) = delete;
 };
 
-constexpr AnalysisWorker::FrameSize FrameSize{64, 64};
+constexpr AnalysisWorker::FrameSize FrameSize{64, 64, 64, 64};
+// The same display captured as a 16x16 crop at 24,24: what the stream delivers
+// once the analysis region is small enough to narrow to.
+constexpr AnalysisWorker::FrameSize NarrowedFrameSize{16, 16, 64, 64};
+
+// A frame carrying only [24,40) of a 64x64 display, in one flat colour.
+FrameBuffer makeNarrowedFrameBuffer(Color color, uint64_t sequence)
+{
+    FrameBuffer frame = makeSolidFrameBuffer(16, 16, color, sequence);
+    frame.sourceX = 24;
+    frame.sourceY = 24;
+    frame.sourceWidth = 64;
+    frame.sourceHeight = 64;
+
+    return frame;
+}
 
 }  // namespace
 
@@ -82,6 +97,39 @@ TEST_CASE("The readout takes its colour from the capture stream's own frame")
     // The one-shot screen read is for other displays only; the stream was
     // right here.
     CHECK(desktopStubs().screenSampleRequests == 0);
+}
+
+TEST_CASE("A narrowed capture still reads the point the cursor is over")
+{
+    // With the capture narrowed to the analysis region, the frame is a small
+    // window on the display. Scaling the cursor by the FRAME's extents put every
+    // point on the display into that little rectangle, so the readout showed one
+    // colour wherever the pointer went.
+    SamplerFixture fix;
+    desktopStubs().cursorDisplay = StreamedDisplay;
+    desktopStubs().screenSample = FloatColor{11.0f, 22.0f, 33.0f};
+    fix.mailbox.publish(makeNarrowedFrameBuffer(Color{0, 128, 255}, 2));
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (fix.worker.consumedFrameSequence() != 2 && std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+    REQUIRE(fix.worker.consumedFrameSequence() == 2);
+
+    // Inside the crop: the stream's own pixels answer.
+    desktopStubs().cursor = DesktopPoint{32.0, 32.0};
+    const CursorSample inside = fix.sampler.update(NarrowedFrameSize, Instant, 1.0, 1.0f / 60.0f);
+    REQUIRE(inside.vectorscopeColor.has_value());
+    CHECK_THAT(inside.vectorscopeColor->b, WithinAbs(255.0f, 1.0f));
+    CHECK(desktopStubs().screenSampleRequests == 0);
+
+    // Outside it the capture simply holds nothing, so the readout goes to the
+    // one-shot screen sampler rather than reporting a pixel from inside the
+    // region.
+    desktopStubs().cursor = DesktopPoint{4.0, 4.0};
+    const CursorSample outside = fix.sampler.update(NarrowedFrameSize, Instant, 1.1, 1.0f / 60.0f);
+    REQUIRE(outside.vectorscopeColor.has_value());
+    CHECK_THAT(outside.vectorscopeColor->g, WithinAbs(22.0f, 1e-3f));
+    CHECK(desktopStubs().screenSampleRequests == 1);
 }
 
 TEST_CASE("A cursor on another display falls back to a throttled screen read")

@@ -66,7 +66,7 @@ struct AnalysisSettings
 /// double-buffered scope images. The UI thread pulls output when the version
 /// advances and samples cursor colors from the most recent frame.
 ///
-/// Threading: start, stop, updateSettings, fetchOutput, sampleFrameColor,
+/// Threading: start, stop, updateSettings, fetchOutput, sampleDisplayColor,
 /// latestFrameSize, withLatestFrame, and consumedFrameSequence make up the
 /// caller-thread surface and are safe to call while the worker runs. run()
 /// exclusively owns the worker thread and is never called directly.
@@ -103,8 +103,11 @@ public:
     /// advancing the version. Returns false when nothing new was produced.
     [[nodiscard]] bool fetchOutput(uint64_t& lastSeenVersion, Output& output) const;
 
-    /// Averaged color around a pixel of the most recent frame, if any.
-    [[nodiscard]] std::optional<FloatColor> sampleFrameColor(int px, int py, int radius = 1) const;
+    /// Averaged color around a point of the most recent frame, if any. The
+    /// point is in DISPLAY pixels: a capture narrowed to part of its display
+    /// still answers for the same place on screen, and returns nothing for a
+    /// point its pixels do not reach.
+    [[nodiscard]] std::optional<FloatColor> sampleDisplayColor(int displayX, int displayY, int radius = 1) const;
 
     struct FrameSize
     {
@@ -133,7 +136,7 @@ public:
     /// false when no frame has arrived yet. Intended for occasional,
     /// interactive work (the picker's photo detection), not per-frame use.
     /// @p reader runs while the frame lock is held, so it must not call back
-    /// into any AnalysisWorker frame accessor (sampleFrameColor,
+    /// into any AnalysisWorker frame accessor (sampleDisplayColor,
     /// latestFrameSize, withLatestFrame) - that would self-deadlock on the
     /// non-recursive mutex - and it must return promptly, since it blocks the
     /// worker's next frame swap.

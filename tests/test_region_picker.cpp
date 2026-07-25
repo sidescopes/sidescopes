@@ -291,7 +291,7 @@ TEST_CASE("A pin poll returns the sampled colour for the host to pin")
     fix.worker.start();
 
     // A solid frame so the point sample reads a known colour.
-    const AnalysisWorker::FrameSize frameSize{64, 64};
+    const AnalysisWorker::FrameSize frameSize{64, 64, 64, 64};
     publishAndAwait(fix, makeSolidFrameBuffer(64, 64, Color{200, 50, 30}, 1), 1);
 
     RegionPickPoll poll;
@@ -319,7 +319,7 @@ TEST_CASE("A dragged pin averages only the rectangle it covered")
 
     // Black on the left, white on the right, so the average reports which half
     // the drag actually read.
-    const AnalysisWorker::FrameSize frameSize{64, 64};
+    const AnalysisWorker::FrameSize frameSize{64, 64, 64, 64};
     publishAndAwait(fix, makeSplitFrameBuffer(64, 64, Color{0, 0, 0}, Color{255, 255, 255}, 1), 1);
 
     RegionPickPoll poll;
@@ -350,7 +350,7 @@ TEST_CASE("A pin drag that covers no pixels pins nothing")
     PickerFixture fix;
     fix.worker.start();
 
-    const AnalysisWorker::FrameSize frameSize{64, 64};
+    const AnalysisWorker::FrameSize frameSize{64, 64, 64, 64};
     publishAndAwait(fix, makeSolidFrameBuffer(64, 64, Color{200, 50, 30}, 1), 1);
 
     RegionPickPoll poll;
@@ -374,7 +374,7 @@ TEST_CASE("A pin on another display takes the cross-display sample")
 
     // The capture stream holds a frame of its own display; a pin somewhere
     // else must not read it.
-    const AnalysisWorker::FrameSize frameSize{64, 64};
+    const AnalysisWorker::FrameSize frameSize{64, 64, 64, 64};
     publishAndAwait(fix, makeSolidFrameBuffer(64, 64, Color{200, 50, 30}, 1), 1);
 
     RegionPickPoll poll;
@@ -397,7 +397,7 @@ TEST_CASE("A plain pin ends the errand and a kept-open one does not")
     PickerFixture fix;
     fix.worker.start();
 
-    const AnalysisWorker::FrameSize frameSize{64, 64};
+    const AnalysisWorker::FrameSize frameSize{64, 64, 64, 64};
     publishAndAwait(fix, makeSolidFrameBuffer(64, 64, Color{200, 50, 30}, 1), 1);
 
     RegionPickPoll poll;
@@ -420,7 +420,7 @@ TEST_CASE("The pin tool closing ends the pick without touching the region")
 {
     PickerFixture fix;
     fix.worker.start();
-    const AnalysisWorker::FrameSize frameSize{64, 64};
+    const AnalysisWorker::FrameSize frameSize{64, 64, 64, 64};
     publishAndAwait(fix, makeSolidFrameBuffer(64, 64, Color{200, 50, 30}, 1), 1);
     openPick(fix, RegionPickerMode::PinColor);
 
@@ -640,7 +640,7 @@ TEST_CASE("The pin chip previews the colour under the cursor")
     PickerFixture fix;
     fix.worker.start();
     desktopStubs().displayGeometry = DisplayGeometry{0.0, 0.0, 64.0, 64.0};
-    const AnalysisWorker::FrameSize frameSize{64, 64};
+    const AnalysisWorker::FrameSize frameSize{64, 64, 64, 64};
     publishAndAwait(fix, makeSplitFrameBuffer(64, 64, Color{0, 0, 0}, Color{255, 255, 255}, 1), 1);
 
     RegionPickPoll poll;

@@ -454,10 +454,10 @@ RegionPickOutcome RegionPicker::processPinPoll(const RegionPickPoll& poll,
                 // The chip previews exactly what a click will pin: the same point
                 // sample the live cursor readout takes, not an averaged patch.
                 const int pixelX =
-                    static_cast<int>((cursor->x - geometry->originX) * frameSize->width / geometry->widthPoints);
-                const int pixelY =
-                    static_cast<int>((cursor->y - geometry->originY) * frameSize->height / geometry->heightPoints);
-                chip = m_worker.sampleFrameColor(pixelX, pixelY);
+                    static_cast<int>((cursor->x - geometry->originX) * frameSize->displayWidth / geometry->widthPoints);
+                const int pixelY = static_cast<int>((cursor->y - geometry->originY) * frameSize->displayHeight /
+                                                    geometry->heightPoints);
+                chip = m_worker.sampleDisplayColor(pixelX, pixelY);
             }
         } else {
             // Another display: the throttled one-shot sampler already tracks the
@@ -488,9 +488,9 @@ void RegionPicker::applyPinnedColor(const RegionPickPoll& poll, std::optional<An
         if (poll.pinnedPoint && frameSize) {
             // A plain pin samples the frame exactly like the live readout; only a
             // dragged rectangle averages, the explicit way to ask for a swatch.
-            const int pixelX = static_cast<int>(poll.pinnedPoint->xPercent / 100.0 * frameSize->width);
-            const int pixelY = static_cast<int>(poll.pinnedPoint->yPercent / 100.0 * frameSize->height);
-            pinned = m_worker.sampleFrameColor(pixelX, pixelY);
+            const int pixelX = static_cast<int>(poll.pinnedPoint->xPercent / 100.0 * frameSize->displayWidth);
+            const int pixelY = static_cast<int>(poll.pinnedPoint->yPercent / 100.0 * frameSize->displayHeight);
+            pinned = m_worker.sampleDisplayColor(pixelX, pixelY);
         } else if (poll.pinnedSample) {
             pinned = averageFrameColor(*poll.pinnedSample);
         }

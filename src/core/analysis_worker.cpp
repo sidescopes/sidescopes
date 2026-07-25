@@ -86,17 +86,18 @@ bool AnalysisWorker::fetchOutput(uint64_t& lastSeenVersion, Output& output) cons
     return true;
 }
 
-std::optional<FloatColor> AnalysisWorker::sampleFrameColor(int px, int py, int radius) const
+std::optional<FloatColor> AnalysisWorker::sampleDisplayColor(int displayX, int displayY, int radius) const
 {
     std::lock_guard lock(m_frameMutex);
     if (!m_hasFrame) {
         return std::nullopt;
     }
     const FrameView view = m_latestFrame.view();
-    if (px < 0 || px >= view.width || py < 0 || py >= view.height) {
+    const IntRect point = view.fromDisplay(IntRect{displayX, displayY, 1, 1});
+    if (point.x < 0 || point.x >= view.width || point.y < 0 || point.y >= view.height) {
         return std::nullopt;
     }
-    return averageNeighborhood(view, px, py, radius);
+    return averageNeighborhood(view, point.x, point.y, radius);
 }
 
 bool AnalysisWorker::withLatestFrame(const std::function<void(const FrameView&)>& reader) const

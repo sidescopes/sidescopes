@@ -48,10 +48,14 @@ std::optional<FloatColor> CursorSampler::sampleCapturedFrame(DesktopPoint cursor
     if (!geometry) {
         return std::nullopt;
     }
-    const int pixelX = static_cast<int>((cursor.x - geometry->originX) * frameSize.width / geometry->widthPoints);
-    const int pixelY = static_cast<int>((cursor.y - geometry->originY) * frameSize.height / geometry->heightPoints);
+    // Display pixels, so a capture narrowed to the analysis region still reads
+    // the point the cursor is actually over; the frame maps it back itself.
+    const int pixelX =
+        static_cast<int>((cursor.x - geometry->originX) * frameSize.displayWidth / geometry->widthPoints);
+    const int pixelY =
+        static_cast<int>((cursor.y - geometry->originY) * frameSize.displayHeight / geometry->heightPoints);
 
-    return m_worker.sampleFrameColor(pixelX, pixelY);
+    return m_worker.sampleDisplayColor(pixelX, pixelY);
 }
 
 std::optional<FloatColor> CursorSampler::sampleOtherDisplay(DesktopPoint cursor, double now)
@@ -90,7 +94,10 @@ CursorSample CursorSampler::update(std::optional<AnalysisWorker::FrameSize> fram
     std::optional<FloatColor> sampled;
     if (onCapturedDisplay && !m_capture.dead() && frameSize) {
         sampled = sampleCapturedFrame(*cursor, *frameSize);
-    } else {
+    }
+    if (!sampled) {
+        // Either another display, or a point the capture no longer carries:
+        // narrowed to the analysis region, the stream holds nothing outside it.
         sampled = sampleOtherDisplay(*cursor, now);
     }
     if (sampled) {

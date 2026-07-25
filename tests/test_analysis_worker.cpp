@@ -378,7 +378,7 @@ TEST_CASE("AnalysisWorker samples a cursor color from the latest frame")
     AnalysisWorker::Output output;
     REQUIRE(waitFor([&] { return worker.fetchOutput(seen, output); }));
 
-    const auto sampled = worker.sampleFrameColor(32, 32);
+    const auto sampled = worker.sampleDisplayColor(32, 32);
     REQUIRE(sampled.has_value());
     CHECK(sampled->r == 10.0f);
     CHECK(sampled->g == 150.0f);
@@ -396,8 +396,49 @@ TEST_CASE("AnalysisWorker rejects out-of-bounds cursor samples")
     AnalysisWorker::Output output;
     REQUIRE(waitFor([&] { return worker.fetchOutput(seen, output); }));
 
-    CHECK_FALSE(worker.sampleFrameColor(-1, 5).has_value());
-    CHECK_FALSE(worker.sampleFrameColor(1000, 5).has_value());
+    CHECK_FALSE(worker.sampleDisplayColor(-1, 5).has_value());
+    CHECK_FALSE(worker.sampleDisplayColor(1000, 5).has_value());
+}
+
+TEST_CASE("A narrowed capture samples the display point, not the frame's")
+{
+    // The readout under the cursor asks in display pixels, so a capture
+    // narrowed to part of its display has to map the question back into its own
+    // frame. Reading the point as if it were a frame coordinate lands somewhere
+    // else entirely - which is what froze the colour readout on a region.
+    FrameMailbox mailbox;
+    AnalysisWorker worker(mailbox);
+    worker.start();
+
+    // A 40x40 crop sitting at 100,60 of a 400x300 display: black, with one
+    // white pixel at its own 10,5 - display 110,65.
+    FrameBuffer narrowed = makeSolidFrameBuffer(40, 40, Color{0, 0, 0}, 1);
+    uint8_t* white =
+        narrowed.data.data() + static_cast<std::size_t>(5) * narrowed.strideBytes + static_cast<std::size_t>(10) * 4;
+    white[0] = 255;
+    white[1] = 255;
+    white[2] = 255;
+    narrowed.sourceX = 100;
+    narrowed.sourceY = 60;
+    narrowed.sourceWidth = 400;
+    narrowed.sourceHeight = 300;
+    mailbox.publish(std::move(narrowed));
+    REQUIRE(waitFor([&] { return worker.consumedFrameSequence() == 1; }));
+
+    const auto onWhite = worker.sampleDisplayColor(110, 65, 0);
+    REQUIRE(onWhite.has_value());
+    CHECK(onWhite->r == 255.0f);
+
+    // The same coordinates read as frame pixels would land on black, so the
+    // mapping is what the assertion above rests on.
+    const auto elsewhere = worker.sampleDisplayColor(120, 80, 0);
+    REQUIRE(elsewhere.has_value());
+    CHECK(elsewhere->r == 0.0f);
+
+    // A point the crop does not carry has no answer at all; the caller falls
+    // back to a one-shot screen read.
+    CHECK_FALSE(worker.sampleDisplayColor(10, 10).has_value());
+    CHECK_FALSE(worker.sampleDisplayColor(300, 200).has_value());
 }
 
 TEST_CASE("AnalysisWorker reports the latest frame size")
@@ -477,7 +518,7 @@ TEST_CASE("AnalysisWorker routes every enabled scope and skips the disabled one"
     CHECK(*std::max_element(output.histogramOutline.begin(), output.histogramOutline.end()) > 0.0f);
 }
 
-TEST_CASE("AnalysisWorker sampleFrameColor honors the averaging radius")
+TEST_CASE("AnalysisWorker sampleDisplayColor honors the averaging radius")
 {
     FrameMailbox mailbox;
     AnalysisWorker worker(mailbox);
@@ -490,8 +531,8 @@ TEST_CASE("AnalysisWorker sampleFrameColor honors the averaging radius")
     mailbox.publish(std::move(frame));
     REQUIRE(waitFor([&] { return worker.consumedFrameSequence() == 1; }));
 
-    const auto tight = worker.sampleFrameColor(0, 0, 0);
-    const auto wide = worker.sampleFrameColor(0, 0, 1);
+    const auto tight = worker.sampleDisplayColor(0, 0, 0);
+    const auto wide = worker.sampleDisplayColor(0, 0, 1);
     REQUIRE(tight.has_value());
     REQUIRE(wide.has_value());
     CHECK(tight->r == 255.0f);
@@ -505,7 +546,7 @@ TEST_CASE("AnalysisWorker offers no frame color before one arrives")
     AnalysisWorker worker(mailbox);
     // No frame has been published, so the frame accessors stay empty rather
     // than reading uninitialized storage.
-    CHECK_FALSE(worker.sampleFrameColor(0, 0).has_value());
+    CHECK_FALSE(worker.sampleDisplayColor(0, 0).has_value());
     CHECK_FALSE(worker.latestFrameSize().has_value());
 }
 
