@@ -575,6 +575,9 @@ void App::pumpEvents()
         waitOutFramePeriod(now + wait.seconds);
         break;
     }
+    // Whatever ended that wait, the frame period is a floor: a wait that ends
+    // on the first event redraws at the event rate otherwise.
+    waitOutFramePeriod(now + wait.redrawFloorSeconds);
     m_lastFrameStart = glfwGetTime();
 }
 

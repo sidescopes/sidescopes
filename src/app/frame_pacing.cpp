@@ -6,17 +6,18 @@ FrameWaitDecision frameWaitFor(const FramePacingInputs& inputs)
 {
     const bool moving = inputs.now - inputs.lastActivity <= IdleAfterSeconds;
     const bool readoutFollowing = inputs.now - inputs.lastReadoutActivity <= IdleAfterSeconds;
+    const double period = moving ? ContentRedrawSeconds : ReadoutRedrawSeconds;
+    const double due = inputs.lastFrameStart + period;
+    const double left = due > inputs.now ? due - inputs.now : 0.0;
     if (!moving && !readoutFollowing) {
         if (inputs.attached && !inputs.pickerActive) {
-            return FrameWaitDecision{FrameWait::WatchAttachedWindow, 0.0};
+            return FrameWaitDecision{FrameWait::WatchAttachedWindow, 0.0, left};
         }
 
-        return FrameWaitDecision{FrameWait::Idle, IdleWaitSeconds};
+        return FrameWaitDecision{FrameWait::Idle, IdleWaitSeconds, left};
     }
 
-    const double due = inputs.lastFrameStart + (moving ? ContentRedrawSeconds : ReadoutRedrawSeconds);
-
-    return FrameWaitDecision{FrameWait::UntilFramePeriod, due > inputs.now ? due - inputs.now : 0.0};
+    return FrameWaitDecision{FrameWait::UntilFramePeriod, left, 0.0};
 }
 
 bool outOfSight(const VisibilityInputs& inputs)

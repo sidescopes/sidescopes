@@ -46,6 +46,14 @@ struct FrameWaitDecision
     FrameWait kind = FrameWait::Idle;
     /// Seconds to wait; zero means poll without blocking.
     double seconds = 0.0;
+    /// Seconds before the next frame may be drawn, whatever ends that wait
+    /// early. Both waits above return on the first event that arrives, and
+    /// events arrive in bursts - a pointer crossing the window delivers one
+    /// every few milliseconds - so without this the loop redraws at the event
+    /// rate precisely when it decided nothing was happening: measured at 65
+    /// frames a second for a picture that never changed. Zero when the wait is
+    /// itself the pacing.
+    double redrawFloorSeconds = 0.0;
 };
 
 /// What the loop knows when it decides how to wait.

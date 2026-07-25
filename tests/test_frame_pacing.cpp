@@ -50,6 +50,37 @@ TEST_CASE("A moving screen redraws at the frame period, not the display's rate")
     CHECK(overrun.seconds == 0.0);
 }
 
+TEST_CASE("A wait that ends early still owes the frame period")
+{
+    // Every wait here returns on the first event that arrives, and a pointer
+    // crossing the window delivers one every few milliseconds. Without a floor
+    // on the redraw the loop ran at the event rate exactly when it had decided
+    // nothing was happening - 65 frames a second for a picture that never
+    // changed.
+    FramePacingInputs inputs;
+    inputs.lastActivity = 0.0;
+    inputs.lastFrameStart = 10.0;
+    inputs.now = 10.0;
+
+    const FrameWaitDecision idle = frameWaitFor(inputs);
+    REQUIRE(idle.kind == FrameWait::Idle);
+    CHECK(idle.redrawFloorSeconds > 0.0);
+
+    inputs.attached = true;
+    const FrameWaitDecision watching = frameWaitFor(inputs);
+    REQUIRE(watching.kind == FrameWait::WatchAttachedWindow);
+    CHECK(watching.redrawFloorSeconds > 0.0);
+
+    // A frame period that has already passed owes nothing, which is the
+    // ordinary case: the loop has been asleep.
+    inputs.now = 10.0 + 1.0;
+    CHECK(frameWaitFor(inputs).redrawFloorSeconds == 0.0);
+
+    // The moving wait needs no floor - it is the pacing itself.
+    inputs.lastActivity = 11.0;
+    CHECK(frameWaitFor(inputs).redrawFloorSeconds == 0.0);
+}
+
 TEST_CASE("A quiet screen falls to the idle tick")
 {
     FramePacingInputs inputs;
