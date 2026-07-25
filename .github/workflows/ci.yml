@@ -120,6 +120,18 @@ jobs:
         run: cmake --build build --config Release
       - name: Test
         run: ctest --test-dir build -C Release --output-on-failure --timeout 120
+      # Compiling the performance harness is not the same as knowing it still
+      # runs: it drives a real analysis worker across threads and reports the
+      # process's own CPU time, which is platform code that only fails when
+      # executed. --quick runs every tier at the smallest effort that exercises
+      # them, so this proves the tool works without measuring anything - the
+      # numbers themselves come from scripts/perf.sh on a quiet machine.
+      - name: Performance harness self-check
+        shell: bash
+        run: |
+          binary=build/bench/sidescopes_perf
+          [ -x "$binary" ] || binary=build/bench/Release/sidescopes_perf.exe
+          "$binary" --quick --out perf-selfcheck.json
 
   # The Dear ImGui Test Engine suites drive the interface on the null backend,
   # so the toolbar seating, status-bar layout, and interface scaling are

@@ -11,6 +11,9 @@
 //             arrive at the capture cadence, with static and with moving
 //             content. This is the number the idle machine feels.
 //
+// --quick runs every tier at the smallest effort that still exercises them, so
+// the continuous build can prove the harness works without measuring anything.
+//
 // Everything is synthetic and fixed-seed, so two runs on one machine compare
 // directly and two machines compare through cost-per-megapixel.
 
@@ -61,6 +64,16 @@ constexpr double DefaultWorkerSeconds = 4.0;
 // times and an expensive one does not stall the sweep.
 constexpr int MinimumSamples = 7;
 constexpr double SampleBudgetMs = 400.0;
+
+/// How hard a run works for its numbers. --quick drops all three to the floor,
+/// which is not a measurement but is enough to prove the harness still runs end
+/// to end - what the continuous build checks.
+struct Effort
+{
+    int minimumSamples = MinimumSamples;
+    double budgetMs = SampleBudgetMs;
+    double workerSeconds = DefaultWorkerSeconds;
+};
 
 // The synthetic display. A capture always delivers the whole screen and the
 // region is a sub-rectangle of it, so the frame stays this size throughout and
@@ -159,7 +172,7 @@ double medianOf(std::vector<double> samples)
 /// returning each run's wall time in nanoseconds. One untimed warm-up runs
 /// first so allocation and first-touch costs stay out of the samples.
 template <typename Body>
-std::vector<double> timeIterations(const Body& body)
+std::vector<double> timeIterations(const Body& body, const Effort& effort)
 {
     body();
     std::vector<double> samples;
@@ -170,7 +183,7 @@ std::vector<double> timeIterations(const Body& body)
         const auto finished = std::chrono::steady_clock::now();
         samples.push_back(std::chrono::duration<double, std::nano>(finished - started).count());
         const double spentMs = std::chrono::duration<double, std::milli>(finished - sweepStarted).count();
-        if (static_cast<int>(samples.size()) >= MinimumSamples && spentMs >= SampleBudgetMs) {
+        if (static_cast<int>(samples.size()) >= effort.minimumSamples && spentMs >= effort.budgetMs) {
             break;
         }
     }
@@ -223,6 +236,7 @@ struct EngineSweep
 {
     std::vector<MetricRow>* rows;
     FrameView frame;
+    Effort effort;
 };
 
 void record(std::vector<MetricRow>& rows, const std::string& metric, double value, const char* unit,
@@ -238,7 +252,7 @@ void measureEngine(EngineSweep& sweep, const char* scope, const RegionCase& regi
                    const Accumulate& accumulate)
 {
     const IntRect rect = centeredRegion(region);
-    const double nanoseconds = medianOf(timeIterations([&]() { accumulate(sweep.frame, rect); }));
+    const double nanoseconds = medianOf(timeIterations([&]() { accumulate(sweep.frame, rect); }, sweep.effort));
     const std::string suffix = std::string(scope) + "/" + region.name + "/" + pane.name;
     const std::vector<std::pair<std::string, std::string>> tags{
         {"scope", scope}, {"region", region.name}, {"pane", pane.name}};
@@ -258,7 +272,7 @@ template <typename Accumulate>
 void measureEngineFloor(EngineSweep& sweep, const char* scope, const PaneCase& pane, const Accumulate& accumulate)
 {
     const IntRect single{FrameWidth / 2, FrameHeight / 2, 1, 1};
-    const double nanoseconds = medianOf(timeIterations([&]() { accumulate(sweep.frame, single); }));
+    const double nanoseconds = medianOf(timeIterations([&]() { accumulate(sweep.frame, single); }, sweep.effort));
     record(*sweep.rows, "engine-fixed " + std::string(scope) + "/" + pane.name, nanoseconds, "ns",
            {{"scope", scope}, {"region", "one-pixel"}, {"pane", pane.name}});
 }
@@ -318,9 +332,9 @@ void sweepNeutral(EngineSweep& sweep, const PaneCase& pane)
     }
 }
 
-void sweepEngines(std::vector<MetricRow>& rows, const FrameView& frame)
+void sweepEngines(std::vector<MetricRow>& rows, const FrameView& frame, const Effort& effort)
 {
-    EngineSweep sweep{&rows, frame};
+    EngineSweep sweep{&rows, frame, effort};
     for (const PaneCase& pane : PaneCases) {
         sweepVectorscope(sweep, pane);
         // The three waveform styles the module actually offers. RgbAndLuma is
@@ -345,12 +359,13 @@ void keepAlive(uint64_t value)
     *static_cast<volatile uint64_t*>(&storage) = value;
 }
 
-void sweepHash(std::vector<MetricRow>& rows, const FrameView& frame)
+void sweepHash(std::vector<MetricRow>& rows, const FrameView& frame, const Effort& effort)
 {
     for (const RegionCase& region : RegionCases) {
         const IntRect rect = centeredRegion(region);
         uint64_t folded = 0;
-        const double nanoseconds = medianOf(timeIterations([&]() { folded ^= hashRegion(frame, rect, IntRect{}); }));
+        const double nanoseconds =
+            medianOf(timeIterations([&]() { folded ^= hashRegion(frame, rect, IntRect{}); }, effort));
         keepAlive(folded);
         const double megapixels = static_cast<double>(rect.width) * rect.height / 1e6;
         record(rows, std::string("hash ") + region.name, nanoseconds, "ns", {{"region", region.name}});
@@ -502,7 +517,7 @@ std::vector<WorkerScenario> workerScenarios()
     };
 }
 
-void sweepWorker(std::vector<MetricRow>& rows, const std::vector<uint8_t>& pixels, double seconds)
+void sweepWorker(std::vector<MetricRow>& rows, const std::vector<uint8_t>& pixels, const Effort& effort)
 {
     // One pane size here: the worker tier is about the thread's steady cost,
     // and the engine tier already separates image size from region size.
@@ -511,7 +526,8 @@ void sweepWorker(std::vector<MetricRow>& rows, const std::vector<uint8_t>& pixel
         for (const RegionCase& region : RegionCases) {
             std::fprintf(stderr, "perf:   %s/%s\n", scenario.name, region.name);
             const AnalysisSettings settings = settingsFor(scenario, region, pane);
-            const WorkerResult result = runWorkerScenario(scenario, settings, pixels, centeredRegion(region), seconds);
+            const WorkerResult result =
+                runWorkerScenario(scenario, settings, pixels, centeredRegion(region), effort.workerSeconds);
             recordWorker(rows, scenario, region, pane, result);
         }
     }
@@ -549,7 +565,7 @@ struct Options
     std::string commit = "unknown";
     std::string outPath;
     std::string tiers = "engine,hash,worker";
-    double workerSeconds = DefaultWorkerSeconds;
+    Effort effort;
 };
 
 Options parseOptions(int argc, char** argv)
@@ -560,17 +576,65 @@ Options parseOptions(int argc, char** argv)
                                                       {"--commit", &options.commit},
                                                       {"--out", &options.outPath},
                                                       {"--tiers", &options.tiers}};
-    for (int i = 1; i + 1 < argc; i += 2) {
-        const auto target = targets.find(argv[i]);
-        if (target != targets.end()) {
-            *target->second = argv[i + 1];
+    // One forward scan, because --quick carries no value and walking the
+    // arguments in pairs would leave everything after it off by one.
+    for (int i = 1; i < argc; ++i) {
+        const std::string argument = argv[i];
+        if (argument == "--quick") {
+            options.effort = Effort{1, 0.0, 0.5};
+            continue;
         }
-        if (std::string(argv[i]) == "--worker-seconds") {
-            options.workerSeconds = std::max(0.5, std::atof(argv[i + 1]));
+        if (i + 1 >= argc) {
+            break;
+        }
+        const auto target = targets.find(argument);
+        if (target != targets.end()) {
+            *target->second = argv[++i];
+            continue;
+        }
+        if (argument == "--worker-seconds") {
+            options.effort.workerSeconds = std::max(0.5, std::atof(argv[++i]));
         }
     }
 
     return options;
+}
+
+/// Why the sweep's own output is not usable, or empty when it is. Checked on
+/// every run: a tier that produced nothing, a worker that analysed no frames,
+/// or a metric that came back negative all mean the harness is broken rather
+/// than the code it measures being slow, and that is worth an exit code.
+std::string sweepProblem(const std::vector<MetricRow>& rows, const std::string& tiers)
+{
+    if (rows.empty()) {
+        return "no metrics at all";
+    }
+    for (const MetricRow& row : rows) {
+        if (!(row.value >= 0.0)) {
+            return "metric '" + row.metric + "' is negative or not a number";
+        }
+    }
+    const auto has = [&rows](const char* prefix) {
+        return std::any_of(rows.begin(), rows.end(),
+                           [prefix](const MetricRow& row) { return row.metric.rfind(prefix, 0) == 0; });
+    };
+    if (tiers.find("engine") != std::string::npos && (!has("engine ") || !has("engine-fixed "))) {
+        return "the engine tier produced no rows";
+    }
+    if (tiers.find("hash") != std::string::npos && !has("hash ")) {
+        return "the hash tier produced no rows";
+    }
+    if (tiers.find("worker") == std::string::npos) {
+        return {};
+    }
+    if (!has("worker-cores ")) {
+        return "the worker tier produced no rows";
+    }
+    const bool analysedSomething = std::any_of(rows.begin(), rows.end(), [](const MetricRow& row) {
+        return row.metric.rfind("worker-processed ", 0) == 0 && row.value > 0.0;
+    });
+
+    return analysedSomething ? std::string{} : "the worker tier analysed no frames";
 }
 
 bool wants(const std::string& tiers, const char* tier)
@@ -592,15 +656,15 @@ int main(int argc, char** argv)
     std::vector<MetricRow> rows;
     if (wants(options.tiers, "engine")) {
         std::fprintf(stderr, "perf: engine tier\n");
-        sweepEngines(rows, frame);
+        sweepEngines(rows, frame, options.effort);
     }
     if (wants(options.tiers, "hash")) {
         std::fprintf(stderr, "perf: hash tier\n");
-        sweepHash(rows, frame);
+        sweepHash(rows, frame, options.effort);
     }
     if (wants(options.tiers, "worker")) {
         std::fprintf(stderr, "perf: worker tier\n");
-        sweepWorker(rows, pixels, options.workerSeconds);
+        sweepWorker(rows, pixels, options.effort);
     }
 
     std::FILE* out = stdout;
@@ -615,6 +679,12 @@ int main(int argc, char** argv)
 
             return 1;
         }
+    }
+    const std::string problem = sweepProblem(rows, options.tiers);
+    if (!problem.empty()) {
+        std::fprintf(stderr, "perf: the sweep is not usable - %s\n", problem.c_str());
+
+        return 1;
     }
     writeJson(out, rows, options.machine, options.osName, options.commit);
     if (out != stdout) {
