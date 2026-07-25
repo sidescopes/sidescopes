@@ -14,6 +14,11 @@ namespace sidescopes {
 
 class ScopeRegistry;
 
+/// @return How a binding is written where a user reads it - the menu's
+///         shortcut column, a tool's tooltip - which is the stored name for
+///         every key but Escape.
+[[nodiscard]] std::string shortcutLabel(const std::string& name);
+
 /// What a shortcut asks the shell to carry out. The resolver decides which
 /// action a key means and fills the fields that action reads; the shell only
 /// executes it. @c Kind::None is the answer for a key that matched nothing.
@@ -30,10 +35,10 @@ struct ShortcutAction
         /// The zoom key steps around its cycle; the level it landed on rides
         /// in @c zoomLevel. The menu sets its levels outright.
         SetZoom,
-        /// The full-screen key peels one layer: the settings window first,
+        /// The clear-region key peels one layer: the settings window first,
         /// and the regions only when nothing is stacked above them.
         CloseSettings,
-        ResetToFullScreen,
+        ClearRegion,
         LoadPreset,
         SavePreset,
         HideApplication,
@@ -72,7 +77,7 @@ struct ShortcutContext
     /// stays silent; likewise the pin key without a scope that takes pins.
     bool faceDetectionSupported = false;
     bool pinsAvailable = false;
-    /// The settings window is up, so the full-screen key closes that first.
+    /// The settings window is up, so the clear-region key closes that first.
     bool settingsOpen = false;
     /// The live vectorscope zoom the cycle steps on from.
     int vectorscopeZoom = 1;
@@ -91,7 +96,7 @@ struct ShortcutContext
 using ShortcutKeyPressed = std::function<bool(std::string_view)>;
 
 /// Owns the keyboard bindings and maps a key to the action it means: the
-/// per-scope letters, the region tools, the zoom cycle, the full-screen peel,
+/// per-scope letters, the region tools, the zoom cycle, the clear-region peel,
 /// the layout-preset digits, and the platform window chords. It carries
 /// nothing out itself - the shell applies the ShortcutAction it returns - and
 /// reads only the registry it is constructed with and the context each call

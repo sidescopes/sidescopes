@@ -202,8 +202,8 @@ private:
     /// Applies a RegionPickOutcome to host state: a live preview becomes the
     /// analysis region (its own no-op check deciding whether anything moved), a
     /// sampled colour joins the pin board, a confirmed pick is attached or
-    /// drawn, an Esc cancel resets to full screen, and the pick's end re-syncs
-    /// the region border.
+    /// drawn, an Esc cancel clears the region, and the pick's end re-syncs the
+    /// region border.
     void applyRegionPickOutcome(const RegionPickOutcome& outcome);
     /// Carries out the region border's live edit: its close affordances, its
     /// attach toggle, or the drag that moved or resized the region.
@@ -315,7 +315,7 @@ private:
     /// The region the worker was last told about, and when it last differed: a
     /// region that keeps changing is one a gesture is dragging around, and the
     /// scopes are computed coarsely until it settles.
-    RegionOfInterest m_lastSentRegion;
+    std::optional<RegionOfInterest> m_lastSentRegion;
     std::optional<double> m_regionMovedAt;
     bool m_regionMoving = false;
     /// When the previous frame's event pump returned, so the redraw cap can

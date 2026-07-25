@@ -34,9 +34,9 @@ public:
     [[nodiscard]] PaneRenderOutcome drawScopeToggles(bool stackModifier);
 
     /// The region toolbox: draw, attach to a window, attach to a face, and the
-    /// reset to full screen, which stands down while the region already covers
-    /// the display (@p regionIsFullScreen).
-    [[nodiscard]] PaneRenderOutcome drawRegionToolIcons(bool regionIsFullScreen);
+    /// clear, which stands down while there is no region to clear
+    /// (@p regionSelected).
+    [[nodiscard]] PaneRenderOutcome drawRegionToolIcons(bool regionSelected);
 
     /// Shows @p message beside the scope chips for the next few seconds: the
     /// note an attached window leaves when it closes out from under its region.

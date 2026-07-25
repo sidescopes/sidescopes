@@ -152,7 +152,7 @@ void hideRegionBorder();
 /// The border's in-progress or just-finished adjustment, if any.
 /// @c dismissed reports the border's own close affordances - the hover
 /// close button and a double-click on the band - and means "dismiss
-/// this region"; the application resets to full screen.
+/// this region"; the application drops the region it outlines.
 struct RegionBorderEdit
 {
     bool editing = false;

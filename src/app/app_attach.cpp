@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -92,7 +93,7 @@ void App::captureActiveDisplay(const AttachDecision& decision)
 // blank the border.
 void App::applyAttachDecision(const AttachDecision& decision)
 {
-    applyRegionOutcome(m_regions.useRegion(decision.region ? *decision.region : m_regions.globalRegion()));
+    applyRegionOutcome(m_regions.useRegion(decision.region ? decision.region : m_regions.globalRegion()));
     if (decision.closedCount > 0) {
         m_panes->showAttachNotice(decision.detachedAll ? "window closed - detached" : "window closed - still attached");
     }
@@ -211,11 +212,12 @@ void App::followAttachedWindow()
     m_attachLastSeenRect = decision.activeRect;
     applyAttachDecision(decision);
     captureActiveDisplay(decision);
+    const RegionOfInterest logged = m_analysis.region.value_or(RegionOfInterest{});
     SS_DIAG(Attach, "fg=%lld active=%llu display=%u region=%.1f,%.1f,%.1f,%.1f label=%s moving=%d",
             static_cast<long long>(foregroundApplicationPid()),
             static_cast<unsigned long long>(decision.activeIdentity), m_captureController.capturedDisplay(),
-            m_analysis.region.leftPercent, m_analysis.region.topPercent, m_analysis.region.rightPercent,
-            m_analysis.region.bottomPercent, m_attachActiveLabel.c_str(), m_attachedWindowMoving ? 1 : 0);
+            logged.leftPercent, logged.topPercent, logged.rightPercent, logged.bottomPercent,
+            m_attachActiveLabel.c_str(), m_attachedWindowMoving ? 1 : 0);
     const FaceLockOutcome faceLockOutcome =
         m_faceLock.update(decision, m_frameSize, m_activeWindowIdentity, m_analysis.region,
                           m_regions.borderEditing() || m_attachedWindowMoving || m_attachGripActive, glfwGetTime());
@@ -300,8 +302,8 @@ void App::idleWaitWatchingAttachedWindow()
     }
 }
 
-// Sheds only the front attached window; the last one's detach is the full
-// reset back to the screen.
+// Sheds only the front attached window; the last one's detach clears the
+// selection outright.
 void App::detachActiveWindow()
 {
     if (m_attach.attachedCount() > 1 && m_attach.activeIdentity() != 0) {
@@ -309,7 +311,7 @@ void App::detachActiveWindow()
         unwatchWindowMotion();
         m_activeWindowIdentity = 0;
     } else {
-        applyRegionOutcome(m_regions.resetToFullScreen());
+        applyRegionOutcome(m_regions.clearRegion());
     }
 }
 

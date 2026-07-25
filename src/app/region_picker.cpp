@@ -105,7 +105,7 @@ void RegionPicker::clearRequest()
     m_want.reset();
 }
 
-RegionPickOutcome RegionPicker::openIfRequested(bool regionIsFullScreen)
+RegionPickOutcome RegionPicker::openIfRequested(bool regionSelected)
 {
     RegionPickOutcome outcome;
     if (m_picking && m_want) {
@@ -124,14 +124,14 @@ RegionPickOutcome RegionPicker::openIfRequested(bool regionIsFullScreen)
         }
     }
     if (!m_picking && m_want && m_capture.capturedDisplay() != 0) {
-        openRegionPicker(*m_want, regionIsFullScreen);
+        openRegionPicker(*m_want, regionSelected);
         outcome.activity = true;
     }
 
     return outcome;
 }
 
-void RegionPicker::openRegionPicker(RegionPickerMode mode, bool regionIsFullScreen)
+void RegionPicker::openRegionPicker(RegionPickerMode mode, bool regionSelected)
 {
     hideRegionBorder();
     // The pick reads pixels from anywhere on screen, so the capture goes back to
@@ -141,7 +141,7 @@ void RegionPicker::openRegionPicker(RegionPickerMode mode, bool regionIsFullScre
     // The previous region's border must not leak into the analyzed frame: its
     // strokes read as rectangle edges and cut suggestions short. Wait briefly
     // for a frame taken after the border left the screen.
-    if (!regionIsFullScreen) {
+    if (regionSelected) {
         waitForBorderFreeFrame();
     }
     const std::vector<PickerDisplay> pickerDisplays = buildPickerDisplays();
@@ -539,9 +539,10 @@ RegionPickOutcome RegionPicker::processRegionPoll(const RegionPickPoll& poll)
         if (poll.confirmed) {
             outcome.confirmed = ConfirmedPick{*poll.confirmed, poll.displayId, poll.attachesToWindow};
         } else if (!m_swallowCancel) {
-            // Cancelled with Esc: detach every attached window and reset all
-            // drawing to full screen. A cancel ordered by a tool switch is
-            // not the user's Esc and resets nothing.
+            // Cancelled with Esc: detach every attached window and drop the
+            // global region, leaving the scopes reading nothing. A cancel
+            // ordered by a tool switch is not the user's Esc and drops
+            // nothing.
             outcome.cancelled = true;
         }
         m_swallowCancel = false;

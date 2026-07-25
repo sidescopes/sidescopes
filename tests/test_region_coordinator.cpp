@@ -43,7 +43,7 @@ struct CoordinatorFixture
     AttachController attach;
     RegionPicker picker{capture, worker, source};
     FaceLockController faceLock{attach, worker, capture};
-    RegionOfInterest region;
+    std::optional<RegionOfInterest> region;
     RegionCoordinator coordinator{attach, capture, picker, faceLock, region};
 
     CoordinatorFixture()
@@ -92,19 +92,6 @@ TEST_CASE("The region kind follows which window the scopes are routed to")
     CHECK(regionKind(42) == RegionKind::Attached);
 }
 
-TEST_CASE("Full screen is measured on the region's own extent")
-{
-    CoordinatorFixture fix;
-    CHECK(fix.coordinator.isFullScreen());
-
-    fix.region = PartialRegion;
-    CHECK_FALSE(fix.coordinator.isFullScreen());
-
-    // A region reaching past the display's edges still reads as full screen.
-    fix.region = RegionOfInterest{-5.0, -5.0, 105.0, 105.0};
-    CHECK(fix.coordinator.isFullScreen());
-}
-
 TEST_CASE("Reading a region the scopes already read asks for nothing")
 {
     CoordinatorFixture fix;
@@ -113,13 +100,30 @@ TEST_CASE("Reading a region the scopes already read asks for nothing")
     // A no-op nudges neither the worker nor the border - it is called every
     // frame the picker previews.
     const RegionOutcome same = fix.coordinator.useRegion(PartialRegion);
-    CHECK_FALSE(same.region.has_value());
+    CHECK_FALSE(same.regionChanged);
     CHECK_FALSE(same.activity);
 
     const RegionOutcome moved = fix.coordinator.useRegion(RegionOfInterest{10.0, 20.0, 60.0, 70.5});
+    REQUIRE(moved.regionChanged);
     REQUIRE(moved.region.has_value());
     CHECK_THAT(moved.region->bottomPercent, WithinAbs(70.5, 1e-9));
     CHECK(moved.activity);
+}
+
+TEST_CASE("Reading no region at all is a change like any other")
+{
+    CoordinatorFixture fix;
+    fix.region = PartialRegion;
+
+    // Empty means two different things on the way out - "read nothing" and
+    // "carry on reading" - which is what regionChanged tells apart.
+    const RegionOutcome dropped = fix.coordinator.useRegion(std::nullopt);
+    CHECK(dropped.regionChanged);
+    CHECK_FALSE(dropped.region.has_value());
+
+    fix.region.reset();
+    const RegionOutcome already = fix.coordinator.useRegion(std::nullopt);
+    CHECK_FALSE(already.regionChanged);
 }
 
 TEST_CASE("The global region is remembered without being put in force")
@@ -127,37 +131,38 @@ TEST_CASE("The global region is remembered without being put in force")
     CoordinatorFixture fix;
     fix.coordinator.setGlobalRegion(PartialRegion);
 
-    CHECK_THAT(fix.coordinator.globalRegion().leftPercent, WithinAbs(10.0, 1e-9));
+    REQUIRE(fix.coordinator.globalRegion().has_value());
+    CHECK_THAT(fix.coordinator.globalRegion()->leftPercent, WithinAbs(10.0, 1e-9));
     // Storing it is all setGlobalRegion does; the scopes still read what they
     // were reading.
-    CHECK(fix.coordinator.isFullScreen());
+    CHECK_FALSE(fix.region.has_value());
 }
 
-TEST_CASE("Resetting to full screen drops every kind of selection at once")
+TEST_CASE("Clearing the region drops every kind of selection at once")
 {
     CoordinatorFixture fix;
     fix.coordinator.setGlobalRegion(PartialRegion);
     (void)fix.attach.attach(42, 100, "Editor", AttachWindowRect{0.0, 0.0, 400.0, 400.0},
                             AttachDisplayRect{0.0, 0.0, 1000.0, 1000.0}, PartialRegion);
 
-    const RegionOutcome outcome = fix.coordinator.resetToFullScreen();
+    const RegionOutcome outcome = fix.coordinator.clearRegion();
 
-    REQUIRE(outcome.region.has_value());
-    CHECK_THAT(outcome.region->rightPercent, WithinAbs(100.0, 1e-9));
+    CHECK(outcome.regionChanged);
+    CHECK_FALSE(outcome.region.has_value());
     CHECK(outcome.detachedAll);
     CHECK_FALSE(fix.attach.attached());
-    // The pending pick goes too, so nothing lands after the reset.
+    // The pending pick goes too, so nothing lands after the clear.
     CHECK(regionOverlayStubs().pickCancels == 1);
-    CHECK_THAT(fix.coordinator.globalRegion().rightPercent, WithinAbs(100.0, 1e-9));
+    CHECK_FALSE(fix.coordinator.globalRegion().has_value());
 }
 
-TEST_CASE("Resetting with nothing attached reports no detach")
+TEST_CASE("Clearing with nothing attached reports no detach")
 {
     CoordinatorFixture fix;
-    const RegionOutcome outcome = fix.coordinator.resetToFullScreen();
+    const RegionOutcome outcome = fix.coordinator.clearRegion();
 
     CHECK_FALSE(outcome.detachedAll);
-    REQUIRE(outcome.region.has_value());
+    CHECK(outcome.regionChanged);
 }
 
 TEST_CASE("The border outlines the global region under the display's name")
@@ -206,13 +211,13 @@ TEST_CASE("The border stays off screen while anything says it must")
     SECTION("a pick is in flight")
     {
         fix.picker.request(RegionPickerMode::DrawGlobal);
-        (void)fix.picker.openIfRequested(true);
+        (void)fix.picker.openIfRequested(/*regionSelected=*/false);
         REQUIRE(fix.picker.active());
         fix.sync();
     }
-    SECTION("the region covers the whole display")
+    SECTION("no region is selected")
     {
-        fix.region = RegionOfInterest{};
+        fix.region.reset();
         fix.sync();
     }
     SECTION("this application is hidden")
@@ -257,7 +262,7 @@ TEST_CASE("No border is drawn while nothing is being captured")
     AttachController attach;
     RegionPicker picker{capture, worker, source};
     FaceLockController faceLock{attach, worker, capture};
-    const RegionOfInterest region = PartialRegion;
+    const std::optional<RegionOfInterest> region = PartialRegion;
     RegionCoordinator coordinator{attach, capture, picker, faceLock, region};
     REQUIRE(capture.capturedDisplay() == 0);
 
@@ -330,7 +335,7 @@ TEST_CASE("The border is not read while a pick is in flight")
     CoordinatorFixture fix;
     regionOverlayStubs().borderEdit = RegionBorderEdit{true, true, true, PartialRegion};
     fix.picker.request(RegionPickerMode::DrawGlobal);
-    (void)fix.picker.openIfRequested(true);
+    (void)fix.picker.openIfRequested(/*regionSelected=*/false);
     REQUIRE(fix.picker.active());
 
     // The border is off screen during a pick, so whatever the platform side

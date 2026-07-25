@@ -37,7 +37,13 @@ namespace {
 // around the center - trace, graticule, and markers together, which is
 // what keeps every overlay glued to the cloud - by cropping the
 // texture's center and scaling overlay coordinates through At().
-DrawnScope drawScopeImage(const ScopeTexture& texture, bool keepAspect, float zoom = 1.0f)
+//
+// Without a region there is no distribution to draw, so the trace is left out
+// and the space it would fill is merely reserved. Everything measured against
+// a trace - the graticule, the markers, the intensity gesture's hit area - is
+// laid out on the same rectangle either way, so an empty scope is the
+// instrument with no signal on it rather than a different pane.
+DrawnScope drawScopeImage(const ScopeTexture& texture, bool traceLive, bool keepAspect, float zoom = 1.0f)
 {
     const ImVec2 available = ImGui::GetContentRegionAvail();
     ImVec2 size = available;
@@ -52,7 +58,11 @@ DrawnScope drawScopeImage(const ScopeTexture& texture, bool keepAspect, float zo
     ImGui::SetCursorPos(cursor);
     const ImVec2 origin = ImGui::GetCursorScreenPos();
     const float crop = 0.5f / zoom;
-    ImGui::Image(texture.textureId(), size, ImVec2(0.5f - crop, 0.5f - crop), ImVec2(0.5f + crop, 0.5f + crop));
+    if (traceLive) {
+        ImGui::Image(texture.textureId(), size, ImVec2(0.5f - crop, 0.5f - crop), ImVec2(0.5f + crop, 0.5f + crop));
+    } else {
+        ImGui::Dummy(size);
+    }
     return DrawnScope{origin, size, zoom};
 }
 
@@ -165,14 +175,16 @@ void strokeHistogramOutline(const DrawnScope& scope, const AnalysisWorker::Outpu
     draw->PopClipRect();
 }
 
-void drawHistogram(const ScopeTexture& texture, const AnalysisWorker::Output& output, const ScopeInstance& instance,
-                   HistogramStyle style, bool showGraticule, const std::optional<FloatColor>& markerColor,
-                   std::vector<ImVec2>& points)
+void drawHistogram(const ScopeTexture& texture, bool traceLive, const AnalysisWorker::Output& output,
+                   const ScopeInstance& instance, HistogramStyle style, bool showGraticule,
+                   const std::optional<FloatColor>& markerColor, std::vector<ImVec2>& points)
 {
     // No intensity gesture here: the histogram's scale adjusts
     // itself, the way every editor draws it.
-    const DrawnScope scope = drawScopeImage(texture, false);
-    strokeHistogramOutline(scope, output, style, points);
+    const DrawnScope scope = drawScopeImage(texture, traceLive, false);
+    if (traceLive) {
+        strokeHistogramOutline(scope, output, style, points);
+    }
     if (showGraticule) {
         drawGraticule(scope, instance.graticule(), GraticuleStyle{});
     }
@@ -417,8 +429,8 @@ void PaneArea::drawScopeById(std::string_view id, Pass& pass)
     } else if (id == HistogramScopeId) {
         const ScopeInstance* instance = projectionFor(HistogramScopeId);
         if (instance != nullptr) {
-            drawHistogram(textureForId(HistogramScopeId), m_output, *instance, histogramStyle(), m_view.graticule(),
-                          pass.input.vectorscopeColor, m_histogramScratch);
+            drawHistogram(textureForId(HistogramScopeId), pass.input.regionSelected, m_output, *instance,
+                          histogramStyle(), m_view.graticule(), pass.input.vectorscopeColor, m_histogramScratch);
         }
     } else if (id == NeutralScopeId) {
         drawNeutralPane(pass);
@@ -434,7 +446,7 @@ void PaneArea::drawNeutralPane(Pass& pass)
     // A square polar plot like the vectorscope: keep its aspect so the plane
     // never stretches, and glue the graticule and cursor marker to the centred
     // square rather than the pane.
-    const DrawnScope scope = drawScopeImage(textureForId(NeutralScopeId), true);
+    const DrawnScope scope = drawScopeImage(textureForId(NeutralScopeId), pass.input.regionSelected, true);
     const SsParamInfo* gain = firstParamOfKind(descriptorFor(NeutralScopeId), SS_PARAM_INTENSITY);
     TraceParams& traces = m_view.traces();
     if (gain != nullptr) {
@@ -459,7 +471,8 @@ void PaneArea::drawNeutralPane(Pass& pass)
 
 void PaneArea::drawVectorscopePane(Pass& pass)
 {
-    const DrawnScope scope = drawScopeImage(textureForId(VectorscopeScopeId), true, static_cast<float>(m_view.zoom()));
+    const DrawnScope scope = drawScopeImage(textureForId(VectorscopeScopeId), pass.input.regionSelected, true,
+                                            static_cast<float>(m_view.zoom()));
     const SsParamInfo* gain = firstParamOfKind(descriptorFor(VectorscopeScopeId), SS_PARAM_INTENSITY);
     TraceParams& traces = m_view.traces();
     if (gain != nullptr) {
@@ -500,7 +513,7 @@ void PaneArea::drawWaveformPane(std::string_view id, Pass& pass)
     // The waveform and its parade share one intensity control; each draws its
     // own instance's scale and cursor markers, and the module's marker layout
     // already follows its configured mode, so the host needs no branch.
-    const DrawnScope scope = drawScopeImage(textureForId(id), false);
+    const DrawnScope scope = drawScopeImage(textureForId(id), pass.input.regionSelected, false);
     const SsParamInfo* gain = firstParamOfKind(descriptorFor(WaveformScopeId), SS_PARAM_INTENSITY);
     TraceParams& traces = m_view.traces();
     if (gain != nullptr) {

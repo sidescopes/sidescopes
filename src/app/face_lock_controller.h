@@ -77,12 +77,14 @@ public:
     /// launches the next probe when due. @p decision is this frame's attach
     /// verdict, @p activeWindowIdentity the window whose geometry an adopted
     /// region is mapped through, @p analysisRegion the region the content watch
-    /// samples, @p gestureActive whether a drag or move is in progress (the
-    /// probe sits those out), and @p now the frame clock.
+    /// samples - a frame with none is sat out - @p gestureActive whether a
+    /// drag or move is in progress (the probe sits those out), and @p now the
+    /// frame clock.
     [[nodiscard]] FaceLockOutcome update(const AttachDecision& decision,
                                          std::optional<AnalysisWorker::FrameSize> frameSize,
-                                         uint64_t activeWindowIdentity, const RegionOfInterest& analysisRegion,
-                                         bool gestureActive, double now);
+                                         uint64_t activeWindowIdentity,
+                                         const std::optional<RegionOfInterest>& analysisRegion, bool gestureActive,
+                                         double now);
 
     /// The probe consume/decide seam, injectable without a detection thread:
     /// filters @p boxes to trustworthy candidates against @p roi, lets
@@ -96,10 +98,11 @@ public:
                                                     std::optional<AnalysisWorker::FrameSize> frameSize, double now);
 
     /// Samples @p region of the latest frame and flags a content change when it
-    /// differs enough from the previous sample. The idle wait drives this
-    /// directly so a pan under an idle loop hides the border within a slice.
-    void probeContentChange(const RegionOfInterest& region, std::optional<AnalysisWorker::FrameSize> frameSize,
-                            double now);
+    /// differs enough from the previous sample; a frame with no region to
+    /// sample is sat out. The idle wait drives this directly so a pan under an
+    /// idle loop hides the border within a slice.
+    void probeContentChange(const std::optional<RegionOfInterest>& region,
+                            std::optional<AnalysisWorker::FrameSize> frameSize, double now);
 
     /// @return Whether @p identity currently holds a face lock.
     [[nodiscard]] bool contains(uint64_t identity) const;

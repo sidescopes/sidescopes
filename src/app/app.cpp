@@ -348,8 +348,11 @@ void App::refreshActivatedScope(std::string_view id)
     // what is enabled, so a newly shown scope's image is stale. Turning it on
     // pushes the settings immediately and waits briefly for the recompute; on
     // timeout the stale image stands in until the recompute lands a frame later.
-    if (!m_panes->hasTexture(id)) {
-        return;  // the color picker asks nothing of the worker
+    if (!m_panes->hasTexture(id) || !m_analysis.region) {
+        // The color picker asks nothing of the worker, and neither does a
+        // scope with no region to read: waiting for an image that cannot
+        // arrive would stall every toggle for the whole timeout.
+        return;
     }
     const uint64_t staleSequence = m_panes->imageFor(id).sequence;
     m_worker.updateSettings(m_analysis);
@@ -404,8 +407,8 @@ void App::applyRegionOutcome(const RegionOutcome& outcome)
         m_attachedWindowMoving = false;
         m_attachGripActive = false;
     }
-    if (outcome.region) {
-        m_analysis.region = *outcome.region;
+    if (outcome.regionChanged) {
+        m_analysis.region = outcome.region;
         m_analysisDirty = true;
     }
     if (outcome.activity) {
@@ -496,7 +499,7 @@ void App::runFrame()
 
     // The blocking overlay runs after the frame is submitted; capture and
     // analysis keep flowing underneath.
-    applyRegionPickOutcome(m_regionPicker.openIfRequested(m_regions.isFullScreen()));
+    applyRegionPickOutcome(m_regionPicker.openIfRequested(m_analysis.region.has_value()));
     applyBorderEditOutcome(m_regions.pollBorderEdit(m_activeWindowIdentity));
     applyRegionPickOutcome(m_regionPicker.poll(m_frameSize, m_cursor.screenSampleColor()));
     commitAnalysisChanges();
@@ -540,7 +543,12 @@ void App::serviceCaptureCrop(bool otherReadersActive, double now)
     if (!m_frameSize) {
         return;
     }
-    const IntRect regionPixels = m_analysis.region.toPixels(m_frameSize->displayWidth, m_frameSize->displayHeight);
+    // No region narrows nothing: the colour under the pointer is read from the
+    // stream wherever it lands, and a narrowed stream would leave that reading
+    // to the far slower whole-screen sample for the whole of an empty session.
+    const IntRect regionPixels =
+        m_analysis.region ? m_analysis.region->toPixels(m_frameSize->displayWidth, m_frameSize->displayHeight)
+                          : IntRect{0, 0, m_frameSize->displayWidth, m_frameSize->displayHeight};
     const std::optional<IntRect> crop =
         m_cropTracker.decide(regionPixels, m_frameSize->displayWidth, m_frameSize->displayHeight, otherReadersActive,
                              m_faceLock.locked(), now);
@@ -596,7 +604,7 @@ void App::drainAsyncSignals()
         m_lastActivity = glfwGetTime();
     }
     if (m_orphanEscape.exchange(false)) {
-        applyRegionOutcome(m_regions.resetToFullScreen());
+        applyRegionOutcome(m_regions.clearRegion());
         m_lastActivity = glfwGetTime();
     }
     // Keys the border panel took while it held the keyboard: Escape and the
@@ -619,7 +627,7 @@ void App::followWindowDisplay()
     // this window sits on. A drawn region or an attached window pins capture to
     // its own display regardless of the window.
     if (m_captureController.permissionGranted() && !m_captureController.dead() && !m_regionPicker.active() &&
-        m_regions.isFullScreen() && !m_attach.attached()) {
+        !m_analysis.region && !m_attach.attached()) {
         const auto homeDisplay = displayOfWindow();
         if (homeDisplay && *homeDisplay != m_captureController.capturedDisplay()) {
             m_captureController.requestDisplay(*homeDisplay);
@@ -730,7 +738,7 @@ void App::drawFrameUi()
         applyShortcutAction(action);
     }
     const PaneRenderInput input{
-        m_uiScale.scale(), m_regions.isFullScreen(),     pinsAvailable(), m_vectorscopeColor, m_waveformColor,
+        m_uiScale.scale(), m_analysis.region.has_value(), pinsAvailable(), m_vectorscopeColor, m_waveformColor,
         m_readoutColor,    m_callbackState.monospaceFont};
     applyPaneRenderOutcome(m_panes->drawRegionToolIcons(input));
     applyPaneRenderOutcome(m_panes->drawScopePanes(input));
@@ -777,8 +785,8 @@ void App::applyPaneRenderOutcome(const PaneRenderOutcome& outcome)
         // reflow from the new stack order with no worker recompute.
         m_view.stack().reorder(*outcome.reorderedStack);
     }
-    if (outcome.resetToFullScreen) {
-        applyRegionOutcome(m_regions.resetToFullScreen());
+    if (outcome.clearRegion) {
+        applyRegionOutcome(m_regions.clearRegion());
     }
     if (outcome.analysisDirty) {
         m_analysisDirty = true;
@@ -824,8 +832,8 @@ void App::applyShortcutAction(const ShortcutAction& action)
     case ShortcutAction::Kind::CloseSettings:
         m_showSettings = false;
         break;
-    case ShortcutAction::Kind::ResetToFullScreen:
-        applyRegionOutcome(m_regions.resetToFullScreen());
+    case ShortcutAction::Kind::ClearRegion:
+        applyRegionOutcome(m_regions.clearRegion());
         break;
     case ShortcutAction::Kind::LoadPreset:
         applyPresetOutcome(m_presets.load(action.presetSlot));
@@ -892,7 +900,7 @@ void App::handleContextMenu()
                                  m_pins.empty(),
                                  m_presets.activeSlot(),
                                  m_uiScale.userFactor(),
-                                 m_regions.isFullScreen()};
+                                 m_analysis.region.has_value()};
     buildContextMenu(model, clickedPane, menu, paramActions);
     const int chosen = showNativeContextMenu(menu);
     dispatchMenuChoice(chosen, paramActions);
@@ -933,8 +941,8 @@ void App::dispatchScopeToggleMenu(int chosen)
 void App::dispatchRegionMenu(int chosen)
 {
     // The region tools are the keys' actions under a different hand, so they
-    // travel the same road; Watch Full Screen is the menu's own, without the
-    // key's peel.
+    // travel the same road; Clear Region is the menu's own, without the key's
+    // peel.
     switch (chosen) {
     case MenuAttachWindow:
         applyShortcutAction(ShortcutAction::pick(RegionPickerMode::AttachWindow));
@@ -945,9 +953,9 @@ void App::dispatchRegionMenu(int chosen)
     case MenuAttachFace:
         applyShortcutAction(ShortcutAction::pick(RegionPickerMode::AttachFace));
         break;
-    case MenuFullScreen:
+    case MenuClearRegion:
     case MenuDetachAll:
-        applyRegionOutcome(m_regions.resetToFullScreen());
+        applyRegionOutcome(m_regions.clearRegion());
         break;
     case MenuDetachWindow:
         detachActiveWindow();
@@ -1099,7 +1107,7 @@ void App::commitAnalysisChanges()
 // each of them is what makes this one test instead of three.
 bool App::trackRegionMotion(double now)
 {
-    if (m_analysisDirty && !(m_analysis.region == m_lastSentRegion)) {
+    if (m_analysisDirty && m_analysis.region != m_lastSentRegion) {
         m_lastSentRegion = m_analysis.region;
         m_regionMovedAt = now;
     }

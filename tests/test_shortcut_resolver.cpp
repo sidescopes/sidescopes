@@ -93,7 +93,7 @@ const ScopeRegistry& registry()
 }
 
 // A resolver on the default bindings: A attach, D draw, F face, P pin, Z zoom,
-// Escape full screen, and the scope letters from the registry.
+// Escape clear region, and the scope letters from the registry.
 ShortcutResolver defaultResolver()
 {
     ShortcutResolver resolver{registry()};
@@ -323,7 +323,7 @@ TEST_CASE("The zoom key cycles through the magnifications")
     CHECK(sole(resolver.resolvePressed(context, ModifierState{}, pressing("Z"))).zoomLevel == 1);
 }
 
-TEST_CASE("The full-screen key peels the settings window first")
+TEST_CASE("The clear-region key peels the settings window first")
 {
     const ShortcutResolver resolver = defaultResolver();
     ShortcutContext context = readyContext();
@@ -335,7 +335,7 @@ TEST_CASE("The full-screen key peels the settings window first")
     // With nothing stacked above them, the regions are what the key drops.
     context.settingsOpen = false;
     CHECK(sole(resolver.resolvePressed(context, ModifierState{}, pressing("Escape"))).kind ==
-          ShortcutAction::Kind::ResetToFullScreen);
+          ShortcutAction::Kind::ClearRegion);
 }
 
 TEST_CASE("A preset digit loads its slot and Shift saves into it")

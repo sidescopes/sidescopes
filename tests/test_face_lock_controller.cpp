@@ -574,7 +574,7 @@ TEST_CASE("Clearing and removing forget the locks they are given")
     CHECK(fix.controller.contains(2));
     CHECK(fix.controller.locked());
 
-    // Watch Full Screen drops everything, the hunting state included.
+    // Clearing the region drops everything, the hunting state included.
     fix.controller.onActivated(2, 5.0);
     REQUIRE(fix.controller.hunting());
     fix.controller.clear();

@@ -175,8 +175,9 @@ void FaceLockController::rebindCrop(uint64_t identity, const RegionOfInterest& r
 // moves data between the threads.
 FaceLockOutcome FaceLockController::update(const AttachDecision& decision,
                                            std::optional<AnalysisWorker::FrameSize> frameSize,
-                                           uint64_t activeWindowIdentity, const RegionOfInterest& analysisRegion,
-                                           bool gestureActive, double now)
+                                           uint64_t activeWindowIdentity,
+                                           const std::optional<RegionOfInterest>& analysisRegion, bool gestureActive,
+                                           double now)
 {
     std::erase_if(m_locks, [this](const auto& entry) { return !m_attach.isAttached(entry.first); });
     FaceLockOutcome outcome;
@@ -326,21 +327,22 @@ std::vector<uint8_t> FaceLockController::sampleContentGrid(const FrameView& view
 // even a develop-slider drag - hides the border until the content settles;
 // the scopes keep analyzing the region throughout. A region rectangle we
 // moved ourselves only refreshes the baseline.
-void FaceLockController::probeContentChange(const RegionOfInterest& region,
+void FaceLockController::probeContentChange(const std::optional<RegionOfInterest>& region,
                                             std::optional<AnalysisWorker::FrameSize> frameSize, double now)
 {
     // The watch reads the region against the frame's own extents, so a capture
-    // narrowed to part of the display would sample somewhere else entirely.
-    if (!frameSize || !frameSize->coversDisplay()) {
+    // narrowed to part of the display would sample somewhere else entirely,
+    // and with no region there is nothing to sample at all.
+    if (!region || !frameSize || !frameSize->coversDisplay()) {
         return;
     }
     std::vector<uint8_t> samples;
     const bool sampled =
-        m_worker.withLatestFrame([&](const FrameView& view) { samples = sampleContentGrid(view, region); });
+        m_worker.withLatestFrame([&](const FrameView& view) { samples = sampleContentGrid(view, *region); });
     if (!sampled || samples.empty()) {
         return;
     }
-    if (sameRegionRect(region, m_contentRect) && samples.size() == m_contentSamples.size()) {
+    if (sameRegionRect(*region, m_contentRect) && samples.size() == m_contentSamples.size()) {
         long long total = 0;
         for (std::size_t index = 0; index < samples.size(); ++index) {
             total += std::abs(static_cast<int>(samples[index]) - static_cast<int>(m_contentSamples[index]));
@@ -349,7 +351,7 @@ void FaceLockController::probeContentChange(const RegionOfInterest& region,
             m_contentChangedAt = now;
         }
     }
-    m_contentRect = region;
+    m_contentRect = *region;
     m_contentSamples = std::move(samples);
 }
 

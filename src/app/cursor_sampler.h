@@ -97,14 +97,14 @@ public:
     CursorSampler(const CaptureController& capture, const AnalysisWorker& worker);
 
     /// One per-frame step. @p frameSize is the captured frame the pointer is
-    /// mapped into, @p region the region the scopes are reading, which decides
-    /// whether the pointer carries a marker when markers are scoped to it,
-    /// @p smoothing how fast each trace follows it, @p now the frame clock the
-    /// off-display sample is throttled against, and @p deltaSeconds the frame's
-    /// own length, which the smoothing advances by.
+    /// mapped into, @p region the region the scopes are reading - empty for
+    /// none - which decides whether the pointer carries a marker when markers
+    /// are scoped to it, @p smoothing how fast each trace follows it, @p now
+    /// the frame clock the off-display sample is throttled against, and
+    /// @p deltaSeconds the frame's own length, which the smoothing advances by.
     [[nodiscard]] CursorSample update(std::optional<AnalysisWorker::FrameSize> frameSize,
-                                      const RegionOfInterest& region, CursorSmoothing smoothing, double now,
-                                      float deltaSeconds);
+                                      const std::optional<RegionOfInterest>& region, CursorSmoothing smoothing,
+                                      double now, float deltaSeconds);
 
     /// The throttled cross-display sample under its lock, passed to the
     /// picker's pin tool each poll.

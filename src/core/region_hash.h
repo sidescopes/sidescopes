@@ -9,7 +9,8 @@ namespace sidescopes {
 /// Content fingerprint of @p region within a frame, used to skip re-analysis
 /// when nothing inside the scoped region changed. Pixels inside @p masked are
 /// excluded: the application masks its own window there, so its own redraws
-/// never re-trigger analysis (without this, a full-screen region turns the
+/// never re-trigger analysis (without this, a region covering the display
+/// turns the
 /// app's trace updates into a feedback loop that keeps analysis running on an
 /// otherwise idle screen).
 ///

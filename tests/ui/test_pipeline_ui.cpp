@@ -48,6 +48,16 @@ namespace {
 
 using namespace test;
 
+// The settings a session starts this test from. The region stands for the one
+// the user would have drawn: without one the worker computes nothing at all.
+AnalysisSettings wholeFrameSettings()
+{
+    AnalysisSettings settings;
+    settings.region = RegionOfInterest{};
+
+    return settings;
+}
+
 // The real application pieces under test, wired the way the app wires them.
 // A function-local static keeps them reachable from the engine's captureless
 // GuiFunc/TestFunc (plain function pointers, like the smoke test's flag).
@@ -62,7 +72,7 @@ struct Pipeline
 
     // The settings last synced into the worker; the GuiFunc keeps them in
     // step with the view and the pane size, as the app's frame loop does.
-    AnalysisSettings settings;
+    AnalysisSettings settings = wholeFrameSettings();
     int settingsPushes = 0;
 
     // A display-only view of the worker output for the on-screen readout,

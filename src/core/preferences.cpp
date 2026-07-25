@@ -96,7 +96,7 @@ void readShortcuts(const std::map<std::string, std::string, std::less<>>& values
     readShortcut(values, "shortcut_attach_face", shortcuts.attachFace);
     readShortcut(values, "shortcut_pin_color", shortcuts.pinColor);
     readShortcut(values, "shortcut_vectorscope_zoom", shortcuts.vectorscopeZoom);
-    readShortcut(values, "shortcut_full_screen", shortcuts.fullScreen);
+    readShortcut(values, "shortcut_clear_region", shortcuts.clearRegion);
 }
 
 // Reads the scope-toggle bindings into the map keyed by scope id. Each retired
@@ -636,7 +636,7 @@ bool savePreferences(const Preferences& preferences, const std::filesystem::path
         << "shortcut_attach_face=" << preferences.shortcuts.attachFace << '\n'
         << "shortcut_pin_color=" << preferences.shortcuts.pinColor << '\n'
         << "shortcut_vectorscope_zoom=" << preferences.shortcuts.vectorscopeZoom << '\n'
-        << "shortcut_full_screen=" << preferences.shortcuts.fullScreen << '\n';
+        << "shortcut_clear_region=" << preferences.shortcuts.clearRegion << '\n';
     // Scope-toggle bindings keyed by scope id: only overrides are written, each
     // as shortcut_<id>, so a scope at its default letter needs no line.
     for (const auto& [id, letter] : preferences.scopeShortcuts) {

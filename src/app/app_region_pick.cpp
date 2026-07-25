@@ -3,6 +3,8 @@
 #define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
 
+#include <optional>
+
 #include "app/region_coordinator.h"
 #include "app/window_suggestions.h"
 
@@ -10,14 +12,14 @@ namespace sidescopes {
 
 // Applies a RegionPickOutcome to host state. The picker owns its own state and
 // returns only intent; every host-visible effect of a pick - the live preview,
-// a pinned colour, a confirmed attachment or draw, an Esc reset, the border
+// a pinned colour, a confirmed attachment or draw, an Esc clear, the border
 // re-sync - lands here.
 void App::applyRegionPickOutcome(const RegionPickOutcome& outcome)
 {
     if (outcome.previewRegion) {
         // The coordinator's no-op check keeps a hover that indicates the same
         // region from nudging the worker or the activity clock every frame.
-        applyRegionOutcome(m_regions.useRegion(*outcome.previewRegion));
+        applyRegionOutcome(m_regions.useRegion(outcome.previewRegion));
     }
     if (outcome.pinColor) {
         m_pins.pin(*outcome.pinColor);
@@ -33,7 +35,7 @@ void App::applyRegionPickOutcome(const RegionPickOutcome& outcome)
         confirmPickedRegion(pick);
     }
     if (outcome.cancelled) {
-        applyRegionOutcome(m_regions.resetToFullScreen());
+        applyRegionOutcome(m_regions.clearRegion());
     }
     if (outcome.ended) {
         m_regions.syncBorder(borderState());
@@ -64,7 +66,7 @@ void App::applyBorderEditOutcome(const RegionBorderEditOutcome& outcome)
 void App::toggleRegionAttach()
 {
     if (regionKind(m_activeWindowIdentity) == RegionKind::Attached) {
-        const RegionOfInterest region = m_analysis.region;
+        const std::optional<RegionOfInterest> region = m_analysis.region;
         m_attach.detachAll();
         m_faceLock.clear();
         unwatchWindowMotion();
@@ -88,10 +90,10 @@ void App::attachGlobalRegionToWindow()
 {
     const uint32_t displayId = m_captureController.capturedDisplay();
     const auto geometry = geometryOfDisplay(displayId);
-    if (!geometry || m_regions.isFullScreen()) {
+    if (!geometry || !m_regions.globalRegion()) {
         return;
     }
-    const RegionOfInterest region = m_regions.globalRegion();
+    const RegionOfInterest region = *m_regions.globalRegion();
     const double centerX = (region.leftPercent + region.rightPercent) / 2.0;
     const double centerY = (region.topPercent + region.bottomPercent) / 2.0;
     for (const DesktopWindow& window : attachCandidateWindows(displayId)) {
@@ -113,8 +115,8 @@ void App::attachGlobalRegionToWindow()
 }
 
 // The border's close affordances dismiss the region it outlines: the
-// attached one detaches from its window only, the global one resets to
-// full screen; the other attached windows keep their regions either way.
+// attached one detaches from its window only, the global one goes away
+// entirely; the other attached windows keep their regions either way.
 void App::dismissEditedBorder()
 {
     if (regionKind(m_activeWindowIdentity) == RegionKind::Attached) {
@@ -122,7 +124,7 @@ void App::dismissEditedBorder()
         unwatchWindowMotion();
         m_activeWindowIdentity = 0;
     } else {
-        m_regions.setGlobalRegion(RegionOfInterest{});
+        m_regions.setGlobalRegion(std::nullopt);
     }
     applyRegionOutcome(m_regions.useRegion(m_regions.globalRegion()));
     m_lastActivity = glfwGetTime();
@@ -169,7 +171,7 @@ void App::applyBorderEdit(const RegionOfInterest& edited)
 // border never wraps someone else's pixels.
 void App::adoptAttachedPick(uint64_t identity, int64_t ownerPid, const RegionOfInterest& region)
 {
-    m_regions.setGlobalRegion(RegionOfInterest{});
+    m_regions.setGlobalRegion(std::nullopt);
     // A manual pick or draw replaces whatever face lock the window wore.
     m_faceLock.removeLock(identity);
     m_attachedWindowMoving = false;

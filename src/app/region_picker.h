@@ -58,7 +58,7 @@ struct RegionPickOutcome
 /// Owns the region-picker lifecycle: opening the screenshot-style overlay, the
 /// background per-display face scans, and the confirm/pin/preview polling. The
 /// host coordination a pick resolves to - attaching a window, drawing the
-/// global region, pinning a colour, resetting to full screen - stays with the
+/// global region, pinning a colour, clearing the region - stays with the
 /// host, fed by the RegionPickOutcome this returns. It reads the capture
 /// controller, worker, and capture source it is constructed with, and drives
 /// the platform picker seams directly, so a poll can be judged end to end
@@ -95,10 +95,10 @@ public:
 
     /// Opens the picker for a pending request, switches an open picker's mode,
     /// or closes it across the pin-versus-region tool boundary.
-    /// @p regionIsFullScreen says whether the region the scopes read already
-    /// covers the display, so a border-free frame is awaited only when a border
-    /// is on screen. @return activity when a picker opened.
-    [[nodiscard]] RegionPickOutcome openIfRequested(bool regionIsFullScreen);
+    /// @p regionSelected says whether the scopes are reading a region at all,
+    /// so a border-free frame is awaited only when a border can be on screen.
+    /// @return activity when a picker opened.
+    [[nodiscard]] RegionPickOutcome openIfRequested(bool regionSelected);
 
     /// One poll of an open picker: reads the platform poll and processes it, or
     /// returns an empty outcome when no pick is active. @p frameSize is the
@@ -156,7 +156,7 @@ private:
         double elapsedMs = 0.0;  ///< grab plus detect, for the diagnostics line
     };
 
-    void openRegionPicker(RegionPickerMode mode, bool regionIsFullScreen);
+    void openRegionPicker(RegionPickerMode mode, bool regionSelected);
     void waitForBorderFreeFrame();
     [[nodiscard]] std::vector<PickerDisplay> buildPickerDisplays();
     [[nodiscard]] std::vector<SuggestedRegion> scanStreamedDisplayFaces(const FrameView& view, uint32_t streamed);

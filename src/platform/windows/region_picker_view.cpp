@@ -278,7 +278,7 @@ void paintSuggestionScene(PickerState& picker, Gdiplus::Graphics& canvas, double
                           &text);
     }
     if (picker.facesMode) {
-        const wchar_t* secondary = L"[A] attach to a window    [D] draw    [Esc] full screen";
+        const wchar_t* secondary = L"[A] attach to a window    [D] draw    [Esc] clear region";
         if (!picker.suggestions.empty()) {
             drawBanner(canvas, picker, L"Attach to a face", secondary, false, scale);
         } else if (picker.facesScanned) {
@@ -288,8 +288,8 @@ void paintSuggestionScene(PickerState& picker, Gdiplus::Graphics& canvas, double
         }
     } else {
         drawBanner(canvas, picker, L"Click a window or drag a region inside it",
-                   supportsFaceDetection() ? L"[F] attach to a face    [D] draw    [Esc] full screen"
-                                           : L"[D] draw    [Esc] full screen",
+                   supportsFaceDetection() ? L"[F] attach to a face    [D] draw    [Esc] clear region"
+                                           : L"[D] draw    [Esc] clear region",
                    false, scale);
     }
 }
@@ -324,11 +324,11 @@ void paintDrawScene(PickerState& picker, Gdiplus::Graphics& canvas, double scale
                                                                     : L"Draw a region in " + picker.constraintLabel;
         drawBanner(canvas, picker, primary.c_str(), L"[Esc] cancel", false, scale);
     } else {
-        const wchar_t* secondary = L"[Esc] full screen";
+        const wchar_t* secondary = L"[Esc] clear region";
         if (!picker.windows.empty() && supportsFaceDetection()) {
-            secondary = L"[A] attach to a window    [F] attach to a face    [Esc] full screen";
+            secondary = L"[A] attach to a window    [F] attach to a face    [Esc] clear region";
         } else if (!picker.windows.empty()) {
-            secondary = L"[A] attach to a window    [Esc] full screen";
+            secondary = L"[A] attach to a window    [Esc] clear region";
         }
         drawBanner(canvas, picker, L"Drag to draw a region", secondary, false, scale);
     }

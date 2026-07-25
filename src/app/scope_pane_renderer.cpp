@@ -25,7 +25,7 @@ PaneRenderOutcome ScopePaneRenderer::drawScopeToggles(bool stackModifier)
 
 PaneRenderOutcome ScopePaneRenderer::drawRegionToolIcons(const PaneRenderInput& input)
 {
-    return m_toolbar.drawRegionToolIcons(input.regionIsFullScreen);
+    return m_toolbar.drawRegionToolIcons(input.regionSelected);
 }
 
 PaneRenderOutcome ScopePaneRenderer::drawScopePanes(const PaneRenderInput& input)

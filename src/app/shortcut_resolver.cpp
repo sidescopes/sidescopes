@@ -12,6 +12,11 @@
 
 namespace sidescopes {
 
+std::string shortcutLabel(const std::string& name)
+{
+    return name == "Escape" ? "Esc" : name;
+}
+
 namespace {
 
 // The preset digits, named the way the key probe names every other key.
@@ -186,9 +191,9 @@ ShortcutAction ShortcutResolver::resolveNamed(const std::string& key, bool shift
     if (key == m_bindings.vectorscopeZoom) {
         return zoomAction(cycledZoom(context.vectorscopeZoom));
     }
-    if (key == m_bindings.fullScreen) {
+    if (key == m_bindings.clearRegion) {
         return ShortcutAction::plain(context.settingsOpen ? ShortcutAction::Kind::CloseSettings
-                                                          : ShortcutAction::Kind::ResetToFullScreen);
+                                                          : ShortcutAction::Kind::ClearRegion);
     }
 
     return {};
@@ -206,7 +211,7 @@ std::vector<ShortcutAction> ShortcutResolver::resolvePlainKeys(const ShortcutCon
     // key whose action is unavailable resolves to nothing and lets the rest of
     // the scan run.
     for (const std::string& binding : {m_bindings.attachWindow, m_bindings.drawRegion, m_bindings.attachFace,
-                                       m_bindings.pinColor, m_bindings.vectorscopeZoom, m_bindings.fullScreen}) {
+                                       m_bindings.pinColor, m_bindings.vectorscopeZoom, m_bindings.clearRegion}) {
         if (!pressed(binding)) {
             continue;
         }

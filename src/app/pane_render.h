@@ -18,9 +18,9 @@ struct PaneRenderInput
     /// The interface scale the divider thickness and the smallest pane are
     /// measured in.
     float uiScale;
-    /// Whether the region the scopes read already covers the display, which
-    /// the reset tool shows as already done.
-    bool regionIsFullScreen;
+    /// Whether a region has been selected at all. Without one the scopes read
+    /// nothing, so no trace is drawn and the clear tool stands down.
+    bool regionSelected;
     /// Whether a scope that takes pins is on screen; without one the pin tool
     /// stands down.
     bool pinsAvailable;
@@ -57,8 +57,8 @@ struct PaneRenderOutcome
     /// the new sequence, which reflows the panes. Set only when the order
     /// actually changed.
     std::optional<std::vector<std::string>> reorderedStack;
-    /// The reset tool: the host drops every region and attachment.
-    bool resetToFullScreen = false;
+    /// The clear tool: the host drops every region and attachment.
+    bool clearRegion = false;
     /// A scope parameter changed: the host pushes the settings to the worker.
     bool analysisDirty = false;
     /// Interaction happened worth marking: the host stamps its activity clock.

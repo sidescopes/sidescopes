@@ -18,11 +18,6 @@
 namespace sidescopes {
 namespace {
 
-std::string shortcutLabel(const std::string& name)
-{
-    return name == "Escape" ? "Esc" : name;
-}
-
 void menuAction(std::vector<NativeMenuItem>& menu, const char* label, int id, bool checked, std::string shortcut = "")
 {
     menu.push_back({NativeMenuItem::Kind::Action, label, id, checked, std::move(shortcut)});
@@ -223,8 +218,9 @@ void appendRegionAndAppSection(const ContextMenuModel& model, std::vector<Native
         menuAction(menu, "Attach to Face...", MenuAttachFace, false,
                    shortcutLabel(model.shortcuts.bindings().attachFace));
     }
-    menuAction(menu, "Watch Full Screen", MenuFullScreen, model.isFullScreen,
-               shortcutLabel(model.shortcuts.bindings().fullScreen));
+    if (model.regionSelected) {
+        menuAction(menu, "Clear Region", MenuClearRegion, false, shortcutLabel(model.shortcuts.bindings().clearRegion));
+    }
     if (model.attach.attachedCount() > 1) {
         if (model.attach.activeIdentity() != 0) {
             menuAction(menu, "Detach Front Window", MenuDetachWindow, false);

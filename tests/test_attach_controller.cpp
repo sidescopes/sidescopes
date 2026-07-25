@@ -506,7 +506,7 @@ TEST_CASE("A display with no area falls back to the whole display")
     AttachController controller;
 
     // A display the desktop reports as empty leaves nothing to measure
-    // percentages against; the region comes back at its full-screen default
+    // percentages against; the region comes back at its whole-window default
     // rather than as an infinity.
     constexpr AttachDisplayRect EmptyDisplay{0.0, 0.0, 0.0, 0.0};
     const RegionOfInterest region = controller.attach(42, EditorPid, "Editor", EditorWindow, EmptyDisplay, WholeEditor);

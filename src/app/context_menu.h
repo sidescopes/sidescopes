@@ -26,7 +26,7 @@ enum MenuAction
     MenuZoom2,
     MenuZoom4,
     MenuAttachWindow = 30,
-    MenuFullScreen,
+    MenuClearRegion,
     MenuDetachWindow,
     MenuDetachAll,
     MenuToggleGraticule = 40,
@@ -70,7 +70,9 @@ struct ContextMenuModel
     bool pinsEmpty;
     int activePresetSlot;
     float userUiScaleFactor;
-    bool isFullScreen;
+    /// Whether a region has been selected at all; without one there is nothing
+    /// for Clear Region to clear.
+    bool regionSelected;
 };
 
 /// A preset slot's menu label: "N - empty" for an unused slot, otherwise a

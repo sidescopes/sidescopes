@@ -168,10 +168,10 @@ std::optional<DetailSizes> AdaptiveDetail::update(const ScopePaneSizes& panes, f
     // the region can populate; desired resolutions are debounced so a live
     // resize does not thrash engine reallocation.
     int regionWidth = 0;
-    if (frameSize) {
+    if (frameSize && m_analysis.region) {
         // The region is a share of the DISPLAY, so it is resolved against the
         // display's extents whether or not the capture covers all of it.
-        regionWidth = m_analysis.region.toPixels(frameSize->displayWidth, frameSize->displayHeight).width;
+        regionWidth = m_analysis.region->toPixels(frameSize->displayWidth, frameSize->displayHeight).width;
     }
     const ScopePaneSizes panePixels = inPixels(panes, density);
     const DetailSizes wanted{desiredWaveformSize(panePixels, regionWidth), desiredHistogramSize(panePixels),

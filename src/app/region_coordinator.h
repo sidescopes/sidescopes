@@ -18,9 +18,7 @@ class RegionPicker;
 ///         active attached window's, or the global one. A narrower
 ///         question than AttachController::attached(), which reports
 ///         whether ANY window holds a region - an attached window that is
-///         not focused leaves the global kind in effect. Orthogonal to
-///         RegionCoordinator::isFullScreen(), which measures a region's
-///         extent rather than what it is bound to.
+///         not focused leaves the global kind in effect.
 [[nodiscard]] RegionKind regionKind(uint64_t activeWindowIdentity);
 
 /// What a region decision asks of the host. The coordinator owns the global
@@ -29,8 +27,12 @@ class RegionPicker;
 /// of being made in place.
 struct RegionOutcome
 {
-    /// The region the scopes should read from here on; empty when the
-    /// decision left them reading where they were.
+    /// The selection changed. Its own flag because @ref region is empty for
+    /// two different answers - "read nothing from here on" and "carry on
+    /// reading what you were" - and only this tells them apart.
+    bool regionChanged = false;
+    /// The region the scopes should read from here on, empty for none at all.
+    /// Meaningful only when @ref regionChanged.
     std::optional<RegionOfInterest> region;
     /// Every attached window was let go: the host drops the active window
     /// along with its motion watch and motion flags.
@@ -66,13 +68,12 @@ struct RegionBorderState
 /// Owns the region truth the whole shell shares: the global region the
 /// analysis falls back to whenever no attached window is active, the label
 /// the global border wears, and which region a border drag in flight began
-/// on. It keeps the region border in step with what the scopes read, and
-/// answers how far that region reaches. Regions are host-wide rather than
-/// per-surface state, which is why this sits beside the scope view rather
-/// than inside it. It reads the attach, capture, picker and face-lock
-/// controllers it is constructed with and drives the platform border seams
-/// directly; what it cannot carry out itself travels back as a RegionOutcome
-/// the host applies.
+/// on. It keeps the region border in step with what the scopes read. Regions
+/// are host-wide rather than per-surface state, which is why this sits beside
+/// the scope view rather than inside it. It reads the attach, capture, picker
+/// and face-lock controllers it is constructed with and drives the platform
+/// border seams directly; what it cannot carry out itself travels back as a
+/// RegionOutcome the host applies.
 class RegionCoordinator
 {
 public:
@@ -80,32 +81,29 @@ public:
     /// names the captured display the border is drawn on, @p picker says
     /// whether a pick is in flight, @p faceLock whether a locked face is
     /// unverified or its content unsettled, and @p region is the region the
-    /// scopes are reading right now. All must outlive the coordinator.
+    /// scopes are reading right now, empty for none. All must outlive the
+    /// coordinator.
     RegionCoordinator(AttachController& attach, const CaptureController& capture, const RegionPicker& picker,
-                      const FaceLockController& faceLock, const RegionOfInterest& region);
+                      const FaceLockController& faceLock, const std::optional<RegionOfInterest>& region);
 
-    /// @return Whether the region the scopes are reading covers the whole
-    ///         captured display - the state Watch Full Screen restores. An
-    ///         extent, not a kind: a region attached to a window filling the
-    ///         display reads full here too.
-    [[nodiscard]] bool isFullScreen() const;
+    /// @return The global region - the one bound to no window, which the
+    ///         analysis falls back to whenever no attached window is active -
+    ///         or nothing when none has been drawn.
+    [[nodiscard]] const std::optional<RegionOfInterest>& globalRegion() const;
 
-    /// @return The global region: the one bound to no window, which the
-    ///         analysis falls back to whenever no attached window is active.
-    [[nodiscard]] const RegionOfInterest& globalRegion() const;
+    /// Replaces the global region, or drops it. Storing it is all this does;
+    /// putting it in force is useRegion's job.
+    void setGlobalRegion(const std::optional<RegionOfInterest>& region);
 
-    /// Replaces the global region. Storing it is all this does; putting it in
-    /// force is useRegion's job.
-    void setGlobalRegion(const RegionOfInterest& region);
-
-    /// Reads @p region with the scopes. @return The change for the host to
-    ///         put in force, empty when the scopes are already reading it -
-    ///         a no-op nudges neither the worker nor the border.
-    [[nodiscard]] RegionOutcome useRegion(const RegionOfInterest& region) const;
+    /// Reads @p region with the scopes, or leaves them reading nothing when it
+    /// is empty. @return The change for the host to put in force, with
+    ///         regionChanged clear when the scopes are already reading it - a
+    ///         no-op nudges neither the worker nor the border.
+    [[nodiscard]] RegionOutcome useRegion(const std::optional<RegionOfInterest>& region) const;
 
     /// Drops all selection - a pending pick, every attached window, and the
-    /// global region alike - and returns the scopes to the whole display.
-    [[nodiscard]] RegionOutcome resetToFullScreen();
+    /// global region alike - leaving the scopes reading nothing.
+    [[nodiscard]] RegionOutcome clearRegion();
 
     /// Reconciles the region border with what the scopes read. Called every
     /// frame; the platform side makes the unchanged case free.
@@ -129,9 +127,9 @@ private:
     const CaptureController& m_capture;
     const RegionPicker& m_picker;
     const FaceLockController& m_faceLock;
-    const RegionOfInterest& m_region;
+    const std::optional<RegionOfInterest>& m_region;
 
-    RegionOfInterest m_globalRegion;
+    std::optional<RegionOfInterest> m_globalRegion;
 
     /// The global region's border label: the captured display's name,
     /// refreshed when the captured display changes.

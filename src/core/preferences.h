@@ -49,7 +49,7 @@ struct ShortcutBindings
     std::string attachFace = "F";
     std::string pinColor = "P";
     std::string vectorscopeZoom = "Z";
-    std::string fullScreen = "Escape";
+    std::string clearRegion = "Escape";
 };
 
 /// Everything worth remembering between sessions. Serialized as a small

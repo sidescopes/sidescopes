@@ -25,6 +25,11 @@ const std::string WaveformId = "org.sidescopes.waveform";
 const std::string ParadeId = "org.sidescopes.parade";
 const std::string HistogramId = "org.sidescopes.histogram";
 
+// The whole captured frame, which most of these tests read. Stated rather than
+// defaulted: a pass needs a region, and without one the worker computes
+// nothing at all.
+constexpr RegionOfInterest WholeFrame{0.0, 0.0, 100.0, 100.0};
+
 bool waitFor(const std::function<bool()>& condition, std::chrono::milliseconds timeout = 2000ms)
 {
     const auto deadline = std::chrono::steady_clock::now() + timeout;
@@ -62,6 +67,7 @@ TEST_CASE("AnalysisWorker produces scope images from published frames")
     FrameMailbox mailbox;
     AnalysisWorker worker(mailbox);
     AnalysisSettings settings;
+    settings.region = WholeFrame;
     settings.enabledScopes = {VectorscopeId};
     worker.updateSettings(settings);
     worker.start();
@@ -81,6 +87,7 @@ TEST_CASE("AnalysisWorker applies settings that arrive before the first frame")
     FrameMailbox mailbox;
     AnalysisWorker worker(mailbox);
     AnalysisSettings settings;
+    settings.region = WholeFrame;
     settings.enabledScopes = {VectorscopeId};
     worker.updateSettings(settings);
     worker.start();
@@ -112,6 +119,7 @@ TEST_CASE("AnalysisWorker survives rapid settings churn before a frame")
     // its own frameless pass, so only the last enabled set may reach the first
     // output.
     AnalysisSettings settings;
+    settings.region = WholeFrame;
     settings.enabledScopes = {WaveformId};
     worker.updateSettings(settings);
     settings.enabledScopes = {HistogramId};
@@ -228,6 +236,7 @@ TEST_CASE("A scope hidden and shown again still produces an image")
 
     const auto showing = [](const std::string& id) {
         AnalysisSettings settings;
+        settings.region = WholeFrame;
         settings.enabledScopes = {id};
         // An image size only an adaptive scope honours, so a lost extension shows
         // up as the default size rather than this one.
@@ -268,6 +277,9 @@ TEST_CASE("AnalysisWorker skips frames with unchanged content")
 {
     FrameMailbox mailbox;
     AnalysisWorker worker(mailbox);
+    AnalysisSettings settings;
+    settings.region = WholeFrame;
+    worker.updateSettings(settings);
     worker.start();
 
     mailbox.publish(makeSolidFrameBuffer(64, 64, Color{100, 100, 100}, 1));
@@ -294,6 +306,7 @@ TEST_CASE("AnalysisWorker ignores changes inside the masked window")
     FrameMailbox mailbox;
     AnalysisWorker worker(mailbox);
     AnalysisSettings settings;
+    settings.region = WholeFrame;
     settings.maskedWindow = IntRect{16, 16, 32, 32};
     worker.updateSettings(settings);
     worker.start();
@@ -322,6 +335,7 @@ TEST_CASE("AnalysisWorker recomputes on settings changes without a new frame")
     FrameMailbox mailbox;
     AnalysisWorker worker(mailbox);
     AnalysisSettings settings;
+    settings.region = WholeFrame;
     settings.enabledScopes = {VectorscopeId};
     worker.updateSettings(settings);
     worker.start();
@@ -341,11 +355,58 @@ TEST_CASE("AnalysisWorker recomputes on settings changes without a new frame")
     CHECK(output.framesProcessed == 1);                         // same frame, reanalyzed
 }
 
+TEST_CASE("AnalysisWorker computes nothing without a region")
+{
+    FrameMailbox mailbox;
+    AnalysisWorker worker(mailbox);
+    AnalysisSettings settings;
+    settings.enabledScopes = {VectorscopeId};  // shown, but reading nowhere
+    worker.updateSettings(settings);
+    worker.start();
+
+    mailbox.publish(makeSolidFrameBuffer(64, 64, Color{191, 0, 0}, 1));
+    REQUIRE(waitFor([&] { return worker.consumedFrameSequence() == 1; }));
+
+    // The frame is taken - the readout still samples it - but no pass runs and
+    // no output is published, so the scopes stay as empty as they started.
+    uint64_t seen = 0;
+    AnalysisWorker::Output output;
+    std::this_thread::sleep_for(50ms);
+    CHECK_FALSE(worker.fetchOutput(seen, output));
+    CHECK(output.images.empty());
+}
+
+TEST_CASE("A region arriving late starts the scopes computing")
+{
+    FrameMailbox mailbox;
+    AnalysisWorker worker(mailbox);
+    AnalysisSettings settings;
+    settings.enabledScopes = {VectorscopeId};
+    worker.updateSettings(settings);
+    worker.start();
+
+    mailbox.publish(makeSolidFrameBuffer(64, 64, Color{191, 0, 0}, 1));
+    REQUIRE(waitFor([&] { return worker.consumedFrameSequence() == 1; }));
+    uint64_t seen = 0;
+    AnalysisWorker::Output output;
+    REQUIRE_FALSE(worker.fetchOutput(seen, output));
+
+    // Selecting a region reaches the worker as a settings change, which is
+    // what re-creates the instances the empty state let go of - and it lands
+    // on the frame already held, with no new one needed.
+    settings.region = WholeFrame;
+    worker.updateSettings(settings);
+    REQUIRE(waitFor([&] { return worker.fetchOutput(seen, output); }));
+    REQUIRE(output.images.count(VectorscopeId) == 1);
+    CHECK(pixelLit(output.images.at(VectorscopeId), 109, 43));
+}
+
 TEST_CASE("AnalysisWorker keeps the scope set across a content-only pass")
 {
     FrameMailbox mailbox;
     AnalysisWorker worker(mailbox);
     AnalysisSettings settings;
+    settings.region = WholeFrame;
     settings.enabledScopes = {VectorscopeId};
     worker.updateSettings(settings);
     worker.start();
@@ -374,9 +435,7 @@ TEST_CASE("AnalysisWorker samples a cursor color from the latest frame")
     worker.start();
 
     mailbox.publish(makeSolidFrameBuffer(64, 64, Color{10, 150, 200}, 1));
-    uint64_t seen = 0;
-    AnalysisWorker::Output output;
-    REQUIRE(waitFor([&] { return worker.fetchOutput(seen, output); }));
+    REQUIRE(waitFor([&] { return worker.consumedFrameSequence() == 1; }));
 
     const auto sampled = worker.sampleDisplayColor(32, 32);
     REQUIRE(sampled.has_value());
@@ -392,9 +451,7 @@ TEST_CASE("AnalysisWorker rejects out-of-bounds cursor samples")
     worker.start();
 
     mailbox.publish(makeSolidFrameBuffer(64, 64, Color{10, 150, 200}, 1));
-    uint64_t seen = 0;
-    AnalysisWorker::Output output;
-    REQUIRE(waitFor([&] { return worker.fetchOutput(seen, output); }));
+    REQUIRE(waitFor([&] { return worker.consumedFrameSequence() == 1; }));
 
     CHECK_FALSE(worker.sampleDisplayColor(-1, 5).has_value());
     CHECK_FALSE(worker.sampleDisplayColor(1000, 5).has_value());
@@ -448,9 +505,7 @@ TEST_CASE("AnalysisWorker reports the latest frame size")
     worker.start();
 
     mailbox.publish(makeSolidFrameBuffer(64, 64, Color{10, 150, 200}, 1));
-    uint64_t seen = 0;
-    AnalysisWorker::Output output;
-    REQUIRE(waitFor([&] { return worker.fetchOutput(seen, output); }));
+    REQUIRE(waitFor([&] { return worker.consumedFrameSequence() == 1; }));
 
     const auto size = worker.latestFrameSize();
     REQUIRE(size.has_value());
@@ -493,6 +548,7 @@ TEST_CASE("AnalysisWorker routes every enabled scope and skips the disabled one"
     FrameMailbox mailbox;
     AnalysisWorker worker(mailbox);
     AnalysisSettings settings;
+    settings.region = WholeFrame;
     // Everything but the waveform: its output image must stay absent while
     // the parade, histogram, and outline - never asserted before - fill.
     settings.enabledScopes = {VectorscopeId, ParadeId, HistogramId};

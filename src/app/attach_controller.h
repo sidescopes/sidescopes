@@ -152,8 +152,8 @@ public:
     /// Detaches one window; the remaining set keeps working.
     void remove(uint64_t identity);
 
-    /// Detaches everything - the user pressed Escape - and the caller
-    /// returns the region to full screen.
+    /// Detaches everything - the user pressed Escape - and the caller drops
+    /// the region with it.
     void detachAll();
 
 private:

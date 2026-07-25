@@ -264,12 +264,16 @@ void configureScopes(std::vector<WorkerScope>& scopes, const AnalysisSettings& s
 // shown must exist before it can be configured or it would run its module
 // defaults for a pass; then the parameters; then the enabled-id lookup the
 // per-pass loop reads, rebuilt once here rather than per scope per pass.
+//
+// A settings change carrying no region enables nothing, so every instance -
+// and the bins and planes it holds - is dropped along with the selection.
 void applySettings(std::vector<WorkerScope>& scopes, const AnalysisSettings& settings,
                    std::set<std::string>& enabledScopes)
 {
-    syncScopeInstances(scopes, settings.enabledScopes);
+    const std::vector<std::string> enabled = settings.region ? settings.enabledScopes : std::vector<std::string>{};
+    syncScopeInstances(scopes, enabled);
     configureScopes(scopes, settings);
-    enabledScopes = std::set<std::string>(settings.enabledScopes.begin(), settings.enabledScopes.end());
+    enabledScopes = std::set<std::string>(enabled.begin(), enabled.end());
 }
 
 // Runs each enabled scope over the region, returning the wall time the pass
@@ -345,6 +349,11 @@ bool AnalysisWorker::syncSettings(AnalysisSettings& settings, uint64_t& seenSett
     return true;
 }
 
+// A pass needs a frame to read and a reason to run: a new frame, or settings
+// that changed. The region it reads is the caller's own test, stated beside
+// this one - a pass without a region computes nothing and publishes nothing,
+// so the scopes stay as empty as they started, while the frame is still taken
+// because the colour under the pointer is read from it.
 bool AnalysisWorker::hasWork(bool newFrame, bool settingsChanged) const
 {
     std::lock_guard lock(m_frameMutex);
@@ -373,7 +382,7 @@ void AnalysisWorker::run()
         if (settingsChanged) {
             applySettings(scopes, settings, enabledScopes);
         }
-        if (!hasWork(newFrame, settingsChanged)) {
+        if (!settings.region || !hasWork(newFrame, settingsChanged)) {
             continue;
         }
 
@@ -384,7 +393,7 @@ void AnalysisWorker::run()
         // Measured against the DISPLAY, then moved into this frame's pixels:
         // a narrowed capture must analyse the same content, not the same
         // percentages of a smaller frame.
-        const IntRect region = view.fromDisplay(settings.region.toPixels(view.displayWidth(), view.displayHeight()))
+        const IntRect region = view.fromDisplay(settings.region->toPixels(view.displayWidth(), view.displayHeight()))
                                    .clampedTo(view.width, view.height);
 
         // The hash is computed on every pass — including settings-only ones —

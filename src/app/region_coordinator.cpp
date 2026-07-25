@@ -21,7 +21,7 @@ RegionKind regionKind(uint64_t activeWindowIdentity)
 
 RegionCoordinator::RegionCoordinator(AttachController& attach, const CaptureController& capture,
                                      const RegionPicker& picker, const FaceLockController& faceLock,
-                                     const RegionOfInterest& region)
+                                     const std::optional<RegionOfInterest>& region)
     : m_attach(attach),
       m_capture(capture),
       m_picker(picker),
@@ -30,38 +30,32 @@ RegionCoordinator::RegionCoordinator(AttachController& attach, const CaptureCont
 {
 }
 
-bool RegionCoordinator::isFullScreen() const
-{
-    return m_region.leftPercent <= 0.0 && m_region.topPercent <= 0.0 && m_region.rightPercent >= 100.0 &&
-           m_region.bottomPercent >= 100.0;
-}
-
-const RegionOfInterest& RegionCoordinator::globalRegion() const
+const std::optional<RegionOfInterest>& RegionCoordinator::globalRegion() const
 {
     return m_globalRegion;
 }
 
-void RegionCoordinator::setGlobalRegion(const RegionOfInterest& region)
+void RegionCoordinator::setGlobalRegion(const std::optional<RegionOfInterest>& region)
 {
     m_globalRegion = region;
 }
 
-RegionOutcome RegionCoordinator::useRegion(const RegionOfInterest& region) const
+RegionOutcome RegionCoordinator::useRegion(const std::optional<RegionOfInterest>& region) const
 {
-    if (region.leftPercent == m_region.leftPercent && region.topPercent == m_region.topPercent &&
-        region.rightPercent == m_region.rightPercent && region.bottomPercent == m_region.bottomPercent) {
+    if (region == m_region) {
         return {};
     }
     RegionOutcome outcome;
+    outcome.regionChanged = true;
     outcome.region = region;
     outcome.activity = true;
 
     return outcome;
 }
 
-RegionOutcome RegionCoordinator::resetToFullScreen()
+RegionOutcome RegionCoordinator::clearRegion()
 {
-    // Resets all selection: a pending pick, every attached window, and the
+    // Drops all selection: a pending pick, every attached window, and the
     // global region alike. The border sync rides the analysis-dirty path.
     cancelRegionPick();
     RegionOutcome outcome;
@@ -69,8 +63,8 @@ RegionOutcome RegionCoordinator::resetToFullScreen()
         m_attach.detachAll();
         outcome.detachedAll = true;
     }
-    m_globalRegion = RegionOfInterest{};
-    outcome.region = RegionOfInterest{};
+    m_globalRegion.reset();
+    outcome.regionChanged = true;
 
     return outcome;
 }
@@ -82,12 +76,12 @@ void RegionCoordinator::syncBorder(const RegionBorderState& state)
     }
     // The border shows only while this application is itself visible - a
     // hidden or minimized SideScopes must not leave regions floating on
-    // screen - never during a pick or window motion. What it outlines
-    // follows the focus routing already folded into the analysis region: the
-    // attached region on the focused attached window (label and warm dress),
-    // else the plain global one. Called every frame; the platform side makes
-    // the unchanged case free.
-    if (m_picker.active() || isFullScreen() || applicationHidden() || state.windowMoving || m_faceLock.hunting() ||
+    // screen - never during a pick or window motion, and never with no region
+    // to outline. What it outlines follows the focus routing already folded
+    // into the analysis region: the attached region on the focused attached
+    // window (label and warm dress), else the plain global one. Called every
+    // frame; the platform side makes the unchanged case free.
+    if (m_picker.active() || !m_region || applicationHidden() || state.windowMoving || m_faceLock.hunting() ||
         m_faceLock.contentUnsettled(state.now) || state.windowMinimized) {
         hideRegionBorder();
     } else {
@@ -96,7 +90,7 @@ void RegionCoordinator::syncBorder(const RegionBorderState& state)
             m_displayLabelId = m_capture.capturedDisplay();
             m_displayLabel = borderLabelFrom(displayName(m_displayLabelId), "Display");
         }
-        showRegionBorder(m_capture.capturedDisplay(), m_region, attached ? state.attachedLabel : m_displayLabel,
+        showRegionBorder(m_capture.capturedDisplay(), *m_region, attached ? state.attachedLabel : m_displayLabel,
                          attached);
     }
 }

@@ -347,7 +347,7 @@ void Toolbar::placeRegionToolbox() const
     }
 }
 
-PaneRenderOutcome Toolbar::drawRegionToolIcons(bool regionIsFullScreen)
+PaneRenderOutcome Toolbar::drawRegionToolIcons(bool regionSelected)
 {
     PaneRenderOutcome outcome;
     char tooltip[96];
@@ -375,12 +375,14 @@ PaneRenderOutcome Toolbar::drawRegionToolIcons(bool regionIsFullScreen)
         }
         ImGui::SameLine(0.0f, 2.0f);
     }
-    const bool fullAlready = regionIsFullScreen;
-    if (iconButton("##full-screen", m_icons.textureId(Icon::Expand, iconPx),
-                   fullAlready ? "Reset to full screen (Esc) - already full" : "Reset to full screen (Esc)",
-                   fullAlready) &&
-        !fullAlready) {
-        outcome.resetToFullScreen = true;
+    // Last among the region tools: the three before it choose what the scopes
+    // read, and this one takes that choice away again.
+    std::snprintf(tooltip, sizeof(tooltip), "Clear the region (%s)%s",
+                  shortcutLabel(m_shortcuts.bindings().clearRegion).c_str(),
+                  regionSelected ? "" : " - no region selected");
+    if (iconButton("##clear-region", m_icons.textureId(Icon::SquareDashed, iconPx), tooltip, !regionSelected) &&
+        regionSelected) {
+        outcome.clearRegion = true;
     }
     ImGui::SameLine(0.0f, 2.0f);
     ImGui::NewLine();

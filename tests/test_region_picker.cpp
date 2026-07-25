@@ -120,13 +120,13 @@ DesktopWindow makeWindow(uint64_t identity, std::string application, double x, d
     return window;
 }
 
-// Opens a pick with the region already covering the display, which is the one
-// way in: a partial region makes the picker wait out a border-free frame
-// against a clock the test binary has frozen.
+// Opens a pick with no region selected, which is the one way in: a selected
+// region makes the picker wait out a border-free frame against a clock the
+// test binary has frozen.
 void openPick(PickerFixture& fix, RegionPickerMode mode)
 {
     fix.picker.request(mode);
-    const RegionPickOutcome outcome = fix.picker.openIfRequested(/*regionIsFullScreen=*/true);
+    const RegionPickOutcome outcome = fix.picker.openIfRequested(/*regionSelected=*/false);
     REQUIRE(outcome.activity);
     REQUIRE(fix.picker.active());
 }
@@ -190,12 +190,12 @@ TEST_CASE("A confirmed draw poll returns the confirmed region and mode")
     CHECK_FALSE(fix.picker.active());
 }
 
-TEST_CASE("A cancelled poll resets to full screen")
+TEST_CASE("A cancelled poll clears the region")
 {
     PickerFixture fix;
 
     // Finished with nothing confirmed and no tool-switch swallow in effect: the
-    // user's Esc, which the host turns into a full-screen reset.
+    // user's Esc, which the host turns into a region clear.
     RegionPickPoll poll;
     poll.finished = true;
     poll.displayId = StreamedDisplay;
@@ -217,7 +217,7 @@ TEST_CASE("A cancel swallowed by a tool switch resets nothing")
     openPick(fix, RegionPickerMode::DrawGlobal);
 
     fix.picker.request(RegionPickerMode::PinColor);
-    (void)fix.picker.openIfRequested(true);
+    (void)fix.picker.openIfRequested(/*regionSelected=*/false);
     CHECK(fix.picker.active());  // the swallow does not close the pick itself
 
     // The swallowed cancel then finishes the pick without a reset.
@@ -239,7 +239,7 @@ TEST_CASE("Choosing another region tool switches the open pick's mode")
     // picker changes mode instead of a second one stacking on it.
     openPick(fix, RegionPickerMode::DrawGlobal);
     fix.picker.request(RegionPickerMode::AttachWindow);
-    (void)fix.picker.openIfRequested(true);
+    (void)fix.picker.openIfRequested(/*regionSelected=*/false);
 
     CHECK(fix.picker.active());
     CHECK(regionOverlayStubs().pickCancels == 0);
@@ -261,7 +261,7 @@ TEST_CASE("A pick is not opened while nothing is being captured")
     // There is no display to draw the overlays over, so the request simply
     // does not open a pick.
     picker.request(RegionPickerMode::DrawGlobal);
-    const RegionPickOutcome outcome = picker.openIfRequested(true);
+    const RegionPickOutcome outcome = picker.openIfRequested(/*regionSelected=*/false);
 
     CHECK_FALSE(outcome.activity);
     CHECK_FALSE(picker.active());
@@ -276,12 +276,12 @@ TEST_CASE("A request the overlay refuses is not retried")
     // The overlay could not be shown; the request is spent either way, so the
     // next frame does not try again.
     fix.picker.request(RegionPickerMode::DrawGlobal);
-    const RegionPickOutcome first = fix.picker.openIfRequested(true);
+    const RegionPickOutcome first = fix.picker.openIfRequested(/*regionSelected=*/false);
     CHECK(first.activity);
     CHECK_FALSE(fix.picker.active());
 
     regionOverlayStubs().lastMode.reset();
-    (void)fix.picker.openIfRequested(true);
+    (void)fix.picker.openIfRequested(/*regionSelected=*/false);
     CHECK_FALSE(regionOverlayStubs().lastMode.has_value());
 }
 

@@ -55,7 +55,11 @@ struct AnalysisSettings
     /// The scope ids to compute this pass; an empty list computes nothing (the
     /// color-picker-only view asks nothing of the worker).
     std::vector<std::string> enabledScopes;
-    RegionOfInterest region;
+    /// The part of the screen the scopes read, or nothing at all when none has
+    /// been selected. A distribution is a reading of somewhere in particular,
+    /// so without a region there is nothing to compute and no scope holds an
+    /// instance; the application starts in exactly that state.
+    std::optional<RegionOfInterest> region;
     /// The application's own window in DISPLAY pixels, masked out of change
     /// detection so its own redraws never re-trigger analysis. Display rather
     /// than frame pixels because a narrowed capture moves the frame's origin;

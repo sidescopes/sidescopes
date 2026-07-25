@@ -394,10 +394,9 @@ AnalysisSettings settingsFor(const WorkerScenario& scenario, const RegionCase& r
     AnalysisSettings settings;
     settings.enabledScopes = scenario.scopes;
     const IntRect rect = centeredRegion(region);
-    settings.region.leftPercent = 100.0 * rect.x / FrameWidth;
-    settings.region.topPercent = 100.0 * rect.y / FrameHeight;
-    settings.region.rightPercent = 100.0 * (rect.x + rect.width) / FrameWidth;
-    settings.region.bottomPercent = 100.0 * (rect.y + rect.height) / FrameHeight;
+    settings.region =
+        RegionOfInterest{100.0 * rect.x / FrameWidth, 100.0 * rect.y / FrameHeight,
+                         100.0 * (rect.x + rect.width) / FrameWidth, 100.0 * (rect.y + rect.height) / FrameHeight};
     settings.imageSizes["org.sidescopes.vectorscope"] = {pane.vectorscopeSize, pane.vectorscopeSize};
     settings.imageSizes["org.sidescopes.waveform"] = {pane.waveformColumns, pane.waveformHeight};
     settings.imageSizes["org.sidescopes.parade"] = {pane.waveformColumns, pane.waveformHeight};

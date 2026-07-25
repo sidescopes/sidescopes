@@ -76,7 +76,7 @@ public:
     [[nodiscard]] PaneRenderOutcome drawScopeToggles(bool stackModifier);
 
     /// The region toolbox: draw, attach to a window, attach to a face, and the
-    /// reset to full screen.
+    /// clear.
     [[nodiscard]] PaneRenderOutcome drawRegionToolIcons(const PaneRenderInput& input);
 
     /// The pane area: the capture help pages, or the scopes on screen stacked

@@ -16,7 +16,7 @@ enum class Icon
     Pencil,
     User,
     Pipette,
-    Expand,
+    SquareDashed,
     ChartColumn,
 };
 

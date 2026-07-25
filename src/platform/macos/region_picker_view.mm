@@ -218,7 +218,7 @@
             withAttributes:labelAttributes];
     }
     if (self.facesMode) {
-        NSString* secondary = @"[A] attach to a window    [D] draw    [Esc] full screen";
+        NSString* secondary = @"[A] attach to a window    [D] draw    [Esc] clear region";
         if (!m_suggestions.empty()) {
             [self drawBanner:@"Attach to a face" secondary:secondary preferCenter:NO];
         } else if (self.facesScanned) {
@@ -228,8 +228,8 @@
         }
     } else {
         [self drawBanner:@"Click a window or drag a region inside it"
-               secondary:sidescopes::supportsFaceDetection() ? @"[F] attach to a face    [D] draw    [Esc] full screen"
-                                                             : @"[D] draw    [Esc] full screen"
+               secondary:sidescopes::supportsFaceDetection() ? @"[F] attach to a face    [D] draw    [Esc] clear region"
+                                                             : @"[D] draw    [Esc] clear region"
             preferCenter:NO];
     }
 }
@@ -280,11 +280,11 @@
 
         return;
     }
-    NSString* secondary = @"[Esc] full screen";
+    NSString* secondary = @"[Esc] clear region";
     if (!m_windows.empty() && sidescopes::supportsFaceDetection()) {
-        secondary = @"[A] attach to a window    [F] attach to a face    [Esc] full screen";
+        secondary = @"[A] attach to a window    [F] attach to a face    [Esc] clear region";
     } else if (!m_windows.empty()) {
-        secondary = @"[A] attach to a window    [Esc] full screen";
+        secondary = @"[A] attach to a window    [Esc] clear region";
     }
     [self drawBanner:@"Drag to draw a region" secondary:secondary preferCenter:NO];
 }

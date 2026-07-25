@@ -77,8 +77,9 @@ std::optional<FloatColor> CursorSampler::sampleOtherDisplay(DesktopPoint cursor,
     return screenSampleColor();
 }
 
-CursorSample CursorSampler::update(std::optional<AnalysisWorker::FrameSize> frameSize, const RegionOfInterest& region,
-                                   CursorSmoothing smoothing, double now, float deltaSeconds)
+CursorSample CursorSampler::update(std::optional<AnalysisWorker::FrameSize> frameSize,
+                                   const std::optional<RegionOfInterest>& region, CursorSmoothing smoothing, double now,
+                                   float deltaSeconds)
 {
     // Cursor color, smoothed per scope with its own rhythm. On the captured
     // display it reads the capture stream's frame; on every other display a
@@ -96,8 +97,8 @@ CursorSample CursorSampler::update(std::optional<AnalysisWorker::FrameSize> fram
     const std::optional<DisplayPixel> pixel =
         onCapturedDisplay && frameSize ? displayPixelOf(*cursor, *frameSize) : std::nullopt;
     const bool inRegion =
-        pixel && frameSize &&
-        region.toPixels(frameSize->displayWidth, frameSize->displayHeight).contains(pixel->x, pixel->y);
+        pixel && frameSize && region &&
+        region->toPixels(frameSize->displayWidth, frameSize->displayHeight).contains(pixel->x, pixel->y);
     const bool markersLive = inRegion || !m_markersFollowRegion;
 
     // Where the pointer is costs arithmetic; what colour is under it costs a

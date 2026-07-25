@@ -34,7 +34,7 @@ screen itself, so it works with every editor and needs no plugins.
 | A | attach to a window |
 | F | attach to a face |
 | D | draw a region |
-| Esc | reset to the full screen |
+| Esc | clear the region; the scopes go empty |
 | P | pin the color under the cursor |
 
 The region border is live on the desktop: drag it to move the region,
