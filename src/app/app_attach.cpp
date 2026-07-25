@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <cstdio>
 #include <optional>
 #include <string>
 #include <vector>
@@ -21,6 +22,21 @@ namespace {
 // The border returns this long after the active window last moved and the
 // grip released - what keeps a slow drag's sparse updates from flickering it.
 constexpr double AttachMotionSettleSeconds = 0.2;
+
+// The region for a diagnostics line. "none" rather than a rectangle when
+// nothing is selected: the whole-display percentages a default would print
+// read as a real selection, which is the sort of lie a log costs hours over.
+std::string regionDiagText(const std::optional<RegionOfInterest>& region)
+{
+    if (!region) {
+        return "none";
+    }
+    char text[48];
+    std::snprintf(text, sizeof(text), "%.1f,%.1f,%.1f,%.1f", region->leftPercent, region->topPercent,
+                  region->rightPercent, region->bottomPercent);
+
+    return text;
+}
 
 }  // namespace
 
@@ -212,12 +228,10 @@ void App::followAttachedWindow()
     m_attachLastSeenRect = decision.activeRect;
     applyAttachDecision(decision);
     captureActiveDisplay(decision);
-    const RegionOfInterest logged = m_analysis.region.value_or(RegionOfInterest{});
-    SS_DIAG(Attach, "fg=%lld active=%llu display=%u region=%.1f,%.1f,%.1f,%.1f label=%s moving=%d",
+    SS_DIAG(Attach, "fg=%lld active=%llu display=%u region=%s label=%s moving=%d",
             static_cast<long long>(foregroundApplicationPid()),
             static_cast<unsigned long long>(decision.activeIdentity), m_captureController.capturedDisplay(),
-            logged.leftPercent, logged.topPercent, logged.rightPercent, logged.bottomPercent,
-            m_attachActiveLabel.c_str(), m_attachedWindowMoving ? 1 : 0);
+            regionDiagText(m_analysis.region).c_str(), m_attachActiveLabel.c_str(), m_attachedWindowMoving ? 1 : 0);
     const FaceLockOutcome faceLockOutcome =
         m_faceLock.update(decision, m_frameSize, m_activeWindowIdentity, m_analysis.region,
                           m_regions.borderEditing() || m_attachedWindowMoving || m_attachGripActive, glfwGetTime());
