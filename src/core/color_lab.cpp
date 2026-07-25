@@ -1,7 +1,9 @@
 #include "core/color_lab.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
+#include <cstddef>
 #include <numbers>
 
 namespace sidescopes {
@@ -60,6 +62,23 @@ double linearFromEncoded(double encoded)
     return std::pow((encoded + 0.055) / 1.055, 2.4);
 }
 
+std::array<double, 256> makeLinearTable()
+{
+    std::array<double, 256> table{};
+    for (int code = 0; code < 256; ++code) {
+        table[static_cast<std::size_t>(code)] = linearFromEncoded(code / 255.0);
+    }
+
+    return table;
+}
+
+// Captured content is 8 bits per channel, so the transfer function has 256
+// possible inputs per channel and the scopes evaluate it once per pixel. The
+// table holds exactly what linearFromEncoded returns for each code - same
+// expression, same doubles - so a byte-sourced conversion is bit-identical to
+// the general one without paying a pow per channel per pixel.
+const std::array<double, 256> LinearTable = makeLinearTable();
+
 double labCurve(double t)
 {
     if (t > Epsilon) {
@@ -67,6 +86,25 @@ double labCurve(double t)
     }
 
     return (Kappa * t + 16.0) / 116.0;
+}
+
+LabColor labFromLinear(double red, double green, double blue)
+{
+    // sRGB primaries under D65.
+    const double x = 0.4124564 * red + 0.3575761 * green + 0.1804375 * blue;
+    const double y = 0.2126729 * red + 0.7151522 * green + 0.0721750 * blue;
+    const double z = 0.0193339 * red + 0.1191920 * green + 0.9503041 * blue;
+
+    const double fx = labCurve(x / WhiteX);
+    const double fy = labCurve(y / WhiteY);
+    const double fz = labCurve(z / WhiteZ);
+
+    LabColor lab;
+    lab.lightness = static_cast<float>(116.0 * fy - 16.0);
+    lab.a = static_cast<float>(500.0 * (fx - fy));
+    lab.b = static_cast<float>(200.0 * (fy - fz));
+
+    return lab;
 }
 
 // Hue angle in [0, 360). A colour on the neutral axis has no hue; atan2
@@ -145,25 +183,14 @@ HueTerms computeHueTerms(double chromaPrime1, double chromaPrime2, double huePri
 
 LabColor labFromSrgb(const FloatColor& srgb)
 {
-    const double red = linearFromEncoded(std::clamp(srgb.r / 255.0, 0.0, 1.0));
-    const double green = linearFromEncoded(std::clamp(srgb.g / 255.0, 0.0, 1.0));
-    const double blue = linearFromEncoded(std::clamp(srgb.b / 255.0, 0.0, 1.0));
+    return labFromLinear(linearFromEncoded(std::clamp(srgb.r / 255.0, 0.0, 1.0)),
+                         linearFromEncoded(std::clamp(srgb.g / 255.0, 0.0, 1.0)),
+                         linearFromEncoded(std::clamp(srgb.b / 255.0, 0.0, 1.0)));
+}
 
-    // sRGB primaries under D65.
-    const double x = 0.4124564 * red + 0.3575761 * green + 0.1804375 * blue;
-    const double y = 0.2126729 * red + 0.7151522 * green + 0.0721750 * blue;
-    const double z = 0.0193339 * red + 0.1191920 * green + 0.9503041 * blue;
-
-    const double fx = labCurve(x / WhiteX);
-    const double fy = labCurve(y / WhiteY);
-    const double fz = labCurve(z / WhiteZ);
-
-    LabColor lab;
-    lab.lightness = static_cast<float>(116.0 * fy - 16.0);
-    lab.a = static_cast<float>(500.0 * (fx - fy));
-    lab.b = static_cast<float>(200.0 * (fy - fz));
-
-    return lab;
+LabColor labFromSrgb8(const Color& srgb)
+{
+    return labFromLinear(LinearTable[srgb.r], LinearTable[srgb.g], LinearTable[srgb.b]);
 }
 
 float chromaOf(const LabColor& lab)

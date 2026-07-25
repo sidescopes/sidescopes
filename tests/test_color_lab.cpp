@@ -239,4 +239,44 @@ TEST_CASE("The reported difference carries the CIEDE2000 magnitude")
     }
 }
 
+// The byte conversion reads the transfer function from a table instead of
+// evaluating it. That is only allowed to be faster, never different, so the
+// two are compared bit for bit rather than within a tolerance: every code on
+// each axis, the neutral axis end to end, and a spread through the cube.
+TEST_CASE("The byte conversion matches the general one exactly")
+{
+    const auto identical = [](int r, int g, int b) {
+        const LabColor bytes =
+            labFromSrgb8(Color{static_cast<uint8_t>(r), static_cast<uint8_t>(g), static_cast<uint8_t>(b)});
+        const LabColor floats =
+            labFromSrgb(FloatColor{static_cast<float>(r), static_cast<float>(g), static_cast<float>(b)});
+
+        return bytes.lightness == floats.lightness && bytes.a == floats.a && bytes.b == floats.b;
+    };
+
+    for (int code = 0; code < 256; ++code) {
+        CAPTURE(code);
+        CHECK(identical(code, code, code));
+        CHECK(identical(code, 0, 255));
+        CHECK(identical(64, code, 191));
+        CHECK(identical(255, 128, code));
+    }
+
+    // A deterministic spread through the cube, so the cross terms are covered
+    // too and not just the axes.
+    uint32_t state = 0x5EEDu;
+    for (int sample = 0; sample < 20000; ++sample) {
+        const auto next = [&state]() {
+            state = state * 1664525u + 1013904223u;
+
+            return static_cast<int>(state >> 24);
+        };
+        const int r = next();
+        const int g = next();
+        const int b = next();
+        CAPTURE(r, g, b);
+        REQUIRE(identical(r, g, b));
+    }
+}
+
 }  // namespace sidescopes

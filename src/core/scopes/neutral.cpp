@@ -100,8 +100,10 @@ void Neutral::accumulate(const FrameView& frame, IntRect region)
         const uint8_t* pixel = frame.pixelAt(region.x, py);
         const uint8_t* rowEnd = frame.pixelAt(region.x + region.width, py);
         for (; pixel < rowEnd; pixel += static_cast<std::ptrdiff_t>(4) * stride) {
-            const LabColor lab = labFromSrgb(
-                FloatColor{static_cast<float>(pixel[2]), static_cast<float>(pixel[1]), static_cast<float>(pixel[0])});
+            // The byte-sourced conversion: bit-identical here, where every
+            // channel arrives as a code, and it does not evaluate the
+            // transfer function once per channel per pixel.
+            const LabColor lab = labFromSrgb8(Color{pixel[2], pixel[1], pixel[0]});
             sumA += lab.a;
             sumB += lab.b;
             ++count;
