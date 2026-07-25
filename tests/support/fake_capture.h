@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -27,6 +28,9 @@ public:
     int stopCount = 0;
     uint32_t lastStartedDisplay = 0;
     int lastFramesPerSecond = 0;
+    /// Every narrowing the controller passed through, in order, so a test can
+    /// tell "asked for the whole display" from "was not asked at all".
+    std::vector<std::optional<IntRect>> narrowings;
 
     CapturePermission requestPermission() override
     {
@@ -38,6 +42,11 @@ public:
     std::vector<CaptureTarget> listTargets() override
     {
         return targets;
+    }
+
+    void narrowTo(const std::optional<IntRect>& rect) override
+    {
+        narrowings.push_back(rect);
     }
 
     bool start(const CaptureTarget& target, int maxFramesPerSecond, FrameMailbox&) override

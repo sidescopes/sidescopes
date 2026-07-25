@@ -21,6 +21,8 @@
 #include <algorithm>
 #include <atomic>
 #include <cstring>
+#include <mutex>
+#include <optional>
 #include <string>
 
 #include "platform/desktop.h"
@@ -82,12 +84,34 @@ SCContentFilter* buildContentFilter(SCShareableContent* content, SCDisplay* disp
     return [[SCContentFilter alloc] initWithDisplay:display excludingWindows:@[]];
 }
 
-SCStreamConfiguration* makeStreamConfiguration(SCDisplay* display, SCContentFilter* filter, int maxFramesPerSecond)
+CGFloat pixelScaleOf(SCContentFilter* filter)
+{
+    return filter.pointPixelScale > 0 ? filter.pointPixelScale : 2.0;
+}
+
+// Narrows @p configuration to @p crop, which is in display PIXELS while
+// sourceRect is in points - the conversion is the whole reason this is a function
+// and not two lines. width and height stay in pixels and become the crop's own,
+// so the delivered buffer is exactly the region and the copy shrinks with it.
+void narrowConfiguration(SCStreamConfiguration* configuration, IntRect crop, CGFloat scale)
+{
+    configuration.sourceRect =
+        CGRectMake(static_cast<CGFloat>(crop.x) / scale, static_cast<CGFloat>(crop.y) / scale,
+                   static_cast<CGFloat>(crop.width) / scale, static_cast<CGFloat>(crop.height) / scale);
+    configuration.width = static_cast<size_t>(crop.width);
+    configuration.height = static_cast<size_t>(crop.height);
+}
+
+SCStreamConfiguration* makeStreamConfiguration(SCDisplay* display, SCContentFilter* filter, int maxFramesPerSecond,
+                                               const std::optional<IntRect>& crop)
 {
     SCStreamConfiguration* configuration = [[SCStreamConfiguration alloc] init];
-    const CGFloat scale = filter.pointPixelScale > 0 ? filter.pointPixelScale : 2.0;
+    const CGFloat scale = pixelScaleOf(filter);
     configuration.width = static_cast<size_t>(static_cast<CGFloat>(display.width) * scale);
     configuration.height = static_cast<size_t>(static_cast<CGFloat>(display.height) * scale);
+    if (crop) {
+        narrowConfiguration(configuration, *crop, scale);
+    }
     configuration.pixelFormat = kCVPixelFormatType_32BGRA;
     configuration.minimumFrameInterval = CMTimeMake(1, maxFramesPerSecond);
     configuration.showsCursor = NO;
@@ -181,7 +205,19 @@ public:
         }
 
         SCContentFilter* filter = buildContentFilter(content, display);
-        SCStreamConfiguration* configuration = makeStreamConfiguration(display, filter, maxFramesPerSecond);
+        SCStreamConfiguration* configuration =
+            makeStreamConfiguration(display, filter, maxFramesPerSecond, std::nullopt);
+        m_display = display;
+        m_filter = filter;
+        m_maxFramesPerSecond = maxFramesPerSecond;
+        {
+            // A stream starts on the whole display; narrowing is asked for later,
+            // once a region has settled.
+            std::lock_guard lock(m_geometryMutex);
+            m_crop.reset();
+            m_displayPixelWidth = static_cast<int>(configuration.width);
+            m_displayPixelHeight = static_cast<int>(configuration.height);
+        }
 
         m_handler = [[SidescopesStreamHandler alloc] init];
         m_handler.owner = this;
@@ -209,6 +245,31 @@ public:
 
         m_running.store(true);
         return true;
+    }
+
+    void narrowTo(const std::optional<IntRect>& rect) override
+    {
+        if (!m_running.load() || m_stream == nil || m_display == nil) {
+            return;
+        }
+        {
+            std::lock_guard lock(m_geometryMutex);
+            if (m_crop == rect) {
+                return;
+            }
+            m_crop = rect;
+        }
+        SCStreamConfiguration* configuration = makeStreamConfiguration(m_display, m_filter, m_maxFramesPerSecond, rect);
+        // Fire and forget: frames keep arriving at the old geometry until this
+        // lands, and each frame is stamped from the size actually delivered, so
+        // nothing downstream depends on when that happens.
+        [m_stream
+            updateConfiguration:configuration
+              completionHandler:^(NSError* error) {
+                if (error != nil && m_status) {
+                    m_status(std::string("narrowing the capture failed: ") + error.localizedDescription.UTF8String);
+                }
+              }];
     }
 
     void stop() override
@@ -261,11 +322,27 @@ public:
         const int sourceStride = static_cast<int>(CVPixelBufferGetBytesPerRow(image));
         const auto* source = static_cast<const uint8_t*>(CVPixelBufferGetBaseAddress(image));
 
+        // Which part of the display these pixels are is decided by the size
+        // actually delivered, not by what was last asked for: a narrowing takes
+        // effect some frames after the request, and a frame whose origin we could
+        // only guess at would put every scope on the wrong pixels. A delivery
+        // matching neither geometry is one in flight across a change, and is
+        // dropped rather than guessed at - one frame, thirty times a second.
+        const std::optional<IntRect> stamp = geometryFor(width, height);
+        if (!stamp) {
+            CVPixelBufferUnlockBaseAddress(image, kCVPixelBufferLock_ReadOnly);
+            return;
+        }
+
         m_buffer.width = width;
         m_buffer.height = height;
         m_buffer.strideBytes = width * 4;  // repacked tightly, surface padding dropped
         m_buffer.colorSpace = ColorSpaceHint::Srgb;
         m_buffer.sequence = ++m_sequence;
+        m_buffer.sourceX = stamp->x;
+        m_buffer.sourceY = stamp->y;
+        m_buffer.sourceWidth = stamp->width;
+        m_buffer.sourceHeight = stamp->height;
         m_buffer.data.resize(static_cast<std::size_t>(m_buffer.strideBytes) * height);
         for (int py = 0; py < height; ++py) {
             std::memcpy(m_buffer.data.data() + static_cast<std::size_t>(py) * m_buffer.strideBytes,
@@ -274,6 +351,26 @@ public:
         CVPixelBufferUnlockBaseAddress(image, kCVPixelBufferLock_ReadOnly);
 
         m_buffer = m_mailbox->publish(std::move(m_buffer));
+    }
+
+    // The source stamp for a delivery of @p width by @p height: the crop's origin
+    // with the display's extents when it is the narrowed geometry, all zeros when
+    // it is the whole display, and nothing when it is neither.
+    //
+    // Returned as a rectangle carrying origin and the DISPLAY's extents, which is
+    // what a frame records - not the crop's own size, which is the frame's.
+    [[nodiscard]] std::optional<IntRect> geometryFor(int width, int height) const
+    {
+        std::lock_guard lock(m_geometryMutex);
+        const bool whole = width == m_displayPixelWidth && height == m_displayPixelHeight;
+        if (whole) {
+            return IntRect{};
+        }
+        if (m_crop && width == m_crop->width && height == m_crop->height) {
+            return IntRect{m_crop->x, m_crop->y, m_displayPixelWidth, m_displayPixelHeight};
+        }
+
+        return std::nullopt;
     }
 
     void handleStopped(NSError* error)
@@ -313,6 +410,20 @@ private:
     StatusCallback m_status;
     std::atomic<bool> m_running{false};
     std::atomic<uint64_t> m_sequence{0};
+
+    // What a narrowing needs to rebuild a configuration, kept from the start that
+    // succeeded.
+    SCDisplay* m_display = nil;
+    SCContentFilter* m_filter = nil;
+    int m_maxFramesPerSecond = 0;
+
+    // The geometry the delivered frames are stamped with. Written on whatever
+    // thread asks for a narrowing, read on the capture queue for every frame, so
+    // it is guarded; the lock is held for four reads a frame.
+    mutable std::mutex m_geometryMutex;
+    std::optional<IntRect> m_crop;
+    int m_displayPixelWidth = 0;
+    int m_displayPixelHeight = 0;
 };
 
 std::unique_ptr<ScreenCaptureSource> createScreenCaptureSource()

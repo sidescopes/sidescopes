@@ -503,6 +503,28 @@ void App::servicePipelineVisibility(double now)
     case PipelineAction::Keep:
         break;
     }
+
+    serviceCaptureCrop(inputs.needsFrames, now);
+}
+
+// Asks the capture for only the pixels the region needs. The compositor renders,
+// scales and delivers whatever the stream is configured for, so a region a
+// fraction of the display was still costing a whole display's worth of that work
+// every frame, plus the copy into the mailbox.
+void App::serviceCaptureCrop(bool otherReadersActive, double now)
+{
+    if (!m_frameSize) {
+        return;
+    }
+    const IntRect regionPixels = m_analysis.region.toPixels(m_frameSize->displayWidth, m_frameSize->displayHeight);
+    const std::optional<IntRect> crop = m_cropTracker.decide(
+        regionPixels, m_frameSize->displayWidth, m_frameSize->displayHeight, otherReadersActive, false, now);
+    if (crop != m_appliedCrop) {
+        SS_DIAG(Perf, "capture narrowed to %dx%d at %d,%d", crop ? crop->width : m_frameSize->displayWidth,
+                crop ? crop->height : m_frameSize->displayHeight, crop ? crop->x : 0, crop ? crop->y : 0);
+        m_appliedCrop = crop;
+    }
+    m_captureController.narrowTo(crop);
 }
 
 void App::pumpEvents()

@@ -45,4 +45,18 @@ std::optional<IntRect> cropFor(const CropInputs& inputs)
     return region;
 }
 
+std::optional<IntRect> CropTracker::decide(IntRect regionPixels, int displayWidth, int displayHeight, bool pickerActive,
+                                           bool faceLockActive, double now)
+{
+    if (!m_seenRegion || !(m_region == regionPixels)) {
+        m_region = regionPixels;
+        m_changedAt = now;
+        m_seenRegion = true;
+    }
+
+    const CropInputs inputs{regionPixels, displayWidth, displayHeight, pickerActive, faceLockActive, m_changedAt, now};
+
+    return cropFor(inputs);
+}
+
 }  // namespace sidescopes

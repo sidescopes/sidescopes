@@ -356,4 +356,44 @@ TEST_CASE("a stream that dies while suspended is not restarted until it returns"
     CHECK_FALSE(controller.dead());
 }
 
+TEST_CASE("Narrowing reaches the stream only while it is delivering")
+{
+    // A stream that is not running, or is suspended, has nothing to narrow - and
+    // a restart begins on the whole display, so the next decision re-applies
+    // whatever is wanted. Forwarding regardless would ask a dead stream to
+    // reconfigure.
+    FakeCaptureSource source;
+    source.targets = {makeTarget(1, "main")};
+    FrameMailbox mailbox;
+    CaptureController controller(source, mailbox);
+
+    const IntRect canvas{100, 100, 800, 600};
+
+    // Before start: ignored.
+    controller.narrowTo(canvas);
+    CHECK(source.narrowings.empty());
+
+    REQUIRE(controller.requestPermission());
+    REQUIRE(controller.start());
+    controller.narrowTo(canvas);
+    REQUIRE(source.narrowings.size() == 1);
+    REQUIRE(source.narrowings.back().has_value());
+    CHECK(*source.narrowings.back() == canvas);
+
+    // Asking for the whole display is a request in its own right, not silence.
+    controller.narrowTo(std::nullopt);
+    REQUIRE(source.narrowings.size() == 2);
+    CHECK_FALSE(source.narrowings.back().has_value());
+
+    // Suspended: ignored, because the stream is not delivering.
+    controller.suspend();
+    controller.narrowTo(canvas);
+    CHECK(source.narrowings.size() == 2);
+
+    // And honoured again once it is.
+    controller.resume();
+    controller.narrowTo(canvas);
+    CHECK(source.narrowings.size() == 3);
+}
+
 }  // namespace sidescopes

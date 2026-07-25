@@ -28,6 +28,11 @@ struct IntRect
         return width <= 0 || height <= 0;
     }
 
+    [[nodiscard]] bool operator==(const IntRect& other) const
+    {
+        return x == other.x && y == other.y && width == other.width && height == other.height;
+    }
+
     /// Intersection with the rectangle [0, 0, frameWidth, frameHeight). The
     /// result may be empty; callers must handle that.
     [[nodiscard]] IntRect clampedTo(int frameWidth, int frameHeight) const;

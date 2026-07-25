@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -56,6 +57,21 @@ public:
     virtual void stop() = 0;
 
     virtual void setStatusCallback(StatusCallback callback) = 0;
+
+    /// Asks the running stream to deliver only @p rect of the display, in display
+    /// pixels, or the whole display when nothing is passed. Frames report which
+    /// part of the display they carry either way, so narrowing never moves what a
+    /// scope reads; see FrameView.
+    ///
+    /// Best-effort by design: a backend that cannot narrow keeps delivering the
+    /// whole display, which is correct rather than merely tolerable - the region
+    /// is still resolved against the display, so only the cost is unimproved. That
+    /// is the default, and it is what Windows does, DXGI having no source
+    /// rectangle.
+    virtual void narrowTo(const std::optional<IntRect>& rect)
+    {
+        (void)rect;
+    }
 };
 
 /// Creates the platform's screen-capture source.

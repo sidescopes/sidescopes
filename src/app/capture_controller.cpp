@@ -173,6 +173,14 @@ void CaptureController::resume()
     (void)start();
 }
 
+void CaptureController::narrowTo(const std::optional<IntRect>& rect)
+{
+    if (!m_running || m_suspended) {
+        return;
+    }
+    m_source.narrowTo(rect);
+}
+
 bool CaptureController::suspended() const
 {
     return m_suspended;

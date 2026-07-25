@@ -14,6 +14,7 @@
 #include "app/adaptive_detail.h"
 #include "app/attach_controller.h"
 #include "app/capture_controller.h"
+#include "app/capture_crop.h"
 #include "app/cursor_sampler.h"
 #include "app/face_lock_controller.h"
 #include "app/frame_pacing.h"
@@ -150,6 +151,7 @@ private:
     /// Suspends the capture stream - and the whole pipeline behind it - while
     /// the window is out of sight, and resumes it when the window returns.
     void servicePipelineVisibility(double now);
+    void serviceCaptureCrop(bool otherReadersActive, double now);
     void pumpEvents();
     void drainAsyncSignals();
     void followWindowDisplay();
@@ -307,6 +309,8 @@ private:
     /// Decides when the pipeline is suspended and resumed; owns the clock its
     /// hysteresis measures against.
     VisibilityGate m_visibility;
+    CropTracker m_cropTracker;
+    std::optional<IntRect> m_appliedCrop;
     /// Whether the session has stopped showing anything - the display asleep,
     /// the screen locked, another user switched in. Set from the platform
     /// observers, which may deliver on any thread, and read by the frame loop.

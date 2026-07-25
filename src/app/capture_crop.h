@@ -49,6 +49,25 @@ struct CropInputs
 /// display can skip frames until an un-narrowed one arrives.
 [[nodiscard]] std::optional<IntRect> cropFor(const CropInputs& inputs);
 
+/// Asks cropFor on the caller's behalf, keeping the one piece of state the pure
+/// policy cannot: when the region last changed. The region is written from three
+/// different places - a picked region, an attached window's, a preset's - so
+/// noticing the change here rather than at each of them keeps the settle rule in
+/// one place and off the paths that merely set a region.
+class CropTracker
+{
+public:
+    /// The sub-rectangle the capture should deliver now, given the region in
+    /// display pixels and who else is reading frames.
+    [[nodiscard]] std::optional<IntRect> decide(IntRect regionPixels, int displayWidth, int displayHeight,
+                                                bool pickerActive, bool faceLockActive, double now);
+
+private:
+    IntRect m_region;
+    double m_changedAt = 0.0;
+    bool m_seenRegion = false;
+};
+
 /// Whether @p view carries what a reader of the whole display needs. False for a
 /// narrowed frame, whatever it contains, because the pixels that reader wants may
 /// simply not be present.

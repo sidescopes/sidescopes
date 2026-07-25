@@ -3,6 +3,7 @@
 #include <atomic>
 #include <cstdint>
 #include <mutex>
+#include <optional>
 #include <string>
 
 #include "core/frame_mailbox.h"
@@ -66,6 +67,13 @@ public:
 
     /// @return Whether capture is suspended.
     [[nodiscard]] bool suspended() const;
+
+    /// Asks the stream to deliver only @p rect of the display, in display pixels,
+    /// or the whole display when nothing is passed. Ignored while the pipeline is
+    /// suspended or not running - a stream that is not delivering has nothing to
+    /// narrow, and a restart begins on the whole display, so the next decision
+    /// re-applies whatever is wanted.
+    void narrowTo(const std::optional<IntRect>& rect);
 
     /// Once per frame: consumes a stale mark, then restarts a dead stream
     /// after its backoff. @p now is the frame clock in seconds; the
