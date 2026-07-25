@@ -104,6 +104,12 @@ public:
     /// @return Whether @p identity currently holds a face lock.
     [[nodiscard]] bool contains(uint64_t identity) const;
 
+    /// @return Whether any window holds a face lock. The probe searches the
+    ///         locked window's rectangle and the content watch samples the
+    ///         region it found, so both read pixels a capture narrowed to the
+    ///         analysis region need not carry.
+    [[nodiscard]] bool locked() const;
+
     /// @return Whether the active lock's face is not confirmed where the region
     ///         sits; the border hides instead of outlining stale content.
     [[nodiscard]] bool hunting() const;

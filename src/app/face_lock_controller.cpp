@@ -349,6 +349,11 @@ bool FaceLockController::contains(uint64_t identity) const
     return m_locks.contains(identity);
 }
 
+bool FaceLockController::locked() const
+{
+    return !m_locks.empty();
+}
+
 bool FaceLockController::hunting() const
 {
     return m_hunting;

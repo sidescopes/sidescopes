@@ -520,12 +520,18 @@ TEST_CASE("Activating a window whose anchor went stale starts a hunt")
 TEST_CASE("Clearing and removing forget the locks they are given")
 {
     ControllerFixture fix;
+    CHECK_FALSE(fix.controller.locked());
     fix.controller.addLock(1, foreheadLock(), 0.0);
     fix.controller.addLock(2, foreheadLock(), 0.0);
+    // A held lock is what keeps the capture on the whole display: the probe
+    // searches the window's rectangle, which the analysis region does not
+    // contain.
+    CHECK(fix.controller.locked());
 
     fix.controller.removeLock(1);
     CHECK_FALSE(fix.controller.contains(1));
     CHECK(fix.controller.contains(2));
+    CHECK(fix.controller.locked());
 
     // Watch Full Screen drops everything, the hunting state included.
     fix.controller.onActivated(2, 5.0);
@@ -533,6 +539,7 @@ TEST_CASE("Clearing and removing forget the locks they are given")
     fix.controller.clear();
     CHECK_FALSE(fix.controller.contains(2));
     CHECK_FALSE(fix.controller.hunting());
+    CHECK_FALSE(fix.controller.locked());
 }
 
 TEST_CASE("A border edit re-teaches the crop the face carries")

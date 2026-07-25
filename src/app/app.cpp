@@ -543,8 +543,9 @@ void App::serviceCaptureCrop(bool otherReadersActive, double now)
         return;
     }
     const IntRect regionPixels = m_analysis.region.toPixels(m_frameSize->displayWidth, m_frameSize->displayHeight);
-    const std::optional<IntRect> crop = m_cropTracker.decide(
-        regionPixels, m_frameSize->displayWidth, m_frameSize->displayHeight, otherReadersActive, false, now);
+    const std::optional<IntRect> crop =
+        m_cropTracker.decide(regionPixels, m_frameSize->displayWidth, m_frameSize->displayHeight, otherReadersActive,
+                             m_faceLock.locked(), now);
     if (crop != m_appliedCrop) {
         SS_DIAG(Perf, "capture narrowed to %dx%d at %d,%d", crop ? crop->width : m_frameSize->displayWidth,
                 crop ? crop->height : m_frameSize->displayHeight, crop ? crop->x : 0, crop ? crop->y : 0);
