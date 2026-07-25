@@ -27,6 +27,17 @@ enum class NeutralRange
     Wide,    ///< +-80
 };
 
+/// Samples the neutral scope needs in each of its bins, and the one budget that
+/// is also capped: its plane follows its pane, so its bins grow to a million,
+/// but it converts every sample to L*a*b* and an unbounded pass over a whole
+/// display measured 69 ms. So it takes the smaller of this and SampleBudget,
+/// which leaves a large plane costing what it does today and makes the default
+/// one cheaper. Calibrated over a whole 3456x2234 display at the default plane:
+/// the pass falls from 35 ms to 14, the cloud moves by a mean of 0.70 of 255,
+/// and the average-cast dot - the reading anyone takes off this scope - moves
+/// by 0.02 of the 160 a*b* units its widest range spans.
+inline constexpr int NeutralMinSamplesPerBin = 24;
+
 struct NeutralSettings
 {
     /// Brightness applied to the near-neutral cloud's density.

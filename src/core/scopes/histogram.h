@@ -20,6 +20,16 @@ enum class HistogramStyle
     PerChannel,
 };
 
+/// Samples the histogram needs in each of its bins. Its bins are fixed at 768 -
+/// 256 codes for each of three channels - however large the pane or the region,
+/// so nothing about its precision grows with either, and a whole 3456x2234
+/// display was putting ten thousand samples in every one of them. Calibrated
+/// over that display against sampling every row: the image moves by a mean of
+/// 0.16 of 255, its rare large deltas confined to the plotted curve's own edge,
+/// and the pass falls from 4.6 ms to 3.3. A region small enough to fit inside
+/// this budget is still sampled whole.
+inline constexpr int HistogramMinSamplesPerBin = 1000;
+
 struct HistogramSettings
 {
     HistogramStyle style = HistogramStyle::PerChannel;

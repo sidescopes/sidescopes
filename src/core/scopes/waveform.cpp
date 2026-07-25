@@ -516,7 +516,9 @@ void Waveform::scatterRows(const FrameView& frame, IntRect region, const SampleG
 void Waveform::accumulate(const FrameView& frame, IntRect region)
 {
     region = region.clampedTo(frame.width, frame.height);
-    const SampleGrid grid = sampleGridFor(m_settings.samplingStride, region, UnlimitedSamples);
+    const SampleGrid grid =
+        sampleGridFor(m_settings.samplingStride, region,
+                      budgetForBins(static_cast<long long>(m_columns) * Levels, WaveformMinSamplesPerBin));
     const int rowCount = grid.rows;
 
     const PlaneSpan span = planeSpanFor(modeFlagsFor(m_settings.mode));

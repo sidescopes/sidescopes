@@ -23,6 +23,24 @@ inline constexpr int WaveformLevels = 256;
 inline constexpr int MaximumWaveformColumns = 3072;
 inline constexpr int MaximumWaveformHeight = 768;
 
+/// Samples the waveform needs in each of its bins. It is the sample-starved
+/// scope - its bins are columns x 256, an order of magnitude more than any other
+/// scope's, so a 2048-column trace over a whole display holds only fifteen
+/// samples a bin - and its log-and-gamma mapping amplifies bin noise where the
+/// vectorscope's density estimate suppresses it. So its minimum is the highest
+/// here, and because its bins scale with its pane the budget it produces is
+/// above a whole display's pixel count from the default thousand columns up: a
+/// waveform large enough to need every row still gets every row, and this is the
+/// value that guarantees it for a 4K region at that default rather than landing
+/// a percent short of it.
+///
+/// Below that it thins, which is the deliberate trade for a small pane.
+/// Calibrated over a whole 3456x2234 display at 512 columns: the pass falls from
+/// 11.3 ms to 6.5, and the image moves by a mean of 1.1 of 255 on a photograph
+/// and 1.9 on gradient-plus-grain - an order of magnitude more than the other
+/// scopes pay, which is why it buys only the small-pane case.
+inline constexpr int WaveformMinSamplesPerBin = 32;
+
 struct WaveformSettings
 {
     /// Trace gain applied to normalized bin densities before log mapping.

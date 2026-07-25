@@ -4,14 +4,12 @@
 
 namespace sidescopes {
 
-/// The most samples one accumulate pass takes from a region, for a scope whose
-/// bins are densely populated. A whole high-resolution display puts a hundred
-/// samples in every vectorscope bin and ten thousand in every histogram bin;
-/// halving that changes nothing anyone can see, and the pixels behind the other
-/// half are read thirty times a second. Everyday regions sit far below the
-/// budget and are sampled whole: it sits just above half a 4K frame, so every
-/// display up to 1440p is sampled row for row, a 4K or Retina one takes every
-/// second row, and a 5K one every fourth.
+/// The ceiling on one accumulate pass, whatever its bins would justify. Only the
+/// neutral scope needs it: its bins grow with its pane, and it is the one engine
+/// that converts every sample to L*a*b*, so an unbounded pass over a whole
+/// display measured 69 ms against 14 at this ceiling. Every other scope's budget
+/// is bounded by its own bin count. It sits just above half a 4K frame, so a
+/// display up to 1440p is sampled row for row.
 ///
 /// Measured over a whole 3456x2234 display against sampling every row, on
 /// gradient-plus-grain content: the vectorscope image moves by at most 7 of
@@ -20,15 +18,28 @@ namespace sidescopes {
 /// edge - the curve moves by well under a pixel.
 inline constexpr long long SampleBudget = 4'200'000;
 
-/// No thinning: every row in the region is sampled. The waveform asks for this.
-/// Its bins are an order of magnitude emptier than any other scope's - a
-/// 2048-column trace over a whole display averages fifteen samples a bin, and
-/// under nine per column per level - so it is already sample-starved and pays
-/// for thinning in visible trace noise. Measured on the same content, halving
-/// its rows moves the image by a mean of 5.4 of 255 with a fifth of the pixels
-/// past 8, and 15.1 in the colored-luma style. That is not a trade the
-/// measurement can afford.
+/// No thinning: every row in the region is sampled, whatever the region costs.
+/// Reserved for callers that must see the whole region by construction - the
+/// tests that establish a reference image, and any scope whose bins outnumber
+/// the pixels available to fill them.
 inline constexpr long long UnlimitedSamples = 0;
+
+/// The budget for a scope holding @p binCount bins that needs
+/// @p minimumSamplesPerBin samples in each of them to draw without visible
+/// noise. Samples per bin is the currency, because it - not the region size - is
+/// what decides whether a scope looks noisy: a whole display puts ten thousand
+/// samples in every histogram bin and fifteen in every waveform bin, so one
+/// global budget over-serves the first by an order of magnitude while
+/// starving the second.
+///
+/// This is also what makes a small scope cheap. The histogram's bins are fixed,
+/// so its cost stops growing with the pane; the waveform's and the neutral's
+/// scale with theirs, so a small one thins where a large one does not - cost
+/// proportional to the scope first and the region second.
+[[nodiscard]] inline long long budgetForBins(long long binCount, int minimumSamplesPerBin)
+{
+    return binCount * minimumSamplesPerBin;
+}
 
 /// The grid an accumulate pass samples a region on: every @p columnStride
 /// pixel of every @p rowStride row, starting at the region's top-left corner.

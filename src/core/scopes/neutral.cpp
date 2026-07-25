@@ -97,7 +97,9 @@ void Neutral::accumulate(const FrameView& frame, IntRect region)
     double sumB = 0.0;
     uint64_t count = 0;
     uint64_t neutral = 0;
-    const SampleGrid grid = sampleGridFor(m_settings.samplingStride, region, SampleBudget);
+    const long long planeBins = static_cast<long long>(m_imageSize) * m_imageSize;
+    const long long budget = std::min(budgetForBins(planeBins, NeutralMinSamplesPerBin), SampleBudget);
+    const SampleGrid grid = sampleGridFor(m_settings.samplingStride, region, budget);
     for (int row = 0; row < grid.rows; ++row) {
         const int py = sampleRowOf(grid, region, row);
         const uint8_t* pixel = frame.pixelAt(region.x, py);

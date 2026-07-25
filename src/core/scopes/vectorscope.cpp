@@ -157,7 +157,9 @@ void Vectorscope::scatterRows(const FrameView& frame, IntRect region, const Samp
 void Vectorscope::accumulate(const FrameView& frame, IntRect region)
 {
     region = region.clampedTo(frame.width, frame.height);
-    const SampleGrid grid = sampleGridFor(m_settings.samplingStride, region, SampleBudget);
+    const SampleGrid grid =
+        sampleGridFor(m_settings.samplingStride, region,
+                      budgetForBins(static_cast<long long>(CodeGridSize) * CodeGridSize, VectorscopeMinSamplesPerBin));
     const int rowCount = grid.rows;
     const int pixelsPerRow = grid.columnsPerRow;
     // The scatter counts one sample per sampled pixel; the count is a plain

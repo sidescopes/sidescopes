@@ -3,7 +3,11 @@
 #include <vector>
 
 #include "core/frame.h"
+#include "core/scopes/histogram.h"
+#include "core/scopes/neutral.h"
 #include "core/scopes/sampling.h"
+#include "core/scopes/vectorscope.h"
+#include "core/scopes/waveform.h"
 
 namespace sidescopes {
 namespace {
@@ -148,15 +152,80 @@ TEST_CASE("A phase that would leave the region falls back inside it")
 
 TEST_CASE("The budgets are the ones the measurements were taken at")
 {
-    // Both numbers were chosen from measured accuracy, recorded in
-    // notes/perf-findings.md, so moving either is a decision rather than a
-    // tweak. The budget sits just above half a 4K frame, which is what keeps
+    // Every number here was chosen from measured accuracy, recorded in
+    // notes/perf-findings.md, so moving any of them is a decision rather than a
+    // tweak. The ceiling sits just above half a 4K frame, which is what keeps
     // every display up to 1440p sampled row for row.
     CHECK(SampleBudget == 4'200'000);
     CHECK(SampleBudget > static_cast<long long>(1920) * 1080);
     CHECK(SampleBudget > static_cast<long long>(2560) * 1440);
     CHECK(SampleBudget < static_cast<long long>(3456) * 2234);
     CHECK(UnlimitedSamples == 0);
+
+    // Per bin, calibrated per scope over a whole 3456x2234 display: the
+    // histogram's bins are fixed and were holding ten thousand samples each; the
+    // vectorscope's density estimate suppresses bin noise the waveform's
+    // log-and-gamma amplifies, so the waveform's minimum is the highest here.
+    CHECK(HistogramMinSamplesPerBin == 1000);
+    CHECK(VectorscopeMinSamplesPerBin == 24);
+    CHECK(NeutralMinSamplesPerBin == 24);
+    CHECK(WaveformMinSamplesPerBin == 32);
+}
+
+TEST_CASE("A scope with fixed bins stops costing more as the region grows")
+{
+    // The histogram's precision cannot improve past its 768 bins however large
+    // the region is, so its budget does not grow with one. This is what makes it
+    // cheap behind a full-screen region, where it was taking every second row of
+    // a 7.7 million pixel frame to fill bins that were already saturated.
+    constexpr long long HistogramBins = 256 * 3;
+    const long long budget = budgetForBins(HistogramBins, HistogramMinSamplesPerBin);
+    CHECK(budget == 768'000);
+
+    const SampleGrid display = sampleGridFor(1, IntRect{0, 0, 3456, 2234}, budget);
+    CHECK(display.rowStride > 1);
+    // Still a thousand samples a bin at the largest region a display offers,
+    // which is the whole argument for thinning it this far.
+    CHECK(static_cast<long long>(display.rows) * display.columnsPerRow / HistogramBins > 1000);
+
+    // A region small enough to fit the budget is sampled whole.
+    const SampleGrid canvas = sampleGridFor(1, IntRect{0, 0, 900, 700}, budget);
+    CHECK(canvas.rowStride == 1);
+}
+
+TEST_CASE("A scope whose bins follow its pane thins only while it is small")
+{
+    // The waveform's bins are columns x levels, so its budget grows with the
+    // pane it is drawn into. That is the owner's principle in one line: a small
+    // waveform can afford to thin, a large one cannot, and one global budget
+    // could not tell them apart.
+    const IntRect display{0, 0, 3456, 2234};
+    const auto budgetAt = [](int columns) {
+        return budgetForBins(static_cast<long long>(columns) * WaveformLevels, WaveformMinSamplesPerBin);
+    };
+
+    CHECK(sampleGridFor(1, display, budgetAt(512)).rowStride > 1);
+    // From the default width up, every row - including at every width above it.
+    for (const int columns : {DefaultWaveformColumns, 2048, MaximumWaveformColumns}) {
+        CHECK(sampleGridFor(1, display, budgetAt(columns)).rowStride == 1);
+    }
+}
+
+TEST_CASE("The neutral plane's budget is capped however many bins it grows")
+{
+    // Alone among the scopes the neutral one converts every sample to L*a*b*, so
+    // an unbounded pass over a whole display measured 69 ms against 14 at the
+    // ceiling. Its plane follows its pane up to a million bins, which would ask
+    // for twenty-five million samples; the ceiling is what keeps a large plane
+    // costing what it costs today rather than five times that.
+    const long long uncapped = budgetForBins(1024LL * 1024, NeutralMinSamplesPerBin);
+    CHECK(uncapped > SampleBudget);
+    CHECK(std::min(uncapped, SampleBudget) == SampleBudget);
+
+    // At the default plane the derived budget is what applies, and it is well
+    // below the ceiling - which is where the saving comes from.
+    const long long derived = budgetForBins(256LL * 256, NeutralMinSamplesPerBin);
+    CHECK(derived < SampleBudget);
 }
 
 TEST_CASE("An empty region asks for no samples")

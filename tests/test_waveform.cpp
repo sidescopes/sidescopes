@@ -418,22 +418,28 @@ TEST_CASE("Colored luma waveform draws a neutral trace for a pure black region")
     CHECK(g == b);
 }
 
-TEST_CASE("The waveform sees every row of a region past the sample budget")
+TEST_CASE("A waveform wide enough to need every row gets every row")
 {
-    // The waveform opts out of the row thinning the other scopes take, because
-    // its bins are an order of magnitude emptier and thinning costs it visible
-    // trace noise. Nothing else guards that opt-out: the exact goldens run on
-    // frames far too small to reach the budget, so a waveform that started
+    // The waveform's budget is its bin count times the samples each bin needs,
+    // and its bins are an order of magnitude emptier than any other scope's, so
+    // from its default width up that budget exceeds any region's pixel count and
+    // no thinning happens. Nothing else guards that: the exact goldens run on
+    // frames far too small to reach any budget, so a waveform that started
     // thinning would pass every one of them.
     //
-    // So paint black exactly the rows a budgeted pass would visit and white all
+    // So paint black exactly the rows a thinned pass would visit and white all
     // the rest, taking the pattern from the policy itself rather than hard
     // coding it. A waveform that samples every row sees white; one that thinned
     // would see nothing but black.
     constexpr int Width = 4201;
     constexpr int Height = 1000;
     const IntRect region{0, 0, Width, Height};
-    REQUIRE(static_cast<long long>(Width) * Height > SampleBudget);
+    // Below the waveform's own budget at its default width, and above the one a
+    // scope with fixed bins would get - so this frame separates the two.
+    REQUIRE(static_cast<long long>(Width) * Height >
+            budgetForBins(static_cast<long long>(DefaultWaveformColumns) * WaveformLevels, 1));
+    REQUIRE(static_cast<long long>(Width) * Height <
+            budgetForBins(static_cast<long long>(DefaultWaveformColumns) * WaveformLevels, WaveformMinSamplesPerBin));
 
     const SampleGrid budgeted = sampleGridFor(1, region, SampleBudget);
     REQUIRE(budgeted.rowStride > 1);

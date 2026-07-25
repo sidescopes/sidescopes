@@ -132,7 +132,9 @@ void Histogram::scatterRows(const FrameView& frame, IntRect region, const Sample
 void Histogram::accumulate(const FrameView& frame, IntRect region)
 {
     region = region.clampedTo(frame.width, frame.height);
-    const SampleGrid grid = sampleGridFor(m_settings.samplingStride, region, SampleBudget);
+    const SampleGrid grid =
+        sampleGridFor(m_settings.samplingStride, region,
+                      budgetForBins(static_cast<long long>(m_bins.size()), HistogramMinSamplesPerBin));
     const int rowCount = grid.rows;
 
     const int chunks = parallelChunkCount(rowCount, AccumulateRowsPerChunk);
