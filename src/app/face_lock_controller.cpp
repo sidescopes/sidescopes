@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "app/capture_controller.h"
+#include "app/capture_crop.h"
 #include "app/region_geometry.h"
 #include "core/diagnostics.h"
 #include "platform/desktop.h"
@@ -93,6 +94,12 @@ ProbeCrop cropProbeRoi(const FrameView& view, const FaceLockState& lock, const A
                        const DisplayGeometry& geometry)
 {
     ProbeCrop crop;
+    // The search rectangle is the locked window's, which a capture narrowed to
+    // the analysis region does not carry; the probe waits for a whole one
+    // rather than searching whatever pixels happen to be in hand.
+    if (!coversWholeDisplay(view)) {
+        return crop;
+    }
     crop.roi = faceLockRoi(lock, windowRect, geometry, view.width, view.height);
     if (crop.roi.width <= 0 || crop.roi.height <= 0) {
         return crop;
@@ -279,7 +286,7 @@ void FaceLockController::carryLockWithWindow(Lock& lock, const AttachWindowRect&
         std::abs(rect.width - lock.windowRect->width) < 0.5 && std::abs(rect.height - lock.windowRect->height) < 0.5;
     const double dx = rect.x - lock.windowRect->x;
     const double dy = rect.y - lock.windowRect->y;
-    if (sameSize && (dx != 0.0 || dy != 0.0) && frameSize) {
+    if (sameSize && (dx != 0.0 || dy != 0.0) && frameSize && frameSize->coversDisplay()) {
         if (const auto geometry = geometryOfDisplay(m_capture.capturedDisplay())) {
             const double scale = frameSize->width / geometry->widthPoints;
             face_lock::translate(lock.state, dx * scale, dy * scale);
@@ -322,7 +329,9 @@ std::vector<uint8_t> FaceLockController::sampleContentGrid(const FrameView& view
 void FaceLockController::probeContentChange(const RegionOfInterest& region,
                                             std::optional<AnalysisWorker::FrameSize> frameSize, double now)
 {
-    if (!frameSize) {
+    // The watch reads the region against the frame's own extents, so a capture
+    // narrowed to part of the display would sample somewhere else entirely.
+    if (!frameSize || !frameSize->coversDisplay()) {
         return;
     }
     std::vector<uint8_t> samples;

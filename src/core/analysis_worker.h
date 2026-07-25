@@ -117,6 +117,14 @@ public:
         /// the capture is narrowed to part of it.
         int displayWidth = 0;
         int displayHeight = 0;
+
+        /// Whether the frame these came from carries its whole display. What is
+        /// stated in frame pixels means what it says only then; a narrowed
+        /// frame's extents are the crop's.
+        [[nodiscard]] bool coversDisplay() const
+        {
+            return width == displayWidth && height == displayHeight;
+        }
     };
 
     [[nodiscard]] std::optional<FrameSize> latestFrameSize() const;

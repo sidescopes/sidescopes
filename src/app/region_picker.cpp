@@ -14,6 +14,7 @@
 #include <vector>
 
 #include "app/capture_controller.h"
+#include "app/capture_crop.h"
 #include "app/window_suggestions.h"
 #include "core/diagnostics.h"
 #include "core/region_suggestions.h"
@@ -133,6 +134,10 @@ RegionPickOutcome RegionPicker::openIfRequested(bool regionIsFullScreen)
 void RegionPicker::openRegionPicker(RegionPickerMode mode, bool regionIsFullScreen)
 {
     hideRegionBorder();
+    // The pick reads pixels from anywhere on screen, so the capture goes back to
+    // the whole display before the first of those reads. The crop policy keeps
+    // it there for as long as the pick is open.
+    m_capture.narrowTo(std::nullopt);
     // The previous region's border must not leak into the analyzed frame: its
     // strokes read as rectangle edges and cut suggestions short. Wait briefly
     // for a frame taken after the border left the screen.
@@ -156,7 +161,10 @@ void RegionPicker::openRegionPicker(RegionPickerMode mode, bool regionIsFullScre
 void RegionPicker::waitForBorderFreeFrame()
 {
     // The 60 ms floor outlasts an in-flight pre-hide frame's capture-to-delivery;
-    // the 300 ms cap keeps the picker responsive if the stream has stalled.
+    // the 300 ms cap keeps the picker responsive if the stream has stalled. The
+    // frame must also carry the whole display: everything the picker reads from
+    // it - the suggestions, a pinned colour - can land anywhere on screen, and
+    // the capture was just asked to widen for exactly that.
     uint64_t staleSequence = 0;
     (void)m_worker.withLatestFrame([&](const FrameView& view) { staleSequence = view.sequence; });
     const double hiddenAt = glfwGetTime();
@@ -166,10 +174,14 @@ void RegionPicker::waitForBorderFreeFrame()
             break;
         }
         uint64_t sequence = staleSequence;
-        (void)m_worker.withLatestFrame([&](const FrameView& view) { sequence = view.sequence; });
+        bool whole = false;
+        (void)m_worker.withLatestFrame([&](const FrameView& view) {
+            sequence = view.sequence;
+            whole = coversWholeDisplay(view);
+        });
         // Inequality, not greater-than: a freshly switched stream counts its
         // frames from one again.
-        if (sequence != staleSequence && elapsed >= 0.06) {
+        if (sequence != staleSequence && whole && elapsed >= 0.06) {
             break;
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(15));
@@ -187,8 +199,14 @@ std::vector<PickerDisplay> RegionPicker::buildPickerDisplays()
     std::vector<SuggestedRegion> faceSuggestions;
     m_faceCandidates.clear();
     if (supportsFaceDetection()) {
-        (void)m_worker.withLatestFrame(
-            [&](const FrameView& view) { faceSuggestions = scanStreamedDisplayFaces(view, streamed); });
+        (void)m_worker.withLatestFrame([&](const FrameView& view) {
+            // A frame narrowed to the analysis region holds neither the faces
+            // outside it nor the coordinates to place the ones inside; no
+            // suggestion beats one pointing at the wrong place.
+            if (coversWholeDisplay(view)) {
+                faceSuggestions = scanStreamedDisplayFaces(view, streamed);
+            }
+        });
     }
 
     std::vector<PickerDisplay> pickerDisplays;
@@ -577,8 +595,13 @@ std::optional<FloatColor> RegionPicker::averageFrameColor(const RegionOfInterest
     // sample. A drag is the explicit request to average textured pixels; a
     // plain click samples a point instead, matching the live readout.
     std::optional<FloatColor> color;
-    const bool sampled =
-        m_worker.withLatestFrame([&](const FrameView& view) { color = averageRegionColor(view, region); });
+    const bool sampled = m_worker.withLatestFrame([&](const FrameView& view) {
+        // The rectangle is a share of the display, which a narrowed frame does
+        // not measure; the caller falls back to the one-shot screen read.
+        if (coversWholeDisplay(view)) {
+            color = averageRegionColor(view, region);
+        }
+    });
 
     return sampled ? color : std::nullopt;
 }

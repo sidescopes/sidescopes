@@ -196,7 +196,7 @@ TEST_CASE("A settled move adopts and maps the region through the window")
     // window so the mapping is easy to read back.
     desktopStubs().displayGeometry = DisplayGeometry{0.0, 0.0, 1000.0, 500.0};
     desktopStubs().windowGeometry = WindowGeometry{0.0, 0.0, 1000.0, 500.0, false, ""};
-    const AnalysisWorker::FrameSize frameSize{2000, 1000};
+    const AnalysisWorker::FrameSize frameSize{2000, 1000, 2000, 1000};
     fix.controller.addLock(1, foreheadLock(), 0.0);
 
     // The first probe at the moved position is unsettled: hunting, no region.
@@ -265,7 +265,7 @@ TEST_CASE("The content watch flags a change and clears after the settle time")
     fix.worker.start();
 
     const RegionOfInterest region;  // the whole frame
-    const AnalysisWorker::FrameSize frameSize{64, 64};
+    const AnalysisWorker::FrameSize frameSize{64, 64, 64, 64};
 
     // A baseline on a black frame: nothing has changed yet.
     publishAndAwait(fix, makeSolidFrameBuffer(64, 64, Color{0, 0, 0}, 1), 1);
@@ -295,7 +295,7 @@ TEST_CASE("The content watch reads the locked region and nothing outside it")
 
     // The locked region is the frame's top-left quarter.
     const RegionOfInterest region{0.0, 0.0, 50.0, 50.0};
-    const AnalysisWorker::FrameSize frameSize{64, 64};
+    const AnalysisWorker::FrameSize frameSize{64, 64, 64, 64};
 
     publishAndAwait(fix, makeSolidFrameBuffer(64, 64, Color{0, 0, 0}, 1), 1);
     fix.controller.probeContentChange(region, frameSize, 0.0);
@@ -320,7 +320,7 @@ TEST_CASE("A region the host itself moved only rebaselines the content watch")
     ControllerFixture fix;
     fix.worker.start();
 
-    const AnalysisWorker::FrameSize frameSize{64, 64};
+    const AnalysisWorker::FrameSize frameSize{64, 64, 64, 64};
     publishAndAwait(fix, makeQuarteredFrameBuffer(64, Color{0, 0, 0}, Color{255, 255, 255}, 1), 1);
     fix.controller.probeContentChange(RegionOfInterest{0.0, 0.0, 50.0, 50.0}, frameSize, 0.0);
 
@@ -347,8 +347,8 @@ TEST_CASE("The probe searches the patch around the anchor")
     fix.controller.addLock(
         1, face_lock::makeLock(FaceAnchor{500.0, 400.0, 100.0}, LockRect{450.0, 350.0, 550.0, 450.0}), 0.0);
     const FaceLockOutcome outcome = fix.controller.update(
-        attachedDecision(1, AttachWindowRect{0.0, 0.0, 1000.0, 500.0}), AnalysisWorker::FrameSize{2000, 1000}, 1,
-        RegionOfInterest{}, /*gestureActive=*/false, 1.0);
+        attachedDecision(1, AttachWindowRect{0.0, 0.0, 1000.0, 500.0}),
+        AnalysisWorker::FrameSize{2000, 1000, 2000, 1000}, 1, RegionOfInterest{}, /*gestureActive=*/false, 1.0);
     CHECK_FALSE(outcome.applyRegion.has_value());
     awaitProbe(fix);
 
@@ -358,6 +358,47 @@ TEST_CASE("The probe searches the patch around the anchor")
     CHECK(detected.width == 500);   // 250..750 across
     CHECK(detected.height == 500);  // 150..650 down
     CHECK_THAT(detected.pixelsPerPoint, WithinAbs(2.0f, 1e-6f));
+
+    fix.worker.stop();
+}
+
+TEST_CASE("Nothing is probed or watched from a narrowed capture")
+{
+    // The probe searches the locked window's rectangle and the content watch
+    // measures the region against the frame's own extents. A capture narrowed to
+    // the analysis region carries neither, so both sit out until a whole frame
+    // arrives rather than reading whatever pixels are in hand.
+    ControllerFixture fix;
+    fix.startCapture();
+    fix.worker.start();
+    desktopStubs().displayGeometry = DisplayGeometry{0.0, 0.0, 1000.0, 500.0};
+
+    FrameBuffer narrowed = makeCoordinateFrameBuffer(500, 500, 1);
+    narrowed.sourceX = 250;
+    narrowed.sourceY = 150;
+    narrowed.sourceWidth = 2000;
+    narrowed.sourceHeight = 1000;
+    publishAndAwait(fix, std::move(narrowed), 1);
+    fix.attachWindow(1, AttachWindowRect{0.0, 0.0, 1000.0, 500.0});
+    fix.controller.addLock(
+        1, face_lock::makeLock(FaceAnchor{500.0, 400.0, 100.0}, LockRect{450.0, 350.0, 550.0, 450.0}), 0.0);
+
+    const AnalysisWorker::FrameSize narrowedSize{500, 500, 2000, 1000};
+    (void)fix.controller.update(attachedDecision(1, AttachWindowRect{0.0, 0.0, 1000.0, 500.0}), narrowedSize, 1,
+                                RegionOfInterest{}, /*gestureActive=*/false, 1.0);
+    awaitProbe(fix);
+    CHECK(desktopStubs().detectorCall().calls == 0);
+
+    // The watch has no baseline either, so a second narrowed frame with wholly
+    // different content is not read as a pan.
+    FrameBuffer second = test::makeSolidFrameBuffer(500, 500, Color{255, 255, 255}, 2);
+    second.sourceX = 250;
+    second.sourceY = 150;
+    second.sourceWidth = 2000;
+    second.sourceHeight = 1000;
+    publishAndAwait(fix, std::move(second), 2);
+    fix.controller.probeContentChange(RegionOfInterest{}, narrowedSize, 2.0);
+    CHECK_FALSE(fix.controller.contentUnsettled(2.0));
 
     fix.worker.stop();
 }
@@ -380,7 +421,7 @@ TEST_CASE("A landed probe is drained on the next step at its own cadence")
         1, face_lock::makeLock(FaceAnchor{500.0, 400.0, 100.0}, LockRect{450.0, 350.0, 550.0, 450.0}), 0.0);
 
     const AttachDecision decision = attachedDecision(1, AttachWindowRect{0.0, 0.0, 1000.0, 500.0});
-    constexpr AnalysisWorker::FrameSize FrameSize{2000, 1000};
+    constexpr AnalysisWorker::FrameSize FrameSize{2000, 1000, 2000, 1000};
     (void)fix.controller.update(decision, FrameSize, 1, RegionOfInterest{}, false, 1.0);
     awaitProbe(fix);
 
@@ -415,7 +456,7 @@ TEST_CASE("The probe never searches past the attached window")
     fix.controller.addLock(
         1, face_lock::makeLock(FaceAnchor{300.0, 400.0, 100.0}, LockRect{250.0, 350.0, 350.0, 450.0}), 0.0);
     (void)fix.controller.update(attachedDecision(1, AttachWindowRect{0.0, 0.0, 200.0, 500.0}),
-                                AnalysisWorker::FrameSize{2000, 1000}, 1, RegionOfInterest{}, false, 1.0);
+                                AnalysisWorker::FrameSize{2000, 1000, 2000, 1000}, 1, RegionOfInterest{}, false, 1.0);
     awaitProbe(fix);
 
     const test::DetectorCall detected = desktopStubs().detectorCall();
@@ -435,7 +476,7 @@ TEST_CASE("A same-size window move carries the lock's search with it")
     desktopStubs().displayGeometry = DisplayGeometry{0.0, 0.0, 1000.0, 500.0};
     publishAndAwait(fix, makeCoordinateFrameBuffer(2000, 1000, 1), 1);
 
-    const AnalysisWorker::FrameSize frameSize{2000, 1000};
+    const AnalysisWorker::FrameSize frameSize{2000, 1000, 2000, 1000};
     fix.attachWindow(1, AttachWindowRect{100.0, 0.0, 400.0, 500.0});
     fix.controller.addLock(1,
                            face_lock::makeLock(FaceAnchor{500.0, 400.0, 100.0}, LockRect{450.0, 350.0, 550.0, 450.0}),
@@ -470,7 +511,7 @@ TEST_CASE("No probe runs while the user is dragging the window")
 
     // The drag wins; the lock catches up once things settle.
     (void)fix.controller.update(attachedDecision(1, AttachWindowRect{0.0, 0.0, 1000.0, 500.0}),
-                                AnalysisWorker::FrameSize{2000, 1000}, 1, RegionOfInterest{},
+                                AnalysisWorker::FrameSize{2000, 1000, 2000, 1000}, 1, RegionOfInterest{},
                                 /*gestureActive=*/true, 1.0);
 
     CHECK_FALSE(fix.controller.probeRunning());
@@ -547,7 +588,7 @@ TEST_CASE("A border edit re-teaches the crop the face carries")
     ControllerFixture fix;
     desktopStubs().displayGeometry = DisplayGeometry{0.0, 0.0, 1000.0, 500.0};
     desktopStubs().windowGeometry = WindowGeometry{0.0, 0.0, 1000.0, 500.0, false, ""};
-    const AnalysisWorker::FrameSize frameSize{2000, 1000};
+    const AnalysisWorker::FrameSize frameSize{2000, 1000, 2000, 1000};
     fix.controller.addLock(1, foreheadLock(), 0.0);
 
     // The user drags the border to a different rectangle over the same face:
@@ -576,7 +617,7 @@ TEST_CASE("A border edit re-teaches the crop the face carries")
 TEST_CASE("An adopted anchor maps to nothing while the window is out of reach")
 {
     ControllerFixture fix;
-    const AnalysisWorker::FrameSize frameSize{2000, 1000};
+    const AnalysisWorker::FrameSize frameSize{2000, 1000, 2000, 1000};
     fix.controller.addLock(1, foreheadLock(), 0.0);
     const IntRect moved{460, 200, 200, 200};
     (void)fix.controller.ingestProbeResult({moved}, IntRect{0, 0, 1000, 800}, 1, decisionFor(1), 1, frameSize, 1.0);

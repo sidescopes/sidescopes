@@ -535,6 +535,38 @@ TEST_CASE("The streamed display's faces open with the picker as candidates")
     fix.worker.stop();
 }
 
+TEST_CASE("A pick asks for the whole display before it reads a frame")
+{
+    // Everything a pick reads off the stream - the suggestions, a pinned colour
+    // - can land anywhere on screen, so a capture narrowed to the analysis
+    // region has to widen first. A narrowed frame still in hand carries neither
+    // the faces outside the region nor the coordinates to place those inside it,
+    // and a suggestion pointing at the wrong place is worse than none.
+    PickerFixture fix;
+    fix.worker.start();
+    desktopStubs().displayGeometry = DisplayGeometry{0.0, 0.0, 320.0, 320.0};
+    desktopStubs().faceDetectionSupported = true;
+    desktopStubs().faces.clear();
+    desktopStubs().faces.push_back(IntRect{160, 80, 80, 80});
+
+    FrameBuffer narrowed = makeSolidFrameBuffer(160, 160, Color{10, 10, 10}, 1);
+    narrowed.sourceX = 240;
+    narrowed.sourceY = 240;
+    narrowed.sourceWidth = 640;
+    narrowed.sourceHeight = 640;
+    publishAndAwait(fix, std::move(narrowed), 1);
+
+    openPick(fix, RegionPickerMode::AttachFace);
+
+    REQUIRE_FALSE(fix.source.narrowings.empty());
+    CHECK_FALSE(fix.source.narrowings.back().has_value());
+    CHECK(desktopStubs().detectorCall().calls == 0);
+    REQUIRE(regionOverlayStubs().lastDisplays.size() == 1);
+    CHECK(regionOverlayStubs().lastDisplays[0].faces.empty());
+
+    fix.worker.stop();
+}
+
 TEST_CASE("A picker opened without face detection scans nothing")
 {
     PickerFixture fix;
