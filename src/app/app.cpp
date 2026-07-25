@@ -556,8 +556,8 @@ void App::serviceCaptureCrop(bool otherReadersActive, double now)
 void App::pumpEvents()
 {
     const double now = glfwGetTime();
-    const FrameWaitDecision wait = frameWaitFor(
-        FramePacingInputs{now, m_lastActivity, m_lastFrameStart, m_attach.attached(), m_regionPicker.active()});
+    const FrameWaitDecision wait = frameWaitFor(FramePacingInputs{
+        now, m_lastActivity, m_lastReadoutActivity, m_lastFrameStart, m_attach.attached(), m_regionPicker.active()});
     switch (wait.kind) {
     case FrameWait::WatchAttachedWindow:
         idleWaitWatchingAttachedWindow();
@@ -679,8 +679,11 @@ void App::sampleCursorColor()
     m_vectorscopeColor = sample.vectorscopeColor;
     m_waveformColor = sample.waveformColor;
     m_readoutColor = sample.readoutColor;
-    if (sample.changed || sample.readoutChanged) {
+    if (sample.changed) {
         m_lastActivity = glfwGetTime();
+    }
+    if (sample.readoutChanged) {
+        m_lastReadoutActivity = glfwGetTime();
     }
 }
 

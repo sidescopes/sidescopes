@@ -303,6 +303,10 @@ private:
     std::unique_ptr<ScopePaneRenderer> m_panes;
 
     double m_lastActivity = 0.0;
+    /// When the colour readout last moved. Its own clock: the readout follows
+    /// the pointer everywhere, and following it at the moving cadence spent as
+    /// much on a swatch as on the traces.
+    double m_lastReadoutActivity = 0.0;
     /// When the previous frame's event pump returned, so the redraw cap can
     /// target a frame period rather than add a delay to one.
     double m_lastFrameStart = 0.0;

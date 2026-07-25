@@ -9,6 +9,13 @@ namespace sidescopes {
 /// three of every four redrawing nothing new.
 inline constexpr double ContentRedrawSeconds = 1.0 / 30.0;
 
+/// The frame period the loop aims at when the colour readout is the only thing
+/// following the pointer. A swatch and a percentage carry no motion, so they
+/// read the same at a third of the rate a marker easing across a trace needs -
+/// and the pointer is outside the region, where no marker is drawn, for most of
+/// a working session.
+inline constexpr double ReadoutRedrawSeconds = 1.0 / 10.0;
+
 /// How long the loop waits for events when nothing at all is happening.
 inline constexpr double IdleWaitSeconds = 0.5;
 
@@ -47,6 +54,9 @@ struct FramePacingInputs
     double now = 0.0;
     /// When anything last happened - new scope output, or interaction.
     double lastActivity = 0.0;
+    /// When the colour readout last moved, which asks for frames of its own at
+    /// a slower cadence.
+    double lastReadoutActivity = 0.0;
     /// When the previous frame's event pump returned.
     double lastFrameStart = 0.0;
     bool attached = false;

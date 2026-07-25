@@ -69,6 +69,34 @@ TEST_CASE("A quiet screen falls to the idle tick")
     CHECK(frameWaitFor(inputs).kind == FrameWait::Idle);
 }
 
+TEST_CASE("A readout following the pointer redraws at its own pace")
+{
+    // The pointer outside the region draws no marker, so the only thing
+    // following it is the swatch and its percentages - which look the same at
+    // a third of the rate. This is the state a session spends most of its time
+    // in, with the user working in the editor beside the scopes.
+    FramePacingInputs inputs;
+    inputs.lastActivity = 0.0;
+    inputs.lastReadoutActivity = 10.0;
+    inputs.lastFrameStart = 10.0;
+    inputs.now = 10.0;
+
+    const FrameWaitDecision readout = frameWaitFor(inputs);
+    CHECK(readout.kind == FrameWait::UntilFramePeriod);
+    CHECK(readout.seconds == Catch::Approx(ReadoutRedrawSeconds));
+    CHECK(ReadoutRedrawSeconds > ContentRedrawSeconds);
+
+    // A marker moving outranks it: the trace is what carries motion.
+    inputs.lastActivity = 10.0;
+    CHECK(frameWaitFor(inputs).seconds == Catch::Approx(ContentRedrawSeconds));
+
+    // And a readout that stopped moving lets the loop fall all the way to the
+    // idle tick, rather than holding it at the readout cadence for ever.
+    inputs.lastActivity = 0.0;
+    inputs.now = 10.0 + IdleAfterSeconds + 0.01;
+    CHECK(frameWaitFor(inputs).kind == FrameWait::Idle);
+}
+
 TEST_CASE("Every way of being out of sight is one")
 {
     CHECK_FALSE(outOfSight(InSight));

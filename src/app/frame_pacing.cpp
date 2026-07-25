@@ -4,7 +4,9 @@ namespace sidescopes {
 
 FrameWaitDecision frameWaitFor(const FramePacingInputs& inputs)
 {
-    if (inputs.now - inputs.lastActivity > IdleAfterSeconds) {
+    const bool moving = inputs.now - inputs.lastActivity <= IdleAfterSeconds;
+    const bool readoutFollowing = inputs.now - inputs.lastReadoutActivity <= IdleAfterSeconds;
+    if (!moving && !readoutFollowing) {
         if (inputs.attached && !inputs.pickerActive) {
             return FrameWaitDecision{FrameWait::WatchAttachedWindow, 0.0};
         }
@@ -12,7 +14,7 @@ FrameWaitDecision frameWaitFor(const FramePacingInputs& inputs)
         return FrameWaitDecision{FrameWait::Idle, IdleWaitSeconds};
     }
 
-    const double due = inputs.lastFrameStart + ContentRedrawSeconds;
+    const double due = inputs.lastFrameStart + (moving ? ContentRedrawSeconds : ReadoutRedrawSeconds);
 
     return FrameWaitDecision{FrameWait::UntilFramePeriod, due > inputs.now ? due - inputs.now : 0.0};
 }
