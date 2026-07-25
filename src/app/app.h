@@ -16,6 +16,7 @@
 #include "app/capture_controller.h"
 #include "app/cursor_sampler.h"
 #include "app/face_lock_controller.h"
+#include "app/frame_pacing.h"
 #include "app/frame_timer.h"
 #include "app/layout_presets.h"
 #include "app/param_menu.h"
@@ -303,9 +304,9 @@ private:
     /// When the previous frame's event pump returned, so the redraw cap can
     /// target a frame period rather than add a delay to one.
     double m_lastFrameStart = 0.0;
-    /// When the window went out of sight, or zero while it is in sight; the
-    /// pipeline is suspended once it has been gone long enough to mean it.
-    double m_outOfSightSince = 0.0;
+    /// Decides when the pipeline is suspended and resumed; owns the clock its
+    /// hysteresis measures against.
+    VisibilityGate m_visibility;
     /// Whether the session has stopped showing anything - the display asleep,
     /// the screen locked, another user switched in. Set from the platform
     /// observers, which may deliver on any thread, and read by the frame loop.

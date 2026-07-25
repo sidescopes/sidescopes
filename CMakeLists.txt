@@ -372,6 +372,7 @@ if(APPLE OR WIN32)
         src/app/cursor_sampler.cpp
         src/app/face_lock.cpp
         src/app/face_lock_controller.cpp
+        src/app/frame_pacing.cpp
         src/app/frame_timer.cpp
         src/app/hex_font.cpp
         src/app/icon_textures.cpp

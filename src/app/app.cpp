@@ -30,6 +30,7 @@
 #include "app/capture_controller.h"
 #include "app/color_readout.h"
 #include "app/context_menu.h"
+#include "app/frame_pacing.h"
 #include "app/frame_timer.h"
 #include "app/interface_style.h"
 #include "app/overlay_render.h"
@@ -65,20 +66,6 @@
 #include "sidescopes_version.h"
 
 namespace {
-
-// The frame period the loop aims at while something on screen is moving. New
-// scope images cannot arrive faster than the capture cadence, so redrawing at
-// the display's refresh rate spends whole frames on an identical image -
-// measured on a 120 Hz panel, 120 frames a second against 30 analysis passes,
-// three of every four redrawing nothing new. The wait returns the instant an
-// event arrives, so a drag or a hover still runs at the rate its events come
-// in; only frames nobody asked for are dropped.
-constexpr double ContentRedrawSeconds = 1.0 / 60.0;
-
-// How long the window must stay out of sight before the pipeline is suspended.
-// Long enough that stepping through the application switcher, or a hide the
-// user immediately undoes, does not pay for a stream restart on the way back.
-constexpr double OutOfSightPauseSeconds = 0.75;
 
 // A key the resolver names resolves to the ImGui key it fires on: the letters
 // and Escape a binding may hold, plus the preset digits and the comma of the
@@ -493,74 +480,48 @@ void App::runFrame()
 
 void App::servicePipelineVisibility(double now)
 {
-    // Nothing on screen to show, nothing worth computing. Suspending capture
-    // stops the whole pipeline behind it - the backend's own work, the
-    // per-frame copy, change detection, the analysis pass - and with no output
-    // arriving the frame loop falls to its idle tick as well. A scope that
-    // lives beside an editor spends much of its life behind that editor, so
-    // this is the difference between a tool that rests and one that does not.
-    // A window can be out of sight because it was put away, or because the
-    // whole session stopped showing anything - the display asleep, the screen
-    // locked, another user switched in. A zero-size framebuffer counts too:
-    // the frame loop already declines to render one, and there is no more
-    // reason to analyse for it.
     int framebufferWidth = 0;
     int framebufferHeight = 0;
     glfwGetFramebufferSize(m_window, &framebufferWidth, &framebufferHeight);
-    const bool outOfSight =
-        m_sessionAsleep.load() || applicationHidden() || glfwGetWindowAttrib(m_window, GLFW_ICONIFIED) != 0 ||
-        glfwGetWindowAttrib(m_window, GLFW_VISIBLE) == 0 || framebufferWidth == 0 || framebufferHeight == 0;
-    // The picker paints its own full-screen overlay and the face probe reads
-    // frames on its own thread; neither may lose the stream underneath it.
-    const bool needsFrames = m_regionPicker.active() || m_regionPicker.scansRunning() || m_faceLock.probeRunning();
-    if (!outOfSight || needsFrames) {
-        if (m_captureController.suspended()) {
-            SS_DIAG(Perf, "pipeline resumed");
-            m_captureController.resume();
-        }
-        m_outOfSightSince = 0.0;
+    const VisibilityInputs inputs{
+        m_sessionAsleep.load(),
+        applicationHidden(),
+        glfwGetWindowAttrib(m_window, GLFW_ICONIFIED) != 0,
+        glfwGetWindowAttrib(m_window, GLFW_VISIBLE) != 0,
+        framebufferWidth == 0 || framebufferHeight == 0,
+        m_regionPicker.active() || m_regionPicker.scansRunning() || m_faceLock.probeRunning()};
 
-        return;
-    }
-    if (m_outOfSightSince == 0.0) {
-        m_outOfSightSince = now;
-    }
-    // Coming back costs a stream restart, so a flick through the application
-    // switcher must not buy one.
-    if (now - m_outOfSightSince > OutOfSightPauseSeconds && !m_captureController.suspended()) {
+    switch (m_visibility.update(inputs, m_captureController.suspended(), now)) {
+    case PipelineAction::Suspend:
         SS_DIAG(Perf, "pipeline suspended - out of sight");
         m_captureController.suspend();
+        break;
+    case PipelineAction::Resume:
+        SS_DIAG(Perf, "pipeline resumed");
+        m_captureController.resume();
+        break;
+    case PipelineAction::Keep:
+        break;
     }
 }
 
 void App::pumpEvents()
 {
-    // Idle: with no new output, no cursor motion, and no interaction, wait for
-    // events at a slow tick instead of spinning at refresh - in short slices
-    // while windows are attached, so their motion and focus stay fresh.
-    if (glfwGetTime() - m_lastActivity > 0.5) {
-        if (m_attach.attached() && !m_regionPicker.active()) {
-            idleWaitWatchingAttachedWindow();
-        } else {
-            glfwWaitEventsTimeout(0.1);
-        }
-        m_lastFrameStart = glfwGetTime();
-
-        return;
-    }
-
-    // Wait out whatever is left of the frame period, not a fixed slice on top
-    // of it. Presenting already blocks - on the drawable through Metal, on the
-    // composition tick through DwmFlush - so a fixed wait would add to that
-    // block and halve the rate again on every display at or below 60 Hz. This
-    // aims at the period, so it caps a faster panel and leaves a slower one
-    // exactly as it was.
     const double now = glfwGetTime();
-    const double due = m_lastFrameStart + ContentRedrawSeconds;
-    if (due > now) {
-        glfwWaitEventsTimeout(due - now);
-    } else {
-        glfwPollEvents();
+    const FrameWaitDecision wait = frameWaitFor(
+        FramePacingInputs{now, m_lastActivity, m_lastFrameStart, m_attach.attached(), m_regionPicker.active()});
+    switch (wait.kind) {
+    case FrameWait::WatchAttachedWindow:
+        idleWaitWatchingAttachedWindow();
+        break;
+    case FrameWait::Idle:
+    case FrameWait::UntilFramePeriod:
+        if (wait.seconds > 0.0) {
+            glfwWaitEventsTimeout(wait.seconds);
+        } else {
+            glfwPollEvents();
+        }
+        break;
     }
     m_lastFrameStart = glfwGetTime();
 }

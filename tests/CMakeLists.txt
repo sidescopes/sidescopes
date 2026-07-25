@@ -14,6 +14,7 @@ add_executable(sidescopes_tests
     test_color_lab.cpp
     test_parallel_for.cpp
     test_frame_mailbox.cpp
+    test_frame_pacing.cpp
     test_region_hash.cpp
     test_sampling.cpp
     test_trace_intensity.cpp
@@ -75,6 +76,7 @@ target_sources(sidescopes_tests PRIVATE
     ${CMAKE_SOURCE_DIR}/src/app/cursor_sampler.cpp
     ${CMAKE_SOURCE_DIR}/src/app/face_lock.cpp
     ${CMAKE_SOURCE_DIR}/src/app/face_lock_controller.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/frame_pacing.cpp
     ${CMAKE_SOURCE_DIR}/src/app/layout_preset_store.cpp
     ${CMAKE_SOURCE_DIR}/src/app/region_geometry.cpp
     ${CMAKE_SOURCE_DIR}/src/app/overlay_style.cpp
