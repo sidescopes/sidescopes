@@ -98,8 +98,13 @@ private:
     // Whether the stream is stopped on purpose, which service() must not
     // mistake for a stream to revive.
     bool m_suspended = false;
-    // The frame-clock deadline a dead stream waits out before a restart.
+    // The frame-clock deadline a dead stream waits out before a restart, and
+    // how many restarts have failed in a row - the wait doubles with them, so a
+    // lock or a display asleep for hours stops costing a retry every two
+    // seconds. Reset by a successful start and by a wake, which changes the
+    // conditions that were failing.
     double m_nextRetry = 0.0;
+    int m_failedRestarts = 0;
 };
 
 }  // namespace sidescopes

@@ -155,6 +155,113 @@ TEST_CASE("A stale mark restarts the stream after a one-second backoff")
     CHECK_FALSE(controller.dead());
 }
 
+TEST_CASE("a stream that stays unreachable is retried less and less often")
+{
+    // What a locked screen or a sleeping display looks like from here: every
+    // restart fails, for hours. A fixed two-second retry would run seven
+    // hundred times an hour for a window nobody can see.
+    FakeCaptureSource source;
+    source.targets = {makeTarget(1, "main")};
+    FrameMailbox mailbox;
+    CaptureController controller(source, mailbox);
+    REQUIRE(controller.requestPermission());
+    REQUIRE(controller.start());
+    source.fireStatus("capture stopped");
+    REQUIRE(controller.dead());
+    source.startSucceeds = false;
+
+    // The first retry is as prompt as it ever was, then each failure doubles
+    // the wait: 2, 4, 8, 16, then the half-minute ceiling. Each wait is timed
+    // from the attempt that failed, not from a round number, so the clock walks
+    // a moment past each deadline.
+    double clock = 0.0;
+    int attempts = source.startCount;
+    for (const double wait : {2.0, 4.0, 8.0, 16.0, 30.0, 30.0}) {
+        clock += 0.001;
+        controller.service(clock);
+        CHECK(source.startCount == attempts + 1);
+        attempts = source.startCount;
+
+        // Still inside the wait: nothing happens.
+        controller.service(clock + wait - 0.01);
+        CHECK(source.startCount == attempts);
+        clock += wait;
+    }
+
+    // Six failures spread over ninety seconds. A flat two-second retry would
+    // have made forty-five attempts across the same span.
+    CHECK(source.startCount - 1 == 6);
+    CHECK(clock > 89.0);
+    CHECK(clock < 91.0);
+}
+
+TEST_CASE("a wake earns a prompt retry however long the backoff had grown")
+{
+    FakeCaptureSource source;
+    source.targets = {makeTarget(1, "main")};
+    FrameMailbox mailbox;
+    CaptureController controller(source, mailbox);
+    REQUIRE(controller.requestPermission());
+    REQUIRE(controller.start());
+    source.fireStatus("capture stopped");
+    source.startSucceeds = false;
+
+    double clock = 0.0;
+    for (const double wait : {2.0, 4.0, 8.0, 16.0}) {
+        clock += 0.001;
+        controller.service(clock);
+        clock += wait;
+    }
+    const int beforeWake = source.startCount;
+
+    // The screen comes back. The conditions that were failing have changed, so
+    // the next attempt must not wait out the backoff those failures earned -
+    // only the wake's own one-second grace.
+    source.startSucceeds = true;
+    controller.markStale();
+    controller.service(clock);
+    CHECK(source.startCount == beforeWake);
+    controller.service(clock + 1.5);
+    CHECK(source.startCount == beforeWake + 1);
+    CHECK_FALSE(controller.dead());
+}
+
+TEST_CASE("a stream that comes back forgets the failures before it")
+{
+    FakeCaptureSource source;
+    source.targets = {makeTarget(1, "main")};
+    FrameMailbox mailbox;
+    CaptureController controller(source, mailbox);
+    REQUIRE(controller.requestPermission());
+    REQUIRE(controller.start());
+    source.fireStatus("capture stopped");
+    source.startSucceeds = false;
+
+    double clock = 0.0;
+    for (const double wait : {2.0, 4.0, 8.0}) {
+        clock += 0.001;
+        controller.service(clock);
+        clock += wait;
+    }
+    source.startSucceeds = true;
+    clock += 0.001;
+    controller.service(clock);
+    REQUIRE_FALSE(controller.dead());
+
+    // A later failure starts the backoff over at two seconds rather than
+    // resuming where the old run left off.
+    source.startSucceeds = false;
+    source.fireStatus("capture stopped");
+    const int attempts = source.startCount;
+    clock += 0.001;
+    controller.service(clock);
+    CHECK(source.startCount == attempts + 1);
+    controller.service(clock + 1.9);
+    CHECK(source.startCount == attempts + 1);
+    controller.service(clock + 2.1);
+    CHECK(source.startCount == attempts + 2);
+}
+
 TEST_CASE("suspend stops the stream and service leaves it stopped")
 {
     FakeCaptureSource source;

@@ -9,6 +9,28 @@ namespace {
 // Capture runs at the display refresh cap the app has always requested.
 constexpr int CaptureFramesPerSecond = 30;
 
+// How long a dead stream waits before the next restart, and the ceiling that
+// wait doubles up to. A stream that cannot be re-established is usually a
+// screen that is locked or asleep, and that lasts hours: a fixed two-second
+// retry then wakes the machine seven hundred times an hour for a window nobody
+// can see. Doubling keeps a transient failure quick to recover from - the
+// first retry is as prompt as it ever was - while a long one settles into a
+// tick the machine can sleep through.
+constexpr double FirstRetrySeconds = 2.0;
+constexpr double LongestRetrySeconds = 30.0;
+
+// The wait after @p failures consecutive failed restarts, doubling from the
+// first up to the ceiling.
+double retryDelaySeconds(int failures)
+{
+    double delay = FirstRetrySeconds;
+    for (int doubled = 1; doubled < failures && delay < LongestRetrySeconds; ++doubled) {
+        delay *= 2.0;
+    }
+
+    return std::min(delay, LongestRetrySeconds);
+}
+
 }  // namespace
 
 CaptureController::CaptureController(ScreenCaptureSource& source, FrameMailbox& mailbox)
@@ -147,6 +169,7 @@ void CaptureController::resume()
     m_suspended = false;
     m_stale.store(false);
     m_dead.store(false);
+    m_failedRestarts = 0;
     (void)start();
 }
 
@@ -173,10 +196,16 @@ void CaptureController::service(double now)
         m_dead.store(true);
         // Give the session a moment to finish coming back.
         m_nextRetry = now + 1.0;
+        // Conditions just changed, so whatever had been failing deserves a
+        // prompt attempt rather than the backoff the last failures earned.
+        m_failedRestarts = 0;
     }
     if (m_permissionGranted && m_dead.load() && now > m_nextRetry) {
-        if (!start()) {
-            m_nextRetry = now + 2.0;
+        if (start()) {
+            m_failedRestarts = 0;
+        } else {
+            ++m_failedRestarts;
+            m_nextRetry = now + retryDelaySeconds(m_failedRestarts);
         }
     }
 }
