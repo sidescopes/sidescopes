@@ -137,6 +137,85 @@ TEST_CASE("AnalysisWorker survives rapid settings churn before a frame")
     CHECK(output.images.count(HistogramId) == 0);
 }
 
+TEST_CASE("A narrowed capture analyses the same content as a whole-display one")
+{
+    // The safety property of letting a frame describe its crop: the region is a
+    // share of the DISPLAY, so narrowing the capture to it must not change which
+    // pixels the scopes read. Two workers, same region, same display - one fed
+    // the whole display, one fed only the region's own pixels - must agree
+    // exactly.
+    //
+    // The display is 200x100: red on the left half, then green and blue splitting
+    // the right half. The region is the right half, so it holds green AND blue.
+    // A worker resolving the region against the narrowed FRAME rather than the
+    // display would take only that frame's right half - blue alone - and miss the
+    // green. The region's content has to be non-uniform for the test to see that;
+    // a solid crop looks the same however much of it you read.
+    RegionOfInterest rightHalf;
+    rightHalf.leftPercent = 50.0;
+    rightHalf.topPercent = 0.0;
+    rightHalf.rightPercent = 100.0;
+    rightHalf.bottomPercent = 100.0;
+
+    const auto settingsFor = [&]() {
+        AnalysisSettings settings;
+        settings.enabledScopes = {VectorscopeId};
+        settings.region = rightHalf;
+
+        return settings;
+    };
+
+    const auto paintColumns = [](FrameBuffer& frame, int from, int to, Color color) {
+        for (int py = 0; py < frame.height; ++py) {
+            for (int px = from; px < to; ++px) {
+                uint8_t* pixel = frame.data.data() + static_cast<std::size_t>(py) * frame.strideBytes +
+                                 static_cast<std::size_t>(px) * 4;
+                pixel[0] = color.b;
+                pixel[1] = color.g;
+                pixel[2] = color.r;
+            }
+        }
+    };
+
+    // The whole display: red | green | blue.
+    FrameBuffer whole = makeSolidFrameBuffer(200, 100, Color{191, 0, 0}, 1);
+    paintColumns(whole, 100, 150, Color{0, 191, 0});
+    paintColumns(whole, 150, 200, Color{0, 0, 191});
+
+    // The same display captured as only the region - green then blue - reporting
+    // that it sits at x=100 of a 200x100 display.
+    FrameBuffer narrowed = makeSolidFrameBuffer(100, 100, Color{0, 191, 0}, 1);
+    paintColumns(narrowed, 50, 100, Color{0, 0, 191});
+    narrowed.sourceX = 100;
+    narrowed.sourceY = 0;
+    narrowed.sourceWidth = 200;
+    narrowed.sourceHeight = 100;
+
+    const auto imageFrom = [&](FrameBuffer&& frame) {
+        FrameMailbox mailbox;
+        AnalysisWorker worker(mailbox);
+        worker.updateSettings(settingsFor());
+        worker.start();
+        mailbox.publish(std::move(frame));
+        uint64_t seen = 0;
+        AnalysisWorker::Output output;
+        REQUIRE(waitFor([&] { return worker.fetchOutput(seen, output); }));
+
+        return output.images.at(VectorscopeId);
+    };
+
+    const ScopeImage fromWhole = imageFrom(std::move(whole));
+    const ScopeImage fromNarrowed = imageFrom(std::move(narrowed));
+
+    REQUIRE(fromWhole.width == fromNarrowed.width);
+    REQUIRE(fromWhole.height == fromNarrowed.height);
+    REQUIRE_FALSE(fromWhole.rgba.empty());
+    // Non-vacuous: the region really does carry a trace.
+    const auto [brightX, brightY] = brightestPixel(fromWhole);
+    CHECK(pixelLit(fromWhole, brightX, brightY));
+    CHECK(fromWhole.rgba == fromNarrowed.rgba);
+}
+
 TEST_CASE("AnalysisWorker skips frames with unchanged content")
 {
     FrameMailbox mailbox;
