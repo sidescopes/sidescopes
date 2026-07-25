@@ -523,6 +523,31 @@ void observeSystemWake(std::function<void()> callback)
                                                   usingBlock:observe];
 }
 
+void observeSystemSleep(std::function<void()> callback)
+{
+    // The way out, mirroring the four notifications observeSystemWake watches
+    // for the way back. Nothing is on screen through any of these, so the
+    // capture stream is stopped rather than left to die and be retried: a
+    // retry that runs while the screen is locked is what binds a stream to the
+    // wrong session in the first place.
+    auto shared = std::make_shared<std::function<void()>>(std::move(callback));
+    const auto observe = ^(NSNotification*) {
+      (*shared)();
+    };
+    [[[NSWorkspace sharedWorkspace] notificationCenter] addObserverForName:NSWorkspaceScreensDidSleepNotification
+                                                                    object:nil
+                                                                     queue:[NSOperationQueue mainQueue]
+                                                                usingBlock:observe];
+    [[[NSWorkspace sharedWorkspace] notificationCenter] addObserverForName:NSWorkspaceSessionDidResignActiveNotification
+                                                                    object:nil
+                                                                     queue:[NSOperationQueue mainQueue]
+                                                                usingBlock:observe];
+    [[NSDistributedNotificationCenter defaultCenter] addObserverForName:@"com.apple.screenIsLocked"
+                                                                 object:nil
+                                                                  queue:[NSOperationQueue mainQueue]
+                                                             usingBlock:observe];
+}
+
 namespace {
 
 // The activation observer's token, kept so teardown can retire it.

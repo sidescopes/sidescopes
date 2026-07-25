@@ -306,6 +306,10 @@ private:
     /// When the window went out of sight, or zero while it is in sight; the
     /// pipeline is suspended once it has been gone long enough to mean it.
     double m_outOfSightSince = 0.0;
+    /// Whether the session has stopped showing anything - the display asleep,
+    /// the screen locked, another user switched in. Set from the platform
+    /// observers, which may deliver on any thread, and read by the frame loop.
+    std::atomic<bool> m_sessionAsleep{false};
     double m_nextPreferencesSave = -1.0;
     std::atomic<bool> m_orphanEscape{false};
 

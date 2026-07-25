@@ -151,6 +151,17 @@ void hideApplication();
 /// separately.
 [[nodiscard]] bool applicationHidden();
 
+/// Calls @p callback when the session stops showing anything: the display
+/// sleeping, the screen locking, or another user taking the session over. The
+/// counterpart to observeSystemWake, which handles every way back.
+///
+/// The capture stream is worth stopping on these rather than letting it die and
+/// be retried. On Windows the retry loop rebuilds a duplication that cannot
+/// succeed until the lock ends, and on macOS a retry that runs while the screen
+/// is locked can bind a stream to the wrong session - which is one of the
+/// things observeSystemWake exists to repair afterwards.
+void observeSystemSleep(std::function<void()> callback);
+
 /// A signal from watchWindowMotion about the watched window. The grip pair
 /// brackets a possible user drag; the motion pair means the border must react
 /// this instant, not at the next frame.

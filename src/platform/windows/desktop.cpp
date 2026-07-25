@@ -643,6 +643,17 @@ void observeSystemWake(std::function<void()>)
 }
 
 // NOLINTNEXTLINE(performance-unnecessary-value-param): by-value matches the sink interface
+void observeSystemSleep(std::function<void()>)
+{
+    // Reaching the power and session messages needs the main window's
+    // procedure, which belongs to GLFW here, so this stays unobserved for now.
+    // The cost it exists to avoid - a restart every couple of seconds for the
+    // whole of a lock - is met from the other side instead: the controller's
+    // retry backoff widens to half a minute while a stream stays unreachable,
+    // which is exactly the shape of a locked screen.
+}
+
+// NOLINTNEXTLINE(performance-unnecessary-value-param): by-value matches the sink interface
 void observeEscapeWithoutKeyWindow(std::function<void()>)
 {
     // The border window carries WS_EX_NOACTIVATE: interacting with it

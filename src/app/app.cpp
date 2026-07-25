@@ -171,7 +171,11 @@ bool App::init()
     m_worker.start();
     warmFaceDetection();
 
-    observeSystemWake([this] { m_captureController.markStale(); });
+    observeSystemWake([this] {
+        m_sessionAsleep.store(false);
+        m_captureController.markStale();
+    });
+    observeSystemSleep([this] { m_sessionAsleep.store(true); });
     observeEscapeWithoutKeyWindow([this] { m_orphanEscape.store(true); });
     // A foreground switch reroutes the borders at the top of the next frame:
     // the flag makes the loop route on arrival, and the empty event wakes an
@@ -495,8 +499,17 @@ void App::servicePipelineVisibility(double now)
     // arriving the frame loop falls to its idle tick as well. A scope that
     // lives beside an editor spends much of its life behind that editor, so
     // this is the difference between a tool that rests and one that does not.
-    const bool outOfSight = applicationHidden() || glfwGetWindowAttrib(m_window, GLFW_ICONIFIED) != 0 ||
-                            glfwGetWindowAttrib(m_window, GLFW_VISIBLE) == 0;
+    // A window can be out of sight because it was put away, or because the
+    // whole session stopped showing anything - the display asleep, the screen
+    // locked, another user switched in. A zero-size framebuffer counts too:
+    // the frame loop already declines to render one, and there is no more
+    // reason to analyse for it.
+    int framebufferWidth = 0;
+    int framebufferHeight = 0;
+    glfwGetFramebufferSize(m_window, &framebufferWidth, &framebufferHeight);
+    const bool outOfSight =
+        m_sessionAsleep.load() || applicationHidden() || glfwGetWindowAttrib(m_window, GLFW_ICONIFIED) != 0 ||
+        glfwGetWindowAttrib(m_window, GLFW_VISIBLE) == 0 || framebufferWidth == 0 || framebufferHeight == 0;
     // The picker paints its own full-screen overlay and the face probe reads
     // frames on its own thread; neither may lose the stream underneath it.
     const bool needsFrames = m_regionPicker.active() || m_regionPicker.scansRunning() || m_faceLock.probeRunning();
