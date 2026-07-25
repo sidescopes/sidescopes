@@ -216,6 +216,54 @@ TEST_CASE("A narrowed capture analyses the same content as a whole-display one")
     CHECK(fromWhole.rgba == fromNarrowed.rgba);
 }
 
+TEST_CASE("A scope hidden and shown again still produces an image")
+{
+    // A scope's instance is created when it appears and released when it goes
+    // away, which is what stops a session paying for scopes nobody is looking at.
+    // The risk that buys is the recreate path: if a returning scope were left
+    // without an instance, or without its adaptive-image extension, it would go
+    // quietly imageless.
+    FrameMailbox mailbox;
+    AnalysisWorker worker(mailbox);
+
+    const auto showing = [](const std::string& id) {
+        AnalysisSettings settings;
+        settings.enabledScopes = {id};
+        // An image size only an adaptive scope honours, so a lost extension shows
+        // up as the default size rather than this one.
+        settings.imageSizes[id] = {1024, 384};
+
+        return settings;
+    };
+
+    worker.updateSettings(showing(HistogramId));
+    worker.start();
+    mailbox.publish(makeSolidFrameBuffer(64, 64, Color{100, 100, 100}, 1));
+
+    uint64_t seen = 0;
+    AnalysisWorker::Output output;
+    REQUIRE(waitFor([&] { return worker.fetchOutput(seen, output); }));
+    REQUIRE(output.images.count(HistogramId) == 1);
+    const int width = output.images.at(HistogramId).width;
+    CHECK(width == 1024);
+
+    // Away: something else entirely, so the histogram's instance is released.
+    worker.updateSettings(showing(VectorscopeId));
+    mailbox.publish(makeSolidFrameBuffer(64, 64, Color{191, 0, 0}, 2));
+    REQUIRE(waitFor([&] { return worker.fetchOutput(seen, output) && output.images.count(VectorscopeId) == 1; }));
+
+    // Back again: a fresh instance, configured, drawing at the size it was asked
+    // for rather than its module default.
+    worker.updateSettings(showing(HistogramId));
+    mailbox.publish(makeSolidFrameBuffer(64, 64, Color{140, 140, 140}, 3));
+    REQUIRE(waitFor([&] { return worker.fetchOutput(seen, output) && output.images.count(HistogramId) == 1; }));
+    const ScopeImage& returned = output.images.at(HistogramId);
+    CHECK(returned.width == width);
+    CHECK_FALSE(returned.rgba.empty());
+    const auto [brightX, brightY] = brightestPixel(returned);
+    CHECK(pixelLit(returned, brightX, brightY));
+}
+
 TEST_CASE("AnalysisWorker skips frames with unchanged content")
 {
     FrameMailbox mailbox;
