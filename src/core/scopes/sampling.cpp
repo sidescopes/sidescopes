@@ -25,9 +25,13 @@ SampleGrid sampleGridFor(int requestedStride, IntRect region, long long budget)
 
     const int columnsPerRow = countAt(region.width, columnStride);
     int rowStride = columnStride;
-    while (
-        budget > 0 &&
-        rowStride<MaximumStride&& static_cast<long long>(countAt(region.height, rowStride)) * columnsPerRow> budget) {
+    // Hoisted out of the loop condition: written inline, the two comparisons
+    // around the && read to clang-format as template brackets, and it formats
+    // them as such.
+    const auto overBudget = [&]() {
+        return static_cast<long long>(countAt(region.height, rowStride)) * columnsPerRow > budget;
+    };
+    while (budget > 0 && rowStride < MaximumStride && overBudget()) {
         ++rowStride;
     }
 
