@@ -66,6 +66,15 @@
 
 namespace {
 
+// The frame period the loop aims at while something on screen is moving. New
+// scope images cannot arrive faster than the capture cadence, so redrawing at
+// the display's refresh rate spends whole frames on an identical image -
+// measured on a 120 Hz panel, 120 frames a second against 30 analysis passes,
+// three of every four redrawing nothing new. The wait returns the instant an
+// event arrives, so a drag or a hover still runs at the rate its events come
+// in; only frames nobody asked for are dropped.
+constexpr double ContentRedrawSeconds = 1.0 / 60.0;
+
 // A key the resolver names resolves to the ImGui key it fires on: the letters
 // and Escape a binding may hold, plus the preset digits and the comma of the
 // settings chord. Anything else never matches a press.
@@ -483,9 +492,25 @@ void App::pumpEvents()
         } else {
             glfwWaitEventsTimeout(0.1);
         }
+        m_lastFrameStart = glfwGetTime();
+
+        return;
+    }
+
+    // Wait out whatever is left of the frame period, not a fixed slice on top
+    // of it. Presenting already blocks - on the drawable through Metal, on the
+    // composition tick through DwmFlush - so a fixed wait would add to that
+    // block and halve the rate again on every display at or below 60 Hz. This
+    // aims at the period, so it caps a faster panel and leaves a slower one
+    // exactly as it was.
+    const double now = glfwGetTime();
+    const double due = m_lastFrameStart + ContentRedrawSeconds;
+    if (due > now) {
+        glfwWaitEventsTimeout(due - now);
     } else {
         glfwPollEvents();
     }
+    m_lastFrameStart = glfwGetTime();
 }
 
 void App::drainAsyncSignals()

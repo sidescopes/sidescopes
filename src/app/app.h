@@ -297,6 +297,9 @@ private:
     std::unique_ptr<ScopePaneRenderer> m_panes;
 
     double m_lastActivity = 0.0;
+    /// When the previous frame's event pump returned, so the redraw cap can
+    /// target a frame period rather than add a delay to one.
+    double m_lastFrameStart = 0.0;
     double m_nextPreferencesSave = -1.0;
     std::atomic<bool> m_orphanEscape{false};
 
