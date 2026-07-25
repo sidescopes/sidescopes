@@ -4,6 +4,7 @@
 #include <vector>
 
 #include "core/frame.h"
+#include "core/scopes/sampling.h"
 #include "core/scopes/scope_types.h"
 
 namespace sidescopes {
@@ -79,7 +80,11 @@ public:
     }
 
 private:
-    void scatterRows(const FrameView& frame, IntRect region, int rowBegin, int rowEnd, uint32_t* bins) const;
+    /// Folds sampled rows [@p rowBegin, @p rowEnd) of @p region into @p bins.
+    /// The bin layout is fixed at three planes of Bins, so this depends on
+    /// nothing an instance holds.
+    static void scatterRows(const FrameView& frame, IntRect region, const SampleGrid& grid, int rowBegin, int rowEnd,
+                            uint32_t* bins);
     void mapBinsToImage();
     [[nodiscard]] std::vector<double> computeHeights() const;
     void exportOutline(const std::vector<double>& heights);

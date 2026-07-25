@@ -4,6 +4,7 @@
 #include <vector>
 
 #include "core/frame.h"
+#include "core/scopes/sampling.h"
 #include "core/scopes/scope_types.h"
 
 namespace sidescopes {
@@ -62,7 +63,8 @@ public:
 private:
     void resize(int size);
     void rebuildTintTable();
-    void scatterRows(const FrameView& frame, IntRect region, int rowBegin, int rowEnd, uint32_t* bins) const;
+    void scatterRows(const FrameView& frame, IntRect region, const SampleGrid& grid, int rowBegin, int rowEnd,
+                     uint32_t* bins) const;
     void mapBinsToImage(uint64_t sampleCount);
     void smoothCodeGrid();
     void adaptiveDensityEstimate(uint64_t sampleCount);

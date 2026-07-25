@@ -5,6 +5,7 @@
 #include <cstddef>
 
 #include "core/parallel_for.h"
+#include "core/scopes/sampling.h"
 #include "core/scopes/trace_response.h"
 
 namespace sidescopes {
@@ -109,17 +110,17 @@ void Histogram::configure(const HistogramSettings& settings)
     }
 }
 
-void Histogram::scatterRows(const FrameView& frame, IntRect region, int rowBegin, int rowEnd, uint32_t* bins) const
+void Histogram::scatterRows(const FrameView& frame, IntRect region, const SampleGrid& grid, int rowBegin, int rowEnd,
+                            uint32_t* bins)
 {
     uint32_t* redBins = bins;
     uint32_t* greenBins = bins + Bins;
     uint32_t* blueBins = bins + static_cast<std::ptrdiff_t>(2) * Bins;
 
-    const int stride = m_settings.samplingStride;
     for (int i = rowBegin; i < rowEnd; ++i) {
-        const int py = region.y + i * stride;
+        const int py = sampleRowOf(grid, region, i);
         const uint8_t* row = frame.pixelAt(region.x, py);
-        for (int px = 0; px < region.width; px += stride) {
+        for (int px = 0; px < region.width; px += grid.columnStride) {
             const uint8_t* pixel = row + static_cast<std::size_t>(px) * 4;
             ++blueBins[pixel[0]];
             ++greenBins[pixel[1]];
@@ -131,13 +132,13 @@ void Histogram::scatterRows(const FrameView& frame, IntRect region, int rowBegin
 void Histogram::accumulate(const FrameView& frame, IntRect region)
 {
     region = region.clampedTo(frame.width, frame.height);
-    const int stride = m_settings.samplingStride;
-    const int rowCount = region.empty() ? 0 : (region.height + stride - 1) / stride;
+    const SampleGrid grid = sampleGridFor(m_settings.samplingStride, region, SampleBudget);
+    const int rowCount = grid.rows;
 
     const int chunks = parallelChunkCount(rowCount, AccumulateRowsPerChunk);
     if (chunks <= 1) {
         std::fill(m_bins.begin(), m_bins.end(), 0u);
-        scatterRows(frame, region, 0, rowCount, m_bins.data());
+        scatterRows(frame, region, grid, 0, rowCount, m_bins.data());
     } else {
         // Each chunk owns a private bin set it clears and scatters into;
         // integer addition then merges them back to a bit-exact total.
@@ -146,7 +147,7 @@ void Histogram::accumulate(const FrameView& frame, IntRect region)
         runParallelChunks(chunks, rowCount, [&](int chunk, int begin, int end) {
             uint32_t* bins = m_threadBins.data() + static_cast<std::size_t>(chunk) * binCount;
             std::fill_n(bins, binCount, uint32_t{0});
-            scatterRows(frame, region, begin, end, bins);
+            scatterRows(frame, region, grid, begin, end, bins);
         });
         mergeBins(m_threadBins.data(), binCount, chunks, m_bins.data());
     }

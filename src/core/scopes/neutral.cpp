@@ -4,6 +4,7 @@
 #include <cmath>
 
 #include "core/color_lab.h"
+#include "core/scopes/sampling.h"
 
 namespace sidescopes {
 namespace {
@@ -95,11 +96,12 @@ void Neutral::accumulate(const FrameView& frame, IntRect region)
     double sumB = 0.0;
     uint64_t count = 0;
     uint64_t neutral = 0;
-    const int stride = m_settings.samplingStride;
-    for (int py = region.y; py < region.y + region.height; py += stride) {
+    const SampleGrid grid = sampleGridFor(m_settings.samplingStride, region, SampleBudget);
+    for (int row = 0; row < grid.rows; ++row) {
+        const int py = sampleRowOf(grid, region, row);
         const uint8_t* pixel = frame.pixelAt(region.x, py);
         const uint8_t* rowEnd = frame.pixelAt(region.x + region.width, py);
-        for (; pixel < rowEnd; pixel += static_cast<std::ptrdiff_t>(4) * stride) {
+        for (; pixel < rowEnd; pixel += static_cast<std::ptrdiff_t>(4) * grid.columnStride) {
             // The byte-sourced conversion: bit-identical here, where every
             // channel arrives as a code, and it does not evaluate the
             // transfer function once per channel per pixel.

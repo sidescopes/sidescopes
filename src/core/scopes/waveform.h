@@ -4,6 +4,7 @@
 #include <vector>
 
 #include "core/frame.h"
+#include "core/scopes/sampling.h"
 #include "core/scopes/scope_types.h"
 
 namespace sidescopes {
@@ -68,8 +69,8 @@ private:
     /// Folds sampled rows [@p rowBegin, @p rowEnd) into @p bins, which points
     /// at plane @p firstPlane of a plane set laid out like m_bins from there
     /// on. Only the planes the active mode draws are written.
-    void scatterRows(const FrameView& frame, IntRect region, int rowBegin, int rowEnd, uint32_t* bins,
-                     int firstPlane) const;
+    void scatterRows(const FrameView& frame, IntRect region, const SampleGrid& grid, int rowBegin, int rowEnd,
+                     uint32_t* bins, int firstPlane) const;
     void mapBinsToImage(uint64_t sampledRows);
     void correctBinDensities();
     void buildParade(const uint32_t* redPlane, const uint32_t* greenPlane, const uint32_t* bluePlane);

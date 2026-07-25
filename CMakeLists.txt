@@ -65,6 +65,7 @@ add_library(sidescopes_core STATIC
     src/core/preferences.cpp
     src/core/region_suggestions.cpp
     src/core/scopes/graticule.cpp
+    src/core/scopes/sampling.cpp
     src/modules/module_registry.cpp
 )
 target_include_directories(sidescopes_core PUBLIC src include)

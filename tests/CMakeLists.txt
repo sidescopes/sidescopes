@@ -15,6 +15,7 @@ add_executable(sidescopes_tests
     test_parallel_for.cpp
     test_frame_mailbox.cpp
     test_region_hash.cpp
+    test_sampling.cpp
     test_trace_intensity.cpp
     test_marker_smoother.cpp
     test_analysis_worker.cpp

@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "core/parallel_for.h"
+#include "core/scopes/sampling.h"
 #include "core/scopes/trace_response.h"
 
 namespace sidescopes {
@@ -110,7 +111,8 @@ void Vectorscope::resize(int size)
     rebuildTintTable();
 }
 
-void Vectorscope::scatterRows(const FrameView& frame, IntRect region, int rowBegin, int rowEnd, uint32_t* bins) const
+void Vectorscope::scatterRows(const FrameView& frame, IntRect region, const SampleGrid& grid, int rowBegin, int rowEnd,
+                              uint32_t* bins) const
 {
     // Accumulation always uses the 256-code grid: 8-bit content quantizes its
     // chroma to those codes (and piles unevenly onto fixed sub-code positions,
@@ -121,17 +123,16 @@ void Vectorscope::scatterRows(const FrameView& frame, IntRect region, int rowBeg
     // parked the whole cloud half a bin off the positions the projection - and
     // with it every marker and graticule target - reports.
     const ChromaCoefficients& matrix = coefficientsFor(m_settings.matrix);
-    const int stride = m_settings.samplingStride;
     const int size = CodeGridSize;
     const int span = size * 16;
     for (int i = rowBegin; i < rowEnd; ++i) {
-        const int py = region.y + i * stride;
+        const int py = sampleRowOf(grid, region, i);
         const uint8_t* pixel = frame.pixelAt(region.x, py);
         const uint8_t* pixelRowEnd = frame.pixelAt(region.x + region.width, py);
         // Clamp to span - 17, not span - 1: the top bin index is then at most
         // (span - 17) >> 4 == size - 2, so the +1 neighbor the bilinear splat
         // writes (both the cb column and the cr row above) stays in the grid.
-        for (; pixel < pixelRowEnd; pixel += static_cast<std::ptrdiff_t>(4) * stride) {
+        for (; pixel < pixelRowEnd; pixel += static_cast<std::ptrdiff_t>(4) * grid.columnStride) {
             const int b = pixel[0], g = pixel[1], r = pixel[2];
             const int64_t cbRaw = matrix.cbFromR * r + matrix.cbFromG * g + matrix.cbFromB * b;
             const int64_t crRaw = matrix.crFromR * r + matrix.crFromG * g + matrix.crFromB * b;
@@ -156,9 +157,9 @@ void Vectorscope::scatterRows(const FrameView& frame, IntRect region, int rowBeg
 void Vectorscope::accumulate(const FrameView& frame, IntRect region)
 {
     region = region.clampedTo(frame.width, frame.height);
-    const int stride = m_settings.samplingStride;
-    const int rowCount = region.empty() ? 0 : (region.height + stride - 1) / stride;
-    const int pixelsPerRow = region.empty() ? 0 : (region.width + stride - 1) / stride;
+    const SampleGrid grid = sampleGridFor(m_settings.samplingStride, region, SampleBudget);
+    const int rowCount = grid.rows;
+    const int pixelsPerRow = grid.columnsPerRow;
     // The scatter counts one sample per sampled pixel; the count is a plain
     // product, so it stays identical however the rows split across threads and
     // the per-sample density normalization stays bit-exact.
@@ -167,7 +168,7 @@ void Vectorscope::accumulate(const FrameView& frame, IntRect region)
     const int chunks = parallelChunkCount(rowCount, AccumulateRowsPerChunk);
     if (chunks <= 1) {
         std::fill(m_bins.begin(), m_bins.end(), 0u);
-        scatterRows(frame, region, 0, rowCount, m_bins.data());
+        scatterRows(frame, region, grid, 0, rowCount, m_bins.data());
     } else {
         // Each chunk owns a private code grid it clears and scatters into, so
         // no two threads write the same bin; integer addition then merges them
@@ -177,7 +178,7 @@ void Vectorscope::accumulate(const FrameView& frame, IntRect region)
         runParallelChunks(chunks, rowCount, [&](int chunk, int begin, int end) {
             uint32_t* bins = m_threadBins.data() + static_cast<std::size_t>(chunk) * binCount;
             std::fill_n(bins, binCount, uint32_t{0});
-            scatterRows(frame, region, begin, end, bins);
+            scatterRows(frame, region, grid, begin, end, bins);
         });
         mergeBins(m_threadBins.data(), binCount, chunks, m_bins.data());
     }

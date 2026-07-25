@@ -5,6 +5,7 @@
 #include <cstddef>
 
 #include "core/parallel_for.h"
+#include "core/scopes/sampling.h"
 #include "core/scopes/trace_response.h"
 
 namespace sidescopes {
@@ -458,17 +459,16 @@ void Waveform::resize(int columns, int imageHeight)
     m_image.rgba.assign(static_cast<std::size_t>(m_columns) * m_imageHeight * 4, 0);
 }
 
-void Waveform::scatterRows(const FrameView& frame, IntRect region, int rowBegin, int rowEnd, uint32_t* bins,
-                           int firstPlane) const
+void Waveform::scatterRows(const FrameView& frame, IntRect region, const SampleGrid& grid, int rowBegin, int rowEnd,
+                           uint32_t* bins, int firstPlane) const
 {
     const ModeFlags flags = modeFlagsFor(m_settings.mode);
     const ScatterPlanes planes = scatterPlanesFor(flags, bins, firstPlane, planeSize());
 
-    const int stride = m_settings.samplingStride;
     for (int i = rowBegin; i < rowEnd; ++i) {
-        const int py = region.y + i * stride;
+        const int py = sampleRowOf(grid, region, i);
         const uint8_t* row = frame.pixelAt(region.x, py);
-        for (int px = 0; px < region.width; px += stride) {
+        for (int px = 0; px < region.width; px += grid.columnStride) {
             const uint8_t* pixel = row + static_cast<std::size_t>(px) * 4;
             const int b = pixel[0], g = pixel[1], r = pixel[2];
             // Samples splat fractionally across the two columns they
@@ -516,8 +516,8 @@ void Waveform::scatterRows(const FrameView& frame, IntRect region, int rowBegin,
 void Waveform::accumulate(const FrameView& frame, IntRect region)
 {
     region = region.clampedTo(frame.width, frame.height);
-    const int stride = m_settings.samplingStride;
-    const int rowCount = region.empty() ? 0 : (region.height + stride - 1) / stride;
+    const SampleGrid grid = sampleGridFor(m_settings.samplingStride, region, UnlimitedSamples);
+    const int rowCount = grid.rows;
 
     const PlaneSpan span = planeSpanFor(modeFlagsFor(m_settings.mode));
     const std::size_t spanOffset = static_cast<std::size_t>(span.first) * planeSize();
@@ -526,7 +526,7 @@ void Waveform::accumulate(const FrameView& frame, IntRect region)
     const int chunks = parallelChunkCount(rowCount, AccumulateRowsPerChunk);
     if (chunks <= 1) {
         std::fill_n(m_bins.data() + spanOffset, spanCount, uint32_t{0});
-        scatterRows(frame, region, 0, rowCount, m_bins.data() + spanOffset, span.first);
+        scatterRows(frame, region, grid, 0, rowCount, m_bins.data() + spanOffset, span.first);
     } else {
         // Each chunk owns a private plane set it clears and scatters into;
         // integer addition then merges them back to a bit-exact total.
@@ -534,7 +534,7 @@ void Waveform::accumulate(const FrameView& frame, IntRect region)
         runParallelChunks(chunks, rowCount, [&](int chunk, int begin, int end) {
             uint32_t* bins = m_threadBins.data() + static_cast<std::size_t>(chunk) * spanCount;
             std::fill_n(bins, spanCount, uint32_t{0});
-            scatterRows(frame, region, begin, end, bins, span.first);
+            scatterRows(frame, region, grid, begin, end, bins, span.first);
         });
         mergeBins(m_threadBins.data(), spanCount, chunks, m_bins.data() + spanOffset);
     }
