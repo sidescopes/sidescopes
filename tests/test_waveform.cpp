@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <vector>
 
+#include "core/scopes/sampling.h"
 #include "core/scopes/waveform.h"
 #include "scope_image.h"
 #include "test_frame.h"
@@ -410,6 +411,49 @@ TEST_CASE("Colored luma waveform draws a neutral trace for a pure black region")
     REQUIRE(r > 0);
     CHECK(r == g);  // no color mass -> equal channels, a neutral trace
     CHECK(g == b);
+}
+
+TEST_CASE("The waveform sees every row of a region past the sample budget")
+{
+    // The waveform opts out of the row thinning the other scopes take, because
+    // its bins are an order of magnitude emptier and thinning costs it visible
+    // trace noise. Nothing else guards that opt-out: the exact goldens run on
+    // frames far too small to reach the budget, so a waveform that started
+    // thinning would pass every one of them.
+    //
+    // So paint black exactly the rows a budgeted pass would visit and white all
+    // the rest, taking the pattern from the policy itself rather than hard
+    // coding it. A waveform that samples every row sees white; one that thinned
+    // would see nothing but black.
+    constexpr int Width = 4201;
+    constexpr int Height = 1000;
+    const IntRect region{0, 0, Width, Height};
+    REQUIRE(static_cast<long long>(Width) * Height > SampleBudget);
+
+    const SampleGrid budgeted = sampleGridFor(1, region, SampleBudget);
+    REQUIRE(budgeted.rowStride > 1);
+
+    TestFrame frame(Width, Height, 0);
+    frame.fill(Color{255, 255, 255});
+    for (int index = 0; index < budgeted.rows; ++index) {
+        const int row = sampleRowOf(budgeted, region, index);
+        frame.fillRows(row, row + 1, Color{0, 0, 0});
+    }
+
+    Waveform waveform;
+    waveform.configure(settingsFor(WaveformMode::Luma));
+    waveform.accumulate(frame.view(), region);
+
+    // White is luma 255, which is the image's top row; black is the bottom.
+    // Both must be populated, because half the rows carry each.
+    bool topLit = false;
+    bool bottomLit = false;
+    for (int column = 0; column < waveform.image().width; ++column) {
+        topLit = topLit || pixelLit(waveform.image(), column, 0);
+        bottomLit = bottomLit || pixelLit(waveform.image(), column, WaveformLevels - 1);
+    }
+    CHECK(topLit);
+    CHECK(bottomLit);
 }
 
 }  // namespace sidescopes
