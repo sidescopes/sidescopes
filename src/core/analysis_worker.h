@@ -36,6 +36,8 @@ struct RegionOfInterest
     double bottomPercent = 100.0;
 
     [[nodiscard]] IntRect toPixels(int frameWidth, int frameHeight) const;
+
+    [[nodiscard]] bool operator==(const RegionOfInterest&) const = default;
 };
 
 /// What the worker runs, keyed entirely by module scope id. Parameters and

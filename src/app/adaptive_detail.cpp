@@ -195,4 +195,14 @@ std::optional<DetailSizes> AdaptiveDetail::update(const ScopePaneSizes& panes, f
     return wanted;
 }
 
+AnalysisSettings coarsenedForMotion(AnalysisSettings settings)
+{
+    for (auto& [id, size] : settings.imageSizes) {
+        size.first = std::max(size.first / MovingDetailDivisor, std::min(size.first, MovingDetailFloor));
+        size.second = std::max(size.second / MovingDetailDivisor, std::min(size.second, MovingDetailFloor));
+    }
+
+    return settings;
+}
+
 }  // namespace sidescopes

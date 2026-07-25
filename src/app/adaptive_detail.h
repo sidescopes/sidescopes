@@ -50,6 +50,34 @@ struct DetailSizes
 /// costs the engines a reallocation.
 inline constexpr double DetailSettleSeconds = 0.4;
 
+/// What each scope image's sides are divided by while the region is moving.
+/// Dragging a region across a picture is scanning it - for a blown highlight, a
+/// colour cast, the next face - and none of that is read off the finest detail
+/// of a trace. A pass costs roughly what its image covers, so halving both
+/// sides is most of the pass.
+///
+/// Measured against full detail on a photograph, magnifying the coarse image
+/// back the way a texture is stretched over a pane: the vectorscope moves by a
+/// mean of 0.02 of 255 and the histogram by 0.10 - both are upsamples of a grid
+/// that does not change - the neutral plane by 1.13 with its cast reading
+/// unmoved, and the waveform by 3.8, all of it from the halved columns. Its
+/// halved height costs 0.18, the levels being fixed at 256 by 8-bit input.
+inline constexpr int MovingDetailDivisor = 2;
+
+/// The smallest side a moving pass is asked for, so a small pane's image stays
+/// a picture rather than a handful of cells.
+inline constexpr int MovingDetailFloor = 128;
+
+/// How long the region must sit still before the scopes go back to full
+/// detail. Longer than the gap between two steps of a drag, so one pass is not
+/// computed at full detail in the middle of one, and short enough that letting
+/// go is followed by the sharp trace.
+inline constexpr double RegionSettleSeconds = 0.25;
+
+/// @p settings with every scope image it names computed at a fraction of its
+/// resolution: what to ask of the worker while the region is moving.
+[[nodiscard]] AnalysisSettings coarsenedForMotion(AnalysisSettings settings);
+
 /// Decides what resolution each scope's image is computed at from the pane the
 /// scope actually gets, and holds a change back until the sizes have sat still.
 /// It reads the view and the settings it is constructed with and returns the

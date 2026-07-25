@@ -184,6 +184,45 @@ TEST_CASE("The neutral plane keeps its resolution while it is off screen")
     CHECK(fixture.detail.desiredNeutralSize(Huge) == 512);
 }
 
+TEST_CASE("A moving region is analysed at a fraction of the detail")
+{
+    // A pass costs roughly what its image covers, so a region being dragged
+    // across a picture - where the reading wanted is a blown highlight or a
+    // colour cast, not the finest detail of a trace - is computed at half of
+    // each side.
+    AnalysisSettings settings;
+    settings.imageSizes[WaveformScopeId] = {2048, 512};
+    settings.imageSizes[VectorscopeScopeId] = {512, 512};
+    settings.region = RegionOfInterest{10.0, 20.0, 60.0, 70.0};
+    settings.enabledScopes = {std::string(WaveformScopeId)};
+    settings.scopeParams[WaveformScopeId]["gain"] = 0.05;
+
+    const AnalysisSettings moving = coarsenedForMotion(settings);
+    CHECK(moving.imageSizes.at(WaveformScopeId) == std::pair<int, int>{1024, 256});
+    CHECK(moving.imageSizes.at(VectorscopeScopeId) == std::pair<int, int>{256, 256});
+
+    // Only the resolutions: the region, the parameters and the scopes computed
+    // are what the user asked for, moving or still.
+    CHECK(moving.region == settings.region);
+    CHECK(moving.enabledScopes == settings.enabledScopes);
+    CHECK(moving.scopeParams == settings.scopeParams);
+}
+
+TEST_CASE("A small scope image is left alone while the region moves")
+{
+    // Halving without a floor turns a small pane's image into a handful of
+    // cells, which is a different picture rather than a coarser one.
+    AnalysisSettings settings;
+    settings.imageSizes[VectorscopeScopeId] = {MovingDetailFloor + 40, MovingDetailFloor + 40};
+    settings.imageSizes[NeutralScopeId] = {MovingDetailFloor / 2, MovingDetailFloor / 2};
+
+    const AnalysisSettings moving = coarsenedForMotion(settings);
+    CHECK(moving.imageSizes.at(VectorscopeScopeId) == std::pair<int, int>{MovingDetailFloor, MovingDetailFloor});
+    // Already below the floor: coarsening it further would be all that is left
+    // of it, so it stands as it is.
+    CHECK(moving.imageSizes.at(NeutralScopeId) == std::pair<int, int>{MovingDetailFloor / 2, MovingDetailFloor / 2});
+}
+
 TEST_CASE("A scope off screen keeps the resolution in force")
 {
     DetailFixture fixture;

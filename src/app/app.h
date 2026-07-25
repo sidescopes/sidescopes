@@ -210,6 +210,11 @@ private:
     void applyBorderEditOutcome(const RegionBorderEditOutcome& outcome);
     void commitAnalysisChanges();
 
+    /// Notes whether the region is moving right now, from whether it keeps
+    /// changing. @return Whether that answer just changed, which the settings
+    /// have to carry to the worker.
+    [[nodiscard]] bool trackRegionMotion(double now);
+
     GLFWwindow* m_window = nullptr;
     AppCallbackState m_callbackState;
     std::unique_ptr<GraphicsBackend> m_graphics;
@@ -307,6 +312,12 @@ private:
     /// the pointer everywhere, and following it at the moving cadence spent as
     /// much on a swatch as on the traces.
     double m_lastReadoutActivity = 0.0;
+    /// The region the worker was last told about, and when it last differed: a
+    /// region that keeps changing is one a gesture is dragging around, and the
+    /// scopes are computed coarsely until it settles.
+    RegionOfInterest m_lastSentRegion;
+    std::optional<double> m_regionMovedAt;
+    bool m_regionMoving = false;
     /// When the previous frame's event pump returned, so the redraw cap can
     /// target a frame period rather than add a delay to one.
     double m_lastFrameStart = 0.0;

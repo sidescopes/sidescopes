@@ -1073,8 +1073,14 @@ void App::applyPendingUiScale()
 
 void App::commitAnalysisChanges()
 {
+    if (trackRegionMotion(glfwGetTime())) {
+        m_analysisDirty = true;
+    }
     if (m_analysisDirty) {
-        m_worker.updateSettings(m_analysis);
+        // Coarse only on the way out: the settings themselves stay the truth,
+        // so the detail policy and the projections keep reading what the region
+        // will be analysed at the moment it stops moving.
+        m_worker.updateSettings(m_regionMoving ? coarsenedForMotion(m_analysis) : m_analysis);
         m_panes->configureProjections();
         m_regions.syncBorder(borderState());
         m_analysisDirty = false;
@@ -1085,6 +1091,27 @@ void App::commitAnalysisChanges()
         persistPreferences();
         m_nextPreferencesSave = -1.0;
     }
+}
+
+// A region that keeps changing is a region in motion, whichever gesture is
+// moving it: a border dragged by its band, a rectangle still being drawn, an
+// attached window on its way across the screen. Asking the region rather than
+// each of them is what makes this one test instead of three.
+bool App::trackRegionMotion(double now)
+{
+    if (m_analysisDirty && !(m_analysis.region == m_lastSentRegion)) {
+        m_lastSentRegion = m_analysis.region;
+        m_regionMovedAt = now;
+    }
+    const bool moving = m_regionMovedAt && now - *m_regionMovedAt < RegionSettleSeconds;
+    if (moving == m_regionMoving) {
+        return false;
+    }
+    m_regionMoving = moving;
+
+    // The change itself has to be sent: a region that stopped moving stops
+    // dirtying the settings, so nothing else would carry the detail back up.
+    return true;
 }
 
 }  // namespace sidescopes
