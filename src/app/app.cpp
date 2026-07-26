@@ -455,9 +455,13 @@ void App::runFrame()
     pumpEvents();
     m_frameTimer->markFrameBodyStart();
     drainAsyncSignals();
+    int framebufferWidth = 0;
+    int framebufferHeight = 0;
+    glfwGetFramebufferSize(m_window, &framebufferWidth, &framebufferHeight);
+    const bool nothingToDrawInto = framebufferWidth == 0 || framebufferHeight == 0;
     // Capture is a service that dies (lock screen, display sleep); restarting
     // it is our job.
-    servicePipelineVisibility(glfwGetTime());
+    servicePipelineVisibility(nothingToDrawInto, glfwGetTime());
     m_captureController.service(glfwGetTime());
     // Attached regions: observe the attached windows and route the analysis by
     // the focused window. The border reconciles here every frame in both
@@ -467,10 +471,7 @@ void App::runFrame()
     followWindowDisplay();
     syncUiScaleToMonitor();
 
-    int framebufferWidth = 0;
-    int framebufferHeight = 0;
-    glfwGetFramebufferSize(m_window, &framebufferWidth, &framebufferHeight);
-    if (framebufferWidth == 0 || framebufferHeight == 0) {
+    if (nothingToDrawInto) {
         return;
     }
     if (!m_graphics->beginFrame(framebufferWidth, framebufferHeight)) {
@@ -505,17 +506,14 @@ void App::runFrame()
     commitAnalysisChanges();
 }
 
-void App::servicePipelineVisibility(double now)
+void App::servicePipelineVisibility(bool framebufferEmpty, double now)
 {
-    int framebufferWidth = 0;
-    int framebufferHeight = 0;
-    glfwGetFramebufferSize(m_window, &framebufferWidth, &framebufferHeight);
     const VisibilityInputs inputs{
         m_sessionAsleep.load(),
         applicationHidden(),
         glfwGetWindowAttrib(m_window, GLFW_ICONIFIED) != 0,
         glfwGetWindowAttrib(m_window, GLFW_VISIBLE) != 0,
-        framebufferWidth == 0 || framebufferHeight == 0,
+        framebufferEmpty,
         m_regionPicker.active() || m_regionPicker.scansRunning() || m_faceLock.probeRunning()};
 
     switch (m_visibility.update(inputs, m_captureController.suspended(), now)) {
@@ -966,6 +964,8 @@ void App::dispatchRegionMenu(int chosen)
     }
 }
 
+namespace {
+
 // Opens the folder holding the diagnostic log, so "send the log" is a
 // click instead of a hunt through the temp directory.
 void openDiagLogFolder()
@@ -980,6 +980,8 @@ void openDiagLogFolder()
     const std::string url = (folder.front() == '/' ? "file://" : "file:///") + folder;
     openUrl(url.c_str());
 }
+
+}  // namespace
 
 void App::dispatchViewMenu(int chosen)
 {

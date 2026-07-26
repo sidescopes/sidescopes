@@ -151,7 +151,9 @@ private:
     void runFrame();
     /// Suspends the capture stream - and the whole pipeline behind it - while
     /// the window is out of sight, and resumes it when the window returns.
-    void servicePipelineVisibility(double now);
+    /// @p framebufferEmpty is the frame's own measurement, taken once and read
+    /// here and by the draw that follows.
+    void servicePipelineVisibility(bool framebufferEmpty, double now);
     void serviceCaptureCrop(bool otherReadersActive, double now);
     void pumpEvents();
     void drainAsyncSignals();

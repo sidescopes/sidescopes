@@ -363,6 +363,7 @@ if(APPLE OR WIN32)
         src/app/attach_controller.cpp
         src/app/border_label.cpp
         src/app/capture_controller.cpp
+        src/app/capture_crop.cpp
         src/app/color_picker_common.cpp
         src/app/color_picker_deck.cpp
         src/app/color_picker_difference.cpp
@@ -372,7 +373,6 @@ if(APPLE OR WIN32)
         src/app/cursor_sampler.cpp
         src/app/face_lock.cpp
         src/app/face_lock_controller.cpp
-        src/app/capture_crop.cpp
         src/app/frame_pacing.cpp
         src/app/frame_timer.cpp
         src/app/hex_font.cpp
@@ -388,8 +388,8 @@ if(APPLE OR WIN32)
         src/app/param_menu.cpp
         src/app/pin_board.cpp
         src/app/region_coordinator.cpp
-        src/app/region_motion.cpp
         src/app/region_geometry.cpp
+        src/app/region_motion.cpp
         src/app/region_picker.cpp
         src/app/row_layout.cpp
         src/app/scope_layout.cpp

@@ -10,9 +10,8 @@ namespace sidescopes {
 /// when nothing inside the scoped region changed. Pixels inside @p masked are
 /// excluded: the application masks its own window there, so its own redraws
 /// never re-trigger analysis (without this, a region covering the display
-/// turns the
-/// app's trace updates into a feedback loop that keeps analysis running on an
-/// otherwise idle screen).
+/// turns the app's trace updates into a feedback loop that keeps analysis
+/// running on an otherwise idle screen).
 ///
 /// The hash samples every fourth row in 8-byte (two-pixel) chunks, dropping a
 /// trailing odd pixel, which detects any real content change at roughly a
