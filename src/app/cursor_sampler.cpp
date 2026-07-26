@@ -9,10 +9,18 @@ namespace sidescopes {
 
 namespace {
 
-// Whether a marker's colour moved enough to be worth a frame. An eighth of a
-// 0-255 code: below that the marker lands on the same pixel of the scope, and
-// the smoothing would otherwise creep towards its target for ever at sixty
-// frames a second, never quite arriving.
+// Whether a marker's colour moved enough to be worth a frame.
+//
+// An eighth of a 0-255 code, which is what the position a marker is drawn at
+// turns it into: a scope maps the whole 0-255 range across its pane, so one
+// code is around one pane pixel and an eighth of one stays under a pixel even
+// on a display drawing two device pixels per point. Below that the marker
+// lands where it already was.
+//
+// It has to be a real fraction of a code because the colour is a 3x3 average,
+// so a single pixel of the neighbourhood changing by one code moves it by a
+// ninth of one. Waking the loop to thirty frames a second for half a second
+// over a tenth of a pixel is what this exists to stop.
 bool markerMoved(const std::optional<FloatColor>& before, const std::optional<FloatColor>& after)
 {
     if (before.has_value() != after.has_value()) {
@@ -21,7 +29,7 @@ bool markerMoved(const std::optional<FloatColor>& before, const std::optional<Fl
     if (!after) {
         return false;
     }
-    constexpr float Threshold = 1.0f / (255.0f * 8.0f);
+    constexpr float Threshold = 1.0f / 8.0f;
 
     return std::abs(before->r - after->r) > Threshold || std::abs(before->g - after->g) > Threshold ||
            std::abs(before->b - after->b) > Threshold;

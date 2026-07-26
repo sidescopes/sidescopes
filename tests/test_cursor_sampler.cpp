@@ -398,6 +398,49 @@ TEST_CASE("A marker takes a new colour at its own interval")
     CHECK_THAT(readout.readoutColor->g, WithinAbs(200.0f, 1.0f));
 }
 
+TEST_CASE("A marker does not spend a frame on movement below a pixel")
+{
+    // The colour under the pointer is a 3x3 average, so one pixel of that
+    // neighbourhood changing by a single code moves it by a ninth of one -
+    // around a tenth of a pane pixel once a scope has mapped 0-255 across its
+    // width. That must not wake the loop to the moving cadence, or a photograph
+    // with the faintest noise in it keeps the application at thirty frames a
+    // second for nothing.
+    SamplerFixture fix;
+    desktopStubs().cursorDisplay = StreamedDisplay;
+    desktopStubs().cursor = DesktopPoint{32.0, 32.0};
+    REQUIRE(fix.sampler.update(FrameSize, WholeDisplay, Instant, 1.0, 1.0f / 60.0f).changed);
+
+    FrameBuffer nudged = makeSolidFrameBuffer(64, 64, Color{200, 50, 30}, 2);
+    // One pixel of the nine, one code brighter: its green byte, which is the
+    // second of the four a BGRA pixel carries.
+    constexpr std::size_t Neighbour = 31;
+    const std::size_t green = Neighbour * static_cast<std::size_t>(nudged.strideBytes) + Neighbour * 4 + 1;
+    nudged.data[green] = 51;
+    fix.mailbox.publish(std::move(nudged));
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (fix.worker.consumedFrameSequence() != 2 && std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+    REQUIRE(fix.worker.consumedFrameSequence() == 2);
+
+    // The reading really did change - a ninth of a code - and is still not
+    // worth a frame.
+    const CursorSample nudge = fix.sampler.update(FrameSize, WholeDisplay, Instant, 1.2, 1.0f / 60.0f);
+    REQUIRE(nudge.vectorscopeColor.has_value());
+    CHECK_THAT(nudge.vectorscopeColor->g, WithinAbs(50.0f, 0.2f));
+    CHECK_FALSE(nudge.changed);
+
+    // A whole code across the neighbourhood is a pane pixel, and does count.
+    fix.mailbox.publish(makeSolidFrameBuffer(64, 64, Color{200, 52, 30}, 3));
+    const auto second = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (fix.worker.consumedFrameSequence() != 3 && std::chrono::steady_clock::now() < second) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+    REQUIRE(fix.worker.consumedFrameSequence() == 3);
+    CHECK(fix.sampler.update(FrameSize, WholeDisplay, Instant, 1.4, 1.0f / 60.0f).changed);
+}
+
 TEST_CASE("A marker crosses the trace at an even speed between samples")
 {
     // Sampling and animation are separate rates. Easing straight onto a target
