@@ -4,12 +4,15 @@
 // platform-independent, so these run on every platform and back both the
 // Windows border procedure and the macOS overlay.
 
+#include <array>
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <cstddef>
+#include <cstdint>
 #include <optional>
 #include <vector>
 
+#include "platform/pixel_average.h"
 #include "platform/region_geometry.h"
 
 namespace sidescopes {
@@ -333,6 +336,42 @@ TEST_CASE("The label tab never exceeds its budget")
             CHECK(layout.textWidth >= 16.0);
         }
     }
+}
+
+TEST_CASE("A screen sample averages only the pixels it covers")
+{
+    // A one-shot sample comes back letterboxed to the display's aspect: the
+    // neighbourhood asked for in a band across the middle, transparent padding
+    // above and below. Nine of sixteen rows covered on a 16:9 display, so
+    // counting the padding reported white as 56%.
+    constexpr std::size_t Side = 8;
+    std::array<uint8_t, Side * Side * 4> pixels{};
+    constexpr std::size_t CoveredRows = 5;
+    for (std::size_t row = 0; row < CoveredRows; ++row) {
+        for (std::size_t column = 0; column < Side; ++column) {
+            const std::size_t at = (row * Side + column) * 4;
+            pixels[at + 0] = 255;
+            pixels[at + 1] = 128;
+            pixels[at + 2] = 64;
+            pixels[at + 3] = 255;
+        }
+    }
+
+    const std::optional<FloatColor> average = averagePremultiplied(pixels.data(), Side * Side);
+    REQUIRE(average.has_value());
+    CHECK(average->r == Catch::Approx(255.0).margin(0.01));
+    CHECK(average->g == Catch::Approx(128.0).margin(0.01));
+    CHECK(average->b == Catch::Approx(64.0).margin(0.01));
+}
+
+TEST_CASE("A screen sample of nothing at all reports nothing")
+{
+    // Padding everywhere means the capture answered with no content; a colour
+    // averaged out of it would be black, which is a reading rather than a
+    // failure and would show as one.
+    constexpr std::size_t Pixels = 16;
+    const std::array<uint8_t, Pixels * 4> empty{};
+    CHECK_FALSE(averagePremultiplied(empty.data(), Pixels).has_value());
 }
 
 }  // namespace sidescopes

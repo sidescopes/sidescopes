@@ -26,6 +26,7 @@
 #include <string>
 
 #include "platform/desktop.h"
+#include "platform/pixel_average.h"
 #include "platform/screen_capture.h"
 
 namespace sidescopes {
@@ -122,7 +123,9 @@ SCStreamConfiguration* makeStreamConfiguration(SCDisplay* display, SCContentFilt
 }
 
 // Redrawing into a known-layout bitmap sidesteps whatever byte order the
-// capture returned, then averages the tiny neighborhood to one color.
+// capture returned, then averages the tiny neighborhood to one color. The
+// average is weighted by coverage - see averagePremultiplied, which is where
+// the reason lives.
 std::optional<FloatColor> averageCapturedImage(CGImageRef image)
 {
     constexpr size_t Pixels = 8;
@@ -137,18 +140,8 @@ std::optional<FloatColor> averageCapturedImage(CGImageRef image)
     }
     CGContextDrawImage(context, CGRectMake(0, 0, Pixels, Pixels), image);
     CGContextRelease(context);
-    double sumR = 0;
-    double sumG = 0;
-    double sumB = 0;
-    for (size_t index = 0; index < Pixels * Pixels; ++index) {
-        sumR += pixels[index * 4 + 0];
-        sumG += pixels[index * 4 + 1];
-        sumB += pixels[index * 4 + 2];
-    }
-    constexpr double Count = static_cast<double>(Pixels * Pixels);
 
-    return FloatColor{static_cast<float>(sumR / Count), static_cast<float>(sumG / Count),
-                      static_cast<float>(sumB / Count)};
+    return averagePremultiplied(pixels, Pixels * Pixels);
 }
 
 }  // namespace
