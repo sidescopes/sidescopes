@@ -370,13 +370,13 @@ void App::refreshActivatedScope(std::string_view id)
     while (glfwGetTime() < deadline) {
         if (m_worker.fetchOutput(m_outputVersion, m_output) && m_panes->imageFor(id).sequence != staleSequence &&
             m_panes->imageFor(id).width > 0) {
-            m_panes->uploadVisibleScopes();
+            m_panes->uploadVisibleScopes(/*traceLive=*/true);
 
             return;
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(2));
     }
-    m_panes->uploadVisibleScopes();  // timeout: a stale image beats none
+    m_panes->uploadVisibleScopes(/*traceLive=*/true);  // timeout: a stale image beats none
 }
 
 void App::toggleScope(std::string_view id)
@@ -520,7 +520,7 @@ void App::drawFrame(int framebufferWidth, int framebufferHeight)
     m_lastDrawnFrame = glfwGetTime();
     m_outputPending.store(false);
     if (m_worker.fetchOutput(m_outputVersion, m_output)) {
-        m_panes->uploadVisibleScopes();
+        m_panes->uploadVisibleScopes(m_analysis.region.has_value());
         SS_DIAG(Perf, "pass analysis_ms=%.1f", m_output.accumulateMilliseconds);
         m_lastActivity = glfwGetTime();
     }

@@ -70,8 +70,9 @@ public:
     /// never disagree with its trace.
     void configureProjections();
 
-    /// Uploads the newest image into every on-screen scope's texture.
-    void uploadVisibleScopes();
+    /// Uploads the newest image into every on-screen scope's texture, and does
+    /// nothing at all unless @p traceLive says a region is being read.
+    void uploadVisibleScopes(bool traceLive);
 
     /// Drops every scope's trace, for when the region goes away: the panes
     /// then read as honestly empty rather than showing the last region's

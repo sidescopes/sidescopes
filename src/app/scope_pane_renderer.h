@@ -92,8 +92,10 @@ public:
     /// never disagree with its trace.
     void configureProjections();
 
-    /// Uploads the newest image into every on-screen scope's texture.
-    void uploadVisibleScopes();
+    /// Uploads the newest image into every on-screen scope's texture. With
+    /// @p traceLive false - no region selected - it uploads nothing, so a pass
+    /// that outlived its region cannot put a texture back.
+    void uploadVisibleScopes(bool traceLive);
 
     /// Drops every scope's trace, for when the region goes away.
     void releaseTraces();

@@ -44,9 +44,9 @@ void ScopePaneRenderer::configureProjections()
     m_panes.configureProjections();
 }
 
-void ScopePaneRenderer::uploadVisibleScopes()
+void ScopePaneRenderer::uploadVisibleScopes(bool traceLive)
 {
-    m_panes.uploadVisibleScopes();
+    m_panes.uploadVisibleScopes(traceLive);
 }
 
 void ScopePaneRenderer::releaseTraces()

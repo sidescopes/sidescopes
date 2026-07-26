@@ -638,8 +638,16 @@ void PaneArea::uploadScope(std::unique_ptr<ScopeTexture>& texture, const ScopeIm
     texture->upload(image);
 }
 
-void PaneArea::uploadVisibleScopes()
+void PaneArea::uploadVisibleScopes(bool traceLive)
 {
+    if (!traceLive) {
+        // Nothing is being read, so no image can be current. A pass already in
+        // flight when the region went away publishes afterwards and describes
+        // somewhere the scopes no longer look: uploading it would rebuild the
+        // very textures releaseTraces just dropped - unseen, since the pane
+        // draws no trace without a region, until the next region opens on them.
+        return;
+    }
     for (const std::string& id : m_view.stack().ids()) {
         const auto texture = m_scopeTextures.find(id);
         if (texture == m_scopeTextures.end()) {
