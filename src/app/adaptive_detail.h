@@ -4,6 +4,7 @@
 #include <string_view>
 #include <utility>
 
+#include "app/quality.h"
 #include "core/analysis_worker.h"
 
 namespace sidescopes {
@@ -67,8 +68,10 @@ inline constexpr int DraggedDetailDivisor = 2;
 /// a picture rather than a handful of cells.
 inline constexpr int DraggedDetailFloor = 128;
 
-/// What the samples per bin are divided by while the region moves, for the
-/// scopes that offer the thinning extension. It is the waveform family's
+/// What the samples per bin are further divided by while the region moves, for
+/// the scopes that offer the thinning extension. It multiplies the level's own
+/// thinning rather than replacing it, so a level that already samples thinly
+/// still gives something up under the hand. It is the waveform family's
 /// answer to the coarser image the others take: its columns are places in the
 /// region and are left alone, so what it gives up instead is how densely each
 /// column is filled. Measured at 1024 columns over a whole display, halving
@@ -135,7 +138,15 @@ public:
     /// in force while it is off screen.
     [[nodiscard]] int desiredNeutralSize(const ScopePaneSizes& panePixels) const;
 
+    /// Reads the ladders above at @p level's numbers from here on. Only the
+    /// resolutions move with it; how thinly the region is sampled and how often
+    /// it is read are the host's to apply.
+    void setQuality(QualityLevel level);
+
 private:
+    /// The numbers the level in force asks for.
+    [[nodiscard]] const QualityProfile& profile() const;
+
     /// @return The image size @p id is computed at right now, {0, 0} for a
     ///         scope left at its module's default.
     [[nodiscard]] std::pair<int, int> currentSize(std::string_view id) const;
@@ -145,6 +156,7 @@ private:
 
     const ScopeView& m_view;
     const AnalysisSettings& m_analysis;
+    QualityLevel m_quality = QualityLevel::Standard;
 
     // The resolutions waiting out the settle time, and when they were first
     // asked for.

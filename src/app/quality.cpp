@@ -11,8 +11,8 @@ namespace {
 // change to it is a change to this table and nothing else.
 constexpr QualityProfile Standard{
     .captureFramesPerSecond = 15,
-    .magnificationTolerance = 1.4f,
-    .columnTolerance = 1.4f,
+    .magnificationTolerance = StandardMagnificationTolerance,
+    .columnTolerance = StandardMagnificationTolerance,
     .waveformHeightCeiling = 512,
     .histogramCeiling = {4096, 768},
     .vectorscopeCeiling = 512,

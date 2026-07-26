@@ -4,6 +4,7 @@
 #include <utility>
 
 #include "app/adaptive_detail.h"
+#include "app/quality.h"
 #include "app/scope_registry.h"
 #include "app/scope_view.h"
 #include "core/analysis_worker.h"
@@ -267,6 +268,117 @@ TEST_CASE("A scope off screen keeps the resolution in force")
     CHECK(fixture.detail.desiredWaveformSize(LargePanes, 0) == std::pair<int, int>{1024, 512});
     CHECK_FALSE(fixture.detail.update(SmallPanes, 1.0f, std::nullopt, 1.0).has_value());
     CHECK_FALSE(fixture.detail.update(SmallPanes, 1.0f, std::nullopt, 2.0).has_value());
+}
+
+TEST_CASE("A low level asks for less of everything but the columns")
+{
+    // The order measurement ranked them in: the vectorscope's image and the
+    // histogram's plot are 45-49% of their passes for a tenth and a hundredth
+    // of a code, the neutral plane is the largest memory item on the list with
+    // its cast reading unmoved, and the waveform gives up its height. Its
+    // COLUMNS do not move, because a column is a place in the region.
+    DetailFixture fixture;
+    // The vectorscope is the stack a fresh view starts on; the rest stack onto
+    // it.
+    fixture.view.stack().choose(WaveformScopeId, true);
+    fixture.view.stack().choose(HistogramScopeId, true);
+    fixture.view.stack().choose(NeutralScopeId, true);
+
+    const std::pair<int, int> standardWaveform = fixture.detail.desiredWaveformSize(LargePanes, 0);
+    const std::pair<int, int> standardHistogram = fixture.detail.desiredHistogramSize(LargePanes);
+    const int standardVectorscope = fixture.detail.desiredVectorscopeSize(LargePanes);
+    const int standardNeutral = fixture.detail.desiredNeutralSize(LargePanes);
+
+    fixture.detail.setQuality(QualityLevel::Low);
+    const std::pair<int, int> lowWaveform = fixture.detail.desiredWaveformSize(LargePanes, 0);
+    CHECK(lowWaveform.first == standardWaveform.first);
+    CHECK(lowWaveform.second < standardWaveform.second);
+    CHECK(lowWaveform.second == WaveformLevels);
+
+    const std::pair<int, int> lowHistogram = fixture.detail.desiredHistogramSize(LargePanes);
+    CHECK(lowHistogram.first < standardHistogram.first);
+    CHECK(lowHistogram.second < standardHistogram.second);
+    CHECK(fixture.detail.desiredVectorscopeSize(LargePanes) < standardVectorscope);
+    CHECK(fixture.detail.desiredNeutralSize(LargePanes) < standardNeutral);
+}
+
+TEST_CASE("A high level asks for more where the pane can use it")
+{
+    // A pane between two steps: Standard tolerates the magnification and stops
+    // where it is, High does not and climbs. Every axis here is either a
+    // display resolution over a fixed grid or - for the neutral plane and the
+    // waveform's columns - real data the region can still populate.
+    constexpr ScopePaneSizes ClimbablePanes{
+        {1100.0f, 400.0f}, {1100.0f, 400.0f}, {1100.0f, 400.0f}, {400.0f, 400.0f}, {600.0f, 600.0f}};
+    DetailFixture fixture;
+    // The vectorscope is the stack a fresh view starts on; the rest stack onto
+    // it.
+    fixture.view.stack().choose(WaveformScopeId, true);
+    fixture.view.stack().choose(HistogramScopeId, true);
+    fixture.view.stack().choose(NeutralScopeId, true);
+
+    const std::pair<int, int> standardWaveform = fixture.detail.desiredWaveformSize(ClimbablePanes, 0);
+    const std::pair<int, int> standardHistogram = fixture.detail.desiredHistogramSize(ClimbablePanes);
+    const int standardVectorscope = fixture.detail.desiredVectorscopeSize(ClimbablePanes);
+    const int standardNeutral = fixture.detail.desiredNeutralSize(ClimbablePanes);
+
+    fixture.detail.setQuality(QualityLevel::High);
+    const std::pair<int, int> highWaveform = fixture.detail.desiredWaveformSize(ClimbablePanes, 0);
+    CHECK(highWaveform.first > standardWaveform.first);
+    CHECK(fixture.detail.desiredHistogramSize(ClimbablePanes).first > standardHistogram.first);
+    CHECK(fixture.detail.desiredVectorscopeSize(ClimbablePanes) > standardVectorscope);
+    CHECK(fixture.detail.desiredNeutralSize(ClimbablePanes) > standardNeutral);
+
+    // And buys nothing on the two axes measurement closed: the waveform's
+    // height only draws a finer spline through levels eight-bit input fixes at
+    // 256, and the histogram's height is the least visible of any of these.
+    CHECK(highWaveform.second == standardWaveform.second);
+    CHECK(fixture.detail.desiredHistogramSize(ClimbablePanes).second == standardHistogram.second);
+}
+
+TEST_CASE("A high level never resolves more than the region can fill")
+{
+    // Tolerating no magnification is still bounded by what is there to see: a
+    // column with no pixels behind it is an empty column, whatever the pane.
+    DetailFixture fixture;
+    fixture.view.stack().choose(WaveformScopeId, false);
+    fixture.detail.setQuality(QualityLevel::High);
+
+    CHECK(fixture.detail.desiredWaveformSize(LargePanes, 1500).first == 1024);
+    CHECK(fixture.detail.desiredWaveformSize(LargePanes, 600).first == 512);
+}
+
+TEST_CASE("Changing the level moves the resolutions in force")
+{
+    // The level reaches the worker by the same debounced route a resized pane
+    // does, so a change made from the menu is applied once rather than per
+    // frame.
+    DetailFixture fixture;
+    fixture.view.stack().choose(VectorscopeScopeId, false);
+    fixture.analysis.imageSizes[VectorscopeScopeId] = {512, 512};
+
+    CHECK_FALSE(fixture.detail.update(LargePanes, 1.0f, std::nullopt, 1.0).has_value());
+    fixture.detail.setQuality(QualityLevel::Low);
+    CHECK_FALSE(fixture.detail.update(LargePanes, 1.0f, std::nullopt, 2.0).has_value());
+
+    const std::optional<DetailSizes> settled =
+        fixture.detail.update(LargePanes, 1.0f, std::nullopt, 2.5 + DetailSettleSeconds);
+    REQUIRE(settled.has_value());
+    CHECK(settled->vectorscope == 256);
+}
+
+TEST_CASE("A dragged pass thins on top of the level's own thinning")
+{
+    // The drag divisor multiplies rather than replaces, so a level that
+    // already samples thinly still gives something up under the hand. Without
+    // that, choosing Low would silently cost a drag the coarsening a Standard
+    // drag gets.
+    AnalysisSettings settings;
+    settings.imageSizes[WaveformScopeId] = {2048, 512};
+    settings.sampleThinning = profileFor(QualityLevel::Low).sampleThinning;
+
+    CHECK(coarsenedForDrag(settings).sampleThinning ==
+          profileFor(QualityLevel::Low).sampleThinning * DraggedSampleDivisor);
 }
 
 }  // namespace sidescopes

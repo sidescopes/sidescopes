@@ -4,6 +4,7 @@
 #include <initializer_list>
 #include <string>
 
+#include "app/quality.h"
 #include "app/scope_view.h"
 #include "core/scopes/neutral.h"
 #include "core/scopes/waveform.h"
@@ -26,19 +27,15 @@ ScopePaneSizes inPixels(const ScopePaneSizes& panes, float density)
                           scaled(panes.neutral, density)};
 }
 
-// How much the display may magnify a scope texture before the softness shows.
-// A trace is smooth, so a little magnification is invisible - and letting a
-// small scope keep a small image is what keeps a small scope cheap. Past this
-// factor the texture is visibly stretched, which is what a scope filling a
-// second monitor looked like while these ladders stopped part way up.
-constexpr float MagnificationTolerance = 1.4f;
-
-// The smallest offered resolution that covers the pane to within @p tolerance.
-// Rounding up rather than down also buys free supersampling, which is what the
+// The smallest offered resolution that covers the pane to within @p tolerance -
+// how much the display may magnify the texture before the softness shows. A
+// trace is smooth, so a little magnification is invisible, and letting a small
+// scope keep a small image is what keeps a small scope cheap. Rounding up
+// rather than down also buys free supersampling, which is what the
 // hand-written thresholds this replaces were already doing.
-int resolutionCovering(float paneExtentPixels, std::initializer_list<int> ladder)
+int resolutionCovering(float paneExtentPixels, std::initializer_list<int> ladder, float tolerance)
 {
-    const float wanted = paneExtentPixels / MagnificationTolerance;
+    const float wanted = paneExtentPixels / tolerance;
     for (const int step : ladder) {
         if (static_cast<float>(step) >= wanted) {
             return step;
@@ -46,6 +43,13 @@ int resolutionCovering(float paneExtentPixels, std::initializer_list<int> ladder
     }
 
     return *(ladder.end() - 1);
+}
+
+// A pane threshold stated at Standard's tolerance, as a level reads it: one
+// that tolerates less magnification reaches the larger step on a smaller pane.
+float paneThreshold(float standardThreshold, float tolerance)
+{
+    return standardThreshold * tolerance / StandardMagnificationTolerance;
 }
 
 // The largest offered resolution the region can actually populate: there is no
@@ -77,6 +81,16 @@ AdaptiveDetail::AdaptiveDetail(const ScopeView& view, const AnalysisSettings& an
 {
 }
 
+void AdaptiveDetail::setQuality(QualityLevel level)
+{
+    m_quality = level;
+}
+
+const QualityProfile& AdaptiveDetail::profile() const
+{
+    return profileFor(m_quality);
+}
+
 std::pair<int, int> AdaptiveDetail::currentSize(std::string_view id) const
 {
     const auto at = m_analysis.imageSizes.find(std::string{id});
@@ -86,13 +100,14 @@ std::pair<int, int> AdaptiveDetail::currentSize(std::string_view id) const
 
 std::pair<int, int> AdaptiveDetail::desiredWaveformSize(const ScopePaneSizes& panePixels, int regionWidth) const
 {
+    const QualityProfile& quality = profile();
     const std::pair<int, int> waveSize = currentSize(WaveformScopeId);
     int wantColumns = waveSize.first;
     int wantHeight = waveSize.second;
     if (m_view.stack().shows(WaveformScopeId) || m_view.stack().shows(ParadeScopeId)) {
         const float wfWidth = std::max(panePixels.waveform.width, panePixels.parade.width);
         const float wfHeight = std::max(panePixels.waveform.height, panePixels.parade.height);
-        wantColumns = resolutionCovering(wfWidth, {512, 1024, 2048, MaximumWaveformColumns});
+        wantColumns = resolutionCovering(wfWidth, {512, 1024, 2048, MaximumWaveformColumns}, quality.columnTolerance);
         if (regionWidth > 0) {
             wantColumns =
                 std::min(wantColumns, resolutionWithin(regionWidth, {512, 1024, 2048, MaximumWaveformColumns}));
@@ -101,8 +116,9 @@ std::pair<int, int> AdaptiveDetail::desiredWaveformSize(const ScopePaneSizes& pa
         // fixes at 256, and it is priced like real data: doubling it cost 14 ms
         // a pass over a whole display for 2.5% more resolved detail, against
         // 4.5% for free from the columns. So this threshold stays where
-        // measurement put it while the columns follow the pane.
-        wantHeight = wfHeight >= 560.0f ? 512 : WaveformLevels;
+        // measurement put it whatever the level tolerates, and only the ceiling
+        // moves - down, never up.
+        wantHeight = std::min(wfHeight >= 560.0f ? 512 : WaveformLevels, quality.waveformHeightCeiling);
     }
 
     return {wantColumns, wantHeight};
@@ -116,12 +132,15 @@ std::pair<int, int> AdaptiveDetail::desiredHistogramSize(const ScopePaneSizes& p
     if (m_view.stack().shows(HistogramScopeId)) {
         // Near one texture pixel per screen pixel keeps the outline's width even
         // on flats and steep slopes alike.
+        const QualityProfile& quality = profile();
         const PaneSize scopePane = panePixels.histogram;
-        wantHistWidth = resolutionCovering(scopePane.width, {512, 1024, 2048, 3072, 4096});
+        wantHistWidth =
+            std::min(resolutionCovering(scopePane.width, {512, 1024, 2048, 3072, 4096}, quality.magnificationTolerance),
+                     quality.histogramCeiling.first);
         // The bright outline is stroked by the interface at display resolution,
         // so the texture carries only the dim fill and its height is the least
         // visible of these; left where it was.
-        wantHistHeight = scopePane.height >= 560.0f ? 768 : 384;
+        wantHistHeight = std::min(scopePane.height >= 560.0f ? 768 : 384, quality.histogramCeiling.second);
     }
 
     return {wantHistWidth, wantHistHeight};
@@ -139,9 +158,11 @@ int AdaptiveDetail::desiredVectorscopeSize(const ScopePaneSizes& panePixels) con
         // the same detail, and on saturated content 1024 reads softer than 512
         // while costing five milliseconds a pass more. A vectorscope that looks
         // soft on a large pane is limited by its code grid, not by this.
+        const QualityProfile& quality = profile();
         const PaneSize scopePane = panePixels.vectorscope;
         const float extent = std::min(scopePane.width, scopePane.height);
-        wantVectorscope = extent >= 480.0f ? 512 : 256;
+        const int step = extent >= paneThreshold(480.0f, quality.magnificationTolerance) ? 512 : 256;
+        wantVectorscope = std::min(step, quality.vectorscopeCeiling);
     }
 
     return wantVectorscope;
@@ -155,8 +176,11 @@ int AdaptiveDetail::desiredNeutralSize(const ScopePaneSizes& panePixels) const
         // and not interpolation. It stops at a thousand because every sample is
         // splatted over three pixels, and past that the plane would resolve
         // structure the splat has already spread.
+        const QualityProfile& quality = profile();
         const PaneSize scopePane = panePixels.neutral;
-        wantNeutral = resolutionCovering(std::min(scopePane.width, scopePane.height), {256, 512, MaximumNeutralSize});
+        wantNeutral = std::min(resolutionCovering(std::min(scopePane.width, scopePane.height),
+                                                  {256, 512, MaximumNeutralSize}, quality.magnificationTolerance),
+                               quality.neutralCeiling);
     }
 
     return wantNeutral;
@@ -204,7 +228,7 @@ std::optional<DetailSizes> AdaptiveDetail::update(const ScopePaneSizes& panes, f
 
 AnalysisSettings coarsenedForDrag(AnalysisSettings settings)
 {
-    settings.sampleThinning = DraggedSampleDivisor;
+    settings.sampleThinning *= DraggedSampleDivisor;
     for (auto& [id, size] : settings.imageSizes) {
         const bool columnsArePlaces = id == WaveformScopeId || id == ParadeScopeId;
         if (!columnsArePlaces) {

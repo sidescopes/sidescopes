@@ -27,6 +27,11 @@ enum class QualityLevel
 inline constexpr std::array<QualityLevel, 3> QualityLevels{QualityLevel::Low, QualityLevel::Standard,
                                                            QualityLevel::High};
 
+/// The magnification Standard tolerates. The detail policy's pane thresholds
+/// are stated at it, so a level that tolerates less reads them proportionally
+/// lower and reaches the larger step on a smaller pane.
+inline constexpr float StandardMagnificationTolerance = 1.4f;
+
 /// What one level asks of the analysis. Every field is a number measurement
 /// chose; see notes on each for what raising or lowering it costs.
 struct QualityProfile
