@@ -361,6 +361,26 @@ void refreshPickerExclusions()
     }
 }
 
+// Ordering the key overlay out leaves this application active with no key
+// window at all: AppKit promotes nothing in its place, and every keyboard
+// shortcut is dead until the scope window is clicked. Hand the keyboard back
+// explicitly, the way the border panel does after a click. The overlays and
+// the chrome windows are skipped by name - the border can take key status, and
+// it answers Escape differently from the scope window.
+void handKeyboardToOwnWindow()
+{
+    for (NSWindow* candidate in NSApp.orderedWindows) {
+        if (candidate == g_borderWindow || candidate == g_editDimWindow || isPickerOverlayWindow(candidate)) {
+            continue;
+        }
+        if (candidate.canBecomeKeyWindow && candidate.visible) {
+            [candidate makeKeyWindow];
+
+            return;
+        }
+    }
+}
+
 // Any overlay finishing - a confirm there, or ESC anywhere - ends the pick on
 // every display, tearing every overlay down. @return whether the pick finished.
 bool pollPickerFinish(RegionPickPoll& poll)
@@ -381,6 +401,10 @@ bool pollPickerFinish(RegionPickPoll& poll)
         for (PickerOverlay& each : g_pickerOverlays) {
             [each.window orderOut:nil];
         }
+        // Every dismissal reaches here - Escape, a confirming click or drag, a
+        // pinned color, a tool switch - so the keyboard comes back on all of
+        // them, not just the one that exposed it.
+        handKeyboardToOwnWindow();
         g_pickerOverlays.clear();
         g_pinCursor = nil;
 
@@ -663,7 +687,16 @@ void hideRegionBorder()
     if (g_borderWindow) {
         SS_DIAG(Border, "hide visible=%d", g_borderWindow.visible ? 1 : 0);
     }
+    // A click on the band gives the panel key status, so taking the border
+    // down can strand the keyboard the same way a finished pick does. Only a
+    // panel that actually held it hands it back: the host reconciles to a
+    // hidden border every frame, and an unconditional hand-back would pull the
+    // keyboard off an open picker overlay thirty times a second.
+    const BOOL borderHeldKeyboard = g_borderWindow.keyWindow;
     [g_borderWindow orderOut:nil];
+    if (borderHeldKeyboard) {
+        handKeyboardToOwnWindow();
+    }
     g_borderTarget = NSMakeRect(0, 0, 0, 0);
 }
 
