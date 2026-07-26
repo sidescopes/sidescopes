@@ -572,15 +572,10 @@ void App::pumpEvents()
     case FrameWait::Idle:
         // Woken by any event, which is what keeps the application feeling
         // instant while nothing is happening.
-        if (wait.seconds > 0.0) {
-            glfwWaitEventsTimeout(wait.seconds);
-        } else {
-            glfwPollEvents();
-        }
+        glfwWaitEventsTimeout(IdleWaitSeconds);
         break;
-    case FrameWait::UntilFramePeriod:
-        waitOutFramePeriod(now + wait.seconds);
-        break;
+    case FrameWait::None:
+        break;  // the frame period below is the whole wait
     }
     // Whatever ended that wait, the frame period is a floor: a wait that ends
     // on the first event redraws at the event rate otherwise.

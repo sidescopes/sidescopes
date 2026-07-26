@@ -32,31 +32,29 @@ inline constexpr double IdleAfterSeconds = 0.5;
 /// way back.
 inline constexpr double OutOfSightPauseSeconds = 0.75;
 
-/// What the frame loop should do to wait for the next frame.
+/// How the frame loop should block for events. The frame period is a floor
+/// under all three - see FrameWaitDecision::redrawFloorSeconds.
 enum class FrameWait
 {
-    /// Nothing is happening, and an attached window needs watching in short
-    /// slices so its motion and focus stay fresh.
+    /// Not at all: something is moving, so the frame period below is the whole
+    /// of the wait and the events that land during it are drained at its end.
+    None,
+    /// In short slices, so an attached window's motion and focus stay fresh.
     WatchAttachedWindow,
-    /// Nothing is happening: wait for events at the slow idle tick.
+    /// At the slow idle tick, which the first event to arrive ends.
     Idle,
-    /// Something is moving: wait out whatever is left of the frame period.
-    UntilFramePeriod,
 };
 
-/// The wait the loop should take, and for how long.
+/// The wait the loop should take.
 struct FrameWaitDecision
 {
     FrameWait kind = FrameWait::Idle;
-    /// Seconds to wait; zero means poll without blocking.
-    double seconds = 0.0;
-    /// Seconds before the next frame may be drawn, whatever ends that wait
-    /// early. Both waits above return on the first event that arrives, and
+    /// Seconds before the next frame may be drawn, whatever ends the wait
+    /// early. A blocking wait returns on the first event that arrives, and
     /// events arrive in bursts - a pointer crossing the window delivers one
     /// every few milliseconds - so without this the loop redraws at the event
     /// rate precisely when it decided nothing was happening: measured at 65
-    /// frames a second for a picture that never changed. Zero when the wait is
-    /// itself the pacing.
+    /// frames a second for a picture that never changed.
     double redrawFloorSeconds = 0.0;
 };
 
@@ -77,14 +75,13 @@ struct FramePacingInputs
 
 /// The wait to take before the next frame.
 ///
-/// The moving case waits out what is left of the frame period rather than
-/// adding a fixed slice on top of it: presenting already blocks - on the
-/// drawable through Metal, on the composition tick through DwmFlush - so a
-/// fixed wait would add to that block and halve the rate again on every
-/// display at or below 60 Hz. Aiming at the period caps a faster panel and
-/// leaves a slower one exactly as it was. Any wait returns the instant an
-/// event arrives, so a drag or a hover still runs at the rate its events come
-/// in; only frames nobody asked for are dropped.
+/// The floor is what is left of the frame period rather than a fixed slice on
+/// top of it: presenting already blocks - on the drawable through Metal, on the
+/// composition tick through DwmFlush - so a fixed wait would add to that block
+/// and halve the rate again on every display at or below 60 Hz. Aiming at the
+/// period caps a faster panel and leaves a slower one exactly as it was. A
+/// blocking wait still returns the instant an event arrives, so interaction is
+/// handled at the rate it comes in; only frames nobody asked for are dropped.
 [[nodiscard]] FrameWaitDecision frameWaitFor(const FramePacingInputs& inputs);
 
 /// What the loop knows about whether anything is worth computing.

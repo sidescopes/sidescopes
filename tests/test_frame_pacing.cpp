@@ -32,22 +32,22 @@ TEST_CASE("A moving screen redraws at the frame period, not the display's rate")
     inputs.now = 10.0;
 
     const FrameWaitDecision fresh = frameWaitFor(inputs);
-    CHECK(fresh.kind == FrameWait::UntilFramePeriod);
-    CHECK(fresh.seconds == Catch::Approx(ContentRedrawSeconds));
+    CHECK(fresh.kind == FrameWait::None);
+    CHECK(fresh.redrawFloorSeconds == Catch::Approx(ContentRedrawSeconds));
 
     // Half the period has already gone into the frame itself; only the rest is
     // waited out.
     inputs.now = 10.0 + ContentRedrawSeconds / 2.0;
     const FrameWaitDecision partway = frameWaitFor(inputs);
-    CHECK(partway.seconds > 0.0);
-    CHECK(partway.seconds < ContentRedrawSeconds);
+    CHECK(partway.redrawFloorSeconds > 0.0);
+    CHECK(partway.redrawFloorSeconds < ContentRedrawSeconds);
 
     // A frame that already overran the period does not wait at all - which is
     // what leaves a 60 Hz display exactly as it was.
     inputs.now = 10.0 + ContentRedrawSeconds * 2.0;
     const FrameWaitDecision overrun = frameWaitFor(inputs);
-    CHECK(overrun.kind == FrameWait::UntilFramePeriod);
-    CHECK(overrun.seconds == 0.0);
+    CHECK(overrun.kind == FrameWait::None);
+    CHECK(overrun.redrawFloorSeconds == 0.0);
 }
 
 TEST_CASE("A wait that ends early still owes the frame period")
@@ -76,9 +76,13 @@ TEST_CASE("A wait that ends early still owes the frame period")
     inputs.now = 10.0 + 1.0;
     CHECK(frameWaitFor(inputs).redrawFloorSeconds == 0.0);
 
-    // The moving wait needs no floor - it is the pacing itself.
-    inputs.lastActivity = 11.0;
-    CHECK(frameWaitFor(inputs).redrawFloorSeconds == 0.0);
+    // The moving case blocks on nothing at all, so the floor is its whole
+    // wait rather than a backstop under one.
+    inputs.now = 10.0;
+    inputs.lastActivity = 10.0;
+    const FrameWaitDecision movingWait = frameWaitFor(inputs);
+    CHECK(movingWait.kind == FrameWait::None);
+    CHECK(movingWait.redrawFloorSeconds > 0.0);
 }
 
 TEST_CASE("A quiet screen falls to the idle tick")
@@ -88,9 +92,7 @@ TEST_CASE("A quiet screen falls to the idle tick")
     inputs.lastFrameStart = 0.0;
     inputs.now = IdleAfterSeconds + 0.01;
 
-    const FrameWaitDecision idle = frameWaitFor(inputs);
-    CHECK(idle.kind == FrameWait::Idle);
-    CHECK(idle.seconds == IdleWaitSeconds);
+    CHECK(frameWaitFor(inputs).kind == FrameWait::Idle);
 
     // An attached window is watched in short slices instead, so its motion and
     // focus stay fresh - unless the picker owns the screen.
@@ -113,13 +115,13 @@ TEST_CASE("A readout following the pointer redraws at its own pace")
     inputs.now = 10.0;
 
     const FrameWaitDecision readout = frameWaitFor(inputs);
-    CHECK(readout.kind == FrameWait::UntilFramePeriod);
-    CHECK(readout.seconds == Catch::Approx(ReadoutRedrawSeconds));
+    CHECK(readout.kind == FrameWait::None);
+    CHECK(readout.redrawFloorSeconds == Catch::Approx(ReadoutRedrawSeconds));
     CHECK(ReadoutRedrawSeconds > ContentRedrawSeconds);
 
     // A marker moving outranks it: the trace is what carries motion.
     inputs.lastActivity = 10.0;
-    CHECK(frameWaitFor(inputs).seconds == Catch::Approx(ContentRedrawSeconds));
+    CHECK(frameWaitFor(inputs).redrawFloorSeconds == Catch::Approx(ContentRedrawSeconds));
 
     // And a readout that stopped moving lets the loop fall all the way to the
     // idle tick, rather than holding it at the readout cadence for ever.
