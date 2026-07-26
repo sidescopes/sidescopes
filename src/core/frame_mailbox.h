@@ -33,6 +33,25 @@ struct FrameBuffer
     int sourceWidth = 0;
     int sourceHeight = 0;
 
+    /// Sizes the pixel storage to @p bytes, holding no more than that.
+    ///
+    /// A vector never gives capacity back, so a buffer that once carried a
+    /// whole display kept those pages for the rest of the session even after
+    /// the capture narrowed to a region: three of them, fourteen megabytes
+    /// each, against under four for the region actually being watched. The
+    /// steady state costs a comparison, since a delivery of the size the
+    /// buffer already holds changes nothing.
+    void sizeTo(std::size_t bytes)
+    {
+        if (data.capacity() != bytes) {
+            // Released before the new one is taken: these are megabytes, and
+            // PageAllocator hands them straight back to the system.
+            PixelStorage{}.swap(data);
+            data.reserve(bytes);
+        }
+        data.resize(bytes);
+    }
+
     [[nodiscard]] FrameView view() const
     {
         return FrameView{data.data(), strideBytes, width,   height,      colorSpace,

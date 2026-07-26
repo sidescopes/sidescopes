@@ -130,6 +130,37 @@ TEST_CASE("FrameMailbox nudge does not swallow a pending frame")
     CHECK(taken->sequence == 7);
 }
 
+TEST_CASE("FrameBuffer holds no more pixels than the frame needs")
+{
+    // The capture narrows to the region once it settles, so a buffer that
+    // carried a whole display must not keep those pages: three of them at a
+    // display each is what the pipeline used to hold for a region a fraction
+    // of the size.
+    FrameBuffer buffer;
+    buffer.sizeTo(static_cast<std::size_t>(4096) * 2160 * 4);
+    const std::size_t whole = buffer.data.capacity();
+    REQUIRE(whole >= static_cast<std::size_t>(4096) * 2160 * 4);
+
+    buffer.sizeTo(static_cast<std::size_t>(640) * 480 * 4);
+    const std::size_t narrowed = buffer.data.capacity();
+    CHECK(buffer.data.size() == static_cast<std::size_t>(640) * 480 * 4);
+    CHECK(narrowed < whole / 4);
+}
+
+TEST_CASE("FrameBuffer keeps its pixels where the size does not move")
+{
+    // The steady state must not reallocate: a delivery of the size already
+    // held is the ordinary case, thirty times a second.
+    FrameBuffer buffer;
+    buffer.sizeTo(static_cast<std::size_t>(1920) * 1080 * 4);
+    const std::uint8_t* first = buffer.data.data();
+    buffer.data[7] = 42;
+
+    buffer.sizeTo(static_cast<std::size_t>(1920) * 1080 * 4);
+    CHECK(buffer.data.data() == first);
+    CHECK(buffer.data[7] == 42);
+}
+
 TEST_CASE("FrameMailbox spends a nudge on a single take")
 {
     // The first take consumes the nudge; the next take, with nothing

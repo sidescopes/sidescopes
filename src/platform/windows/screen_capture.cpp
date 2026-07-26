@@ -347,7 +347,7 @@ private:
         const int width = static_cast<int>(description.Width);
         const int height = static_cast<int>(description.Height);
         const int stride = width * 4;
-        state.buffer.data.resize(static_cast<std::size_t>(stride) * height);
+        state.buffer.sizeTo(static_cast<std::size_t>(stride) * height);
         const auto* source = static_cast<const uint8_t*>(mapped.pData);
         for (int row = 0; row < height; ++row) {
             std::memcpy(state.buffer.data.data() + static_cast<std::size_t>(row) * stride,

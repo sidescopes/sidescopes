@@ -336,7 +336,7 @@ public:
         m_buffer.sourceY = stamp->y;
         m_buffer.sourceWidth = stamp->width;
         m_buffer.sourceHeight = stamp->height;
-        m_buffer.data.resize(static_cast<std::size_t>(m_buffer.strideBytes) * height);
+        m_buffer.sizeTo(static_cast<std::size_t>(m_buffer.strideBytes) * height);
         for (int py = 0; py < height; ++py) {
             std::memcpy(m_buffer.data.data() + static_cast<std::size_t>(py) * m_buffer.strideBytes,
                         source + static_cast<std::size_t>(py) * sourceStride, static_cast<std::size_t>(width) * 4);
