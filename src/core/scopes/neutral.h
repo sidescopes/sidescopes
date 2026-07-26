@@ -115,6 +115,10 @@ public:
     }
 
 private:
+    /// Brings the cloud and image up to the configured size, allocating them
+    /// if this is the first pass. Nothing else may allocate them: an engine
+    /// that has never accumulated holds no cloud at all.
+    void ensureBuffers();
     void resize(int size);
     void renderImage();
 

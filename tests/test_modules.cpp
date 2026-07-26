@@ -492,11 +492,16 @@ TEST_CASE("The adaptive-image extension sizes the vectorscope by its height")
     REQUIRE(vectorscope.valid());
 
     // The vectorscope is square by construction, so it takes the height and
-    // ignores the width the host offers.
+    // ignores the width the host offers. A size is a request the next pass
+    // honours: an engine holds no buffers until it accumulates.
     const auto* adaptive =
         static_cast<const SsAdaptiveImageExtension*>(vectorscope.getExtension(AdaptiveImageExtension));
     REQUIRE(adaptive != nullptr);
     adaptive->setImageSize(vectorscope.raw(), 900, 384);
+    CHECK(vectorscope.image().width == 0);
+
+    const TestFrame mixed = grayRamp(16, 16);
+    REQUIRE(vectorscope.accumulate(viewOf(mixed), SsRect{0, 0, 16, 16}));
 
     const SsImageView resized = vectorscope.image();
     CHECK(resized.width == 384);
@@ -510,14 +515,43 @@ TEST_CASE("The adaptive-image extension resizes the histogram's plot")
     CHECK(histogram.getExtension("sidescopes.not-an-extension") == nullptr);
 
     // The histogram's bins are fixed at 256 codes; what the host sizes is the
-    // plot it strokes them into.
+    // plot it strokes them into, at the next pass.
     const auto* adaptive = static_cast<const SsAdaptiveImageExtension*>(histogram.getExtension(AdaptiveImageExtension));
     REQUIRE(adaptive != nullptr);
     adaptive->setImageSize(histogram.raw(), 1024, 384);
+    CHECK(histogram.image().width == 0);
+
+    const TestFrame ramp = grayRamp(64, 8);
+    REQUIRE(histogram.accumulate(viewOf(ramp), SsRect{0, 0, 64, 8}));
 
     const SsImageView resized = histogram.image();
     CHECK(resized.width == 1024);
     CHECK(resized.height == 384);
+}
+
+TEST_CASE("A scope holds no buffers until it first accumulates")
+{
+    // The host creates a second instance of every scope purely to project
+    // markers and emit a graticule, and those never accumulate. Buffers that
+    // arrive with the constructor would be paid for by every one of them, so
+    // an engine allocates at its first pass and not before. Configuring is
+    // not a pass: the projections are configured on every settings change.
+    const std::array<const char*, 5> ids{"org.sidescopes.vectorscope", "org.sidescopes.waveform",
+                                         "org.sidescopes.parade", "org.sidescopes.histogram", "org.sidescopes.neutral"};
+    const TestFrame ramp = grayRamp(32, 16);
+    for (const char* id : ids) {
+        CAPTURE(id);
+        ScopeInstance instance = builtinModules().createInstance(id);
+        REQUIRE(instance.valid());
+        REQUIRE(instance.configure(std::vector<SsParamValue>{}));
+        CHECK(instance.image().width == 0);
+        CHECK(instance.image().height == 0);
+        CHECK(!instance.graticule().empty());
+
+        REQUIRE(instance.accumulate(viewOf(ramp), SsRect{0, 0, 32, 16}));
+        CHECK(instance.image().width > 0);
+        CHECK(instance.image().height > 0);
+    }
 }
 
 TEST_CASE("A module refuses to create a scope it does not own")
@@ -599,11 +633,18 @@ TEST_CASE("The adaptive-image extension resizes a scope's output through the bou
     const auto* adaptive = static_cast<const SsAdaptiveImageExtension*>(waveform.getExtension(AdaptiveImageExtension));
     REQUIRE(adaptive != nullptr);
 
-    // The waveform's default grid is 1024 columns by 256 levels.
+    // An engine that has never accumulated holds nothing at all - the planes
+    // arrive with the first pass, at whatever size was asked for by then.
+    CHECK(waveform.image().width == 0);
+    CHECK(waveform.image().height == 0);
+
+    const TestFrame ramp = grayRamp(64, 8);
+    REQUIRE(waveform.accumulate(viewOf(ramp), SsRect{0, 0, 64, 8}));
     CHECK(waveform.image().width == 1024);
     CHECK(waveform.image().height == 256);
 
     adaptive->setImageSize(waveform.raw(), 512, 512);
+    REQUIRE(waveform.accumulate(viewOf(ramp), SsRect{0, 0, 64, 8}));
     const SsImageView resized = waveform.image();
     CHECK(resized.width == 512);
     CHECK(resized.height == 512);

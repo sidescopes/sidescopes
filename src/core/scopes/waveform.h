@@ -94,6 +94,10 @@ public:
     [[nodiscard]] static NormalizedPoint project(const FloatColor& color);
 
 private:
+    /// Brings the planes up to the configured geometry, allocating them if
+    /// this is the first pass. Nothing else may allocate them: an engine that
+    /// has never accumulated holds no planes at all.
+    void ensureBuffers();
     void resize(int columns, int imageHeight);
     /// Folds sampled rows [@p rowBegin, @p rowEnd) into @p bins, which points
     /// at plane @p firstPlane of a plane set laid out like m_bins from there

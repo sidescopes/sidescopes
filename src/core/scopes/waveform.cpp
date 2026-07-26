@@ -433,9 +433,14 @@ LevelSample levelSampleWeights(int y, int imageHeight, bool nativeHeight)
 
 }  // namespace
 
-Waveform::Waveform()
+Waveform::Waveform() = default;
+
+void Waveform::ensureBuffers()
 {
-    resize(DefaultWaveformColumns, WaveformLevels);
+    if (!m_bins.empty() && m_columns == m_settings.columns && m_imageHeight == m_settings.imageHeight) {
+        return;
+    }
+    resize(m_settings.columns, m_settings.imageHeight);
 }
 
 void Waveform::configure(const WaveformSettings& settings)
@@ -444,9 +449,6 @@ void Waveform::configure(const WaveformSettings& settings)
     m_settings.samplingStride = std::clamp(m_settings.samplingStride, 1, 8);
     m_settings.columns = std::clamp(m_settings.columns, 256, MaximumWaveformColumns);
     m_settings.imageHeight = std::clamp(m_settings.imageHeight, WaveformLevels, MaximumWaveformHeight);
-    if (m_settings.columns != m_columns || m_settings.imageHeight != m_imageHeight) {
-        resize(m_settings.columns, m_settings.imageHeight);
-    }
 }
 
 void Waveform::resize(int columns, int imageHeight)
@@ -515,6 +517,7 @@ void Waveform::scatterRows(const FrameView& frame, IntRect region, const SampleG
 
 void Waveform::accumulate(const FrameView& frame, IntRect region)
 {
+    ensureBuffers();
     region = region.clampedTo(frame.width, frame.height);
     const SampleGrid grid =
         sampleGridFor(m_settings.samplingStride, region,

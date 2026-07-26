@@ -45,8 +45,12 @@ int clampInt(int value, int low, int high)
 
 Neutral::Neutral()
 {
-    resize(DefaultNeutralSize);
     configure(m_settings);
+}
+
+void Neutral::ensureBuffers()
+{
+    resize(m_settings.size);
 }
 
 float Neutral::axisRange() const
@@ -71,8 +75,12 @@ void Neutral::configure(const NeutralSettings& settings)
     m_settings.neutralChroma = std::max(0.0f, settings.neutralChroma);
     m_settings.size = clampInt(settings.size, 16, MaximumNeutralSize);
     m_axisRange = axisRange();
-    resize(m_settings.size);
-    renderImage();
+    // A live engine repaints for the new settings without waiting for a
+    // frame; one that has never accumulated stays unallocated until it does.
+    if (!m_cloud.empty()) {
+        resize(m_settings.size);
+        renderImage();
+    }
 }
 
 void Neutral::resize(int size)
@@ -129,6 +137,7 @@ void Neutral::scatterRows(const FrameView& frame, IntRect region, const SampleGr
 
 void Neutral::accumulate(const FrameView& frame, IntRect region)
 {
+    ensureBuffers();
     region = region.clampedTo(frame.width, frame.height);
     const long long planeBins = static_cast<long long>(m_imageSize) * m_imageSize;
     const long long budget = std::min(budgetForBins(planeBins, NeutralMinSamplesPerBin), SampleBudget);

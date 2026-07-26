@@ -87,7 +87,14 @@ std::vector<ColumnEdge> columnEdges(const std::vector<double>& heights, int widt
 Histogram::Histogram()
     : m_bins(static_cast<std::size_t>(Bins) * 3, 0)
 {
-    resize(ImageWidth, Height);
+}
+
+void Histogram::ensureBuffers()
+{
+    if (!m_image.rgba.empty() && m_width == m_settings.imageWidth && m_height == m_settings.imageHeight) {
+        return;
+    }
+    resize(m_settings.imageWidth, m_settings.imageHeight);
 }
 
 void Histogram::resize(int width, int height)
@@ -105,9 +112,6 @@ void Histogram::configure(const HistogramSettings& settings)
     m_settings.samplingStride = std::clamp(m_settings.samplingStride, 1, 8);
     m_settings.imageWidth = std::clamp(m_settings.imageWidth, Bins, 4096);
     m_settings.imageHeight = std::clamp(m_settings.imageHeight, 192, 1536);
-    if (m_settings.imageWidth != m_width || m_settings.imageHeight != m_height) {
-        resize(m_settings.imageWidth, m_settings.imageHeight);
-    }
 }
 
 void Histogram::scatterRows(const FrameView& frame, IntRect region, const SampleGrid& grid, int rowBegin, int rowEnd,
@@ -131,6 +135,7 @@ void Histogram::scatterRows(const FrameView& frame, IntRect region, const Sample
 
 void Histogram::accumulate(const FrameView& frame, IntRect region)
 {
+    ensureBuffers();
     region = region.clampedTo(frame.width, frame.height);
     const SampleGrid grid =
         sampleGridFor(m_settings.samplingStride, region,

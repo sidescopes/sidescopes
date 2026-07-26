@@ -80,9 +80,14 @@ void halfBinomial(const Src* in, int size, float* out)
 
 }  // namespace
 
-Vectorscope::Vectorscope()
+Vectorscope::Vectorscope() = default;
+
+void Vectorscope::ensureBuffers()
 {
-    resize(DefaultVectorscopeSize);
+    if (!m_bins.empty() && m_imageSize == m_settings.size) {
+        return;
+    }
+    resize(m_settings.size);
 }
 
 void Vectorscope::configure(const VectorscopeSettings& settings)
@@ -91,9 +96,10 @@ void Vectorscope::configure(const VectorscopeSettings& settings)
     m_settings = settings;
     m_settings.samplingStride = std::clamp(m_settings.samplingStride, 1, 8);
     m_settings.size = std::clamp(m_settings.size, CodeGridSize, 512);
-    if (m_settings.size != m_imageSize) {
-        resize(m_settings.size);
-    } else if (matrixChanged) {
+    // A size change is recorded and honoured by the next pass. The tint table
+    // is rebuilt here only for a live engine holding the matched size; the
+    // resize that a changed size triggers rebuilds it anyway.
+    if (matrixChanged && !m_tint.empty() && m_settings.size == m_imageSize) {
         rebuildTintTable();
     }
 }
@@ -156,6 +162,7 @@ void Vectorscope::scatterRows(const FrameView& frame, IntRect region, const Samp
 
 void Vectorscope::accumulate(const FrameView& frame, IntRect region)
 {
+    ensureBuffers();
     region = region.clampedTo(frame.width, frame.height);
     const SampleGrid grid =
         sampleGridFor(m_settings.samplingStride, region,

@@ -68,6 +68,10 @@ public:
     [[nodiscard]] NormalizedPoint project(const FloatColor& color) const;
 
 private:
+    /// Brings the buffers up to the configured size, allocating them if this
+    /// is the first pass. Nothing else may allocate them: an engine that has
+    /// never accumulated holds no planes at all.
+    void ensureBuffers();
     void resize(int size);
     void rebuildTintTable();
     void scatterRows(const FrameView& frame, IntRect region, const SampleGrid& grid, int rowBegin, int rowEnd,

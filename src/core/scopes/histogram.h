@@ -100,6 +100,10 @@ private:
     void exportOutline(const std::vector<double>& heights);
     void renderFill(const std::vector<double>& heights);
 
+    /// Brings the image up to the configured geometry, allocating it if this
+    /// is the first pass. Nothing else may allocate it: an engine that has
+    /// never accumulated holds no image at all.
+    void ensureBuffers();
     void resize(int width, int height);
 
     HistogramSettings m_settings;
