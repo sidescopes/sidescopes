@@ -10,9 +10,10 @@ namespace sidescopes {
 /// not, the face-picking action is simply unavailable.
 [[nodiscard]] bool supportsFaceDetection();
 
-/// Loads the platform's face-detection model in the background so the
-/// first real detection is instant instead of stalling for the model
-/// load. Safe to call once at startup; a no-op where unsupported.
+/// Called once at startup, where a platform wants its face-detection model
+/// loaded ahead of the first detection. Neither platform does: both measure
+/// the warm-up as memory charged to every session against a saving most
+/// never collect, so the model is loaded by the first real detection.
 void warmFaceDetection();
 
 /// Face rectangles in frame pixels, largest first: the detector's own

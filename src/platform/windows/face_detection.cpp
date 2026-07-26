@@ -122,17 +122,12 @@ bool supportsFaceDetection()
 
 void warmFaceDetection()
 {
-    // The first FaceDetector construction loads the model; pay that cost
-    // in the background at startup, the way the macOS warmer does.
-    std::thread([] {
-        try {
-            winrt::init_apartment();
-            // The temporary releases before the apartment closes.
-            FaceDetector::CreateAsync().get();
-            winrt::uninit_apartment();
-        } catch (...) {  // NOLINT(bugprone-empty-catch): warm-up failure is retried by real detection
-        }
-    }).detach();
+    // Nothing, deliberately, as on macOS. Building a throwaway FaceDetector
+    // at startup charges 8.6 MB of private memory to every session - a fifth
+    // of what the application holds at rest - including the many that never
+    // look for a face. It buys about 40 ms on a first face pick: a first
+    // detector takes 46-53 ms against 8-12 ms once the model is loaded. The
+    // first real detection loads it instead.
 }
 
 std::vector<IntRect> detectFaces(const FrameView& frame, float pixelsPerPoint)
