@@ -21,24 +21,14 @@ bool supportsFaceDetection()
 
 void warmFaceDetection()
 {
-    // Vision loads its model on the first request - seconds of stall if
-    // that happens on the picker's opening. A throwaway request on a tiny
-    // blank image pays that cost in the background at startup.
-    dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
-      static uint8_t blank[64 * 64 * 4] = {};
-      CVPixelBufferRef buffer = nullptr;
-      if (CVPixelBufferCreateWithBytes(kCFAllocatorDefault, 64, 64, kCVPixelFormatType_32BGRA, blank,
-                                       static_cast<size_t>(64) * 4, nullptr, nullptr, nullptr,
-                                       &buffer) != kCVReturnSuccess ||
-          !buffer) {
-          return;
-      }
-      VNDetectFaceRectanglesRequest* request = [[VNDetectFaceRectanglesRequest alloc] init];
-      VNImageRequestHandler* handler = [[VNImageRequestHandler alloc] initWithCVPixelBuffer:buffer options:@{}];
-      NSError* error = nil;
-      [handler performRequests:@[ request ] error:&error];
-      CVPixelBufferRelease(buffer);
-    });
+    // Nothing, deliberately. This used to run a throwaway request at startup
+    // so that Vision's model was loaded before the picker could ask for it.
+    // Measured, that saves nothing: the picker's first opening takes the same
+    // 250 ms either way, across four interleaved pairs. What the warm request
+    // does cost is 13.5 MB of the 44.5 MB an application with no region
+    // holds, and it charges that to every session including the many that
+    // never look for a face. The model is loaded by the first real request
+    // instead, which is the first time the picker opens.
 }
 
 std::vector<IntRect> detectFaces(const FrameView& frame, float pixelsPerPoint)
