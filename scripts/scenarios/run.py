@@ -96,7 +96,13 @@ class PreferencesGuard:
         self.override = scratch / "preferences.txt"
         self._backup = scratch / "preferences.user.txt"
         self._existed = PREFERENCES.exists()
-        if self._existed:
+        if self._existed and session.HARNESS_MARKER in PREFERENCES.read_text(errors="replace"):
+            # A previous run was killed before it could put the file back. The
+            # backup beside this one still holds the user's copy; keeping it is
+            # the difference between restoring their file and overwriting it
+            # with the harness's own leavings.
+            self._existed = self._backup.exists()
+        elif self._existed:
             shutil.copy2(PREFERENCES, self._backup)
 
     def write(self, text):
@@ -204,6 +210,75 @@ def _rows(result, build):
             for kind, value, unit, direction, detail in readings]
 
 
+def _complaint_about(bundle, executable):
+    """Why this run must not start, or an empty string if it may.
+
+    All of it is about not measuring the wrong thing: an application somebody
+    else launched, one nobody is actually driving, or one whose behaviour the
+    harness cannot identify.
+    """
+    if not executable.exists():
+        return f"{bundle} is not a built application bundle"
+    running = session.find_any_running()
+    if running:
+        return ("SideScopes is already running; quit it first so that the harness measures only the launches it "
+                f"made itself (pids {running})")
+    if not quartz.pointer_works():
+        return ("synthesised pointer events are being dropped. Grant Accessibility to the application running "
+                "this script in System Settings > Privacy & Security > Accessibility.")
+    if catalog.detect_profile(executable) is None:
+        return "cannot tell what this build does; it matches no known behaviour profile"
+
+    return ""
+
+
+def _chosen_scenarios(names):
+    """The named scenarios in the order given, or every one; None if a name is unknown."""
+    chosen = [name.strip() for name in names.split(",") if name.strip()]
+    if not chosen:
+        return list(catalog.SCENARIOS)
+    found = [catalog.scenario_named(name) for name in chosen]
+
+    return None if any(scenario is None for scenario in found) else found
+
+
+def _measure_all(scenarios, stacks, setup):
+    """Drive every scenario against every stack; return rows, absences, warnings."""
+    results, absent, warnings = [], [], []
+    total = len(scenarios) * len(stacks)
+    done = 0
+    for stack in stacks:
+        for scenario in scenarios:
+            done += 1
+            reason = catalog.unavailable(scenario, stack, setup["profile"], setup["scopes"])
+            if reason:
+                absent.append({"scenario": scenario.id, "stack": stack, "reason": reason})
+                print(f"[{done}/{total}] {scenario.id}/{stack}: absent - {reason}")
+                continue
+            seconds = setup["seconds"] or scenario.seconds
+            print(f"[{done}/{total}] {scenario.id}/{stack}: measuring {seconds:.0f} s", flush=True)
+            result = _run_one(scenario, stack, setup["bundle"], setup["plan"], setup["guard"], setup["helper"],
+                              setup["content"], setup["diagnostics"], seconds)
+            results.extend(_rows(result, setup["build"]))
+            for warning in result.warnings:
+                warnings.append(f"{scenario.id}/{stack}: {warning}")
+                print(f"    warning: {warning}")
+            measurement = result.measurement
+            print(f"    {measurement.cores:.3f} cores, {measurement.footprint_mb:.0f} MB, "
+                  f"{measurement.frames_per_second:.1f} frames/s, {measurement.passes_per_second:.1f} passes/s")
+
+    return (results, absent, warnings)
+
+
+def _destination_for(chosen, build):
+    if chosen is not None:
+        return chosen
+    results_dir = REPOSITORY / "bench-results"
+    results_dir.mkdir(parents=True, exist_ok=True)
+
+    return results_dir / f"scenarios-{build['machine']}-{build['build'] or 'unknown'}.json"
+
+
 def main(argv=None):
     arguments = _parse_arguments(sys.argv[1:] if argv is None else argv)
     if arguments.list:
@@ -213,101 +288,61 @@ def main(argv=None):
 
     bundle = arguments.app.resolve()
     executable = bundle / "Contents" / "MacOS" / "SideScopes"
-    if not executable.exists():
-        print(f"app-scenarios: {bundle} is not a built application bundle", file=sys.stderr)
+    complaint = _complaint_about(bundle, executable)
+    if complaint:
+        print(f"app-scenarios: {complaint}", file=sys.stderr)
 
         return 2
-    running = session.find_any_running()
-    if running:
-        print("app-scenarios: SideScopes is already running; quit it first so that the harness measures only "
-              f"the launches it made itself (pids {running})", file=sys.stderr)
-
-        return 2
-    if not quartz.pointer_works():
-        print("app-scenarios: synthesised pointer events are being dropped. Grant Accessibility to the "
-              "application running this script in System Settings > Privacy & Security > Accessibility.",
-              file=sys.stderr)
-
-        return 2
-
-    profile = catalog.detect_profile(executable)
-    if profile is None:
-        print("app-scenarios: cannot tell what this build does; it matches no known behaviour profile",
-              file=sys.stderr)
-
-        return 2
-    scopes = catalog.detect_scopes(executable)
-    honours_override = b"SIDESCOPES_PREFS_FILE" in catalog.strings_in(executable)
-
-    cache = content_module.cache_directory()
-    scratch = cache / "run"
-    scratch.mkdir(parents=True, exist_ok=True)
-    content_set = content_module.prepare(cache / "images", arguments.photographs)
-    helper = content_module.build_helper(cache)
-
-    display = _target_display(arguments.display)
-    wanted = tuple(int(part) for part in arguments.region_pixels.lower().split("x"))
-    plan = catalog.Layout(display, wanted)
-
-    chosen = [name.strip() for name in arguments.scenarios.split(",") if name.strip()]
-    scenarios = [catalog.scenario_named(name) for name in chosen] if chosen else list(catalog.SCENARIOS)
-    if any(scenario is None for scenario in scenarios):
+    scenarios = _chosen_scenarios(arguments.scenarios)
+    if scenarios is None:
         print(f"app-scenarios: unknown scenario in {arguments.scenarios!r}", file=sys.stderr)
 
         return 2
     stacks = [stack.strip().upper() for stack in arguments.stacks.split(",") if stack.strip()]
 
+    cache = content_module.cache_directory()
+    scratch = cache / "run"
+    scratch.mkdir(parents=True, exist_ok=True)
+    content_set = content_module.prepare(cache / "images", arguments.photographs)
+    display = _target_display(arguments.display)
+    plan = catalog.Layout(display, tuple(int(part) for part in arguments.region_pixels.lower().split("x")))
     facts = conditions.collect(bundle, display, content_set.describe())
-    build = {"machine": facts["machine"]["name"], "os": facts["machine"]["os"],
-             "build": facts["application"]["binary_sha256"], "version": facts["application"]["version"]}
     diagnostics_path = None if arguments.no_diagnostics else scratch / "diagnostics.log"
     if diagnostics_path is not None:
         diagnostics_path.unlink(missing_ok=True)
 
-    guard = PreferencesGuard(scratch)
-    results, absent, warnings = [], [], []
-    if content_set.degraded:
-        warnings.append(content_set.reason)
-    total = len(scenarios) * len(stacks)
-    done = 0
+    profile = catalog.detect_profile(executable)
+    setup = {
+        "bundle": bundle,
+        "plan": plan,
+        "profile": profile,
+        "scopes": catalog.detect_scopes(executable),
+        "guard": PreferencesGuard(scratch),
+        "helper": content_module.build_helper(cache),
+        "content": content_set,
+        "diagnostics": diagnostics_path,
+        "seconds": arguments.seconds,
+        "build": {"machine": facts["machine"]["name"], "os": facts["machine"]["os"],
+                  "build": facts["application"]["binary_sha256"], "version": facts["application"]["version"]},
+    }
     try:
-        for stack in stacks:
-            for scenario in scenarios:
-                done += 1
-                reason = catalog.unavailable(scenario, stack, profile, scopes)
-                if reason:
-                    absent.append({"scenario": scenario.id, "stack": stack, "reason": reason})
-                    print(f"[{done}/{total}] {scenario.id}/{stack}: absent - {reason}")
-                    continue
-                seconds = arguments.seconds or scenario.seconds
-                print(f"[{done}/{total}] {scenario.id}/{stack}: measuring {seconds:.0f} s", flush=True)
-                result = _run_one(scenario, stack, bundle, plan, guard, helper, content_set, diagnostics_path,
-                                  seconds)
-                results.extend(_rows(result, build))
-                for warning in result.warnings:
-                    warnings.append(f"{scenario.id}/{stack}: {warning}")
-                    print(f"    warning: {warning}")
-                print(f"    {result.measurement.cores:.3f} cores, {result.measurement.footprint_mb:.0f} MB, "
-                      f"{result.measurement.frames_per_second:.1f} frames/s, "
-                      f"{result.measurement.passes_per_second:.1f} passes/s")
+        results, absent, warnings = _measure_all(scenarios, stacks, setup)
     finally:
-        guard.restore()
+        setup["guard"].restore()
+    if content_set.degraded:
+        warnings.insert(0, content_set.reason)
 
     document = {
         "schema": "sidescopes-app-scenarios/1",
         "conditions": facts,
         "layout": plan.describe(),
-        "profile": {"name": profile.name, "behaviour": profile.summary, "scopes": scopes,
-                    "honours_prefs_override": honours_override},
+        "profile": {"name": profile.name, "behaviour": profile.summary, "scopes": setup["scopes"],
+                    "honours_prefs_override": b"SIDESCOPES_PREFS_FILE" in catalog.strings_in(executable)},
         "results": results,
         "absent": absent,
         "warnings": warnings,
     }
-    destination = arguments.out
-    if destination is None:
-        results_dir = REPOSITORY / "bench-results"
-        results_dir.mkdir(parents=True, exist_ok=True)
-        destination = results_dir / f"scenarios-{build['machine']}-{build['build'] or 'unknown'}.json"
+    destination = _destination_for(arguments.out, setup['build'])
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.write_text(json.dumps(document, indent=2) + "\n")
     print(destination)

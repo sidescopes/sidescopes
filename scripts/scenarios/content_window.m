@@ -515,6 +515,70 @@ static NSMutableArray* buildImages(const Options* options, size_t width, size_t 
     return images;
 }
 
+// The window and its layer-backed view, on screen at the requested content
+// rectangle. Only the title bar moves it: a drag across the content is how a
+// region is drawn over it.
+static NSWindow* newContentWindow(const Options* options)
+{
+    const NSRect content = NSMakeRect(options->x, primaryHeight() - options->y - options->height, options->width,
+                                      options->height);
+    NSWindow* window = [[NSWindow alloc]
+        initWithContentRect:content
+                  styleMask:(NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskMiniaturizable)
+                    backing:NSBackingStoreBuffered
+                      defer:NO];
+    window.title = @(options->title);
+    window.releasedWhenClosed = NO;
+
+    NSView* view = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, options->width, options->height)];
+    view.wantsLayer = YES;
+    window.contentView = view;
+    [window orderFrontRegardless];
+    view.layer.contentsScale = window.backingScaleFactor;
+    view.layer.contentsGravity = kCAGravityResize;
+    view.layer.magnificationFilter = kCAFilterNearest;
+    view.layer.contentsRect = CGRectMake((1.0 - PanWindow) * 0.5, 0.0, PanWindow, 1.0);
+
+    return window;
+}
+
+// The mode's own timer, plus the watch that leaves the screen if the harness
+// that started this is gone.
+static void startTimers(ContentController* controller, const Options* options)
+{
+    [NSTimer scheduledTimerWithTimeInterval:1.0
+                                     target:controller
+                                   selector:@selector(checkParent:)
+                                   userInfo:nil
+                                    repeats:YES];
+    if (strcmp(options->mode, "switch") == 0) {
+        [NSTimer scheduledTimerWithTimeInterval:fmax(options->period, 0.05)
+                                         target:controller
+                                       selector:@selector(advanceImage:)
+                                       userInfo:nil
+                                        repeats:YES];
+    } else if (strcmp(options->mode, "animate") == 0) {
+        [NSTimer scheduledTimerWithTimeInterval:1.0 / fmax(options->fps, 1.0)
+                                         target:controller
+                                       selector:@selector(advancePan:)
+                                       userInfo:nil
+                                        repeats:YES];
+    }
+}
+
+// The rectangle the window actually achieved is what the caller must aim a
+// region at, so it is reported rather than assumed.
+static void reportReady(NSWindow* window, NSUInteger imageCount)
+{
+    const NSRect achieved = contentRectInGlobalPoints(window);
+    printf("pid %d\n", getpid());
+    printf("content_rect %.0f,%.0f,%.0f,%.0f\n", achieved.origin.x, achieved.origin.y, achieved.size.width,
+           achieved.size.height);
+    printf("images %lu\n", (unsigned long)imageCount);
+    printf("ready\n");
+    fflush(stdout);
+}
+
 int main(int argc, const char** argv)
 {
     @autoreleasepool {
@@ -537,68 +601,23 @@ int main(int argc, const char** argv)
         // keeps the keyboard focus its shortcuts need.
         [NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory];
 
-        const NSRect content = NSMakeRect(options.x, primaryHeight() - options.y - options.height, options.width,
-                                          options.height);
-        NSWindow* window = [[NSWindow alloc]
-            initWithContentRect:content
-                      styleMask:(NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskMiniaturizable)
-                        backing:NSBackingStoreBuffered
-                          defer:NO];
-        window.title = @(options.title);
-        window.releasedWhenClosed = NO;
-
-        NSView* view = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, options.width, options.height)];
-        view.wantsLayer = YES;
-        window.contentView = view;
-        [window orderFrontRegardless];
-
+        NSWindow* window = newContentWindow(&options);
         const double backing = window.backingScaleFactor;
-        const size_t pixelWidth = (size_t)(options.width * backing * PanSurplus);
-        const size_t pixelHeight = (size_t)(options.height * backing);
-        NSMutableArray* images = buildImages(&options, pixelWidth, pixelHeight);
+        NSMutableArray* images = buildImages(&options, (size_t)(options.width * backing * PanSurplus),
+                                             (size_t)(options.height * backing));
         if (images.count == 0) {
             fprintf(stderr, "content_window: no content to show\n");
 
             return 3;
         }
 
-        view.layer.contentsScale = backing;
-        view.layer.contentsGravity = kCAGravityResize;
-        view.layer.magnificationFilter = kCAFilterNearest;
-        view.layer.contentsRect = CGRectMake((1.0 - PanWindow) * 0.5, 0.0, PanWindow, 1.0);
-
         ContentController* controller = [[ContentController alloc] init];
         controller.window = window;
         controller.images = images;
         controller.parent = getppid();
         [controller showImageAtIndex:0];
-        [NSTimer scheduledTimerWithTimeInterval:1.0
-                                         target:controller
-                                       selector:@selector(checkParent:)
-                                       userInfo:nil
-                                        repeats:YES];
-
-        if (strcmp(options.mode, "switch") == 0) {
-            [NSTimer scheduledTimerWithTimeInterval:fmax(options.period, 0.05)
-                                             target:controller
-                                           selector:@selector(advanceImage:)
-                                           userInfo:nil
-                                            repeats:YES];
-        } else if (strcmp(options.mode, "animate") == 0) {
-            [NSTimer scheduledTimerWithTimeInterval:1.0 / fmax(options.fps, 1.0)
-                                             target:controller
-                                           selector:@selector(advancePan:)
-                                           userInfo:nil
-                                            repeats:YES];
-        }
-
-        const NSRect achieved = contentRectInGlobalPoints(window);
-        printf("pid %d\n", getpid());
-        printf("content_rect %.0f,%.0f,%.0f,%.0f\n", achieved.origin.x, achieved.origin.y, achieved.size.width,
-               achieved.size.height);
-        printf("images %lu\n", (unsigned long)images.count);
-        printf("ready\n");
-        fflush(stdout);
+        startTimers(controller, &options);
+        reportReady(window, images.count);
 
         [NSApp run];
     }

@@ -74,6 +74,14 @@ class ScenarioResult:
 # --- Preferences ------------------------------------------------------------
 
 
+# A key no build knows, so every one skips it, and the harness can recognise its
+# own file. It matters because builds older than SIDESCOPES_PREFS_FILE write the
+# real preferences file during a measured run, so a run killed outright leaves
+# the harness's file in place - and the next run must not then back THAT up as
+# though it were the user's.
+HARNESS_MARKER = "scenario_harness=1"
+
+
 def preferences_text(stack, window_rect):
     """The whole preferences file a measured launch starts from.
 
@@ -83,7 +91,8 @@ def preferences_text(stack, window_rect):
     """
     x, y, width, height = (round(value) for value in window_rect)
 
-    return (f"scope_stack={stack}\n"
+    return (f"{HARNESS_MARKER}\n"
+            f"scope_stack={stack}\n"
             f"window_x={x}\n"
             f"window_y={y}\n"
             f"window_width={width}\n"
