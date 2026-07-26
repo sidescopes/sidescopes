@@ -191,21 +191,39 @@ TEST_CASE("A dragged region is analysed at a fraction of the detail")
     // colour cast, not the finest detail of a trace - is computed at half of
     // each side.
     AnalysisSettings settings;
-    settings.imageSizes[WaveformScopeId] = {2048, 512};
     settings.imageSizes[VectorscopeScopeId] = {512, 512};
+    settings.imageSizes[HistogramScopeId] = {2048, 768};
+    settings.imageSizes[NeutralScopeId] = {512, 512};
     settings.region = RegionOfInterest{10.0, 20.0, 60.0, 70.0};
-    settings.enabledScopes = {std::string(WaveformScopeId)};
-    settings.scopeParams[WaveformScopeId]["gain"] = 0.05;
+    settings.enabledScopes = {std::string(VectorscopeScopeId)};
+    settings.scopeParams[VectorscopeScopeId]["gain"] = 3.0;
 
     const AnalysisSettings dragged = coarsenedForDrag(settings);
-    CHECK(dragged.imageSizes.at(WaveformScopeId) == std::pair<int, int>{1024, 256});
     CHECK(dragged.imageSizes.at(VectorscopeScopeId) == std::pair<int, int>{256, 256});
+    CHECK(dragged.imageSizes.at(HistogramScopeId) == std::pair<int, int>{1024, 384});
+    CHECK(dragged.imageSizes.at(NeutralScopeId) == std::pair<int, int>{256, 256});
 
     // Only the resolutions: the region, the parameters and the scopes computed
     // are what the user asked for, dragged or still.
     CHECK(dragged.region == settings.region);
     CHECK(dragged.enabledScopes == settings.enabledScopes);
     CHECK(dragged.scopeParams == settings.scopeParams);
+}
+
+TEST_CASE("The waveform keeps its columns while the region is dragged")
+{
+    // A column is a place in the region, and scanning for a blown highlight or
+    // a skin tone is exactly when that scope matters most: measured on a
+    // photograph, halving the columns moves the trace by twenty times what
+    // halving the height does. So the height is what a drag gives up, and the
+    // parade - which is the same engine - gives up the same.
+    AnalysisSettings settings;
+    settings.imageSizes[WaveformScopeId] = {2048, 512};
+    settings.imageSizes[ParadeScopeId] = {1024, 512};
+
+    const AnalysisSettings dragged = coarsenedForDrag(settings);
+    CHECK(dragged.imageSizes.at(WaveformScopeId) == std::pair<int, int>{2048, 256});
+    CHECK(dragged.imageSizes.at(ParadeScopeId) == std::pair<int, int>{1024, 256});
 }
 
 TEST_CASE("A small scope image is left alone while the region is dragged")

@@ -56,11 +56,11 @@ inline constexpr double DetailSettleSeconds = 0.4;
 /// image covers, so a coarser image is most of the pass.
 ///
 /// Measured against full detail on a photograph, magnifying the coarse image
-/// back the way a texture is stretched over a pane: the vectorscope moves by a
-/// mean of 0.02 of 255 and the histogram by 0.10 - both are upsamples of a grid
-/// that does not change - the neutral plane by 1.13 with its cast reading
-/// unmoved, and the waveform by 3.8, all of it from the halved columns. Its
-/// halved height costs 0.18, the levels being fixed at 256 by 8-bit input.
+/// back the way a texture is stretched over a pane, over the region sizes a
+/// scan actually uses: the vectorscope moves by a mean of 0.03 to 0.13 of 255
+/// and the histogram by 0.12 to 0.49 - both are upsamples of a grid that does
+/// not change - and the neutral plane by 0.71 to 2.79 with its cast reading,
+/// the one number anybody takes off it, unmoved to four decimal places.
 inline constexpr int DraggedDetailDivisor = 2;
 
 /// The smallest side a dragged pass is asked for, so a small pane's image stays
@@ -69,6 +69,16 @@ inline constexpr int DraggedDetailFloor = 128;
 
 /// @p settings with every scope image it names computed at a fraction of its
 /// resolution: what to ask of the worker while the user drags the region.
+///
+/// The waveform's COLUMNS are the exception and are left alone. A column is a
+/// place in the region - the same reason the sampling doctrine thins rows and
+/// never columns - and scanning for a blown highlight or a skin tone is exactly
+/// when that scope matters most. Measured on a photograph at the sizes the
+/// application asks for, halving them moves the waveform by a mean of 5.5 to
+/// 10.6 of 255 against 0.29 to 0.42 for the halved height, and the parade by
+/// 2.1 to 4.1 against 0.10 to 0.14: nearly all of the cost of coarsening, on
+/// the one axis that carries data rather than resolution. Per millisecond
+/// saved the columns are the worst knob on any scope by a factor of five.
 [[nodiscard]] AnalysisSettings coarsenedForDrag(AnalysisSettings settings);
 
 /// Decides what resolution each scope's image is computed at from the pane the

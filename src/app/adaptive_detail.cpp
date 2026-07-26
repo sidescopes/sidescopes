@@ -205,7 +205,10 @@ std::optional<DetailSizes> AdaptiveDetail::update(const ScopePaneSizes& panes, f
 AnalysisSettings coarsenedForDrag(AnalysisSettings settings)
 {
     for (auto& [id, size] : settings.imageSizes) {
-        size.first = coarserSide(size.first);
+        const bool columnsArePlaces = id == WaveformScopeId || id == ParadeScopeId;
+        if (!columnsArePlaces) {
+            size.first = coarserSide(size.first);
+        }
         size.second = coarserSide(size.second);
     }
 
