@@ -87,6 +87,12 @@ class ScenarioResult:
 HARNESS_MARKER = "scenario_harness=1"
 
 
+# The quality level a measured launch starts at, for comparing the levels
+# against each other on one binary. Unset leaves the key out entirely, so the
+# application defaults it and a build that predates the setting is unaffected.
+QUALITY_VARIABLE = "SIDESCOPES_SCENARIO_QUALITY"
+
+
 def preferences_text(stack, window_rect):
     """The whole preferences file a measured launch starts from.
 
@@ -95,9 +101,12 @@ def preferences_text(stack, window_rect):
     one file usable for either.
     """
     x, y, width, height = (round(value) for value in window_rect)
+    quality = os.environ.get(QUALITY_VARIABLE, "").strip()
+    quality_line = f"quality={quality}\n" if quality else ""
 
     return (f"{HARNESS_MARKER}\n"
             f"scope_stack={stack}\n"
+            f"{quality_line}"
             f"window_x={x}\n"
             f"window_y={y}\n"
             f"window_width={width}\n"
