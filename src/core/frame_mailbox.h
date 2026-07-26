@@ -9,13 +9,14 @@
 
 #include "core/diagnostics.h"
 #include "core/frame.h"
+#include "core/page_allocator.h"
 
 namespace sidescopes {
 
 /// Owned frame storage passed between the capture and analysis threads.
 struct FrameBuffer
 {
-    std::vector<uint8_t> data;
+    PixelStorage data;
     int strideBytes = 0;
     int width = 0;
     int height = 0;

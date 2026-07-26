@@ -461,7 +461,7 @@ WorkerResult runWorkerScenario(const WorkerScenario& scenario, const AnalysisSet
         if (scenario.moving) {
             disturbFrame(pixels, region, tick);
         }
-        storage.data = pixels;
+        storage.data.assign(pixels.begin(), pixels.end());
         storage.strideBytes = FrameWidth * 4;
         storage.width = FrameWidth;
         storage.height = FrameHeight;
