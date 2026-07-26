@@ -130,21 +130,41 @@ TEST_CASE("A readout following the pointer redraws at its own pace")
     CHECK(frameWaitFor(inputs).kind == FrameWait::Idle);
 }
 
-TEST_CASE("Every way of being out of sight is one")
+TEST_CASE("Every reason to stop capturing is one")
 {
-    CHECK_FALSE(outOfSight(InSight));
+    CHECK_FALSE(nothingNeedsFrames(InSight));
 
-    // Put away by hand, or the whole session showing nothing.
-    for (const auto& set : {&VisibilityInputs::sessionAsleep, &VisibilityInputs::applicationHidden,
-                            &VisibilityInputs::iconified, &VisibilityInputs::framebufferEmpty}) {
+    // Put away by hand, the whole session showing nothing, or nothing selected
+    // to read: the window in front of the user with no region is as free of
+    // readers as a hidden one, since the colour under the pointer has an
+    // off-stream sample of its own.
+    for (const auto& set :
+         {&VisibilityInputs::sessionAsleep, &VisibilityInputs::applicationHidden, &VisibilityInputs::iconified,
+          &VisibilityInputs::framebufferEmpty, &VisibilityInputs::nothingSelected}) {
         VisibilityInputs inputs;
         inputs.*set = true;
-        CHECK(outOfSight(inputs));
+        CHECK(nothingNeedsFrames(inputs));
     }
 
     VisibilityInputs invisible;
     invisible.windowVisible = false;
-    CHECK(outOfSight(invisible));
+    CHECK(nothingNeedsFrames(invisible));
+}
+
+TEST_CASE("A selected region holds the stream open on a visible window")
+{
+    // The everyday state: the window in sight with something to read. Nothing
+    // here may stop the capture.
+    VisibilityInputs inputs = InSight;
+    inputs.nothingSelected = false;
+    CHECK_FALSE(nothingNeedsFrames(inputs));
+
+    // And a pick opened from the empty state holds it open even before a
+    // region exists, because the picker reads frames itself.
+    VisibilityInputs picking;
+    picking.nothingSelected = true;
+    picking.needsFrames = true;
+    CHECK_FALSE(nothingNeedsFrames(picking));
 }
 
 TEST_CASE("A reader of frames holds the stream open however hidden the window")
@@ -155,7 +175,7 @@ TEST_CASE("A reader of frames holds the stream open however hidden the window")
     inputs.sessionAsleep = true;
     inputs.iconified = true;
     inputs.needsFrames = true;
-    CHECK_FALSE(outOfSight(inputs));
+    CHECK_FALSE(nothingNeedsFrames(inputs));
 }
 
 TEST_CASE("The pipeline is suspended only once the window has been gone a while")
@@ -166,8 +186,8 @@ TEST_CASE("The pipeline is suspended only once the window has been gone a while"
     CHECK(gate.update(InSight, false, 0.0) == PipelineAction::Keep);
 
     CHECK(gate.update(hidden(), false, 1.0) == PipelineAction::Keep);
-    CHECK(gate.update(hidden(), false, 1.0 + OutOfSightPauseSeconds - 0.01) == PipelineAction::Keep);
-    CHECK(gate.update(hidden(), false, 1.0 + OutOfSightPauseSeconds + 0.01) == PipelineAction::Suspend);
+    CHECK(gate.update(hidden(), false, 1.0 + CapturePauseSeconds - 0.01) == PipelineAction::Keep);
+    CHECK(gate.update(hidden(), false, 1.0 + CapturePauseSeconds + 0.01) == PipelineAction::Suspend);
 
     // Already suspended, the gate asks for nothing more.
     CHECK(gate.update(hidden(), true, 100.0) == PipelineAction::Keep);
@@ -186,8 +206,8 @@ TEST_CASE("A window that comes back inside the delay is never suspended")
     // The clock restarts, so the next disappearance waits out the whole delay
     // again rather than inheriting the first one's head start.
     CHECK(gate.update(hidden(), false, 5.3) == PipelineAction::Keep);
-    CHECK(gate.update(hidden(), false, 5.3 + OutOfSightPauseSeconds - 0.01) == PipelineAction::Keep);
-    CHECK(gate.update(hidden(), false, 5.3 + OutOfSightPauseSeconds + 0.01) == PipelineAction::Suspend);
+    CHECK(gate.update(hidden(), false, 5.3 + CapturePauseSeconds - 0.01) == PipelineAction::Keep);
+    CHECK(gate.update(hidden(), false, 5.3 + CapturePauseSeconds + 0.01) == PipelineAction::Suspend);
 }
 
 TEST_CASE("Resuming is immediate, however long the window was away")

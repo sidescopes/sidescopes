@@ -396,6 +396,10 @@ private:
         m_stream = nil;
         m_handler = nil;
         m_mailbox = nullptr;
+        // The recycled buffer is a whole display of pixels; a stopped stream
+        // keeps it warm for deliveries that are not coming. The capture queue
+        // has drained by here, so nothing else can be holding it.
+        m_buffer = FrameBuffer{};
     }
 
     bool fail(const std::string& message)

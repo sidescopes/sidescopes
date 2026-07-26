@@ -767,6 +767,39 @@ TEST_CASE("Releasing a held worker recomputes without waiting for a frame")
     CHECK(pixelLit(output.images.at(VectorscopeId), 109, 43));
 }
 
+TEST_CASE("A released frame is let go and the accessors say so")
+{
+    // A whole display's pixels are the largest thing this application holds,
+    // and a suspended capture will never replace them. Letting the frame go is
+    // what turns the pause into a memory saving; the accessors then answering
+    // nothing is what sends the colour readout to its off-stream sample rather
+    // than reporting a picture of the screen as it used to be.
+    FrameMailbox mailbox;
+    AnalysisWorker worker(mailbox);
+    AnalysisSettings settings;
+    settings.region = WholeFrame;
+    settings.enabledScopes = {VectorscopeId};
+    worker.updateSettings(settings);
+    worker.start();
+
+    mailbox.publish(makeSolidFrameBuffer(64, 64, Color{191, 0, 0}, 1));
+    REQUIRE(waitFor([&] { return worker.consumedFrameSequence() == 1; }));
+    REQUIRE(worker.sampleDisplayColor(32, 32).has_value());
+    REQUIRE(worker.latestFrameSize().has_value());
+
+    worker.releaseFrame();
+    REQUIRE(waitFor([&] { return !worker.latestFrameSize().has_value(); }));
+    CHECK_FALSE(worker.sampleDisplayColor(32, 32).has_value());
+    CHECK_FALSE(worker.withLatestFrame([](const FrameView&) {}));
+
+    // And the pipeline picks up again from the next frame, at full health.
+    mailbox.publish(makeSolidFrameBuffer(64, 64, Color{0, 191, 0}, 2));
+    REQUIRE(waitFor([&] { return worker.latestFrameSize().has_value(); }));
+    const std::optional<FloatColor> resumed = worker.sampleDisplayColor(32, 32);
+    REQUIRE(resumed.has_value());
+    CHECK(resumed->g > resumed->r);
+}
+
 TEST_CASE("AnalysisWorker offers no frame color before one arrives")
 {
     FrameMailbox mailbox;

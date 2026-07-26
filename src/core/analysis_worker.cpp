@@ -8,6 +8,7 @@
 #include <utility>
 #include <vector>
 
+#include "core/heap.h"
 #include "core/marker_smoother.h"
 #include "core/region_hash.h"
 #include "modules/module_registry.h"
@@ -342,6 +343,19 @@ void writeOutput(AnalysisWorker::Output& output, std::vector<WorkerScope>& scope
 bool AnalysisWorker::takeLatestFrame()
 {
     auto frame = m_mailbox.takeLatest(std::chrono::milliseconds(100));
+    if (m_releaseFrame.exchange(false, std::memory_order_relaxed)) {
+        // Capture has stopped, so anything that arrived alongside the request
+        // is the last frame in flight and is let go with the rest. The content
+        // hash is deliberately left standing: a screen that has not changed
+        // over the pause deserves the same skip it would get without one.
+        dropFrame();
+        // The allocator caches what it has just been handed back, so without
+        // this the pause frees the frames on paper and the process keeps every
+        // page of them.
+        releaseFreeHeap();
+
+        return false;
+    }
     if (!frame) {
         return false;
     }
@@ -355,6 +369,22 @@ bool AnalysisWorker::takeLatestFrame()
     m_consumedSequence.store(m_latestFrame.sequence, std::memory_order_relaxed);
 
     return true;
+}
+
+void AnalysisWorker::releaseFrame()
+{
+    m_releaseFrame.store(true, std::memory_order_relaxed);
+    // The take is what the worker is sitting in; end its wait so the frame is
+    // let go now rather than at the end of the timeout.
+    m_mailbox.nudge();
+}
+
+void AnalysisWorker::dropFrame()
+{
+    std::lock_guard lock(m_frameMutex);
+    m_hasFrame = false;
+    m_latestFrame = FrameBuffer{};
+    m_consumedSequence.store(0, std::memory_order_relaxed);
 }
 
 void AnalysisWorker::hold(bool held)

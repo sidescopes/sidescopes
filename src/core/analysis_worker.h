@@ -128,6 +128,14 @@ public:
     /// point its pixels do not reach.
     [[nodiscard]] std::optional<FloatColor> sampleDisplayColor(int displayX, int displayY, int radius = 1) const;
 
+    /// Asks the worker to let go of the frame it is holding, which is a whole
+    /// display's worth of pixels kept warm for passes that are not coming.
+    /// Honoured at the top of the next pass, because this thread owns that
+    /// buffer and no other may free it. From then until a frame arrives every
+    /// frame accessor answers nothing, which is what sends the colour readout
+    /// to its off-stream sample. Safe to call from any thread.
+    void releaseFrame();
+
     struct FrameSize
     {
         int width = 0;
@@ -182,6 +190,9 @@ private:
     /// whether a frame arrived this pass. Runs only on the worker thread.
     [[nodiscard]] bool takeLatestFrame();
 
+    /// Frees the held frame. Runs only on the worker thread, which owns it.
+    void dropFrame();
+
     /// Copies pending settings into @p settings under the settings lock,
     /// advancing @p seenSettingsVersion and returning whether they changed.
     [[nodiscard]] bool syncSettings(AnalysisSettings& settings, uint64_t& seenSettingsVersion);
@@ -203,6 +214,8 @@ private:
     mutable std::mutex m_frameMutex;
     FrameBuffer m_latestFrame;
     bool m_hasFrame = false;
+    // Set from the frame loop when capture is suspended, consumed by run().
+    std::atomic<bool> m_releaseFrame{false};
     std::atomic<uint64_t> m_consumedSequence{0};
 
     mutable std::mutex m_outputMutex;

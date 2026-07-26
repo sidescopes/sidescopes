@@ -520,12 +520,22 @@ void App::servicePipelineVisibility(bool framebufferEmpty, double now)
         glfwGetWindowAttrib(m_window, GLFW_ICONIFIED) != 0,
         glfwGetWindowAttrib(m_window, GLFW_VISIBLE) != 0,
         framebufferEmpty,
+        !m_analysis.region.has_value(),
         m_regionPicker.active() || m_regionPicker.scansRunning() || m_faceLock.probeRunning()};
+    // Which reason to name in the status line, read back off the inputs rather
+    // than gathered a second time: an empty selection is the only one of them
+    // that pauses a window the user is looking at.
+    const bool outOfSight = inputs.sessionAsleep || inputs.applicationHidden || inputs.iconified ||
+                            !inputs.windowVisible || inputs.framebufferEmpty;
 
     switch (m_visibility.update(inputs, m_captureController.suspended(), now)) {
     case PipelineAction::Suspend:
-        SS_DIAG(Perf, "pipeline suspended - out of sight");
-        m_captureController.suspend();
+        SS_DIAG(Perf, "pipeline suspended - %s", outOfSight ? "out of sight" : "no region");
+        m_captureController.suspend(outOfSight ? "paused - the window is out of sight" : "paused - no region selected");
+        // The frame the worker holds is a whole display of pixels; with the
+        // stream stopped nothing will replace it, and the colour readout falls
+        // back to the off-stream sample the moment it is gone.
+        m_worker.releaseFrame();
         break;
     case PipelineAction::Resume:
         SS_DIAG(Perf, "pipeline resumed");

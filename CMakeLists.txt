@@ -59,6 +59,7 @@ add_library(sidescopes_core STATIC
     src/core/diagnostics.cpp
     src/core/color_lab.cpp
     src/core/region_hash.cpp
+    src/core/heap.cpp
     src/core/trace_intensity.cpp
     src/core/marker_smoother.cpp
     src/core/analysis_worker.cpp

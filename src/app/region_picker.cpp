@@ -138,10 +138,17 @@ void RegionPicker::openRegionPicker(RegionPickerMode mode, bool regionSelected)
     // the whole display before the first of those reads. The crop policy keeps
     // it there for as long as the pick is open.
     m_capture.narrowTo(std::nullopt);
+    // With no region selected the pipeline is paused, so there is no frame at
+    // all to read: the stream is restarted here rather than a frame later by
+    // the visibility gate, and waited for like any other.
+    const bool restarted = m_capture.suspended();
+    if (restarted) {
+        m_capture.resume();
+    }
     // The previous region's border must not leak into the analyzed frame: its
     // strokes read as rectangle edges and cut suggestions short. Wait briefly
     // for a frame taken after the border left the screen.
-    if (regionSelected) {
+    if (regionSelected || restarted) {
         waitForBorderFreeFrame();
     }
     const std::vector<PickerDisplay> pickerDisplays = buildPickerDisplays();

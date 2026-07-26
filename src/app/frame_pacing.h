@@ -26,11 +26,11 @@ inline constexpr double IdleWaitSeconds = 0.5;
 /// How long since the last activity counts as nothing happening.
 inline constexpr double IdleAfterSeconds = 0.5;
 
-/// How long the window must stay out of sight before the pipeline is
-/// suspended. Long enough that stepping through the application switcher, or a
-/// hide the user immediately undoes, does not pay for a stream restart on the
-/// way back.
-inline constexpr double OutOfSightPauseSeconds = 0.75;
+/// How long nothing must have asked for frames before the pipeline is
+/// suspended. Long enough that stepping through the application switcher, a
+/// hide the user immediately undoes, or a region cleared on the way to drawing
+/// the next one, does not pay for a stream restart on the way back.
+inline constexpr double CapturePauseSeconds = 0.75;
 
 /// How the frame loop should block for events. The frame period is a floor
 /// under all three - see FrameWaitDecision::redrawFloorSeconds.
@@ -96,13 +96,18 @@ struct VisibilityInputs
     bool windowVisible = true;
     /// The framebuffer has no area, so there is nothing to draw into either.
     bool framebufferEmpty = false;
+    /// No region is selected, so no pass is being run on the frames and the
+    /// only thing left reading them is the colour under the pointer - which
+    /// has an off-stream sample of its own, the one the second display and
+    /// Windows already use.
+    bool nothingSelected = false;
     /// The picker or a face probe is reading frames on its own, so the stream
     /// must not be pulled out from under it.
     bool needsFrames = false;
 };
 
-/// Whether nothing on screen is showing the scopes.
-[[nodiscard]] bool outOfSight(const VisibilityInputs& inputs);
+/// Whether nothing is asking the capture for frames.
+[[nodiscard]] bool nothingNeedsFrames(const VisibilityInputs& inputs);
 
 /// What the frame loop should do with the capture pipeline.
 enum class PipelineAction
@@ -129,11 +134,12 @@ public:
     [[nodiscard]] PipelineAction update(const VisibilityInputs& inputs, bool suspended, double now);
 
 private:
-    /// Whether the window is out of sight, and since when. The flag is separate
-    /// from the timestamp because a clock that legitimately reads zero - which
-    /// the frame clock does at startup - is indistinguishable from a sentinel.
-    bool m_outOfSight = false;
-    double m_outOfSightSince = 0.0;
+    /// Whether nothing has been asking for frames, and since when. The flag is
+    /// separate from the timestamp because a clock that legitimately reads zero
+    /// - which the frame clock does at startup - is indistinguishable from a
+    /// sentinel.
+    bool m_idle = false;
+    double m_idleSince = 0.0;
 };
 
 }  // namespace sidescopes

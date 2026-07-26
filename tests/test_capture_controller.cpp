@@ -1,4 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
+#include <chrono>
+#include <cstddef>
 #include <string>
 
 #include "app/capture_controller.h"
@@ -262,6 +264,42 @@ TEST_CASE("a stream that comes back forgets the failures before it")
     CHECK(source.startCount == attempts + 2);
 }
 
+TEST_CASE("suspend lets go of the frames as well as the stream")
+{
+    // A stopped stream keeping a display's worth of pixels warm for deliveries
+    // that are not coming is the largest single allocation this application
+    // makes, so the pause frees the mailbox rather than only stopping the
+    // producer that fills it.
+    FakeCaptureSource source;
+    source.targets = {makeTarget(4, "main")};
+    FrameMailbox mailbox;
+    CaptureController controller(source, mailbox);
+    REQUIRE(controller.requestPermission());
+    REQUIRE(controller.start());
+
+    FrameBuffer filled;
+    filled.width = 64;
+    filled.height = 32;
+    filled.strideBytes = 64 * 4;
+    filled.data.assign(static_cast<std::size_t>(64) * 32 * 4, 0);
+    FrameBuffer recycled = mailbox.publish(std::move(filled));
+    recycled.data.assign(static_cast<std::size_t>(64) * 32 * 4, 0);
+    mailbox.returnStorage(std::move(recycled));
+
+    controller.suspend("paused");
+
+    // Nothing pending: the frame nobody took is gone rather than waiting.
+    CHECK_FALSE(mailbox.takeLatest(std::chrono::milliseconds(0)).has_value());
+    // And nothing kept for reuse: the next publish is handed empty storage.
+    FrameBuffer next;
+    next.width = 8;
+    next.height = 8;
+    next.strideBytes = 8 * 4;
+    next.data.assign(static_cast<std::size_t>(8) * 8 * 4, 0);
+    const FrameBuffer afterPause = mailbox.publish(std::move(next));
+    CHECK(afterPause.data.empty());
+}
+
 TEST_CASE("suspend stops the stream and service leaves it stopped")
 {
     FakeCaptureSource source;
@@ -271,7 +309,9 @@ TEST_CASE("suspend stops the stream and service leaves it stopped")
     REQUIRE(controller.requestPermission());
     REQUIRE(controller.start());
 
-    controller.suspend();
+    // A pause carries its reason to the status line: the two callers stop for
+    // different reasons and the settings window says which.
+    controller.suspend("paused - the window is out of sight");
     CHECK(controller.suspended());
     CHECK(source.stopCount == 1);
     // A stream stopped on purpose has not died, or service would revive it.
@@ -304,8 +344,8 @@ TEST_CASE("suspending twice or resuming unsuspended does nothing")
     controller.resume();
     CHECK(source.startCount == 1);
 
-    controller.suspend();
-    controller.suspend();
+    controller.suspend("paused");
+    controller.suspend("paused");
     CHECK(source.stopCount == 1);
 
     controller.resume();
@@ -321,7 +361,7 @@ TEST_CASE("a wake during a suspension is answered by the resume itself")
     CaptureController controller(source, mailbox);
     REQUIRE(controller.requestPermission());
     REQUIRE(controller.start());
-    controller.suspend();
+    controller.suspend("paused");
 
     // The display slept and woke while the window was away. The resume starts a
     // fresh stream, which is exactly what the stale mark was asking for, so it
@@ -344,7 +384,7 @@ TEST_CASE("a stream that dies while suspended is not restarted until it returns"
     CaptureController controller(source, mailbox);
     REQUIRE(controller.requestPermission());
     REQUIRE(controller.start());
-    controller.suspend();
+    controller.suspend("paused");
 
     // The backend reports the stop from its own thread after suspend returned.
     source.fireStatus("capture stopped");
@@ -386,7 +426,7 @@ TEST_CASE("Narrowing reaches the stream only while it is delivering")
     CHECK_FALSE(source.narrowings.back().has_value());
 
     // Suspended: ignored, because the stream is not delivering.
-    controller.suspend();
+    controller.suspend("paused");
     controller.narrowTo(canvas);
     CHECK(source.narrowings.size() == 2);
 

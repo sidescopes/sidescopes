@@ -53,12 +53,16 @@ public:
     /// @return Whether the stream has died and awaits a restart.
     [[nodiscard]] bool dead() const;
 
-    /// Stops capturing until resume(), because nothing is on screen to show
-    /// it. The whole pipeline goes with the stream: the backend's own work,
-    /// the per-frame copy into the mailbox, change detection, and the analysis
-    /// pass. service() leaves a suspended controller alone rather than reading
-    /// the stopped stream as one that died.
-    void suspend();
+    /// Stops capturing until resume(), because nothing is asking for frames.
+    /// The whole pipeline goes with the stream: the backend's own work, the
+    /// per-frame copy into the mailbox, change detection, and the analysis
+    /// pass. The frames go too - a stopped stream holding a display's worth of
+    /// pixels for deliveries that are not coming is the largest single thing
+    /// this application keeps. service() leaves a suspended controller alone
+    /// rather than reading the stopped stream as one that died.
+    /// @p reason becomes the status line, since the two callers pause for
+    /// different reasons and the settings window says which.
+    void suspend(const std::string& reason);
 
     /// Starts capturing again after a suspend(). This start is also the
     /// restart a wake or unlock during the pause would have asked for, so the

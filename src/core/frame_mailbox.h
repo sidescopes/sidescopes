@@ -114,6 +114,19 @@ public:
         m_available.notify_one();
     }
 
+    /// Drops the frame nobody took and the storage held for reuse, returning
+    /// a whole display's worth of pixels to the system rather than keeping it
+    /// warm for a producer that has stopped. Only the producer's own stop
+    /// makes this safe, which is why the capture controller is what calls it;
+    /// the next publish allocates afresh.
+    void release()
+    {
+        std::lock_guard lock(m_mutex);
+        m_pending = FrameBuffer{};
+        m_returned = FrameBuffer{};
+        m_hasPending = false;
+    }
+
     /// Hands storage back for the producer to reuse.
     void returnStorage(FrameBuffer&& used)
     {

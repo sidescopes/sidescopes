@@ -19,28 +19,28 @@ FrameWaitDecision frameWaitFor(const FramePacingInputs& inputs)
     return FrameWaitDecision{FrameWait::Idle, left};
 }
 
-bool outOfSight(const VisibilityInputs& inputs)
+bool nothingNeedsFrames(const VisibilityInputs& inputs)
 {
     if (inputs.needsFrames) {
         return false;
     }
 
     return inputs.sessionAsleep || inputs.applicationHidden || inputs.iconified || !inputs.windowVisible ||
-           inputs.framebufferEmpty;
+           inputs.framebufferEmpty || inputs.nothingSelected;
 }
 
 PipelineAction VisibilityGate::update(const VisibilityInputs& inputs, bool suspended, double now)
 {
-    if (!outOfSight(inputs)) {
-        m_outOfSight = false;
+    if (!nothingNeedsFrames(inputs)) {
+        m_idle = false;
 
         return suspended ? PipelineAction::Resume : PipelineAction::Keep;
     }
-    if (!m_outOfSight) {
-        m_outOfSight = true;
-        m_outOfSightSince = now;
+    if (!m_idle) {
+        m_idle = true;
+        m_idleSince = now;
     }
-    if (suspended || now - m_outOfSightSince <= OutOfSightPauseSeconds) {
+    if (suspended || now - m_idleSince <= CapturePauseSeconds) {
         return PipelineAction::Keep;
     }
 

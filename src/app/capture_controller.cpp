@@ -144,7 +144,7 @@ bool CaptureController::dead() const
     return m_dead.load();
 }
 
-void CaptureController::suspend()
+void CaptureController::suspend(const std::string& reason)
 {
     if (m_suspended) {
         return;
@@ -154,11 +154,15 @@ void CaptureController::suspend()
         m_source.stop();
         m_running = false;
     }
+    // The producer has stopped by here, so its buffers are nobody's: freeing
+    // them is what turns a suspend into a memory saving rather than only a
+    // CPU one.
+    m_mailbox.release();
     // Stopping the stream can land the source's status callback, which marks
     // it dead; a stream stopped on purpose has not died, and clearing the mark
     // after the stop is what keeps resume() from restarting twice.
     m_dead.store(false);
-    setStatus("paused - the window is out of sight");
+    setStatus(reason);
 }
 
 void CaptureController::resume()
