@@ -220,6 +220,18 @@ def click(point, settle=0.08):
     _post_mouse(_LEFT_UP, point)
 
 
+def press_mouse(point):
+    _post_mouse(_LEFT_DOWN, point)
+
+
+def drag_mouse(point):
+    _post_mouse(_LEFT_DRAGGED, point)
+
+
+def release_mouse(point):
+    _post_mouse(_LEFT_UP, point)
+
+
 def drag(start, end, steps=30, step_seconds=0.016, settle=0.12):
     """A press, a straight sweep, and a release, at roughly a frame per step."""
     _post_mouse(_MOUSE_MOVED, start)

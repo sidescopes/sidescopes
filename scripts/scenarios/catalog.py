@@ -103,7 +103,7 @@ class Scenario:
         the detector is right to skip them. What that scenario costs is the
         tracking, not the analysis.
         """
-        return self.content in ("switch", "animate") or self.action == "region-drag"
+        return self.content in ("switch", "animate") or self.action in ("region-drag", "region-flick")
 
 
 SCENARIOS = (
@@ -129,6 +129,14 @@ SCENARIOS = (
     Scenario(
         "region-scan", "the region dragged back and forth across the content",
         "still", "draw", "region-drag",
+    ),
+    Scenario(
+        "region-flick", "the region thrown across the content in quick, rough moves",
+        "still", "draw", "region-flick",
+    ),
+    Scenario(
+        "region-redraw", "a region drawn roughly in a fifth of a second, cleared, and drawn again",
+        "still", "none", "region-redraw", needs=("draw-region",),
     ),
     Scenario(
         "attached-window-drag", "attached to a window, and that window dragged about",

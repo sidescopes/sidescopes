@@ -149,17 +149,19 @@ def _run_one(scenario, stack, bundle, plan, guard, helper, content_set, diagnost
             if not session.establish_region(application, scenario.region, region, content_rect, BINDINGS, bundle):
                 warnings.append(f"no region border appeared, so this measures an application with no "
                                 f"{scenario.region} region rather than the scenario asked for")
-        action = session.action_for(scenario.action, region, content_rect)
+        target = session.Target(application, bundle, BINDINGS)
+        action = session.action_for(scenario.action, region, content_rect, target)
         action.start()
         try:
             if not scenario.from_launch:
                 time.sleep(1.0)
-            measurement = session.measure(application, window.pid if window else None, seconds, tail)
+            measurement = session.measure(application, window.pid if window else None, seconds, tail, action=action)
         finally:
             action.stop()
         if scenario.expects_analysis and tail is not None and measurement.passes_per_second == 0.0:
             warnings.append("nothing was analysed although the content was changing, so the screen recording "
                             "permission may be missing")
+        warnings.extend(action.complaints())
 
         return session.ScenarioResult(scenario, stack, measurement, warnings=warnings)
     finally:
@@ -204,10 +206,28 @@ def _rows(result, build):
         ("passes", measurement.passes_per_second, "per second", "none", "analysis passes, reported without a verdict"),
         ("content-cpu", measurement.content_cores, "cores", "none",
          "what the harness's own content window cost, so two runs can be checked for equal load"),
-    )
+    ) + _tracking_readings(measurement.tracking)
 
     return [dict(common, metric=f"{kind} {name}", value=round(value, 4), unit=unit, direction=direction, detail=detail)
             for kind, value, unit, direction, detail in readings]
+
+
+def _tracking_readings(tracking):
+    """How closely the border followed the pointer, for the scenarios that drag it.
+
+    Its own function because these are the only readings with a verdict that is
+    not about cost: a border that trails the hand is a defect however cheap it
+    was, and this is the number that says so.
+    """
+    if tracking is None or not tracking.samples:
+        return ()
+
+    return (
+        ("track", tracking.median_ms, "ms", "lower", "median lag of the region border behind the pointer"),
+        ("track-worst", tracking.worst_ms, "ms", "lower", "worst lag of the region border behind the pointer"),
+        ("track-settle", tracking.settle_ms, "ms", "lower",
+         "from the release of a flick until the border stops where the pointer left it"),
+    )
 
 
 def _complaint_about(bundle, executable):
@@ -264,8 +284,12 @@ def _measure_all(scenarios, stacks, setup):
                 warnings.append(f"{scenario.id}/{stack}: {warning}")
                 print(f"    warning: {warning}")
             measurement = result.measurement
+            tracked = measurement.tracking
             print(f"    {measurement.cores:.3f} cores, {measurement.footprint_mb:.0f} MB, "
-                  f"{measurement.frames_per_second:.1f} frames/s, {measurement.passes_per_second:.1f} passes/s")
+                  f"{measurement.frames_per_second:.1f} frames/s, {measurement.passes_per_second:.1f} passes/s"
+                  + (f", border {tracked.median_ms:.0f} ms behind the pointer "
+                     f"({tracked.worst_ms:.0f} worst, settles in {tracked.settle_ms:.0f})"
+                     if tracked is not None and tracked.samples else ""))
 
     return (results, absent, warnings)
 

@@ -28,6 +28,7 @@ import math
 import os
 import re
 import signal
+import statistics
 import subprocess
 import threading
 import time
@@ -53,13 +54,17 @@ _REGION_CONFIRM_SECONDS = 3.0
 
 
 class Measurement:
-    def __init__(self, cores, footprint_mb, resident_mb, frames_per_second, passes_per_second, content_cores):
+    def __init__(self, cores, footprint_mb, resident_mb, frames_per_second, passes_per_second, content_cores,
+                 tracking=None):
         self.cores = cores
         self.footprint_mb = footprint_mb
         self.resident_mb = resident_mb
         self.frames_per_second = frames_per_second
         self.passes_per_second = passes_per_second
         self.content_cores = content_cores
+        # How far the region border trailed the pointer, for the actions that
+        # drag it; None for every other scenario.
+        self.tracking = tracking
 
 
 class ScenarioResult:
@@ -230,8 +235,22 @@ class Action:
         if self._thread is not None:
             self._thread.join(timeout=10.0)
 
+    def complaints(self):
+        """What went wrong while acting, so a scenario that did not really run
+        says so rather than reporting the cost of doing nothing."""
+        return []
+
     def _loop(self):
         raise NotImplementedError
+
+
+class Target:
+    """What an action needs to know about the application it is driving."""
+
+    def __init__(self, pid=None, bundle=None, bindings=None):
+        self.pid = pid
+        self.bundle = bundle
+        self.bindings = bindings or {"draw": "d", "attach": "a"}
 
 
 class Still(Action):
@@ -294,6 +313,183 @@ class BorderDrag(Action):
             forward = not forward
 
 
+class Tracking:
+    """How closely the region border followed the pointer.
+
+    Read off the geometry rather than out of the application: during a sweep at
+    a known velocity the distance the border is behind the pointer IS the time
+    it is behind, times that velocity. Both are sampled from the window server,
+    so this measures what the user sees and needs nothing compiled in.
+
+    `settle_ms` is the other half of the same question - how long after the
+    button is released the border stops where the pointer left it.
+    """
+
+    def __init__(self, lags_ms, settles_ms):
+        ordered = sorted(lags_ms)
+        self.samples = len(ordered)
+        self.median_ms = ordered[len(ordered) // 2] if ordered else None
+        self.worst_ms = ordered[-1] if ordered else None
+        self.settle_ms = statistics.median(settles_ms) if settles_ms else None
+
+
+# The border window extends this far beyond the region on every side, and
+# carries a label strip above it. Both come from the platform overlay, and the
+# harness needs them only to recognise the window in the list.
+BORDER_PAD = 17.5
+BORDER_LABEL_BAND = 20.0
+# How often the border is sampled during a flick. Fast enough to resolve a
+# frame period several times over, slow enough that the harness's own thread
+# does not compete with the application it is measuring.
+TRACK_SAMPLE_SECONDS = 0.004
+
+
+def border_window(pid, region_size):
+    """The region border's frame, recognised by its size around the region."""
+    want = (region_size[0] + 2 * BORDER_PAD, region_size[1] + 2 * BORDER_PAD + BORDER_LABEL_BAND)
+    best = None
+    for x, y, width, height in quartz.windows_owned_by(pid):
+        error = abs(width - want[0]) + abs(height - want[1])
+        if error < 90.0 and (best is None or error < best[0]):
+            best = (error, (x, y, width, height))
+
+    return best[1] if best else None
+
+
+class BorderFlick(Action):
+    """Throws the region across the picture, the way one is really moved.
+
+    BorderDrag above sweeps slowly and evenly over most of a second, which is
+    how nobody moves a region. A region is drawn in well under a second and then
+    flicked from one face to another - "a quick, rough move, not a precise
+    selection" - so this one throws it: a short burst of large steps, a pause,
+    and the same back again. It samples the border against the pointer
+    throughout, because the question this scenario asks is whether the border
+    kept up, and no cost figure answers that.
+    """
+
+    def __init__(self, target, region, distance, seconds=0.2, steps=12, rest=0.35):
+        super().__init__()
+        self._pid = target.pid
+        self._size = (region[2], region[3])
+        self._distance = distance
+        self._seconds = seconds
+        self._steps = steps
+        self._rest = rest
+        self._lags = []
+        self._settles = []
+        self._missed = 0
+
+    def tracking(self):
+        return Tracking(self._lags, self._settles)
+
+    def complaints(self):
+        if self._missed:
+            return [f"the border was missing for {self._missed} of the flicks, which were not measured"]
+
+        return []
+
+    def _loop(self):
+        forward = True
+        while not self._stop.is_set():
+            self._flick(self._distance if forward else -self._distance)
+            forward = not forward
+            self._stop.wait(self._rest)
+
+    def _flick(self, distance):
+        frame = border_window(self._pid, self._size)
+        if frame is None:
+            self._missed += 1
+
+            return
+        # A quarter along the top band: outside the region, clear of both the
+        # corner zones and the edge midpoint, so the grab moves rather than
+        # resizes.
+        grab = (frame[0] + BORDER_PAD + (self._size[0] * 0.25), frame[1] + BORDER_LABEL_BAND + BORDER_PAD - 6.0)
+        quartz.move_pointer(grab)
+        time.sleep(0.08)
+        quartz.press_mouse(grab)
+        time.sleep(0.08)
+        origin = border_window(self._pid, self._size)
+        if origin is None:
+            quartz.release_mouse(grab)
+            self._missed += 1
+
+            return
+        started = time.monotonic()
+        for step in range(1, self._steps + 1):
+            due = started + (self._seconds * step / self._steps)
+            quartz.drag_mouse((grab[0] + (distance * step / self._steps), grab[1]))
+            self._sample(origin, grab, distance / self._seconds, due)
+        quartz.release_mouse((grab[0] + distance, grab[1]))
+        self._settles.append(self._settle(origin, grab, distance))
+
+    def _sample(self, origin, grab, velocity, until):
+        """Collect the border's lag behind the pointer until a moment passes."""
+        while time.monotonic() < until:
+            frame = border_window(self._pid, self._size)
+            if frame is not None:
+                behind = (quartz.pointer_position()[0] - grab[0]) - (frame[0] - origin[0])
+                self._lags.append(behind / velocity * 1000.0)
+            time.sleep(TRACK_SAMPLE_SECONDS)
+
+    def _settle(self, origin, grab, distance):
+        """Milliseconds from the release until the border stops where it was left."""
+        released = time.monotonic()
+        while time.monotonic() - released < 1.0:
+            frame = border_window(self._pid, self._size)
+            if frame is not None and abs((frame[0] - origin[0]) - distance) < 2.0:
+                return (time.monotonic() - released) * 1000.0
+            time.sleep(TRACK_SAMPLE_SECONDS)
+
+        return 1000.0
+
+
+class RegionRedraw(Action):
+    """Draws a region roughly and quickly, clears it, and draws it again.
+
+    The other half of what the owner does: "the region is often drawn within a
+    second". Nothing here is a careful selection - the picker is opened, a
+    rectangle is thrown across the content in a fifth of a second, and Escape
+    takes it away again. What it exercises is the picker's own rubber band,
+    which is drawn by the overlay rather than by the application's frame, and
+    the settings churn a growing region pushes at the worker.
+    """
+
+    def __init__(self, target, region, rest=0.5):
+        super().__init__()
+        self._target = target
+        self._region = region
+        self._rest = rest
+        self._drawn = 0
+        self._attempts = 0
+
+    def complaints(self):
+        if self._attempts and not self._drawn:
+            return ["no region was ever drawn, so this measured an application nobody drew on"]
+
+        return []
+
+    def _loop(self):
+        x, y, width, height = self._region
+        corners = ((x, y), (x + width, y + height))
+        while not self._stop.is_set():
+            # The picker takes the keyboard and Escape hands it back, but a
+            # letter pressed while something else holds it is simply lost - so
+            # the application is brought forward for each cycle, exactly as the
+            # region setup does.
+            activate(self._target.bundle)
+            self._attempts += 1
+            quartz.press_key(self._target.bindings["draw"])
+            self._stop.wait(0.35)
+            quartz.drag(corners[0], corners[1], steps=12, step_seconds=0.016, settle=0.08)
+            self._stop.wait(self._rest)
+            if border_window(self._target.pid, (width, height)) is not None:
+                self._drawn += 1
+            quartz.press_key("escape")
+            self._stop.wait(self._rest)
+
+
 class WindowDrag(Action):
     """Drags the content window itself, the way a person moves an editor.
 
@@ -317,11 +513,18 @@ class WindowDrag(Action):
             forward = not forward
 
 
-def action_for(name, region, content_rect):
+def action_for(name, region, content_rect, target=None):
+    target = target or Target()
     if name == "pointer-sweep":
         return PointerSweep(region)
     if name == "region-drag":
         return BorderDrag(region, distance=min(200.0, content_rect[2] * 0.15))
+    if name == "region-flick":
+        # Far enough to be a throw across the picture rather than a nudge, and
+        # no further than keeps the region on the display it was drawn on.
+        return BorderFlick(target, region, distance=min(300.0, content_rect[2] * 0.3))
+    if name == "region-redraw":
+        return RegionRedraw(target, region)
     if name == "window-drag":
         return WindowDrag(content_rect, distance=min(200.0, content_rect[2] * 0.15))
 
@@ -436,7 +639,7 @@ def establish_region(pid, kind, region, content_rect, bindings, bundle=None, att
 # --- One scenario -----------------------------------------------------------
 
 
-def measure(pid, content_pid, seconds, tail=None, sample_seconds=0.5):
+def measure(pid, content_pid, seconds, tail=None, sample_seconds=0.5, action=None):
     """Watch a running application for a while and report what it cost."""
     if tail is not None:
         tail.mark()
@@ -471,4 +674,5 @@ def measure(pid, content_pid, seconds, tail=None, sample_seconds=0.5):
         frames_per_second=frames,
         passes_per_second=passes,
         content_cores=content_cores,
+        tracking=action.tracking() if hasattr(action, "tracking") else None,
     )
