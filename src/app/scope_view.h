@@ -21,6 +21,11 @@ public:
     /// @return Whether @p control's readout is still on screen at @p now.
     [[nodiscard]] bool showing(std::string_view control, double now) const;
 
+    /// @return When the readout leaves the screen by itself, or zero while
+    ///         none has ever been shown. The frame loop draws a frame then,
+    ///         since nothing else will take it away.
+    [[nodiscard]] double redrawDueSeconds() const;
+
 private:
     std::string m_control;
     double m_until = 0.0;

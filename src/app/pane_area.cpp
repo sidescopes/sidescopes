@@ -599,6 +599,11 @@ const ScopeImage& PaneArea::imageFor(std::string_view id) const
     return at != m_output.images.end() ? at->second : empty;
 }
 
+double PaneArea::redrawDueSeconds() const
+{
+    return m_flash.redrawDueSeconds();
+}
+
 bool PaneArea::hasTexture(std::string_view id) const
 {
     return m_scopeTextures.find(std::string{id}) != m_scopeTextures.end();

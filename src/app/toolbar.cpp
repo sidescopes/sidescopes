@@ -396,4 +396,9 @@ void Toolbar::showAttachNotice(std::string message)
     m_attachNoticeUntil = glfwGetTime() + 5.0;
 }
 
+double Toolbar::redrawDueSeconds() const
+{
+    return m_attachNoticeUntil;
+}
+
 }  // namespace sidescopes

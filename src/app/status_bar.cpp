@@ -151,4 +151,9 @@ void StatusBar::setStatus(std::string message)
     m_until = glfwGetTime() + 2.0;
 }
 
+double StatusBar::redrawDueSeconds() const
+{
+    return m_until;
+}
+
 }  // namespace sidescopes

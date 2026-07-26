@@ -13,6 +13,11 @@ bool TraceFlash::showing(std::string_view control, double now) const
     return m_control == control && now < m_until;
 }
 
+double TraceFlash::redrawDueSeconds() const
+{
+    return m_until;
+}
+
 ScopeView::ScopeView(const ScopeRegistry& registry)
     : m_stack(registry)
 {

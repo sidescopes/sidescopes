@@ -121,6 +121,13 @@ public:
     /// note an attached window leaves when it closes out from under its region.
     void showAttachNotice(std::string message);
 
+    /// @return The latest moment at which something standing on one of the
+    ///         three bands leaves it by itself - a status message, the attach
+    ///         notice, an intensity readout - or zero while none has been
+    ///         shown. Nothing else takes those away, so the frame loop owes a
+    ///         frame then even with the application otherwise quiet.
+    [[nodiscard]] double redrawDueSeconds() const;
+
 private:
     // The icon cache is declared first: both rows that draw glyphs hold a
     // reference to it.

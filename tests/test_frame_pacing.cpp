@@ -130,6 +130,85 @@ TEST_CASE("A readout following the pointer redraws at its own pace")
     CHECK(frameWaitFor(inputs).kind == FrameWait::Idle);
 }
 
+namespace {
+
+// The application quiet: nothing has happened for long enough that the last
+// frame drawn is still the right picture.
+RedrawInputs quiet()
+{
+    RedrawInputs inputs;
+    inputs.now = 100.0;
+    inputs.lastActivity = 50.0;
+    inputs.lastReadoutActivity = 50.0;
+    inputs.lastInputEvent = 50.0;
+    inputs.lastDrawn = 50.0;
+
+    return inputs;
+}
+
+}  // namespace
+
+TEST_CASE("A quiet application draws nothing at all")
+{
+    // Not a slower cadence - none. The driver holds its render arena for as
+    // long as frames keep arriving, so two a second cost as much as sixty.
+    CHECK_FALSE(frameWorthDrawing(quiet()));
+
+    // Every reason a picture can differ from the one on screen brings the
+    // frame back.
+    for (const auto& set : {&RedrawInputs::outputPending, &RedrawInputs::textInputActive, &RedrawInputs::overlayActive,
+                            &RedrawInputs::framebufferChanged, &RedrawInputs::statusChanged}) {
+        RedrawInputs inputs = quiet();
+        inputs.*set = true;
+        CHECK(frameWorthDrawing(inputs));
+    }
+}
+
+TEST_CASE("An interaction owes frames after its last event")
+{
+    // Hover highlights, tooltip delays and text cursors all advance on drawn
+    // frames, so the frames that finish a gesture have to outlast it. A
+    // pointer that settles over a tool and stops sending events is the case:
+    // its tooltip is still due.
+    RedrawInputs inputs = quiet();
+    inputs.lastInputEvent = inputs.now - InputSettleSeconds + 0.01;
+    CHECK(frameWorthDrawing(inputs));
+
+    inputs.lastInputEvent = inputs.now - InputSettleSeconds - 0.01;
+    CHECK_FALSE(frameWorthDrawing(inputs));
+    CHECK(InputSettleSeconds > IdleAfterSeconds);
+
+    // The two clocks the pacing already keeps hold frames the same way.
+    for (const auto& clock : {&RedrawInputs::lastActivity, &RedrawInputs::lastReadoutActivity}) {
+        RedrawInputs recent = quiet();
+        recent.*clock = recent.now - IdleAfterSeconds + 0.01;
+        CHECK(frameWorthDrawing(recent));
+    }
+}
+
+TEST_CASE("Something that leaves the screen by itself is taken away")
+{
+    // A status message, the attach notice and an intensity readout all expire
+    // on a clock rather than on an event. Nothing else takes them off screen,
+    // so the loop owes exactly one frame at the moment they do - and stops
+    // again once that frame has drawn the row without them.
+    RedrawInputs inputs = quiet();
+    inputs.redrawDue = inputs.now + 1.0;
+    CHECK_FALSE(frameWorthDrawing(inputs));
+
+    inputs.now = inputs.redrawDue + 0.01;
+    CHECK(frameWorthDrawing(inputs));
+
+    inputs.lastDrawn = inputs.now;
+    CHECK_FALSE(frameWorthDrawing(inputs));
+
+    // Nothing timed has ever been shown, which is the ordinary case and must
+    // not read as one that expired at the beginning of time.
+    RedrawInputs never = quiet();
+    never.redrawDue = 0.0;
+    CHECK_FALSE(frameWorthDrawing(never));
+}
+
 TEST_CASE("Every reason to stop capturing is one")
 {
     CHECK_FALSE(nothingNeedsFrames(InSight));

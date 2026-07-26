@@ -78,6 +78,10 @@ public:
     /// distribution, and the textures stop costing anything.
     void releaseTraces();
 
+    /// @return When the intensity readout a scroll raised leaves the pane by
+    ///         itself, or zero while none has ever been shown.
+    [[nodiscard]] double redrawDueSeconds() const;
+
     /// @return Whether @p id draws a worker image at all; the host color picker
     ///         has no texture and asks the worker for nothing.
     [[nodiscard]] bool hasTexture(std::string_view id) const;

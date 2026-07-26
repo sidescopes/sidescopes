@@ -42,6 +42,10 @@ public:
     /// note an attached window leaves when it closes out from under its region.
     void showAttachNotice(std::string message);
 
+    /// @return When the notice leaves the row by itself, or zero while none
+    ///         has ever been shown.
+    [[nodiscard]] double redrawDueSeconds() const;
+
 private:
     /// The column geometry the scope menu lays its rows on: where the name
     /// starts, the total row width, and the margin the keys keep from the right

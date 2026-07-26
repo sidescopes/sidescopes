@@ -26,6 +26,13 @@ inline constexpr double IdleWaitSeconds = 0.5;
 /// How long since the last activity counts as nothing happening.
 inline constexpr double IdleAfterSeconds = 0.5;
 
+/// How long after the last window event the loop keeps drawing. Hover
+/// highlights, tooltip delays and text carets advance only on a drawn frame,
+/// and the interface toolkit's own hover delays run to a third of a second
+/// from the moment the pointer settles - so the frames that finish an
+/// interaction have to outlast the interaction itself.
+inline constexpr double InputSettleSeconds = 1.0;
+
 /// How long nothing must have asked for frames before the pipeline is
 /// suspended. Long enough that stepping through the application switcher, a
 /// hide the user immediately undoes, or a region cleared on the way to drawing
@@ -83,6 +90,45 @@ struct FramePacingInputs
 /// blocking wait still returns the instant an event arrives, so interaction is
 /// handled at the rate it comes in; only frames nobody asked for are dropped.
 [[nodiscard]] FrameWaitDecision frameWaitFor(const FramePacingInputs& inputs);
+
+/// What the loop knows about whether the picture can still be changing.
+struct RedrawInputs
+{
+    double now = 0.0;
+    /// When anything last happened - new scope output, or interaction.
+    double lastActivity = 0.0;
+    /// When the colour readout last moved.
+    double lastReadoutActivity = 0.0;
+    /// When a window event from the user last arrived.
+    double lastInputEvent = 0.0;
+    /// When the last frame was drawn.
+    double lastDrawn = 0.0;
+    /// When something standing on screen leaves it by itself - a status
+    /// message, the attach notice, an intensity readout - or zero while
+    /// nothing timed has ever been shown.
+    double redrawDue = 0.0;
+    /// The worker has published a pass no frame has shown yet.
+    bool outputPending = false;
+    /// A text cursor is blinking, which changes the picture with no input.
+    bool textInputActive = false;
+    /// A picker overlay is up, and the frame it draws is what keeps its
+    /// colour readout current.
+    bool overlayActive = false;
+    /// The window's size differs from the one last drawn into.
+    bool framebufferChanged = false;
+    /// The capture status differs from the one last drawn.
+    bool statusChanged = false;
+};
+
+/// Whether a frame is worth drawing at all.
+///
+/// While this is false nothing is presented, which is the whole point rather
+/// than a saving on the side: the graphics driver holds a per-process render
+/// arena - measured at 85-99 MB, most of it wired - for as long as frames keep
+/// arriving, and releases the bulk of it about a second after the last one.
+/// Slowing down never reached that. Two frames a second held the entire arena
+/// resident, so the loop has to stop presenting outright.
+[[nodiscard]] bool frameWorthDrawing(const RedrawInputs& inputs);
 
 /// What the loop knows about whether anything is worth computing.
 struct VisibilityInputs

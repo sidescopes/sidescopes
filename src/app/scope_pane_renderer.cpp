@@ -1,5 +1,6 @@
 #include "app/scope_pane_renderer.h"
 
+#include <algorithm>
 #include <map>
 #include <string>
 #include <string_view>
@@ -81,6 +82,11 @@ void ScopePaneRenderer::setStatus(std::string message)
 void ScopePaneRenderer::showAttachNotice(std::string message)
 {
     m_toolbar.showAttachNotice(std::move(message));
+}
+
+double ScopePaneRenderer::redrawDueSeconds() const
+{
+    return std::max({m_toolbar.redrawDueSeconds(), m_panes.redrawDueSeconds(), m_statusBar.redrawDueSeconds()});
 }
 
 }  // namespace sidescopes

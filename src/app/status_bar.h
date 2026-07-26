@@ -39,6 +39,10 @@ public:
     /// Shows @p message in the status strip for the next couple of seconds.
     void setStatus(std::string message);
 
+    /// @return When the message leaves the strip by itself, or zero while none
+    ///         has ever been shown.
+    [[nodiscard]] double redrawDueSeconds() const;
+
 private:
     /// The bar's colour sampler, anchored to the strip's left corner.
     void drawPinTool(bool pinsAvailable);

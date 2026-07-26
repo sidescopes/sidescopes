@@ -179,7 +179,7 @@ bool App::init()
     m_panes = std::make_unique<ScopePaneRenderer>(paneContext, createProjectionInstances(m_scopeRegistry),
                                                   createScopeTextures(m_scopeRegistry));
 
-    m_worker.setOutputCallback([] { glfwPostEmptyEvent(); });
+    m_worker.setOutputCallback([this] { noteWorkerOutput(); });
     m_worker.start();
     warmFaceDetection();
 
@@ -203,6 +203,15 @@ bool App::init()
     m_regions.syncBorder(borderState());
 
     return true;
+}
+
+// A pass has been published. Runs on the worker's thread, so it does two
+// things and no more: marks the frame loop's picture out of date, and ends
+// whatever wait the loop is in.
+void App::noteWorkerOutput()
+{
+    m_outputPending.store(true);
+    glfwPostEmptyEvent();
 }
 
 void App::run()
@@ -480,10 +489,28 @@ void App::runFrame()
     if (nothingToDrawInto) {
         return;
     }
+    if (frameWorthDrawing(redrawInputs(framebufferWidth, framebufferHeight))) {
+        drawFrame(framebufferWidth, framebufferHeight);
+    }
+
+    // The blocking overlay runs after the frame is submitted; capture and
+    // analysis keep flowing underneath. These run whether or not a frame was
+    // drawn: a region border grabbed while the loop is quiet reaches the
+    // application through this poll and no other way.
+    applyRegionPickOutcome(m_regionPicker.openIfRequested(m_analysis.region.has_value()));
+    applyBorderEditOutcome(m_regions.pollBorderEdit(m_activeWindowIdentity));
+    applyRegionPickOutcome(m_regionPicker.poll(m_frameSize, m_cursor.screenSampleColor()));
+    commitAnalysisChanges();
+}
+
+// Builds one frame and presents it.
+void App::drawFrame(int framebufferWidth, int framebufferHeight)
+{
     if (!m_graphics->beginFrame(framebufferWidth, framebufferHeight)) {
         return;
     }
 
+    m_outputPending.store(false);
     if (m_worker.fetchOutput(m_outputVersion, m_output)) {
         m_panes->uploadVisibleScopes();
         SS_DIAG(Perf, "pass analysis_ms=%.1f", m_output.accumulateMilliseconds);
@@ -504,12 +531,34 @@ void App::runFrame()
     // fast-dragged window visibly.
     followAttachedWindow();
 
-    // The blocking overlay runs after the frame is submitted; capture and
-    // analysis keep flowing underneath.
-    applyRegionPickOutcome(m_regionPicker.openIfRequested(m_analysis.region.has_value()));
-    applyBorderEditOutcome(m_regions.pollBorderEdit(m_activeWindowIdentity));
-    applyRegionPickOutcome(m_regionPicker.poll(m_frameSize, m_cursor.screenSampleColor()));
-    commitAnalysisChanges();
+    // What this frame put on screen, so the next one can tell whether the
+    // picture it would draw is the same one.
+    m_lastDrawnFrame = glfwGetTime();
+    m_drawnFramebufferWidth = framebufferWidth;
+    m_drawnFramebufferHeight = framebufferHeight;
+    m_drawnCaptureStatus = m_captureController.status();
+}
+
+// What the redraw decision is made on. Everything here is either a clock the
+// shell already keeps or a cheap read; the expensive part of a frame is the
+// frame, so the decision is taken before any of it.
+RedrawInputs App::redrawInputs(int framebufferWidth, int framebufferHeight) const
+{
+    RedrawInputs inputs;
+    inputs.now = glfwGetTime();
+    inputs.lastActivity = m_lastActivity;
+    inputs.lastReadoutActivity = m_lastReadoutActivity;
+    inputs.lastInputEvent = m_callbackState.lastInputEvent;
+    inputs.lastDrawn = m_lastDrawnFrame;
+    inputs.redrawDue = m_panes->redrawDueSeconds();
+    inputs.outputPending = m_outputPending.load();
+    inputs.textInputActive = ImGui::GetIO().WantTextInput;
+    inputs.overlayActive = m_regionPicker.active();
+    inputs.framebufferChanged =
+        framebufferWidth != m_drawnFramebufferWidth || framebufferHeight != m_drawnFramebufferHeight;
+    inputs.statusChanged = m_captureController.status() != m_drawnCaptureStatus;
+
+    return inputs;
 }
 
 void App::servicePipelineVisibility(bool framebufferEmpty, double now)

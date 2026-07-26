@@ -64,6 +64,14 @@ struct AppCallbackState
     /// deliver from an operating-system callback context, so the flag is all
     /// the callback touches; the frame loop drains it and does the routing.
     std::atomic<bool> foregroundChanged{false};
+    /// When a window event from the user last arrived: pointer, wheel, key or
+    /// focus. The frame loop draws only while the picture can still be
+    /// changing, and every hover highlight, tooltip and text cursor in the
+    /// interface is a consequence of one of these, so an event is what says
+    /// there are frames left to do. Plain rather than atomic because GLFW
+    /// delivers input callbacks from the event pump on the main thread, which
+    /// is also the only reader.
+    double lastInputEvent{0.0};
     /// The fixed-width companion for values whose glyphs must align - hex codes
     /// most of all; null when no system monospace font was found, and the
     /// interface font stands in. Set once at font load, read by the picker.
@@ -147,8 +155,20 @@ private:
     static void logAttachMapping(const RegionPicker::WindowCandidate& picked, const RegionOfInterest& start);
     void persistPreferences();
 
+    /// Notes that the worker published a pass, and ends whatever wait the
+    /// frame loop is in. Called from the worker's thread.
+    void noteWorkerOutput();
+
     // --- per-frame ---
     void runFrame();
+    /// Builds one frame and presents it. Skipped outright while nothing can
+    /// have changed what is on screen: a presented frame is what keeps the
+    /// graphics driver's per-process render arena resident, and it releases
+    /// most of it about a second after the last one.
+    void drawFrame(int framebufferWidth, int framebufferHeight);
+    /// What the skip decision is made on, gathered before any of the frame is
+    /// built.
+    [[nodiscard]] RedrawInputs redrawInputs(int framebufferWidth, int framebufferHeight) const;
     /// Suspends the capture stream - and the whole pipeline behind it - while
     /// the window is out of sight, and resumes it when the window returns.
     /// @p framebufferEmpty is the frame's own measurement, taken once and read
@@ -325,6 +345,19 @@ private:
     /// When the previous frame's event pump returned, so the redraw cap can
     /// target a frame period rather than add a delay to one.
     double m_lastFrameStart = 0.0;
+    /// When a frame was last built and presented, which is not every pass of
+    /// the loop: the loop goes on servicing capture, the border and the
+    /// overlays while it draws nothing at all.
+    double m_lastDrawnFrame = 0.0;
+    /// What the last drawn frame was drawn from, so the next pass can tell
+    /// whether the picture it would draw is the one already on screen.
+    int m_drawnFramebufferWidth = 0;
+    int m_drawnFramebufferHeight = 0;
+    std::string m_drawnCaptureStatus;
+    /// The worker has published a pass no frame has shown yet. Set from the
+    /// worker's own thread beside the wake it already posts, cleared by the
+    /// frame that fetches it.
+    std::atomic<bool> m_outputPending{false};
     /// Decides when the pipeline is suspended and resumed; owns the clock its
     /// hysteresis measures against.
     VisibilityGate m_visibility;

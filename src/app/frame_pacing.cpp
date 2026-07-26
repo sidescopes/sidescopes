@@ -19,6 +19,27 @@ FrameWaitDecision frameWaitFor(const FramePacingInputs& inputs)
     return FrameWaitDecision{FrameWait::Idle, left};
 }
 
+bool frameWorthDrawing(const RedrawInputs& inputs)
+{
+    // The picture is already different from the one on screen.
+    const bool changed = inputs.outputPending || inputs.framebufferChanged || inputs.statusChanged;
+    // The interface has not finished with the last thing that happened. Hover
+    // highlights, tooltip delays and carets all advance on drawn frames, so an
+    // interaction owes frames for a while after its last event.
+    const bool settling = inputs.textInputActive || inputs.overlayActive ||
+                          inputs.now - inputs.lastInputEvent <= InputSettleSeconds ||
+                          inputs.now - inputs.lastActivity <= IdleAfterSeconds ||
+                          inputs.now - inputs.lastReadoutActivity <= IdleAfterSeconds;
+    // Something timed has left the picture and no frame has taken it away.
+    // Measured against the last frame drawn rather than cleared by the thing
+    // that timed out, so one frame settles it and the next asks for nothing -
+    // and a deadline of zero, meaning none was ever set, can never be earlier
+    // than a frame that has been drawn.
+    const bool expired = inputs.now >= inputs.redrawDue && inputs.lastDrawn < inputs.redrawDue;
+
+    return changed || settling || expired;
+}
+
 bool nothingNeedsFrames(const VisibilityInputs& inputs)
 {
     if (inputs.needsFrames) {

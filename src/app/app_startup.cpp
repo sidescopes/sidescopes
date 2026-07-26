@@ -122,6 +122,25 @@ void restoreWindowPlacement(GLFWwindow* window, const Preferences& startup)
     }
 }
 
+void stampInputEvent(GLFWwindow* window)
+{
+    static_cast<AppCallbackState*>(glfwGetWindowUserPointer(window))->lastInputEvent = glfwGetTime();
+}
+
+// Every window event the user causes stamps one clock, which is what tells the
+// frame loop the interface still has frames to do. Installed before the ImGui
+// backend, which chains these rather than replacing them.
+void installInputClock(GLFWwindow* window)
+{
+    glfwSetCursorPosCallback(window, [](GLFWwindow* target, double, double) { stampInputEvent(target); });
+    glfwSetCursorEnterCallback(window, [](GLFWwindow* target, int) { stampInputEvent(target); });
+    glfwSetMouseButtonCallback(window, [](GLFWwindow* target, int, int, int) { stampInputEvent(target); });
+    glfwSetScrollCallback(window, [](GLFWwindow* target, double, double) { stampInputEvent(target); });
+    glfwSetKeyCallback(window, [](GLFWwindow* target, int, int, int, int) { stampInputEvent(target); });
+    glfwSetCharCallback(window, [](GLFWwindow* target, unsigned int) { stampInputEvent(target); });
+    glfwSetWindowFocusCallback(window, [](GLFWwindow* target, int) { stampInputEvent(target); });
+}
+
 }  // namespace
 
 namespace sidescopes {
@@ -203,6 +222,7 @@ MainWindow createMainWindow(const Preferences& startup, const VersionInfo& versi
     glfwSetWindowIconifyCallback(window, [](GLFWwindow* iconifyTarget, int) {
         static_cast<AppCallbackState*>(glfwGetWindowUserPointer(iconifyTarget))->iconifyChanged.store(true);
     });
+    installInputClock(window);
 
     return {window, std::move(graphics)};
 }
