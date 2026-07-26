@@ -140,6 +140,7 @@ TEST_CASE("The global region is remembered without being put in force")
 TEST_CASE("Clearing the region drops every kind of selection at once")
 {
     CoordinatorFixture fix;
+    fix.region = PartialRegion;
     fix.coordinator.setGlobalRegion(PartialRegion);
     (void)fix.attach.attach(42, 100, "Editor", AttachWindowRect{0.0, 0.0, 400.0, 400.0},
                             AttachDisplayRect{0.0, 0.0, 1000.0, 1000.0}, PartialRegion);
@@ -158,10 +159,26 @@ TEST_CASE("Clearing the region drops every kind of selection at once")
 TEST_CASE("Clearing with nothing attached reports no detach")
 {
     CoordinatorFixture fix;
+    fix.region = PartialRegion;
     const RegionOutcome outcome = fix.coordinator.clearRegion();
 
     CHECK_FALSE(outcome.detachedAll);
     CHECK(outcome.regionChanged);
+}
+
+TEST_CASE("Clearing when the scopes read nothing is not a change")
+{
+    // Escape in the empty state is the ordinary case - it is also how a pick is
+    // cancelled - and there is nothing to take away. Reported as a change it
+    // pushed the settings, re-synced the border and re-saved the preferences,
+    // every press.
+    CoordinatorFixture fix;
+    const RegionOutcome outcome = fix.coordinator.clearRegion();
+
+    CHECK_FALSE(outcome.regionChanged);
+    CHECK_FALSE(outcome.detachedAll);
+    // The pick is still cancelled: that is what Escape means with a picker up.
+    CHECK(regionOverlayStubs().pickCancels == 1);
 }
 
 TEST_CASE("The border outlines the global region under the display's name")

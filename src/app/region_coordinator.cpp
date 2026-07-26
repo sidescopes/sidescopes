@@ -64,7 +64,11 @@ RegionOutcome RegionCoordinator::clearRegion()
         outcome.detachedAll = true;
     }
     m_globalRegion.reset();
-    outcome.regionChanged = true;
+    // Only a clear that takes something away is a change, the same no-op test
+    // useRegion makes. Escape in the empty state is the ordinary case - it is
+    // also how a pick is cancelled - and reporting it as a change pushed the
+    // settings, re-synced the border and re-saved the preferences for nothing.
+    outcome.regionChanged = m_region.has_value();
 
     return outcome;
 }
