@@ -318,18 +318,26 @@ void smoothPlane(const uint32_t* corrected, int columns, uint32_t* out)
 
 // The densest bin across the planes the active mode draws; it sets the
 // log-normalization ceiling.
-uint32_t peakDensity(const std::vector<uint32_t>& traces, std::size_t planeSize, bool wantsRgb, bool wantsLuma)
+uint32_t peakDensity(const std::vector<uint32_t>& traces, std::size_t planeSize, std::size_t binsPerPlane,
+                     bool wantsRgb, bool wantsLuma)
 {
     uint32_t densest = 0;
+    // Plane by plane over the bins each really holds: the space between them
+    // is padding, never written, and reading it would let a stale word from an
+    // earlier size decide the normalization ceiling.
+    const auto scan = [&](int plane) {
+        const uint32_t* bins = traces.data() + (static_cast<std::size_t>(plane) * planeSize);
+        for (std::size_t i = 0; i < binsPerPlane; ++i) {
+            densest = std::max(densest, bins[i]);
+        }
+    };
     if (wantsRgb) {
-        for (std::size_t i = 0; i < 3 * planeSize; ++i) {
-            densest = std::max(densest, traces[i]);
+        for (int plane = 0; plane < 3; ++plane) {
+            scan(plane);
         }
     }
     if (wantsLuma) {
-        for (std::size_t i = 3 * planeSize; i < 4 * planeSize; ++i) {
-            densest = std::max(densest, traces[i]);
-        }
+        scan(3);
     }
     return densest;
 }
@@ -564,7 +572,7 @@ void Waveform::mapBinsToImage(uint64_t sampledRows)
     const std::size_t planeSize = this->planeSize();
 
     const ModeFlags flags = modeFlagsFor(m_settings.mode);
-    const uint32_t densest = peakDensity(traces, planeSize, flags.rgb, flags.luma);
+    const uint32_t densest = peakDensity(traces, planeSize, binsPerPlane(), flags.rgb, flags.luma);
 
     // Each sample contributes sixteen weight units (the splat's
     // sixteenths), so the per-row normalization divides them back out and

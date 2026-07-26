@@ -42,6 +42,10 @@ inline constexpr int MaximumWaveformHeight = 768;
 /// scopes pay, which is why it buys only the small-pane case.
 inline constexpr int WaveformMinSamplesPerBin = 32;
 
+/// Words of unused space between one bin plane and the next, so that the four
+/// never start an exact power of two apart. See Waveform::planeSize.
+inline constexpr std::size_t WaveformPlanePadding = 32;
+
 struct WaveformSettings
 {
     /// Trace gain applied to normalized bin densities before log mapping.
@@ -128,9 +132,30 @@ private:
     void composeImage(const uint32_t* redPlane, const uint32_t* greenPlane, const uint32_t* bluePlane,
                       const uint32_t* lumaPlane, double gain, double intensityScale);
 
-    [[nodiscard]] std::size_t planeSize() const
+    /// The bins one plane really holds: a row per level, a column per column.
+    [[nodiscard]] std::size_t binsPerPlane() const
     {
         return static_cast<std::size_t>(m_columns) * Levels;
+    }
+
+    /// The distance from one plane to the next, which is its bins plus a pad.
+    ///
+    /// Without the pad the four planes sit an exact power of two apart at
+    /// every column count the application asks for, and an RGB scatter - which
+    /// writes all four per sample - then has all four land in the same cache
+    /// sets. Measured on an M5 Pro over a 3024x1964 region, the pass took
+    /// 17.2 ms at 1024 columns and 28.0 at 2048, against 12.5 at 2049: one
+    /// extra column was 55% faster than the power of two beside it. With the
+    /// pad they are 7.7 and 14.2. Luma, which writes one plane, never showed
+    /// it. Swept at 0, 8, 16, 32, 64, 128 and 512 words; 32 is where it
+    /// flattens, and it is a cache line on the machines this runs on.
+    ///
+    /// The padding is never written and never read as data. Nothing may
+    /// iterate a plane by planeSize; peakDensity, the one place that used to,
+    /// walks binsPerPlane within each plane instead.
+    [[nodiscard]] std::size_t planeSize() const
+    {
+        return binsPerPlane() + WaveformPlanePadding;
     }
 
     WaveformSettings m_settings;
