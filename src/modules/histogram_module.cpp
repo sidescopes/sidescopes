@@ -11,6 +11,7 @@
 #include "core/scopes/histogram.h"
 #include "modules/module_export.h"
 #include "modules/module_registry.h"
+#include "modules/module_scratch.h"
 #include "sidescopes/module.h"
 
 namespace sidescopes {
@@ -21,6 +22,9 @@ struct HistogramInstance
     SsScopeInstance vtable{};
     Histogram engine;
     HistogramSettings settings;
+    /// The host that created this instance, kept for the shared
+    /// accumulation arena it lends. Null when there is none.
+    const SsHost* host = nullptr;
 };
 
 HistogramInstance* impl(SsScopeInstance* instance)
@@ -63,6 +67,7 @@ bool accumulate(SsScopeInstance* instance, const SsFrameView* frame, SsRect regi
                              frame->height,
                              frame->color_space == SS_COLOR_SPACE_SRGB ? ColorSpaceHint::Srgb : ColorSpaceHint::Unknown,
                              frame->sequence};
+        lendHostScratch(impl(instance)->engine, impl(instance)->host);
         impl(instance)->engine.accumulate(view, IntRect{region.x, region.y, region.width, region.height});
         return true;
     } catch (...) {
@@ -216,7 +221,7 @@ const SsScopeDescriptor* descriptor(uint32_t index)
     return index == 0 ? &HistogramDescriptor : nullptr;
 }
 
-SsScopeInstance* create(const char* scopeId, const SsHost*)
+SsScopeInstance* create(const char* scopeId, const SsHost* host)
 {
     try {
         if (std::strcmp(scopeId, HistogramDescriptor.id) != 0) {
@@ -227,6 +232,7 @@ SsScopeInstance* create(const char* scopeId, const SsHost*)
         // Push the constructed defaults through the engine explicitly, so the
         // instance never relies on the engine's own ctor defaults matching.
         self->engine.configure(self->settings);
+        self->host = host;
         self->vtable.instance_data = self;
         self->vtable.configure = configure;
         self->vtable.accumulate = accumulate;

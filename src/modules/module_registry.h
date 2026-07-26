@@ -151,6 +151,13 @@ public:
     /// Creates an instance by id; an invalid instance means the id is unknown or creation failed.
     [[nodiscard]] ScopeInstance createInstance(const std::string& id) const;
 
+    /// @return The host every module created here is given, and through which
+    ///         they reach the extensions it offers.
+    [[nodiscard]] const SsHost& host() const
+    {
+        return m_host;
+    }
+
 private:
     std::vector<const SsModuleEntry*> m_modules;
     std::vector<RegisteredScope> m_scopes;

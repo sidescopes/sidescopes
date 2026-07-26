@@ -4,6 +4,7 @@
 #include <vector>
 
 #include "core/frame.h"
+#include "core/scopes/chunk_scratch.h"
 #include "core/scopes/sampling.h"
 #include "core/scopes/scope_types.h"
 
@@ -56,6 +57,15 @@ public:
     /// Folds a frame region into the bins.
     void accumulate(const FrameView& frame, IntRect region);
 
+    /// Takes the room a split pass needs for its per-chunk bins from the
+    /// host's shared arena rather than from its own. The whole stack then
+    /// holds one arena instead of a set each; an engine never told keeps its
+    /// own, which is what a test or a benchmark does.
+    void lendScratch(ChunkScratch::Lender lender, const void* context)
+    {
+        m_scratch.lendFrom(lender, context);
+    }
+
     /// The composed scope image.
     [[nodiscard]] const ScopeImage& image() const
     {
@@ -84,10 +94,10 @@ private:
 
     VectorscopeSettings m_settings;
     int m_imageSize = DefaultVectorscopeSize;
-    std::vector<uint32_t> m_bins;        // always CodeGridSize x CodeGridSize (code grid)
-    std::vector<uint32_t> m_threadBins;  // per-chunk private code grids for the parallel accumulate
-    std::vector<float> m_smoothed;       // code grid, post-kernel densities
-    std::vector<float> m_upsampled;      // m_imageSize x m_imageSize when finer than CodeGridSize
+    std::vector<uint32_t> m_bins;  // always CodeGridSize x CodeGridSize (code grid)
+    ChunkScratch m_scratch;
+    std::vector<float> m_smoothed;   // code grid, post-kernel densities
+    std::vector<float> m_upsampled;  // m_imageSize x m_imageSize when finer than CodeGridSize
     std::vector<uint8_t> m_tint;
     ScopeImage m_image;
 };

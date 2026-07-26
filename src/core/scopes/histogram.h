@@ -4,6 +4,7 @@
 #include <vector>
 
 #include "core/frame.h"
+#include "core/scopes/chunk_scratch.h"
 #include "core/scopes/sampling.h"
 #include "core/scopes/scope_types.h"
 
@@ -72,6 +73,15 @@ public:
     /// Folds a frame region into the bins.
     void accumulate(const FrameView& frame, IntRect region);
 
+    /// Takes the room a split pass needs for its per-chunk bins from the
+    /// host's shared arena rather than from its own. The whole stack then
+    /// holds one arena instead of a set each; an engine never told keeps its
+    /// own, which is what a test or a benchmark does.
+    void lendScratch(ChunkScratch::Lender lender, const void* context)
+    {
+        m_scratch.lendFrom(lender, context);
+    }
+
     /// The composed scope image.
     [[nodiscard]] const ScopeImage& image() const
     {
@@ -113,7 +123,7 @@ private:
     std::vector<uint32_t> m_bins;
     // Per-chunk private bin sets for the parallel accumulate, merged into
     // m_bins by integer addition.
-    std::vector<uint32_t> m_threadBins;
+    ChunkScratch m_scratch;
     std::vector<float> m_outline;
     ScopeImage m_image;
 };

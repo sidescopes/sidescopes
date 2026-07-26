@@ -535,13 +535,13 @@ void Waveform::accumulate(const FrameView& frame, IntRect region)
     } else {
         // Each chunk owns a private plane set it clears and scatters into;
         // integer addition then merges them back to a bit-exact total.
-        m_threadBins.resize(spanCount * static_cast<std::size_t>(chunks));
+        uint32_t* threadBins = m_scratch.borrow(spanCount * static_cast<std::size_t>(chunks));
         runParallelChunks(chunks, rowCount, [&](int chunk, int begin, int end) {
-            uint32_t* bins = m_threadBins.data() + static_cast<std::size_t>(chunk) * spanCount;
+            uint32_t* bins = threadBins + static_cast<std::size_t>(chunk) * spanCount;
             std::fill_n(bins, spanCount, uint32_t{0});
             scatterRows(frame, region, grid, begin, end, bins, span.first);
         });
-        mergeBins(m_threadBins.data(), spanCount, chunks, m_bins.data() + spanOffset);
+        mergeBins(threadBins, spanCount, chunks, m_bins.data() + spanOffset);
     }
 
     // A column receives one sample per sampled row, so the sampled-row count

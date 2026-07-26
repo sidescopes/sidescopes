@@ -43,7 +43,7 @@ extern "C" {
  * extensions. Until 1.0 the layout itself may still change under a minor
  * bump; rebuild modules against the current header. */
 #define SS_ABI_MAJOR 0u
-#define SS_ABI_MINOR 2u
+#define SS_ABI_MINOR 3u
 
 /* ---- core types ---------------------------------------------------- */
 
@@ -180,6 +180,35 @@ typedef struct SsHost
     /* [thread-safe] */
     void (*log)(const struct SsHost* host, uint32_t level, const char* message);
 } SsHost;
+
+/* ---- host extension: accumulation scratch ---------------------------
+ * A scope that splits a pass across threads gives each of them a private
+ * set of bins to scatter into and merges those back afterwards. Those
+ * sets are several times the size of the bins they merge into - a
+ * waveform at its widest holds fifty megabytes of them against twelve of
+ * bins - and a scope that keeps its own holds them for its whole life,
+ * not for the pass.
+ *
+ * The host accumulates scopes strictly one at a time, so it can lend the
+ * same room to each of them in turn: a stack then holds as much as its
+ * largest scope needs rather than the sum of what all of them need. */
+
+#define SS_EXT_HOST_SCRATCH "sidescopes.scratch/1"
+
+typedef struct SsHostScratch
+{
+    /* [any-thread] Room for `count` 32-bit words, aligned for uint32_t,
+     * with unspecified contents; null when the host has none to lend, and
+     * the module must then use memory of its own. A count of zero lends
+     * nothing: it is answered with this thread's arena as it stands,
+     * which is null until something has borrowed.
+     *
+     * The room belongs to the calling thread and stays valid until that
+     * thread borrows again, so one borrow must be finished with - the
+     * merge included - before the next is taken. A module that hands
+     * slices of it to threads of its own must join them first. */
+    uint32_t* (*borrow)(const struct SsHost* host, uint64_t count);
+} SsHostScratch;
 
 /* ---- scope instance -------------------------------------------------
  * Single-threaded: the creating thread owns the instance. The host

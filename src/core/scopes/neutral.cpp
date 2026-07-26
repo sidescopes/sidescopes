@@ -155,14 +155,14 @@ void Neutral::accumulate(const FrameView& frame, IntRect region)
         std::fill(m_cloud.begin(), m_cloud.end(), 0u);
         scatterRows(frame, region, grid, 0, grid.rows, m_cloud.data(), totals);
     } else {
-        m_threadCloud.resize(cloudCells * static_cast<std::size_t>(chunks));
+        uint32_t* threadCloud = m_scratch.borrow(cloudCells * static_cast<std::size_t>(chunks));
         std::vector<ChromaTotals> perChunk(static_cast<std::size_t>(chunks));
         runParallelChunks(chunks, grid.rows, [&](int chunk, int begin, int end) {
-            uint32_t* cloud = m_threadCloud.data() + static_cast<std::size_t>(chunk) * cloudCells;
+            uint32_t* cloud = threadCloud + static_cast<std::size_t>(chunk) * cloudCells;
             std::fill_n(cloud, cloudCells, 0u);
             scatterRows(frame, region, grid, begin, end, cloud, perChunk[static_cast<std::size_t>(chunk)]);
         });
-        mergeBins(m_threadCloud.data(), cloudCells, chunks, m_cloud.data());
+        mergeBins(threadCloud, cloudCells, chunks, m_cloud.data());
         for (const ChromaTotals& chunkTotals : perChunk) {
             totals.sumA += chunkTotals.sumA;
             totals.sumB += chunkTotals.sumB;

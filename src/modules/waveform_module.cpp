@@ -12,6 +12,7 @@
 #include "core/scopes/waveform.h"
 #include "modules/module_export.h"
 #include "modules/module_registry.h"
+#include "modules/module_scratch.h"
 #include "sidescopes/module.h"
 
 namespace sidescopes {
@@ -26,6 +27,9 @@ struct WaveformInstance
     Waveform engine;
     WaveformSettings settings;
     bool parade = false;
+    /// The host that created this instance, kept for the shared
+    /// accumulation arena it lends. Null when there is none.
+    const SsHost* host = nullptr;
 };
 
 WaveformInstance* impl(SsScopeInstance* instance)
@@ -86,6 +90,7 @@ bool accumulate(SsScopeInstance* instance, const SsFrameView* frame, SsRect regi
                              frame->height,
                              frame->color_space == SS_COLOR_SPACE_SRGB ? ColorSpaceHint::Srgb : ColorSpaceHint::Unknown,
                              frame->sequence};
+        lendHostScratch(impl(instance)->engine, impl(instance)->host);
         impl(instance)->engine.accumulate(view, IntRect{region.x, region.y, region.width, region.height});
         return true;
     } catch (...) {
@@ -280,7 +285,7 @@ const SsScopeDescriptor* descriptor(uint32_t index)
     return nullptr;
 }
 
-SsScopeInstance* create(const char* scopeId, const SsHost*)
+SsScopeInstance* create(const char* scopeId, const SsHost* host)
 {
     try {
         const bool waveform = std::strcmp(scopeId, WaveformDescriptor.id) == 0;
@@ -295,6 +300,7 @@ SsScopeInstance* create(const char* scopeId, const SsHost*)
             self->settings.mode = WaveformMode::RgbParade;
         }
         self->engine.configure(self->settings);
+        self->host = host;
         self->vtable.instance_data = self;
         self->vtable.configure = configure;
         self->vtable.accumulate = accumulate;

@@ -16,6 +16,7 @@ add_executable(sidescopes_tests
     test_parallel_for.cpp
     test_frame_mailbox.cpp
     test_capture_crop.cpp
+    test_chunk_scratch.cpp
     test_frame_pacing.cpp
     test_region_hash.cpp
     test_sampling.cpp

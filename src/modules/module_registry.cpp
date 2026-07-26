@@ -2,7 +2,10 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <cstring>
+#include <new>
 #include <string_view>
+#include <vector>
 
 #ifdef SIDESCOPES_MODULES_DYNAMIC
 #include "modules/module_loader.h"
@@ -39,9 +42,43 @@ void hostLog(const SsHost*, uint32_t level, const char* message)
                  message);
 }
 
-const void* hostGetExtension(const SsHost*, const char*)
+// The room a split accumulate needs for its per-chunk bins, lent to whichever
+// scope is running. One arena per thread that ever asks: scopes accumulate
+// strictly one at a time on the analysis thread, so that is one arena for the
+// whole stack, and a thread that never accumulates never has one. It grows to
+// the largest pass it has served and is not given back, which is the point -
+// it stands in for the buffer every engine used to hold for its own life.
+uint32_t* hostBorrowScratch(const SsHost*, uint64_t count)
 {
-    return nullptr;  // no host extensions yet
+    static thread_local std::vector<uint32_t> arena;
+    if (count == 0) {
+        // Nothing to lend, answered with the arena as it stands - which is
+        // also how a caller asks whether this thread has one at all, since a
+        // thread that never accumulated never grew one.
+        return arena.empty() ? nullptr : arena.data();
+    }
+    try {
+        if (arena.size() < count) {
+            arena.resize(static_cast<std::size_t>(count));
+        }
+    } catch (const std::bad_alloc&) {
+        // Declining is a supported answer: the engine falls back to room of
+        // its own, which is what it held before there was an arena at all.
+        return nullptr;
+    }
+
+    return arena.data();
+}
+
+constexpr SsHostScratch HostScratch{hostBorrowScratch};
+
+const void* hostGetExtension(const SsHost*, const char* id)
+{
+    if (std::strcmp(id, SS_EXT_HOST_SCRATCH) == 0) {
+        return &HostScratch;
+    }
+
+    return nullptr;
 }
 
 }  // namespace

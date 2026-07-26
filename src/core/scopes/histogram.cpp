@@ -150,13 +150,13 @@ void Histogram::accumulate(const FrameView& frame, IntRect region)
         // Each chunk owns a private bin set it clears and scatters into;
         // integer addition then merges them back to a bit-exact total.
         const std::size_t binCount = m_bins.size();
-        m_threadBins.resize(binCount * static_cast<std::size_t>(chunks));
+        uint32_t* threadBins = m_scratch.borrow(binCount * static_cast<std::size_t>(chunks));
         runParallelChunks(chunks, rowCount, [&](int chunk, int begin, int end) {
-            uint32_t* bins = m_threadBins.data() + static_cast<std::size_t>(chunk) * binCount;
+            uint32_t* bins = threadBins + static_cast<std::size_t>(chunk) * binCount;
             std::fill_n(bins, binCount, uint32_t{0});
             scatterRows(frame, region, grid, begin, end, bins);
         });
-        mergeBins(m_threadBins.data(), binCount, chunks, m_bins.data());
+        mergeBins(threadBins, binCount, chunks, m_bins.data());
     }
 
     mapBinsToImage();
