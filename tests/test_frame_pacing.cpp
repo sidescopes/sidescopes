@@ -243,6 +243,68 @@ TEST_CASE("A moving pointer paces the loop like the readout it carries")
     CHECK(frameWaitFor(inputs).kind == FrameWait::Idle);
 }
 
+TEST_CASE("A region under the hand is followed, not paced")
+{
+    // The regression this exists to stop: the region border and the picker's
+    // rubber band are repositioned from the frame loop, so whatever paces the
+    // loop paces them. At a 50 ms frame period a border flicked at 1600 points
+    // a second trailed the pointer by 83 ms on average and 158 at worst -
+    // twenty-odd points of stickiness under a hand that is drawing roughly and
+    // quickly, which is how a region is drawn.
+    FramePacingInputs inputs;
+    inputs.lastActivity = 10.0;
+    inputs.lastFrameStart = 10.0;
+    inputs.now = 10.0;
+    REQUIRE(frameWaitFor(inputs).redrawFloorSeconds > 0.0);
+
+    inputs.regionInteracting = true;
+    const FrameWaitDecision following = frameWaitFor(inputs);
+    CHECK(following.kind == FrameWait::FollowInteraction);
+    // No floor at all: the wait ends on the pointer event, and the loop applies
+    // it and moves the border before taking the next one.
+    CHECK(following.redrawFloorSeconds == 0.0);
+
+    // It outranks every other reason to wait, including the two that block.
+    for (const auto& set : {&FramePacingInputs::attached, &FramePacingInputs::pickerActive}) {
+        FramePacingInputs other = inputs;
+        other.lastActivity = 0.0;
+        other.now = 10.0 + IdleAfterSeconds + 0.01;
+        other.*set = true;
+        CHECK(frameWaitFor(other).kind == FrameWait::FollowInteraction);
+    }
+
+    // And a hand that pauses mid-gesture is not left waiting on the idle tick.
+    CHECK(InteractionWaitSeconds <= ContentRedrawSeconds);
+}
+
+TEST_CASE("A followed region still redraws at the frame period")
+{
+    // The wait is what holds the frame period everywhere else, and a followed
+    // region has none - so without this the window itself would redraw once per
+    // pointer event, a hundred times a second, for scope images that arrive
+    // fifteen. What the hand is watching is the border, and no frame of this
+    // window draws it.
+    RedrawInputs inputs = quiet();
+    inputs.lastPointerMove = inputs.now;
+    inputs.lastDrawn = inputs.now - ContentRedrawSeconds / 2.0;
+    REQUIRE(frameWorthDrawing(inputs));
+
+    inputs.regionInteracting = true;
+    CHECK_FALSE(frameWorthDrawing(inputs));
+
+    // A period is a period, not a mute: the frame comes back when it is due.
+    inputs.lastDrawn = inputs.now - ContentRedrawSeconds - 0.001;
+    CHECK(frameWorthDrawing(inputs));
+
+    // It gives way to nothing else, either - a picker overlay up over a region
+    // being drawn is still worth exactly one frame a period.
+    RedrawInputs overlay = quiet();
+    overlay.overlayActive = true;
+    overlay.regionInteracting = true;
+    overlay.lastDrawn = overlay.now;
+    CHECK_FALSE(frameWorthDrawing(overlay));
+}
+
 TEST_CASE("Something that leaves the screen by itself is taken away")
 {
     // A status message, the attach notice and an intensity readout all expire

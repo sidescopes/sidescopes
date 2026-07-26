@@ -491,7 +491,8 @@ void App::runFrame()
     if (nothingToDrawInto) {
         return;
     }
-    if (frameWorthDrawing(redrawInputs(framebufferWidth, framebufferHeight))) {
+    const bool drawing = frameWorthDrawing(redrawInputs(framebufferWidth, framebufferHeight));
+    if (drawing) {
         drawFrame(framebufferWidth, framebufferHeight);
     }
 
@@ -502,7 +503,7 @@ void App::runFrame()
     applyRegionPickOutcome(m_regionPicker.openIfRequested(m_analysis.region.has_value()));
     applyBorderEditOutcome(m_regions.pollBorderEdit(m_activeWindowIdentity));
     applyRegionPickOutcome(m_regionPicker.poll(m_frameSize, m_cursor.screenSampleColor()));
-    commitAnalysisChanges();
+    commitAnalysisChanges(drawing);
 }
 
 // Builds one frame and presents it.
@@ -512,6 +513,11 @@ void App::drawFrame(int framebufferWidth, int framebufferHeight)
         return;
     }
 
+    // Stamped where the frame begins rather than where it ends, because it is
+    // what the frame period is counted from: a period measured from the end
+    // adds the frame's own length to every one of them, and the body plus the
+    // present were enough to take a twenty-frame cadence down to sixteen.
+    m_lastDrawnFrame = glfwGetTime();
     m_outputPending.store(false);
     if (m_worker.fetchOutput(m_outputVersion, m_output)) {
         m_panes->uploadVisibleScopes();
@@ -535,7 +541,6 @@ void App::drawFrame(int framebufferWidth, int framebufferHeight)
 
     // What this frame put on screen, so the next one can tell whether the
     // picture it would draw is the same one.
-    m_lastDrawnFrame = glfwGetTime();
     m_drawnFramebufferWidth = framebufferWidth;
     m_drawnFramebufferHeight = framebufferHeight;
     m_drawnCaptureStatus = m_captureController.status();
@@ -560,8 +565,34 @@ RedrawInputs App::redrawInputs(int framebufferWidth, int framebufferHeight) cons
     inputs.framebufferChanged =
         framebufferWidth != m_drawnFramebufferWidth || framebufferHeight != m_drawnFramebufferHeight;
     inputs.statusChanged = m_captureController.status() != m_drawnCaptureStatus;
+    inputs.regionInteracting = regionInteracting();
 
     return inputs;
+}
+
+// The user's hand is on the region itself: a rubber band being drawn through
+// the picker, or the border being dragged by its band. Both are followed from
+// the frame loop, so both take it off its frame period - see frameWaitFor.
+bool App::regionInteracting() const
+{
+    return m_regionPicker.active() || m_regions.borderEditing();
+}
+
+// How long to block while following a hand: until the next event, and no later
+// than the next frame is due.
+//
+// The second half matters as much as the first. Nothing else paces the drawing
+// once the loop is following events, so a wait that ended only on an event drew
+// every frame late by however long the gap to the next one was - a hand
+// reporting every 20 ms took a twenty-frame cadence down to sixteen, and the
+// scopes with it. A deadline already past belongs to the frame this pass is
+// about to draw, so there is nothing left to wake for and the ceiling is the
+// honest wait.
+double App::interactionWait(double now) const
+{
+    const double left = m_lastDrawnFrame + ContentRedrawSeconds - now;
+
+    return left > 0.0 && left < InteractionWaitSeconds ? left : InteractionWaitSeconds;
 }
 
 void App::servicePipelineVisibility(bool framebufferEmpty, double now)
@@ -631,8 +662,13 @@ void App::pumpEvents()
     const double now = glfwGetTime();
     const FrameWaitDecision wait =
         frameWaitFor(FramePacingInputs{now, m_lastActivity, m_lastReadoutActivity, m_lastPointerMove, m_lastFrameStart,
-                                       m_attach.attached(), m_regionPicker.active()});
+                                       m_attach.attached(), m_regionPicker.active(), regionInteracting()});
     switch (wait.kind) {
+    case FrameWait::FollowInteraction:
+        // Ends on the pointer event that moved the region, so the border is
+        // repositioned in the same breath as the hand moved it.
+        glfwWaitEventsTimeout(interactionWait(now));
+        break;
     case FrameWait::WatchAttachedWindow:
         idleWaitWatchingAttachedWindow();
         break;
@@ -1154,21 +1190,33 @@ void App::applyPendingUiScale()
     m_pendingUiScaleStep = -1;
 }
 
-void App::commitAnalysisChanges()
+void App::commitAnalysisChanges(bool drewThisPass)
 {
-    const RegionMotion motion = trackRegionMotion(glfwGetTime());
+    const double now = glfwGetTime();
+    const RegionMotion motion = trackRegionMotion(now);
     if (m_analysisDirty) {
+        // The border follows the hand; the scopes follow the frames. A region
+        // under the hand takes the loop off the frame period so the border can
+        // keep up, and every settings push is a pass the worker owes - even
+        // with no new frame, since the pixels under a moved region differ - so
+        // pushing at the pointer's rate would run one per pointer event. Riding
+        // the drawn frame keeps the scopes at exactly the rate they are shown
+        // at. The border is reconciled either way, which is the whole point of
+        // the arrangement.
+        m_regions.syncBorder(borderState());
+        if (regionInteracting() && !drewThisPass) {
+            return;  // still dirty: the pass that draws carries it out
+        }
         // Coarse only on the way out: the settings themselves stay the truth,
         // so the detail policy and the projections keep reading what the region
         // will be analysed at the moment it stops moving.
         m_worker.updateSettings(motion == RegionMotion::Dragged ? coarsenedForDrag(m_analysis) : m_analysis);
         m_panes->configureProjections();
-        m_regions.syncBorder(borderState());
         m_analysisDirty = false;
-        m_lastActivity = glfwGetTime();
-        m_nextPreferencesSave = glfwGetTime() + 1.0;
+        m_lastActivity = now;
+        m_nextPreferencesSave = now + 1.0;
     }
-    if (m_nextPreferencesSave > 0.0 && glfwGetTime() > m_nextPreferencesSave) {
+    if (m_nextPreferencesSave > 0.0 && now > m_nextPreferencesSave) {
         persistPreferences();
         m_nextPreferencesSave = -1.0;
     }

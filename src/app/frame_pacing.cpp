@@ -4,6 +4,12 @@ namespace sidescopes {
 
 FrameWaitDecision frameWaitFor(const FramePacingInputs& inputs)
 {
+    // Ahead of every rate below, and with no floor of its own: the hand comes
+    // first.
+    if (inputs.regionInteracting) {
+        return FrameWaitDecision{FrameWait::FollowInteraction, 0.0};
+    }
+
     const bool moving = inputs.now - inputs.lastActivity <= IdleAfterSeconds;
     const bool following = inputs.now - inputs.lastReadoutActivity <= IdleAfterSeconds ||
                            inputs.now - inputs.lastPointerMove <= IdleAfterSeconds;
@@ -22,6 +28,13 @@ FrameWaitDecision frameWaitFor(const FramePacingInputs& inputs)
 
 bool frameWorthDrawing(const RedrawInputs& inputs)
 {
+    // Everywhere else the wait holds the frame period, but a region under the
+    // hand is followed at the pointer's rate, which would otherwise redraw the
+    // window a hundred times a second. What the hand is watching is the border,
+    // and no frame of this window draws that.
+    if (inputs.regionInteracting && inputs.now - inputs.lastDrawn < ContentRedrawSeconds) {
+        return false;
+    }
     // The picture is already different from the one on screen.
     const bool changed = inputs.outputPending || inputs.framebufferChanged || inputs.statusChanged;
     // The interface has not finished with the last thing that happened. Hover

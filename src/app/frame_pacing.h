@@ -31,6 +31,14 @@ inline constexpr double ContentRedrawSeconds = 1.0 / 20.0;
 /// cannot have changed.
 inline constexpr double ReadoutRedrawSeconds = 1.0 / 8.0;
 
+/// The longest the loop blocks while the user's hand is on the region.
+///
+/// Not a frame period and not a floor: the wait ends on the pointer event that
+/// arrives, and this only paces a hand that has paused mid-gesture. It is the
+/// content period because a paused hand wants exactly what a moving screen
+/// wants.
+inline constexpr double InteractionWaitSeconds = ContentRedrawSeconds;
+
 /// How long the loop waits for events when nothing at all is happening.
 inline constexpr double IdleWaitSeconds = 0.5;
 
@@ -57,6 +65,9 @@ enum class FrameWait
     /// Not at all: something is moving, so the frame period below is the whole
     /// of the wait and the events that land during it are drained at its end.
     None,
+    /// Until the next event, and no longer than InteractionWaitSeconds: the
+    /// user is drawing or dragging a region, and the loop follows their hand.
+    FollowInteraction,
     /// In short slices, so an attached window's motion and focus stay fresh.
     WatchAttachedWindow,
     /// At the slow idle tick, which the first event to arrive ends.
@@ -93,6 +104,10 @@ struct FramePacingInputs
     double lastFrameStart = 0.0;
     bool attached = false;
     bool pickerActive = false;
+    /// The user's hand is on the region: a rubber band being drawn, or the
+    /// border being dragged. See frameWaitFor for why it outranks everything
+    /// else here.
+    bool regionInteracting = false;
 };
 
 /// The wait to take before the next frame.
@@ -104,6 +119,15 @@ struct FramePacingInputs
 /// period caps a faster panel and leaves a slower one exactly as it was. A
 /// blocking wait still returns the instant an event arrives, so interaction is
 /// handled at the rate it comes in; only frames nobody asked for are dropped.
+///
+/// DIRECT MANIPULATION IS NEVER PACED. A region being drawn or dragged is
+/// repositioned from this loop and from nowhere else - the overlay records the
+/// pointer, the loop applies it and moves the border - so a floor here is a
+/// floor on how closely the border can follow the hand, and it is measurable:
+/// at a frame period of 50 ms a border flicked at 1600 points a second trailed
+/// the pointer by 83 ms on average and 158 at worst. The interaction is a
+/// second or two long, so what it costs is not worth a moment of its
+/// stickiness.
 [[nodiscard]] FrameWaitDecision frameWaitFor(const FramePacingInputs& inputs);
 
 /// What the loop knows about whether the picture can still be changing.
@@ -142,6 +166,9 @@ struct RedrawInputs
     bool framebufferChanged = false;
     /// The capture status differs from the one last drawn.
     bool statusChanged = false;
+    /// The user's hand is on the region. The wait no longer paces the loop
+    /// while this holds, so the frame period is enforced here instead.
+    bool regionInteracting = false;
 };
 
 /// Whether a frame is worth drawing at all.

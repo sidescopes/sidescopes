@@ -169,6 +169,11 @@ private:
     /// What the skip decision is made on, gathered before any of the frame is
     /// built.
     [[nodiscard]] RedrawInputs redrawInputs(int framebufferWidth, int framebufferHeight) const;
+    /// Whether the user is drawing or dragging the region itself, which takes
+    /// the loop off its frame period so the border can follow their hand.
+    [[nodiscard]] bool regionInteracting() const;
+    /// How long to block while following a hand on the region.
+    [[nodiscard]] double interactionWait(double now) const;
     /// Suspends the capture stream - and the whole pipeline behind it - while
     /// the window is out of sight, and resumes it when the window returns.
     /// @p framebufferEmpty is the frame's own measurement, taken once and read
@@ -239,7 +244,7 @@ private:
     /// Carries out the region border's live edit: its close affordances, its
     /// attach toggle, or the drag that moved or resized the region.
     void applyBorderEditOutcome(const RegionBorderEditOutcome& outcome);
-    void commitAnalysisChanges();
+    void commitAnalysisChanges(bool drewThisPass);
 
     /// Notes what is moving the region right now and puts the answer in force -
     /// holding analysis while an attached window carries it, and dirtying the
