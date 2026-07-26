@@ -95,6 +95,9 @@ public:
     /// Uploads the newest image into every on-screen scope's texture.
     void uploadVisibleScopes();
 
+    /// Drops every scope's trace, for when the region goes away.
+    void releaseTraces();
+
     /// @return Whether @p id draws a worker image at all; the host color picker
     ///         has no texture and asks the worker for nothing.
     [[nodiscard]] bool hasTexture(std::string_view id) const;

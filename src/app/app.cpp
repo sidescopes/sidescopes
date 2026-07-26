@@ -177,7 +177,7 @@ bool App::init()
     const ScopePaneContext paneContext{*m_graphics,         m_view,         m_scopeRegistry, m_analysis, m_output,
                                        m_captureController, m_regionPicker, m_pins,          m_shortcuts};
     m_panes = std::make_unique<ScopePaneRenderer>(paneContext, createProjectionInstances(m_scopeRegistry),
-                                                  createScopeTextures(*m_graphics, m_scopeRegistry));
+                                                  createScopeTextures(m_scopeRegistry));
 
     m_worker.setOutputCallback([] { glfwPostEmptyEvent(); });
     m_worker.start();
@@ -410,6 +410,12 @@ void App::applyRegionOutcome(const RegionOutcome& outcome)
     if (outcome.regionChanged) {
         m_analysis.region = outcome.region;
         m_analysisDirty = true;
+        if (!m_analysis.region) {
+            // Nothing is being read, so the last region's traces are dropped
+            // rather than left standing: the panes go honestly empty, and the
+            // next region draws onto a clean instrument instead of a ghost.
+            m_panes->releaseTraces();
+        }
     }
     if (outcome.activity) {
         m_lastActivity = glfwGetTime();

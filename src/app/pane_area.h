@@ -73,6 +73,11 @@ public:
     /// Uploads the newest image into every on-screen scope's texture.
     void uploadVisibleScopes();
 
+    /// Drops every scope's trace, for when the region goes away: the panes
+    /// then read as honestly empty rather than showing the last region's
+    /// distribution, and the textures stop costing anything.
+    void releaseTraces();
+
     /// @return Whether @p id draws a worker image at all; the host color picker
     ///         has no texture and asks the worker for nothing.
     [[nodiscard]] bool hasTexture(std::string_view id) const;
@@ -103,7 +108,8 @@ private:
     [[nodiscard]] const ScopeInstance* projectionFor(std::string_view id) const;
     [[nodiscard]] HistogramStyle histogramStyle() const;
     void setWaveformGain(double gain);
-    [[nodiscard]] ScopeTexture& textureForId(std::string_view id);
+    /// @return @p id's texture, or null while no pass has composed one.
+    [[nodiscard]] ScopeTexture* textureForId(std::string_view id);
     void uploadScope(std::unique_ptr<ScopeTexture>& texture, const ScopeImage& image);
     /// What fills the pane area: the capture help pages, or the scope stack.
     void drawContent(Pass& pass);

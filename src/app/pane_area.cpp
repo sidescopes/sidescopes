@@ -43,14 +43,21 @@ namespace {
 // a trace - the graticule, the markers, the intensity gesture's hit area - is
 // laid out on the same rectangle either way, so an empty scope is the
 // instrument with no signal on it rather than a different pane.
-DrawnScope drawScopeImage(const ScopeTexture& texture, bool traceLive, bool keepAspect, float zoom = 1.0f)
+DrawnScope drawScopeImage(const ScopeTexture* texture, bool traceLive, bool keepAspect, float zoom = 1.0f)
 {
+    // A trace needs both a region and an image composed from it. There is no
+    // texture before the first pass of a newly drawn region, nor after one is
+    // cleared - showing the previous region's would be a ghost.
+    const bool drawTrace = traceLive && texture != nullptr;
     const ImVec2 available = ImGui::GetContentRegionAvail();
     ImVec2 size = available;
     if (keepAspect) {
-        const float scale = std::max(0.05f, std::min(available.x / static_cast<float>(texture.width()),
-                                                     available.y / static_cast<float>(texture.height())));
-        size = ImVec2(static_cast<float>(texture.width()) * scale, static_cast<float>(texture.height()) * scale);
+        // Both scopes that keep their aspect are square by construction, so
+        // an absent texture reserves the same square its trace would fill.
+        const float width = texture != nullptr ? static_cast<float>(texture->width()) : 1.0f;
+        const float height = texture != nullptr ? static_cast<float>(texture->height()) : 1.0f;
+        const float scale = std::max(0.05f, std::min(available.x / width, available.y / height));
+        size = ImVec2(width * scale, height * scale);
     }
     ImVec2 cursor = ImGui::GetCursorPos();
     cursor.x += std::max(0.0f, (available.x - size.x) * 0.5f);
@@ -58,8 +65,8 @@ DrawnScope drawScopeImage(const ScopeTexture& texture, bool traceLive, bool keep
     ImGui::SetCursorPos(cursor);
     const ImVec2 origin = ImGui::GetCursorScreenPos();
     const float crop = 0.5f / zoom;
-    if (traceLive) {
-        ImGui::Image(texture.textureId(), size, ImVec2(0.5f - crop, 0.5f - crop), ImVec2(0.5f + crop, 0.5f + crop));
+    if (drawTrace) {
+        ImGui::Image(texture->textureId(), size, ImVec2(0.5f - crop, 0.5f - crop), ImVec2(0.5f + crop, 0.5f + crop));
     } else {
         ImGui::Dummy(size);
     }
@@ -175,14 +182,14 @@ void strokeHistogramOutline(const DrawnScope& scope, const AnalysisWorker::Outpu
     draw->PopClipRect();
 }
 
-void drawHistogram(const ScopeTexture& texture, bool traceLive, const AnalysisWorker::Output& output,
+void drawHistogram(const ScopeTexture* texture, bool traceLive, const AnalysisWorker::Output& output,
                    const ScopeInstance& instance, HistogramStyle style, bool showGraticule,
                    const std::optional<FloatColor>& markerColor, std::vector<ImVec2>& points)
 {
     // No intensity gesture here: the histogram's scale adjusts
     // itself, the way every editor draws it.
     const DrawnScope scope = drawScopeImage(texture, traceLive, false);
-    if (traceLive) {
+    if (traceLive && texture != nullptr) {
         strokeHistogramOutline(scope, output, style, points);
     }
     if (showGraticule) {
@@ -597,9 +604,19 @@ bool PaneArea::hasTexture(std::string_view id) const
     return m_scopeTextures.find(std::string{id}) != m_scopeTextures.end();
 }
 
-ScopeTexture& PaneArea::textureForId(std::string_view id)
+ScopeTexture* PaneArea::textureForId(std::string_view id)
 {
-    return *m_scopeTextures.at(std::string{id});
+    return m_scopeTextures.at(std::string{id}).get();
+}
+
+void PaneArea::releaseTraces()
+{
+    // Nothing is being read any more, so the traces are both wrong to show
+    // and expensive to keep: a pane-sized texture per scope. They are rebuilt
+    // by the first pass of whatever region comes next.
+    for (auto& [id, texture] : m_scopeTextures) {
+        texture.reset();
+    }
 }
 
 void PaneArea::uploadScope(std::unique_ptr<ScopeTexture>& texture, const ScopeImage& image)
@@ -610,7 +627,7 @@ void PaneArea::uploadScope(std::unique_ptr<ScopeTexture>& texture, const ScopeIm
     if (image.rgba.size() < static_cast<std::size_t>(image.width) * static_cast<std::size_t>(image.height) * 4) {
         return;
     }
-    if (texture->width() != image.width || texture->height() != image.height) {
+    if (!texture || texture->width() != image.width || texture->height() != image.height) {
         texture = m_graphics.createScopeTexture(image.width, image.height);
     }
     texture->upload(image);

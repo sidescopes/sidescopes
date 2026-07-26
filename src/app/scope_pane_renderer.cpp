@@ -48,6 +48,11 @@ void ScopePaneRenderer::uploadVisibleScopes()
     m_panes.uploadVisibleScopes();
 }
 
+void ScopePaneRenderer::releaseTraces()
+{
+    m_panes.releaseTraces();
+}
+
 bool ScopePaneRenderer::hasTexture(std::string_view id) const
 {
     return m_panes.hasTexture(id);

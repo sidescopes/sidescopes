@@ -122,21 +122,6 @@ void restoreWindowPlacement(GLFWwindow* window, const Preferences& startup)
     }
 }
 
-std::unique_ptr<ScopeTexture> createBlankTexture(GraphicsBackend& graphics, int width, int height)
-{
-    auto texture = graphics.createScopeTexture(width, height);
-    ScopeImage blank;
-    blank.width = width;
-    blank.height = height;
-    blank.rgba.assign(static_cast<std::size_t>(width) * height * 4, 0);
-    for (std::size_t i = 3; i < blank.rgba.size(); i += 4) {
-        blank.rgba[i] = 255;
-    }
-    texture->upload(blank);
-
-    return texture;
-}
-
 }  // namespace
 
 namespace sidescopes {
@@ -260,19 +245,17 @@ std::map<std::string, ScopeInstance> createProjectionInstances(const ScopeRegist
     return instances;
 }
 
-ScopeTextureSet createScopeTextures(GraphicsBackend& graphics, const ScopeRegistry& registry)
+ScopeTextureSet createScopeTextures(const ScopeRegistry& registry)
 {
-    // One texture per module scope, keyed by id and sized from its descriptor;
-    // the upload path resizes to whatever the worker actually produces. The
-    // color picker has no descriptor and draws no texture.
+    // A slot per module scope, keyed by id and empty until a pass composes an
+    // image: the upload path creates the texture at whatever size the worker
+    // actually produced, and a scope with no region has no texture at all.
+    // The color picker has no descriptor and draws no texture.
     ScopeTextureSet set;
     for (const HostScope& scope : registry.scopes()) {
-        if (!scope.descriptor) {
-            continue;
+        if (scope.descriptor != nullptr) {
+            set.textures[scope.id] = nullptr;
         }
-        const int width = scope.descriptor->image_width > 0 ? scope.descriptor->image_width : DefaultVectorscopeSize;
-        const int height = scope.descriptor->image_height > 0 ? scope.descriptor->image_height : DefaultVectorscopeSize;
-        set.textures[scope.id] = createBlankTexture(graphics, width, height);
     }
     set.panePoints.assign(registry.scopes().size(), ImVec2());
     for (std::size_t i = 0; i < registry.scopes().size(); ++i) {

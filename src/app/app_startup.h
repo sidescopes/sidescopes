@@ -71,6 +71,6 @@ struct ScopeTextureSet
 /// Builds a blank texture for every module scope in @p registry, sized from
 /// its descriptor, alongside the pane points, pane ids, and divider ids the
 /// layout addresses them by.
-[[nodiscard]] ScopeTextureSet createScopeTextures(GraphicsBackend& graphics, const ScopeRegistry& registry);
+[[nodiscard]] ScopeTextureSet createScopeTextures(const ScopeRegistry& registry);
 
 }  // namespace sidescopes
