@@ -1,0 +1,61 @@
+{
+  "comment": "Photographs the scenario harness may measure against, fetched on demand into a cache outside every repository and never committed. This manifest is the citable artefact: it records where each image comes from, the exact bytes expected, the licence, and what characteristic it is there to exercise. Every download is checked against its digest before use, and a mismatch is treated exactly like a missing file - the run falls back to generated content and says so, because an image that changed silently would change the measurements silently. Adding an image is a data change: only works whose licence permits redistribution and modification with no attribution carried in the file belong here.",
+  "licence_note": "All five are works of the United States federal government, in the public domain by 17 U.S.C. 105. No attribution is required; the credits below are a courtesy. Right of publicity is separate from copyright, so these images are for test tooling only and must not be repurposed into anything implying that a person shown endorses this software.",
+  "images": [
+    {
+      "name": "face-portrait.jpg",
+      "purpose": "a real face for the face-lock path, and skin tones for the vectorscope's skin line",
+      "url": "https://upload.wikimedia.org/wikipedia/commons/f/fe/Ellen_Ochoa%2C_official_portrait.jpg",
+      "sha256": "7f8a4d485ca5f7dfb09f40684fb309fbc0a4bcc65cb06e33e2bb0363ee22884a",
+      "bytes": 949678,
+      "pixels": [3000, 4000],
+      "licence": "PD-USGov-NASA",
+      "credit": "NASA / Bill Stafford",
+      "source": "https://commons.wikimedia.org/wiki/File:Ellen_Ochoa,_official_portrait.jpg"
+    },
+    {
+      "name": "saturated-colour.jpg",
+      "purpose": "strongly saturated varied colour, which pushes the vectorscope out towards its graticule",
+      "url": "https://upload.wikimedia.org/wikipedia/commons/d/da/Woodduck95.jpg",
+      "sha256": "2c77dbbe3e27b300dc5cfc0fa63be30c1108e3f238f8e8243bd3d8bbe5ec0cb8",
+      "bytes": 2339423,
+      "pixels": [2200, 1875],
+      "licence": "PD-USGov-FWS",
+      "credit": "U.S. Fish and Wildlife Service / Dave Menke",
+      "source": "https://commons.wikimedia.org/wiki/File:Woodduck95.jpg"
+    },
+    {
+      "name": "neutral-detail.jpg",
+      "purpose": "near-neutral areas with fine high-frequency detail, the expensive case for every engine",
+      "url": "https://upload.wikimedia.org/wikipedia/commons/2/26/Snow_laden_trees_along_the_Norris_to_Canyon_Road_%2831218031662%29.jpg",
+      "sha256": "88a1495d798a9420b31e1c80caa98f1549263dc6f7ddcd9e16b83262ad611d4e",
+      "bytes": 13106459,
+      "pixels": [5184, 3456],
+      "licence": "PD-USGov-NPS",
+      "credit": "Yellowstone National Park / National Park Service",
+      "source": "https://commons.wikimedia.org/wiki/File:Snow_laden_trees_along_the_Norris_to_Canyon_Road_(31218031662).jpg"
+    },
+    {
+      "name": "flat-field.jpg",
+      "purpose": "a mostly uniform field, the cheap case, where a change detector should find almost nothing",
+      "url": "https://upload.wikimedia.org/wikipedia/commons/e/e7/Red_fox_resting_in_snow_%2831695215684%29.jpg",
+      "sha256": "190a1f1f9ffce28bd64c4c84118b3bb488169c01775b7a1685a63fec4aef14ff",
+      "bytes": 2458436,
+      "pixels": [3001, 2157],
+      "licence": "PD-USGov-NPS",
+      "credit": "Yellowstone National Park / National Park Service",
+      "source": "https://commons.wikimedia.org/wiki/File:Red_fox_resting_in_snow_(31695215684).jpg"
+    },
+    {
+      "name": "wide-tonal-range.jpg",
+      "purpose": "deep shadow beside clipped highlight, which fills the waveform and the histogram end to end",
+      "url": "https://upload.wikimedia.org/wikipedia/commons/8/8d/Artemis_II_Launch_%28NHQ202604010307%29.jpg",
+      "sha256": "64db053a6ae592efcfa8051fde57f92b541be61fea26e431e05db5447bf5f9ed",
+      "bytes": 7895175,
+      "pixels": [7657, 4686],
+      "licence": "PD-USGov-NASA",
+      "credit": "NASA / Bill Ingalls",
+      "source": "https://commons.wikimedia.org/wiki/File:Artemis_II_Launch_(NHQ202604010307).jpg"
+    }
+  ]
+}
