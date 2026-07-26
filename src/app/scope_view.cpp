@@ -53,14 +53,14 @@ const TraceParams& ScopeView::traces() const
     return m_traces;
 }
 
-bool ScopeView::graticule() const
+float ScopeView::graticuleStrength() const
 {
-    return m_graticule;
+    return m_graticuleStrength;
 }
 
-void ScopeView::setGraticule(bool on)
+void ScopeView::setGraticuleStrength(float strength)
 {
-    m_graticule = on;
+    m_graticuleStrength = cleanedGraticuleStrength(strength);
 }
 
 int ScopeView::zoom() const

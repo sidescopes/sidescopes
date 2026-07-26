@@ -29,8 +29,7 @@ enum MenuAction
     MenuClearRegion,
     MenuDetachWindow,
     MenuDetachAll,
-    MenuToggleGraticule = 40,
-    MenuClearPinnedMarkers,
+    MenuClearPinnedMarkers = 41,
     MenuPinColor,
     MenuToggleCaptureVisibility,
     MenuToggleDiagRecording,
@@ -52,6 +51,9 @@ enum MenuAction
     // registry, so every registered scope gets a menu entry with no hardcoded
     // list. Clear of ParamMenuActionBase.
     MenuShowScopeBase = 100,
+    // Graticule-strength ids are MenuGraticuleBase + the GraticuleStrengths
+    // index, above the scope range so a new scope cannot grow into them.
+    MenuGraticuleBase = 200,
 };
 
 /// The read-only snapshot the context-menu builder reads from the app: the view

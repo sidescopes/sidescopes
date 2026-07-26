@@ -188,6 +188,29 @@ void appendUiScaleSubmenu(const ContextMenuModel& model, std::vector<NativeMenuI
     menuEndSubmenu(menu);
 }
 
+void appendGraticuleSubmenu(const ContextMenuModel& model, std::vector<NativeMenuItem>& menu)
+{
+    // Percentages of the strength the scopes are graded at, the way the
+    // interface-size steps read against the system scale. The list stops at the
+    // floor: the graticule quietens for a busy trace but never leaves, so there
+    // is no off. The checked step is an exact GraticuleStrengths value, so the
+    // equality is safe.
+    menuSubmenu(menu, "Graticule");
+    for (std::size_t step = 0; step < GraticuleStrengths.size(); ++step) {
+        const float strength = GraticuleStrengths[step];
+        const bool checked = strength == model.view.graticuleStrength();
+        const int id = MenuGraticuleBase + static_cast<int>(step);
+        if (strength == DefaultGraticuleStrength) {
+            menuAction(menu, "Default (100%)", id, checked);
+        } else {
+            char label[16];
+            std::snprintf(label, sizeof(label), "%d%%", static_cast<int>(std::lround(strength * 100.0f)));
+            menuAction(menu, label, id, checked);
+        }
+    }
+    menuEndSubmenu(menu);
+}
+
 void appendPresetsSubmenu(const ContextMenuModel& model, std::vector<NativeMenuItem>& menu)
 {
     // Each slot lists its saved summary or "empty"; the digit hint teaches the
@@ -231,7 +254,7 @@ void appendRegionAndAppSection(const ContextMenuModel& model, std::vector<Native
     }
 
     menuSeparator(menu);
-    menuAction(menu, "Graticule", MenuToggleGraticule, model.view.graticule());
+    appendGraticuleSubmenu(model, menu);
 
     menuSeparator(menu);
     // Support tooling in one clearly named place; every checkbox reads the live

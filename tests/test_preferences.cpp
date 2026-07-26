@@ -43,7 +43,7 @@ TEST_CASE("Preferences round-trip through a file")
     saved.scopeParams[VectorscopeId]["response"] = 1.0;
     saved.vectorscopeZoom = 2;
     saved.scopeStack = "HWV";  // stacking order is part of the setting
-    saved.showGraticule = false;
+    saved.graticuleStrength = 0.5f;
     saved.windowX = 120;
     saved.windowWidth = 640;
 
@@ -59,7 +59,7 @@ TEST_CASE("Preferences round-trip through a file")
     CHECK(param(loaded, VectorscopeId, "response") == 1.0);
     CHECK(loaded.vectorscopeZoom == 2);
     CHECK(loaded.scopeStack == "HWV");
-    CHECK_FALSE(loaded.showGraticule);
+    CHECK(loaded.graticuleStrength == 0.5f);
     CHECK(loaded.windowX == 120);
     CHECK(loaded.windowWidth == 640);
 }
@@ -70,7 +70,7 @@ TEST_CASE("Preferences default when the file is missing")
     const Preferences loaded = loadPreferences(file.path());
     CHECK(param(loaded, VectorscopeId, "gain") == 3.0);
     CHECK(param(loaded, WaveformId, "gain") == 0.05);
-    CHECK(loaded.showGraticule);
+    CHECK(loaded.graticuleStrength == 1.0f);
 }
 
 TEST_CASE("Preferences read a legacy per-scope gain")
@@ -274,7 +274,7 @@ TEST_CASE("Preferences load a whole legacy file to the same live state")
         "waveform_mode=4\n"
         "histogram_per_channel=1\n"
         "scope_stack=VWH\n"
-        "show_graticule=0\n"
+        "graticule_strength=0.75\n"
         "vectorscope_zoom=2\n"
         "window_x=100\n"
         "window_width=500\n"
@@ -296,7 +296,7 @@ TEST_CASE("Preferences load a whole legacy file to the same live state")
     CHECK(param(loaded, HistogramId, "stride") == 3.0);
     CHECK(param(loaded, HistogramId, "style") == 0.0);  // per-channel inverts to choice 0
     CHECK(loaded.scopeStack == "VWH");
-    CHECK_FALSE(loaded.showGraticule);
+    CHECK(loaded.graticuleStrength == 0.75f);
     CHECK(loaded.vectorscopeZoom == 2);
     CHECK(loaded.windowX == 100);
     CHECK(loaded.windowWidth == 500);

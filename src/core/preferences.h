@@ -80,7 +80,11 @@ struct Preferences
     /// waveform) is accepted only as a migration input, folded into W in its
     /// Luma style. Never empty.
     std::string scopeStack = "V";
-    bool showGraticule = true;
+    /// How strongly the graticule is drawn, a multiplier on its shipped ink and
+    /// one of the discrete GraticuleStrengths. Bounded below rather than
+    /// switchable off, so a stored value can quieten the graticule but never
+    /// take it away.
+    float graticuleStrength = 1.0f;
     /// Magnify-view factor for the vectorscope: 1, 2, or 4.
     int vectorscopeZoom = 1;
     /// Live layout split orientation: 0 automatic (the historical longer-axis

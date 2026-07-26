@@ -3,6 +3,7 @@
 #include <string>
 #include <string_view>
 
+#include "app/overlay_style.h"
 #include "app/pane_layout.h"
 #include "app/scope_registry.h"
 #include "app/scope_stack.h"
@@ -54,8 +55,13 @@ public:
     [[nodiscard]] TraceParams& traces();
     [[nodiscard]] const TraceParams& traces() const;
 
-    [[nodiscard]] bool graticule() const;
-    void setGraticule(bool on);
+    /// How strongly the graticule is drawn over every scope. Bounded below
+    /// rather than switchable off: it is what makes a trace readable, and with
+    /// no region selected it is the whole instrument.
+    [[nodiscard]] float graticuleStrength() const;
+
+    /// Sets the graticule's strength, snapped to an offered step.
+    void setGraticuleStrength(float strength);
 
     [[nodiscard]] int zoom() const;
     void setZoom(int level);
@@ -64,7 +70,7 @@ private:
     ScopeStack m_stack;
     PaneLayout m_layout;
     TraceParams m_traces;
-    bool m_graticule = true;
+    float m_graticuleStrength = DefaultGraticuleStrength;
     int m_zoom = 1;
 };
 

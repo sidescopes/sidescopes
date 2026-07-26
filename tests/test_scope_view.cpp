@@ -37,14 +37,20 @@ TEST_CASE("The trace flash remembers which trace was adjusted")
     CHECK_FALSE(flash.showing(VectorscopeScopeId, 15.0));
 }
 
-TEST_CASE("The graticule toggle round-trips")
+TEST_CASE("The graticule strength round-trips, snapped to a step")
 {
     ScopeView view{registry()};
-    CHECK(view.graticule());  // shown by default
-    view.setGraticule(false);
-    CHECK_FALSE(view.graticule());
-    view.setGraticule(true);
-    CHECK(view.graticule());
+    CHECK(view.graticuleStrength() == DefaultGraticuleStrength);
+    view.setGraticuleStrength(GraticuleStrengths.front());
+    CHECK(view.graticuleStrength() == GraticuleStrengths.front());
+
+    // The setter is the one gate on the value, so what reaches the ink is
+    // always a step: a hand-edited preferences file cannot dim the graticule
+    // past the floor, and nothing can switch it off.
+    view.setGraticuleStrength(0.05f);
+    CHECK(view.graticuleStrength() == GraticuleStrengths.front());
+    view.setGraticuleStrength(0.0f);
+    CHECK(view.graticuleStrength() == DefaultGraticuleStrength);
 }
 
 TEST_CASE("The magnify zoom round-trips and is stored verbatim")

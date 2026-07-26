@@ -183,7 +183,7 @@ void strokeHistogramOutline(const DrawnScope& scope, const AnalysisWorker::Outpu
 }
 
 void drawHistogram(const ScopeTexture* texture, bool traceLive, const AnalysisWorker::Output& output,
-                   const ScopeInstance& instance, HistogramStyle style, bool showGraticule,
+                   const ScopeInstance& instance, HistogramStyle style, const GraticuleStyle& graticule,
                    const std::optional<FloatColor>& markerColor, std::vector<ImVec2>& points)
 {
     // No intensity gesture here: the histogram's scale adjusts
@@ -192,9 +192,7 @@ void drawHistogram(const ScopeTexture* texture, bool traceLive, const AnalysisWo
     if (traceLive && texture != nullptr) {
         strokeHistogramOutline(scope, output, style, points);
     }
-    if (showGraticule) {
-        drawGraticule(scope, instance.graticule(), GraticuleStyle{});
-    }
+    drawGraticule(scope, instance.graticule(), graticule);
     if (markerColor) {
         drawMarkers(scope, instance.markers(SsColor{markerColor->r, markerColor->g, markerColor->b}));
     }
@@ -437,7 +435,8 @@ void PaneArea::drawScopeById(std::string_view id, Pass& pass)
         const ScopeInstance* instance = projectionFor(HistogramScopeId);
         if (instance != nullptr) {
             drawHistogram(textureForId(HistogramScopeId), pass.input.regionSelected, m_output, *instance,
-                          histogramStyle(), m_view.graticule(), pass.input.vectorscopeColor, m_histogramScratch);
+                          histogramStyle(), graticuleStyle(DefaultLineWidth), pass.input.vectorscopeColor,
+                          m_histogramScratch);
         }
     } else if (id == NeutralScopeId) {
         drawNeutralPane(pass);
@@ -467,9 +466,7 @@ void PaneArea::drawNeutralPane(Pass& pass)
     }
     const ScopeInstance* instance = projectionFor(NeutralScopeId);
     if (instance != nullptr) {
-        if (m_view.graticule()) {
-            drawGraticule(scope, instance->graticule(), GraticuleStyle{});
-        }
+        drawGraticule(scope, instance->graticule(), graticuleStyle(DefaultLineWidth));
         if (pass.input.vectorscopeColor) {
             drawMarkers(scope, instance->markers(toSsColor(*pass.input.vectorscopeColor)));
         }
@@ -496,9 +493,7 @@ void PaneArea::drawVectorscopePane(Pass& pass)
     draw->PushClipRect(scope.origin, ImVec2(scope.origin.x + scope.size.x, scope.origin.y + scope.size.y), true);
     const ScopeInstance* instance = projectionFor(VectorscopeScopeId);
     if (instance != nullptr) {
-        if (m_view.graticule()) {
-            drawGraticule(scope, instance->graticule(), GraticuleStyle{VectorscopeMajorLineWidth});
-        }
+        drawGraticule(scope, instance->graticule(), graticuleStyle(VectorscopeMajorLineWidth));
         // Pinned references are host state, drawn amber over the trace; the live
         // cursor point takes its own white default.
         for (const FloatColor& pinned : m_pins.colors()) {
@@ -534,13 +529,18 @@ void PaneArea::drawWaveformPane(std::string_view id, Pass& pass)
     }
     const ScopeInstance* instance = projectionFor(id);
     if (instance != nullptr) {
-        if (m_view.graticule()) {
-            drawGraticule(scope, instance->graticule(), GraticuleStyle{});
-        }
+        drawGraticule(scope, instance->graticule(), graticuleStyle(DefaultLineWidth));
         if (pass.input.waveformColor) {
             drawMarkers(scope, instance->markers(toSsColor(*pass.input.waveformColor)));
         }
     }
+}
+
+GraticuleStyle PaneArea::graticuleStyle(float majorLineWidth) const
+{
+    // One strength for every scope, laid on ink each module's own stroke
+    // classes chose: a target box stays louder than a grid line at any step.
+    return GraticuleStyle{majorLineWidth, DefaultLineWidth, false, m_view.graticuleStrength()};
 }
 
 const SsScopeDescriptor* PaneArea::descriptorFor(std::string_view id) const

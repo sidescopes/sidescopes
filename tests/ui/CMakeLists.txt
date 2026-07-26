@@ -79,6 +79,7 @@ foreach(suite IN ITEMS pipeline view)
         test_${suite}_ui.cpp
         ui_test_harness.cpp
         ${CMAKE_SOURCE_DIR}/src/app/scope_registry.cpp
+        ${CMAKE_SOURCE_DIR}/src/app/overlay_style.cpp
         ${CMAKE_SOURCE_DIR}/src/app/pane_layout.cpp
         ${CMAKE_SOURCE_DIR}/src/app/scope_stack.cpp
         ${CMAKE_SOURCE_DIR}/src/app/scope_view.cpp
@@ -106,6 +107,20 @@ target_include_directories(sidescopes_ui_layout_tests PRIVATE ${CMAKE_SOURCE_DIR
 target_link_libraries(sidescopes_ui_layout_tests PRIVATE sidescopes_imgui_test_engine)
 sidescopes_target_defaults(sidescopes_ui_layout_tests)
 add_test(NAME sidescopes_ui_layout COMMAND sidescopes_ui_layout_tests)
+
+# The graticule suite drives the real overlay renderer against a hooked Dear
+# ImGui and reads back what landed in the draw list, which is the only place the
+# strength's whole path - style, render shim, toolkit - can be seen at once.
+add_executable(sidescopes_ui_graticule_tests
+    test_graticule_ui.cpp
+    ui_test_harness.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/overlay_render.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/overlay_style.cpp)
+target_include_directories(sidescopes_ui_graticule_tests PRIVATE
+    ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/include)
+target_link_libraries(sidescopes_ui_graticule_tests PRIVATE sidescopes_imgui_test_engine)
+sidescopes_target_defaults(sidescopes_ui_graticule_tests)
+add_test(NAME sidescopes_ui_graticule COMMAND sidescopes_ui_graticule_tests)
 
 # The interface-scale suite asserts applyInterfaceScale never compounds the
 # style across repeated scale changes - the ImGui-only unit behind the UI

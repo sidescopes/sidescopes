@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <optional>
 #include <vector>
@@ -23,6 +24,32 @@ constexpr uint32_t GraticuleMajor = packColor(205, 172, 110, 130);
 constexpr uint32_t GraticuleAccent = packColor(218, 175, 95, 180);
 constexpr uint32_t GraticuleLabel = packColor(226, 198, 145, 200);
 constexpr uint32_t GraticuleSkinTone = packColor(230, 170, 140, 160);
+
+/// The strengths the graticule is offered at, ascending: multipliers on the ink
+/// above, 1.0 being the strength every scope was graded at.
+///
+/// Bounded at both ends, and both bounds are reasoned rather than round. The
+/// FLOOR is a half: there the major lines land within a tenth of the alpha the
+/// default gives its minor lines, so the quietest graticule is still read the
+/// way the faintest line already shipping is read - which is what lets a
+/// strength replace the old on/off. The CEILING is where the brightest ink, the
+/// labels at 200, is about to reach full opacity; past it the strengths would
+/// clamp together and a target box would stop reading louder than a grid line.
+inline constexpr std::array<float, 4> GraticuleStrengths = {0.5f, 0.75f, 1.0f, 1.25f};
+
+/// The strength a scope is graded at, and what a fresh installation draws.
+inline constexpr float DefaultGraticuleStrength = 1.0f;
+
+/// Snaps a stored or requested strength to the nearest offered step, and to the
+/// default for anything out of range or unparseable - the preferences file may
+/// be hand-edited.
+[[nodiscard]] float cleanedGraticuleStrength(float requested);
+
+/// One graticule element's ink at @p strength: its alpha scaled, its hue left
+/// alone. Every element keeps its share of the one palette, so the whole
+/// graticule dims and brightens as a single voice rather than a flat wash, and
+/// what is loudest at full strength stays loudest at the floor.
+[[nodiscard]] uint32_t graticuleInk(uint32_t color, float strength);
 
 /// The live cursor's point marker on the vectorscope: white, to read over the
 /// trace whatever its color.
@@ -53,7 +80,8 @@ struct GraticuleStyle
 {
     float majorLineWidth = DefaultLineWidth;
     float minorLineWidth = DefaultLineWidth;
-    bool roomy = false;  ///< Whether pane-crowding minor labels are drawn.
+    bool roomy = false;                         ///< Whether pane-crowding minor labels are drawn.
+    float strength = DefaultGraticuleStrength;  ///< How strongly the ink is laid down.
 };
 
 enum class GraticuleOp

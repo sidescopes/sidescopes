@@ -1,7 +1,9 @@
 #include <catch2/catch_test_macros.hpp>
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <limits>
 #include <optional>
 #include <string>
 #include <vector>
@@ -24,6 +26,16 @@ SsGraticulePrimitive line(uint32_t stroke)
     primitive.y1 = 0.4f;
     return primitive;
 }
+
+uint32_t alphaOf(uint32_t color)
+{
+    return (color >> 24) & 0xFFu;
+}
+
+/// Every ink the graticule is drawn with, so a sweep covers the palette rather
+/// than one colour that happens to be convenient.
+const std::vector<uint32_t> EveryInk = {GraticuleMinor, GraticuleMajor, GraticuleAccent, GraticuleLabel,
+                                        GraticuleSkinTone};
 
 SsMarker level(float y, uint32_t mask, float from, float to)
 {
@@ -58,6 +70,130 @@ TEST_CASE("channelMaskColor colors a mask by the mix of its channels")
     CHECK(channelMaskColor(0b101) == packColor(255, 90, 255, 230));   // magenta
     CHECK(channelMaskColor(0b110) == packColor(90, 235, 255, 230));   // cyan
     CHECK(channelMaskColor(0b111) == packColor(235, 235, 235, 230));  // gray
+}
+
+TEST_CASE("Strength scales an ink's alpha and leaves its color alone")
+{
+    for (const uint32_t ink : EveryInk) {
+        // The graded strength is the ink itself, to the byte: every test above
+        // that names a colour is also the guard on that.
+        CHECK(graticuleInk(ink, DefaultGraticuleStrength) == ink);
+        // Dimming and brightening move only the alpha.
+        CHECK((graticuleInk(ink, 0.5f) & 0x00FFFFFFu) == (ink & 0x00FFFFFFu));
+        CHECK(alphaOf(graticuleInk(ink, 0.5f)) == static_cast<uint32_t>(std::lround(alphaOf(ink) * 0.5)));
+        CHECK(alphaOf(graticuleInk(ink, 1.25f)) == static_cast<uint32_t>(std::lround(alphaOf(ink) * 1.25)));
+    }
+    // Opacity is the ceiling, not an overflow.
+    CHECK(alphaOf(graticuleInk(GraticuleLabel, 8.0f)) == 255u);
+}
+
+TEST_CASE("The quietest graticule is still one the tool asks you to read")
+{
+    // THE FLOOR'S WHOLE ARGUMENT. At the lowest strength the lines that carry
+    // the reading - the majors - land within a tenth of the alpha the SHIPPING
+    // DEFAULT gives its minor lines, a level the instrument already relies on
+    // being legible, and the labels and target boxes land above it. Nothing can
+    // vanish, which is what lets a strength replace an on/off.
+    const float floor = GraticuleStrengths.front();
+    CHECK(floor < DefaultGraticuleStrength);
+    CHECK(alphaOf(graticuleInk(GraticuleMajor, floor)) * 10u >= alphaOf(GraticuleMinor) * 9u);
+    CHECK(alphaOf(graticuleInk(GraticuleLabel, floor)) >= alphaOf(GraticuleMinor));
+    CHECK(alphaOf(graticuleInk(GraticuleAccent, floor)) >= alphaOf(GraticuleMinor));
+    for (const uint32_t ink : EveryInk) {
+        CHECK(alphaOf(graticuleInk(ink, floor)) >= 32u);
+    }
+}
+
+TEST_CASE("The loudest graticule keeps its hierarchy")
+{
+    // THE CEILING'S ARGUMENT: the top step is where the brightest ink is about
+    // to reach full opacity. No class may clamp there, or two elements the
+    // palette deliberately separates would arrive at the same alpha and a
+    // target box would stop reading louder than a grid line.
+    const float ceiling = GraticuleStrengths.back();
+    CHECK(ceiling > DefaultGraticuleStrength);
+    for (const uint32_t ink : EveryInk) {
+        CHECK(alphaOf(graticuleInk(ink, ceiling)) == static_cast<uint32_t>(std::lround(alphaOf(ink) * ceiling)));
+        CHECK(alphaOf(graticuleInk(ink, ceiling)) < 255u);
+    }
+    CHECK(alphaOf(graticuleInk(GraticuleAccent, ceiling)) > alphaOf(graticuleInk(GraticuleMajor, ceiling)));
+    CHECK(alphaOf(graticuleInk(GraticuleMajor, ceiling)) > alphaOf(graticuleInk(GraticuleMinor, ceiling)));
+}
+
+TEST_CASE("A stored strength snaps to an offered step")
+{
+    for (const float step : GraticuleStrengths) {
+        CHECK(cleanedGraticuleStrength(step) == step);
+    }
+    CHECK(cleanedGraticuleStrength(0.72f) == 0.75f);
+    // A hand-edited extreme lands on the nearest bound rather than off scale.
+    CHECK(cleanedGraticuleStrength(0.01f) == GraticuleStrengths.front());
+    CHECK(cleanedGraticuleStrength(40.0f) == GraticuleStrengths.back());
+    // What says nothing about strength says nothing: back to the default.
+    CHECK(cleanedGraticuleStrength(0.0f) == DefaultGraticuleStrength);
+    CHECK(cleanedGraticuleStrength(-2.0f) == DefaultGraticuleStrength);
+    CHECK(cleanedGraticuleStrength(std::numeric_limits<float>::quiet_NaN()) == DefaultGraticuleStrength);
+}
+
+TEST_CASE("Every styled primitive is laid down at the chosen strength")
+{
+    // The scopes differ in WHICH primitives they emit, not in how loud one
+    // is: the strength lands on the stroke class each module chose, so a
+    // vectorscope target and a waveform scale line each dim on their own ink.
+    GraticuleStyle quiet;
+    quiet.strength = GraticuleStrengths.front();
+    quiet.roomy = true;
+
+    CHECK(styleGraticulePrimitive(line(SS_STROKE_GRID), quiet).commands[0].color ==
+          graticuleInk(GraticuleMinor, quiet.strength));
+    CHECK(styleGraticulePrimitive(line(SS_STROKE_GRID_MAJOR), quiet).commands[0].color ==
+          graticuleInk(GraticuleMajor, quiet.strength));
+    CHECK(styleGraticulePrimitive(line(SS_STROKE_SKIN_TONE), quiet).commands[0].color ==
+          graticuleInk(GraticuleSkinTone, quiet.strength));
+
+    SsGraticulePrimitive circle{};
+    circle.kind = SS_PRIMITIVE_CIRCLE;
+    circle.stroke = SS_STROKE_GRID;
+    CHECK(styleGraticulePrimitive(circle, quiet).commands[0].color == graticuleInk(GraticuleMinor, quiet.strength));
+
+    SsGraticulePrimitive target{};
+    target.kind = SS_PRIMITIVE_TARGET_BOX;
+    target.flags = SS_PRIMITIVE_FLAG_TARGET_PRIMARY;
+    std::snprintf(target.label, sizeof(target.label), "R");
+    const StyledGraticule box = styleGraticulePrimitive(target, quiet);
+    REQUIRE(box.count == 2);
+    CHECK(box.commands[0].color == graticuleInk(GraticuleAccent, quiet.strength));
+    CHECK(box.commands[1].color == graticuleInk(GraticuleLabel, quiet.strength));
+
+    SsGraticulePrimitive text{};
+    text.kind = SS_PRIMITIVE_TEXT;
+    std::snprintf(text.label, sizeof(text.label), "50");
+    CHECK(styleGraticulePrimitive(text, quiet).commands[0].color == graticuleInk(GraticuleLabel, quiet.strength));
+}
+
+TEST_CASE("A quieter graticule is drawn, not thinned out")
+{
+    // Strength is not a filter: the same primitives resolve to the same
+    // commands at every step, so quietening the graticule can never take an
+    // element away. What decides whether a minor label is drawn stays the
+    // pane's room, which the strength does not touch.
+    SsGraticulePrimitive text{};
+    text.kind = SS_PRIMITIVE_TEXT;
+    text.flags = SS_PRIMITIVE_FLAG_TEXT_MAJOR_ONLY;
+    std::snprintf(text.label, sizeof(text.label), "40");
+
+    for (const float strength : GraticuleStrengths) {
+        GraticuleStyle roomy;
+        roomy.roomy = true;
+        roomy.strength = strength;
+        CHECK(styleGraticulePrimitive(text, roomy).count == 1);
+        CHECK(styleGraticulePrimitive(line(SS_STROKE_GRID), roomy).count == 1);
+
+        GraticuleStyle tight = roomy;
+        tight.roomy = false;
+        CHECK(styleGraticulePrimitive(text, tight).count == 0);
+        CHECK(styleGraticulePrimitive(line(SS_STROKE_GRID), tight).count == 1);
+    }
 }
 
 TEST_CASE("A line takes its stroke color and the weight for its class")

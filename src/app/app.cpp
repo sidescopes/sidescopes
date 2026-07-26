@@ -279,7 +279,7 @@ void App::setupView(const Preferences& startup)
     static_assert(MaximumPins == PinBoard::Maximum);
     m_pins.restore(startup.pins, startup.pinComparator);
     m_view.stack().restore(startup.scopeStack);
-    m_view.setGraticule(startup.showGraticule);
+    m_view.setGraticuleStrength(startup.graticuleStrength);
     m_view.setZoom(startup.vectorscopeZoom);
     m_view.layout().setOrientation(orientationFromInt(startup.layoutOrientation));
     m_view.layout().setWeights(startup.layoutWeights);
@@ -443,7 +443,7 @@ void App::persistPreferences()
     preferences.scopeParams[VectorscopeScopeId]["smoothing_ms"] = m_view.traces().smoothing(VectorscopeScopeId);
     preferences.scopeParams[WaveformScopeId]["smoothing_ms"] = m_view.traces().smoothing(WaveformScopeId);
     preferences.scopeStack = m_view.stack().tokens();
-    preferences.showGraticule = m_view.graticule();
+    preferences.graticuleStrength = m_view.graticuleStrength();
     preferences.vectorscopeZoom = m_view.zoom();
     preferences.layoutOrientation = orientationToInt(m_view.layout().orientation());
     preferences.layoutWeights = m_view.layout().weightsSnapshot();
@@ -1109,9 +1109,6 @@ void App::dispatchViewMenu(int chosen)
     case MenuZoom4:
         m_view.setZoom(4);
         break;
-    case MenuToggleGraticule:
-        m_view.setGraticule(!m_view.graticule());
-        break;
     case MenuToggleCaptureVisibility:
         setCaptureVisibility(!captureVisible());
         break;
@@ -1140,6 +1137,10 @@ void App::dispatchViewMenu(int chosen)
         break;
     default:
         break;
+    }
+    const int strengthStep = chosen - MenuGraticuleBase;
+    if (strengthStep >= 0 && strengthStep < static_cast<int>(GraticuleStrengths.size())) {
+        m_view.setGraticuleStrength(GraticuleStrengths[static_cast<std::size_t>(strengthStep)]);
     }
 }
 

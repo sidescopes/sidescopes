@@ -46,13 +46,6 @@ void readInt(const std::map<std::string, std::string, std::less<>>& values, cons
     }
 }
 
-void readBool(const std::map<std::string, std::string, std::less<>>& values, const char* key, bool& out)
-{
-    if (const auto found = values.find(key); found != values.end()) {
-        out = found->second == "1";
-    }
-}
-
 void readFloat(const std::map<std::string, std::string, std::less<>>& values, const char* key, float& out)
 {
     if (const auto found = values.find(key); found != values.end()) {
@@ -586,7 +579,7 @@ Preferences loadPreferences(const std::filesystem::path& file)
     readInt(values, "waveform_mode", storedWaveformMode);
     migrateScopeStack(values, storedWaveformMode, preferences);
 
-    readBool(values, "show_graticule", preferences.showGraticule);
+    readFloat(values, "graticule_strength", preferences.graticuleStrength);
     readInt(values, "vectorscope_zoom", preferences.vectorscopeZoom);
     if (preferences.vectorscopeZoom != 2 && preferences.vectorscopeZoom != 4) {
         preferences.vectorscopeZoom = 1;
@@ -630,7 +623,7 @@ bool savePreferences(const Preferences& preferences, const std::filesystem::path
         }
     }
     out << "scope_stack=" << preferences.scopeStack << '\n'
-        << "show_graticule=" << (preferences.showGraticule ? 1 : 0) << '\n'
+        << "graticule_strength=" << preferences.graticuleStrength << '\n'
         << "vectorscope_zoom=" << preferences.vectorscopeZoom << '\n'
         << "ui_scale_factor=" << preferences.uiScaleFactor << '\n'
         << "window_x=" << preferences.windowX << '\n'

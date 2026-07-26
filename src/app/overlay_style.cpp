@@ -1,5 +1,6 @@
 #include "app/overlay_style.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 
@@ -18,6 +19,11 @@ uint32_t strokeColor(uint32_t stroke)
     default:
         return GraticuleMinor;
     }
+}
+
+uint32_t strokeInk(uint32_t stroke, const GraticuleStyle& style)
+{
+    return graticuleInk(strokeColor(stroke), style.strength);
 }
 
 // A whole-color marker - one marker with no per-channel meaning - takes a
@@ -48,35 +54,35 @@ void styleGraticuleLine(StyledGraticule& out, const SsGraticulePrimitive& primit
     command.y0 = primitive.y0;
     command.x1 = primitive.x1;
     command.y1 = primitive.y1;
-    command.color = strokeColor(primitive.stroke);
+    command.color = strokeInk(primitive.stroke, style);
     command.width = primitive.stroke == SS_STROKE_GRID_MAJOR ? style.majorLineWidth : style.minorLineWidth;
 }
 
-void styleGraticuleCircle(StyledGraticule& out, const SsGraticulePrimitive& primitive)
+void styleGraticuleCircle(StyledGraticule& out, const SsGraticulePrimitive& primitive, const GraticuleStyle& style)
 {
     GraticuleDrawCommand& command = out.commands[out.count++];
     command.op = GraticuleOp::Circle;
     command.x0 = primitive.x0;
     command.y0 = primitive.y0;
     command.x1 = primitive.x1;  // normalized radius
-    command.color = strokeColor(primitive.stroke);
+    command.color = strokeInk(primitive.stroke, style);
     command.segments = 64;
 }
 
-void styleGraticuleTargetBox(StyledGraticule& out, const SsGraticulePrimitive& primitive)
+void styleGraticuleTargetBox(StyledGraticule& out, const SsGraticulePrimitive& primitive, const GraticuleStyle& style)
 {
     GraticuleDrawCommand& box = out.commands[out.count++];
     box.op = GraticuleOp::Rect;
     box.x0 = primitive.x0;
     box.y0 = primitive.y0;
-    box.color = GraticuleAccent;
+    box.color = graticuleInk(GraticuleAccent, style.strength);
     box.halfBox = (primitive.flags & SS_PRIMITIVE_FLAG_TARGET_PRIMARY) != 0u ? 5.0f : 3.0f;
     if (primitive.label[0] != '\0') {
         GraticuleDrawCommand& label = out.commands[out.count++];
         label.op = GraticuleOp::Label;
         label.x0 = primitive.x0;
         label.y0 = primitive.y0;
-        label.color = GraticuleLabel;
+        label.color = graticuleInk(GraticuleLabel, style.strength);
         label.offsetX = 7.0f;
         label.offsetY = -7.0f;
         std::memcpy(label.label, primitive.label, sizeof(label.label));
@@ -91,7 +97,7 @@ void styleGraticuleText(StyledGraticule& out, const SsGraticulePrimitive& primit
         command.op = GraticuleOp::Label;
         command.x0 = primitive.x0;
         command.y0 = primitive.y0;
-        command.color = GraticuleLabel;
+        command.color = graticuleInk(GraticuleLabel, style.strength);
         command.offsetX = 4.0f;
         command.offsetY = 1.0f;
         std::memcpy(command.label, primitive.label, sizeof(command.label));
@@ -148,6 +154,36 @@ std::vector<StyledMarker> mergePerChannelMarkers(const std::vector<SsMarker>& ma
 
 }  // namespace
 
+float cleanedGraticuleStrength(float requested)
+{
+    // Zero, negative, and NaN say nothing about strength; fall back to the
+    // default. (NaN fails every comparison, so this guard is what catches it -
+    // snapping alone would keep the seed.) Anything else snaps, so a
+    // hand-edited extreme lands on the nearest bound rather than being ignored.
+    if (!(requested > 0.0f)) {
+        return DefaultGraticuleStrength;
+    }
+    float best = DefaultGraticuleStrength;
+    float bestDelta = std::fabs(requested - best);
+    for (const float step : GraticuleStrengths) {
+        const float delta = std::fabs(requested - step);
+        if (delta < bestDelta) {
+            best = step;
+            bestDelta = delta;
+        }
+    }
+
+    return best;
+}
+
+uint32_t graticuleInk(uint32_t color, float strength)
+{
+    const auto alpha = static_cast<float>((color >> 24) & 0xFFu);
+    const auto scaled = static_cast<uint32_t>(std::clamp(std::round(alpha * strength), 0.0f, 255.0f));
+
+    return (color & 0x00FFFFFFu) | (scaled << 24);
+}
+
 uint32_t channelMaskColor(uint32_t mask)
 {
     switch (mask) {
@@ -176,10 +212,10 @@ StyledGraticule styleGraticulePrimitive(const SsGraticulePrimitive& primitive, c
         styleGraticuleLine(out, primitive, style);
         break;
     case SS_PRIMITIVE_CIRCLE:
-        styleGraticuleCircle(out, primitive);
+        styleGraticuleCircle(out, primitive, style);
         break;
     case SS_PRIMITIVE_TARGET_BOX:
-        styleGraticuleTargetBox(out, primitive);
+        styleGraticuleTargetBox(out, primitive, style);
         break;
     case SS_PRIMITIVE_TEXT:
         styleGraticuleText(out, primitive, style);

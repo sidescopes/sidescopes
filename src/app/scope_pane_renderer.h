@@ -33,7 +33,7 @@ struct ScopePaneContext
     /// changed resolution.
     GraphicsBackend& graphics;
     /// What is on screen: the stack, the weights the dividers move, the
-    /// graticule toggle, and each trace's intensity.
+    /// graticule's strength, and each trace's intensity.
     ScopeView& view;
     const ScopeRegistry& registry;
     /// The worker's settings: the scope parameters the intensity gestures

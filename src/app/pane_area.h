@@ -29,7 +29,7 @@ struct PaneAreaContext
     /// Rebuilds a scope texture whose image changed resolution.
     GraphicsBackend& graphics;
     /// What is on screen: the stack, the weights the dividers move, the
-    /// graticule toggle, and each trace's intensity.
+    /// graticule's strength, and each trace's intensity.
     ScopeView& view;
     const ScopeRegistry& registry;
     /// The worker's settings: the scope parameters the intensity gestures
@@ -110,6 +110,9 @@ private:
 
     [[nodiscard]] const SsScopeDescriptor* descriptorFor(std::string_view id) const;
     [[nodiscard]] const ScopeInstance* projectionFor(std::string_view id) const;
+    /// The graticule styling for one pane: the view's strength, plus the weight
+    /// @p majorLineWidth this scope draws its major lines at.
+    [[nodiscard]] GraticuleStyle graticuleStyle(float majorLineWidth) const;
     [[nodiscard]] HistogramStyle histogramStyle() const;
     void setWaveformGain(double gain);
     /// @return @p id's texture, or null while no pass has composed one.
