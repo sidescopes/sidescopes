@@ -556,6 +556,123 @@ TEST_CASE("A thinned waveform stops reading every row, through its accumulate")
     CHECK(channelAt(sparse.image(), column, 0, 1) == 0);
 }
 
+namespace {
+
+// Textured content standing in for a photograph: every column spans many
+// levels, which is what separates a picture from the editor's chrome.
+void paintTexture(TestFrame& frame, IntRect area)
+{
+    uint32_t state = 0x9E3779B9u;
+    const auto next = [&state] {
+        state ^= state << 13;
+        state ^= state >> 17;
+        state ^= state << 5;
+
+        return state;
+    };
+    for (int py = area.y; py < area.y + area.height; ++py) {
+        for (int px = area.x; px < area.x + area.width; ++px) {
+            const int shade = 40 + static_cast<int>(next() % 170u);
+            frame.setColor(px, py,
+                           Color{static_cast<uint8_t>(shade), static_cast<uint8_t>(shade * 4 / 5),
+                                 static_cast<uint8_t>(shade * 3 / 5)});
+        }
+    }
+}
+
+// The mean absolute difference over the columns both images built from the
+// same pixels, skipping the flat strip and the columns its mass smears into.
+double traceDifference(const ScopeImage& before, const ScopeImage& after, int firstColumn)
+{
+    double total = 0.0;
+    long long counted = 0;
+    for (int py = 0; py < before.height; ++py) {
+        for (int px = firstColumn; px < before.width; ++px) {
+            const auto base = (static_cast<std::size_t>(py) * before.width + px) * 4;
+            for (int channel = 0; channel < 3; ++channel) {
+                total += std::abs(static_cast<double>(before.rgba[base + channel]) -
+                                  static_cast<double>(after.rgba[base + channel]));
+                ++counted;
+            }
+        }
+    }
+
+    return counted > 0 ? total / static_cast<double>(counted) : 0.0;
+}
+
+}  // namespace
+
+TEST_CASE("A flat tone beside the picture leaves the rest of the trace alone")
+{
+    // The reported bug: sliding a region a few pixels off the photograph, onto
+    // the editor's flat chrome, dimmed the whole waveform. Those columns put
+    // every sample they have into one bin, and the ceiling the log
+    // normalization divides by was simply the densest bin, so the picture's own
+    // trace lost a quarter of its brightness for content beside it.
+    //
+    // Same region, same pixels, with a strip of one flat tone painted over the
+    // leading columns: the part of the trace built from the shared pixels must
+    // not move.
+    const IntRect region{0, 0, 480, 320};
+    const int strip = 12;  // Two and a half percent of the region's width.
+
+    TestFrame picture(480, 320, 0);
+    paintTexture(picture, region);
+
+    // One flat tone, and the same tone dithered over two levels: a window
+    // background is not always a single code, and the share that decides what
+    // counts as flat has to hold for both. Two levels put 5/12 of a column's
+    // mass on one bin against 4/6 for one level, and at most a quarter for a
+    // photographic column.
+    for (const int spread : {1, 2}) {
+        TestFrame withChrome(480, 320, 0);
+        withChrome.pixels = picture.pixels;
+        for (int py = region.y; py < region.y + region.height; ++py) {
+            for (int px = 0; px < strip; ++px) {
+                const auto shade = static_cast<uint8_t>(45 + (px + py) % spread);
+                withChrome.setColor(px, py, Color{shade, shade, static_cast<uint8_t>(shade + 2)});
+            }
+        }
+
+        for (const WaveformMode mode :
+             {WaveformMode::Luma, WaveformMode::Rgb, WaveformMode::RgbParade, WaveformMode::ColoredLuma}) {
+            WaveformSettings settings = settingsFor(mode);
+            settings.columns = 256;
+
+            Waveform alone;
+            alone.configure(settings);
+            alone.accumulate(picture.view(), region);
+            Waveform beside;
+            beside.configure(settings);
+            beside.accumulate(withChrome.view(), region);
+
+            // The image columns the strip feeds, plus a guard for the
+            // horizontal kernel; everything past them comes from identical
+            // pixels.
+            const int shared = strip * settings.columns / region.width + 4;
+            INFO("waveform mode " << static_cast<int>(mode) << " over " << spread << " level(s)");
+            CHECK(traceDifference(alone.image(), beside.image(), shared) < 2.0);
+        }
+    }
+}
+
+TEST_CASE("A frame of one flat tone still normalizes to its own peak")
+{
+    // The ceiling passes over columns that are a single flat tone, so a frame
+    // with nothing else in it has no column left to measure. It falls back to
+    // the plain maximum rather than dividing by nothing and rendering black -
+    // and that fallback is what keeps the colour-bar and ramp goldens exact.
+    TestFrame frame(320, 240, 0);
+    frame.fill(Color{90, 140, 200});
+
+    Waveform waveform;
+    waveform.configure(settingsFor(WaveformMode::Rgb));
+    waveform.accumulate(frame.view(), IntRect{0, 0, 320, 240});
+
+    const auto [litColumn, litRow] = brightestPixel(waveform.image());
+    CHECK(channelAt(waveform.image(), litColumn, litRow, 2) == 255);
+}
+
 TEST_CASE("Thinning cannot take a waveform below one sample a bin")
 {
     // The divisor is clamped and the samples per bin it produces has a floor,

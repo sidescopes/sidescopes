@@ -46,6 +46,17 @@ inline constexpr int WaveformMinSamplesPerBin = 32;
 /// never start an exact power of two apart. See Waveform::planeSize.
 inline constexpr std::size_t WaveformPlanePadding = 32;
 
+/// What one column of one bin plane holds: its densest bin, the level that bin
+/// sits at, and the mass of the whole column. Together they say whether the
+/// column carries a distribution or a single flat tone, which is what decides
+/// the trace's normalization ceiling.
+struct ColumnDensity
+{
+    uint32_t peak = 0;
+    uint64_t mass = 0;
+    int level = 0;
+};
+
 struct WaveformSettings
 {
     /// Trace gain applied to normalized bin densities before log mapping.
@@ -151,8 +162,8 @@ private:
     /// flattens, and it is a cache line on the machines this runs on.
     ///
     /// The padding is never written and never read as data. Nothing may
-    /// iterate a plane by planeSize; peakDensity, the one place that used to,
-    /// walks binsPerPlane within each plane instead.
+    /// iterate a plane by planeSize: every pass over one walks its levels and
+    /// columns, which stops at the bins the plane really holds.
     [[nodiscard]] std::size_t planeSize() const
     {
         return binsPerPlane() + WaveformPlanePadding;
@@ -167,6 +178,10 @@ private:
     // Per-chunk private plane sets for the parallel accumulate, merged into
     // m_bins by integer addition.
     ChunkScratch m_scratch;
+    // One plane's per-column densities, the evidence the normalization ceiling
+    // is chosen from. Sized with the planes and rewritten per plane, so
+    // choosing the ceiling allocates nothing.
+    std::vector<ColumnDensity> m_columnDensities;
     // Parade scratch: per-channel window-maxed planes feeding the shared
     // composer.
     std::vector<uint32_t> m_parade;

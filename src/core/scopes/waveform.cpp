@@ -316,20 +316,109 @@ void smoothPlane(const uint32_t* corrected, int columns, uint32_t* out)
     }
 }
 
-// The densest bin across the planes the active mode draws; it sets the
-// log-normalization ceiling.
-uint32_t peakDensity(const std::vector<uint32_t>& traces, std::size_t planeSize, std::size_t binsPerPlane,
-                     bool wantsRgb, bool wantsLuma)
+// A column is one flat tone when its densest bin holds at least this share of
+// the column's own mass. Held as a fraction so the test is integer arithmetic:
+// the goldens are exact and shared across three platforms, and a float
+// comparison here would decide the whole image's brightness.
+//
+// The vertical 1-4-1 fixes what the share means. A column whose samples all
+// land on one level keeps 4/6 of its mass there; two adjacent levels give
+// 5/12, and from three levels up it is simply one over the level count. So
+// three tenths reads as "fewer than about three and a third levels" - a flat
+// tone, plus however far the display's dithering spreads it. Measured over
+// four photographs at five modes, four column counts and three region sizes,
+// the highest a photographic column reached was a quarter: 240 of 240 of those
+// renderings are bit-identical at this share, and the first of them moves at
+// 0.22.
+constexpr uint64_t FlatToneNumerator = 3;
+constexpr uint64_t FlatToneDenominator = 10;
+
+// Each column's densest bin, the level it sits at, and the column's total
+// mass, over the bins the plane really holds: the space between planes is
+// padding, never written, and reading it would let a stale word from an
+// earlier size decide the normalization ceiling.
+void measureColumns(const uint32_t* bins, int columns, ColumnDensity* densities)
 {
-    uint32_t densest = 0;
-    // Plane by plane over the bins each really holds: the space between them
-    // is padding, never written, and reading it would let a stale word from an
-    // earlier size decide the normalization ceiling.
-    const auto scan = [&](int plane) {
-        const uint32_t* bins = traces.data() + (static_cast<std::size_t>(plane) * planeSize);
-        for (std::size_t i = 0; i < binsPerPlane; ++i) {
-            densest = std::max(densest, bins[i]);
+    std::fill_n(densities, columns, ColumnDensity{});
+    for (int level = 0; level < WaveformLevels; ++level) {
+        const uint32_t* line = bins + static_cast<std::size_t>(level) * columns;
+        for (int column = 0; column < columns; ++column) {
+            ColumnDensity& measured = densities[static_cast<std::size_t>(column)];
+            measured.mass += line[column];
+            if (line[column] > measured.peak) {
+                measured.peak = line[column];
+                measured.level = level;
+            }
         }
+    }
+}
+
+// The levels some column of this plane holds as one flat tone.
+//
+// Only the level each such column peaks on, with no allowance for the vertical
+// 1-4-1 spreading the pile onto its neighbours: the columns that carry a
+// diluted copy of the same pile are weighted level by level exactly as this one
+// is, so they peak wherever it peaks. Widening by one either side was measured
+// over a flat tone at all 256 levels, three strip widths and two modes - it
+// moved six of those 1536 traces, none of them by a measurable change in
+// brightness.
+void markFlatToneLevels(const ColumnDensity* densities, int columns, bool* flatTone)
+{
+    std::fill_n(flatTone, WaveformLevels, false);
+    for (int column = 0; column < columns; ++column) {
+        const ColumnDensity& measured = densities[static_cast<std::size_t>(column)];
+        if (measured.mass > 0 &&
+            static_cast<uint64_t>(measured.peak) * FlatToneDenominator > FlatToneNumerator * measured.mass) {
+            flatTone[measured.level] = true;
+        }
+    }
+}
+
+// The ceiling a plane offers: the densest bin among its columns that peak on a
+// level no flat tone holds, and - as the fallback - the densest of all of them.
+struct TraceCeiling
+{
+    uint32_t distributed = 0;
+    uint32_t overall = 0;
+};
+
+void gatherCeiling(const ColumnDensity* densities, int columns, const bool* flatTone, TraceCeiling& ceiling)
+{
+    for (int column = 0; column < columns; ++column) {
+        const ColumnDensity& measured = densities[static_cast<std::size_t>(column)];
+        ceiling.overall = std::max(ceiling.overall, measured.peak);
+        // A flat tone does not end at the edge of the strip that carries it:
+        // the fractional splat and the horizontal 1-2-1 taper its pile over the
+        // columns beside it, several times the surrounding content but too
+        // diluted to read as one tone. What gives those columns away is that
+        // they still peak on the tone's own level.
+        if (!flatTone[measured.level]) {
+            ceiling.distributed = std::max(ceiling.distributed, measured.peak);
+        }
+    }
+}
+
+// The bin the log normalization maps to full brightness, across the planes the
+// active mode draws.
+//
+// Not simply the densest bin. A column that is one flat tone - the editor's
+// chrome beside the photograph, a letterboxed bar - puts every sample it has
+// into a single bin, several times over what the densest photographic column
+// reaches, and the ceiling is close to linear in that at the calibrated gain.
+// Sliding a region five pixels off the picture cost the rest of the trace a
+// quarter of its brightness. Such a column is passed over instead, and its
+// bins clip. When every column is one flat tone there is no distribution to
+// measure and the plain maximum stands, which is what keeps a frame of colour
+// bars or a ramp rendering exactly as before.
+uint32_t peakDensity(const std::vector<uint32_t>& traces, std::size_t planeSize, int columns, bool wantsRgb,
+                     bool wantsLuma, ColumnDensity* densities)
+{
+    TraceCeiling ceiling;
+    bool flatTone[WaveformLevels];
+    const auto scan = [&](int plane) {
+        measureColumns(traces.data() + (static_cast<std::size_t>(plane) * planeSize), columns, densities);
+        markFlatToneLevels(densities, columns, flatTone);
+        gatherCeiling(densities, columns, flatTone, ceiling);
     };
     if (wantsRgb) {
         for (int plane = 0; plane < 3; ++plane) {
@@ -339,7 +428,8 @@ uint32_t peakDensity(const std::vector<uint32_t>& traces, std::size_t planeSize,
     if (wantsLuma) {
         scan(3);
     }
-    return densest;
+
+    return ceiling.distributed > 0 ? ceiling.distributed : ceiling.overall;
 }
 
 // Map a bin count to display brightness through the log-and-gamma
@@ -465,6 +555,7 @@ void Waveform::resize(int columns, int imageHeight)
     m_columns = columns;
     m_imageHeight = imageHeight;
     m_bins.assign(planeSize() * 4, 0);
+    m_columnDensities.assign(static_cast<std::size_t>(m_columns), ColumnDensity{});
     m_image.width = m_columns;
     m_image.height = m_imageHeight;
     m_image.rgba.assign(static_cast<std::size_t>(m_columns) * m_imageHeight * 4, 0);
@@ -572,7 +663,7 @@ void Waveform::mapBinsToImage(uint64_t sampledRows)
     const std::size_t planeSize = this->planeSize();
 
     const ModeFlags flags = modeFlagsFor(m_settings.mode);
-    const uint32_t densest = peakDensity(traces, planeSize, binsPerPlane(), flags.rgb, flags.luma);
+    const uint32_t densest = peakDensity(traces, planeSize, m_columns, flags.rgb, flags.luma, m_columnDensities.data());
 
     // Each sample contributes sixteen weight units (the splat's
     // sixteenths), so the per-row normalization divides them back out and
