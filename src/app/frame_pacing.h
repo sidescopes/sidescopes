@@ -74,6 +74,10 @@ struct FramePacingInputs
     /// When the colour readout last moved, which asks for frames of its own at
     /// a slower cadence.
     double lastReadoutActivity = 0.0;
+    /// When the pointer last moved. It asks for frames at the readout's cadence
+    /// because what follows it is a reading - see RedrawInputs::lastPointerMove
+    /// for why nothing else notices.
+    double lastPointerMove = 0.0;
     /// When the previous frame's event pump returned.
     double lastFrameStart = 0.0;
     bool attached = false;
@@ -99,6 +103,15 @@ struct RedrawInputs
     double lastActivity = 0.0;
     /// When the colour readout last moved.
     double lastReadoutActivity = 0.0;
+    /// When the pointer last moved, wherever on the desktop it is.
+    ///
+    /// Its own clock because nothing else here can stand for it: a marker and
+    /// the colour readout are readings of the point under the pointer, and the
+    /// pointer crosses a still photograph in another application's window
+    /// without changing one pixel of the screen or delivering this window one
+    /// event. Every other reason listed here would say the picture is finished,
+    /// and the readings would sit on the colour they were last drawn at.
+    double lastPointerMove = 0.0;
     /// When a window event from the user last arrived.
     double lastInputEvent = 0.0;
     /// When the last frame was drawn.

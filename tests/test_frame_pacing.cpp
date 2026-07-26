@@ -178,12 +178,69 @@ TEST_CASE("An interaction owes frames after its last event")
     CHECK_FALSE(frameWorthDrawing(inputs));
     CHECK(InputSettleSeconds > IdleAfterSeconds);
 
-    // The two clocks the pacing already keeps hold frames the same way.
-    for (const auto& clock : {&RedrawInputs::lastActivity, &RedrawInputs::lastReadoutActivity}) {
+    // The other clocks the pacing keeps hold frames the same way.
+    for (const auto& clock :
+         {&RedrawInputs::lastActivity, &RedrawInputs::lastReadoutActivity, &RedrawInputs::lastPointerMove}) {
         RedrawInputs recent = quiet();
         recent.*clock = recent.now - IdleAfterSeconds + 0.01;
         CHECK(frameWorthDrawing(recent));
     }
+}
+
+TEST_CASE("A moving pointer is a reason to draw all by itself")
+{
+    // The case nothing else here covers, and the ordinary one beside an editor:
+    // the pointer crosses a still photograph in another application's window.
+    // Not one pixel of the screen changes, so no pass is published; this window
+    // is not frontmost, so no event reaches it; and every clock says the picture
+    // is finished. But a marker and the colour readout are readings of the point
+    // under the pointer, and the point has moved.
+    RedrawInputs inputs = quiet();
+    REQUIRE_FALSE(frameWorthDrawing(inputs));
+
+    inputs.lastPointerMove = inputs.now;
+    CHECK(frameWorthDrawing(inputs));
+
+    // It owes frames for a moment after the pointer stops, because a marker
+    // takes its colour on its own interval and cannot set off before the next
+    // one lands.
+    inputs.lastPointerMove = inputs.now - IdleAfterSeconds + 0.01;
+    CHECK(frameWorthDrawing(inputs));
+
+    // And no longer than that: a pointer parked over a picture nobody is
+    // editing leaves the application drawing nothing at all.
+    inputs.lastPointerMove = inputs.now - IdleAfterSeconds - 0.01;
+    CHECK_FALSE(frameWorthDrawing(inputs));
+}
+
+TEST_CASE("A moving pointer paces the loop like the readout it carries")
+{
+    // The same argument on the waiting side. Without this the loop blocks for
+    // the idle tick, and a pointer moved over an unchanging screen is noticed
+    // half a second later - which is most of what a reading taken by hovering
+    // felt like it cost.
+    FramePacingInputs inputs;
+    inputs.lastActivity = 0.0;
+    inputs.lastReadoutActivity = 0.0;
+    inputs.lastFrameStart = 10.0;
+    inputs.now = 10.0;
+    REQUIRE(frameWaitFor(inputs).kind == FrameWait::Idle);
+
+    inputs.lastPointerMove = 10.0;
+    const FrameWaitDecision pointing = frameWaitFor(inputs);
+    CHECK(pointing.kind == FrameWait::None);
+    // A swatch and a marker, not a moving trace: the readout's own cadence.
+    CHECK(pointing.redrawFloorSeconds == Catch::Approx(ReadoutRedrawSeconds));
+
+    // A trace actually moving still outranks it.
+    inputs.lastActivity = 10.0;
+    CHECK(frameWaitFor(inputs).redrawFloorSeconds == Catch::Approx(ContentRedrawSeconds));
+
+    // A pointer that stopped lets the loop fall all the way back to the idle
+    // tick rather than holding it at the readout cadence for ever.
+    inputs.lastActivity = 0.0;
+    inputs.now = 10.0 + IdleAfterSeconds + 0.01;
+    CHECK(frameWaitFor(inputs).kind == FrameWait::Idle);
 }
 
 TEST_CASE("Something that leaves the screen by itself is taken away")

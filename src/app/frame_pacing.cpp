@@ -5,11 +5,12 @@ namespace sidescopes {
 FrameWaitDecision frameWaitFor(const FramePacingInputs& inputs)
 {
     const bool moving = inputs.now - inputs.lastActivity <= IdleAfterSeconds;
-    const bool readoutFollowing = inputs.now - inputs.lastReadoutActivity <= IdleAfterSeconds;
+    const bool following = inputs.now - inputs.lastReadoutActivity <= IdleAfterSeconds ||
+                           inputs.now - inputs.lastPointerMove <= IdleAfterSeconds;
     const double period = moving ? ContentRedrawSeconds : ReadoutRedrawSeconds;
     const double due = inputs.lastFrameStart + period;
     const double left = due > inputs.now ? due - inputs.now : 0.0;
-    if (moving || readoutFollowing) {
+    if (moving || following) {
         return FrameWaitDecision{FrameWait::None, left};
     }
     if (inputs.attached && !inputs.pickerActive) {
@@ -26,10 +27,14 @@ bool frameWorthDrawing(const RedrawInputs& inputs)
     // The interface has not finished with the last thing that happened. Hover
     // highlights, tooltip delays and carets all advance on drawn frames, so an
     // interaction owes frames for a while after its last event.
+    // A pointer still moving is in the same list: it carries the readings, and
+    // it goes on owing frames for a moment after it stops because a marker
+    // cannot set off until its next sample lands.
     const bool settling = inputs.textInputActive || inputs.overlayActive ||
                           inputs.now - inputs.lastInputEvent <= InputSettleSeconds ||
                           inputs.now - inputs.lastActivity <= IdleAfterSeconds ||
-                          inputs.now - inputs.lastReadoutActivity <= IdleAfterSeconds;
+                          inputs.now - inputs.lastReadoutActivity <= IdleAfterSeconds ||
+                          inputs.now - inputs.lastPointerMove <= IdleAfterSeconds;
     // Something timed has left the picture and no frame has taken it away.
     // Measured against the last frame drawn rather than cleared by the thing
     // that timed out, so one frame settles it and the next asks for nothing -

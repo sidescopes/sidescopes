@@ -485,6 +485,7 @@ void App::runFrame()
     m_regions.syncBorder(borderState());
     followWindowDisplay();
     syncUiScaleToMonitor();
+    notePointerMovement();
 
     if (nothingToDrawInto) {
         return;
@@ -548,6 +549,7 @@ RedrawInputs App::redrawInputs(int framebufferWidth, int framebufferHeight) cons
     inputs.now = glfwGetTime();
     inputs.lastActivity = m_lastActivity;
     inputs.lastReadoutActivity = m_lastReadoutActivity;
+    inputs.lastPointerMove = m_lastPointerMove;
     inputs.lastInputEvent = m_callbackState.lastInputEvent;
     inputs.lastDrawn = m_lastDrawnFrame;
     inputs.redrawDue = m_panes->redrawDueSeconds();
@@ -626,8 +628,9 @@ void App::serviceCaptureCrop(bool otherReadersActive, double now)
 void App::pumpEvents()
 {
     const double now = glfwGetTime();
-    const FrameWaitDecision wait = frameWaitFor(FramePacingInputs{
-        now, m_lastActivity, m_lastReadoutActivity, m_lastFrameStart, m_attach.attached(), m_regionPicker.active()});
+    const FrameWaitDecision wait =
+        frameWaitFor(FramePacingInputs{now, m_lastActivity, m_lastReadoutActivity, m_lastPointerMove, m_lastFrameStart,
+                                       m_attach.attached(), m_regionPicker.active()});
     switch (wait.kind) {
     case FrameWait::WatchAttachedWindow:
         idleWaitWatchingAttachedWindow();
@@ -734,6 +737,15 @@ void App::publishSelfWindowMask()
         m_analysis.maskedWindow = selfWindow;
         m_analysisDirty = true;
     }
+}
+
+void App::notePointerMovement()
+{
+    const std::optional<DesktopPoint> pointer = globalCursorPosition();
+    if (pointer && m_pointerAt && (pointer->x != m_pointerAt->x || pointer->y != m_pointerAt->y)) {
+        m_lastPointerMove = glfwGetTime();
+    }
+    m_pointerAt = pointer;
 }
 
 // Applies a cursor sample to host state: the smoothed colors flow on to this

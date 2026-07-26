@@ -180,6 +180,14 @@ private:
     void followWindowDisplay();
     void syncUiScaleToMonitor();
     void publishSelfWindowMask();
+    /// Notes whether the pointer has moved since the last pass of the loop.
+    ///
+    /// Taken outside the frame, because it is one of the things that decides
+    /// whether there should be one: the colour readout and both trace markers
+    /// are readings of the point under the pointer, and the pointer crosses a
+    /// still picture in another application's window without changing the
+    /// screen or sending this window an event.
+    void notePointerMovement();
     void sampleCursorColor();
     /// Puts the resolutions the adaptive detail settled on in force, so the
     /// worker recomputes each scope's image at the size its pane now wants.
@@ -349,6 +357,10 @@ private:
     /// the loop: the loop goes on servicing capture, the border and the
     /// overlays while it draws nothing at all.
     double m_lastDrawnFrame = 0.0;
+    /// Where the pointer was on the previous pass of the loop, and when it was
+    /// last somewhere else.
+    std::optional<DesktopPoint> m_pointerAt;
+    double m_lastPointerMove = 0.0;
     /// What the last drawn frame was drawn from, so the next pass can tell
     /// whether the picture it would draw is the one already on screen.
     int m_drawnFramebufferWidth = 0;
