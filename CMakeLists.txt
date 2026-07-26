@@ -57,6 +57,7 @@ endfunction()
 add_library(sidescopes_core STATIC
     src/core/frame.cpp
     src/core/diagnostics.cpp
+    src/core/environment.cpp
     src/core/color_lab.cpp
     src/core/region_hash.cpp
     src/core/heap.cpp

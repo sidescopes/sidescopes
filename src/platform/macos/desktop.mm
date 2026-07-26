@@ -2,6 +2,8 @@
 #import <CoreGraphics/CoreGraphics.h>
 
 #include "platform/desktop.h"
+
+#include "core/preferences.h"
 #include "platform/focus_resolution.h"
 
 #include <algorithm>
@@ -251,6 +253,12 @@ std::optional<uint32_t> displayUnderCursor()
 
 std::string preferencesFilePath()
 {
+    // NSHomeDirectory ignores HOME under the sandbox, so an override cannot be
+    // expressed by moving the home directory; it needs a variable of its own.
+    std::string elsewhere = preferencesFileFromEnvironment();
+    if (!elsewhere.empty()) {
+        return elsewhere;
+    }
     NSString* home = NSHomeDirectory();
     const std::string base = home.length > 0 ? home.UTF8String : ".";
     return base + "/Library/Application Support/SideScopes/preferences.txt";

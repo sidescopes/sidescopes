@@ -11,6 +11,7 @@ FetchContent_MakeAvailable(catch2)
 add_executable(sidescopes_tests
     test_frame.cpp
     test_diagnostics.cpp
+    test_environment.cpp
     test_color_lab.cpp
     test_parallel_for.cpp
     test_frame_mailbox.cpp

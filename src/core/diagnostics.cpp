@@ -3,10 +3,11 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdio>
-#include <cstdlib>
 #include <ctime>
 #include <filesystem>
 #include <iterator>
+
+#include "core/environment.h"
 
 #ifdef _WIN32
 #include <process.h>
@@ -28,28 +29,10 @@ constexpr double FlushIntervalSeconds = 0.1;
 constexpr const char* ChannelNames[] = {"attach", "border", "suggestions", "facelock", "perf"};
 static_assert(std::size(ChannelNames) == static_cast<std::size_t>(DiagChannel::Count));
 
-// The secure-CRT deprecations make std::getenv and std::fopen hard errors
-// under MSVC's warnings-as-errors, so environment and file access go
-// through the annexes Microsoft accepts.
-std::string envValue(const char* name)
-{
-#ifdef _MSC_VER
-    char* value = nullptr;
-    std::size_t size = 0;
-    if (_dupenv_s(&value, &size, name) != 0 || value == nullptr) {
-        return std::string();
-    }
-    std::string result(value);
-    std::free(value);
-
-    return result;
-#else
-    const char* value = std::getenv(name);
-
-    return value ? std::string(value) : std::string();
-#endif
-}
-
+// The secure-CRT deprecations make std::fopen a hard error under MSVC's
+// warnings-as-errors, so file access goes through the annex Microsoft
+// accepts. Environment reads go through core/environment.h for the same
+// reason.
 std::FILE* openFile(const char* path, const char* mode)
 {
 #ifdef _MSC_VER
@@ -198,8 +181,8 @@ DiagState& diagState()
 {
     static DiagState state = []() {
         DiagState fresh;
-        applyConfig(fresh, DiagConfig{envValue("SIDESCOPES_DIAG"), envValue("SIDESCOPES_DIAG_FILE"),
-                                      flushFromEnv(envValue("SIDESCOPES_DIAG_FLUSH"))});
+        applyConfig(fresh, DiagConfig{environmentValue("SIDESCOPES_DIAG"), environmentValue("SIDESCOPES_DIAG_FILE"),
+                                      flushFromEnv(environmentValue("SIDESCOPES_DIAG_FLUSH"))});
 
         return fresh;
     }();
@@ -235,16 +218,16 @@ std::string diagLogPath()
     if (!state.path.empty()) {
         return state.path;
     }
-    const std::string configured = envValue("SIDESCOPES_DIAG_FILE");
+    const std::string configured = environmentValue("SIDESCOPES_DIAG_FILE");
 
     return configured.empty() ? defaultLogPath() : configured;
 }
 
 std::string diagDirectory()
 {
-    std::string base = envValue("TEMP");
+    std::string base = environmentValue("TEMP");
     if (base.empty()) {
-        base = envValue("TMPDIR");
+        base = environmentValue("TMPDIR");
     }
     if (base.empty()) {
         base = "/tmp";

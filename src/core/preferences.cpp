@@ -11,6 +11,7 @@
 #include <string_view>
 #include <vector>
 
+#include "core/environment.h"
 #include "core/scopes/scope_types.h"
 
 namespace sidescopes {
@@ -605,6 +606,11 @@ Preferences loadPreferences(const std::filesystem::path& file)
     readInt(values, "window_height", preferences.windowHeight);
 
     return preferences;
+}
+
+std::string preferencesFileFromEnvironment()
+{
+    return environmentValue(PreferencesFileVariable);
 }
 
 bool savePreferences(const Preferences& preferences, const std::filesystem::path& file)

@@ -19,6 +19,7 @@
 #include <string>
 #include <vector>
 
+#include "core/preferences.h"
 #include "platform/windows/capture_visibility.h"
 #include "platform/windows/display_identity.h"
 #include "platform/windows/wide_strings.h"
@@ -308,6 +309,10 @@ std::string applicationDataDirectory()
 
 std::string preferencesFilePath()
 {
+    std::string elsewhere = preferencesFileFromEnvironment();
+    if (!elsewhere.empty()) {
+        return elsewhere;
+    }
     return applicationDataDirectory() + "\\SideScopes\\preferences.txt";
 }
 

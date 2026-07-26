@@ -116,6 +116,17 @@ struct Preferences
     std::map<std::string, std::string> scopeShortcuts;
 };
 
+/// The environment variable that moves the preferences file elsewhere.
+inline constexpr char PreferencesFileVariable[] = "SIDESCOPES_PREFS_FILE";
+
+/// The preferences file the environment names, or empty for the usual one.
+///
+/// A throwaway instance - a measurement harness driving the application, a test
+/// launching it - needs its own scope stack and window placement without
+/// inheriting or overwriting the user's. Pointing this at a scratch file gives
+/// it exactly that: the real file is never read and never written.
+[[nodiscard]] std::string preferencesFileFromEnvironment();
+
 /// Missing or unreadable files yield the defaults; malformed lines and
 /// unknown keys are skipped.
 [[nodiscard]] Preferences loadPreferences(const std::filesystem::path& file);
