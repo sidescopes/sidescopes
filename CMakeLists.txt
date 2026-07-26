@@ -391,6 +391,7 @@ if(APPLE OR WIN32)
         src/app/pane_layout.cpp
         src/app/param_menu.cpp
         src/app/pin_board.cpp
+        src/app/quality.cpp
         src/app/region_coordinator.cpp
         src/app/region_geometry.cpp
         src/app/region_motion.cpp

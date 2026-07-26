@@ -55,6 +55,7 @@ add_executable(sidescopes_tests
     test_region_picker.cpp
     test_region_coordinator.cpp
     test_region_motion.cpp
+    test_quality.cpp
     test_shortcut_resolver.cpp
     test_region_geometry.cpp
     test_icons.cpp
@@ -88,6 +89,7 @@ target_sources(sidescopes_tests PRIVATE
     ${CMAKE_SOURCE_DIR}/src/app/param_menu.cpp
     ${CMAKE_SOURCE_DIR}/src/app/pane_layout.cpp
     ${CMAKE_SOURCE_DIR}/src/app/pin_board.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/quality.cpp
     ${CMAKE_SOURCE_DIR}/src/app/region_coordinator.cpp
     ${CMAKE_SOURCE_DIR}/src/app/region_motion.cpp
     ${CMAKE_SOURCE_DIR}/src/app/region_picker.cpp
