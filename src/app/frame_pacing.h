@@ -7,7 +7,18 @@ namespace sidescopes {
 /// the display's refresh rate spends whole frames on an identical image -
 /// measured on a 120 Hz panel, 120 frames a second against 30 analysis passes,
 /// three of every four redrawing nothing new.
-inline constexpr double ContentRedrawSeconds = 1.0 / 30.0;
+///
+/// Twenty rather than thirty, and the cursor marker is what decides it: its
+/// glide between samples animates on drawn frames, so the cap is a smoothness
+/// setting as much as a cost one. Driven against the real MarkerSmoother at
+/// both shipped time constants and three pointer speeds, twenty is as even as
+/// thirty on every one - a tenth of frames off the average step, fastest 1.38
+/// of it against 1.37 - and it settles sooner, within a code in 100-150 ms
+/// against 133-167. Twenty-five and fifteen are both worse than either,
+/// because what matters is how the period divides the marker's own 83 ms
+/// sampling interval rather than how large it is: at fifteen the marker gets
+/// one frame a sample and steps, and at twenty-five the two rates beat.
+inline constexpr double ContentRedrawSeconds = 1.0 / 20.0;
 
 /// The frame period the loop aims at when the colour readout is the only thing
 /// following the pointer. A swatch and a percentage carry no motion, so they
