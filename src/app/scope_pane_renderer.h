@@ -117,15 +117,11 @@ public:
     /// Shows @p message in the status strip for the next couple of seconds.
     void setStatus(std::string message);
 
-    /// Shows @p message beside the scope chips for the next few seconds: the
-    /// note an attached window leaves when it closes out from under its region.
-    void showAttachNotice(std::string message);
-
-    /// @return The latest moment at which something standing on one of the
-    ///         three bands leaves it by itself - a status message, the attach
-    ///         notice, an intensity readout - or zero while none has been
-    ///         shown. Nothing else takes those away, so the frame loop owes a
-    ///         frame then even with the application otherwise quiet.
+    /// @return The latest moment at which something drawn on a clock of its own
+    ///         leaves the screen by itself - a status message, an intensity
+    ///         readout - or zero while none has been shown. Nothing else takes
+    ///         those away, so the frame loop owes a frame then even with the
+    ///         application otherwise quiet.
     [[nodiscard]] double redrawDueSeconds() const;
 
 private:

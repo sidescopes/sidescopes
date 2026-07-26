@@ -1,8 +1,5 @@
 #include "app/toolbar.h"
 
-#define GLFW_INCLUDE_NONE
-#include <GLFW/glfw3.h>
-
 #include <algorithm>
 #include <cstdio>
 #include <string>
@@ -12,6 +9,7 @@
 
 #include "app/imgui_ui.h"
 #include "app/region_picker.h"
+#include "app/row_layout.h"
 #include "imgui.h"
 #include "platform/face_detection.h"
 
@@ -138,6 +136,27 @@ bool applyScopeDrop(std::vector<std::string>& shown, ImVec2 listTop, float width
     }
 
     return false;
+}
+
+// Seats the constant-width region toolbox on the row the scope selector opened.
+//
+// The toolbox is a constant-width cluster: state dims a tool, it never removes
+// one, so the row reflows only when the WINDOW changes - not when the scope
+// stack does, and not when something transient stands beside it. Right-aligned
+// while it shares the row with the scopes; flush left when it wraps to a row of
+// its own. Narrow windows are the tall beside-the-editor shape, which has the
+// height for a second row; wide strips keep one row.
+void placeRegionToolbox()
+{
+    const int iconCount = 3 + (supportsFaceDetection() ? 1 : 0);
+    const float chip = ImGui::GetTextLineHeight() + 12.0f;
+    const float width = static_cast<float>(iconCount) * chip + static_cast<float>(iconCount - 1) * 2.0f;
+    const float right = ImGui::GetWindowContentRegionMax().x;
+    if (regionToolboxWraps(ImGui::GetCursorPosX(), width, right)) {
+        ImGui::NewLine();
+    } else {
+        ImGui::SetCursorPosX(right - width);
+    }
 }
 
 }  // namespace
@@ -322,31 +341,6 @@ const char* Toolbar::scopeName(std::string_view id) const
     return scope != nullptr ? scopeDisplayName(*scope) : "";
 }
 
-void Toolbar::placeRegionToolbox() const
-{
-    // The brief note after an attached window closed out from under its region
-    // stays on the left, by the scopes cluster, clear of the toolbox.
-    if (glfwGetTime() < m_attachNoticeUntil) {
-        ImGui::TextDisabled("%s", m_attachNotice.c_str());
-        ImGui::SameLine(0.0f, 8.0f);
-    }
-    // The region toolbox is a constant-width cluster: state dims a tool, it
-    // never removes one, so the row reflows only when the WINDOW changes -
-    // not when the scope stack does. Right-aligned while it shares the row
-    // with the scopes; flush left when it wraps to a row of its own. Narrow
-    // windows are the tall beside-the-editor shape, which has the height
-    // for a second row; wide strips keep one row.
-    const int iconCount = 3 + (supportsFaceDetection() ? 1 : 0);
-    const float chip = ImGui::GetTextLineHeight() + 12.0f;
-    const float width = static_cast<float>(iconCount) * chip + static_cast<float>(iconCount - 1) * 2.0f;
-    const float right = ImGui::GetWindowContentRegionMax().x;
-    if (ImGui::GetCursorPosX() + width + 8.0f > right) {
-        ImGui::NewLine();
-    } else {
-        ImGui::SetCursorPosX(right - width);
-    }
-}
-
 PaneRenderOutcome Toolbar::drawRegionToolIcons(bool regionSelected)
 {
     PaneRenderOutcome outcome;
@@ -388,17 +382,6 @@ PaneRenderOutcome Toolbar::drawRegionToolIcons(bool regionSelected)
     ImGui::NewLine();
 
     return outcome;
-}
-
-void Toolbar::showAttachNotice(std::string message)
-{
-    m_attachNotice = std::move(message);
-    m_attachNoticeUntil = glfwGetTime() + 5.0;
-}
-
-double Toolbar::redrawDueSeconds() const
-{
-    return m_attachNoticeUntil;
 }
 
 }  // namespace sidescopes

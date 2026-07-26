@@ -125,7 +125,7 @@ float StatusBar::drawNoRegionNote(float taken)
                         ImGui::GetWindowContentRegionMax().x)) {
         return taken;
     }
-    ImGui::SameLine(taken + StatusRowSeparation);
+    ImGui::SameLine(taken + RowSeparation);
     ImGui::SetCursorPosY(ImGui::GetCursorPosY() + rowTextDrop());
     ImGui::TextDisabled("%s", note);
 

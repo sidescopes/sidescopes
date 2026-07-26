@@ -79,14 +79,9 @@ void ScopePaneRenderer::setStatus(std::string message)
     m_statusBar.setStatus(std::move(message));
 }
 
-void ScopePaneRenderer::showAttachNotice(std::string message)
-{
-    m_toolbar.showAttachNotice(std::move(message));
-}
-
 double ScopePaneRenderer::redrawDueSeconds() const
 {
-    return std::max({m_toolbar.redrawDueSeconds(), m_panes.redrawDueSeconds(), m_statusBar.redrawDueSeconds()});
+    return std::max(m_panes.redrawDueSeconds(), m_statusBar.redrawDueSeconds());
 }
 
 }  // namespace sidescopes

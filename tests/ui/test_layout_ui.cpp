@@ -213,7 +213,7 @@ void theStandingNoteGivesWayBeforeTheReadout(ImGuiTestContext*)
     constexpr float Tool = 24.0f;
     constexpr float Note = 200.0f;
     constexpr float Swatch = 14.0f;
-    const float exact = Tool + StatusRowSeparation + Note + StatusRowSeparation + Swatch;
+    const float exact = Tool + RowSeparation + Note + RowSeparation + Swatch;
 
     IM_CHECK(statusNoteFits(Tool, Note, Swatch, exact));
     IM_CHECK(statusNoteFits(Tool, Note, Swatch, exact + 1.0f));
@@ -223,6 +223,35 @@ void theStandingNoteGivesWayBeforeTheReadout(ImGuiTestContext*)
     // still drops it when the swatch has to stand on the same line.
     IM_CHECK(statusNoteFits(Tool, Note, 0.0f, exact - Swatch));
     IM_CHECK(!statusNoteFits(Tool, Note, Swatch, exact - Swatch));
+}
+
+/// SYMPTOM IF BROKEN: the region toolbox drops to a second row and climbs back
+/// a few seconds later, while the window has not changed size.
+///
+/// The toolbox holds a constant width, so which row it sits on may depend only
+/// on the window and on the standing furniture beside it. A line of text that
+/// comes and goes to its left is enough to reflow it - the second block states
+/// exactly that, and it is why a message that shows for a moment is drawn on
+/// the status bar rather than up here.
+void theToolboxSeatsByTheWindowAlone(ImGuiTestContext*)
+{
+    constexpr float Scopes = 30.0f;
+    constexpr float Toolbox = 100.0f;
+    const float exact = Scopes + Toolbox + RowSeparation;
+
+    IM_CHECK(!regionToolboxWraps(Scopes, Toolbox, exact));
+    IM_CHECK(!regionToolboxWraps(Scopes, Toolbox, exact + 1.0f));
+    IM_CHECK(regionToolboxWraps(Scopes, Toolbox, exact - 1.0f));
+
+    // The toolbox keeps its own gap: a row wide enough for the two clusters
+    // touching still wraps.
+    IM_CHECK(regionToolboxWraps(Scopes, Toolbox, Scopes + Toolbox));
+
+    // Anything transient standing to its left moves it. On a row that seats the
+    // toolbox, a notice's width wraps it - and the row springs back when the
+    // notice goes.
+    constexpr float Notice = 180.0f;
+    IM_CHECK(regionToolboxWraps(Scopes + Notice, Toolbox, exact));
 }
 
 void registerLayoutTests(ImGuiTestEngine* engine)
@@ -248,6 +277,9 @@ void registerLayoutTests(ImGuiTestEngine* engine)
 
     ImGuiTest* note = IM_REGISTER_TEST(engine, "layout", "standing_note_gives_way_to_readout");
     note->TestFunc = theStandingNoteGivesWayBeforeTheReadout;
+
+    ImGuiTest* toolbox = IM_REGISTER_TEST(engine, "layout", "toolbox_seats_by_the_window_alone");
+    toolbox->TestFunc = theToolboxSeatsByTheWindowAlone;
 }
 
 }  // namespace
@@ -257,5 +289,5 @@ int main()
 {
     using namespace sidescopes;
 
-    return uitest::runSuite("layout", registerLayoutTests, /*expectedTests=*/7);
+    return uitest::runSuite("layout", registerLayoutTests, /*expectedTests=*/8);
 }

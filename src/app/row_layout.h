@@ -63,9 +63,8 @@ struct ReadoutColumns
 /// own height still lands off centre in the visible gap.
 [[nodiscard]] float statusRowOffset();
 
-/// The gap the status row keeps between neighbours that are not part of one
-/// reading.
-inline constexpr float StatusRowSeparation = 8.0f;
+/// The gap a row keeps between neighbours that are not part of one reading.
+inline constexpr float RowSeparation = 8.0f;
 
 /// Whether a standing note of @p noteWidth fits on a status row @p rowWidth
 /// wide: after @p taken, which is what already stands on the row, and clear of
@@ -75,5 +74,15 @@ inline constexpr float StatusRowSeparation = 8.0f;
 /// toolbox above it, while the colour under the pointer has nowhere else to
 /// go - so a row too narrow for both keeps the reading and drops the words.
 [[nodiscard]] bool statusNoteFits(float taken, float noteWidth, float swatchWidth, float rowWidth);
+
+/// Whether the region toolbox of @p toolboxWidth drops to a row of its own,
+/// rather than sitting right-aligned on the @p rowWidth row it shares, with
+/// @p taken of that row already standing to its left.
+///
+/// The toolbox is a constant-width cluster - state dims a tool, it never
+/// removes one - so the row reflows only when the window changes. Anything
+/// that comes and goes to its left reflows it too, which is why a message
+/// that shows for a moment belongs on the status bar and not on this row.
+[[nodiscard]] bool regionToolboxWraps(float taken, float toolboxWidth, float rowWidth);
 
 }  // namespace sidescopes

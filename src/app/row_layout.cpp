@@ -51,7 +51,12 @@ float statusRowOffset()
 
 bool statusNoteFits(float taken, float noteWidth, float swatchWidth, float rowWidth)
 {
-    return taken + StatusRowSeparation + noteWidth + StatusRowSeparation + swatchWidth <= rowWidth;
+    return taken + RowSeparation + noteWidth + RowSeparation + swatchWidth <= rowWidth;
+}
+
+bool regionToolboxWraps(float taken, float toolboxWidth, float rowWidth)
+{
+    return taken + toolboxWidth + RowSeparation > rowWidth;
 }
 
 }  // namespace sidescopes

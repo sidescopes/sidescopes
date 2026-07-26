@@ -16,10 +16,10 @@ class RegionPicker;
 
 /// @brief The row above the panes: the scope chips and the region toolbox.
 ///
-/// It owns the one line that comes and goes up here - the note an attached
-/// window leaves when it closes out from under its region - and drives the
-/// picker directly when a region tool is clicked. Only what the host alone can
-/// carry out travels back as a PaneRenderOutcome.
+/// Nothing transient stands up here: every message the app has to give belongs
+/// to the status bar, which keeps the foot of the window. The row drives the
+/// picker directly when a region tool is clicked, and only what the host alone
+/// can carry out travels back as a PaneRenderOutcome.
 class Toolbar
 {
 public:
@@ -37,14 +37,6 @@ public:
     /// clear, which stands down while there is no region to clear
     /// (@p regionSelected).
     [[nodiscard]] PaneRenderOutcome drawRegionToolIcons(bool regionSelected);
-
-    /// Shows @p message beside the scope chips for the next few seconds: the
-    /// note an attached window leaves when it closes out from under its region.
-    void showAttachNotice(std::string message);
-
-    /// @return When the notice leaves the row by itself, or zero while none
-    ///         has ever been shown.
-    [[nodiscard]] double redrawDueSeconds() const;
 
 private:
     /// The column geometry the scope menu lays its rows on: where the name
@@ -80,18 +72,11 @@ private:
     /// it.
     [[nodiscard]] const char* scopeName(std::string_view id) const;
 
-    /// Seats the constant-width region toolbox: right-aligned beside the
-    /// scopes, flush left on its own wrapped row, attach notice on the left.
-    void placeRegionToolbox() const;
-
     const ScopeRegistry& m_registry;
     ScopeView& m_view;
     const ShortcutResolver& m_shortcuts;
     RegionPicker& m_picker;
     IconTextures& m_icons;
-
-    std::string m_attachNotice;
-    double m_attachNoticeUntil = 0.0;
 };
 
 }  // namespace sidescopes
