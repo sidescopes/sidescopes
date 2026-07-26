@@ -357,6 +357,10 @@ public:
     // with the display's extents when it is the narrowed geometry, all zeros when
     // it is the whole display, and nothing when it is neither.
     //
+    // Telling the two apart by their dimensions is only sound because one crop is
+    // never asked for while another is in force - the settle rule on CropTracker
+    // sends the capture back to the whole display in between.
+    //
     // Returned as a rectangle carrying origin and the DISPLAY's extents, which is
     // what a frame records - not the crop's own size, which is the frame's.
     [[nodiscard]] std::optional<IntRect> geometryFor(int width, int height) const

@@ -642,7 +642,7 @@ void App::syncUiScaleToMonitor()
 
 void App::publishSelfWindowMask()
 {
-    // Publish our own window rectangle (frame pixels, generous chrome margins)
+    // Publish our own window rectangle (display pixels, generous chrome margins)
     // so analysis masks it out of change detection.
     if (!m_frameSize || m_captureController.capturedDisplay() == 0) {
         return;

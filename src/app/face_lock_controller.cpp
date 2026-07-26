@@ -50,9 +50,11 @@ bool sameRegionRect(const RegionOfInterest& a, const RegionOfInterest& b)
            std::abs(a.rightPercent - b.rightPercent) < 0.01 && std::abs(a.bottomPercent - b.bottomPercent) < 0.01;
 }
 
-// The probe's region of interest, in frame pixels: FaceLockRoiWidths anchor
+// The probe's region of interest, in display pixels: FaceLockRoiWidths anchor
 // widths around the last adopted anchor, clipped to the attached window and
 // the frame - a neighbouring window's faces are structurally out of reach.
+// The caller has already refused a narrowed frame, so the frame IS the
+// display here.
 // A lock that has lost its face searches the whole attached window instead.
 IntRect faceLockRoi(const FaceLockState& lock, const AttachWindowRect& window, const DisplayGeometry& geometry,
                     int frameWidth, int frameHeight)

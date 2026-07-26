@@ -23,6 +23,10 @@ struct FrameBuffer
     uint64_t sequence = 0;
     /// Where these pixels sit on their display, and how large it is; all zero
     /// for a frame that covers the whole display. See FrameView.
+    ///
+    /// A producer must stamp all four on EVERY frame, not only on the narrowed
+    /// ones: buffers are recycled through the mailbox, so a field left alone
+    /// carries the previous frame's answer forward and mislabels the pixels.
     int sourceX = 0;
     int sourceY = 0;
     int sourceWidth = 0;

@@ -5,9 +5,12 @@
 
 namespace sidescopes {
 
-/// A rectangle in frame pixels. The lock does all of its geometry in frame
+/// A rectangle in display pixels. The lock does all of its geometry in
 /// pixels because they are isotropic; display percentages are not, and
-/// distance gates would skew. The App converts at the boundary.
+/// distance gates would skew. The App converts at the boundary. Display
+/// rather than frame pixels because the probe searches the whole display -
+/// a capture narrowed to the analysis region cannot answer for the window
+/// the face sits in, so no lock is ever measured against a crop.
 struct LockRect
 {
     double left = 0.0;
@@ -17,7 +20,7 @@ struct LockRect
 };
 
 /// A detected face reduced to the anchor the lock follows: its centre and
-/// width, in frame pixels. Both platforms anchor on the detector's box -
+/// width, in display pixels. Both platforms anchor on the detector's box -
 /// deliberately no landmark refinement, so macOS and Windows behave the
 /// same.
 struct FaceAnchor

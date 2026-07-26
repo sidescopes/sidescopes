@@ -146,7 +146,7 @@ private:
         std::atomic<bool> running{false};
         std::atomic<bool> ready{false};
         std::mutex mutex;
-        std::vector<IntRect> faces;  ///< detector boxes, full-frame pixels
+        std::vector<IntRect> faces;  ///< detector boxes, display pixels
         uint64_t forWindowIdentity = 0;
         IntRect roi;  ///< the searched rectangle, for judging edge-clipped boxes
     };

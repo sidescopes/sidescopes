@@ -54,6 +54,13 @@ struct CropInputs
 /// different places - a picked region, an attached window's, a preset's - so
 /// noticing the change here rather than at each of them keeps the settle rule in
 /// one place and off the paths that merely set a region.
+///
+/// THE SETTLE RULE ALSO CARRIES AN INVARIANT THE BACKENDS RELY ON: because any
+/// region change restarts it, one crop is never replaced by another directly -
+/// the capture is always asked for the whole display in between. A backend may
+/// therefore tell a narrowed delivery from a whole one by its dimensions alone,
+/// which is what the macOS one does; two crops of the same size asked for back
+/// to back would leave it stamping the frames in flight with the wrong origin.
 class CropTracker
 {
 public:
