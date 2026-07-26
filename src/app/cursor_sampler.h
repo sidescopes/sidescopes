@@ -16,10 +16,10 @@ class CaptureController;
 /// How often a marker takes a new colour to travel towards. The pointer crosses
 /// a photograph faster than a marker means anything at: sampled every frame, a
 /// marker chases thirty colours a second and reads as jumping about rather than
-/// as a reading. Twelve a second is a third of that, and still short enough
-/// against the traces' own smoothing - 75 ms on the vectorscope, 100 on the
-/// waveform - that a new colour arrives while the marker is still travelling,
-/// so it keeps moving continuously instead of stepping and settling.
+/// as a reading. Twelve a second is a third of that.
+///
+/// It is a sampling rate and not an animation rate: what a marker draws moves
+/// every frame, along the glide between one sample and the next.
 inline constexpr double MarkerSampleSeconds = 1.0 / 12.0;
 
 /// How often the readout takes a new colour. It has the same complaint as the
@@ -157,16 +157,28 @@ private:
                        float deltaSeconds, CursorSample& sample);
 
     /// The colour the markers are travelling towards: @p sampled taken afresh
-    /// when the sampling interval is up, the one they were already following
+    /// when the sampling interval is up, the glide from the one before it
     /// until then, and nothing at all while @p markersLive is false.
     [[nodiscard]] std::optional<FloatColor> markerTarget(const std::optional<FloatColor>& sampled, bool markersLive,
                                                          double now);
 
+    /// How far the glide between the last two samples has got by @p now.
+    [[nodiscard]] std::optional<FloatColor> glidingTarget(double now) const;
+
+    /// Whether the glide still has ground to cover at @p now.
+    ///
+    /// The frame that takes a new sample draws the marker where it already
+    /// was, so movement has to be reported from the ground left rather than
+    /// from the step just taken: a loop that had gone idle would otherwise
+    /// sleep through the whole glide and land the marker on its colour in one
+    /// jump, which is the very stutter the glide exists to remove.
+    [[nodiscard]] bool markerStillTravelling(double now) const;
+
     /// Advances both trace markers one frame towards @p target, or takes them
     /// off the traces when it is empty, and reports through @p sample whether
-    /// either moved.
-    void advanceMarkers(const std::optional<FloatColor>& target, CursorSmoothing smoothing, float deltaSeconds,
-                        CursorSample& sample);
+    /// either has anywhere left to go.
+    void advanceMarkers(const std::optional<FloatColor>& target, CursorSmoothing smoothing, double now,
+                        float deltaSeconds, CursorSample& sample);
 
     /// The sample under the pointer anywhere else: a throttled one-shot screen
     /// read whose result lands asynchronously, so this returns the freshest
@@ -189,6 +201,18 @@ private:
     /// each is due a new one: what makes them readings taken a dozen times a
     /// second rather than points chasing every frame's pixel.
     std::optional<FloatColor> m_markerTarget;
+    /// Where the glide towards that target started, and when.
+    ///
+    /// Sampling and animation are separate rates. A target refreshed twelve
+    /// times a second is a staircase, and a marker easing onto a staircase
+    /// lurches once per step: it spends a third of each step in the first
+    /// frame after it and crawls through what is left, so its speed swings
+    /// between a third and half again the average, twelve times a second.
+    /// Sliding the target between samples gives the ease something continuous
+    /// to follow and the swing falls to a tenth of that, for two floats a
+    /// frame and no extra probes.
+    std::optional<FloatColor> m_markerGlideFrom;
+    double m_markerGlideStart = 0.0;
     double m_nextMarkerSample = 0.0;
     std::optional<FloatColor> m_readoutTarget;
     double m_nextReadoutSample = 0.0;

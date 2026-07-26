@@ -372,12 +372,19 @@ TEST_CASE("A marker takes a new colour at its own interval")
     CHECK_THAT(within.vectorscopeColor->r, WithinAbs(200.0f, 1.0f));
     CHECK_FALSE(within.changed);
 
-    // Past the interval it takes the new one.
+    // Past the interval it takes the new one and sets off towards it: a moment
+    // after the sample lands it has barely left the old colour, and it arrives
+    // an interval later, as the sample after that lands.
     const CursorSample after =
         fix.sampler.update(FrameSize, Quadrant, Instant, 1.0 + MarkerSampleSeconds + 0.001, 1.0f / 60.0f);
     REQUIRE(after.vectorscopeColor.has_value());
-    CHECK_THAT(after.vectorscopeColor->g, WithinAbs(200.0f, 1.0f));
+    CHECK_THAT(after.vectorscopeColor->g, WithinAbs(50.0f, 5.0f));
     CHECK(after.changed);
+
+    const CursorSample arrived =
+        fix.sampler.update(FrameSize, Quadrant, Instant, 1.0 + 2.0 * MarkerSampleSeconds, 1.0f / 60.0f);
+    REQUIRE(arrived.vectorscopeColor.has_value());
+    CHECK_THAT(arrived.vectorscopeColor->g, WithinAbs(200.0f, 3.0f));
 
     // The readout keeps a slower interval of its own - it has the same
     // complaint and less reason to move at all - so it is still showing the
@@ -389,6 +396,47 @@ TEST_CASE("A marker takes a new colour at its own interval")
         fix.sampler.update(FrameSize, Quadrant, Instant, 1.0 + ReadoutSampleSeconds + 0.001, 1.0f / 60.0f);
     REQUIRE(readout.readoutColor.has_value());
     CHECK_THAT(readout.readoutColor->g, WithinAbs(200.0f, 1.0f));
+}
+
+TEST_CASE("A marker crosses the trace at an even speed between samples")
+{
+    // Sampling and animation are separate rates. Easing straight onto a target
+    // refreshed twelve times a second spends most of each step in the first
+    // frame after it and crawls through the rest, which reads as a stutter;
+    // the target glides between samples instead, so the marker covers a
+    // quarter of the way in a quarter of the interval. Smoothing is off here,
+    // so what is measured is the glide and not the ease on top of it.
+    SamplerFixture fix;
+    desktopStubs().cursorDisplay = StreamedDisplay;
+    desktopStubs().cursor = DesktopPoint{8.0, 8.0};
+
+    REQUIRE(fix.sampler.update(FrameSize, Quadrant, Instant, 1.0, 1.0f / 60.0f).vectorscopeColor.has_value());
+    fix.mailbox.publish(makeSolidFrameBuffer(64, 64, Color{20, 200, 90}, 2));
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (fix.worker.consumedFrameSequence() != 2 && std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+    REQUIRE(fix.worker.consumedFrameSequence() == 2);
+
+    // The sample that takes the new colour, and the glide it starts.
+    constexpr double Sampled = 1.0 + MarkerSampleSeconds;
+    REQUIRE(fix.sampler.update(FrameSize, Quadrant, Instant, Sampled, 1.0f / 60.0f).vectorscopeColor.has_value());
+    for (const double covered : {0.25, 0.5, 0.75}) {
+        const CursorSample step =
+            fix.sampler.update(FrameSize, Quadrant, Instant, Sampled + MarkerSampleSeconds * covered, 1.0f / 60.0f);
+        REQUIRE(step.vectorscopeColor.has_value());
+        CHECK_THAT(step.vectorscopeColor->g, WithinAbs(static_cast<float>(50.0 + 150.0 * covered), 2.0f));
+        // Every one of those frames is movement, so the loop keeps drawing at
+        // the moving cadence for the whole of the glide.
+        CHECK(step.changed);
+    }
+
+    // And it stops when it arrives: a glide that has run out with the colour
+    // under the pointer unchanged asks for no more frames.
+    for (int frame = 1; frame <= 30; ++frame) {
+        (void)fix.sampler.update(FrameSize, Quadrant, Instant, Sampled + 1.0 + 0.033 * frame, 1.0f / 60.0f);
+    }
+    CHECK_FALSE(fix.sampler.update(FrameSize, Quadrant, Instant, Sampled + 2.0, 1.0f / 60.0f).changed);
 }
 
 TEST_CASE("The loop's readout cadence matches the rate the pointer is probed at")

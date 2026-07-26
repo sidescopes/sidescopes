@@ -1,5 +1,6 @@
 #include "app/cursor_sampler.h"
 
+#include <algorithm>
 #include <cmath>
 
 #include "app/capture_controller.h"
@@ -24,6 +25,12 @@ bool markerMoved(const std::optional<FloatColor>& before, const std::optional<Fl
 
     return std::abs(before->r - after->r) > Threshold || std::abs(before->g - after->g) > Threshold ||
            std::abs(before->b - after->b) > Threshold;
+}
+
+FloatColor partWay(const FloatColor& from, const FloatColor& to, float fraction)
+{
+    return FloatColor{from.r + (to.r - from.r) * fraction, from.g + (to.g - from.g) * fraction,
+                      from.b + (to.b - from.b) * fraction};
 }
 
 }  // namespace
@@ -110,7 +117,7 @@ CursorSample CursorSampler::update(std::optional<AnalysisWorker::FrameSize> fram
         probed = probeColor(*cursor, pixel, now);
     }
     updateReadout(probed, smoothing, now, deltaSeconds, sample);
-    advanceMarkers(markerTarget(probed, markersLive, now), smoothing, deltaSeconds, sample);
+    advanceMarkers(markerTarget(probed, markersLive, now), smoothing, now, deltaSeconds, sample);
 
     return sample;
 }
@@ -145,6 +152,20 @@ void CursorSampler::updateReadout(const std::optional<FloatColor>& probed, Curso
     m_lastReadoutColor = sample.readoutColor;
 }
 
+std::optional<FloatColor> CursorSampler::glidingTarget(double now) const
+{
+    if (!m_markerTarget || !m_markerGlideFrom) {
+        return m_markerTarget;
+    }
+    // The glide lasts exactly one sampling interval, so it arrives as the next
+    // sample lands: no step to take at the handover, and nothing left over
+    // once the pointer stops.
+    const double elapsed = now - m_markerGlideStart;
+    const auto covered = static_cast<float>(std::clamp(elapsed / MarkerSampleSeconds, 0.0, 1.0));
+
+    return partWay(*m_markerGlideFrom, *m_markerTarget, covered);
+}
+
 std::optional<FloatColor> CursorSampler::markerTarget(const std::optional<FloatColor>& sampled, bool markersLive,
                                                       double now)
 {
@@ -152,19 +173,33 @@ std::optional<FloatColor> CursorSampler::markerTarget(const std::optional<FloatC
         // Nothing to travel towards, and the next arrival takes its colour
         // where the pointer comes back rather than where it left.
         m_markerTarget.reset();
+        m_markerGlideFrom.reset();
         m_nextMarkerSample = 0.0;
 
         return std::nullopt;
     }
     if (sampled && now >= m_nextMarkerSample) {
+        // From wherever the glide had reached rather than from the last
+        // sample, so one that arrives late leaves no step behind it.
+        m_markerGlideFrom = glidingTarget(now);
         m_markerTarget = sampled;
+        m_markerGlideStart = now;
         m_nextMarkerSample = now + MarkerSampleSeconds;
     }
 
-    return m_markerTarget;
+    return glidingTarget(now);
 }
 
-void CursorSampler::advanceMarkers(const std::optional<FloatColor>& target, CursorSmoothing smoothing,
+bool CursorSampler::markerStillTravelling(double now) const
+{
+    if (!m_markerTarget || !m_markerGlideFrom || now - m_markerGlideStart >= MarkerSampleSeconds) {
+        return false;
+    }
+
+    return markerMoved(glidingTarget(now), m_markerTarget);
+}
+
+void CursorSampler::advanceMarkers(const std::optional<FloatColor>& target, CursorSmoothing smoothing, double now,
                                    float deltaSeconds, CursorSample& sample)
 {
     // Where the pointer carries no marker there is none rather than a stale
@@ -181,8 +216,9 @@ void CursorSampler::advanceMarkers(const std::optional<FloatColor>& target, Curs
     }
     // The smoothed value, not the raw one: a marker easing towards a colour it
     // has not reached yet still has to be redrawn, and one that has arrived
-    // does not.
-    sample.changed = markerMoved(m_lastVectorscopeColor, sample.vectorscopeColor) ||
+    // does not. Ground still to cover counts as well as ground just covered,
+    // so the frame a sample lands on asks for the frames its glide needs.
+    sample.changed = markerStillTravelling(now) || markerMoved(m_lastVectorscopeColor, sample.vectorscopeColor) ||
                      markerMoved(m_lastWaveformColor, sample.waveformColor);
     m_lastVectorscopeColor = sample.vectorscopeColor;
     m_lastWaveformColor = sample.waveformColor;
