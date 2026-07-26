@@ -1,6 +1,19 @@
 #include "app/region_geometry.h"
 
+#include <algorithm>
+#include <cmath>
+
 namespace sidescopes {
+
+double regionTravelPercent(const std::optional<RegionOfInterest>& from, const std::optional<RegionOfInterest>& to)
+{
+    if (!from || !to) {
+        return 0.0;
+    }
+
+    return std::max({std::abs(to->leftPercent - from->leftPercent), std::abs(to->rightPercent - from->rightPercent),
+                     std::abs(to->topPercent - from->topPercent), std::abs(to->bottomPercent - from->bottomPercent)});
+}
 
 LockRect lockRectFromPercent(const RegionOfInterest& region, int frameWidth, int frameHeight)
 {

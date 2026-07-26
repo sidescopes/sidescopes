@@ -10,6 +10,23 @@ namespace sidescopes {
 /// enough that letting go is followed by the sharp trace.
 inline constexpr double RegionSettleSeconds = 0.25;
 
+/// How fast the user's hand has to be moving the region before nobody could be
+/// reading the scopes, as per cent of the display a second.
+///
+/// Two gestures, and the owner separates them: a region SCANNED at walking pace
+/// hunting for blown highlights is read while it moves, and a region THROWN
+/// from one face to another is not - "no one is going to care about the scopes
+/// during this short period". Measured on the harness's own two: its slow scan
+/// travels about 16 per cent of the display a second, its flick about 100. The
+/// pair sits between them, far enough from the scan that a brisk one never
+/// crosses it.
+inline constexpr double ThrownSpeedPercent = 50.0;
+
+/// And how far it must slow down to be read again. Lower than the speed that
+/// starts a throw, so a hand that wavers around one number does not flick the
+/// scopes on and off through the middle of a gesture.
+inline constexpr double ScannedSpeedPercent = 25.0;
+
 /// What is moving the region, which is what decides what analysis does about
 /// it. The two causes are opposites, and reading them as one state served
 /// neither: a user moving the region is scanning a picture with it - over a
@@ -39,15 +56,25 @@ struct RegionMotionInputs
     /// An attached window is being moved or resized by the user.
     bool windowMoving = false;
     double now = 0.0;
+    /// How far the region moved to differ, as per cent of the display: the
+    /// largest of its four edges' displacements, so a rectangle being thrown
+    /// and one being drawn from a corner both read as the movement they are.
+    /// Meaningless unless regionChanged.
+    double travelPercent = 0.0;
 };
 
 /// What one step decided.
 struct RegionMotionStep
 {
     RegionMotion motion = RegionMotion::Still;
-    /// Whether the motion just changed. The change itself has to be carried
-    /// out: a region that stopped moving stops dirtying the settings, so
-    /// nothing else would take the detail back up or let analysis go again.
+    /// Whether the hand is moving it too fast for anyone to be reading the
+    /// scopes. Only ever true of a Dragged region - a window carrying one is
+    /// already not being read at any speed.
+    bool thrown = false;
+    /// Whether either of the two above just changed. The change itself has to
+    /// be carried out: a region that stopped moving stops dirtying the
+    /// settings, so nothing else would take the detail back up or let analysis
+    /// go again.
     bool changed = false;
 };
 
@@ -64,11 +91,17 @@ public:
     }
 
 private:
+    /// Reads the hand's speed off one region change and answers whether the
+    /// region is being thrown, with the hysteresis that keeps one gesture in
+    /// one regime.
+    [[nodiscard]] bool throwing(const RegionMotionInputs& inputs);
+
     /// When the user last moved the region themselves. Held as an optional
     /// rather than a sentinel because the frame clock legitimately reads zero
     /// at startup.
     std::optional<double> m_draggedAt;
     RegionMotion m_motion = RegionMotion::Still;
+    bool m_thrown = false;
 };
 
 }  // namespace sidescopes
