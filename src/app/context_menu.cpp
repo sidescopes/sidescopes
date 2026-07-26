@@ -18,6 +18,15 @@
 namespace sidescopes {
 namespace {
 
+// Three id ranges run consecutively from their bases, one entry per offered
+// step, and the last of them is open-ended: a scope toggle exists for every
+// registered scope. Adding a step to either of the first two silently walked
+// into the next range, so the build checks the ranges instead.
+static_assert(MenuUiScaleBase + static_cast<int>(UiScaleSteps.size()) <= MenuQualityBase,
+              "the interface-size ids run into the quality ids");
+static_assert(MenuQualityBase + static_cast<int>(QualityLevels.size()) <= MenuShowScopeBase,
+              "the quality ids run into the scope-toggle ids");
+
 void menuAction(std::vector<NativeMenuItem>& menu, const char* label, int id, bool checked, std::string shortcut = "")
 {
     menu.push_back({NativeMenuItem::Kind::Action, label, id, checked, std::move(shortcut)});
@@ -211,6 +220,19 @@ void appendGraticuleSubmenu(const ContextMenuModel& model, std::vector<NativeMen
     menuEndSubmenu(menu);
 }
 
+void appendQualitySubmenu(const ContextMenuModel& model, std::vector<NativeMenuItem>& menu)
+{
+    // One choice for how much of the machine the analysis may spend: the rate
+    // the screen is read at, the resolution every scope image is computed at,
+    // and how densely the region is sampled.
+    menuSubmenu(menu, "Quality");
+    for (std::size_t step = 0; step < QualityLevels.size(); ++step) {
+        const QualityLevel level = QualityLevels[step];
+        menuAction(menu, qualityLabel(level), MenuQualityBase + static_cast<int>(step), level == model.quality);
+    }
+    menuEndSubmenu(menu);
+}
+
 void appendPresetsSubmenu(const ContextMenuModel& model, std::vector<NativeMenuItem>& menu)
 {
     // Each slot lists its saved summary or "empty"; the digit hint teaches the
@@ -270,6 +292,7 @@ void appendRegionAndAppSection(const ContextMenuModel& model, std::vector<Native
     menuSeparator(menu);
     menuAction(menu, "Reset to Defaults", MenuResetDiagnostics, false);
     menuEndSubmenu(menu);
+    appendQualitySubmenu(model, menu);
     appendUiScaleSubmenu(model, menu);
     menuAction(menu, "Settings", MenuOpenSettings, false);
     menuAction(menu, "About SideScopes", MenuAbout, false);

@@ -22,6 +22,7 @@
 #include "app/layout_presets.h"
 #include "app/param_menu.h"
 #include "app/pin_board.h"
+#include "app/quality.h"
 #include "app/region_coordinator.h"
 #include "app/region_motion.h"
 #include "app/region_picker.h"
@@ -107,6 +108,10 @@ private:
     // --- startup ---
     void setupImGui();
     void setupCapture();
+
+    /// Registers the system observers the frame loop reacts to: sleep and
+    /// wake, an Escape with no key window, and foreground changes.
+    void observeSystemEvents();
     void setupView(const Preferences& startup);
 
     // --- state accessors ---
@@ -233,6 +238,11 @@ private:
     void dispatchViewMenu(int chosen);
     void dispatchLayoutMenu(int chosen);
     void dispatchUiScaleMenu(int chosen);
+    void dispatchQualityMenu(int chosen);
+
+    /// Puts @p level in force: the resolutions the detail policy asks for, how
+    /// thinly the region is sampled, and how often the screen is read.
+    void applyQuality(QualityLevel level);
 
     // --- post-render region handling ---
     /// Applies a RegionPickOutcome to host state: a live preview becomes the
@@ -264,6 +274,8 @@ private:
     /// The interface-size step the context menu chose this frame, or -1. Held
     /// until applyPendingUiScale runs it past the host window's PopStyleVar.
     int m_pendingUiScaleStep = -1;
+    /// How much of the machine the analysis may spend.
+    QualityLevel m_quality = QualityLevel::Standard;
 
     FrameMailbox m_mailbox;
     AnalysisWorker m_worker;

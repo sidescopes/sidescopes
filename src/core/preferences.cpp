@@ -593,6 +593,10 @@ Preferences loadPreferences(const std::filesystem::path& file)
     readPins(values, preferences);
 
     readFloat(values, "ui_scale_factor", preferences.uiScaleFactor);
+    const auto quality = values.find("quality");
+    if (quality != values.end()) {
+        preferences.quality = quality->second;
+    }
     readInt(values, "window_x", preferences.windowX);
     readInt(values, "window_y", preferences.windowY);
     readInt(values, "window_width", preferences.windowWidth);
@@ -626,6 +630,7 @@ bool savePreferences(const Preferences& preferences, const std::filesystem::path
         << "graticule_strength=" << preferences.graticuleStrength << '\n'
         << "vectorscope_zoom=" << preferences.vectorscopeZoom << '\n'
         << "ui_scale_factor=" << preferences.uiScaleFactor << '\n'
+        << "quality=" << preferences.quality << '\n'
         << "window_x=" << preferences.windowX << '\n'
         << "window_y=" << preferences.windowY << '\n'
         << "window_width=" << preferences.windowWidth << '\n'

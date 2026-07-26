@@ -171,6 +171,9 @@ bool App::init()
     }
     m_frameTimer = std::make_unique<FrameTimer>(*m_graphics);
 
+    // Before the stream is created, so a saved level is the rate it is created
+    // at rather than a restart on the way up.
+    applyQuality(qualityFromToken(startup.quality));
     setupCapture();
     seedAnalysis(m_analysis, startup);
     setupView(startup);
@@ -184,6 +187,18 @@ bool App::init()
     m_worker.start();
     warmFaceDetection();
 
+    observeSystemEvents();
+    rememberApplicationWindow(m_graphics->nativeWindowHandle());
+    m_ownPid = ownApplicationPid();
+
+    m_lastActivity = glfwGetTime();
+    m_regions.syncBorder(borderState());
+
+    return true;
+}
+
+void App::observeSystemEvents()
+{
     observeSystemWake([this] {
         m_sessionAsleep.store(false);
         m_captureController.markStale();
@@ -197,13 +212,6 @@ bool App::init()
         m_callbackState.foregroundChanged.store(true);
         glfwPostEmptyEvent();
     });
-    rememberApplicationWindow(m_graphics->nativeWindowHandle());
-    m_ownPid = ownApplicationPid();
-
-    m_lastActivity = glfwGetTime();
-    m_regions.syncBorder(borderState());
-
-    return true;
 }
 
 // A pass has been published. Runs on the worker's thread, so it does two
@@ -450,6 +458,7 @@ void App::persistPreferences()
     preferences.layoutPresets = m_presets.all();
     preferences.layoutActiveSlot = m_presets.activeSlot();
     preferences.uiScaleFactor = m_uiScale.userFactor();
+    preferences.quality = qualityToken(m_quality);
     preferences.shortcuts = m_shortcuts.bindings();
     preferences.scopeShortcuts = m_shortcuts.scopeOverrides();
     preferences.pins = m_pins.colors();
@@ -1007,6 +1016,7 @@ void App::handleContextMenu()
                                  m_pins.empty(),
                                  m_presets.activeSlot(),
                                  m_uiScale.userFactor(),
+                                 m_quality,
                                  m_analysis.region.has_value()};
     buildContextMenu(model, clickedPane, menu, paramActions);
     const int chosen = showNativeContextMenu(menu);
@@ -1030,6 +1040,7 @@ void App::dispatchMenuChoice(int chosen, const std::vector<ParamMenuAction>& par
     dispatchViewMenu(chosen);
     dispatchLayoutMenu(chosen);
     dispatchUiScaleMenu(chosen);
+    dispatchQualityMenu(chosen);
     m_lastActivity = glfwGetTime();
     m_nextPreferencesSave = glfwGetTime() + 1.0;
 }
@@ -1182,6 +1193,27 @@ void App::dispatchUiScaleMenu(int chosen)
     }
 }
 
+void App::dispatchQualityMenu(int chosen)
+{
+    const int step = chosen - MenuQualityBase;
+    if (step >= 0 && step < static_cast<int>(QualityLevels.size())) {
+        applyQuality(QualityLevels[static_cast<std::size_t>(step)]);
+    }
+}
+
+void App::applyQuality(QualityLevel level)
+{
+    m_quality = level;
+    const QualityProfile& profile = profileFor(level);
+    // The resolutions travel by the detail policy's own debounced route, so a
+    // change lands once rather than per frame; the sample rate and the capture
+    // cadence are applied here and now.
+    m_detail.setQuality(level);
+    m_analysis.sampleThinning = profile.sampleThinning;
+    m_captureController.setFrameRate(profile.captureFramesPerSecond);
+    m_analysisDirty = true;
+}
+
 void App::applyPendingUiScale()
 {
     if (m_pendingUiScaleStep < 0) {
@@ -1211,7 +1243,8 @@ void App::commitAnalysisChanges(bool drewThisPass)
         // Coarse only on the way out: the settings themselves stay the truth,
         // so the detail policy and the projections keep reading what the region
         // will be analysed at the moment it stops moving.
-        m_worker.updateSettings(motion == RegionMotion::Dragged ? coarsenedForDrag(m_analysis) : m_analysis);
+        const bool coarsen = motion == RegionMotion::Dragged && profileFor(m_quality).coarsenWhileDragged;
+        m_worker.updateSettings(coarsen ? coarsenedForDrag(m_analysis) : m_analysis);
         m_panes->configureProjections();
         m_analysisDirty = false;
         m_lastActivity = now;

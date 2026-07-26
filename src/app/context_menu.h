@@ -7,6 +7,7 @@
 
 #include "app/attach_controller.h"
 #include "app/param_menu.h"
+#include "app/quality.h"
 #include "app/scope_registry.h"
 #include "app/scope_view.h"
 #include "app/shortcut_resolver.h"
@@ -47,6 +48,8 @@ enum MenuAction
     MenuSavePresetBase = 80,
     // Interface-size ids are MenuUiScaleBase + the UiScaleSteps index.
     MenuUiScaleBase = 90,
+    // Quality ids are MenuQualityBase + the QualityLevels index.
+    MenuQualityBase = 97,
     // Scope-toggle ids are MenuShowScopeBase + the scope's index in the
     // registry, so every registered scope gets a menu entry with no hardcoded
     // list. Clear of ParamMenuActionBase.
@@ -58,8 +61,8 @@ enum MenuAction
 
 /// The read-only snapshot the context-menu builder reads from the app: the view
 /// and registry it reflects, the shortcut labels, the pin and attach state, the
-/// preset slots, and the interface-size factor. References stay valid for the
-/// single synchronous build call.
+/// preset slots, the interface-size factor, and the quality level. References
+/// stay valid for the single synchronous build call.
 struct ContextMenuModel
 {
     const ScopeView& view;
@@ -72,6 +75,8 @@ struct ContextMenuModel
     bool pinsEmpty;
     int activePresetSlot;
     float userUiScaleFactor;
+    /// How much of the machine the analysis may spend.
+    QualityLevel quality;
     /// Whether a region has been selected at all; without one there is nothing
     /// for Clear Region to clear.
     bool regionSelected;

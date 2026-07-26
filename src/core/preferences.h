@@ -101,6 +101,10 @@ struct Preferences
     /// User interface-size factor, a multiplier on the OS scale (1.0 = match
     /// the system). One of the discrete UiScaleSteps; per user, not per display.
     float uiScaleFactor = 1.0f;
+    /// How much of the machine the analysis may spend, as the level's own word:
+    /// "low", "standard" or "high". The app resolves it; anything else reads as
+    /// the default.
+    std::string quality = "standard";
     int windowX = -1;  ///< Negative lets the system place the window.
     int windowY = -1;
     int windowWidth = 440;

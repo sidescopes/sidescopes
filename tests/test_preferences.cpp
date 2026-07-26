@@ -46,6 +46,7 @@ TEST_CASE("Preferences round-trip through a file")
     saved.graticuleStrength = 0.5f;
     saved.windowX = 120;
     saved.windowWidth = 640;
+    saved.quality = "high";
 
     const TempFile file("roundtrip.txt");
     REQUIRE(savePreferences(saved, file.path()));
@@ -62,6 +63,7 @@ TEST_CASE("Preferences round-trip through a file")
     CHECK(loaded.graticuleStrength == 0.5f);
     CHECK(loaded.windowX == 120);
     CHECK(loaded.windowWidth == 640);
+    CHECK(loaded.quality == "high");
 }
 
 TEST_CASE("Preferences default when the file is missing")
@@ -71,6 +73,7 @@ TEST_CASE("Preferences default when the file is missing")
     CHECK(param(loaded, VectorscopeId, "gain") == 3.0);
     CHECK(param(loaded, WaveformId, "gain") == 0.05);
     CHECK(loaded.graticuleStrength == 1.0f);
+    CHECK(loaded.quality == "standard");
 }
 
 TEST_CASE("Preferences read a legacy per-scope gain")
