@@ -67,6 +67,17 @@ inline constexpr int DraggedDetailDivisor = 2;
 /// a picture rather than a handful of cells.
 inline constexpr int DraggedDetailFloor = 128;
 
+/// What the samples per bin are divided by while the region moves, for the
+/// scopes that offer the thinning extension. It is the waveform family's
+/// answer to the coarser image the others take: its columns are places in the
+/// region and are left alone, so what it gives up instead is how densely each
+/// column is filled. Measured at 1024 columns over a whole display, halving
+/// them takes the pass to 64% of full for a mean of 1.3 of 255 - a better
+/// trade per millisecond than any image axis on any scope, and three times
+/// the saving. It also does nothing at all below about four megapixels, where
+/// the budget already exceeds the region.
+inline constexpr int DraggedSampleDivisor = 2;
+
 /// @p settings with every scope image it names computed at a fraction of its
 /// resolution: what to ask of the worker while the user drags the region.
 ///

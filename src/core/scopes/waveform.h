@@ -57,6 +57,14 @@ struct WaveformSettings
     /// image samples them through a spline so magnified traces draw as
     /// curves rather than stretched texels.
     int imageHeight = WaveformLevels;
+    /// Divides the samples per bin the pass asks for (1..8, 1 = every one it
+    /// would take). Host-driven and never a user setting: the columns are
+    /// places in the region and must not be coarsened, so this is what a
+    /// moving region gives up instead. Halving it costs a mean 1.3 of 255 for
+    /// 36% of the pass, and does nothing at all where the budget already
+    /// exceeds the region - which is every region under about four
+    /// megapixels.
+    int sampleThinning = 1;
 };
 
 /// Waveform monitor: level (vertical) against image column (horizontal).

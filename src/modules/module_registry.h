@@ -189,6 +189,20 @@ struct SsAdaptiveImageExtension
     void (*setImageSize)(SsScopeInstance* instance, int32_t width, int32_t height);
 };
 
+/// Instance extension: how thinly a scope may sample, as a divisor on the
+/// samples per bin it would otherwise ask for. The host raises it while the
+/// region is moving, for scopes whose image resolution cannot be coarsened
+/// without losing places in the region rather than precision - the waveform
+/// family, whose columns are places. Kept out of the parameter list users
+/// see, like the image size above it. A scope that does not offer it samples
+/// the same however the region moves.
+inline constexpr char SampleThinningExtension[] = "sidescopes.sample_thinning/1";
+
+struct SsSampleThinningExtension
+{
+    void (*setSampleThinning)(SsScopeInstance* instance, int32_t divisor);
+};
+
 /// Instance extension: normalized curve heights for display-resolution
 /// stroking (the histogram's outline).
 inline constexpr char OutlineExtension[] = "sidescopes.outline/1";

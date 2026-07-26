@@ -158,6 +158,7 @@ struct WorkerScope
     const SsScopeDescriptor* descriptor = nullptr;
     ScopeInstance instance;
     const SsAdaptiveImageExtension* adaptive = nullptr;
+    const SsSampleThinningExtension* thinning = nullptr;
     const SsOutlineExtension* outline = nullptr;
 };
 
@@ -200,6 +201,7 @@ void syncScopeInstances(std::vector<WorkerScope>& scopes, const std::vector<std:
         if (!wanted) {
             scope.instance = ScopeInstance{};
             scope.adaptive = nullptr;
+            scope.thinning = nullptr;
             scope.outline = nullptr;
             continue;
         }
@@ -207,6 +209,8 @@ void syncScopeInstances(std::vector<WorkerScope>& scopes, const std::vector<std:
         if (scope.instance.valid()) {
             scope.adaptive =
                 static_cast<const SsAdaptiveImageExtension*>(scope.instance.getExtension(AdaptiveImageExtension));
+            scope.thinning =
+                static_cast<const SsSampleThinningExtension*>(scope.instance.getExtension(SampleThinningExtension));
             scope.outline = static_cast<const SsOutlineExtension*>(scope.instance.getExtension(OutlineExtension));
         }
     }
@@ -256,6 +260,9 @@ void configureScopes(std::vector<WorkerScope>& scopes, const AnalysisSettings& s
         const auto size = settings.imageSizes.find(scope.id);
         if (scope.adaptive && size != settings.imageSizes.end()) {
             scope.adaptive->setImageSize(scope.instance.raw(), size->second.first, size->second.second);
+        }
+        if (scope.thinning) {
+            scope.thinning->setSampleThinning(scope.instance.raw(), settings.sampleThinning);
         }
     }
 }

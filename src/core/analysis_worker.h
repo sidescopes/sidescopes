@@ -60,6 +60,11 @@ struct AnalysisSettings
     /// so without a region there is nothing to compute and no scope holds an
     /// instance; the application starts in exactly that state.
     std::optional<RegionOfInterest> region;
+    /// How thinly scopes that offer the sample-thinning extension may sample,
+    /// as a divisor on the samples per bin they would otherwise take. One is
+    /// every sample the scope wants; the host raises it while the region is
+    /// moving, where a fraction of a reading is worth the frames.
+    int sampleThinning = 1;
     /// The application's own window in DISPLAY pixels, masked out of change
     /// detection so its own redraws never re-trigger analysis. Display rather
     /// than frame pixels because a narrowed capture moves the frame's origin;

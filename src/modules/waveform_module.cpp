@@ -210,10 +210,27 @@ void setImageSize(SsScopeInstance* instance, int32_t width, int32_t height)
 
 constexpr SsAdaptiveImageExtension AdaptiveImage{setImageSize};
 
+void setSampleThinning(SsScopeInstance* instance, int32_t divisor)
+{
+    try {
+        WaveformInstance* self = impl(instance);
+        self->settings.sampleThinning = divisor;
+        self->engine.configure(self->settings);
+    } catch (...) {
+        // The boundary must not throw; the previous rate stands.
+        return;
+    }
+}
+
+constexpr SsSampleThinningExtension SampleThinning{setSampleThinning};
+
 const void* getExtension(const SsScopeInstance*, const char* id)
 {
     if (std::strcmp(id, AdaptiveImageExtension) == 0) {
         return &AdaptiveImage;
+    }
+    if (std::strcmp(id, SampleThinningExtension) == 0) {
+        return &SampleThinning;
     }
     return nullptr;
 }

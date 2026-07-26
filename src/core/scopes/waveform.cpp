@@ -449,6 +449,7 @@ void Waveform::configure(const WaveformSettings& settings)
     m_settings.samplingStride = std::clamp(m_settings.samplingStride, 1, 8);
     m_settings.columns = std::clamp(m_settings.columns, 256, MaximumWaveformColumns);
     m_settings.imageHeight = std::clamp(m_settings.imageHeight, WaveformLevels, MaximumWaveformHeight);
+    m_settings.sampleThinning = std::clamp(m_settings.sampleThinning, 1, 8);
 }
 
 void Waveform::resize(int columns, int imageHeight)
@@ -519,9 +520,9 @@ void Waveform::accumulate(const FrameView& frame, IntRect region)
 {
     ensureBuffers();
     region = region.clampedTo(frame.width, frame.height);
-    const SampleGrid grid =
-        sampleGridFor(m_settings.samplingStride, region,
-                      budgetForBins(static_cast<long long>(m_columns) * Levels, WaveformMinSamplesPerBin));
+    const int perBin = std::max(WaveformMinSamplesPerBin / m_settings.sampleThinning, 1);
+    const SampleGrid grid = sampleGridFor(m_settings.samplingStride, region,
+                                          budgetForBins(static_cast<long long>(m_columns) * Levels, perBin));
     const int rowCount = grid.rows;
 
     const PlaneSpan span = planeSpanFor(modeFlagsFor(m_settings.mode));

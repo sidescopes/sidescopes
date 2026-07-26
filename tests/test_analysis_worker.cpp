@@ -7,7 +7,10 @@
 #include <utility>
 #include <vector>
 
+#include "app/adaptive_detail.h"
 #include "core/analysis_worker.h"
+#include "core/scopes/sampling.h"
+#include "core/scopes/waveform.h"
 #include "scope_image.h"
 #include "test_frame.h"
 
@@ -608,6 +611,61 @@ TEST_CASE("AnalysisWorker reports the latest frame size")
     REQUIRE(size.has_value());
     CHECK(size->width == 64);
     CHECK(size->height == 64);
+}
+
+TEST_CASE("A worker told to thin really thins the waveform's samples")
+{
+    // The path the application takes, not the engine's own: the setting has to
+    // travel from AnalysisSettings, through configureScopes, into the module's
+    // thinning extension and out the other side as a coarser pass. An earlier
+    // extension shipped with every test driving the engine directly, and
+    // deleting the module's wiring broke nothing at all.
+    //
+    // Black on exactly the rows a thinned pass visits and white everywhere
+    // else, over a region a full pass reads whole: the trace's top lights for
+    // the white rows only, so a pass that saw them differs visibly from one
+    // that did not.
+    constexpr int Columns = 256;
+    constexpr int Width = 1400;
+    constexpr int Height = 900;
+    const IntRect region{0, 0, Width, Height};
+    const long long full = budgetForBins(static_cast<long long>(Columns) * WaveformLevels, WaveformMinSamplesPerBin);
+    REQUIRE(sampleGridFor(1, region, full).rowStride == 1);
+    const SampleGrid thinned = sampleGridFor(1, region,
+                                             budgetForBins(static_cast<long long>(Columns) * WaveformLevels,
+                                                           WaveformMinSamplesPerBin / DraggedSampleDivisor));
+    REQUIRE(thinned.rowStride > 1);
+
+    const auto litTopOfTrace = [&](int divisor) {
+        FrameMailbox mailbox;
+        AnalysisWorker worker(mailbox);
+        AnalysisSettings settings;
+        settings.region = WholeFrame;
+        settings.enabledScopes = {WaveformId};
+        settings.imageSizes[WaveformId] = {Columns, WaveformLevels};
+        settings.scopeParams[WaveformId]["mode"] = 1.0;  // luma
+        settings.sampleThinning = divisor;
+        worker.updateSettings(settings);
+        worker.start();
+
+        FrameBuffer frame = makeSolidFrameBuffer(Width, Height, Color{255, 255, 255}, 1);
+        for (int index = 0; index < thinned.rows; ++index) {
+            const int row = sampleRowOf(thinned, region, index);
+            uint8_t* line = frame.data.data() + static_cast<std::size_t>(row) * Width * 4;
+            std::fill_n(line, static_cast<std::size_t>(Width) * 4, uint8_t{0});
+        }
+        mailbox.publish(std::move(frame));
+
+        uint64_t seen = 0;
+        AnalysisWorker::Output output;
+        REQUIRE(waitFor([&] { return worker.fetchOutput(seen, output); }));
+        const ScopeImage& image = output.images.at(WaveformId);
+
+        return channelAt(image, image.width / 2, 0, 1);
+    };
+
+    CHECK(litTopOfTrace(1) > 0);
+    CHECK(litTopOfTrace(DraggedSampleDivisor) == 0);
 }
 
 TEST_CASE("AnalysisWorker restricts analysis to the region of interest")

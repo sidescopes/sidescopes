@@ -204,6 +204,7 @@ std::optional<DetailSizes> AdaptiveDetail::update(const ScopePaneSizes& panes, f
 
 AnalysisSettings coarsenedForDrag(AnalysisSettings settings)
 {
+    settings.sampleThinning = DraggedSampleDivisor;
     for (auto& [id, size] : settings.imageSizes) {
         const bool columnsArePlaces = id == WaveformScopeId || id == ParadeScopeId;
         if (!columnsArePlaces) {

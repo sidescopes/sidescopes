@@ -510,4 +510,67 @@ TEST_CASE("A narrow waveform really does thin, through its own accumulate")
     CHECK(channelAt(image, column, image.height - 1, 1) > 0);
 }
 
+TEST_CASE("A thinned waveform stops reading every row, through its accumulate")
+{
+    // The sibling tests above prove a wide waveform reads every row and a
+    // narrow one thins. This proves the third case: a wide one told to thin.
+    // Through the engine's own accumulate rather than the policy function,
+    // because the policy holding is no use if the waveform stops asking it.
+    constexpr int Columns = 1024;
+    constexpr int Width = 3000;
+    constexpr int Height = 1500;
+    const IntRect region{0, 0, Width, Height};
+    const long long full = budgetForBins(static_cast<long long>(Columns) * WaveformLevels, WaveformMinSamplesPerBin);
+    REQUIRE(sampleGridFor(1, region, full).rowStride == 1);
+
+    const long long halved =
+        budgetForBins(static_cast<long long>(Columns) * WaveformLevels, WaveformMinSamplesPerBin / 2);
+    const SampleGrid thinned = sampleGridFor(1, region, halved);
+    REQUIRE(thinned.rowStride > 1);
+
+    // Black on exactly the rows a thinned pass visits, white everywhere else,
+    // so a pass that reads every row lights the top of the trace and one that
+    // thins does not.
+    TestFrame frame(Width, Height, 0);
+    frame.fill(Color{255, 255, 255});
+    for (int index = 0; index < thinned.rows; ++index) {
+        const int row = sampleRowOf(thinned, region, index);
+        frame.fillRows(row, row + 1, Color{0, 0, 0});
+    }
+
+    WaveformSettings settings;
+    settings.columns = Columns;
+    settings.mode = WaveformMode::Luma;
+
+    Waveform every;
+    every.configure(settings);
+    every.accumulate(frame.view(), region);
+
+    settings.sampleThinning = 2;
+    Waveform sparse;
+    sparse.configure(settings);
+    sparse.accumulate(frame.view(), region);
+
+    const int column = every.image().width / 2;
+    CHECK(channelAt(every.image(), column, 0, 1) > 0);
+    CHECK(channelAt(sparse.image(), column, 0, 1) == 0);
+}
+
+TEST_CASE("Thinning cannot take a waveform below one sample a bin")
+{
+    // The divisor is clamped and the samples per bin it produces has a floor,
+    // so an extreme value asks for a coarse pass rather than an empty one.
+    WaveformSettings settings;
+    settings.sampleThinning = 64;
+    Waveform waveform;
+    waveform.configure(settings);
+
+    TestFrame frame(400, 300, 0);
+    frame.fill(Color{200, 200, 200});
+    waveform.accumulate(frame.view(), IntRect{0, 0, 400, 300});
+
+    const auto [litColumn, litRow] = brightestPixel(waveform.image());
+    CHECK(pixelLit(waveform.image(), litColumn, litRow));
+}
+
 }  // namespace sidescopes
