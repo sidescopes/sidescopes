@@ -276,6 +276,26 @@ void applySettings(std::vector<WorkerScope>& scopes, const AnalysisSettings& set
     enabledScopes = std::set<std::string>(enabled.begin(), enabled.end());
 }
 
+// The part of @p view the scopes should read for @p region, in the frame's own
+// pixels - or nothing when the frame cannot answer for that region at all.
+//
+// The region is measured against the DISPLAY and then moved into this frame's
+// pixels, so a narrowed capture analyses the same content rather than the same
+// percentages of a smaller frame. A frame carrying only part of the region
+// answers for nowhere in particular: the crop trails the region it was made for
+// by the reconfiguration's own latency, and clipping the region to the overlap
+// would publish a reading of a fraction of it as if it were the whole.
+std::optional<IntRect> regionInFrame(const FrameView& view, const RegionOfInterest& region)
+{
+    const IntRect onDisplay =
+        region.toPixels(view.displayWidth(), view.displayHeight()).clampedTo(view.displayWidth(), view.displayHeight());
+    if (!view.carries(onDisplay)) {
+        return std::nullopt;
+    }
+
+    return view.fromDisplay(onDisplay).clampedTo(view.width, view.height);
+}
+
 // Runs each enabled scope over the region, returning the wall time the pass
 // took. Only the scopes on screen cost anything; a disabled scope's image
 // simply goes stale and the UI never draws it.
@@ -421,24 +441,24 @@ void AnalysisWorker::run()
         // only writer, and readers on other threads take the mutex only for
         // the brief sampling reads that tolerate the previous frame.
         const FrameView view = m_latestFrame.view();
-        // Measured against the DISPLAY, then moved into this frame's pixels:
-        // a narrowed capture must analyse the same content, not the same
-        // percentages of a smaller frame.
-        const IntRect region = view.fromDisplay(settings.region->toPixels(view.displayWidth(), view.displayHeight()))
-                                   .clampedTo(view.width, view.height);
+        // The last images stand while the frame cannot answer for the region.
+        const std::optional<IntRect> region = regionInFrame(view, *settings.region);
+        if (!region) {
+            continue;
+        }
 
         // The hash is computed on every pass — including settings-only ones —
         // so it always corresponds to the current region and mask. Skipping
         // it on any path leaves a stale value that defeats the next
         // unchanged-content comparison.
-        const uint64_t contentHash = hashRegion(view, region, view.fromDisplay(settings.maskedWindow));
+        const uint64_t contentHash = hashRegion(view, *region, view.fromDisplay(settings.maskedWindow));
         if (!settingsChanged && contentHash == lastContentHash) {
             continue;
         }
         lastContentHash = contentHash;
 
         const SsFrameView boundaryFrame = toBoundaryFrame(view);
-        const SsRect boundaryRegion{region.x, region.y, region.width, region.height};
+        const SsRect boundaryRegion{region->x, region->y, region->width, region->height};
         const double elapsedMs = accumulateScopes(scopes, boundaryFrame, boundaryRegion, enabledScopes);
         if (newFrame) {
             ++framesProcessed;

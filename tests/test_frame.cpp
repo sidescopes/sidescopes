@@ -154,4 +154,25 @@ TEST_CASE("A narrowed frame resolves a region to the same display pixels")
     CHECK(wrong.x == 80);
 }
 
+TEST_CASE("A frame says whether it carries a rectangle of its display")
+{
+    std::array<uint8_t, 8> tiny{};
+    // A 200x160 crop at 400,320 of a 1000x800 display.
+    const FrameView narrowed{tiny.data(), 200 * 4, 200, 160, ColorSpaceHint::Srgb, 1, 400, 320, 1000, 800};
+
+    CHECK(narrowed.carries(IntRect{400, 320, 200, 160}));
+    CHECK(narrowed.carries(IntRect{450, 350, 50, 50}));
+    // Straddling an edge is not carrying: the part outside is simply absent,
+    // and clipping to the overlap is what publishes a fraction of a region as
+    // if it were all of it.
+    CHECK_FALSE(narrowed.carries(IntRect{350, 320, 200, 160}));
+    CHECK_FALSE(narrowed.carries(IntRect{400, 320, 260, 160}));
+    CHECK_FALSE(narrowed.carries(IntRect{0, 0, 100, 100}));
+
+    // An uncropped frame carries anything inside its display, which is itself.
+    const FrameView whole{tiny.data(), 200 * 4, 200, 160, ColorSpaceHint::Srgb, 1};
+    CHECK(whole.carries(IntRect{0, 0, 200, 160}));
+    CHECK(whole.carries(IntRect{10, 10, 20, 20}));
+}
+
 }  // namespace sidescopes

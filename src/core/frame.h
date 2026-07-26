@@ -113,6 +113,22 @@ struct FrameView
         return IntRect{rect.x - sourceX, rect.y - sourceY, rect.width, rect.height};
     }
 
+    /// Whether every pixel of @p displayRect, stated in display pixels, is in
+    /// this frame. Always true of an uncropped frame for anything inside its
+    /// display; false where a narrowing has left part of the rectangle out.
+    ///
+    /// A crop trails the region it was made for by the reconfiguration's own
+    /// latency, so a frame in hand can be the crop for somewhere the region has
+    /// already left. Measuring the region against it anyway would silently clip
+    /// it to the overlap - a reading of part of the region, indistinguishable
+    /// downstream from a reading of all of it.
+    [[nodiscard]] bool carries(IntRect displayRect) const
+    {
+        const IntRect local = fromDisplay(displayRect);
+
+        return local.empty() || local == local.clampedTo(width, height);
+    }
+
     [[nodiscard]] const uint8_t* pixelAt(int px, int py) const
     {
         return bgra + static_cast<std::size_t>(py) * strideBytes + static_cast<std::size_t>(px) * 4;

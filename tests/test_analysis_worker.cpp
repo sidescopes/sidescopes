@@ -224,6 +224,103 @@ TEST_CASE("A narrowed capture analyses the same content as a whole-display one")
     CHECK(fromWhole.rgba == fromNarrowed.rgba);
 }
 
+TEST_CASE("A narrowed capture never answers for a region it does not carry")
+{
+    // The crop trails the region by the reconfiguration's own latency. The
+    // capture is asked to widen the instant the region moves, but the frame
+    // already in hand is still the old crop - and a settings change is reason
+    // enough to run a pass without a new frame. Measured against that frame the
+    // moved region is silently clipped to whatever the old crop overlaps, and a
+    // trace built from a fraction of the region is published as if it were the
+    // whole of it. Nothing downstream can tell the difference.
+    const auto settingsFor = [](RegionOfInterest region) {
+        AnalysisSettings settings;
+        settings.enabledScopes = {VectorscopeId};
+        settings.region = region;
+
+        return settings;
+    };
+
+    // A 200x100 display: red | green | blue. The crop is the right half, so it
+    // holds green and blue and no red at all.
+    const auto paintColumns = [](FrameBuffer& frame, int from, int to, Color color) {
+        for (int py = 0; py < frame.height; ++py) {
+            for (int px = from; px < to; ++px) {
+                uint8_t* pixel = frame.data.data() + static_cast<std::size_t>(py) * frame.strideBytes +
+                                 static_cast<std::size_t>(px) * 4;
+                pixel[0] = color.b;
+                pixel[1] = color.g;
+                pixel[2] = color.r;
+            }
+        }
+    };
+    const auto wholeDisplay = [&](uint64_t sequence) {
+        FrameBuffer frame = makeSolidFrameBuffer(200, 100, Color{191, 0, 0}, sequence);
+        paintColumns(frame, 100, 150, Color{0, 191, 0});
+        paintColumns(frame, 150, 200, Color{0, 0, 191});
+
+        return frame;
+    };
+    const auto rightHalfCrop = [&](uint64_t sequence) {
+        FrameBuffer frame = makeSolidFrameBuffer(100, 100, Color{0, 191, 0}, sequence);
+        paintColumns(frame, 50, 100, Color{0, 0, 191});
+        frame.sourceX = 100;
+        frame.sourceY = 0;
+        frame.sourceWidth = 200;
+        frame.sourceHeight = 100;
+
+        return frame;
+    };
+
+    // The region the crop was made for, and the one it is moved to: display
+    // pixels 50..150, half red and half green, straddling the crop's left edge.
+    const RegionOfInterest cropped{50.0, 0.0, 100.0, 100.0};
+    const RegionOfInterest moved{25.0, 0.0, 75.0, 100.0};
+
+    FrameMailbox mailbox;
+    AnalysisWorker worker(mailbox);
+    worker.updateSettings(settingsFor(cropped));
+    worker.start();
+    mailbox.publish(rightHalfCrop(1));
+    uint64_t seen = 0;
+    AnalysisWorker::Output output;
+    REQUIRE(waitFor([&] { return worker.fetchOutput(seen, output); }));
+    const uint64_t beforeMove = seen;
+
+    // The region moves off the crop. No frame carrying it has arrived yet, so
+    // nothing may be published: the images standing on screen answer for the
+    // old region, which is a truthful answer a moment out of date, where a pass
+    // over the crop's overlap would be an untruthful one.
+    worker.updateSettings(settingsFor(moved));
+    REQUIRE(waitFor([&] { return worker.consumedFrameSequence() == 1; }));
+    for (int settle = 0; settle < 10; ++settle) {
+        std::this_thread::sleep_for(5ms);
+        REQUIRE_FALSE(worker.fetchOutput(seen, output));
+    }
+    CHECK(seen == beforeMove);
+
+    // The widened frame is what answers, and it answers for the whole region.
+    mailbox.publish(wholeDisplay(2));
+    REQUIRE(waitFor([&] { return worker.fetchOutput(seen, output); }));
+
+    FrameMailbox referenceMailbox;
+    AnalysisWorker reference(referenceMailbox);
+    reference.updateSettings(settingsFor(moved));
+    reference.start();
+    referenceMailbox.publish(wholeDisplay(1));
+    uint64_t referenceSeen = 0;
+    AnalysisWorker::Output referenceOutput;
+    REQUIRE(waitFor([&] { return reference.fetchOutput(referenceSeen, referenceOutput); }));
+
+    const ScopeImage& answered = output.images.at(VectorscopeId);
+    const ScopeImage& expected = referenceOutput.images.at(VectorscopeId);
+    // Non-vacuous: the region really does carry a trace, and it is not the one
+    // the crop alone would have produced.
+    const auto [brightX, brightY] = brightestPixel(expected);
+    CHECK(pixelLit(expected, brightX, brightY));
+    CHECK(answered.rgba == expected.rgba);
+}
+
 TEST_CASE("A scope hidden and shown again still produces an image")
 {
     // A scope's instance is created when it appears and released when it goes
