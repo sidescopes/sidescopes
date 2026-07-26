@@ -59,6 +59,7 @@
 #include "modules/module_registry.h"
 #include "platform/desktop.h"
 #include "platform/face_detection.h"
+#include "platform/frame_pool.h"
 #include "platform/graphics.h"
 #include "platform/native_menu.h"
 #include "platform/region_selection.h"
@@ -217,7 +218,7 @@ void App::noteWorkerOutput()
 void App::run()
 {
     while (!glfwWindowShouldClose(m_window)) {
-        runFrame();
+        runInFramePool([](void* self) { static_cast<App*>(self)->runFrame(); }, this);
     }
 }
 

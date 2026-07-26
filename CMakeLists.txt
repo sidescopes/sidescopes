@@ -183,6 +183,7 @@ if(APPLE)
         src/platform/region_geometry.cpp
         src/platform/macos/desktop.mm
         src/platform/macos/face_detection.mm
+        src/platform/macos/frame_pool.mm
         src/platform/macos/native_menu.mm
         src/platform/macos/region_border_view.mm
         src/platform/macos/region_picker_view.mm
@@ -210,6 +211,7 @@ if(WIN32)
     # itself.
     add_library(sidescopes_platform STATIC
         src/platform/focus_resolution.cpp
+        src/platform/frame_pool.cpp
         src/platform/icons.cpp
         src/platform/region_geometry.cpp
         src/platform/windows/desktop.cpp
