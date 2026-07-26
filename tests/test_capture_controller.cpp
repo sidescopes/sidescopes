@@ -45,12 +45,59 @@ TEST_CASE("start captures the first target when no display is desired")
     // it costs 32% less processor time than thirty over changing content, and
     // a whole-display region never managed more than fourteen passes a second
     // anyway. What it buys with is the step between updates - see the constant
-    // in capture_controller.cpp, which carries the numbers.
-    CHECK(source.lastFramesPerSecond == 15);
+    // in capture_controller.h, which carries the numbers.
+    CHECK(source.lastFramesPerSecond == DefaultCaptureFramesPerSecond);
+    CHECK(DefaultCaptureFramesPerSecond == 15);
     CHECK(controller.capturedDisplay() == 7);
     CHECK(controller.desiredDisplay() == 7);
     CHECK_FALSE(controller.dead());
     CHECK(controller.status() == "capturing primary");
+}
+
+TEST_CASE("A new rate replaces the stream that carries the old one")
+{
+    // The rate is fixed when a stream is created, so the only way to change it
+    // is to make another. A quality level is chosen once and rarely, which is
+    // what makes a restart the right price.
+    FakeCaptureSource source;
+    source.targets = {makeTarget(7, "primary")};
+    FrameMailbox mailbox;
+    CaptureController controller(source, mailbox);
+    REQUIRE(controller.requestPermission());
+    REQUIRE(controller.start());
+    CHECK(source.lastFramesPerSecond == DefaultCaptureFramesPerSecond);
+
+    controller.setFrameRate(10);
+    CHECK(source.startCount == 2);
+    CHECK(source.stopCount == 1);
+    CHECK(source.lastFramesPerSecond == 10);
+    CHECK(controller.capturedDisplay() == 7);
+
+    // The same rate again is not a reason to interrupt the stream.
+    controller.setFrameRate(10);
+    CHECK(source.startCount == 2);
+}
+
+TEST_CASE("A rate chosen while nothing is running waits for the next start")
+{
+    // A suspended stream is stopped on purpose, and restarting it here would
+    // undo the pause the visibility gate asked for. The next start reads the
+    // rate anyway.
+    FakeCaptureSource source;
+    source.targets = {makeTarget(7, "primary")};
+    FrameMailbox mailbox;
+    CaptureController controller(source, mailbox);
+    REQUIRE(controller.requestPermission());
+    REQUIRE(controller.start());
+    controller.suspend("out of sight");
+
+    controller.setFrameRate(20);
+    CHECK(source.startCount == 1);
+    CHECK(controller.suspended());
+
+    controller.resume();
+    CHECK(source.startCount == 2);
+    CHECK(source.lastFramesPerSecond == 20);
 }
 
 TEST_CASE("start captures the display the user requested")

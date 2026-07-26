@@ -11,6 +11,16 @@
 
 namespace sidescopes {
 
+/// How often the screen is read before anything asks for a different rate.
+/// Measured whole-application over content changing continuously: 0.422 cores
+/// at 30 a second, 0.336 at 20, 0.286 at 15, 0.220 at 10. Fifteen also costs
+/// nothing at all on a large region - a whole display already only manages
+/// 14.2 passes a second, and at 30 the other 52% of the frames captured are
+/// thrown away unanalysed. What it costs is the step: during a brisk exposure
+/// drag the waveform moves 0.9% of its pane's height between updates at 30 and
+/// 1.8% at 15.
+inline constexpr int DefaultCaptureFramesPerSecond = 15;
+
 /// Owns the screen-capture service: the permission verdict, which display is
 /// captured versus desired, the status line, and the restart policy for a
 /// stream that died or went stale. Frames keep flowing through the mailbox;
@@ -45,6 +55,12 @@ public:
 
     /// Chooses the display the next start() captures.
     void requestDisplay(uint32_t displayId);
+
+    /// Reads the screen @p framesPerSecond times a second from here on. The
+    /// rate is fixed when a stream is created, so changing it replaces a
+    /// running one; a stopped, suspended or dead stream is left alone, since
+    /// the next start reads the new rate anyway.
+    void setFrameRate(int framesPerSecond);
 
     /// Marks the stream stale so the next service() restarts it (system wake
     /// or unlock). Safe to call from any thread.
@@ -103,6 +119,7 @@ private:
 
     uint32_t m_capturedDisplay = 0;
     uint32_t m_desiredDisplay = 0;
+    int m_frameRate = DefaultCaptureFramesPerSecond;
     bool m_permissionGranted = false;
     // Whether a stream is running, so start() stops the old one first only
     // when there is one; the first start has nothing to stop.

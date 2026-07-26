@@ -6,19 +6,6 @@
 namespace sidescopes {
 namespace {
 
-// How often the screen is read. Photography is the subject, and a scope has to
-// carry a distribution rather than motion, so the rate is set by what reads
-// smoothly rather than by what the display can deliver.
-//
-// Measured whole-application over content changing continuously: 0.422 cores
-// at 30 a second, 0.336 at 20, 0.286 at 15, 0.220 at 10. Fifteen also costs
-// nothing at all on a large region - a whole display already only manages 14.2
-// passes a second, and at 30 the other 52% of the frames captured are thrown
-// away unanalysed. What it costs is the step: during a brisk exposure drag the
-// waveform moves 0.9% of its pane's height between updates at 30 and 1.8% at
-// 15, roughly three and a half pixels against seven on a 400-pixel pane.
-constexpr int CaptureFramesPerSecond = 15;
-
 // How long a dead stream waits before the next restart, and the ceiling that
 // wait doubles up to. A stream that cannot be re-established is usually a
 // screen that is locked or asleep, and that lasts hours: a fixed two-second
@@ -116,7 +103,7 @@ bool CaptureController::start()
         target = &*wanted;
     }
 
-    if (!m_source.start(*target, CaptureFramesPerSecond, m_mailbox)) {
+    if (!m_source.start(*target, m_frameRate, m_mailbox)) {
         return fail();
     }
 
@@ -142,6 +129,22 @@ uint32_t CaptureController::desiredDisplay() const
 void CaptureController::requestDisplay(uint32_t displayId)
 {
     m_desiredDisplay = displayId;
+}
+
+void CaptureController::setFrameRate(int framesPerSecond)
+{
+    const int wanted = std::max(framesPerSecond, 1);
+    if (wanted == m_frameRate) {
+        return;
+    }
+    m_frameRate = wanted;
+    // Photography is the subject, and a scope carries a distribution rather
+    // than motion, so this is a choice about how smoothly the trace reads and
+    // not about what the display can deliver. The rate is fixed when a stream
+    // is created, so a running one is replaced to pick the new one up.
+    if (m_running && !m_suspended) {
+        (void)start();
+    }
 }
 
 void CaptureController::markStale()
