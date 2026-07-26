@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "core/frame.h"
+#include "core/page_allocator.h"
 
 namespace sidescopes {
 
@@ -15,9 +16,13 @@ namespace sidescopes {
 /// An owned one-shot snapshot of a display: BGRA, 8 bits per channel, rows
 /// top-down and tightly packed (stride is width * 4), the same encoding a
 /// FrameView carries. Returned by captureDisplayImage.
+/// A whole display's pixels, taken once for a face scan and let go again.
+/// Page-allocated for the same reason the capture frames are: the system
+/// allocator keeps a block this size cached for the rest of the process's
+/// life, and a pick over two displays would leave 45 MB behind it.
 struct CapturedImage
 {
-    std::vector<uint8_t> bgra;
+    PixelStorage bgra;
     int width = 0;
     int height = 0;
 };

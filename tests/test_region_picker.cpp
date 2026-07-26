@@ -597,7 +597,7 @@ TEST_CASE("A display off the capture stream is scanned in the background")
     desktopStubs().faceDetectionSupported = true;
     desktopStubs().faces.clear();
     desktopStubs().faces.push_back(IntRect{50, 25, 100, 100});
-    desktopStubs().displayImage = CapturedImage{std::vector<uint8_t>(ScannedPixels, 8), ScannedSide, ScannedSide};
+    desktopStubs().displayImage = CapturedImage{PixelStorage(ScannedPixels, 8), ScannedSide, ScannedSide};
     publishAndAwait(fix, makeSolidFrameBuffer(640, 640, Color{10, 10, 10}, 1), 1);
 
     // The picker opens on the streamed display's faces alone: the other
@@ -644,7 +644,7 @@ TEST_CASE("A scan that lands after its picker closed is dropped")
     desktopStubs().faceDetectionSupported = true;
     desktopStubs().faces.clear();
     desktopStubs().faces.push_back(IntRect{50, 25, 100, 100});
-    desktopStubs().displayImage = CapturedImage{std::vector<uint8_t>(ScannedPixels, 8), ScannedSide, ScannedSide};
+    desktopStubs().displayImage = CapturedImage{PixelStorage(ScannedPixels, 8), ScannedSide, ScannedSide};
     publishAndAwait(fix, makeSolidFrameBuffer(640, 640, Color{10, 10, 10}, 1), 1);
 
     openPick(fix, RegionPickerMode::AttachFace);
