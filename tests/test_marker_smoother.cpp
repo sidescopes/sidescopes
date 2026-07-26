@@ -75,6 +75,63 @@ TEST_CASE("MarkerSmoother stays locked once on target")
     CHECK(settled.b == target.b);
 }
 
+namespace {
+
+// Frames at sixty a second until the smoother has locked onto @p target.
+int framesToArrive(MarkerSmoother& smoother, const FloatColor& target)
+{
+    for (int frame = 1; frame <= 600; ++frame) {
+        const FloatColor value = smoother.update(target, 1.0f / 60.0f);
+        if (value.r == target.r && value.g == target.g && value.b == target.b) {
+            return frame;
+        }
+    }
+
+    return -1;
+}
+
+}  // namespace
+
+TEST_CASE("MarkerSmoother arrives in about the same time whatever the distance")
+{
+    // The regression this guards is a usability one: a fixed time constant
+    // needs a further one for every e-fold of distance, so a marker sent right
+    // across the range took half again as long as one sent a tenth of the way,
+    // and the reading a pointer was moved to arrive at kept the pointer
+    // waiting. Dividing the constant by the distance bounds that.
+    MarkerSmoother near;
+    near.setTimeConstant(100.0f);
+    const int nearFrames = framesToArrive(near, FloatColor{136.0f, 128.0f, 128.0f});
+
+    MarkerSmoother far;
+    far.setTimeConstant(100.0f);
+    const int farFrames = framesToArrive(far, FloatColor{255.0f, 128.0f, 128.0f});
+
+    REQUIRE(nearFrames > 0);
+    REQUIRE(farFrames > 0);
+    // Thirty-one times the distance, and at most four more frames to cross it.
+    CHECK(farFrames - nearFrames <= 4);
+    // A fifth of a second at sixty frames a second, whatever the distance.
+    CHECK(farFrames <= 13);
+}
+
+TEST_CASE("MarkerSmoother still eases movement close to its target")
+{
+    // The other half of the same knob. Speeding up with distance must not turn
+    // into snapping: a sample that moves a reading by a code is jitter, and
+    // absorbing it is what the smoothing is for. One frame of a 100 ms constant
+    // covers 1 - e^(-1/6) of the way, and a code out is close enough to its
+    // target that the distance term may barely touch that.
+    MarkerSmoother smoother;
+    smoother.setTimeConstant(100.0f);
+    const FloatColor target{129.0f, 128.0f, 128.0f};
+
+    const FloatColor stepped = smoother.update(target, 1.0f / 60.0f);
+    const float covered = stepped.r - 128.0f;
+    CHECK(covered > 0.14f);
+    CHECK(covered < 0.20f);
+}
+
 TEST_CASE("MarkerSmoother with a zero time constant follows immediately")
 {
     MarkerSmoother smoother;

@@ -1,9 +1,12 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <chrono>
+#include <cmath>
 #include <cstdint>
+#include <numeric>
 #include <optional>
 #include <thread>
+#include <vector>
 
 #include "app/capture_controller.h"
 #include "app/cursor_sampler.h"
@@ -64,6 +67,13 @@ struct SamplerFixture
     SamplerFixture& operator=(const SamplerFixture&) = delete;
 };
 
+// The shipped marker smoothing: 75 ms on the vectorscope, 100 on the waveform
+// (the defaults in preferences.h). What the two tests about how a marker
+// travels are measured against, since the travelling is the smoothing's doing.
+constexpr CursorSmoothing Shipped{75.0f, 100.0f};
+// One frame at the cadence the loop redraws at while something is moving.
+constexpr float MovingFrame = 1.0f / 30.0f;
+
 constexpr AnalysisWorker::FrameSize FrameSize{64, 64, 64, 64};
 // The whole captured display: every point on it carries a marker.
 constexpr RegionOfInterest WholeDisplay{0.0, 0.0, 100.0, 100.0};
@@ -74,6 +84,39 @@ constexpr RegionOfInterest CroppedRegion{37.5, 37.5, 62.5, 62.5};
 // The same display captured as a 16x16 crop at 24,24: what the stream delivers
 // once the analysis region is small enough to narrow to.
 constexpr AnalysisWorker::FrameSize NarrowedFrameSize{16, 16, 64, 64};
+
+// A horizontal grey ramp across the display: column x carries x * 255 / 63 in
+// every channel, so the colour under the pointer is a known function of where
+// the pointer is - a photograph's gradient, with nothing else in it.
+FrameBuffer makeRampFrameBuffer(uint64_t sequence)
+{
+    FrameBuffer frame = makeSolidFrameBuffer(64, 64, Color{0, 0, 0}, sequence);
+    for (int py = 0; py < 64; ++py) {
+        for (int px = 0; px < 64; ++px) {
+            const auto level = static_cast<uint8_t>(px * 255 / 63);
+            uint8_t* pixel =
+                frame.data.data() + static_cast<std::size_t>(py) * frame.strideBytes + static_cast<std::size_t>(px) * 4;
+            pixel[0] = level;
+            pixel[1] = level;
+            pixel[2] = level;
+        }
+    }
+
+    return frame;
+}
+
+// Publishes @p frame and waits for the worker to take it, so the next sample
+// reads it rather than the one before.
+void publishAndAwait(SamplerFixture& fix, FrameBuffer frame)
+{
+    const uint64_t sequence = frame.sequence;
+    fix.mailbox.publish(std::move(frame));
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (fix.worker.consumedFrameSequence() != sequence && std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+    REQUIRE(fix.worker.consumedFrameSequence() == sequence);
+}
 
 // A frame carrying only [24,40) of a 64x64 display, in one flat colour.
 FrameBuffer makeNarrowedFrameBuffer(Color color, uint64_t sequence)
@@ -552,6 +595,94 @@ TEST_CASE("The last cross-display sample is what the pin tool reads")
     // another display is the one the readout was already showing.
     REQUIRE(fix.sampler.screenSampleColor().has_value());
     CHECK_THAT(fix.sampler.screenSampleColor()->b, WithinAbs(33.0f, 1e-3f));
+}
+
+TEST_CASE("A marker reaches a colour the pointer was moved to promptly")
+{
+    // The regression this guards: the reading a pointer was deliberately moved
+    // to arrive at kept the pointer waiting, because a fixed time constant
+    // needs a further one for every e-fold of distance. Measured end to end
+    // through the sampler - the wait for the next sample, the glide across it,
+    // and the smoothing on top - at the cadence the loop redraws at, and with
+    // the smoothing the application ships.
+    SamplerFixture fix;
+    desktopStubs().cursorDisplay = StreamedDisplay;
+    desktopStubs().cursor = DesktopPoint{4.0, 32.0};
+    publishAndAwait(fix, makeRampFrameBuffer(2));
+
+    double now = 1.0;
+    for (int frame = 0; frame < 60; ++frame, now += MovingFrame) {
+        (void)fix.sampler.update(FrameSize, WholeDisplay, Shipped, now, MovingFrame);
+    }
+    // Right across the ramp, in one move, and held.
+    desktopStubs().cursor = DesktopPoint{59.0, 32.0};
+    const double arrived = now;
+    // The three ramp columns the 3x3 neighbourhood there averages, in the
+    // frame's own integer levels: what the marker really converges on.
+    const int neighbourhood = (58 * 255 / 63) + (59 * 255 / 63) + (60 * 255 / 63);
+    const auto target = static_cast<float>(neighbourhood) / 3.0f;
+    double reached = -1.0;
+    for (int frame = 0; frame < 60 && reached < 0.0; ++frame, now += MovingFrame) {
+        const CursorSample sample = fix.sampler.update(FrameSize, WholeDisplay, Shipped, now, MovingFrame);
+        REQUIRE(sample.waveformColor.has_value());
+        if (std::abs(sample.waveformColor->g - target) <= 1.0f) {
+            reached = now - arrived;
+        }
+    }
+
+    REQUIRE(reached >= 0.0);
+    // A quarter of a second, over a distance of 230 codes. The same journey
+    // took over half of one before the smoothing took the distance into
+    // account, and the waveform is the slower of the two markers.
+    CHECK(reached <= 0.25);
+}
+
+TEST_CASE("A marker follows a moving pointer at an even speed")
+{
+    // The other side of the same knob, and the property that must survive it:
+    // a marker crossing a photograph moves by roughly the same amount every
+    // frame. Easing onto a target refreshed twelve times a second used to
+    // spend most of each step in the first frame after it and crawl through
+    // the rest, which is what read as a stutter; the glide between samples is
+    // what fixed it, and a smoothing that closes distance faster must not
+    // uncover it again.
+    SamplerFixture fix;
+    desktopStubs().cursorDisplay = StreamedDisplay;
+    desktopStubs().cursor = DesktopPoint{4.0, 32.0};
+    publishAndAwait(fix, makeRampFrameBuffer(2));
+
+    double now = 1.0;
+    for (int frame = 0; frame < 30; ++frame, now += MovingFrame) {
+        (void)fix.sampler.update(FrameSize, WholeDisplay, Shipped, now, MovingFrame);
+    }
+    // Two pixels a frame across the ramp: about eight codes a frame, the pace
+    // of a brisk pointer crossing a picture. The first few frames are lead-in
+    // and not measured - a marker sampled twelve times a second cannot move
+    // before its next sample lands, which is a property of the sampling rate
+    // rather than of how it travels once it is under way.
+    constexpr int LeadIn = 6;
+    std::vector<float> steps;
+    float previous = -1.0f;
+    for (int frame = 0; frame < LeadIn + 20; ++frame, now += MovingFrame) {
+        desktopStubs().cursor = DesktopPoint{4.0 + (2 * frame), 32.0};
+        const CursorSample sample = fix.sampler.update(FrameSize, WholeDisplay, Shipped, now, MovingFrame);
+        REQUIRE(sample.vectorscopeColor.has_value());
+        if (frame >= LeadIn && previous >= 0.0f) {
+            steps.push_back(sample.vectorscopeColor->g - previous);
+        }
+        previous = sample.vectorscopeColor->g;
+    }
+
+    REQUIRE(steps.size() > 15);
+    const float mean = std::accumulate(steps.begin(), steps.end(), 0.0f) / static_cast<float>(steps.size());
+    REQUIRE(mean > 4.0f);  // the sweep really is moving, so the ratios below mean something
+    for (const float step : steps) {
+        // No frame off the average by half. Without the glide a third of them
+        // are, and the fastest is half again the average while the slowest
+        // covers a fifth of it.
+        CHECK(step > mean * 0.5f);
+        CHECK(step < mean * 1.5f);
+    }
 }
 
 }  // namespace sidescopes

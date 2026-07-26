@@ -37,7 +37,12 @@ FloatColor MarkerSmoother::update(const FloatColor& target, float elapsedSeconds
 
         return target;
     }
-    const float tauSeconds = m_timeConstantMs / 1000.0f;
+    // One rate for all three channels, taken from the furthest of them, so the
+    // colour travels in a straight line: per-channel rates would swing its hue
+    // on the way.
+    const float distance = std::max(
+        {std::fabs(target.r - m_value->r), std::fabs(target.g - m_value->g), std::fabs(target.b - m_value->b)});
+    const float tauSeconds = m_timeConstantMs / (1000.0f * (1.0f + distance / Reach));
     const float alpha = tauSeconds <= 0.0f ? 1.0f : 1.0f - std::exp(-elapsedSeconds / tauSeconds);
 
     m_value->r += alpha * (target.r - m_value->r);
