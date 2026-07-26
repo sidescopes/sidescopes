@@ -72,10 +72,11 @@ struct AnalysisSettings
 /// double-buffered scope images. The UI thread pulls output when the version
 /// advances and samples cursor colors from the most recent frame.
 ///
-/// Threading: start, stop, updateSettings, fetchOutput, sampleDisplayColor,
-/// latestFrameSize, withLatestFrame, and consumedFrameSequence make up the
-/// caller-thread surface and are safe to call while the worker runs. run()
-/// exclusively owns the worker thread and is never called directly.
+/// Threading: start, stop, updateSettings, hold, held, fetchOutput,
+/// sampleDisplayColor, latestFrameSize, withLatestFrame, and
+/// consumedFrameSequence make up the caller-thread surface and are safe to call
+/// while the worker runs. run() exclusively owns the worker thread and is never
+/// called directly.
 class AnalysisWorker
 {
 public:
@@ -104,6 +105,18 @@ public:
     void stop();
 
     void updateSettings(const AnalysisSettings& settings);
+
+    /// Holds analysis without holding the pipeline behind it. Frames are still
+    /// taken from the mailbox, so the colour readout and the pickers go on
+    /// reading live pixels, but no pass runs and no output is published - which
+    /// leaves the last images standing rather than blanking them. Releasing it
+    /// recomputes at once, whether or not a new frame has arrived, because the
+    /// region a held pass would have run on may be nowhere near the one now in
+    /// force.
+    void hold(bool held);
+
+    /// @return Whether analysis is held.
+    [[nodiscard]] bool held() const;
 
     /// Copies the latest output when it is newer than @p lastSeenVersion,
     /// advancing the version. Returns false when nothing new was produced.
@@ -173,8 +186,8 @@ private:
     /// advancing @p seenSettingsVersion and returning whether they changed.
     [[nodiscard]] bool syncSettings(AnalysisSettings& settings, uint64_t& seenSettingsVersion);
 
-    /// Whether a frame is stored and either it or the settings just changed,
-    /// so this pass has analysis to do.
+    /// Whether a frame is stored, analysis is not held, and either the frame
+    /// or the settings just changed, so this pass has analysis to do.
     [[nodiscard]] bool hasWork(bool newFrame, bool settingsChanged) const;
 
     FrameMailbox& m_mailbox;
@@ -184,6 +197,7 @@ private:
     mutable std::mutex m_settingsMutex;
     AnalysisSettings m_settings;
     uint64_t m_settingsVersion = 1;
+    std::atomic<bool> m_held{false};
 
     std::function<void()> m_outputCallback;
     mutable std::mutex m_frameMutex;

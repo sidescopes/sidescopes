@@ -62,6 +62,13 @@ int resolutionWithin(int regionWidth, std::initializer_list<int> ladder)
     return chosen;
 }
 
+// One side of a dragged pass's image: halved, but never past the floor a side
+// already sits at or below.
+int coarserSide(int side)
+{
+    return std::max(side / DraggedDetailDivisor, std::min(side, DraggedDetailFloor));
+}
+
 }  // namespace
 
 AdaptiveDetail::AdaptiveDetail(const ScopeView& view, const AnalysisSettings& analysis)
@@ -195,11 +202,11 @@ std::optional<DetailSizes> AdaptiveDetail::update(const ScopePaneSizes& panes, f
     return wanted;
 }
 
-AnalysisSettings coarsenedForMotion(AnalysisSettings settings)
+AnalysisSettings coarsenedForDrag(AnalysisSettings settings)
 {
     for (auto& [id, size] : settings.imageSizes) {
-        size.first = std::max(size.first / MovingDetailDivisor, std::min(size.first, MovingDetailFloor));
-        size.second = std::max(size.second / MovingDetailDivisor, std::min(size.second, MovingDetailFloor));
+        size.first = coarserSide(size.first);
+        size.second = coarserSide(size.second);
     }
 
     return settings;

@@ -596,6 +596,80 @@ TEST_CASE("AnalysisWorker sampleDisplayColor honors the averaging radius")
     CHECK(wide->r < tight->r);
 }
 
+TEST_CASE("A held worker publishes nothing, however many frames arrive")
+{
+    // What an attached window being dragged across the screen asks for: the
+    // region is in transit, so there is nothing worth reading off it, and the
+    // last images stand until it lands.
+    FrameMailbox mailbox;
+    AnalysisWorker worker(mailbox);
+    AnalysisSettings settings;
+    settings.region = WholeFrame;
+    settings.enabledScopes = {VectorscopeId};
+    worker.updateSettings(settings);
+    worker.start();
+
+    mailbox.publish(makeSolidFrameBuffer(64, 64, Color{191, 0, 0}, 1));
+    uint64_t seen = 0;
+    AnalysisWorker::Output output;
+    REQUIRE(waitFor([&] { return worker.fetchOutput(seen, output); }));
+    const uint64_t heldAt = seen;
+
+    worker.hold(true);
+    CHECK(worker.held());
+    // Each frame carries different content, so a worker that failed to hold
+    // would have every reason to publish rather than skipping on the
+    // unchanged-content test.
+    for (uint64_t sequence = 2; sequence <= 5; ++sequence) {
+        const auto red = static_cast<uint8_t>(40 * sequence);
+        mailbox.publish(makeSolidFrameBuffer(64, 64, Color{red, 0, 0}, sequence));
+        REQUIRE(waitFor([&] { return worker.consumedFrameSequence() == sequence; }));
+    }
+    // Every frame is still taken - the colour under the pointer is read from
+    // it, and that goes on working while the region is in transit - but none
+    // of them is analysed.
+    CHECK_FALSE(worker.fetchOutput(seen, output));
+    CHECK(seen == heldAt);
+}
+
+TEST_CASE("Releasing a held worker recomputes without waiting for a frame")
+{
+    // The region moves all the way through the hold, so the settings changes
+    // that carried it were consumed while nothing ran. Nothing else records
+    // that the images on screen answer for somewhere the region has left.
+    FrameMailbox mailbox;
+    AnalysisWorker worker(mailbox);
+    AnalysisSettings settings;
+    settings.region = WholeFrame;
+    settings.enabledScopes = {VectorscopeId};
+    worker.updateSettings(settings);
+    worker.start();
+
+    mailbox.publish(makeSolidFrameBuffer(64, 64, Color{191, 0, 0}, 1));
+    uint64_t seen = 0;
+    AnalysisWorker::Output output;
+    REQUIRE(waitFor([&] { return worker.fetchOutput(seen, output); }));
+
+    worker.hold(true);
+    settings.region = RegionOfInterest{0.0, 0.0, 50.0, 50.0};
+    worker.updateSettings(settings);
+    // Two held passes, each of which takes a frame and then reads the pending
+    // settings, so by the second the region change has certainly been consumed
+    // with nothing computed from it.
+    for (uint64_t sequence = 2; sequence <= 3; ++sequence) {
+        mailbox.publish(makeSolidFrameBuffer(64, 64, Color{191, 0, 0}, sequence));
+        REQUIRE(waitFor([&] { return worker.consumedFrameSequence() == sequence; }));
+    }
+    CHECK_FALSE(worker.fetchOutput(seen, output));
+
+    // No frame is published after this: the release alone has to be reason
+    // enough to run.
+    worker.hold(false);
+    CHECK_FALSE(worker.held());
+    REQUIRE(waitFor([&] { return worker.fetchOutput(seen, output); }));
+    CHECK(pixelLit(output.images.at(VectorscopeId), 109, 43));
+}
+
 TEST_CASE("AnalysisWorker offers no frame color before one arrives")
 {
     FrameMailbox mailbox;

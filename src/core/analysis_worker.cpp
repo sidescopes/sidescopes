@@ -337,6 +337,32 @@ bool AnalysisWorker::takeLatestFrame()
     return true;
 }
 
+void AnalysisWorker::hold(bool held)
+{
+    if (m_held.load(std::memory_order_relaxed) == held) {
+        return;
+    }
+    m_held.store(held, std::memory_order_relaxed);
+    if (held) {
+        return;
+    }
+
+    // A release is a reason to run in itself. Every settings change that
+    // arrived during the hold was applied the moment it was seen but never
+    // acted on, so nothing else records that the images on screen answer for
+    // somewhere the region has since left - and with the content unchanged and
+    // no new settings, the two gates below would both skip. Advancing the
+    // version is what the settings path already means by "recompute"; the flag
+    // is cleared first so a held pass can never consume it.
+    std::lock_guard lock(m_settingsMutex);
+    ++m_settingsVersion;
+}
+
+bool AnalysisWorker::held() const
+{
+    return m_held.load(std::memory_order_relaxed);
+}
+
 bool AnalysisWorker::syncSettings(AnalysisSettings& settings, uint64_t& seenSettingsVersion)
 {
     std::lock_guard lock(m_settingsMutex);
@@ -353,9 +379,14 @@ bool AnalysisWorker::syncSettings(AnalysisSettings& settings, uint64_t& seenSett
 // that changed. The region it reads is the caller's own test, stated beside
 // this one - a pass without a region computes nothing and publishes nothing,
 // so the scopes stay as empty as they started, while the frame is still taken
-// because the colour under the pointer is read from it.
+// because the colour under the pointer is read from it. A hold is the same
+// shape of answer for a different reason: the region is in transit, so there
+// is nothing worth reading off it until it lands.
 bool AnalysisWorker::hasWork(bool newFrame, bool settingsChanged) const
 {
+    if (m_held.load(std::memory_order_relaxed)) {
+        return false;
+    }
     std::lock_guard lock(m_frameMutex);
 
     return m_hasFrame && (newFrame || settingsChanged);

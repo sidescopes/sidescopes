@@ -1081,14 +1081,12 @@ void App::applyPendingUiScale()
 
 void App::commitAnalysisChanges()
 {
-    if (trackRegionMotion(glfwGetTime())) {
-        m_analysisDirty = true;
-    }
+    const RegionMotion motion = trackRegionMotion(glfwGetTime());
     if (m_analysisDirty) {
         // Coarse only on the way out: the settings themselves stay the truth,
         // so the detail policy and the projections keep reading what the region
         // will be analysed at the moment it stops moving.
-        m_worker.updateSettings(m_regionMoving ? coarsenedForMotion(m_analysis) : m_analysis);
+        m_worker.updateSettings(motion == RegionMotion::Dragged ? coarsenedForDrag(m_analysis) : m_analysis);
         m_panes->configureProjections();
         m_regions.syncBorder(borderState());
         m_analysisDirty = false;
@@ -1101,25 +1099,33 @@ void App::commitAnalysisChanges()
     }
 }
 
-// A region that keeps changing is a region in motion, whichever gesture is
-// moving it: a border dragged by its band, a rectangle still being drawn, an
-// attached window on its way across the screen. Asking the region rather than
-// each of them is what makes this one test instead of three.
-bool App::trackRegionMotion(double now)
+// What is moving the region decides what analysis does about it, and the two
+// causes want opposite things. The user dragging the region - a border by its
+// band, a rectangle still being drawn - is scanning a picture and wants the
+// scopes live under their hand, so the pass goes on at a coarser image. An
+// attached window carrying it across the screen is a desktop being tidied and
+// is nobody reading anything, so analysis is held outright and the last images
+// stand until it lands.
+RegionMotion App::trackRegionMotion(double now)
 {
+    bool regionChanged = false;
     if (m_analysisDirty && m_analysis.region != m_lastSentRegion) {
         m_lastSentRegion = m_analysis.region;
-        m_regionMovedAt = now;
+        regionChanged = true;
     }
-    const bool moving = m_regionMovedAt && now - *m_regionMovedAt < RegionSettleSeconds;
-    if (moving == m_regionMoving) {
-        return false;
-    }
-    m_regionMoving = moving;
 
-    // The change itself has to be sent: a region that stopped moving stops
-    // dirtying the settings, so nothing else would carry the detail back up.
-    return true;
+    // A live picker means the user's hand is on the region, whatever a window
+    // was doing a moment ago - and the flag it would otherwise carry cannot
+    // clear while the picker is up, because the follow step that clears it is
+    // suppressed for the picker's whole duration.
+    const bool carried = m_attachedWindowMoving && !m_regionPicker.active();
+    const RegionMotionStep step = m_motion.update({regionChanged, carried, now});
+    if (step.changed) {
+        m_worker.hold(step.motion == RegionMotion::Carried);
+        m_analysisDirty = true;
+    }
+
+    return step.motion;
 }
 
 }  // namespace sidescopes

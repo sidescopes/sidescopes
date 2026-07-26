@@ -23,6 +23,7 @@
 #include "app/param_menu.h"
 #include "app/pin_board.h"
 #include "app/region_coordinator.h"
+#include "app/region_motion.h"
 #include "app/region_picker.h"
 #include "app/scope_pane_renderer.h"
 #include "app/scope_registry.h"
@@ -210,10 +211,10 @@ private:
     void applyBorderEditOutcome(const RegionBorderEditOutcome& outcome);
     void commitAnalysisChanges();
 
-    /// Notes whether the region is moving right now, from whether it keeps
-    /// changing. @return Whether that answer just changed, which the settings
-    /// have to carry to the worker.
-    [[nodiscard]] bool trackRegionMotion(double now);
+    /// Notes what is moving the region right now and puts the answer in force -
+    /// holding analysis while an attached window carries it, and dirtying the
+    /// settings whenever it changes so the detail follows.
+    RegionMotion trackRegionMotion(double now);
 
     GLFWwindow* m_window = nullptr;
     AppCallbackState m_callbackState;
@@ -312,12 +313,13 @@ private:
     /// the pointer everywhere, and following it at the moving cadence spent as
     /// much on a swatch as on the traces.
     double m_lastReadoutActivity = 0.0;
-    /// The region the worker was last told about, and when it last differed: a
-    /// region that keeps changing is one a gesture is dragging around, and the
-    /// scopes are computed coarsely until it settles.
+    /// The region the worker was last told about: a region that differs from it
+    /// is a region something is moving, and what is moving it decides whether
+    /// the scopes go coarse or stop altogether.
     std::optional<RegionOfInterest> m_lastSentRegion;
-    std::optional<double> m_regionMovedAt;
-    bool m_regionMoving = false;
+    /// Owns which of the two that is, and the clock its settle time is
+    /// measured against.
+    RegionMotionTracker m_motion;
     /// When the previous frame's event pump returned, so the redraw cap can
     /// target a frame period rather than add a delay to one.
     double m_lastFrameStart = 0.0;

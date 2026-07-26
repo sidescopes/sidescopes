@@ -15,6 +15,9 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Escape, the last region tool, and the right-click menu clear the region
   instead of returning it to the whole screen. The menu entry is Clear
   Region, and the preferences key is `shortcut_clear_region`.
+- Moving an attached window holds the scopes on their last reading until
+  it lands, instead of analysing a region in transit. Moving the region
+  itself goes on reading live, at a coarser image while it is moving.
 
 ### Removed
 
