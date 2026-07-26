@@ -41,7 +41,12 @@ TEST_CASE("start captures the first target when no display is desired")
     CHECK(source.startCount == 1);
     CHECK(source.stopCount == 0);  // the first start has nothing to stop
     CHECK(source.lastStartedDisplay == 7);
-    CHECK(source.lastFramesPerSecond == 30);
+    // Fifteen a second, chosen from measurement rather than from the display:
+    // it costs 32% less processor time than thirty over changing content, and
+    // a whole-display region never managed more than fourteen passes a second
+    // anyway. What it buys with is the step between updates - see the constant
+    // in capture_controller.cpp, which carries the numbers.
+    CHECK(source.lastFramesPerSecond == 15);
     CHECK(controller.capturedDisplay() == 7);
     CHECK(controller.desiredDisplay() == 7);
     CHECK_FALSE(controller.dead());

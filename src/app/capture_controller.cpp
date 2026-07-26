@@ -6,8 +6,18 @@
 namespace sidescopes {
 namespace {
 
-// Capture runs at the display refresh cap the app has always requested.
-constexpr int CaptureFramesPerSecond = 30;
+// How often the screen is read. Photography is the subject, and a scope has to
+// carry a distribution rather than motion, so the rate is set by what reads
+// smoothly rather than by what the display can deliver.
+//
+// Measured whole-application over content changing continuously: 0.422 cores
+// at 30 a second, 0.336 at 20, 0.286 at 15, 0.220 at 10. Fifteen also costs
+// nothing at all on a large region - a whole display already only manages 14.2
+// passes a second, and at 30 the other 52% of the frames captured are thrown
+// away unanalysed. What it costs is the step: during a brisk exposure drag the
+// waveform moves 0.9% of its pane's height between updates at 30 and 1.8% at
+// 15, roughly three and a half pixels against seven on a 400-pixel pane.
+constexpr int CaptureFramesPerSecond = 15;
 
 // How long a dead stream waits before the next restart, and the ceiling that
 // wait doubles up to. A stream that cannot be re-established is usually a

@@ -51,8 +51,10 @@
 namespace sidescopes {
 namespace {
 
-// The capture cadence the app requests, mirrored here so the worker tier runs
-// against the same arrival rate the shipping app produces.
+// The arrival rate the worker tier is fed at. Deliberately fixed rather than
+// tracking the application's own cadence: every stored baseline was taken at
+// this rate, and a sweep that moved with the application would compare a
+// slower pipeline against a faster one and call the difference a speed-up.
 constexpr int CaptureFramesPerSecond = 30;
 
 // How long each worker-tier scenario feeds frames by default. Long enough to
