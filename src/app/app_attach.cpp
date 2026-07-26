@@ -308,7 +308,7 @@ void App::idleWaitWatchingAttachedWindow()
         // A face-locked region's content churn - a pan under an idle loop -
         // takes the border down within a slice, not a whole tick.
         if (m_faceLock.contains(m_activeWindowIdentity)) {
-            m_faceLock.probeContentChange(m_analysis.region, m_frameSize, glfwGetTime());
+            m_faceLock.probeContentChange(m_analysis.region, glfwGetTime());
             if (m_faceLock.contentUnsettled(glfwGetTime())) {
                 hideRegionBorder();
             }

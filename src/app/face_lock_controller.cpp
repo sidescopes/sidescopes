@@ -166,7 +166,10 @@ void FaceLockController::rebindCrop(uint64_t identity, const RegionOfInterest& r
     if (lock == m_locks.end()) {
         return;
     }
-    face_lock::rebindCrop(lock->second.state, lockRectFromPercent(region, frameSize.width, frameSize.height));
+    // Display pixels: the lock's rectangle is stated against the display, which
+    // is what the probe searches and what a narrowed frame's own extents are not.
+    face_lock::rebindCrop(lock->second.state,
+                          lockRectFromPercent(region, frameSize.displayWidth, frameSize.displayHeight));
 }
 
 // The per-frame face-lock step: prunes locks whose windows are gone, drains
@@ -202,7 +205,7 @@ FaceLockOutcome FaceLockController::update(const AttachDecision& decision,
     if (decision.activeRect) {
         carryLockWithWindow(locked->second, *decision.activeRect, frameSize);
     }
-    probeContentChange(analysisRegion, frameSize, now);
+    probeContentChange(analysisRegion, now);
     // The probe never runs against a mid-gesture window: the user's drag
     // wins, and the lock catches up once things settle.
     if (gestureActive) {
@@ -327,18 +330,23 @@ std::vector<uint8_t> FaceLockController::sampleContentGrid(const FrameView& view
 // even a develop-slider drag - hides the border until the content settles;
 // the scopes keep analyzing the region throughout. A region rectangle we
 // moved ourselves only refreshes the baseline.
-void FaceLockController::probeContentChange(const std::optional<RegionOfInterest>& region,
-                                            std::optional<AnalysisWorker::FrameSize> frameSize, double now)
+void FaceLockController::probeContentChange(const std::optional<RegionOfInterest>& region, double now)
 {
-    // The watch reads the region against the frame's own extents, so a capture
-    // narrowed to part of the display would sample somewhere else entirely,
-    // and with no region there is nothing to sample at all.
-    if (!region || !frameSize || !frameSize->coversDisplay()) {
+    // With no region there is nothing to sample.
+    if (!region) {
         return;
     }
     std::vector<uint8_t> samples;
-    const bool sampled =
-        m_worker.withLatestFrame([&](const FrameView& view) { samples = sampleContentGrid(view, *region); });
+    // The grid is measured against the frame's own extents, so a capture
+    // narrowed to part of the display would sample somewhere else entirely. The
+    // question is asked of the frame being read, not of a summary of some
+    // earlier one: the idle watch drives this between frame bodies, where such
+    // a summary can be seconds old.
+    const bool sampled = m_worker.withLatestFrame([&](const FrameView& view) {
+        if (coversWholeDisplay(view)) {
+            samples = sampleContentGrid(view, *region);
+        }
+    });
     if (!sampled || samples.empty()) {
         return;
     }
@@ -432,7 +440,7 @@ std::optional<RegionOfInterest> FaceLockController::mappedRegion(const FaceLockS
                                                                  std::optional<AnalysisWorker::FrameSize> frameSize,
                                                                  uint64_t activeWindowIdentity)
 {
-    if (!frameSize || frameSize->width <= 0 || frameSize->height <= 0) {
+    if (!frameSize || frameSize->displayWidth <= 0 || frameSize->displayHeight <= 0) {
         return std::nullopt;
     }
     const auto geometry = geometryOfDisplay(m_capture.capturedDisplay());
@@ -441,7 +449,7 @@ std::optional<RegionOfInterest> FaceLockController::mappedRegion(const FaceLockS
         return std::nullopt;
     }
     const LockRect target = face_lock::mapRegion(lock, lock.lastAnchor);
-    const RegionOfInterest edited = percentFromLockRect(target, frameSize->width, frameSize->height);
+    const RegionOfInterest edited = percentFromLockRect(target, frameSize->displayWidth, frameSize->displayHeight);
 
     return m_attach.editRegion(
         edited, AttachWindowRect{windowGeom->x, windowGeom->y, windowGeom->width, windowGeom->height},

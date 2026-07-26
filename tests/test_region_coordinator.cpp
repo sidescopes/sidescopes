@@ -68,14 +68,13 @@ struct CoordinatorFixture
     void unsettleContent()
     {
         worker.start();
-        const AnalysisWorker::FrameSize frameSize{16, 16, 16, 16};
         for (uint64_t sequence = 1; sequence <= 2; ++sequence) {
             const Color shade = sequence == 1 ? Color{0, 0, 0} : Color{255, 255, 255};
             mailbox.publish(test::makeSolidFrameBuffer(16, 16, shade, sequence));
             while (worker.consumedFrameSequence() != sequence) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(1));
             }
-            faceLock.probeContentChange(RegionOfInterest{}, frameSize, 0.0);
+            faceLock.probeContentChange(RegionOfInterest{}, 0.0);
         }
         worker.stop();
     }

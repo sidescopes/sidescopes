@@ -98,11 +98,12 @@ public:
                                                     std::optional<AnalysisWorker::FrameSize> frameSize, double now);
 
     /// Samples @p region of the latest frame and flags a content change when it
-    /// differs enough from the previous sample; a frame with no region to
-    /// sample is sat out. The idle wait drives this directly so a pan under an
-    /// idle loop hides the border within a slice.
-    void probeContentChange(const std::optional<RegionOfInterest>& region,
-                            std::optional<AnalysisWorker::FrameSize> frameSize, double now);
+    /// differs enough from the previous sample. Nothing is sampled without a
+    /// region, or from a capture narrowed to part of its display - the grid is
+    /// measured against the frame's extents, which a crop's are not. The idle
+    /// wait drives this directly so a pan under an idle loop hides the border
+    /// within a slice.
+    void probeContentChange(const std::optional<RegionOfInterest>& region, double now);
 
     /// @return Whether @p identity currently holds a face lock.
     [[nodiscard]] bool contains(uint64_t identity) const;

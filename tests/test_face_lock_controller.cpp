@@ -265,21 +265,20 @@ TEST_CASE("The content watch flags a change and clears after the settle time")
     fix.worker.start();
 
     const RegionOfInterest region;  // the whole frame
-    const AnalysisWorker::FrameSize frameSize{64, 64, 64, 64};
 
     // A baseline on a black frame: nothing has changed yet.
     publishAndAwait(fix, makeSolidFrameBuffer(64, 64, Color{0, 0, 0}, 1), 1);
-    fix.controller.probeContentChange(region, frameSize, 0.0);
+    fix.controller.probeContentChange(region, 0.0);
     CHECK_FALSE(fix.controller.contentUnsettled(0.0));
 
     // A second identical frame stays settled: the threshold ignores noise.
     publishAndAwait(fix, makeSolidFrameBuffer(64, 64, Color{0, 0, 0}, 2), 2);
-    fix.controller.probeContentChange(region, frameSize, 1.0);
+    fix.controller.probeContentChange(region, 1.0);
     CHECK_FALSE(fix.controller.contentUnsettled(1.0));
 
     // A very different frame is a change, stamped at t = 2.0.
     publishAndAwait(fix, makeSolidFrameBuffer(64, 64, Color{255, 255, 255}, 3), 3);
-    fix.controller.probeContentChange(region, frameSize, 2.0);
+    fix.controller.probeContentChange(region, 2.0);
     CHECK(fix.controller.contentUnsettled(2.0));
     CHECK(fix.controller.contentUnsettled(2.44));        // within the 0.45s settle
     CHECK_FALSE(fix.controller.contentUnsettled(2.45));  // at the edge, settled again
@@ -295,21 +294,20 @@ TEST_CASE("The content watch reads the locked region and nothing outside it")
 
     // The locked region is the frame's top-left quarter.
     const RegionOfInterest region{0.0, 0.0, 50.0, 50.0};
-    const AnalysisWorker::FrameSize frameSize{64, 64, 64, 64};
 
     publishAndAwait(fix, makeSolidFrameBuffer(64, 64, Color{0, 0, 0}, 1), 1);
-    fix.controller.probeContentChange(region, frameSize, 0.0);
+    fix.controller.probeContentChange(region, 0.0);
     CHECK_FALSE(fix.controller.contentUnsettled(0.0));
 
     // Repainting the rest of the frame is somebody else's window moving; the
     // locked content did not change and the border stays up.
     publishAndAwait(fix, makeQuarteredFrameBuffer(64, Color{0, 0, 0}, Color{255, 255, 255}, 2), 2);
-    fix.controller.probeContentChange(region, frameSize, 1.0);
+    fix.controller.probeContentChange(region, 1.0);
     CHECK_FALSE(fix.controller.contentUnsettled(1.0));
 
     // Repainting inside it is the pan the border must hide for.
     publishAndAwait(fix, makeQuarteredFrameBuffer(64, Color{255, 255, 255}, Color{255, 255, 255}, 3), 3);
-    fix.controller.probeContentChange(region, frameSize, 2.0);
+    fix.controller.probeContentChange(region, 2.0);
     CHECK(fix.controller.contentUnsettled(2.0));
 
     fix.worker.stop();
@@ -320,13 +318,12 @@ TEST_CASE("A region the host itself moved only rebaselines the content watch")
     ControllerFixture fix;
     fix.worker.start();
 
-    const AnalysisWorker::FrameSize frameSize{64, 64, 64, 64};
     publishAndAwait(fix, makeQuarteredFrameBuffer(64, Color{0, 0, 0}, Color{255, 255, 255}, 1), 1);
-    fix.controller.probeContentChange(RegionOfInterest{0.0, 0.0, 50.0, 50.0}, frameSize, 0.0);
+    fix.controller.probeContentChange(RegionOfInterest{0.0, 0.0, 50.0, 50.0}, 0.0);
 
     // The same frame read through a different rectangle samples wholly
     // different pixels; that is the region moving, not the content changing.
-    fix.controller.probeContentChange(RegionOfInterest{50.0, 50.0, 100.0, 100.0}, frameSize, 1.0);
+    fix.controller.probeContentChange(RegionOfInterest{50.0, 50.0, 100.0, 100.0}, 1.0);
     CHECK_FALSE(fix.controller.contentUnsettled(1.0));
 
     fix.worker.stop();
@@ -397,7 +394,7 @@ TEST_CASE("Nothing is probed or watched from a narrowed capture")
     second.sourceWidth = 2000;
     second.sourceHeight = 1000;
     publishAndAwait(fix, std::move(second), 2);
-    fix.controller.probeContentChange(RegionOfInterest{}, narrowedSize, 2.0);
+    fix.controller.probeContentChange(RegionOfInterest{}, 2.0);
     CHECK_FALSE(fix.controller.contentUnsettled(2.0));
 
     fix.worker.stop();
@@ -612,6 +609,38 @@ TEST_CASE("A border edit re-teaches the crop the face carries")
     // An edit aimed at a window that holds no lock is simply ignored.
     fix.controller.rebindCrop(99, RegionOfInterest{0.0, 0.0, 1.0, 1.0}, frameSize);
     CHECK(fix.controller.contains(1));
+}
+
+TEST_CASE("A lock's rectangle is stated in display pixels")
+{
+    // Everything a lock holds - the anchor, the crop it carries - is measured
+    // where the probe searched, which is the whole display. A frame narrowed to
+    // the analysis region reports its own extents alongside the display's, and
+    // reading the lock against the wrong pair of them puts the region somewhere
+    // else entirely. The crop policy keeps the two apart today by refusing to
+    // narrow while any window holds a lock; this pins the units so that policy
+    // is what makes the probe possible rather than what makes it correct.
+    ControllerFixture fix;
+    desktopStubs().displayGeometry = DisplayGeometry{0.0, 0.0, 1000.0, 500.0};
+    desktopStubs().windowGeometry = WindowGeometry{0.0, 0.0, 1000.0, 500.0, false, ""};
+    // A 500x500 crop of a 2000x1000 display: four times too narrow to read as
+    // the display, which is exactly what makes the assertion below sharp.
+    const AnalysisWorker::FrameSize narrowed{500, 500, 2000, 1000};
+    fix.controller.addLock(1, foreheadLock(), 0.0);
+
+    fix.controller.rebindCrop(1, RegionOfInterest{20.0, 20.0, 30.0, 40.0}, narrowed);
+    const IntRect moved{460, 200, 200, 200};
+    (void)fix.controller.ingestProbeResult({moved}, IntRect{0, 0, 1000, 800}, 1, decisionFor(1), 1, narrowed, 1.0);
+    const FaceLockOutcome adopted =
+        fix.controller.ingestProbeResult({moved}, IntRect{0, 0, 1000, 800}, 1, decisionFor(1), 1, narrowed, 2.0);
+
+    // The same answer the whole-display frame gives above: the crop's extents
+    // never enter the arithmetic.
+    REQUIRE(adopted.applyRegion.has_value());
+    CHECK_THAT(adopted.applyRegion->leftPercent, WithinAbs(23.0, 1e-6));
+    CHECK_THAT(adopted.applyRegion->rightPercent, WithinAbs(33.0, 1e-6));
+    CHECK_THAT(adopted.applyRegion->topPercent, WithinAbs(20.0, 1e-6));
+    CHECK_THAT(adopted.applyRegion->bottomPercent, WithinAbs(40.0, 1e-6));
 }
 
 TEST_CASE("An adopted anchor maps to nothing while the window is out of reach")
