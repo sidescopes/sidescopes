@@ -110,10 +110,14 @@ ScatterPlanes scatterPlanesFor(const ModeFlags& flags, uint32_t* bins, int first
 }
 
 // Sum each level's population across a plane's columns.
-void sumLevelDensities(const uint32_t* in, int columns, uint64_t* global)
+//
+// `rowPitch` is the distance between levels and `columns` is how many bins a
+// level really holds. They are NOT the same number and must never be merged
+// back into one parameter - see Waveform::rowPitch.
+void sumLevelDensities(const uint32_t* in, std::size_t rowPitch, int columns, uint64_t* global)
 {
     for (int row = 0; row < WaveformLevels; ++row) {
-        const uint32_t* line = in + static_cast<std::size_t>(row) * columns;
+        const uint32_t* line = in + static_cast<std::size_t>(row) * rowPitch;
         for (int column = 0; column < columns; ++column) {
             global[row] += line[column];
         }
@@ -252,13 +256,13 @@ void computeMixTargets(const uint64_t* global, const double* expectedOf, int low
 
 // Apply the flat-field weights, reconstructing dead interior codes
 // from their healthy neighbors, into the per-plane corrected buffer.
-void applyCorrection(const uint32_t* in, int columns, const uint32_t* flatten, const int* mixAbove, const int* mixBelow,
-                     uint32_t* corrected)
+void applyCorrection(const uint32_t* in, std::size_t rowPitch, int columns, const uint32_t* flatten,
+                     const int* mixAbove, const int* mixBelow, uint32_t* corrected)
 {
     for (int row = 0; row < WaveformLevels; ++row) {
-        uint32_t* line = corrected + static_cast<std::size_t>(row) * columns;
+        uint32_t* line = corrected + static_cast<std::size_t>(row) * rowPitch;
         const auto weighted = [&](int level, int column) -> uint32_t {
-            const uint64_t count = in[static_cast<std::size_t>(level) * columns + column];
+            const uint64_t count = in[static_cast<std::size_t>(level) * rowPitch + column];
             return static_cast<uint32_t>(count * flatten[level] >> 8);
         };
         if (mixAbove[row] == row) {
@@ -280,7 +284,7 @@ void applyCorrection(const uint32_t* in, int columns, const uint32_t* flatten, c
 
 // Smooth a corrected plane into the output plane: a vertical 1-4-1
 // then a horizontal 1-2-1.
-void smoothPlane(const uint32_t* corrected, int columns, uint32_t* out)
+void smoothPlane(const uint32_t* corrected, std::size_t rowPitch, int columns, uint32_t* out)
 {
     // A plane with no columns holds nothing to smooth. Stated rather than left
     // to the loop bounds because the analyzer cannot otherwise tell that the
@@ -300,10 +304,10 @@ void smoothPlane(const uint32_t* corrected, int columns, uint32_t* out)
     // wide pane that is megabytes restreamed thousands of times - while the
     // arithmetic per bin is identical either way.
     for (int row = 0; row < WaveformLevels; ++row) {
-        const uint32_t* self = corrected + static_cast<std::size_t>(row) * columns;
-        const uint32_t* above = row > 0 ? self - columns : nullptr;
-        const uint32_t* below = row + 1 < WaveformLevels ? self + columns : nullptr;
-        uint32_t* line = out + static_cast<std::size_t>(row) * columns;
+        const uint32_t* self = corrected + static_cast<std::size_t>(row) * rowPitch;
+        const uint32_t* above = row > 0 ? self - rowPitch : nullptr;
+        const uint32_t* below = row + 1 < WaveformLevels ? self + rowPitch : nullptr;
+        uint32_t* line = out + static_cast<std::size_t>(row) * rowPitch;
         for (int column = 0; column < columns; ++column) {
             const uint32_t lower = above != nullptr ? above[column] : 0u;
             const uint32_t upper = below != nullptr ? below[column] : 0u;
@@ -312,7 +316,7 @@ void smoothPlane(const uint32_t* corrected, int columns, uint32_t* out)
     }
     // Horizontal 1-2-1 within each row, in place.
     for (int row = 0; row < WaveformLevels; ++row) {
-        uint32_t* line = out + static_cast<std::size_t>(row) * columns;
+        uint32_t* line = out + static_cast<std::size_t>(row) * rowPitch;
         uint32_t previous = 0;
         for (int column = 0; column < columns; ++column) {
             const uint32_t current = line[column];
@@ -344,11 +348,11 @@ constexpr uint64_t FlatToneDenominator = 10;
 // mass, over the bins the plane really holds: the space between planes is
 // padding, never written, and reading it would let a stale word from an
 // earlier size decide the normalization ceiling.
-void measureColumns(const uint32_t* bins, int columns, ColumnDensity* densities)
+void measureColumns(const uint32_t* bins, std::size_t rowPitch, int columns, ColumnDensity* densities)
 {
     std::fill_n(densities, columns, ColumnDensity{});
     for (int level = 0; level < WaveformLevels; ++level) {
-        const uint32_t* line = bins + static_cast<std::size_t>(level) * columns;
+        const uint32_t* line = bins + static_cast<std::size_t>(level) * rowPitch;
         for (int column = 0; column < columns; ++column) {
             ColumnDensity& measured = densities[static_cast<std::size_t>(column)];
             measured.mass += line[column];
@@ -417,13 +421,13 @@ void gatherCeiling(const ColumnDensity* densities, int columns, const bool* flat
 // bins clip. When every column is one flat tone there is no distribution to
 // measure and the plain maximum stands, which is what keeps a frame of colour
 // bars or a ramp rendering exactly as before.
-uint32_t peakDensity(const std::vector<uint32_t>& traces, std::size_t planeSize, int columns, bool wantsRgb,
-                     bool wantsLuma, ColumnDensity* densities)
+uint32_t peakDensity(const std::vector<uint32_t>& traces, std::size_t planeSize, std::size_t rowPitch, int columns,
+                     bool wantsRgb, bool wantsLuma, ColumnDensity* densities)
 {
     TraceCeiling ceiling;
     bool flatTone[WaveformLevels];
     const auto scan = [&](int plane) {
-        measureColumns(traces.data() + (static_cast<std::size_t>(plane) * planeSize), columns, densities);
+        measureColumns(traces.data() + (static_cast<std::size_t>(plane) * planeSize), rowPitch, columns, densities);
         markFlatToneLevels(densities, columns, flatTone);
         gatherCeiling(densities, columns, flatTone, ceiling);
     };
@@ -574,6 +578,8 @@ void Waveform::scatterRowsAs(const FrameView& frame, IntRect region, const Sampl
 {
     const ModeFlags flags = modeFlagsFor(m_settings.mode);
     const ScatterPlanes planes = scatterPlanesFor(flags, bins, firstPlane, planeSize());
+    // Hoisted: this is the innermost write in the whole engine.
+    const std::size_t pitch = rowPitch();
 
     for (int i = rowBegin; i < rowEnd; ++i) {
         const int py = sampleRowOf(grid, region, i);
@@ -597,7 +603,7 @@ void Waveform::scatterRowsAs(const FrameView& frame, IntRect region, const Sampl
             const uint32_t leftWeight = 16u - rightWeight;
             const std::size_t next = column + 1 < static_cast<std::size_t>(m_columns) ? column + 1 : column;
             const auto splat = [&](uint32_t* plane, int level, uint32_t value) {
-                uint32_t* line = plane + static_cast<std::size_t>(WaveformLevels - 1 - level) * m_columns;
+                uint32_t* line = plane + static_cast<std::size_t>(WaveformLevels - 1 - level) * pitch;
                 line[column] += leftWeight * value;
                 line[next] += rightWeight * value;
             };
@@ -687,7 +693,8 @@ void Waveform::mapBinsToImage(uint64_t sampledRows)
     const std::size_t planeSize = this->planeSize();
 
     const ModeFlags flags = modeFlagsFor(m_settings.mode);
-    const uint32_t densest = peakDensity(traces, planeSize, m_columns, flags.rgb, flags.luma, m_columnDensities.data());
+    const uint32_t densest =
+        peakDensity(traces, planeSize, rowPitch(), m_columns, flags.rgb, flags.luma, m_columnDensities.data());
 
     // Each sample contributes sixteen weight units (the splat's
     // sixteenths), so the per-row normalization divides them back out and
@@ -738,7 +745,7 @@ void Waveform::correctBinDensities()
         uint32_t* out = m_smoothed.data() + static_cast<std::size_t>(plane) * planeSize;
 
         uint64_t global[Levels] = {};
-        sumLevelDensities(in, m_columns, global);
+        sumLevelDensities(in, rowPitch(), m_columns, global);
         const PopulatedRange range = populatedRange(global);
 
         uint32_t flatten[Levels];
@@ -749,8 +756,8 @@ void Waveform::correctBinDensities()
         int mixBelow[Levels];
         computeMixTargets(global, expectedOf, range.lowest, range.highest, mixAbove, mixBelow);
 
-        applyCorrection(in, m_columns, flatten, mixAbove, mixBelow, m_corrected.data());
-        smoothPlane(m_corrected.data(), m_columns, out);
+        applyCorrection(in, rowPitch(), m_columns, flatten, mixAbove, mixBelow, m_corrected.data());
+        smoothPlane(m_corrected.data(), rowPitch(), m_columns, out);
     }
 }
 
@@ -773,8 +780,8 @@ void Waveform::buildParade(const uint32_t* redPlane, const uint32_t* greenPlane,
         const int last = (channel == 2 ? m_columns : (channel + 1) * third) - (channel < 2 ? gutter : 0);
         const int span = last - first;
         for (int row = 0; row < Levels; ++row) {
-            const uint32_t* sourceRow = planes[channel] + static_cast<std::size_t>(row) * m_columns;
-            uint32_t* outRow = outPlane + static_cast<std::size_t>(row) * m_columns;
+            const uint32_t* sourceRow = planes[channel] + static_cast<std::size_t>(row) * rowPitch();
+            uint32_t* outRow = outPlane + static_cast<std::size_t>(row) * rowPitch();
             for (int column = first; column < last; ++column) {
                 const int local = column - first;
                 const int begin = local * m_columns / span;
@@ -810,7 +817,7 @@ void Waveform::composeImage(const uint32_t* redPlane, const uint32_t* greenPlane
                     if (level < 0 || level >= Levels) {
                         return 0.0f;
                     }
-                    return static_cast<float>(plane[static_cast<std::size_t>(level) * m_columns + column]);
+                    return static_cast<float>(plane[static_cast<std::size_t>(level) * rowPitch() + column]);
                 };
                 if (nativeHeight) {
                     return rowAt(tap.base);

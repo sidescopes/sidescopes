@@ -60,6 +60,10 @@ inline constexpr int WaveformMinSamplesPerBin = 32;
 /// never start an exact power of two apart. See Waveform::planeSize.
 inline constexpr std::size_t WaveformPlanePadding = 32;
 
+/// Bins of unused space at the end of every level's row, so that one level's
+/// row never starts an exact power of two from the next. See Waveform::rowPitch.
+inline constexpr std::size_t WaveformRowPadding = 8;
+
 /// What one column of one bin plane holds: its densest bin, the level that bin
 /// sits at, and the mass of the whole column. Together they say whether the
 /// column carries a distribution or a single flat tone, which is what decides
@@ -161,10 +165,31 @@ private:
     void composeImage(const uint32_t* redPlane, const uint32_t* greenPlane, const uint32_t* bluePlane,
                       const uint32_t* lumaPlane, double gain, double intensityScale);
 
-    /// The bins one plane really holds: a row per level, a column per column.
+    /// The distance from one level's row to the next, in bins. Deliberately
+    /// NOT the column count.
+    ///
+    /// With the two equal, the rows of a plane sit `columns x 4` bytes apart -
+    /// an exact power of two at 2048 columns, which the detail ladder
+    /// deliberately selects for any waveform pane 1434 to 2867 pixels wide. An
+    /// RGB scatter writes three or four planes per sample at three or four
+    /// different levels, so those rows then contend for the same cache sets.
+    /// Measured on an M5 Pro over a 3024x1964 region: the RGB pass cost 15.57
+    /// ms at 2048 columns against 12.16 at both 2047 and 2049, and the parade
+    /// 13.20 against 9.84 and 9.66. Luma, which writes one plane, was flat at
+    /// 6.4 to 6.7 across all three - the tell that it is the multi-plane
+    /// scatter and not the width itself.
+    ///
+    /// The padding is never written and never read as data. Nothing may
+    /// iterate a row by rowPitch: every pass over one stops at m_columns.
+    [[nodiscard]] std::size_t rowPitch() const
+    {
+        return static_cast<std::size_t>(m_columns) + WaveformRowPadding;
+    }
+
+    /// The bins one plane really holds: a row per level, a row pitch apart.
     [[nodiscard]] std::size_t binsPerPlane() const
     {
-        return static_cast<std::size_t>(m_columns) * Levels;
+        return rowPitch() * Levels;
     }
 
     /// The distance from one plane to the next, which is its bins plus a pad.
