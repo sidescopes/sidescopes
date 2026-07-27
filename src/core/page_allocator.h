@@ -14,6 +14,36 @@ namespace sidescopes {
 /// Returns pages taken by allocatePages. @p bytes must be what was asked for.
 void freePages(void* memory, std::size_t bytes) noexcept;
 
+/// A file mapped into the address space read-only.
+struct MappedFile
+{
+    const unsigned char* data = nullptr;
+    std::size_t size = 0;
+
+    [[nodiscard]] bool valid() const
+    {
+        return data != nullptr && size > 0;
+    }
+};
+
+/// Maps @p path read-only, or returns an invalid mapping if it cannot be read.
+///
+/// The pages are clean and file-backed: they are shared with every other
+/// process mapping the same file, the system can evict them under pressure
+/// without writing anything, and they are NOT charged to phys_footprint the
+/// way a heap copy of the same bytes is. That is the whole reason this exists
+/// - the interface font is 4.27 MB the process would otherwise hold as dirty
+/// private memory for its entire life.
+///
+/// READ-ONLY IS LOAD-BEARING, not defensive: a write to the mapping is a fault
+/// rather than a slow path, which is exactly what makes it safe to hand these
+/// bytes to a library that promises not to modify them. Defined in heap.cpp so
+/// the platform headers stay out of every translation unit.
+[[nodiscard]] MappedFile mapFileReadOnly(const char* path);
+
+/// Releases a mapping taken by mapFileReadOnly. Safe on an invalid mapping.
+void unmapFile(MappedFile mapping) noexcept;
+
 /// An allocator that takes whole pages from the operating system and gives
 /// them straight back.
 ///

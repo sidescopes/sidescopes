@@ -14,6 +14,7 @@
 #include "app/app.h"
 #include "app/scope_view.h"
 #include "app/ui_scaling.h"
+#include "core/page_allocator.h"
 #include "core/scopes/histogram.h"
 #include "core/scopes/vectorscope.h"
 #include "core/scopes/waveform.h"
@@ -141,6 +142,39 @@ void installInputClock(GLFWwindow* window)
     glfwSetWindowFocusCallback(window, [](GLFWwindow* target, int) { stampInputEvent(target); });
 }
 
+// Adds one font from a file mapped read-only instead of read into the heap.
+//
+// AddFontFromFileTTF copies the whole file into private dirty memory that the
+// atlas keeps for the process's life, because 1.92 rasterizes glyphs on demand
+// and needs the source bytes to stay put. Measured on macOS: 4.27 MB for the
+// interface face and 224 KB for the monospace one, live for the whole session.
+// Mapped instead, the same bytes are clean and file-backed - shared with every
+// other process using the system font, and not charged to phys_footprint.
+//
+// The mapping is deliberately never released. It has to outlive the atlas,
+// which lives as long as the interface does, and the pages cost nothing to
+// keep: unmapping them at shutdown would only add a way to get it wrong.
+ImFont* addMappedFont(ImGuiIO& io, const std::string& path, float sizePixels, const ImFontConfig& base)
+{
+    const sidescopes::MappedFile mapping = sidescopes::mapFileReadOnly(path.c_str());
+    if (!mapping.valid()) {
+        return nullptr;
+    }
+    ImFontConfig config = base;
+    // ImGui must neither free these bytes nor write to them. It does not: the
+    // stb_truetype loader takes the blob as const and only reads it. The
+    // mapping is PROT_READ, so were that ever to change the result would be an
+    // immediate fault rather than silent corruption.
+    config.FontDataOwnedByAtlas = false;
+    ImFont* font = io.Fonts->AddFontFromMemoryTTF(const_cast<unsigned char*>(mapping.data),
+                                                  static_cast<int>(mapping.size), sizePixels, &config);
+    if (font == nullptr) {
+        sidescopes::unmapFile(mapping);
+    }
+
+    return font;
+}
+
 }  // namespace
 
 namespace sidescopes {
@@ -158,22 +192,19 @@ ImFont* loadInterfaceFont(GLFWwindow* window)
     static constexpr ImWchar InterfaceGlyphRanges[] = {0x0020, 0x00FF, 0x0394, 0x0394, 0};
     config.GlyphRanges = InterfaceGlyphRanges;
     ImGuiIO& io = ImGui::GetIO();
-    bool loaded = false;
     for (const std::string& path : interfaceFontFiles()) {
-        if (io.Fonts->AddFontFromFileTTF(path.c_str(), InterfaceFontSize, &config)) {
-            loaded = true;
+        if (addMappedFont(io, path, InterfaceFontSize, config) != nullptr) {
             break;
         }
     }
     ImFont* monospace = nullptr;
     const float monoSize = InterfaceFontSize * monospaceFontScale();
     for (const std::string& path : monospaceFontFiles()) {
-        monospace = io.Fonts->AddFontFromFileTTF(path.c_str(), monoSize, &config);
+        monospace = addMappedFont(io, path, monoSize, config);
         if (monospace != nullptr) {
             break;
         }
     }
-    (void)loaded;
 
     return monospace;
 }
