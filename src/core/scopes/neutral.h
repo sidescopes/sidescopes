@@ -143,6 +143,10 @@ private:
 
     void scatterRows(const FrameView& frame, IntRect region, const SampleGrid& grid, int rowBegin, int rowEnd,
                      uint32_t* cloud, ChromaTotals& totals) const;
+    /// The same, compiled for one pixel layout.
+    template <typename Pixels>
+    void scatterRowsAs(const FrameView& frame, IntRect region, const SampleGrid& grid, int rowBegin, int rowEnd,
+                       uint32_t* cloud, ChromaTotals& totals) const;
     void splatInto(uint32_t* cloud, NormalizedPoint at) const;
     void drawCloud();
     void drawDot();

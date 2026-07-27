@@ -123,9 +123,9 @@ void DesktopStubs::recordDetection(const FrameView& view, float pixelsPerPoint)
     m_detected.height = view.height;
     m_detected.pixelsPerPoint = pixelsPerPoint;
     m_detected.firstPixel = {};
-    if (view.bgra != nullptr && view.width > 0 && view.height > 0) {
+    if (view.pixels != nullptr && view.width > 0 && view.height > 0) {
         for (std::size_t byte = 0; byte < m_detected.firstPixel.size(); ++byte) {
-            m_detected.firstPixel[byte] = view.bgra[byte];
+            m_detected.firstPixel[byte] = view.pixels[byte];
         }
     }
 }

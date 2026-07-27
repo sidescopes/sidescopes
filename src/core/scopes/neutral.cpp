@@ -112,18 +112,20 @@ NormalizedPoint Neutral::project(const FloatColor& color) const
     return projectAb(lab.a, lab.b);
 }
 
-void Neutral::scatterRows(const FrameView& frame, IntRect region, const SampleGrid& grid, int rowBegin, int rowEnd,
-                          uint32_t* cloud, ChromaTotals& totals) const
+template <typename Pixels>
+void Neutral::scatterRowsAs(const FrameView& frame, IntRect region, const SampleGrid& grid, int rowBegin, int rowEnd,
+                            uint32_t* cloud, ChromaTotals& totals) const
 {
     for (int row = rowBegin; row < rowEnd; ++row) {
         const int py = sampleRowOf(grid, region, row);
-        const uint8_t* pixel = frame.pixelAt(region.x, py);
-        const uint8_t* rowFinish = frame.pixelAt(region.x + region.width, py);
+        const uint8_t* pixel = frame.rawPixelAt(region.x, py);
+        const uint8_t* rowFinish = frame.rawPixelAt(region.x + region.width, py);
         for (; pixel < rowFinish; pixel += static_cast<std::ptrdiff_t>(4) * grid.columnStride) {
-            // The byte-sourced conversion: bit-identical here, where every
+            // The code-sourced conversion: bit-identical here, where every
             // channel arrives as a code, and it does not evaluate the
-            // transfer function once per channel per pixel.
-            const LabColor lab = labFromSrgb8(Color{pixel[2], pixel[1], pixel[0]});
+            // transfer function once per channel per pixel. A 10-bit frame
+            // reads its own table, whose full scale is 1023.
+            const LabColor lab = labFromCodes<Pixels>(Pixels::read(pixel));
             totals.sumA += std::llround(static_cast<double>(lab.a) * ChromaSumScale);
             totals.sumB += std::llround(static_cast<double>(lab.b) * ChromaSumScale);
             ++totals.count;
@@ -132,6 +134,17 @@ void Neutral::scatterRows(const FrameView& frame, IntRect region, const SampleGr
                 ++totals.neutral;
             }
         }
+    }
+}
+
+void Neutral::scatterRows(const FrameView& frame, IntRect region, const SampleGrid& grid, int rowBegin, int rowEnd,
+                          uint32_t* cloud, ChromaTotals& totals) const
+{
+    // Dispatched once per chunk, never per pixel.
+    if (frame.format == PixelFormat::Argb2101010) {
+        scatterRowsAs<Argb2101010Pixels>(frame, region, grid, rowBegin, rowEnd, cloud, totals);
+    } else {
+        scatterRowsAs<Bgra8Pixels>(frame, region, grid, rowBegin, rowEnd, cloud, totals);
     }
 }
 

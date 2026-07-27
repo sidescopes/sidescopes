@@ -8,6 +8,7 @@
 
 #include "core/scopes/neutral.h"
 #include "modules/module_export.h"
+#include "modules/module_frame.h"
 #include "modules/module_registry.h"
 #include "modules/module_scratch.h"
 #include "sidescopes/module.h"
@@ -64,12 +65,7 @@ bool configure(SsScopeInstance* instance, const SsParamValue* values, uint32_t c
 bool accumulate(SsScopeInstance* instance, const SsFrameView* frame, SsRect region)
 {
     try {
-        const FrameView view{frame->bgra,
-                             frame->stride_bytes,
-                             frame->width,
-                             frame->height,
-                             frame->color_space == SS_COLOR_SPACE_SRGB ? ColorSpaceHint::Srgb : ColorSpaceHint::Unknown,
-                             frame->sequence};
+        const FrameView view = frameFromBoundary(*frame);
         lendHostScratch(impl(instance)->engine, impl(instance)->host);
         impl(instance)->engine.accumulate(view, IntRect{region.x, region.y, region.width, region.height});
         return true;

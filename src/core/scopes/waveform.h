@@ -11,6 +11,20 @@
 namespace sidescopes {
 
 inline constexpr int DefaultWaveformColumns = 1024;
+
+/// Levels the trace is binned into. Held at 256 by measurement, not by the
+/// input: a ten-bit capture carries about two bits more than this resolves, so
+/// unlike the columns this is now a deliberate ceiling rather than a floor the
+/// source imposed.
+///
+/// Doubling it doubles the bins - 16 MB more at the default pane, 48 at the
+/// widest - and costs 69% more per pass, against an application whose whole
+/// footprint is around 137 MB. What it buys is confined to columns whose own
+/// tonal spread is under about a level, since a column spanning two levels or
+/// more is already resolved to within a few percent here. The image is capped
+/// at MaximumWaveformHeight anyway, so beyond that many levels there is no
+/// pixel left to draw one in. If it is ever raised, 512 is the only step worth
+/// taking and it should follow the pane the way the columns do.
 inline constexpr int WaveformLevels = 256;
 
 /// The widest and tallest image the waveform is computed at. Columns carry real
@@ -19,8 +33,8 @@ inline constexpr int WaveformLevels = 256;
 /// cost is four private plane sets per parallel pass: 66 MB at this width
 /// against 44 at the 2048 it used to stop at, and a wider one buys nothing any
 /// current display can show. Height only resolves the level spline, the levels
-/// themselves being fixed at 256 by eight-bit input, so it is worth far less
-/// per megabyte and does not follow the pane.
+/// themselves being held at WaveformLevels, so it is worth far less per
+/// megabyte and does not follow the pane.
 inline constexpr int MaximumWaveformColumns = 3072;
 inline constexpr int MaximumWaveformHeight = 768;
 
@@ -137,6 +151,10 @@ private:
     /// on. Only the planes the active mode draws are written.
     void scatterRows(const FrameView& frame, IntRect region, const SampleGrid& grid, int rowBegin, int rowEnd,
                      uint32_t* bins, int firstPlane) const;
+    /// The same, compiled for one pixel layout.
+    template <typename Pixels>
+    void scatterRowsAs(const FrameView& frame, IntRect region, const SampleGrid& grid, int rowBegin, int rowEnd,
+                       uint32_t* bins, int firstPlane) const;
     void mapBinsToImage(uint64_t sampledRows);
     void correctBinDensities();
     void buildParade(const uint32_t* redPlane, const uint32_t* greenPlane, const uint32_t* bluePlane);

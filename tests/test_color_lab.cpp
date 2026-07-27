@@ -247,7 +247,7 @@ TEST_CASE("The byte conversion matches the general one exactly")
 {
     const auto identical = [](int r, int g, int b) {
         const LabColor bytes =
-            labFromSrgb8(Color{static_cast<uint8_t>(r), static_cast<uint8_t>(g), static_cast<uint8_t>(b)});
+            labFromCodes8(Sample{static_cast<uint16_t>(r), static_cast<uint16_t>(g), static_cast<uint16_t>(b)});
         const LabColor floats =
             labFromSrgb(FloatColor{static_cast<float>(r), static_cast<float>(g), static_cast<float>(b)});
 

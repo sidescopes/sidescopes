@@ -81,6 +81,54 @@ struct TestFrame
     int height;
 };
 
+// One ten-bit frame, in the packed layout the macOS capture delivers: alpha in
+// bits 30-31, red 20-29, green 10-19, blue 0-9 of a little-endian word.
+//
+// Codes are written on the 0..1023 scale, so a test can put a value BETWEEN
+// two eight-bit levels - which is the whole of what this format buys and the
+// only way to tell a real ten-bit path from one that widened its arithmetic
+// and still reads bytes.
+struct TenBitTestFrame
+{
+    TenBitTestFrame(int width, int height)
+        : width(width),
+          height(height)
+    {
+        pixels.assign(static_cast<std::size_t>(width) * height * 4, 0);
+    }
+
+    void setCodes(int px, int py, uint16_t r, uint16_t g, uint16_t b)
+    {
+        const uint32_t word = 0xC0000000u | static_cast<uint32_t>(r) << 20 | static_cast<uint32_t>(g) << 10 | b;
+        uint8_t* pixel = pixels.data() + (static_cast<std::size_t>(py) * width + px) * 4;
+        pixel[0] = static_cast<uint8_t>(word);
+        pixel[1] = static_cast<uint8_t>(word >> 8);
+        pixel[2] = static_cast<uint8_t>(word >> 16);
+        pixel[3] = static_cast<uint8_t>(word >> 24);
+    }
+
+    void fill(uint16_t r, uint16_t g, uint16_t b)
+    {
+        for (int py = 0; py < height; ++py) {
+            for (int px = 0; px < width; ++px) {
+                setCodes(px, py, r, g, b);
+            }
+        }
+    }
+
+    [[nodiscard]] FrameView view() const
+    {
+        FrameView frame{pixels.data(), width * 4, width, height, ColorSpaceHint::Srgb, 1};
+        frame.format = PixelFormat::Argb2101010;
+
+        return frame;
+    }
+
+    std::vector<uint8_t> pixels;
+    int width;
+    int height;
+};
+
 // An owned solid-color BGRA frame buffer for the mailbox and worker tests:
 // stride packed to the width and fully opaque.
 inline FrameBuffer makeSolidFrameBuffer(int width, int height, Color color, uint64_t sequence)

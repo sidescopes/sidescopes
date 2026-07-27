@@ -35,6 +35,12 @@ constexpr const ChromaCoefficients& coefficientsFor(ChromaMatrix matrix)
     return matrix == ChromaMatrix::Bt601 ? Bt601 : Bt709;
 }
 
+// The chroma coefficients carry eight fractional bits and the channels feeding
+// them carry VectorscopeLevelBits more, so the product is shifted by both. An
+// 8-bit channel's fraction is always zero, which makes this shift exactly the
+// eight-bit one it replaced - the same position, from a wider input.
+constexpr int ChromaShift = 16 + VectorscopeLevelBits;
+
 // Densities are normalized to a nominal sample count so the same scene maps
 // to the same trace regardless of sampling stride or region size.
 constexpr double ReferenceSampleCount = 1'000'000.0;
@@ -117,8 +123,9 @@ void Vectorscope::resize(int size)
     rebuildTintTable();
 }
 
-void Vectorscope::scatterRows(const FrameView& frame, IntRect region, const SampleGrid& grid, int rowBegin, int rowEnd,
-                              uint32_t* bins) const
+template <typename Pixels>
+void Vectorscope::scatterRowsAs(const FrameView& frame, IntRect region, const SampleGrid& grid, int rowBegin,
+                                int rowEnd, uint32_t* bins) const
 {
     // Accumulation always uses the 256-code grid: 8-bit content quantizes its
     // chroma to those codes (and piles unevenly onto fixed sub-code positions,
@@ -133,17 +140,24 @@ void Vectorscope::scatterRows(const FrameView& frame, IntRect region, const Samp
     const int span = size * 16;
     for (int i = rowBegin; i < rowEnd; ++i) {
         const int py = sampleRowOf(grid, region, i);
-        const uint8_t* pixel = frame.pixelAt(region.x, py);
-        const uint8_t* pixelRowEnd = frame.pixelAt(region.x + region.width, py);
+        const uint8_t* pixel = frame.rawPixelAt(region.x, py);
+        const uint8_t* pixelRowEnd = frame.rawPixelAt(region.x + region.width, py);
         // Clamp to span - 17, not span - 1: the top bin index is then at most
         // (span - 17) >> 4 == size - 2, so the +1 neighbor the bilinear splat
         // writes (both the cb column and the cr row above) stays in the grid.
         for (; pixel < pixelRowEnd; pixel += static_cast<std::ptrdiff_t>(4) * grid.columnStride) {
-            const int b = pixel[0], g = pixel[1], r = pixel[2];
+            // Channels enter on the common level scale, so a 10-bit sample
+            // reaches a sub-code position the splat can express and an 8-bit
+            // one lands exactly where it always did: the extra four fractional
+            // bits are divided straight back out by the wider shift below.
+            const Sample sample = Pixels::read(pixel);
+            const int b = levelIn<Pixels, VectorscopeLevelBits>(sample.b);
+            const int g = levelIn<Pixels, VectorscopeLevelBits>(sample.g);
+            const int r = levelIn<Pixels, VectorscopeLevelBits>(sample.r);
             const int64_t cbRaw = matrix.cbFromR * r + matrix.cbFromG * g + matrix.cbFromB * b;
             const int64_t crRaw = matrix.crFromR * r + matrix.crFromG * g + matrix.crFromB * b;
-            const int cbPosition = std::clamp(static_cast<int>(cbRaw * span >> 16) + span / 2, 0, span - 17);
-            const int crPosition = std::clamp(static_cast<int>(crRaw * span >> 16) + span / 2, 0, span - 17);
+            const int cbPosition = std::clamp(static_cast<int>(cbRaw * span >> ChromaShift) + span / 2, 0, span - 17);
+            const int crPosition = std::clamp(static_cast<int>(crRaw * span >> ChromaShift) + span / 2, 0, span - 17);
             const int cbBin = cbPosition >> 4;
             const int crBin = crPosition >> 4;
             const uint32_t cbHigh = static_cast<uint32_t>(cbPosition & 15);
@@ -157,6 +171,17 @@ void Vectorscope::scatterRows(const FrameView& frame, IntRect region, const Samp
             above[0] += cbLow * crHigh;
             above[1] += cbHigh * crHigh;
         }
+    }
+}
+
+void Vectorscope::scatterRows(const FrameView& frame, IntRect region, const SampleGrid& grid, int rowBegin, int rowEnd,
+                              uint32_t* bins) const
+{
+    // Dispatched once per chunk, never per pixel.
+    if (frame.format == PixelFormat::Argb2101010) {
+        scatterRowsAs<Argb2101010Pixels>(frame, region, grid, rowBegin, rowEnd, bins);
+    } else {
+        scatterRowsAs<Bgra8Pixels>(frame, region, grid, rowBegin, rowEnd, bins);
     }
 }
 

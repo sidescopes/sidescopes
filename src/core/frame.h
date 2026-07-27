@@ -53,6 +53,92 @@ struct Color
     uint8_t b = 0;
 };
 
+/// How a captured frame packs its pixels. Both layouts are four bytes per
+/// pixel, so a frame buffer costs the same either way and the capture backends
+/// copy them identically.
+enum class PixelFormat
+{
+    /// Blue, green, red, alpha, one byte each. What every backend delivered
+    /// before 10-bit capture, and still the fallback everywhere.
+    Bgra8,
+    /// Ten bits per channel packed into one little-endian 32-bit word: alpha
+    /// in bits 30-31, red 20-29, green 10-19, blue 0-9.
+    Argb2101010
+};
+
+/// One pixel's channels on the scale its frame's format resolves - 0..255 for
+/// Bgra8, 0..1023 for Argb2101010. Carrying the native codes rather than
+/// promoting them keeps an 8-bit frame's arithmetic exactly what it always
+/// was; see levelIn below for the 0..255 scale the scopes bin on.
+struct Sample
+{
+    uint16_t r = 0;
+    uint16_t g = 0;
+    uint16_t b = 0;
+};
+
+/// Fractional bits a scope resolves below one 0..255 level.
+///
+/// Only the scopes that project a code into a CONTINUOUS position ask for any.
+/// A scope whose axis is the code itself - the waveform's level, the histogram's
+/// bin - is bounded by how many bins it holds, not by how many bits arrived, so
+/// it takes the whole level and a finer input changes nothing it can draw.
+/// Measured; see the level table in the notes.
+inline constexpr int WholeLevelBits = 0;
+inline constexpr int VectorscopeLevelBits = 4;
+
+/// Reads Bgra8 pixels. A compile-time policy rather than a runtime branch: the
+/// accumulate loops instantiate one of these per pass, so the hot path holds no
+/// per-pixel test of the format.
+struct Bgra8Pixels
+{
+    static constexpr int MaxCode = 255;
+    static constexpr PixelFormat Format = PixelFormat::Bgra8;
+
+    [[nodiscard]] static Sample read(const uint8_t* pixel)
+    {
+        return Sample{pixel[2], pixel[1], pixel[0]};
+    }
+};
+
+/// Reads Argb2101010 pixels. The word is assembled from bytes rather than
+/// read through a uint32_t so the unpack does not depend on the host's
+/// alignment rules; every compiler folds it back into a single load.
+struct Argb2101010Pixels
+{
+    static constexpr int MaxCode = 1023;
+    static constexpr PixelFormat Format = PixelFormat::Argb2101010;
+
+    [[nodiscard]] static Sample read(const uint8_t* pixel)
+    {
+        const uint32_t word = static_cast<uint32_t>(pixel[0]) | static_cast<uint32_t>(pixel[1]) << 8 |
+                              static_cast<uint32_t>(pixel[2]) << 16 | static_cast<uint32_t>(pixel[3]) << 24;
+
+        return Sample{static_cast<uint16_t>(word >> 20 & 0x3FFu), static_cast<uint16_t>(word >> 10 & 0x3FFu),
+                      static_cast<uint16_t>(word & 0x3FFu)};
+    }
+};
+
+/// One channel as the 0..255 level a scope bins on, carrying @p FractionBits
+/// bits below it. An 8-bit code maps to exactly @c code << FractionBits, so its
+/// fraction is always zero and an 8-bit frame bins precisely where it always
+/// did; a 10-bit code lands between two levels and the scopes splat it across
+/// both. Full scale maps to 255 at either depth, so white stays white.
+/// Rounds rather than truncates, which only a deeper frame can notice: an
+/// 8-bit code converts exactly, so its result is unchanged either way, while
+/// truncation would bias every 10-bit sample half a step toward black.
+template <typename Pixels, int FractionBits>
+[[nodiscard]] constexpr int levelIn(int code)
+{
+    constexpr int One = 1 << FractionBits;
+
+    if constexpr (Pixels::MaxCode == 255) {
+        return code * One;
+    } else {
+        return (code * (255 * One) + Pixels::MaxCode / 2) / Pixels::MaxCode;
+    }
+}
+
 /// Floating-point RGB on the 0..255 scale. Marker and indicator paths stay in
 /// floating point end to end: quantizing intermediate values makes a smoothed
 /// marker dither between adjacent scope bins while it settles.
@@ -63,12 +149,12 @@ struct FloatColor
     float b = 0.0f;
 };
 
-/// Non-owning view of one captured frame: BGRA, 8 bits per channel, rows
-/// top-down. The producer guarantees the pixels stay valid for the duration
-/// of the call that received the view.
+/// Non-owning view of one captured frame, four bytes per pixel in whichever
+/// layout @c format names, rows top-down. The producer guarantees the pixels
+/// stay valid for the duration of the call that received the view.
 struct FrameView
 {
-    const uint8_t* bgra = nullptr;
+    const uint8_t* pixels = nullptr;
     int strideBytes = 0;
     int width = 0;
     int height = 0;
@@ -88,6 +174,10 @@ struct FrameView
     int sourceY = 0;
     int sourceWidth = 0;
     int sourceHeight = 0;
+    /// Last so that every existing construction keeps naming the same fields.
+    /// Defaulting to Bgra8 is what makes that safe: a producer that says
+    /// nothing produces exactly the frame it always did.
+    PixelFormat format = PixelFormat::Bgra8;
 
     /// The display's pixel extents, which for an uncropped frame are its own.
     [[nodiscard]] int displayWidth() const
@@ -129,15 +219,38 @@ struct FrameView
         return local.empty() || local == local.clampedTo(width, height);
     }
 
-    [[nodiscard]] const uint8_t* pixelAt(int px, int py) const
+    /// The pixel's bytes, in whatever layout @c format names. Callers that go
+    /// through this must decode it themselves; anything wanting colour should
+    /// use sampleAt or srgbAt, which are format-independent.
+    [[nodiscard]] const uint8_t* rawPixelAt(int px, int py) const
     {
-        return bgra + static_cast<std::size_t>(py) * strideBytes + static_cast<std::size_t>(px) * 4;
+        return pixels + static_cast<std::size_t>(py) * strideBytes + static_cast<std::size_t>(px) * 4;
     }
 
-    [[nodiscard]] Color colorAt(int px, int py) const
+    /// The highest code a channel of this frame can hold.
+    [[nodiscard]] int maxCode() const
     {
-        const uint8_t* pixel = pixelAt(px, py);
-        return Color{pixel[2], pixel[1], pixel[0]};
+        return format == PixelFormat::Argb2101010 ? Argb2101010Pixels::MaxCode : Bgra8Pixels::MaxCode;
+    }
+
+    /// The pixel's channels on this frame's own scale, 0..maxCode().
+    [[nodiscard]] Sample sampleAt(int px, int py) const
+    {
+        const uint8_t* pixel = rawPixelAt(px, py);
+
+        return format == PixelFormat::Argb2101010 ? Argb2101010Pixels::read(pixel) : Bgra8Pixels::read(pixel);
+    }
+
+    /// The pixel on the 0..255 display scale every readout, marker and pin
+    /// speaks, keeping a 10-bit frame's sub-code precision in the fraction.
+    /// Exact for an 8-bit frame.
+    [[nodiscard]] FloatColor srgbAt(int px, int py) const
+    {
+        const Sample sample = sampleAt(px, py);
+        const float scale = 255.0f / static_cast<float>(maxCode());
+
+        return FloatColor{static_cast<float>(sample.r) * scale, static_cast<float>(sample.g) * scale,
+                          static_cast<float>(sample.b) * scale};
     }
 };
 

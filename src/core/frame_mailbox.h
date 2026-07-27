@@ -21,6 +21,10 @@ struct FrameBuffer
     int width = 0;
     int height = 0;
     ColorSpaceHint colorSpace = ColorSpaceHint::Unknown;
+    /// The layout of `data`. Stamped on every frame for the same reason the
+    /// source rectangle is: buffers are recycled, so a producer that leaves it
+    /// alone carries the previous delivery's answer forward.
+    PixelFormat format = PixelFormat::Bgra8;
     uint64_t sequence = 0;
     /// Where these pixels sit on their display, and how large it is; all zero
     /// for a frame that covers the whole display. See FrameView.
@@ -54,8 +58,8 @@ struct FrameBuffer
 
     [[nodiscard]] FrameView view() const
     {
-        return FrameView{data.data(), strideBytes, width,   height,      colorSpace,
-                         sequence,    sourceX,     sourceY, sourceWidth, sourceHeight};
+        return FrameView{data.data(), strideBytes, width,       height,       colorSpace, sequence,
+                         sourceX,     sourceY,     sourceWidth, sourceHeight, format};
     }
 
     [[nodiscard]] int displayWidth() const

@@ -282,6 +282,13 @@ void applyCorrection(const uint32_t* in, int columns, const uint32_t* flatten, c
 // then a horizontal 1-2-1.
 void smoothPlane(const uint32_t* corrected, int columns, uint32_t* out)
 {
+    // A plane with no columns holds nothing to smooth. Stated rather than left
+    // to the loop bounds because the analyzer cannot otherwise tell that the
+    // row pointers below are formed from real storage.
+    if (corrected == nullptr || out == nullptr || columns <= 0) {
+        return;
+    }
+
     // Vertical 1-4-1: light, so a sharp level stays crisp while
     // single-bin grain still fills in. The banding work lives in the
     // flat-field and the dead-code reconstruction above - a wider
@@ -561,18 +568,24 @@ void Waveform::resize(int columns, int imageHeight)
     m_image.rgba.assign(static_cast<std::size_t>(m_columns) * m_imageHeight * 4, 0);
 }
 
-void Waveform::scatterRows(const FrameView& frame, IntRect region, const SampleGrid& grid, int rowBegin, int rowEnd,
-                           uint32_t* bins, int firstPlane) const
+template <typename Pixels>
+void Waveform::scatterRowsAs(const FrameView& frame, IntRect region, const SampleGrid& grid, int rowBegin, int rowEnd,
+                             uint32_t* bins, int firstPlane) const
 {
     const ModeFlags flags = modeFlagsFor(m_settings.mode);
     const ScatterPlanes planes = scatterPlanesFor(flags, bins, firstPlane, planeSize());
 
     for (int i = rowBegin; i < rowEnd; ++i) {
         const int py = sampleRowOf(grid, region, i);
-        const uint8_t* row = frame.pixelAt(region.x, py);
+        const uint8_t* row = frame.rawPixelAt(region.x, py);
         for (int px = 0; px < region.width; px += grid.columnStride) {
-            const uint8_t* pixel = row + static_cast<std::size_t>(px) * 4;
-            const int b = pixel[0], g = pixel[1], r = pixel[2];
+            // The level a code rounds to. An 8-bit code IS its level; a deeper
+            // one is rounded to the same 256, which is all this scope's bins
+            // can express - see the note beside the histogram's splat.
+            const Sample sample = Pixels::read(row + static_cast<std::size_t>(px) * 4);
+            const int b = levelIn<Pixels, WholeLevelBits>(sample.b);
+            const int g = levelIn<Pixels, WholeLevelBits>(sample.g);
+            const int r = levelIn<Pixels, WholeLevelBits>(sample.r);
             // Samples splat fractionally across the two columns they
             // straddle, in sixteenths. Integer bucketing made columns
             // aggregate alternately two and three image columns at
@@ -583,35 +596,46 @@ void Waveform::scatterRows(const FrameView& frame, IntRect region, const SampleG
             const uint32_t rightWeight = position & 15u;
             const uint32_t leftWeight = 16u - rightWeight;
             const std::size_t next = column + 1 < static_cast<std::size_t>(m_columns) ? column + 1 : column;
-            const auto splat = [&](uint32_t* plane, int value) {
-                uint32_t* line = plane + static_cast<std::size_t>(255 - value) * m_columns;
-                line[column] += leftWeight;
-                line[next] += rightWeight;
+            const auto splat = [&](uint32_t* plane, int level, uint32_t value) {
+                uint32_t* line = plane + static_cast<std::size_t>(WaveformLevels - 1 - level) * m_columns;
+                line[column] += leftWeight * value;
+                line[next] += rightWeight * value;
             };
             if (flags.rgb) {
-                splat(planes.red, r);
-                splat(planes.green, g);
-                splat(planes.blue, b);
+                splat(planes.red, r, 1);
+                splat(planes.green, g, 1);
+                splat(planes.blue, b, 1);
             }
+            // Luma is taken on the frame's own code scale and converted after,
+            // so that an 8-bit frame reaches the level its weights have always
+            // rounded it to: the truncation in luma709 is not distributive
+            // over the conversion, and taking it the other way round would
+            // move every eight-bit luma trace by up to a level.
             if (flags.coloredLuma) {
                 // The luma plane carries the density; the channel
                 // planes carry value-weighted mass at the same rows,
                 // so each cell remembers the average color of the
                 // pixels that landed on it.
-                const int level = luma709(r, g, b);
-                const auto tintSplat = [&](uint32_t* plane, uint32_t value) {
-                    uint32_t* line = plane + static_cast<std::size_t>(255 - level) * m_columns;
-                    line[column] += leftWeight * value;
-                    line[next] += rightWeight * value;
-                };
-                tintSplat(planes.red, static_cast<uint32_t>(r));
-                tintSplat(planes.green, static_cast<uint32_t>(g));
-                tintSplat(planes.blue, static_cast<uint32_t>(b));
-                splat(planes.luma, level);
+                const int level = levelIn<Pixels, WholeLevelBits>(luma709(sample.r, sample.g, sample.b));
+                splat(planes.red, level, static_cast<uint32_t>(r));
+                splat(planes.green, level, static_cast<uint32_t>(g));
+                splat(planes.blue, level, static_cast<uint32_t>(b));
+                splat(planes.luma, level, 1);
             } else if (flags.luma) {
-                splat(planes.luma, luma709(r, g, b));
+                splat(planes.luma, levelIn<Pixels, WholeLevelBits>(luma709(sample.r, sample.g, sample.b)), 1);
             }
         }
+    }
+}
+
+void Waveform::scatterRows(const FrameView& frame, IntRect region, const SampleGrid& grid, int rowBegin, int rowEnd,
+                           uint32_t* bins, int firstPlane) const
+{
+    // Dispatched once per chunk, never per pixel.
+    if (frame.format == PixelFormat::Argb2101010) {
+        scatterRowsAs<Argb2101010Pixels>(frame, region, grid, rowBegin, rowEnd, bins, firstPlane);
+    } else {
+        scatterRowsAs<Bgra8Pixels>(frame, region, grid, rowBegin, rowEnd, bins, firstPlane);
     }
 }
 

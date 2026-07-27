@@ -105,6 +105,10 @@ private:
     /// nothing an instance holds.
     static void scatterRows(const FrameView& frame, IntRect region, const SampleGrid& grid, int rowBegin, int rowEnd,
                             uint32_t* bins);
+    /// The same, compiled for one pixel layout.
+    template <typename Pixels>
+    static void scatterRowsAs(const FrameView& frame, IntRect region, const SampleGrid& grid, int rowBegin, int rowEnd,
+                              uint32_t* bins);
     void mapBinsToImage();
     [[nodiscard]] std::vector<double> computeHeights() const;
     void exportOutline(const std::vector<double>& heights);

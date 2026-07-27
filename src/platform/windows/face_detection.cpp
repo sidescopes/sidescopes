@@ -40,10 +40,31 @@ using winrt::Windows::Graphics::Imaging::BitmapPixelFormat;
 using winrt::Windows::Graphics::Imaging::SoftwareBitmap;
 using winrt::Windows::Media::FaceAnalysis::FaceDetector;
 
-// Rec.709 luma, fixed-point x256: the detector consumes grayscale.
-inline uint8_t luma709(int r, int g, int b)
+// Rec.709 luma, fixed-point x256: the detector consumes grayscale. Returned on
+// the scale its arguments came in on - a ten-bit pixel yields a ten-bit luma -
+// so that narrowing to a byte happens once, after the conversion, rather than
+// wrapping here.
+inline int luma709(int r, int g, int b)
 {
-    return static_cast<uint8_t>((54 * r + 183 * g + 19 * b) >> 8);
+    return (54 * r + 183 * g + 19 * b) >> 8;
+}
+
+// Writes the frame's rows into @p data as Gray8. Compiled per pixel layout,
+// the same way the scope accumulate paths are, so the inner loop holds no test
+// of the format. Unlike Vision on macOS the detector here is handed a bitmap
+// this converts, never the frame's own memory, so any layout can be read.
+template <typename Pixels>
+void writeGrayRows(const FrameView& frame, uint8_t* data, int32_t startIndex, int32_t stride)
+{
+    for (int py = 0; py < frame.height; ++py) {
+        const uint8_t* source = frame.rawPixelAt(0, py);
+        uint8_t* out = data + startIndex + static_cast<std::size_t>(py) * stride;
+        for (int px = 0; px < frame.width; ++px, source += 4) {
+            const Sample sample = Pixels::read(source);
+            out[px] = static_cast<uint8_t>(levelIn<Pixels, WholeLevelBits>(
+                luma709(static_cast<int>(sample.r), static_cast<int>(sample.g), static_cast<int>(sample.b))));
+        }
+    }
 }
 
 SoftwareBitmap grayBitmapFromFrame(const FrameView& frame)
@@ -57,12 +78,10 @@ SoftwareBitmap grayBitmapFromFrame(const FrameView& frame)
         uint8_t* data = nullptr;
         uint32_t capacity = 0;
         winrt::check_hresult(access->GetBuffer(&data, &capacity));
-        for (int py = 0; py < frame.height; ++py) {
-            const uint8_t* source = frame.pixelAt(0, py);
-            uint8_t* out = data + plane.StartIndex + static_cast<std::size_t>(py) * plane.Stride;
-            for (int px = 0; px < frame.width; ++px, source += 4) {
-                out[px] = luma709(source[2], source[1], source[0]);
-            }
+        if (frame.format == PixelFormat::Argb2101010) {
+            writeGrayRows<Argb2101010Pixels>(frame, data, plane.StartIndex, plane.Stride);
+        } else {
+            writeGrayRows<Bgra8Pixels>(frame, data, plane.StartIndex, plane.Stride);
         }
         reference.Close();
         buffer.Close();
@@ -139,7 +158,7 @@ void warmFaceDetection()
 std::vector<IntRect> detectFaces(const FrameView& frame, float pixelsPerPoint)
 {
     std::vector<IntRect> faces;
-    if (!frame.bgra || frame.width <= 0 || frame.height <= 0) {
+    if (!frame.pixels || frame.width <= 0 || frame.height <= 0) {
         return faces;
     }
     if (!supportsFaceDetection()) {

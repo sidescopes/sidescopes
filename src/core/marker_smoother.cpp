@@ -16,10 +16,13 @@ FloatColor averageNeighborhood(const FrameView& frame, int px, int py, int radiu
             if (sampleX < 0 || sampleX >= frame.width || sampleY < 0 || sampleY >= frame.height) {
                 continue;
             }
-            const Color color = frame.colorAt(sampleX, sampleY);
-            sumR += static_cast<float>(color.r);
-            sumG += static_cast<float>(color.g);
-            sumB += static_cast<float>(color.b);
+            // On the 0..255 display scale whatever depth the frame arrived at,
+            // so a 10-bit capture makes the readout and the markers finer
+            // rather than making them read differently.
+            const FloatColor color = frame.srgbAt(sampleX, sampleY);
+            sumR += color.r;
+            sumG += color.g;
+            sumB += color.b;
             ++count;
         }
     }

@@ -70,10 +70,10 @@ TEST_CASE("FrameView reads BGRA pixels as RGB colors")
 
     const FrameView view{pixels.data(), Stride, 2, 2, ColorSpaceHint::Srgb, 1};
 
-    CHECK(view.colorAt(0, 0).r == 255);
-    CHECK(view.colorAt(1, 0).g == 255);
-    CHECK(view.colorAt(0, 1).b == 255);
-    const Color mixed = view.colorAt(1, 1);
+    CHECK(view.sampleAt(0, 0).r == 255);
+    CHECK(view.sampleAt(1, 0).g == 255);
+    CHECK(view.sampleAt(0, 1).b == 255);
+    const Sample mixed = view.sampleAt(1, 1);
     CHECK(mixed.r == 17);
     CHECK(mixed.g == 34);
     CHECK(mixed.b == 51);

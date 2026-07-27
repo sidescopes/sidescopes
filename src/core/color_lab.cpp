@@ -62,22 +62,30 @@ double linearFromEncoded(double encoded)
     return std::pow((encoded + 0.055) / 1.055, 2.4);
 }
 
-std::array<double, 256> makeLinearTable()
+template <std::size_t Count>
+std::array<double, Count> makeLinearTable()
 {
-    std::array<double, 256> table{};
-    for (int code = 0; code < 256; ++code) {
-        table[static_cast<std::size_t>(code)] = linearFromEncoded(code / 255.0);
+    constexpr double MaxCode = Count - 1;
+    std::array<double, Count> table{};
+    for (std::size_t code = 0; code < Count; ++code) {
+        table[code] = linearFromEncoded(static_cast<double>(code) / MaxCode);
     }
 
     return table;
 }
 
-// Captured content is 8 bits per channel, so the transfer function has 256
-// possible inputs per channel and the scopes evaluate it once per pixel. The
-// table holds exactly what linearFromEncoded returns for each code - same
-// expression, same doubles - so a byte-sourced conversion is bit-identical to
-// the general one without paying a pow per channel per pixel.
-const std::array<double, 256> LinearTable = makeLinearTable();
+// Captured content arrives as codes, so the transfer function has one input per
+// code per channel and the scopes evaluate it once per pixel. Each table holds
+// exactly what linearFromEncoded returns for its own code - same expression,
+// same doubles - so a code-sourced conversion is bit-identical to the general
+// one without paying a pow per channel per pixel.
+//
+// A 10-bit frame needs its own table rather than an index into this one: its
+// full scale is 1023, so code 4n is not the same encoded value as 8-bit code n
+// and sharing a table would shift every colour. Ten kilobytes for both, which
+// measured no slower than the single table it replaced.
+const std::array<double, 256> LinearTable8 = makeLinearTable<256>();
+const std::array<double, 1024> LinearTable10 = makeLinearTable<1024>();
 
 double labCurve(double t)
 {
@@ -188,9 +196,14 @@ LabColor labFromSrgb(const FloatColor& srgb)
                          linearFromEncoded(std::clamp(srgb.b / 255.0, 0.0, 1.0)));
 }
 
-LabColor labFromSrgb8(const Color& srgb)
+LabColor labFromCodes8(const Sample& sample)
 {
-    return labFromLinear(LinearTable[srgb.r], LinearTable[srgb.g], LinearTable[srgb.b]);
+    return labFromLinear(LinearTable8[sample.r], LinearTable8[sample.g], LinearTable8[sample.b]);
+}
+
+LabColor labFromCodes10(const Sample& sample)
+{
+    return labFromLinear(LinearTable10[sample.r], LinearTable10[sample.g], LinearTable10[sample.b]);
 }
 
 float chromaOf(const LabColor& lab)

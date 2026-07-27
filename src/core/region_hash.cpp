@@ -11,13 +11,18 @@ constexpr uint64_t FnvPrime = 1099511628211ull;
 
 // Folds one row's [x0, x1) pixels into the running hash, eight bytes at a
 // time; a span with no width leaves it alone.
+//
+// The bytes are hashed as they lie, whatever layout they are in: the question
+// is only whether this region's pixels changed, and every format packs four
+// bytes per pixel. A capture that switches format answers "changed" once,
+// which is exactly right - the samples really are different numbers.
 uint64_t hashSpan(uint64_t hash, const FrameView& frame, int x0, int x1, int py)
 {
     if (x1 <= x0) {
         return hash;
     }
-    const uint8_t* cursor = frame.pixelAt(x0, py);
-    const uint8_t* end = frame.pixelAt(x1, py);
+    const uint8_t* cursor = frame.rawPixelAt(x0, py);
+    const uint8_t* end = frame.rawPixelAt(x1, py);
     for (; cursor + 8 <= end; cursor += 8) {
         uint64_t chunk = 0;
         std::memcpy(&chunk, cursor, sizeof(chunk));

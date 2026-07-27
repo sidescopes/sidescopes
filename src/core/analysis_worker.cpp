@@ -218,12 +218,13 @@ void syncScopeInstances(std::vector<WorkerScope>& scopes, const std::vector<std:
 
 SsFrameView toBoundaryFrame(const FrameView& view)
 {
-    return SsFrameView{view.bgra,
+    return SsFrameView{view.pixels,
                        view.strideBytes,
                        view.width,
                        view.height,
                        view.colorSpace == ColorSpaceHint::Srgb ? SS_COLOR_SPACE_SRGB : SS_COLOR_SPACE_UNKNOWN,
-                       view.sequence};
+                       view.sequence,
+                       view.format == PixelFormat::Argb2101010 ? SS_PIXEL_FORMAT_ARGB2101010 : SS_PIXEL_FORMAT_BGRA8};
 }
 
 void copyImage(const SsImageView& view, ScopeImage& image)

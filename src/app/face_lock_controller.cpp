@@ -109,11 +109,25 @@ ProbeCrop cropProbeRoi(const FrameView& view, const FaceLockState& lock, const A
     crop.pixelsPerPoint = static_cast<float>(view.width / geometry.widthPoints);
     const std::size_t rowBytes = static_cast<std::size_t>(crop.roi.width) * 4;
     crop.pixels.resize(rowBytes * static_cast<std::size_t>(crop.roi.height));
+    // The detectors take eight-bit BGRA and nothing else - on macOS the buffer
+    // goes to Vision uncopied - so a deeper frame is narrowed here, where the
+    // copy this crop already makes absorbs it. A face is found from shape, so
+    // the lost bits cost the search nothing.
+    const bool packed = view.format == PixelFormat::Bgra8;
     for (int row = 0; row < crop.roi.height; ++row) {
-        std::memcpy(crop.pixels.data() + rowBytes * static_cast<std::size_t>(row),
-                    view.bgra + static_cast<std::size_t>(crop.roi.y + row) * view.strideBytes +
-                        static_cast<std::size_t>(crop.roi.x) * 4,
-                    rowBytes);
+        uint8_t* target = crop.pixels.data() + rowBytes * static_cast<std::size_t>(row);
+        if (packed) {
+            std::memcpy(target, view.rawPixelAt(crop.roi.x, crop.roi.y + row), rowBytes);
+            continue;
+        }
+        for (int column = 0; column < crop.roi.width; ++column) {
+            const Sample sample = view.sampleAt(crop.roi.x + column, crop.roi.y + row);
+            uint8_t* pixel = target + static_cast<std::size_t>(column) * 4;
+            pixel[0] = static_cast<uint8_t>(sample.b >> 2);
+            pixel[1] = static_cast<uint8_t>(sample.g >> 2);
+            pixel[2] = static_cast<uint8_t>(sample.r >> 2);
+            pixel[3] = 0xFF;
+        }
     }
 
     return crop;
@@ -317,10 +331,14 @@ std::vector<uint8_t> FaceLockController::sampleContentGrid(const FrameView& view
         for (int gridX = 0; gridX < GridSide; ++gridX) {
             const int px = std::clamp(static_cast<int>(left + (gridX + 0.5) * width / GridSide), 0, view.width - 1);
             const int py = std::clamp(static_cast<int>(top + (gridY + 0.5) * height / GridSide), 0, view.height - 1);
-            const uint8_t* pixel = view.pixelAt(px, py);
-            samples.push_back(pixel[0]);
-            samples.push_back(pixel[1]);
-            samples.push_back(pixel[2]);
+            // Taken on the 0..255 scale rather than as raw bytes: two grids are
+            // compared against each other, and the capture can change depth
+            // between them, which would read as the whole region moving.
+            const Sample sample = view.sampleAt(px, py);
+            const int shift = view.maxCode() == Argb2101010Pixels::MaxCode ? 2 : 0;
+            samples.push_back(static_cast<uint8_t>(sample.b >> shift));
+            samples.push_back(static_cast<uint8_t>(sample.g >> shift));
+            samples.push_back(static_cast<uint8_t>(sample.r >> shift));
         }
     }
 
@@ -413,7 +431,9 @@ void FaceLockController::launchProbe(const AttachDecision& decision, const FaceL
     Probe* probe = &m_probe;
     std::thread([probe, pixels, roi, pixelsPerPoint] {
         FrameView view;
-        view.bgra = pixels->data();
+        // Eight-bit by construction: cropProbeRoi narrows a deeper frame while
+        // it copies, which is what the detectors require.
+        view.pixels = pixels->data();
         view.strideBytes = roi.width * 4;
         view.width = roi.width;
         view.height = roi.height;

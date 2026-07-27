@@ -12,6 +12,16 @@ namespace {
 // Faces smaller than this (in points) are thumbnails, not scoping targets.
 constexpr double MinimumFacePoints = 72.0;
 
+// Whether Vision can be handed this frame's memory directly. The buffer it is
+// wrapped in is uncopied and declared eight-bit BGRA, so a frame in any other
+// layout would be read as though it were that - a plausible image made of the
+// wrong bits. Callers pass either a one-shot capture, which is always
+// eight-bit, or a crop that narrowed the frame while copying it.
+bool readableByVision(const FrameView& frame)
+{
+    return frame.pixels != nullptr && frame.format == PixelFormat::Bgra8 && frame.width > 0 && frame.height > 0;
+}
+
 }  // namespace
 
 bool supportsFaceDetection()
@@ -34,7 +44,7 @@ void warmFaceDetection()
 std::vector<IntRect> detectFaces(const FrameView& frame, float pixelsPerPoint)
 {
     std::vector<IntRect> faces;
-    if (!frame.bgra || frame.width <= 0 || frame.height <= 0) {
+    if (!readableByVision(frame)) {
         return faces;
     }
 
@@ -43,7 +53,7 @@ std::vector<IntRect> detectFaces(const FrameView& frame, float pixelsPerPoint)
     CVPixelBufferRef buffer = nullptr;
     const CVReturn wrapped = CVPixelBufferCreateWithBytes(
         kCFAllocatorDefault, static_cast<size_t>(frame.width), static_cast<size_t>(frame.height),
-        kCVPixelFormatType_32BGRA, const_cast<uint8_t*>(frame.bgra), static_cast<size_t>(frame.strideBytes), nullptr,
+        kCVPixelFormatType_32BGRA, const_cast<uint8_t*>(frame.pixels), static_cast<size_t>(frame.strideBytes), nullptr,
         nullptr, nullptr, &buffer);
     if (wrapped != kCVReturnSuccess || !buffer) {
         return faces;

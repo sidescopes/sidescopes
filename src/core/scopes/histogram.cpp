@@ -114,22 +114,47 @@ void Histogram::configure(const HistogramSettings& settings)
     m_settings.imageHeight = std::clamp(m_settings.imageHeight, 192, 1536);
 }
 
-void Histogram::scatterRows(const FrameView& frame, IntRect region, const SampleGrid& grid, int rowBegin, int rowEnd,
-                            uint32_t* bins)
+template <typename Pixels>
+void Histogram::scatterRowsAs(const FrameView& frame, IntRect region, const SampleGrid& grid, int rowBegin, int rowEnd,
+                              uint32_t* bins)
 {
     uint32_t* redBins = bins;
     uint32_t* greenBins = bins + Bins;
     uint32_t* blueBins = bins + static_cast<std::ptrdiff_t>(2) * Bins;
 
+    // One count in the bin the code rounds to. An 8-bit code IS its bin, so
+    // this is exactly the count it always was.
+    //
+    // A deeper frame gains nothing here and is not made to pretend otherwise:
+    // the bins are the axis, and 256 of them cannot show what a tenth bit says.
+    // Splitting each sample between the two bins it straddles was measured as
+    // an alternative and rejected - it places the curve no better than rounding
+    // does and widens every narrow peak, because a two-bin split is a kernel
+    // one bin wide. More bins is the only thing that would help, and that is a
+    // memory decision recorded in the notes rather than one taken here.
+    const auto splat = [](uint32_t* plane, int code) { ++plane[levelIn<Pixels, WholeLevelBits>(code)]; };
+
     for (int i = rowBegin; i < rowEnd; ++i) {
         const int py = sampleRowOf(grid, region, i);
-        const uint8_t* row = frame.pixelAt(region.x, py);
+        const uint8_t* row = frame.rawPixelAt(region.x, py);
         for (int px = 0; px < region.width; px += grid.columnStride) {
-            const uint8_t* pixel = row + static_cast<std::size_t>(px) * 4;
-            ++blueBins[pixel[0]];
-            ++greenBins[pixel[1]];
-            ++redBins[pixel[2]];
+            const Sample sample = Pixels::read(row + static_cast<std::size_t>(px) * 4);
+            splat(blueBins, sample.b);
+            splat(greenBins, sample.g);
+            splat(redBins, sample.r);
         }
+    }
+}
+
+void Histogram::scatterRows(const FrameView& frame, IntRect region, const SampleGrid& grid, int rowBegin, int rowEnd,
+                            uint32_t* bins)
+{
+    // Dispatched once per chunk, never per pixel: the inner loop is compiled
+    // for one layout and holds no test of the format.
+    if (frame.format == PixelFormat::Argb2101010) {
+        scatterRowsAs<Argb2101010Pixels>(frame, region, grid, rowBegin, rowEnd, bins);
+    } else {
+        scatterRowsAs<Bgra8Pixels>(frame, region, grid, rowBegin, rowEnd, bins);
     }
 }
 

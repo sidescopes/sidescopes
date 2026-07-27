@@ -54,7 +54,9 @@ ScanResult scanDisplayForFaces(uint32_t displayId, double widthPoints)
     ScanResult result;
     if (const std::optional<CapturedImage> image = captureDisplayImage(displayId)) {
         FrameView view;
-        view.bgra = image->bgra.data();
+        // A one-shot display capture is always eight-bit BGRA, which is what
+        // the face detectors take.
+        view.pixels = image->bgra.data();
         view.strideBytes = image->width * 4;
         view.width = image->width;
         view.height = image->height;
@@ -581,10 +583,12 @@ std::optional<FloatColor> RegionPicker::averageRegionColor(const FrameView& view
     long long count = 0;
     for (int y = top; y < bottom; y += stride) {
         for (int x = left; x < right; x += stride) {
-            const uint8_t* pixel = view.pixelAt(x, y);
-            sumB += pixel[0];
-            sumG += pixel[1];
-            sumR += pixel[2];
+            // On the 0..255 display scale, so a pin averages to the same
+            // colour whatever depth the capture is running at.
+            const FloatColor pixel = view.srgbAt(x, y);
+            sumB += pixel.b;
+            sumG += pixel.g;
+            sumR += pixel.r;
             ++count;
         }
     }

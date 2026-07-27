@@ -137,7 +137,8 @@ TestFrame grayRamp(int width, int height)
 
 SsFrameView viewOf(const TestFrame& frame)
 {
-    return SsFrameView{frame.pixels.data(), frame.width * 4, frame.width, frame.height, SS_COLOR_SPACE_SRGB, 1};
+    return SsFrameView{frame.pixels.data(),  frame.width * 4, frame.width, frame.height, SS_COLOR_SPACE_SRGB, 1,
+                       SS_PIXEL_FORMAT_BGRA8};
 }
 
 }  // namespace
@@ -157,7 +158,7 @@ TEST_CASE("Registry serves the vectorscope through the module boundary")
     // puts 75% red at bin (109, 43).
     TestFrame red(8, 8, 0);
     red.fill(0, 8, Color{191, 0, 0});
-    const SsFrameView frame{red.pixels.data(), 8 * 4, 8, 8, SS_COLOR_SPACE_SRGB, 1};
+    const SsFrameView frame{red.pixels.data(), 8 * 4, 8, 8, SS_COLOR_SPACE_SRGB, 1, SS_PIXEL_FORMAT_BGRA8};
     REQUIRE(instance.accumulate(frame, SsRect{0, 0, 8, 8}));
     const SsImageView image = instance.image();
     REQUIRE(image.width == 256);
@@ -198,7 +199,7 @@ TEST_CASE("Registry serves the waveform through the module boundary")
     // plots on image row 255 - 128 = 127.
     REQUIRE(instance.configure(std::vector<SsParamValue>{{"mode", 1.0}}));
     TestFrame gray(32, 16, 128);
-    const SsFrameView frame{gray.pixels.data(), 32 * 4, 32, 16, SS_COLOR_SPACE_SRGB, 1};
+    const SsFrameView frame{gray.pixels.data(), 32 * 4, 32, 16, SS_COLOR_SPACE_SRGB, 1, SS_PIXEL_FORMAT_BGRA8};
     REQUIRE(instance.accumulate(frame, SsRect{0, 0, 32, 16}));
     const SsImageView image = instance.image();
     REQUIRE(image.height == 256);
@@ -253,7 +254,7 @@ TEST_CASE("Registry serves the histogram through the module boundary")
     REQUIRE(instance.valid());
 
     TestFrame gray(32, 16, 128);
-    const SsFrameView frame{gray.pixels.data(), 32 * 4, 32, 16, SS_COLOR_SPACE_SRGB, 1};
+    const SsFrameView frame{gray.pixels.data(), 32 * 4, 32, 16, SS_COLOR_SPACE_SRGB, 1, SS_PIXEL_FORMAT_BGRA8};
     REQUIRE(instance.accumulate(frame, SsRect{0, 0, 32, 16}));
 
     // The outline extension hands back three channels of bin heights.

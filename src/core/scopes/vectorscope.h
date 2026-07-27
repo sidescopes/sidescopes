@@ -86,6 +86,10 @@ private:
     void rebuildTintTable();
     void scatterRows(const FrameView& frame, IntRect region, const SampleGrid& grid, int rowBegin, int rowEnd,
                      uint32_t* bins) const;
+    /// The same, compiled for one pixel layout.
+    template <typename Pixels>
+    void scatterRowsAs(const FrameView& frame, IntRect region, const SampleGrid& grid, int rowBegin, int rowEnd,
+                       uint32_t* bins) const;
     void mapBinsToImage(uint64_t sampleCount);
     void smoothCodeGrid();
     void adaptiveDensityEstimate(uint64_t sampleCount);

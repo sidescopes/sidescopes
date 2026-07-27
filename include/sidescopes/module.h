@@ -43,24 +43,38 @@ extern "C" {
  * extensions. Until 1.0 the layout itself may still change under a minor
  * bump; rebuild modules against the current header. */
 #define SS_ABI_MAJOR 0u
-#define SS_ABI_MINOR 3u
+#define SS_ABI_MINOR 4u
 
 /* ---- core types ---------------------------------------------------- */
 
 #define SS_COLOR_SPACE_UNKNOWN 0u
 #define SS_COLOR_SPACE_SRGB 1u
 
+/* How a frame packs its pixels. Both are four bytes per pixel.
+ * BGRA8 is blue, green, red, alpha, one byte each. ARGB2101010 is ten bits
+ * per channel in one little-endian 32-bit word: alpha in bits 30-31, red
+ * 20-29, green 10-19, blue 0-9. */
+#define SS_PIXEL_FORMAT_BGRA8 0u
+#define SS_PIXEL_FORMAT_ARGB2101010 1u
+
 /* Host-owned; every field valid only for the duration of the call.
  * `sequence` strictly increases per captured frame, so a scope handed the
- * same frame twice can compare it to skip recomputation. */
+ * same frame twice can compare it to skip recomputation.
+ *
+ * `pixels` was named `bgra` through ABI minor 3, when that was the only
+ * layout a host could send. It is renamed rather than kept so that a module
+ * built against this header cannot go on reading a ten-bit frame as bytes:
+ * the compiler stops it, where a silent misread would have shown a plausible
+ * but wrong trace. Check `pixel_format` before dereferencing it. */
 typedef struct SsFrameView
 {
-    const uint8_t* bgra;
+    const uint8_t* pixels;
     int32_t stride_bytes;
     int32_t width;
     int32_t height;
     uint32_t color_space;
     uint64_t sequence;
+    uint32_t pixel_format; /* SS_PIXEL_FORMAT_* */
 } SsFrameView;
 
 typedef struct SsRect

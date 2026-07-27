@@ -214,8 +214,9 @@ TEST_CASE("Every scope the host creates borrows the host's arena")
             pristine = scratch->borrow(&host, 0) == nullptr;
             const ScopeInstance instance = builtinModules().createInstance(id);
             if (instance.valid()) {
-                const SsFrameView view{frame.pixels.data(), frame.width * 4,     frame.width,
-                                       frame.height,        SS_COLOR_SPACE_SRGB, 1};
+                const SsFrameView view{frame.pixels.data(),  frame.width * 4,     frame.width,
+                                       frame.height,         SS_COLOR_SPACE_SRGB, 1,
+                                       SS_PIXEL_FORMAT_BGRA8};
                 (void)instance.accumulate(view, SsRect{0, 0, frame.width, frame.height});
             }
             borrowed = scratch->borrow(&host, 0) != nullptr;

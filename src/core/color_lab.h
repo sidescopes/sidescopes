@@ -26,11 +26,24 @@ struct ColorDifference
 /// Channels outside the range are clamped into it.
 [[nodiscard]] LabColor labFromSrgb(const FloatColor& srgb);
 
-/// The same conversion for a colour that arrived as bytes, which captured
-/// content always does. Bit-identical to labFromSrgb over integer inputs: the
-/// transfer function has 256 possible arguments per channel, so it is read
-/// from a table rather than evaluated per pixel.
-[[nodiscard]] LabColor labFromSrgb8(const Color& srgb);
+/// The same conversion for a colour that arrived as codes, which captured
+/// content always does. Bit-identical to labFromSrgb over the codes of the
+/// matching depth: the transfer function has one argument per code per channel,
+/// so it is read from a table rather than evaluated per pixel.
+[[nodiscard]] LabColor labFromCodes8(const Sample& sample);
+[[nodiscard]] LabColor labFromCodes10(const Sample& sample);
+
+/// The conversion for @p sample read by @p Pixels, chosen at compile time so an
+/// accumulate loop carries no per-pixel test of the frame's format.
+template <typename Pixels>
+[[nodiscard]] LabColor labFromCodes(const Sample& sample)
+{
+    if constexpr (Pixels::MaxCode == 255) {
+        return labFromCodes8(sample);
+    } else {
+        return labFromCodes10(sample);
+    }
+}
 
 /// @return The chroma C* of @p lab.
 [[nodiscard]] float chromaOf(const LabColor& lab);
