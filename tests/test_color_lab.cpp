@@ -169,6 +169,38 @@ TEST_CASE("Neutral greys carry no chroma at any level")
     }
 }
 
+TEST_CASE("The ten-bit conversion agrees with the eight-bit one where they meet")
+{
+    // labFromCodes10 had no test of its own while labFromCodes8 had an
+    // exhaustive one, so nothing held its table to the right scale: dividing a
+    // ten-bit code by 255 rather than 1023 would leave every colour four times
+    // too bright and no test would have noticed.
+    //
+    // The two depths share exactly two codes - the ends - and there they must
+    // agree to the bit, because both are the same physical intensity.
+    const LabColor black8 = labFromCodes8(Sample{0, 0, 0});
+    const LabColor black10 = labFromCodes10(Sample{0, 0, 0});
+    CHECK(black10.lightness == black8.lightness);
+    CHECK(black10.a == black8.a);
+    CHECK(black10.b == black8.b);
+
+    const LabColor white8 = labFromCodes8(Sample{255, 255, 255});
+    const LabColor white10 = labFromCodes10(Sample{1023, 1023, 1023});
+    CHECK(white10.lightness == white8.lightness);
+    CHECK(white10.a == white8.a);
+    CHECK(white10.b == white8.b);
+    CHECK(white10.lightness == Catch::Approx(100.0).margin(1e-3));
+
+    // A ten-bit code lands between the eight-bit levels that bracket it, which
+    // is the precision the deeper capture exists to carry. 514 is 128.1 of
+    // 255, so it sits just above the grey that code 128 gives.
+    const LabColor grey8 = labFromCodes8(Sample{128, 128, 128});
+    const LabColor grey10 = labFromCodes10(Sample{514, 514, 514});
+    CHECK(grey10.lightness > grey8.lightness);
+    CHECK(grey10.lightness - grey8.lightness < 0.1f);
+    CHECK(chromaOf(grey10) == Catch::Approx(0.0).margin(1e-3));
+}
+
 TEST_CASE("Chroma is the distance from the neutral axis")
 {
     CHECK(chromaOf(LabColor{50.0f, 3.0f, 4.0f}) == Catch::Approx(5.0));

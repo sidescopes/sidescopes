@@ -27,6 +27,7 @@ using test::desktopStubs;
 using test::FakeCaptureSource;
 using test::makeSolidFrameBuffer;
 using test::makeTarget;
+using test::makeTenBitFrameBuffer;
 
 constexpr uint32_t StreamedDisplay = 3;
 
@@ -307,6 +308,41 @@ TEST_CASE("The content watch reads the locked region and nothing outside it")
 
     // Repainting inside it is the pan the border must hide for.
     publishAndAwait(fix, makeQuarteredFrameBuffer(64, Color{255, 255, 255}, Color{255, 255, 255}, 3), 3);
+    fix.controller.probeContentChange(region, 2.0);
+    CHECK(fix.controller.contentUnsettled(2.0));
+
+    fix.worker.stop();
+}
+
+TEST_CASE("A capture that changes depth is not a change of content")
+{
+    // The grid is taken on the 0..255 scale precisely so that this holds. The
+    // capture can change depth between two probes - it narrows and widens with
+    // the region, and a reconfigured stream can come back at the other depth -
+    // and the samples either side must still describe the same picture.
+    //
+    // Without the downshift a ten-bit code truncates into the byte rather than
+    // scaling into it: 616 becomes 104 against the eight-bit 154, on every one
+    // of the 256 taps at once, and the watch reads a still screen as a pan and
+    // hides the border for it.
+    ControllerFixture fix;
+    fix.worker.start();
+
+    const RegionOfInterest region;  // the whole frame
+
+    // Level 154 as eight-bit codes, then the same colour as ten-bit ones:
+    // (616 * 255 + 511) / 1023 is 154.
+    publishAndAwait(fix, makeSolidFrameBuffer(64, 64, Color{154, 154, 154}, 1), 1);
+    fix.controller.probeContentChange(region, 0.0);
+    CHECK_FALSE(fix.controller.contentUnsettled(0.0));
+
+    publishAndAwait(fix, makeTenBitFrameBuffer(64, 64, 616, 616, 616, 2), 2);
+    fix.controller.probeContentChange(region, 1.0);
+    CHECK_FALSE(fix.controller.contentUnsettled(1.0));
+
+    // The guard is not vacuous: a real repaint at the same depth still reads
+    // as a change.
+    publishAndAwait(fix, makeTenBitFrameBuffer(64, 64, 1023, 1023, 1023, 3), 3);
     fix.controller.probeContentChange(region, 2.0);
     CHECK(fix.controller.contentUnsettled(2.0));
 
