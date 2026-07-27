@@ -32,6 +32,7 @@
 #include "app/shortcut_resolver.h"
 #include "app/ui_scale.h"
 #include "app/version.h"
+#include "app/window_place.h"
 #include "core/analysis_worker.h"
 #include "core/diagnostics.h"
 #include "core/frame.h"
@@ -115,6 +116,8 @@ private:
     void observeSystemEvents();
 
     // --- state accessors ---
+    /// Where the window sits, as the toolkit reports it.
+    [[nodiscard]] WindowPlacement windowPlacement() const;
     [[nodiscard]] std::optional<uint32_t> displayOfWindow() const;
     [[nodiscard]] bool pinsAvailable() const;
     void refreshActivatedScope(std::string_view id);

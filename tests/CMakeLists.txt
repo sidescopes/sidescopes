@@ -64,6 +64,7 @@ add_executable(sidescopes_tests
     test_icons.cpp
     test_focus_resolution.cpp
     test_border_label.cpp
+    test_window_place.cpp
     test_window_suggestions.cpp
     test_version.cpp
 )
@@ -109,6 +110,7 @@ target_sources(sidescopes_tests PRIVATE
     ${CMAKE_SOURCE_DIR}/src/app/ui_scale.cpp
     ${CMAKE_SOURCE_DIR}/src/app/ui_scaling.cpp
     ${CMAKE_SOURCE_DIR}/src/app/version.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/window_place.cpp
     ${CMAKE_SOURCE_DIR}/src/app/window_suggestions.cpp)
 
 # The region geometry (src/platform/region_geometry.cpp) is pure,

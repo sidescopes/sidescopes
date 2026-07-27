@@ -410,6 +410,7 @@ if(APPLE OR WIN32)
         src/app/ui_scale.cpp
         src/app/ui_scaling.cpp
         src/app/version.cpp
+        src/app/window_place.cpp
         src/app/window_suggestions.cpp)
 
     # Build-time version stamp. The custom target regenerates the header from

@@ -43,6 +43,9 @@ public:
     std::vector<DesktopWindow> onScreenWindows;
     std::optional<DesktopPoint> cursor;
     std::optional<uint32_t> cursorDisplay;
+    /// The point the last displayAtPoint asked about, so a caller's own
+    /// arithmetic is visible to a test that stubs the answer.
+    std::optional<DesktopPoint> lastDisplayPoint;
     std::optional<CapturedImage> displayImage;
 
     bool faceDetectionSupported = false;

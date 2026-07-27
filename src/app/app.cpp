@@ -48,6 +48,7 @@
 #include "app/ui_scale.h"
 #include "app/ui_scaling.h"
 #include "app/version.h"
+#include "app/window_place.h"
 #include "app/window_suggestions.h"
 #include "core/analysis_worker.h"
 #include "core/color_lab.h"
@@ -286,16 +287,18 @@ void App::setupCapture()
     }
 }
 
+WindowPlacement App::windowPlacement() const
+{
+    WindowPlacement placement;
+    glfwGetWindowPos(m_window, &placement.x, &placement.y);
+    glfwGetWindowSize(m_window, &placement.width, &placement.height);
+
+    return placement;
+}
+
 std::optional<uint32_t> App::displayOfWindow() const
 {
-    int windowX = 0;
-    int windowY = 0;
-    int windowWidth = 0;
-    int windowHeight = 0;
-    glfwGetWindowPos(m_window, &windowX, &windowY);
-    glfwGetWindowSize(m_window, &windowWidth, &windowHeight);
-
-    return displayAtPoint(DesktopPoint{windowX + windowWidth / 2.0, windowY + windowHeight / 2.0});
+    return displayUnderWindow(windowPlacement());
 }
 
 bool App::pinsAvailable() const
@@ -634,8 +637,6 @@ void App::syncUiScaleToMonitor()
 
 void App::publishSelfWindowMask()
 {
-    // Publish our own window rectangle (display pixels, generous chrome margins)
-    // so analysis masks it out of change detection.
     if (!m_frameSize || m_captureController.capturedDisplay() == 0) {
         return;
     }
@@ -643,21 +644,9 @@ void App::publishSelfWindowMask()
     if (!geometry) {
         return;
     }
-    int windowX = 0, windowY = 0, windowW = 0, windowH = 0;
-    glfwGetWindowPos(m_window, &windowX, &windowY);
-    glfwGetWindowSize(m_window, &windowW, &windowH);
-    // Display pixels per point, not FRAME pixels per point: the mask is stated
-    // in display pixels so it survives a capture narrowed to part of one.
-    const double scaleX = m_frameSize->displayWidth / geometry->widthPoints;
-    const double scaleY = m_frameSize->displayHeight / geometry->heightPoints;
-    // The chrome margins are 100%-scale units like the rest of the interface,
-    // so they grow with the monitor's scale.
-    const IntRect selfWindow{static_cast<int>((windowX - geometry->originX - 8.0f * m_uiScale.scale()) * scaleX),
-                             static_cast<int>((windowY - geometry->originY - 42.0f * m_uiScale.scale()) * scaleY),
-                             static_cast<int>((static_cast<float>(windowW) + 16.0f * m_uiScale.scale()) * scaleX),
-                             static_cast<int>((static_cast<float>(windowH) + 58.0f * m_uiScale.scale()) * scaleY)};
-    if (selfWindow.x != m_analysis.maskedWindow.x || selfWindow.y != m_analysis.maskedWindow.y ||
-        selfWindow.width != m_analysis.maskedWindow.width || selfWindow.height != m_analysis.maskedWindow.height) {
+    const IntRect selfWindow = selfWindowMask(windowPlacement(), *geometry, m_frameSize->displayWidth,
+                                              m_frameSize->displayHeight, m_uiScale.scale());
+    if (!(selfWindow == m_analysis.maskedWindow)) {
         m_analysis.maskedWindow = selfWindow;
         m_analysisDirty = true;
     }

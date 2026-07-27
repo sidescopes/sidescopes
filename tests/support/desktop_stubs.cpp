@@ -52,8 +52,10 @@ std::optional<DisplayGeometry> geometryOfDisplay(uint32_t)
     return g_stubs.displayGeometry;
 }
 
-std::optional<uint32_t> displayAtPoint(DesktopPoint)
+std::optional<uint32_t> displayAtPoint(DesktopPoint point)
 {
+    g_stubs.lastDisplayPoint = point;
+
     return g_stubs.cursorDisplay;
 }
 
