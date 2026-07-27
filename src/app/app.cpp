@@ -36,6 +36,7 @@
 #include "app/overlay_render.h"
 #include "app/param_menu.h"
 #include "app/pin_board.h"
+#include "app/preferences_binding.h"
 #include "app/region_coordinator.h"
 #include "app/region_geometry.h"
 #include "app/row_layout.h"
@@ -175,9 +176,14 @@ bool App::init()
     // at rather than a restart on the way up.
     applyQuality(qualityFromToken(startup.quality));
     setupCapture();
-    seedAnalysis(m_analysis, startup);
-    setupView(startup);
-    m_shortcuts.restore(startup.shortcuts, startup.scopeShortcuts);
+    seedImageSizes(m_analysis);
+    restorePreferences(startup, m_view, m_pins, m_shortcuts, m_analysis);
+    m_presets.restore(startup.layoutPresets, startup.layoutActiveSlot);
+    // The stored factor is cleaned to an offered step here, at the app boundary,
+    // so core preferences never depend on the app's scaling policy. setupImGui
+    // already applied the OS scale at the 1.0 default; fold the preference in
+    // now, before the first frame.
+    m_uiScale.restore(startup.uiScaleFactor, m_window);
     const ScopePaneContext paneContext{*m_graphics,         m_view,         m_scopeRegistry, m_analysis, m_output,
                                        m_captureController, m_regionPicker, m_pins,          m_shortcuts};
     m_panes = std::make_unique<ScopePaneRenderer>(paneContext, createProjectionInstances(m_scopeRegistry),
@@ -280,44 +286,6 @@ void App::setupCapture()
     }
 }
 
-void App::setupView(const Preferences& startup)
-{
-    // The file format caps its pin list at the ring's capacity; the two
-    // constants sit in different layers, so the build checks they agree.
-    static_assert(MaximumPins == PinBoard::Maximum);
-    m_pins.restore(startup.pins, startup.pinComparator);
-    m_view.stack().restore(startup.scopeStack);
-    m_view.setGraticuleStrength(startup.graticuleStrength);
-    m_view.setZoom(startup.vectorscopeZoom);
-    m_view.layout().setOrientation(orientationFromInt(startup.layoutOrientation));
-    m_view.layout().setWeights(startup.layoutWeights);
-    m_presets.restore(startup.layoutPresets, startup.layoutActiveSlot);
-    // The stored factor is cleaned to an offered step here, at the app boundary,
-    // so core preferences never depend on the app's scaling policy. setupImGui
-    // already applied the OS scale at the 1.0 default; fold the preference in now,
-    // before the first frame.
-    m_uiScale.restore(startup.uiScaleFactor, m_window);
-    // The intensity control is derived from each trace's saved gain; smoothing
-    // is the host's own per-scope value, read straight from the preferences.
-    const auto startupSmoothing = [&](std::string_view id, double fallback) -> float {
-        const auto scope = startup.scopeParams.find(std::string{id});
-        if (scope == startup.scopeParams.end()) {
-            return static_cast<float>(fallback);
-        }
-        const auto value = scope->second.find("smoothing_ms");
-
-        return value != scope->second.end() ? static_cast<float>(value->second) : static_cast<float>(fallback);
-    };
-    m_view.traces().setIntensity(VectorscopeScopeId,
-                                 intensityFromTraceGain(static_cast<float>(scopeParam(VectorscopeScopeId, "gain", 3.0)),
-                                                        VectorscopeIntensityShift));
-    m_view.traces().setIntensity(WaveformScopeId,
-                                 intensityFromTraceGain(static_cast<float>(scopeParam(WaveformScopeId, "gain", 0.05))));
-    m_view.traces().setSmoothing(VectorscopeScopeId, startupSmoothing(VectorscopeScopeId, 75.0));
-    m_view.traces().setSmoothing(WaveformScopeId, startupSmoothing(WaveformScopeId, 100.0));
-    m_analysis.enabledScopes = m_view.stack().enabledScopeIds();
-}
-
 std::optional<uint32_t> App::displayOfWindow() const
 {
     int windowX = 0;
@@ -328,17 +296,6 @@ std::optional<uint32_t> App::displayOfWindow() const
     glfwGetWindowSize(m_window, &windowWidth, &windowHeight);
 
     return displayAtPoint(DesktopPoint{windowX + windowWidth / 2.0, windowY + windowHeight / 2.0});
-}
-
-double App::scopeParam(std::string_view id, std::string_view key, double fallback) const
-{
-    const auto scope = m_analysis.scopeParams.find(std::string{id});
-    if (scope == m_analysis.scopeParams.end()) {
-        return fallback;
-    }
-    const auto value = scope->second.find(std::string{key});
-
-    return value != scope->second.end() ? value->second : fallback;
 }
 
 bool App::pinsAvailable() const
@@ -442,27 +399,13 @@ void App::applyRegionOutcome(const RegionOutcome& outcome)
 
 void App::persistPreferences()
 {
-    Preferences preferences;
-    // The worker's parameter map is the persisted state directly; only the
-    // host-owned smoothing control is folded back in. The parade is dropped: it
-    // mirrors the waveform and re-seeds on load.
-    preferences.scopeParams = m_analysis.scopeParams;
-    preferences.scopeParams.erase(ParadeScopeId);
-    preferences.scopeParams[VectorscopeScopeId]["smoothing_ms"] = m_view.traces().smoothing(VectorscopeScopeId);
-    preferences.scopeParams[WaveformScopeId]["smoothing_ms"] = m_view.traces().smoothing(WaveformScopeId);
-    preferences.scopeStack = m_view.stack().tokens();
-    preferences.graticuleStrength = m_view.graticuleStrength();
-    preferences.vectorscopeZoom = m_view.zoom();
-    preferences.layoutOrientation = orientationToInt(m_view.layout().orientation());
-    preferences.layoutWeights = m_view.layout().weightsSnapshot();
+    // Everything the binding does not restore is the shell's own, and this is
+    // the whole of it.
+    Preferences preferences = capturePreferences(m_view, m_pins, m_shortcuts, m_analysis);
     preferences.layoutPresets = m_presets.all();
     preferences.layoutActiveSlot = m_presets.activeSlot();
     preferences.uiScaleFactor = m_uiScale.userFactor();
     preferences.quality = qualityToken(m_quality);
-    preferences.shortcuts = m_shortcuts.bindings();
-    preferences.scopeShortcuts = m_shortcuts.scopeOverrides();
-    preferences.pins = m_pins.colors();
-    preferences.pinComparator = m_pins.comparator();
     glfwGetWindowPos(m_window, &preferences.windowX, &preferences.windowY);
     glfwGetWindowSize(m_window, &preferences.windowWidth, &preferences.windowHeight);
     if (!savePreferences(preferences, preferencesFilePath())) {

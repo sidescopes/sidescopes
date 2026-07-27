@@ -113,11 +113,9 @@ private:
     /// Registers the system observers the frame loop reacts to: sleep and
     /// wake, an Escape with no key window, and foreground changes.
     void observeSystemEvents();
-    void setupView(const Preferences& startup);
 
     // --- state accessors ---
     [[nodiscard]] std::optional<uint32_t> displayOfWindow() const;
-    [[nodiscard]] double scopeParam(std::string_view id, std::string_view key, double fallback) const;
     [[nodiscard]] bool pinsAvailable() const;
     void refreshActivatedScope(std::string_view id);
     void toggleScope(std::string_view id);

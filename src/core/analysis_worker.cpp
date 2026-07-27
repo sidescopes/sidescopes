@@ -5,6 +5,7 @@
 #include <cmath>
 #include <set>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -33,6 +34,17 @@ IntRect RegionOfInterest::toPixels(int frameWidth, int frameHeight) const
     const int right = std::max(left, floorEdge(rightPercent, frameWidth));
     const int bottom = std::max(top, floorEdge(bottomPercent, frameHeight));
     return IntRect{left, top, right - left, bottom - top};
+}
+
+double scopeParam(const AnalysisSettings& settings, std::string_view id, std::string_view key, double fallback)
+{
+    const auto scope = settings.scopeParams.find(std::string{id});
+    if (scope == settings.scopeParams.end()) {
+        return fallback;
+    }
+    const auto value = scope->second.find(std::string{key});
+
+    return value != scope->second.end() ? value->second : fallback;
 }
 
 AnalysisWorker::AnalysisWorker(FrameMailbox& mailbox)

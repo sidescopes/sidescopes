@@ -49,10 +49,10 @@ struct MainWindow
 [[nodiscard]] MainWindow createMainWindow(const Preferences& startup, const VersionInfo& version,
                                           AppCallbackState& callbackState);
 
-/// Seeds @p analysis from the saved preferences: each scope's parameters by
-/// id, and the image sizes the worker starts at before adaptive detail moves
-/// them.
-void seedAnalysis(AnalysisSettings& analysis, const Preferences& startup);
+/// Seeds the image sizes the worker starts at, before adaptive detail moves
+/// them to the sizes the panes ask for. The saved parameters that go beside
+/// them are restorePreferences' half of the same settings.
+void seedImageSizes(AnalysisSettings& analysis);
 
 /// @return One projection instance per module scope in @p registry, keyed by
 ///         id. The host color picker has no module, so it gets none.

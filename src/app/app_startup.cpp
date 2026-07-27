@@ -258,22 +258,8 @@ MainWindow createMainWindow(const Preferences& startup, const VersionInfo& versi
     return {window, std::move(graphics)};
 }
 
-void seedAnalysis(AnalysisSettings& analysis, const Preferences& startup)
+void seedImageSizes(AnalysisSettings& analysis)
 {
-    // The worker is driven entirely by scope id: each scope's saved parameters
-    // fan out by key straight from the preference map into the module's
-    // declarative vocabulary. Smoothing rides the same map but belongs to the
-    // host, so it is filtered out. The parade shares the waveform's gain and
-    // stride, so both are re-seeded from the waveform.
-    for (const auto& [id, params] : startup.scopeParams) {
-        for (const auto& [key, value] : params) {
-            if (key != "smoothing_ms") {
-                analysis.scopeParams[id][key] = value;
-            }
-        }
-    }
-    analysis.scopeParams[ParadeScopeId]["gain"] = analysis.scopeParams[WaveformScopeId]["gain"];
-    analysis.scopeParams[ParadeScopeId]["stride"] = analysis.scopeParams[WaveformScopeId]["stride"];
     analysis.imageSizes[VectorscopeScopeId] = {DefaultVectorscopeSize, DefaultVectorscopeSize};
     analysis.imageSizes[WaveformScopeId] = {DefaultWaveformColumns, WaveformLevels};
     analysis.imageSizes[ParadeScopeId] = {DefaultWaveformColumns, WaveformLevels};

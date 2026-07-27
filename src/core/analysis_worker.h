@@ -7,6 +7,7 @@
 #include <mutex>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -71,6 +72,14 @@ struct AnalysisSettings
     /// FrameView::fromDisplay does that mapping.
     IntRect maskedWindow;
 };
+
+/// @return @p settings' value for @p key on the scope @p id, or @p fallback
+///         when the scope or the key has none. The map is deliberately sparse -
+///         a scope carries only the keys that have been set - so every read of
+///         it needs a default, and this is the one place that spells the lookup
+///         out.
+[[nodiscard]] double scopeParam(const AnalysisSettings& settings, std::string_view id, std::string_view key,
+                                double fallback);
 
 /// Runs the scope engines on a dedicated thread: takes the newest frame from
 /// the mailbox, skips frames whose scoped content is unchanged, and publishes

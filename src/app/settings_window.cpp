@@ -18,17 +18,6 @@ const SsScopeDescriptor* descriptorFor(const ScopeRegistry& registry, std::strin
     return hostScope != nullptr ? hostScope->descriptor : nullptr;
 }
 
-double scopeParam(const AnalysisSettings& analysis, std::string_view id, std::string_view key, double fallback)
-{
-    const auto scope = analysis.scopeParams.find(std::string{id});
-    if (scope == analysis.scopeParams.end()) {
-        return fallback;
-    }
-    const auto value = scope->second.find(std::string{key});
-
-    return value != scope->second.end() ? value->second : fallback;
-}
-
 void drawVectorscopeSettings(const SettingsContext& ctx)
 {
     // The intensity and stride sliders read their default, headroom, and range

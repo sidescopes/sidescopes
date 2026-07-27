@@ -27,6 +27,7 @@ add_executable(sidescopes_tests
     test_graticule.cpp
     test_histogram.cpp
     test_preferences.cpp
+    test_preferences_binding.cpp
     test_region_suggestions.cpp
     test_scope_goldens.cpp
     test_vectorscope.cpp
@@ -89,6 +90,7 @@ target_sources(sidescopes_tests PRIVATE
     ${CMAKE_SOURCE_DIR}/src/app/param_menu.cpp
     ${CMAKE_SOURCE_DIR}/src/app/pane_layout.cpp
     ${CMAKE_SOURCE_DIR}/src/app/pin_board.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/preferences_binding.cpp
     ${CMAKE_SOURCE_DIR}/src/app/quality.cpp
     ${CMAKE_SOURCE_DIR}/src/app/region_coordinator.cpp
     ${CMAKE_SOURCE_DIR}/src/app/region_motion.cpp
