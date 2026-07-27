@@ -64,9 +64,16 @@ const ScopeImage& ScopePaneRenderer::imageFor(std::string_view id) const
     return m_panes.imageFor(id);
 }
 
-ImVec2 ScopePaneRenderer::paneSizePoints(std::string_view id) const
+ScopePaneSizes ScopePaneRenderer::paneSizes() const
 {
-    return m_panes.paneSizePoints(id);
+    const auto sizeOf = [this](std::string_view id) {
+        const ImVec2 points = m_panes.paneSizePoints(id);
+
+        return PaneSize{points.x, points.y};
+    };
+
+    return ScopePaneSizes{sizeOf(WaveformScopeId), sizeOf(ParadeScopeId), sizeOf(HistogramScopeId),
+                          sizeOf(VectorscopeScopeId)};
 }
 
 int ScopePaneRenderer::paneAt(const ImVec2& point) const

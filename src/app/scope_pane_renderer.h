@@ -4,6 +4,7 @@
 #include <string>
 #include <string_view>
 
+#include "app/adaptive_detail.h"
 #include "app/app_startup.h"
 #include "app/icon_textures.h"
 #include "app/pane_area.h"
@@ -108,8 +109,11 @@ public:
     ///         none yet.
     [[nodiscard]] const ScopeImage& imageFor(std::string_view id) const;
 
-    /// @return The size @p id's pane last drew at, in interface points.
-    [[nodiscard]] ImVec2 paneSizePoints(std::string_view id) const;
+    /// @return The sizes the panes the detail policy measures last drew at, in
+    ///         interface points. Which scopes those are is the policy's own
+    ///         list, so it is answered here rather than asked for a scope at a
+    ///         time by a caller that would have to name them.
+    [[nodiscard]] ScopePaneSizes paneSizes() const;
 
     /// @return The index of the pane @p point fell in, or -1 for none: which
     ///         pane a right-click landed in decides which options lead the

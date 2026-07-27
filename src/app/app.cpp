@@ -647,18 +647,11 @@ void App::sampleCursorColor()
 
 void App::updateAdaptiveDetail(int framebufferWidth)
 {
-    const auto paneSize = [this](std::string_view id) {
-        const ImVec2 points = m_panes->paneSizePoints(id);
-
-        return PaneSize{points.x, points.y};
-    };
     int windowW = 0;
     int windowH = 0;
     glfwGetWindowSize(m_window, &windowW, &windowH);
     const float density = windowW > 0 ? static_cast<float>(framebufferWidth) / static_cast<float>(windowW) : 1.0f;
-    const ScopePaneSizes panes{paneSize(WaveformScopeId), paneSize(ParadeScopeId), paneSize(HistogramScopeId),
-                               paneSize(VectorscopeScopeId)};
-    const std::optional<DetailSizes> sizes = m_detail.update(panes, density, m_frameSize, glfwGetTime());
+    const std::optional<DetailSizes> sizes = m_detail.update(m_panes->paneSizes(), density, m_frameSize, glfwGetTime());
     if (!sizes) {
         return;
     }
