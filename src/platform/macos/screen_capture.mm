@@ -13,10 +13,16 @@
 //    application restarts capture; this backend never retries on its own.
 //  - Frames are requested in sRGB, so the OS converts from the display's
 //    color space and the scopes read honest sRGB values.
+//  - Frames are requested at ten bits a channel. The compositor carries
+//    more than a byte resolves and a BGRA capture threw it away; the
+//    request is not load-bearing, since every delivery is stamped with
+//    the format it actually arrived in.
 
 #import <CoreGraphics/CoreGraphics.h>
 #import <CoreMedia/CoreMedia.h>
 #import <ScreenCaptureKit/ScreenCaptureKit.h>
+
+#include "core/diagnostics.h"
 
 #include <algorithm>
 #include <atomic>
@@ -113,13 +119,37 @@ SCStreamConfiguration* makeStreamConfiguration(SCDisplay* display, SCContentFilt
     if (crop) {
         narrowConfiguration(configuration, *crop, scale);
     }
-    configuration.pixelFormat = kCVPixelFormatType_32BGRA;
+    // Ten bits a channel. The compositor carries about two bits more than a
+    // byte resolves - measured against Lightroom Classic and Capture One, on
+    // the same RAW, at both fit and 1:1 zoom - and a BGRA capture is what threw
+    // them away. It costs no memory: both layouts are four bytes a pixel.
+    //
+    // Asked for rather than assumed. Nothing here fails if the system declines
+    // it: every delivery is stamped with the format it actually arrived in, so
+    // an unsupported request degrades to whatever does arrive.
+    configuration.pixelFormat = kCVPixelFormatType_ARGB2101010LEPacked;
     configuration.minimumFrameInterval = CMTimeMake(1, maxFramesPerSecond);
     configuration.showsCursor = NO;
     configuration.queueDepth = 5;
     configuration.colorSpaceName = kCGColorSpaceSRGB;
 
     return configuration;
+}
+
+// The layout a delivered buffer really holds. Read from the buffer rather than
+// taken from what the configuration asked for: the two need not agree, and a
+// frame read in the wrong layout is a plausible-looking trace built from the
+// wrong bits.
+std::optional<PixelFormat> formatOfBuffer(CVImageBufferRef image)
+{
+    switch (CVPixelBufferGetPixelFormatType(image)) {
+    case kCVPixelFormatType_32BGRA:
+        return PixelFormat::Bgra8;
+    case kCVPixelFormatType_ARGB2101010LEPacked:
+        return PixelFormat::Argb2101010;
+    default:
+        return std::nullopt;
+    }
 }
 
 // Redrawing into a known-layout bitmap sidesteps whatever byte order the
@@ -306,6 +336,11 @@ public:
         if (!image) {
             return;
         }
+        // A layout no scope can read is dropped rather than guessed at.
+        const std::optional<PixelFormat> format = formatOfBuffer(image);
+        if (!format) {
+            return;
+        }
         if (CVPixelBufferLockBaseAddress(image, kCVPixelBufferLock_ReadOnly) != kCVReturnSuccess) {
             return;
         }
@@ -327,16 +362,7 @@ public:
             return;
         }
 
-        m_buffer.width = width;
-        m_buffer.height = height;
-        m_buffer.strideBytes = width * 4;  // repacked tightly, surface padding dropped
-        m_buffer.colorSpace = ColorSpaceHint::Srgb;
-        m_buffer.sequence = ++m_sequence;
-        m_buffer.sourceX = stamp->x;
-        m_buffer.sourceY = stamp->y;
-        m_buffer.sourceWidth = stamp->width;
-        m_buffer.sourceHeight = stamp->height;
-        m_buffer.sizeTo(static_cast<std::size_t>(m_buffer.strideBytes) * height);
+        stampBuffer(width, height, *format, *stamp);
         for (int py = 0; py < height; ++py) {
             std::memcpy(m_buffer.data.data() + static_cast<std::size_t>(py) * m_buffer.strideBytes,
                         source + static_cast<std::size_t>(py) * sourceStride, static_cast<std::size_t>(width) * 4);
@@ -344,6 +370,31 @@ public:
         CVPixelBufferUnlockBaseAddress(image, kCVPixelBufferLock_ReadOnly);
 
         m_buffer = m_mailbox->publish(std::move(m_buffer));
+    }
+
+    // Describes the delivery in the recycled buffer and sizes its storage. Every
+    // field is written on every frame, never only on the ones that changed: the
+    // buffer comes back from the mailbox holding the previous delivery's
+    // answers, and one left alone mislabels these pixels.
+    void stampBuffer(int width, int height, PixelFormat format, IntRect stamp)
+    {
+        m_buffer.width = width;
+        m_buffer.height = height;
+        m_buffer.strideBytes = width * 4;  // repacked tightly, surface padding dropped
+        m_buffer.colorSpace = ColorSpaceHint::Srgb;
+        m_buffer.format = format;
+        m_buffer.sequence = ++m_sequence;
+        m_buffer.sourceX = stamp.x;
+        m_buffer.sourceY = stamp.y;
+        m_buffer.sourceWidth = stamp.width;
+        m_buffer.sourceHeight = stamp.height;
+        m_buffer.sizeTo(static_cast<std::size_t>(m_buffer.strideBytes) * height);
+        // Logged once per change rather than thirty times a second, so the depth
+        // actually being delivered is observable without a build.
+        if (m_loggedFormat != format) {
+            m_loggedFormat = format;
+            SS_DIAG(Perf, "capture format %s", format == PixelFormat::Argb2101010 ? "10-bit" : "8-bit");
+        }
     }
 
     // The source stamp for a delivery of @p width by @p height: the crop's origin
@@ -408,6 +459,9 @@ private:
     dispatch_queue_t m_queue = nil;
     FrameMailbox* m_mailbox = nullptr;
     FrameBuffer m_buffer;  // recycled storage, touched only on the capture queue
+    // The last layout logged, so the depth actually being delivered is
+    // observable once rather than thirty times a second.
+    std::optional<PixelFormat> m_loggedFormat;
     StatusCallback m_status;
     std::atomic<bool> m_running{false};
     std::atomic<uint64_t> m_sequence{0};
