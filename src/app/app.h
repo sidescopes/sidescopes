@@ -119,7 +119,6 @@ private:
     /// Where the window sits, as the toolkit reports it.
     [[nodiscard]] WindowPlacement windowPlacement() const;
     [[nodiscard]] std::optional<uint32_t> displayOfWindow() const;
-    [[nodiscard]] bool pinsAvailable() const;
     void refreshActivatedScope(std::string_view id);
     void toggleScope(std::string_view id);
     void chooseScope(std::string_view id, bool stack);

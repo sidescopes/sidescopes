@@ -74,4 +74,10 @@ private:
     DiagRegistration m_stateReport;
 };
 
+/// @return Whether any of @p scopeIds is a scope pins can mark: one that
+///         declares itself a pin target, or the host's own color picker.
+///         Without one on screen the pin tool's button, its menu entries and
+///         its shortcut all stand down together, so they all ask this.
+[[nodiscard]] bool anyPinTarget(const ScopeRegistry& registry, const std::vector<std::string>& scopeIds);
+
 }  // namespace sidescopes

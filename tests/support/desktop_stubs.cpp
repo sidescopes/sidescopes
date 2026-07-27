@@ -108,6 +108,21 @@ bool captureVisibilityToggleSupported()
     return true;
 }
 
+bool platformHidesWindowOnCommandW()
+{
+    return g_stubs.hidesWindowOnCommandW;
+}
+
+bool platformMinimizesWindowOnControlW()
+{
+    return g_stubs.minimizesWindowOnControlW;
+}
+
+bool platformQuitsOnControlQ()
+{
+    return g_stubs.quitsOnControlQ;
+}
+
 void openUrl(const char*)
 {
 }

@@ -301,25 +301,6 @@ std::optional<uint32_t> App::displayOfWindow() const
     return displayUnderWindow(windowPlacement());
 }
 
-bool App::pinsAvailable() const
-{
-    // Pins mark any scope that declares itself a pin target (plus the host's
-    // own color picker); without one on screen, the tool's button, menu
-    // entries, and shortcuts all stand down together.
-    for (const std::string& scopeId : m_view.stack().ids()) {
-        if (scopeId == ColorPickerScopeId) {
-            return true;
-        }
-        const HostScope* hostScope = m_scopeRegistry.byId(scopeId);
-        if (hostScope != nullptr && hostScope->descriptor != nullptr &&
-            (hostScope->descriptor->flags & SS_SCOPE_PIN_TARGET) != 0u) {
-            return true;
-        }
-    }
-
-    return false;
-}
-
 void App::refreshActivatedScope(std::string_view id)
 {
     // A scope draws the same frame it turns on, but the worker only computes
@@ -719,9 +700,13 @@ void App::drawFrameUi()
     for (const ShortcutAction& action : m_shortcuts.resolvePressed(shortcutContext(), modifiers, shortcutPressed)) {
         applyShortcutAction(action);
     }
-    const PaneRenderInput input{
-        m_uiScale.scale(), m_analysis.region.has_value(), pinsAvailable(), m_vectorscopeColor, m_waveformColor,
-        m_readoutColor,    m_callbackState.monospaceFont};
+    const PaneRenderInput input{m_uiScale.scale(),
+                                m_analysis.region.has_value(),
+                                anyPinTarget(m_scopeRegistry, m_view.stack().ids()),
+                                m_vectorscopeColor,
+                                m_waveformColor,
+                                m_readoutColor,
+                                m_callbackState.monospaceFont};
     applyPaneRenderOutcome(m_panes->drawRegionToolIcons(input));
     applyPaneRenderOutcome(m_panes->drawScopePanes(input));
     m_panes->drawStatusBar(input);
@@ -783,17 +768,7 @@ void App::applyPaneRenderOutcome(const PaneRenderOutcome& outcome)
 
 ShortcutContext App::shortcutContext() const
 {
-    ShortcutContext context;
-    context.wantsTextInput = ImGui::GetIO().WantTextInput;
-    context.faceDetectionSupported = supportsFaceDetection();
-    context.pinsAvailable = pinsAvailable();
-    context.settingsOpen = m_showSettings;
-    context.vectorscopeZoom = m_view.zoom();
-    context.hidesWindowOnCommandW = platformHidesWindowOnCommandW();
-    context.minimizesWindowOnControlW = platformMinimizesWindowOnControlW();
-    context.quitsOnControlQ = platformQuitsOnControlQ();
-
-    return context;
+    return shortcutContextFor(m_view, m_scopeRegistry, m_showSettings, ImGui::GetIO().WantTextInput);
 }
 
 // Carries out what the resolver decided. Which scope, which tool, which zoom

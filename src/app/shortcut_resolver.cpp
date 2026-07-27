@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "app/scope_registry.h"
+#include "platform/face_detection.h"
 
 namespace sidescopes {
 
@@ -236,6 +237,22 @@ void ShortcutResolver::appendScopeKeys(bool shift, const ShortcutKeyPressed& pre
             actions.push_back(chooseScopeAction(scope.id, shift));
         }
     }
+}
+
+ShortcutContext shortcutContextFor(const ScopeView& view, const ScopeRegistry& registry, bool settingsOpen,
+                                   bool wantsTextInput)
+{
+    ShortcutContext context;
+    context.wantsTextInput = wantsTextInput;
+    context.faceDetectionSupported = supportsFaceDetection();
+    context.pinsAvailable = anyPinTarget(registry, view.stack().ids());
+    context.settingsOpen = settingsOpen;
+    context.vectorscopeZoom = view.zoom();
+    context.hidesWindowOnCommandW = platformHidesWindowOnCommandW();
+    context.minimizesWindowOnControlW = platformMinimizesWindowOnControlW();
+    context.quitsOnControlQ = platformQuitsOnControlQ();
+
+    return context;
 }
 
 }  // namespace sidescopes

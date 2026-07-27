@@ -6,6 +6,7 @@
 #include <string_view>
 #include <vector>
 
+#include "app/scope_view.h"
 #include "core/preferences.h"
 #include "platform/desktop.h"
 #include "platform/region_selection.h"
@@ -87,6 +88,14 @@ struct ShortcutContext
     bool minimizesWindowOnControlW = false;
     bool quitsOnControlQ = false;
 };
+
+/// @return The context a resolution reads, gathered from @p view, @p registry
+///         and the platform. @p settingsOpen and @p wantsTextInput are the
+///         shell's own, and everything else is either the live view or a
+///         platform seam - so which seams a resolution depends on is stated
+///         beside the resolver rather than at each call site.
+[[nodiscard]] ShortcutContext shortcutContextFor(const ScopeView& view, const ScopeRegistry& registry,
+                                                 bool settingsOpen, bool wantsTextInput);
 
 /// Answers whether the key a shortcut names went down this frame. The name is
 /// what a binding holds - a single letter A-Z or "Escape" - plus the two the

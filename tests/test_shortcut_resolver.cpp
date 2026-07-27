@@ -8,7 +8,9 @@
 #include <vector>
 
 #include "app/scope_registry.h"
+#include "app/scope_view.h"
 #include "app/shortcut_resolver.h"
+#include "desktop_stubs.h"
 #include "modules/module_registry.h"
 #include "platform/desktop.h"
 #include "sidescopes/module.h"
@@ -411,6 +413,33 @@ TEST_CASE("The bindings survive the round trip to preferences")
           ShortcutAction::Kind::RequestPick);
     CHECK(sole(resolver.resolvePressed(readyContext(), ModifierState{}, pressing("D"))).kind ==
           ShortcutAction::Kind::None);
+}
+
+TEST_CASE("The resolution context is gathered from the view and the platform")
+{
+    test::desktopStubs().reset();
+    test::desktopStubs().faceDetectionSupported = true;
+    test::desktopStubs().hidesWindowOnCommandW = true;
+    test::desktopStubs().quitsOnControlQ = true;
+
+    const ScopeRegistry registry{builtinModules()};
+    ScopeView view{registry};
+    view.stack().restore("W");
+    view.setZoom(4);
+
+    const ShortcutContext context = shortcutContextFor(view, registry, /*settingsOpen=*/true, /*wantsTextInput=*/false);
+    CHECK(context.settingsOpen);
+    CHECK_FALSE(context.wantsTextInput);
+    CHECK(context.vectorscopeZoom == 4);
+    CHECK(context.faceDetectionSupported);
+    CHECK(context.hidesWindowOnCommandW);
+    CHECK_FALSE(context.minimizesWindowOnControlW);
+    CHECK(context.quitsOnControlQ);
+    // A waveform alone takes no pins, so the pin key stands down with the tool.
+    CHECK_FALSE(context.pinsAvailable);
+
+    view.stack().restore("V");
+    CHECK(shortcutContextFor(view, registry, false, false).pinsAvailable);
 }
 
 }  // namespace sidescopes

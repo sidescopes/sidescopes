@@ -84,4 +84,20 @@ int ScopeRegistry::indexOf(std::string_view id) const
     return -1;
 }
 
+bool anyPinTarget(const ScopeRegistry& registry, const std::vector<std::string>& scopeIds)
+{
+    for (const std::string& scopeId : scopeIds) {
+        if (scopeId == ColorPickerScopeId) {
+            return true;
+        }
+        const HostScope* hostScope = registry.byId(scopeId);
+        if (hostScope != nullptr && hostScope->descriptor != nullptr &&
+            (hostScope->descriptor->flags & SS_SCOPE_PIN_TARGET) != 0u) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 }  // namespace sidescopes

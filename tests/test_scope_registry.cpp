@@ -200,4 +200,22 @@ TEST_CASE("A saved stack naming a scope this build dropped still loads")
     CHECK(parseStackTokens(registry, "N") == std::vector<std::string>{VectorscopeScopeId});
 }
 
+TEST_CASE("Pins mark the scopes that declare themselves targets")
+{
+    const ScopeRegistry registry{builtinModules()};
+
+    // Nothing on screen, nothing to pin into.
+    CHECK_FALSE(anyPinTarget(registry, {}));
+    // The host's colour picker takes pins without a module descriptor to say
+    // so, which is why the question is not the flag alone.
+    CHECK(anyPinTarget(registry, {std::string{ColorPickerScopeId}}));
+    // The vectorscope is the module scope that declares the flag.
+    CHECK(anyPinTarget(registry, {std::string{VectorscopeScopeId}}));
+    CHECK_FALSE(anyPinTarget(registry, {std::string{WaveformScopeId}, std::string{HistogramScopeId}}));
+    // One target anywhere in the stack is enough.
+    CHECK(anyPinTarget(registry, {std::string{WaveformScopeId}, std::string{VectorscopeScopeId}}));
+    // A scope the registry has never heard of cannot take a pin.
+    CHECK_FALSE(anyPinTarget(registry, {std::string{"org.example.unknown"}}));
+}
+
 }  // namespace sidescopes

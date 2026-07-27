@@ -55,6 +55,10 @@ public:
     std::string displayName = "Test display";
     /// Whether this window shows up in other applications' screen captures.
     bool captureVisible = false;
+    /// The window chords the platform decides rather than the preferences.
+    bool hidesWindowOnCommandW = false;
+    bool minimizesWindowOnControlW = false;
+    bool quitsOnControlQ = false;
 
     /// The one-shot screen read the cursor readout falls back to off the
     /// captured display: what it answers, and how often it was asked - the
