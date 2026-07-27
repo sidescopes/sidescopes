@@ -389,10 +389,11 @@ public:
         m_buffer.sourceWidth = stamp.width;
         m_buffer.sourceHeight = stamp.height;
         m_buffer.sizeTo(static_cast<std::size_t>(m_buffer.strideBytes) * height);
-        // Logged once per change rather than thirty times a second, so the depth
-        // actually being delivered is observable without a build.
-        if (m_loggedFormat != format) {
-            m_loggedFormat = format;
+        // Logged when it changes rather than thirty times a second, and stated
+        // afresh to every recording: capture settles its format in the first
+        // second of a run, and a log switched on later still has to say what
+        // depth is being delivered.
+        if (m_loggedFormat.shouldLog(format)) {
             SS_DIAG(Perf, "capture format %s", format == PixelFormat::Argb2101010 ? "10-bit" : "8-bit");
         }
     }
@@ -459,9 +460,9 @@ private:
     dispatch_queue_t m_queue = nil;
     FrameMailbox* m_mailbox = nullptr;
     FrameBuffer m_buffer;  // recycled storage, touched only on the capture queue
-    // The last layout logged, so the depth actually being delivered is
-    // observable once rather than thirty times a second.
-    std::optional<PixelFormat> m_loggedFormat;
+    // The layout this recording has been told about, read on the capture queue
+    // and forgotten whenever a recording opens.
+    DiagOnChange<PixelFormat> m_loggedFormat{DiagChannel::Perf};
     StatusCallback m_status;
     std::atomic<bool> m_running{false};
     std::atomic<uint64_t> m_sequence{0};
