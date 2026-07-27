@@ -365,6 +365,7 @@ if(APPLE OR WIN32)
         src/app/border_label.cpp
         src/app/capture_controller.cpp
         src/app/capture_crop.cpp
+        src/app/capture_supervisor.cpp
         src/app/color_picker_common.cpp
         src/app/color_picker_deck.cpp
         src/app/color_picker_difference.cpp

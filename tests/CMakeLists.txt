@@ -17,6 +17,7 @@ add_executable(sidescopes_tests
     test_parallel_for.cpp
     test_frame_mailbox.cpp
     test_capture_crop.cpp
+    test_capture_supervisor.cpp
     test_chunk_scratch.cpp
     test_frame_pacing.cpp
     test_region_hash.cpp
@@ -85,6 +86,7 @@ target_sources(sidescopes_tests PRIVATE
     ${CMAKE_SOURCE_DIR}/src/app/face_lock.cpp
     ${CMAKE_SOURCE_DIR}/src/app/face_lock_controller.cpp
     ${CMAKE_SOURCE_DIR}/src/app/capture_crop.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/capture_supervisor.cpp
     ${CMAKE_SOURCE_DIR}/src/app/frame_pacing.cpp
     ${CMAKE_SOURCE_DIR}/src/app/layout_preset_store.cpp
     ${CMAKE_SOURCE_DIR}/src/app/region_geometry.cpp

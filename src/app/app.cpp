@@ -27,6 +27,7 @@
 #include "app/adaptive_detail.h"
 #include "app/app_startup.h"
 #include "app/capture_controller.h"
+#include "app/capture_supervisor.h"
 #include "app/color_readout.h"
 #include "app/context_menu.h"
 #include "app/frame_pacing.h"
@@ -428,7 +429,7 @@ void App::runFrame()
     const bool nothingToDrawInto = framebufferWidth == 0 || framebufferHeight == 0;
     // Capture is a service that dies (lock screen, display sleep); restarting
     // it is our job.
-    servicePipelineVisibility(nothingToDrawInto, glfwGetTime());
+    serviceCapture(nothingToDrawInto, glfwGetTime());
     m_captureController.service(glfwGetTime());
     // Attached regions: observe the attached windows and route the analysis by
     // the focused window. The border reconciles here every frame in both
@@ -508,68 +509,40 @@ bool App::regionInteracting() const
     return m_regionPicker.active() || m_regions.borderEditing();
 }
 
-void App::servicePipelineVisibility(bool framebufferEmpty, double now)
+void App::serviceCapture(bool framebufferEmpty, double now)
 {
-    const VisibilityInputs inputs{
-        m_sessionAsleep.load(),
-        applicationHidden(),
-        glfwGetWindowAttrib(m_window, GLFW_ICONIFIED) != 0,
-        glfwGetWindowAttrib(m_window, GLFW_VISIBLE) != 0,
-        framebufferEmpty,
-        !m_analysis.region.has_value(),
-        m_regionPicker.active() || m_regionPicker.scansRunning() || m_faceLock.probeRunning()};
-    // Which reason to name in the status line, read back off the inputs rather
-    // than gathered a second time: an empty selection is the only one of them
-    // that pauses a window the user is looking at.
-    const bool outOfSight = inputs.sessionAsleep || inputs.applicationHidden || inputs.iconified ||
-                            !inputs.windowVisible || inputs.framebufferEmpty;
+    CaptureConditions conditions;
+    conditions.visibility =
+        VisibilityInputs{m_sessionAsleep.load(),
+                         applicationHidden(),
+                         glfwGetWindowAttrib(m_window, GLFW_ICONIFIED) != 0,
+                         glfwGetWindowAttrib(m_window, GLFW_VISIBLE) != 0,
+                         framebufferEmpty,
+                         !m_analysis.region.has_value(),
+                         m_regionPicker.active() || m_regionPicker.scansRunning() || m_faceLock.probeRunning()};
+    conditions.suspended = m_captureController.suspended();
+    conditions.frameSize = m_frameSize;
+    conditions.region = m_analysis.region;
+    conditions.faceLocked = m_faceLock.locked();
 
-    switch (m_visibility.update(inputs, m_captureController.suspended(), now)) {
+    const CaptureDecision decision = m_captureSupervisor.update(conditions, now);
+    switch (decision.pipeline) {
     case PipelineAction::Suspend:
-        SS_DIAG(Perf, "pipeline suspended - %s", outOfSight ? "out of sight" : "no region");
-        m_captureController.suspend(outOfSight ? "paused - the window is out of sight" : "paused - no region selected");
+        m_captureController.suspend(decision.pauseReason);
         // The frame the worker holds is a whole display of pixels; with the
         // stream stopped nothing will replace it, and the colour readout falls
         // back to the off-stream sample the moment it is gone.
         m_worker.releaseFrame();
         break;
     case PipelineAction::Resume:
-        SS_DIAG(Perf, "pipeline resumed");
         m_captureController.resume();
         break;
     case PipelineAction::Keep:
         break;
     }
-
-    serviceCaptureCrop(inputs.needsFrames, now);
-}
-
-// Asks the capture for only the pixels the region needs. The compositor renders,
-// scales and delivers whatever the stream is configured for, so a region a
-// fraction of the display was still costing a whole display's worth of that work
-// every frame, plus the copy into the mailbox.
-void App::serviceCaptureCrop(bool otherReadersActive, double now)
-{
-    if (!m_frameSize) {
-        return;
+    if (decision.cropKnown) {
+        m_captureController.narrowTo(decision.crop);
     }
-    // No region narrows nothing: the colour under the pointer is read from the
-    // stream wherever it lands, and a narrowed stream would leave that reading
-    // to the far slower whole-screen sample for the whole of an empty session.
-    const IntRect regionPixels =
-        m_analysis.region ? m_analysis.region->toPixels(m_frameSize->displayWidth, m_frameSize->displayHeight)
-                          : IntRect{0, 0, m_frameSize->displayWidth, m_frameSize->displayHeight};
-    const std::optional<IntRect> crop =
-        m_cropTracker.decide(regionPixels, m_frameSize->displayWidth, m_frameSize->displayHeight, otherReadersActive,
-                             m_faceLock.locked(), now);
-    if (m_loggedCrop.shouldLog(crop)) {
-        if (crop) {
-            SS_DIAG(Perf, "capture narrowed to %dx%d at %d,%d", crop->width, crop->height, crop->x, crop->y);
-        } else {
-            SS_DIAG(Perf, "capture covers the whole display");
-        }
-    }
-    m_captureController.narrowTo(crop);
 }
 
 void App::pumpEvents()

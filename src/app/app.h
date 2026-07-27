@@ -14,7 +14,7 @@
 #include "app/adaptive_detail.h"
 #include "app/attach_controller.h"
 #include "app/capture_controller.h"
-#include "app/capture_crop.h"
+#include "app/capture_supervisor.h"
 #include "app/cursor_sampler.h"
 #include "app/face_lock_controller.h"
 #include "app/frame_pacing.h"
@@ -173,12 +173,12 @@ private:
     /// Whether the user is drawing or dragging the region itself, which takes
     /// the loop off its frame period so the border can follow their hand.
     [[nodiscard]] bool regionInteracting() const;
-    /// Suspends the capture stream - and the whole pipeline behind it - while
-    /// the window is out of sight, and resumes it when the window returns.
+    /// Gathers what the capture's state is decided from and carries the answer
+    /// out: suspending the whole pipeline behind the stream while the window is
+    /// out of sight, and narrowing the stream to the region.
     /// @p framebufferEmpty is the frame's own measurement, taken once and read
     /// here and by the draw that follows.
-    void servicePipelineVisibility(bool framebufferEmpty, double now);
-    void serviceCaptureCrop(bool otherReadersActive, double now);
+    void serviceCapture(bool framebufferEmpty, double now);
     void pumpEvents();
     void drainAsyncSignals();
     void followWindowDisplay();
@@ -359,12 +359,9 @@ private:
     /// Where the pointer was on the previous pass of the loop. The clock for
     /// when it was last somewhere else is one of the loop's.
     std::optional<DesktopPoint> m_pointerAt;
-    /// Decides when the pipeline is suspended and resumed; owns the clock its
-    /// hysteresis measures against.
-    VisibilityGate m_visibility;
-    CropTracker m_cropTracker;
-    /// The crop this recording has been told about.
-    DiagOnChange<std::optional<IntRect>> m_loggedCrop{DiagChannel::Perf};
+    /// Owns whether the pipeline should be running and how wide the capture
+    /// should be, with the clocks both answers are measured against.
+    CaptureSupervisor m_captureSupervisor;
     /// Whether the session has stopped showing anything - the display asleep,
     /// the screen locked, another user switched in. Set from the platform
     /// observers, which may deliver on any thread, and read by the frame loop.
