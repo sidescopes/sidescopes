@@ -108,7 +108,6 @@ public:
 
 private:
     // --- startup ---
-    void setupImGui();
     void setupCapture();
 
     /// Registers the system observers the frame loop reacts to: sleep and

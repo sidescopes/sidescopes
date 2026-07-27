@@ -163,11 +163,10 @@ bool App::init()
     }
     m_window = mainWindow.window;
     m_graphics = std::move(mainWindow.graphics);
-    setupImGui();
+    m_callbackState.monospaceFont = startImGui(m_window);
+    m_uiScale.refresh(m_window);
     if (!m_graphics->init(m_window)) {
-        ImGui::DestroyContext();
-        glfwDestroyWindow(m_window);
-        glfwTerminate();
+        stopRendering(m_window, nullptr);
 
         return false;
     }
@@ -258,22 +257,7 @@ void App::shutdown()
     hideRegionBorder();
     m_worker.stop();
     m_capture->stop();
-    m_graphics->shutdown();
-    ImGui::DestroyContext();
-    glfwDestroyWindow(m_window);
-    glfwTerminate();
-}
-
-void App::setupImGui()
-{
-    IMGUI_CHECKVERSION();
-    ImGui::CreateContext();
-    ImGuiIO& io = ImGui::GetIO();
-    io.IniFilename = nullptr;  // window layout is ours to persist
-    ImGui::StyleColorsDark();
-    applyTheme();
-    m_callbackState.monospaceFont = loadInterfaceFont(m_window);
-    m_uiScale.refresh(m_window);
+    stopRendering(m_window, m_graphics.get());
 }
 
 void App::setupCapture()

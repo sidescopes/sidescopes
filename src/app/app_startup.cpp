@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "app/app.h"
+#include "app/interface_style.h"
 #include "app/scope_view.h"
 #include "app/ui_scaling.h"
 #include "core/page_allocator.h"
@@ -207,6 +208,28 @@ ImFont* loadInterfaceFont(GLFWwindow* window)
     }
 
     return monospace;
+}
+
+ImFont* startImGui(GLFWwindow* window)
+{
+    IMGUI_CHECKVERSION();
+    ImGui::CreateContext();
+    ImGuiIO& io = ImGui::GetIO();
+    io.IniFilename = nullptr;  // window layout is ours to persist
+    ImGui::StyleColorsDark();
+    applyTheme();
+
+    return loadInterfaceFont(window);
+}
+
+void stopRendering(GLFWwindow* window, GraphicsBackend* graphics)
+{
+    if (graphics != nullptr) {
+        graphics->shutdown();
+    }
+    ImGui::DestroyContext();
+    glfwDestroyWindow(window);
+    glfwTerminate();
 }
 
 float computeUiScale(GLFWwindow* window)

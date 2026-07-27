@@ -27,6 +27,19 @@ struct AppCallbackState;
 /// system had none and the interface font stands in.
 [[nodiscard]] ImFont* loadInterfaceFont(GLFWwindow* window);
 
+/// Creates the Dear ImGui context and dresses it for @p window: the theme, the
+/// layout file left to the shell to persist, and the interface font.
+/// @return The fixed-width companion font, as @ref loadInterfaceFont answers
+///         it. The interface scale is the shell's to fold in afterwards, since
+///         it carries the user's own preference.
+[[nodiscard]] ImFont* startImGui(GLFWwindow* window);
+
+/// Releases what the shell brought up, in the reverse order: @p graphics when
+/// there is one, then the Dear ImGui context, the window and the toolkit.
+/// Shared by shutdown and by the one startup failure that happens after the
+/// context exists.
+void stopRendering(GLFWwindow* window, GraphicsBackend* graphics);
+
 /// The interface is authored in 100%-scale units. On macOS GLFW window
 /// coordinates are already such units - the framebuffer alone carries the
 /// Retina factor - so this is 1.0; on Windows the window is sized in
