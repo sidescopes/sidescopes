@@ -170,14 +170,9 @@ private:
     /// graphics driver's per-process render arena resident, and it releases
     /// most of it about a second after the last one.
     void drawFrame(int framebufferWidth, int framebufferHeight);
-    /// What the skip decision is made on, gathered before any of the frame is
-    /// built.
-    [[nodiscard]] RedrawInputs redrawInputs(int framebufferWidth, int framebufferHeight) const;
     /// Whether the user is drawing or dragging the region itself, which takes
     /// the loop off its frame period so the border can follow their hand.
     [[nodiscard]] bool regionInteracting() const;
-    /// How long to block while following a hand on the region.
-    [[nodiscard]] double interactionWait(double now) const;
     /// Suspends the capture stream - and the whole pipeline behind it - while
     /// the window is out of sight, and resumes it when the window returns.
     /// @p framebufferEmpty is the frame's own measurement, taken once and read
@@ -350,11 +345,10 @@ private:
     /// holds them by reference.
     std::unique_ptr<ScopePaneRenderer> m_panes;
 
-    double m_lastActivity = 0.0;
-    /// When the colour readout last moved. Its own clock: the readout follows
-    /// the pointer everywhere, and following it at the moving cadence spent as
-    /// much on a swatch as on the traces.
-    double m_lastReadoutActivity = 0.0;
+    /// Owns when each thing the picture follows last happened, and what the
+    /// frame on screen was drawn from; the loop asks it how long to block and
+    /// whether to draw.
+    FrameClocks m_clocks;
     /// The region the worker was last told about: a region that differs from it
     /// is a region something is moving, and what is moving it decides whether
     /// the scopes go coarse or stop altogether.
@@ -362,26 +356,9 @@ private:
     /// Owns which of the two that is, and the clock its settle time is
     /// measured against.
     RegionMotionTracker m_motion;
-    /// When the previous frame's event pump returned, so the redraw cap can
-    /// target a frame period rather than add a delay to one.
-    double m_lastFrameStart = 0.0;
-    /// When a frame was last built and presented, which is not every pass of
-    /// the loop: the loop goes on servicing capture, the border and the
-    /// overlays while it draws nothing at all.
-    double m_lastDrawnFrame = 0.0;
-    /// Where the pointer was on the previous pass of the loop, and when it was
-    /// last somewhere else.
+    /// Where the pointer was on the previous pass of the loop. The clock for
+    /// when it was last somewhere else is one of the loop's.
     std::optional<DesktopPoint> m_pointerAt;
-    double m_lastPointerMove = 0.0;
-    /// What the last drawn frame was drawn from, so the next pass can tell
-    /// whether the picture it would draw is the one already on screen.
-    int m_drawnFramebufferWidth = 0;
-    int m_drawnFramebufferHeight = 0;
-    std::string m_drawnCaptureStatus;
-    /// The worker has published a pass no frame has shown yet. Set from the
-    /// worker's own thread beside the wake it already posts, cleared by the
-    /// frame that fetches it.
-    std::atomic<bool> m_outputPending{false};
     /// Decides when the pipeline is suspended and resumed; owns the clock its
     /// hysteresis measures against.
     VisibilityGate m_visibility;

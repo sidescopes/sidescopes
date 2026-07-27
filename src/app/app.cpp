@@ -196,7 +196,7 @@ bool App::init()
     rememberApplicationWindow(m_graphics->nativeWindowHandle());
     m_ownPid = ownApplicationPid();
 
-    m_lastActivity = glfwGetTime();
+    m_clocks.noteActivity(glfwGetTime());
     m_regions.syncBorder(borderState());
 
     return true;
@@ -224,7 +224,7 @@ void App::observeSystemEvents()
 // whatever wait the loop is in.
 void App::noteWorkerOutput()
 {
-    m_outputPending.store(true);
+    m_clocks.noteOutputPublished();
     glfwPostEmptyEvent();
 }
 
@@ -392,7 +392,7 @@ void App::applyRegionOutcome(const RegionOutcome& outcome)
         }
     }
     if (outcome.activity) {
-        m_lastActivity = glfwGetTime();
+        m_clocks.noteActivity(glfwGetTime());
     }
 }
 
@@ -442,7 +442,19 @@ void App::runFrame()
     if (nothingToDrawInto) {
         return;
     }
-    const bool drawing = frameWorthDrawing(redrawInputs(framebufferWidth, framebufferHeight));
+    // The redraw decision is taken before any of the frame is built: everything
+    // it rests on is either a clock the loop already keeps or a cheap read, and
+    // the expensive part of a frame is the frame.
+    const std::string captureStatus = m_captureController.status();
+    const RedrawSignals signals{m_callbackState.lastInputEvent,
+                                m_panes->redrawDueSeconds(),
+                                ImGui::GetIO().WantTextInput,
+                                m_regionPicker.active(),
+                                regionInteracting(),
+                                framebufferWidth,
+                                framebufferHeight,
+                                captureStatus};
+    const bool drawing = frameWorthDrawing(m_clocks.redrawInputs(signals, glfwGetTime()));
     if (drawing) {
         drawFrame(framebufferWidth, framebufferHeight);
     }
@@ -464,16 +476,11 @@ void App::drawFrame(int framebufferWidth, int framebufferHeight)
         return;
     }
 
-    // Stamped where the frame begins rather than where it ends, because it is
-    // what the frame period is counted from: a period measured from the end
-    // adds the frame's own length to every one of them, and the body plus the
-    // present were enough to take a twenty-frame cadence down to sixteen.
-    m_lastDrawnFrame = glfwGetTime();
-    m_outputPending.store(false);
+    m_clocks.noteFrameBegun(glfwGetTime());
     if (m_worker.fetchOutput(m_outputVersion, m_output)) {
         m_panes->uploadVisibleScopes(m_analysis.region.has_value());
         SS_DIAG(Perf, "pass analysis_ms=%.1f", m_output.accumulateMilliseconds);
-        m_lastActivity = glfwGetTime();
+        m_clocks.noteActivity(glfwGetTime());
     }
     m_frameSize = m_worker.latestFrameSize();
     publishSelfWindowMask();
@@ -490,35 +497,7 @@ void App::drawFrame(int framebufferWidth, int framebufferHeight)
     // fast-dragged window visibly.
     followAttachedWindow();
 
-    // What this frame put on screen, so the next one can tell whether the
-    // picture it would draw is the same one.
-    m_drawnFramebufferWidth = framebufferWidth;
-    m_drawnFramebufferHeight = framebufferHeight;
-    m_drawnCaptureStatus = m_captureController.status();
-}
-
-// What the redraw decision is made on. Everything here is either a clock the
-// shell already keeps or a cheap read; the expensive part of a frame is the
-// frame, so the decision is taken before any of it.
-RedrawInputs App::redrawInputs(int framebufferWidth, int framebufferHeight) const
-{
-    RedrawInputs inputs;
-    inputs.now = glfwGetTime();
-    inputs.lastActivity = m_lastActivity;
-    inputs.lastReadoutActivity = m_lastReadoutActivity;
-    inputs.lastPointerMove = m_lastPointerMove;
-    inputs.lastInputEvent = m_callbackState.lastInputEvent;
-    inputs.lastDrawn = m_lastDrawnFrame;
-    inputs.redrawDue = m_panes->redrawDueSeconds();
-    inputs.outputPending = m_outputPending.load();
-    inputs.textInputActive = ImGui::GetIO().WantTextInput;
-    inputs.overlayActive = m_regionPicker.active();
-    inputs.framebufferChanged =
-        framebufferWidth != m_drawnFramebufferWidth || framebufferHeight != m_drawnFramebufferHeight;
-    inputs.statusChanged = m_captureController.status() != m_drawnCaptureStatus;
-    inputs.regionInteracting = regionInteracting();
-
-    return inputs;
+    m_clocks.noteFrameShown(framebufferWidth, framebufferHeight, m_captureController.status());
 }
 
 // The user's hand is on the region itself: a rubber band being drawn through
@@ -527,23 +506,6 @@ RedrawInputs App::redrawInputs(int framebufferWidth, int framebufferHeight) cons
 bool App::regionInteracting() const
 {
     return m_regionPicker.active() || m_regions.borderEditing();
-}
-
-// How long to block while following a hand: until the next event, and no later
-// than the next frame is due.
-//
-// The second half matters as much as the first. Nothing else paces the drawing
-// once the loop is following events, so a wait that ended only on an event drew
-// every frame late by however long the gap to the next one was - a hand
-// reporting every 20 ms took a twenty-frame cadence down to sixteen, and the
-// scopes with it. A deadline already past belongs to the frame this pass is
-// about to draw, so there is nothing left to wake for and the ceiling is the
-// honest wait.
-double App::interactionWait(double now) const
-{
-    const double left = m_lastDrawnFrame + ContentRedrawSeconds - now;
-
-    return left > 0.0 && left < InteractionWaitSeconds ? left : InteractionWaitSeconds;
 }
 
 void App::servicePipelineVisibility(bool framebufferEmpty, double now)
@@ -614,13 +576,12 @@ void App::pumpEvents()
 {
     const double now = glfwGetTime();
     const FrameWaitDecision wait =
-        frameWaitFor(FramePacingInputs{now, m_lastActivity, m_lastReadoutActivity, m_lastPointerMove, m_lastFrameStart,
-                                       m_attach.attached(), m_regionPicker.active(), regionInteracting()});
+        frameWaitFor(m_clocks.pacingInputs(now, m_attach.attached(), m_regionPicker.active(), regionInteracting()));
     switch (wait.kind) {
     case FrameWait::FollowInteraction:
         // Ends on the pointer event that moved the region, so the border is
         // repositioned in the same breath as the hand moved it.
-        glfwWaitEventsTimeout(interactionWait(now));
+        glfwWaitEventsTimeout(m_clocks.interactionWait(now));
         break;
     case FrameWait::WatchAttachedWindow:
         idleWaitWatchingAttachedWindow();
@@ -636,7 +597,7 @@ void App::pumpEvents()
     // Whatever ended that wait, the frame period is a floor: a wait that ends
     // on the first event redraws at the event rate otherwise.
     waitOutFramePeriod(now + wait.redrawFloorSeconds);
-    m_lastFrameStart = glfwGetTime();
+    m_clocks.notePumpReturned(glfwGetTime());
 }
 
 void App::drainAsyncSignals()
@@ -647,16 +608,16 @@ void App::drainAsyncSignals()
     if (m_callbackState.foregroundChanged.exchange(false)) {
         SS_DIAG(Attach, "fg-event wake");
         followAttachedWindow();
-        m_lastActivity = glfwGetTime();
+        m_clocks.noteActivity(glfwGetTime());
     }
     m_regionPicker.drainFaceScans();
     if (m_callbackState.iconifyChanged.exchange(false)) {
         m_regions.syncBorder(borderState());
-        m_lastActivity = glfwGetTime();
+        m_clocks.noteActivity(glfwGetTime());
     }
     if (m_orphanEscape.exchange(false)) {
         applyRegionOutcome(m_regions.clearRegion());
-        m_lastActivity = glfwGetTime();
+        m_clocks.noteActivity(glfwGetTime());
     }
     // Keys the border panel took while it held the keyboard: Escape and the
     // shortcuts keep working right after a border interaction. Escape on the
@@ -668,7 +629,7 @@ void App::drainAsyncSignals()
         } else {
             applyShortcutAction(m_shortcuts.resolveNamed(press.key, press.shift, shortcutContext()));
         }
-        m_lastActivity = glfwGetTime();
+        m_clocks.noteActivity(glfwGetTime());
     }
 }
 
@@ -683,7 +644,7 @@ void App::followWindowDisplay()
         if (homeDisplay && *homeDisplay != m_captureController.capturedDisplay()) {
             m_captureController.requestDisplay(*homeDisplay);
             if (m_captureController.start()) {
-                m_lastActivity = glfwGetTime();
+                m_clocks.noteActivity(glfwGetTime());
             }
         }
     }
@@ -694,7 +655,7 @@ void App::syncUiScaleToMonitor()
     // The window may have moved to a monitor with a different scale; the user
     // factor rides along through the controller's refresh.
     if (m_uiScale.refresh(m_window)) {
-        m_lastActivity = glfwGetTime();
+        m_clocks.noteActivity(glfwGetTime());
     }
 }
 
@@ -733,7 +694,7 @@ void App::notePointerMovement()
 {
     const std::optional<DesktopPoint> pointer = globalCursorPosition();
     if (pointer && m_pointerAt && (pointer->x != m_pointerAt->x || pointer->y != m_pointerAt->y)) {
-        m_lastPointerMove = glfwGetTime();
+        m_clocks.notePointerMove(glfwGetTime());
     }
     m_pointerAt = pointer;
 }
@@ -750,10 +711,10 @@ void App::sampleCursorColor()
     m_waveformColor = sample.waveformColor;
     m_readoutColor = sample.readoutColor;
     if (sample.changed) {
-        m_lastActivity = glfwGetTime();
+        m_clocks.noteActivity(glfwGetTime());
     }
     if (sample.readoutChanged) {
-        m_lastReadoutActivity = glfwGetTime();
+        m_clocks.noteReadoutActivity(glfwGetTime());
     }
 }
 
@@ -814,7 +775,7 @@ void App::drawFrameUi()
     m_about.draw(m_versionInfo);
 
     if (ImGui::IsAnyItemActive()) {
-        m_lastActivity = glfwGetTime();
+        m_clocks.noteActivity(glfwGetTime());
         m_nextPreferencesSave = glfwGetTime() + 1.0;
     }
 }
@@ -851,7 +812,7 @@ void App::applyPaneRenderOutcome(const PaneRenderOutcome& outcome)
         m_analysisDirty = true;
     }
     if (outcome.activity) {
-        m_lastActivity = glfwGetTime();
+        m_clocks.noteActivity(glfwGetTime());
     }
     if (outcome.preferencesSaveDue) {
         m_nextPreferencesSave = glfwGetTime() + 1.0;
@@ -936,7 +897,7 @@ void App::applyPresetOutcome(const LayoutPresetOutcome& outcome)
 void App::setStatus(std::string message)
 {
     m_panes->setStatus(std::move(message));
-    m_lastActivity = glfwGetTime();
+    m_clocks.noteActivity(glfwGetTime());
 }
 
 void App::handleContextMenu()
@@ -997,7 +958,7 @@ void App::dispatchMenuChoice(int chosen, const std::vector<ParamMenuAction>& par
         applyQuality(*quality);
     }
     dispatchShellMenu(chosen);
-    m_lastActivity = glfwGetTime();
+    m_clocks.noteActivity(glfwGetTime());
     m_nextPreferencesSave = glfwGetTime() + 1.0;
 }
 
@@ -1069,7 +1030,7 @@ void App::commitAnalysisChanges(bool drewThisPass)
         m_worker.updateSettings(coarsen ? coarsenedForDrag(m_analysis) : m_analysis);
         m_panes->configureProjections();
         m_analysisDirty = false;
-        m_lastActivity = now;
+        m_clocks.noteActivity(now);
         m_nextPreferencesSave = now + 1.0;
     }
     if (m_nextPreferencesSave > 0.0 && now > m_nextPreferencesSave) {

@@ -98,7 +98,7 @@ void App::captureActiveDisplay(const AttachDecision& decision)
         m_captureController.permissionGranted() && !m_captureController.dead()) {
         m_captureController.requestDisplay(decision.activeDisplayId);
         m_captureController.start();
-        m_lastActivity = glfwGetTime();
+        m_clocks.noteActivity(glfwGetTime());
     }
 }
 
@@ -223,7 +223,7 @@ void App::followAttachedWindow()
                               [this](WindowMotionSignal signal) { onWindowMotion(signal); });
         }
         m_faceLock.onActivated(m_activeWindowIdentity, glfwGetTime());
-        m_lastActivity = glfwGetTime();
+        m_clocks.noteActivity(glfwGetTime());
     }
     m_attachLastSeenRect = decision.activeRect;
     applyAttachDecision(decision);
@@ -237,7 +237,7 @@ void App::followAttachedWindow()
                           m_regions.borderEditing() || m_attachedWindowMoving || m_attachGripActive, glfwGetTime());
     applyFaceLockOutcome(faceLockOutcome);
     if (decision.closedCount > 0) {
-        m_lastActivity = glfwGetTime();
+        m_clocks.noteActivity(glfwGetTime());
     }
     // The window has sat still long enough and nothing grips it: the border
     // may come back where the motion left it.
@@ -269,7 +269,7 @@ void App::applyFaceLockOutcome(const FaceLockOutcome& outcome)
         setStatus("face lost - region removed");
         applyRegionOutcome(m_regions.useRegion(m_regions.globalRegion()));
         m_regions.syncBorder(borderState());
-        m_lastActivity = glfwGetTime();
+        m_clocks.noteActivity(glfwGetTime());
     }
 }
 

@@ -422,4 +422,98 @@ TEST_CASE("Resuming is immediate, however long the window was away")
     CHECK(gate.update(InSight, true, 10.001) == PipelineAction::Resume);
 }
 
+TEST_CASE("Every clock the loop keeps reaches the decision it belongs to")
+{
+    FrameClocks clocks;
+    clocks.noteActivity(1.0);
+    clocks.noteReadoutActivity(2.0);
+    clocks.notePointerMove(3.0);
+    clocks.notePumpReturned(4.0);
+    clocks.noteFrameBegun(5.0);
+
+    const FramePacingInputs pacing = clocks.pacingInputs(9.0, true, false, true);
+    CHECK(pacing.now == 9.0);
+    CHECK(pacing.lastActivity == 1.0);
+    CHECK(pacing.lastReadoutActivity == 2.0);
+    CHECK(pacing.lastPointerMove == 3.0);
+    CHECK(pacing.lastFrameStart == 4.0);
+    CHECK(pacing.attached);
+    CHECK_FALSE(pacing.pickerActive);
+    CHECK(pacing.regionInteracting);
+
+    RedrawSignals signals;
+    signals.lastInputEvent = 6.0;
+    signals.redrawDue = 7.0;
+    signals.textInputActive = true;
+    signals.overlayActive = true;
+    signals.regionInteracting = true;
+    const RedrawInputs redraw = clocks.redrawInputs(signals, 9.0);
+    CHECK(redraw.now == 9.0);
+    CHECK(redraw.lastActivity == 1.0);
+    CHECK(redraw.lastReadoutActivity == 2.0);
+    CHECK(redraw.lastPointerMove == 3.0);
+    CHECK(redraw.lastInputEvent == 6.0);
+    CHECK(redraw.lastDrawn == 5.0);
+    CHECK(redraw.redrawDue == 7.0);
+    CHECK(redraw.textInputActive);
+    CHECK(redraw.overlayActive);
+    CHECK(redraw.regionInteracting);
+}
+
+TEST_CASE("A published pass is pending until a frame begins")
+{
+    FrameClocks clocks;
+    const RedrawSignals signals;
+    CHECK_FALSE(clocks.redrawInputs(signals, 0.0).outputPending);
+
+    clocks.noteOutputPublished();
+    CHECK(clocks.redrawInputs(signals, 0.0).outputPending);
+
+    // Cleared where the frame begins, not where it ends: a pass published
+    // while that frame is being built is owed a frame of its own.
+    clocks.noteFrameBegun(1.0);
+    CHECK_FALSE(clocks.redrawInputs(signals, 1.0).outputPending);
+}
+
+TEST_CASE("A frame is owed until one has been drawn at this size and status")
+{
+    FrameClocks clocks;
+    RedrawSignals signals;
+    signals.framebufferWidth = 800;
+    signals.framebufferHeight = 600;
+    signals.captureStatus = "capturing";
+
+    // Nothing has been drawn at all, so the first frame is owed on both counts.
+    CHECK(clocks.redrawInputs(signals, 0.0).framebufferChanged);
+    CHECK(clocks.redrawInputs(signals, 0.0).statusChanged);
+
+    clocks.noteFrameShown(800, 600, "capturing");
+    CHECK_FALSE(clocks.redrawInputs(signals, 0.0).framebufferChanged);
+    CHECK_FALSE(clocks.redrawInputs(signals, 0.0).statusChanged);
+
+    signals.framebufferHeight = 601;
+    CHECK(clocks.redrawInputs(signals, 0.0).framebufferChanged);
+
+    signals.framebufferHeight = 600;
+    signals.captureStatus = "paused - no region selected";
+    CHECK(clocks.redrawInputs(signals, 0.0).statusChanged);
+}
+
+TEST_CASE("Following a hand waits no longer than the frame it is holding up")
+{
+    FrameClocks clocks;
+    clocks.noteFrameBegun(10.0);
+
+    // Most of the period is still to run, so that is the whole of the wait.
+    CHECK(clocks.interactionWait(10.0 + ContentRedrawSeconds * 0.25) == Catch::Approx(ContentRedrawSeconds * 0.75));
+
+    // The frame is already due: there is nothing left to wake for, and the
+    // ceiling is the honest wait.
+    CHECK(clocks.interactionWait(10.0 + ContentRedrawSeconds) == InteractionWaitSeconds);
+    CHECK(clocks.interactionWait(20.0) == InteractionWaitSeconds);
+
+    // And it is never longer than one slice, whatever the clocks say.
+    CHECK(clocks.interactionWait(0.0) == InteractionWaitSeconds);
+}
+
 }  // namespace sidescopes

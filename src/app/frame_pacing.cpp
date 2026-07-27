@@ -86,4 +86,76 @@ PipelineAction VisibilityGate::update(const VisibilityInputs& inputs, bool suspe
     return PipelineAction::Suspend;
 }
 
+void FrameClocks::noteActivity(double now)
+{
+    m_lastActivity = now;
+}
+
+void FrameClocks::noteReadoutActivity(double now)
+{
+    m_lastReadoutActivity = now;
+}
+
+void FrameClocks::notePointerMove(double now)
+{
+    m_lastPointerMove = now;
+}
+
+void FrameClocks::notePumpReturned(double now)
+{
+    m_lastFrameStart = now;
+}
+
+void FrameClocks::noteFrameBegun(double now)
+{
+    m_lastDrawnFrame = now;
+    m_outputPending.store(false);
+}
+
+void FrameClocks::noteFrameShown(int framebufferWidth, int framebufferHeight, std::string captureStatus)
+{
+    m_drawnFramebufferWidth = framebufferWidth;
+    m_drawnFramebufferHeight = framebufferHeight;
+    m_drawnCaptureStatus = std::move(captureStatus);
+}
+
+void FrameClocks::noteOutputPublished()
+{
+    m_outputPending.store(true);
+}
+
+FramePacingInputs FrameClocks::pacingInputs(double now, bool attached, bool pickerActive, bool regionInteracting) const
+{
+    return FramePacingInputs{now,      m_lastActivity, m_lastReadoutActivity, m_lastPointerMove, m_lastFrameStart,
+                             attached, pickerActive,   regionInteracting};
+}
+
+RedrawInputs FrameClocks::redrawInputs(const RedrawSignals& signals, double now) const
+{
+    RedrawInputs inputs;
+    inputs.now = now;
+    inputs.lastActivity = m_lastActivity;
+    inputs.lastReadoutActivity = m_lastReadoutActivity;
+    inputs.lastPointerMove = m_lastPointerMove;
+    inputs.lastInputEvent = signals.lastInputEvent;
+    inputs.lastDrawn = m_lastDrawnFrame;
+    inputs.redrawDue = signals.redrawDue;
+    inputs.outputPending = m_outputPending.load();
+    inputs.textInputActive = signals.textInputActive;
+    inputs.overlayActive = signals.overlayActive;
+    inputs.framebufferChanged =
+        signals.framebufferWidth != m_drawnFramebufferWidth || signals.framebufferHeight != m_drawnFramebufferHeight;
+    inputs.statusChanged = signals.captureStatus != m_drawnCaptureStatus;
+    inputs.regionInteracting = signals.regionInteracting;
+
+    return inputs;
+}
+
+double FrameClocks::interactionWait(double now) const
+{
+    const double left = m_lastDrawnFrame + ContentRedrawSeconds - now;
+
+    return left > 0.0 && left < InteractionWaitSeconds ? left : InteractionWaitSeconds;
+}
+
 }  // namespace sidescopes

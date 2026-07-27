@@ -1,5 +1,9 @@
 #pragma once
 
+#include <atomic>
+#include <string>
+#include <string_view>
+
 namespace sidescopes {
 
 /// The frame period the loop aims at while something on screen is moving. New
@@ -180,6 +184,101 @@ struct RedrawInputs
 /// Slowing down never reached that. Two frames a second held the entire arena
 /// resident, so the loop has to stop presenting outright.
 [[nodiscard]] bool frameWorthDrawing(const RedrawInputs& inputs);
+
+/// The facts a redraw decision rests on that are not clocks, gathered where
+/// each is true rather than held: the capture status and the framebuffer size
+/// are compared against what the last drawn frame was drawn from, and the rest
+/// are read off the interface as the frame is decided.
+struct RedrawSignals
+{
+    /// When a window event from the user last arrived.
+    double lastInputEvent = 0.0;
+    /// When something standing on screen leaves it by itself.
+    double redrawDue = 0.0;
+    bool textInputActive = false;
+    bool overlayActive = false;
+    /// The user's hand is on the region itself.
+    bool regionInteracting = false;
+    int framebufferWidth = 0;
+    int framebufferHeight = 0;
+    /// The line the capture would put in the status bar now.
+    std::string_view captureStatus;
+};
+
+/// When each thing that can change the picture last happened, and what the
+/// frame on screen was drawn from.
+///
+/// Both of the loop's decisions - how long to block, and whether to draw at
+/// all - are functions of these and nothing else, so the clocks and the
+/// policies that read them belong together. They used to be nine fields on the
+/// shell, stamped from twenty call sites and read from three, which is a
+/// decision no test can reach.
+///
+/// Every clock is supplied by the caller rather than taken here, so a test
+/// drives the whole thing on a clock of its own; that is also the convention
+/// the rest of the shell's timed units follow.
+class FrameClocks
+{
+public:
+    /// Anything happened that the picture follows: a published pass, a
+    /// gesture, a menu choice, a border moved.
+    void noteActivity(double now);
+
+    /// The colour readout moved, which asks for frames at a slower cadence of
+    /// its own.
+    void noteReadoutActivity(double now);
+
+    /// The pointer is somewhere it was not.
+    void notePointerMove(double now);
+
+    /// The event pump returned, which is what a frame period is counted from.
+    void notePumpReturned(double now);
+
+    /// A frame is being built. Stamped where the frame begins rather than
+    /// where it ends, because it is what the frame period is counted from: a
+    /// period measured from the end adds the frame's own length to every one
+    /// of them, and the body plus the present were enough to take a
+    /// twenty-frame cadence down to sixteen.
+    void noteFrameBegun(double now);
+
+    /// A frame was presented, built for @p framebufferWidth by
+    /// @p framebufferHeight with @p captureStatus in its status line - so the
+    /// next pass can tell whether the picture it would draw is the one already
+    /// on screen.
+    void noteFrameShown(int framebufferWidth, int framebufferHeight, std::string captureStatus);
+
+    /// The worker published a pass no frame has shown yet. Called from the
+    /// worker's own thread, so it touches nothing else.
+    void noteOutputPublished();
+
+    [[nodiscard]] FramePacingInputs pacingInputs(double now, bool attached, bool pickerActive,
+                                                 bool regionInteracting) const;
+
+    [[nodiscard]] RedrawInputs redrawInputs(const RedrawSignals& signals, double now) const;
+
+    /// How long to block while following a hand on the region: no later than
+    /// the next frame is due, and never longer than one interaction slice.
+    ///
+    /// Nothing else paces the drawing once the loop is following events, so a
+    /// wait that ended only on an event drew every frame late by however long
+    /// the gap to the next one was - a hand reporting every 20 ms took a
+    /// twenty-frame cadence down to sixteen, and the scopes with it. A
+    /// deadline already past belongs to the frame this pass is about to draw,
+    /// so there is nothing left to wake for and the ceiling is the honest
+    /// wait.
+    [[nodiscard]] double interactionWait(double now) const;
+
+private:
+    double m_lastActivity = 0.0;
+    double m_lastReadoutActivity = 0.0;
+    double m_lastPointerMove = 0.0;
+    double m_lastFrameStart = 0.0;
+    double m_lastDrawnFrame = 0.0;
+    int m_drawnFramebufferWidth = 0;
+    int m_drawnFramebufferHeight = 0;
+    std::string m_drawnCaptureStatus;
+    std::atomic<bool> m_outputPending{false};
+};
 
 /// What the loop knows about whether anything is worth computing.
 struct VisibilityInputs

@@ -41,7 +41,7 @@ void App::applyRegionPickOutcome(const RegionPickOutcome& outcome)
         m_regions.syncBorder(borderState());
     }
     if (outcome.activity) {
-        m_lastActivity = glfwGetTime();
+        m_clocks.noteActivity(glfwGetTime());
     }
 }
 
@@ -78,7 +78,7 @@ void App::toggleRegionAttach()
     } else {
         attachGlobalRegionToWindow();
     }
-    m_lastActivity = glfwGetTime();
+    m_clocks.noteActivity(glfwGetTime());
     m_regions.syncBorder(borderState());
 }
 
@@ -127,7 +127,7 @@ void App::dismissEditedBorder()
         m_regions.setGlobalRegion(std::nullopt);
     }
     applyRegionOutcome(m_regions.useRegion(m_regions.globalRegion()));
-    m_lastActivity = glfwGetTime();
+    m_clocks.noteActivity(glfwGetTime());
 }
 
 // Routes a border drag to the region kind it began on. An edit that began
@@ -162,7 +162,7 @@ void App::applyBorderEdit(const RegionOfInterest& edited)
     m_analysis.region = applied;
     // The analysis-dirty path syncs the border this same iteration.
     m_analysisDirty = true;
-    m_lastActivity = glfwGetTime();
+    m_clocks.noteActivity(glfwGetTime());
 }
 
 // The shared tail of both attached creations: the global region retires
