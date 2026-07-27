@@ -234,6 +234,110 @@ TEST_CASE("Recording state and path follow the configuration")
     cleanup(path);
 }
 
+TEST_CASE("A recording is told what settled before it opened")
+{
+    const std::string path = "diag-test-report.log";
+    // The state settles with nothing recording - a capture format decided in
+    // the first second of a run, long before anyone reaches the menu.
+    int depth = 10;
+    const sidescopes::DiagRegistration report =
+        sidescopes::diagAddStateReport([depth] { SS_DIAG(Attach, "depth=%d", depth); });
+
+    sidescopes::diagConfigure({"all", path});
+    sidescopes::diagConfigure({});
+    const std::string content = readAll(path);
+    CHECK(content.find("# state when this recording opened") != std::string::npos);
+    CHECK(content.find(" attach depth=10\n") != std::string::npos);
+    cleanup(path);
+}
+
+TEST_CASE("Every recording is told, not only the first")
+{
+    const std::string first = "diag-test-report-first.log";
+    const std::string second = "diag-test-report-second.log";
+    const sidescopes::DiagRegistration report = sidescopes::diagAddStateReport([] { SS_DIAG(Attach, "in force"); });
+
+    sidescopes::diagConfigure({"all", first});
+    sidescopes::diagConfigure({});
+    sidescopes::diagConfigure({"all", second});
+    sidescopes::diagConfigure({});
+    CHECK(readAll(first).find("in force") != std::string::npos);
+    CHECK(readAll(second).find("in force") != std::string::npos);
+    cleanup(first);
+    cleanup(second);
+}
+
+TEST_CASE("A report goes when its registration does")
+{
+    const std::string path = "diag-test-report-gone.log";
+    {
+        const sidescopes::DiagRegistration report = sidescopes::diagAddStateReport([] { SS_DIAG(Attach, "stale"); });
+    }
+    sidescopes::diagConfigure({"all", path});
+    sidescopes::diagConfigure({});
+    CHECK(readAll(path).find("stale") == std::string::npos);
+    cleanup(path);
+}
+
+TEST_CASE("Nothing is reported while nothing records")
+{
+    const std::string path = "diag-test-report-off.log";
+    const sidescopes::DiagRegistration report = sidescopes::diagAddStateReport([] { SS_DIAG(Attach, "unwanted"); });
+
+    sidescopes::diagConfigure({"", path});
+    CHECK_FALSE(fileExists(path));
+    cleanup(path);
+}
+
+TEST_CASE("A value seen while nothing records is stated to the recording that follows")
+{
+    const std::string path = "diag-test-onchange-late.log";
+    sidescopes::DiagOnChange<int> depth(sidescopes::DiagChannel::Attach);
+    // Nothing is recording, so nothing is stated - and nothing is remembered
+    // either, which is what leaves something to say later.
+    CHECK_FALSE(depth.shouldLog(10));
+    CHECK_FALSE(depth.shouldLog(10));
+
+    sidescopes::diagConfigure({"all", path});
+    CHECK(depth.shouldLog(10));
+    sidescopes::diagConfigure({});
+    cleanup(path);
+}
+
+TEST_CASE("A second recording is told the value the first was told")
+{
+    const std::string path = "diag-test-onchange-again.log";
+    sidescopes::DiagOnChange<int> depth(sidescopes::DiagChannel::Attach);
+
+    sidescopes::diagConfigure({"all", path});
+    CHECK(depth.shouldLog(10));
+    CHECK_FALSE(depth.shouldLog(10));
+    sidescopes::diagConfigure({});
+
+    // Unchanged all the while: without a recording of its own to measure
+    // against, the second log would open silent about a value that is as true
+    // as it ever was.
+    sidescopes::diagConfigure({"all", path});
+    CHECK(depth.shouldLog(10));
+    sidescopes::diagConfigure({});
+    cleanup(path);
+}
+
+TEST_CASE("A value is stated once to a recording, and again when it changes")
+{
+    const std::string path = "diag-test-onchange-dedupe.log";
+    sidescopes::DiagOnChange<int> depth(sidescopes::DiagChannel::Attach);
+
+    sidescopes::diagConfigure({"all", path});
+    CHECK(depth.shouldLog(10));
+    CHECK_FALSE(depth.shouldLog(10));
+    CHECK(depth.shouldLog(8));
+    CHECK_FALSE(depth.shouldLog(8));
+    CHECK(depth.shouldLog(10));
+    sidescopes::diagConfigure({});
+    cleanup(path);
+}
+
 TEST_CASE("Reconfiguring rotates the previous log, extension kept")
 {
     const std::string path = "diag-test-rotate.log";

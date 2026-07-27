@@ -1,7 +1,10 @@
 #pragma once
 
+#include <atomic>
 #include <chrono>
 #include <cstdio>
+#include <functional>
+#include <memory>
 #include <string>
 
 namespace sidescopes {
@@ -76,6 +79,51 @@ void diagConfigure(const DiagConfig& config);
 ///         first use so "show the log" always has a folder to open.
 [[nodiscard]] std::string diagDirectory();
 
+/// A subsystem's account of what is currently true - the lines it would
+/// already have written had a recording been open when its state settled.
+/// Every registered report runs when a recording opens, so a log started at
+/// any moment begins with the state of the application instead of only the
+/// changes that follow it.
+///
+/// A report may equally re-arm whatever its subsystem dedupes against, which
+/// is the other half of the same problem: dedupe state that outlives a
+/// recording makes the next one's first line wrong rather than missing.
+///
+/// A report describes; it must not open, close, or register anything.
+using DiagStateReport = std::function<void()>;
+
+/// Keeps a state report registered for as long as it lives and drops it on
+/// destruction, so a report never outlives the subsystem it describes.
+/// Declare it as the LAST member of that subsystem: members die in reverse
+/// order, so the report goes before the state it reads.
+class DiagRegistration
+{
+public:
+    DiagRegistration() = default;
+    DiagRegistration(DiagRegistration&&) noexcept = default;
+    DiagRegistration& operator=(DiagRegistration&&) noexcept = default;
+    DiagRegistration(const DiagRegistration&) = delete;
+    DiagRegistration& operator=(const DiagRegistration&) = delete;
+
+private:
+    friend DiagRegistration diagAddStateReport(DiagStateReport report);
+
+    explicit DiagRegistration(std::shared_ptr<DiagStateReport> report)
+        : m_report(std::move(report))
+    {
+    }
+
+    std::shared_ptr<DiagStateReport> m_report;
+};
+
+/// Registers @p report to run whenever a recording opens - which is what lets
+/// a subsystem whose state settled before anyone could reach the menu still be
+/// heard from. A subsystem registering while a recording is already open has
+/// nothing settled to state yet, so nothing runs until the next one opens.
+///
+/// @return The registration; letting it go removes the report.
+[[nodiscard]] DiagRegistration diagAddStateReport(DiagStateReport report);
+
 /// Writes one finished line to the sink: "t=<seconds> <channel>
 /// <message>", where t counts from the sink's initialization on the
 /// steady clock - the single timeline every channel shares. A no-op when
@@ -104,6 +152,62 @@ private:
     const char* m_name;
     std::chrono::steady_clock::time_point m_begin;
     bool m_armed;
+};
+
+/// A value worth logging when it changes and not thirty times a second - the
+/// capture format, the crop in force.
+///
+/// It holds the last value ANNOUNCED rather than the last one seen, so a value
+/// that changed while nothing was recording is still stated to the recording
+/// that follows; and it forgets on every new recording, so a second recording
+/// is told what the first one was told. Both halves are needed. Dedupe state
+/// that advances while the channel is off loses the line entirely, and the
+/// reader concludes nothing happened; dedupe state that outlives its recording
+/// produces a line that is wrong rather than missing, which is worse, because
+/// a wrong line is read and believed.
+///
+/// shouldLog is called from the one thread that owns the value; the forgetting
+/// a new recording asks for may come from another.
+template <typename Value>
+class DiagOnChange
+{
+public:
+    explicit DiagOnChange(DiagChannel channel)
+        : m_channel(channel),
+          m_registration(diagAddStateReport([this] { m_restate.store(true, std::memory_order_relaxed); }))
+    {
+    }
+
+    DiagOnChange(const DiagOnChange&) = delete;
+    DiagOnChange& operator=(const DiagOnChange&) = delete;
+
+    /// @return Whether @p value must be logged now: its channel is recording,
+    ///         and this is not a value the recording has already been told.
+    ///         Answering yes is what marks it told, so a caller that asks must
+    ///         log.
+    [[nodiscard]] bool shouldLog(const Value& value)
+    {
+        if (!diagEnabled(m_channel)) {
+            return false;
+        }
+        // Always taken, never short-circuited: a restatement left pending
+        // would spend itself on some later frame instead of this one.
+        const bool restate = m_restate.exchange(false, std::memory_order_relaxed);
+        if (!restate && m_told && m_value == value) {
+            return false;
+        }
+        m_value = value;
+        m_told = true;
+
+        return true;
+    }
+
+private:
+    DiagChannel m_channel;
+    Value m_value{};
+    bool m_told = false;
+    std::atomic<bool> m_restate{false};
+    DiagRegistration m_registration;
 };
 
 }  // namespace sidescopes

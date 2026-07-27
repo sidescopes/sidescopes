@@ -6,6 +6,9 @@
 #include <ctime>
 #include <filesystem>
 #include <iterator>
+#include <mutex>
+#include <utility>
+#include <vector>
 
 #include "core/environment.h"
 
@@ -52,7 +55,27 @@ struct DiagState
     double lastFlushSeconds = 0.0;
     std::chrono::steady_clock::time_point start;
     std::string path;
+    /// Whether this opening of the sink has had its state reported. Reset with
+    /// the rest of the state, so every new recording is told afresh.
+    bool reported = false;
 };
+
+// The registered state reports, held weakly: a registration going away is
+// what removes one, and holding it weakly means that removal costs the
+// subsystem's destructor nothing but a refcount - no lock, and nothing that
+// can throw out of a destructor.
+struct StateReports
+{
+    std::mutex mutex;
+    std::vector<std::weak_ptr<DiagStateReport>> reports;
+};
+
+StateReports& stateReports()
+{
+    static StateReports reports;
+
+    return reports;
+}
 
 DiagFlush flushFromEnv(const std::string& value)
 {
@@ -190,6 +213,48 @@ DiagState& diagState()
     return state;
 }
 
+/// Runs every registered state report against a freshly opened sink, once per
+/// opening, so a recording starts with what is already true rather than only
+/// with what changes next.
+void reportState()
+{
+    DiagState& state = diagState();
+    if (!state.sink || state.reported) {
+        return;
+    }
+    // Marked before the reports run: a report logs, and logging must not lead
+    // back in here.
+    state.reported = true;
+    std::vector<std::shared_ptr<DiagStateReport>> live;
+    {
+        StateReports& registered = stateReports();
+        const std::lock_guard lock(registered.mutex);
+        // The subsystems that report tend to outlive the process, so this
+        // prunes little and stays short; doing it here keeps the registration
+        // itself free of any bookkeeping.
+        std::erase_if(registered.reports,
+                      [](const std::weak_ptr<DiagStateReport>& report) { return report.expired(); });
+        for (const std::weak_ptr<DiagStateReport>& report : registered.reports) {
+            if (std::shared_ptr<DiagStateReport> held = report.lock()) {
+                live.push_back(std::move(held));
+            }
+        }
+    }
+    if (live.empty()) {
+        return;
+    }
+    // Named, because these lines describe a past this recording did not see:
+    // the timestamps are honest about when they were written, not about when
+    // the state they carry came about.
+    std::fprintf(state.sink, "# state when this recording opened\n");
+    // Outside the lock: a report is arbitrary subsystem code, and holding a
+    // diagnostics lock across it would put this facility inside their lock
+    // order.
+    for (const std::shared_ptr<DiagStateReport>& report : live) {
+        (*report)();
+    }
+}
+
 }  // namespace
 
 bool diagEnabled(DiagChannel channel)
@@ -200,11 +265,27 @@ bool diagEnabled(DiagChannel channel)
 void diagInit()
 {
     (void)diagState();
+    // A run enabled from the environment opens its sink at whichever line
+    // logs first, which can be before the application reaches here. The
+    // reporting waits for this call regardless, so the subsystems built during
+    // startup are all registered by the time it runs.
+    reportState();
 }
 
 void diagConfigure(const DiagConfig& config)
 {
     applyConfig(diagState(), config);
+    reportState();
+}
+
+DiagRegistration diagAddStateReport(DiagStateReport report)
+{
+    auto held = std::make_shared<DiagStateReport>(std::move(report));
+    StateReports& registered = stateReports();
+    const std::lock_guard lock(registered.mutex);
+    registered.reports.push_back(held);
+
+    return DiagRegistration(std::move(held));
 }
 
 bool diagRecording()
