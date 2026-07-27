@@ -27,7 +27,6 @@ struct ScopePaneSizes
     PaneSize parade;
     PaneSize histogram;
     PaneSize vectorscope;
-    PaneSize neutral;
 };
 
 /// The scope image resolutions one step settled on, for the host to put in
@@ -40,8 +39,6 @@ struct DetailSizes
     std::pair<int, int> histogram;
     /// The vectorscope image, square.
     int vectorscope = 0;
-    /// The neutral plane, square.
-    int neutral = 0;
 
     [[nodiscard]] bool operator==(const DetailSizes&) const = default;
 };
@@ -60,8 +57,7 @@ inline constexpr double DetailSettleSeconds = 0.4;
 /// back the way a texture is stretched over a pane, over the region sizes a
 /// scan actually uses: the vectorscope moves by a mean of 0.03 to 0.13 of 255
 /// and the histogram by 0.12 to 0.49 - both are upsamples of a grid that does
-/// not change - and the neutral plane by 0.71 to 2.79 with its cast reading,
-/// the one number anybody takes off it, unmoved to four decimal places.
+/// not change.
 inline constexpr int DraggedDetailDivisor = 2;
 
 /// The smallest side a dragged pass is asked for, so a small pane's image stays
@@ -130,13 +126,6 @@ public:
     /// The vectorscope's desired image edge for the pane in @p panePixels.
     /// Stays at the resolution in force while it is off screen.
     [[nodiscard]] int desiredVectorscopeSize(const ScopePaneSizes& panePixels) const;
-
-    /// The neutral plane's desired edge for the pane in @p panePixels. Unlike
-    /// the vectorscope's, this is not only a display resolution: the
-    /// near-neutral cloud is accumulated at it, so a larger plane resolves the
-    /// cloud more finely rather than interpolating it. Stays at the resolution
-    /// in force while it is off screen.
-    [[nodiscard]] int desiredNeutralSize(const ScopePaneSizes& panePixels) const;
 
     /// Reads the ladders above at @p level's numbers from here on. Only the
     /// resolutions move with it; how thinly the region is sampled and how often

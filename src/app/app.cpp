@@ -825,7 +825,7 @@ void App::updateAdaptiveDetail(int framebufferWidth)
     glfwGetWindowSize(m_window, &windowW, &windowH);
     const float density = windowW > 0 ? static_cast<float>(framebufferWidth) / static_cast<float>(windowW) : 1.0f;
     const ScopePaneSizes panes{paneSize(WaveformScopeId), paneSize(ParadeScopeId), paneSize(HistogramScopeId),
-                               paneSize(VectorscopeScopeId), paneSize(NeutralScopeId)};
+                               paneSize(VectorscopeScopeId)};
     const std::optional<DetailSizes> sizes = m_detail.update(panes, density, m_frameSize, glfwGetTime());
     if (!sizes) {
         return;
@@ -834,7 +834,6 @@ void App::updateAdaptiveDetail(int framebufferWidth)
     m_analysis.imageSizes[ParadeScopeId] = sizes->waveform;
     m_analysis.imageSizes[VectorscopeScopeId] = {sizes->vectorscope, sizes->vectorscope};
     m_analysis.imageSizes[HistogramScopeId] = sizes->histogram;
-    m_analysis.imageSizes[NeutralScopeId] = {sizes->neutral, sizes->neutral};
     m_analysisDirty = true;
 }
 

@@ -1,6 +1,5 @@
 #include "app/quality.h"
 
-#include "core/scopes/neutral.h"
 #include "core/scopes/vectorscope.h"
 #include "core/scopes/waveform.h"
 
@@ -16,17 +15,14 @@ constexpr QualityProfile Standard{
     .waveformHeightCeiling = 512,
     .histogramCeiling = {4096, 768},
     .vectorscopeCeiling = 512,
-    .neutralCeiling = MaximumNeutralSize,
     .sampleThinning = 1,
     .coarsenWhileDragged = true,
 };
 
 // Low takes the cheap precision first, in the order measurement ranked it: the
 // vectorscope's image and the histogram's plot are 45-49% of their passes for
-// deviations of a tenth and a hundredth of a code, the neutral plane is the
-// largest memory item on the list with its cast reading unmoved, and the
-// waveform gives up its height and the density of its columns but never the
-// columns themselves.
+// deviations of a tenth and a hundredth of a code, and the waveform gives up
+// its height and the density of its columns but never the columns themselves.
 constexpr QualityProfile Low{
     .captureFramesPerSecond = 10,
     .magnificationTolerance = 2.0f,
@@ -34,7 +30,6 @@ constexpr QualityProfile Low{
     .waveformHeightCeiling = WaveformLevels,
     .histogramCeiling = {2048, 384},
     .vectorscopeCeiling = DefaultVectorscopeSize,
-    .neutralCeiling = DefaultNeutralSize,
     .sampleThinning = 2,
     .coarsenWhileDragged = true,
 };
@@ -50,7 +45,6 @@ constexpr QualityProfile High{
     .waveformHeightCeiling = Standard.waveformHeightCeiling,
     .histogramCeiling = Standard.histogramCeiling,
     .vectorscopeCeiling = Standard.vectorscopeCeiling,
-    .neutralCeiling = Standard.neutralCeiling,
     .sampleThinning = 1,
     .coarsenWhileDragged = false,
 };

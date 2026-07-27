@@ -13,7 +13,6 @@
 
 #include "core/scopes/chunk_scratch.h"
 #include "core/scopes/histogram.h"
-#include "core/scopes/neutral.h"
 #include "core/scopes/vectorscope.h"
 #include "core/scopes/waveform.h"
 #include "modules/module_registry.h"
@@ -107,10 +106,6 @@ TEST_CASE("A lent arena leaves every scope's image byte for byte")
     RecordingArena vectorscope;
     CHECK(sameEitherWay<Vectorscope>(frame, vectorscope));
     CHECK(vectorscope.borrows > 0);
-
-    RecordingArena neutral;
-    CHECK(sameEitherWay<Neutral>(frame, neutral));
-    CHECK(neutral.borrows > 0);
 }
 
 TEST_CASE("A lender that declines is answered from the engine's own room")
@@ -206,7 +201,7 @@ TEST_CASE("Every scope the host creates borrows the host's arena")
 
     const TestFrame frame = busyFrame();
     for (const char* id : {"org.sidescopes.waveform", "org.sidescopes.parade", "org.sidescopes.histogram",
-                           "org.sidescopes.vectorscope", "org.sidescopes.neutral"}) {
+                           "org.sidescopes.vectorscope"}) {
         INFO(id);
         bool pristine = false;
         bool borrowed = false;

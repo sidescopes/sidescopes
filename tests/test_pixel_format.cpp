@@ -16,7 +16,6 @@
 #include "core/analysis_worker.h"
 #include "core/frame.h"
 #include "core/scopes/histogram.h"
-#include "core/scopes/neutral.h"
 #include "core/scopes/vectorscope.h"
 #include "core/scopes/waveform.h"
 #include "modules/module_frame.h"
@@ -190,23 +189,6 @@ TEST_CASE("A ten-bit frame reaches chroma positions an eight-bit frame cannot")
     }
 
     CHECK(differingBytes(vectorscopeImageOf(deep.view()), vectorscopeImageOf(shallow.view())) > 0);
-}
-
-TEST_CASE("The neutral plane reads a ten-bit frame as the colour it is")
-{
-    // A correctness guard on the one path this change added to that scope, and
-    // no more than that. Its accumulate now converts through the ten-bit
-    // transfer table, so the cast it reports must agree with projecting the
-    // same colour directly - two independent routes to one number, which a
-    // misread pixel or the wrong table would separate.
-    TenBitTestFrame frame(32, 32);
-    frame.fill(600, 603, 610);
-    Neutral scope;
-    scope.accumulate(frame.view(), IntRect{0, 0, 32, 32});
-
-    const NormalizedPoint projected = scope.project(frame.view().srgbAt(0, 0));
-    CHECK(scope.averagePoint().x == Catch::Approx(projected.x).margin(0.002));
-    CHECK(scope.averagePoint().y == Catch::Approx(projected.y).margin(0.002));
 }
 
 TEST_CASE("A bin-bound scope reads a ten-bit frame as the level it rounds to")

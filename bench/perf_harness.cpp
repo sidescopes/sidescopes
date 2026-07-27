@@ -44,7 +44,6 @@
 #include "core/frame_mailbox.h"
 #include "core/region_hash.h"
 #include "core/scopes/histogram.h"
-#include "core/scopes/neutral.h"
 #include "core/scopes/vectorscope.h"
 #include "core/scopes/waveform.h"
 
@@ -109,12 +108,11 @@ struct PaneCase
     int waveformHeight;
     int histogramWidth;
     int histogramHeight;
-    int neutralSize;
 };
 
 constexpr PaneCase PaneCases[] = {
-    {"small", 256, 512, 256, 512, 384, 256},
-    {"large", 512, 2048, 512, 2048, 768, 512},
+    {"small", 256, 512, 256, 512, 384},
+    {"large", 512, 2048, 512, 2048, 768},
 };
 
 /// One measured number, plus the dimensions it was measured at. Serialized as
@@ -321,19 +319,6 @@ void sweepHistogram(EngineSweep& sweep, const PaneCase& pane)
     }
 }
 
-void sweepNeutral(EngineSweep& sweep, const PaneCase& pane)
-{
-    Neutral neutral;
-    NeutralSettings settings;
-    settings.size = pane.neutralSize;
-    neutral.configure(settings);
-    const auto accumulate = [&](const FrameView& frame, IntRect region) { neutral.accumulate(frame, region); };
-    measureEngineFloor(sweep, "neutral", pane, accumulate);
-    for (const RegionCase& region : RegionCases) {
-        measureEngine(sweep, "neutral", region, pane, accumulate);
-    }
-}
-
 void sweepEngines(std::vector<MetricRow>& rows, const FrameView& frame, const Effort& effort)
 {
     EngineSweep sweep{&rows, frame, effort};
@@ -346,7 +331,6 @@ void sweepEngines(std::vector<MetricRow>& rows, const FrameView& frame, const Ef
         sweepWaveform(sweep, pane, WaveformMode::Luma, "waveform-luma");
         sweepWaveform(sweep, pane, WaveformMode::RgbParade, "parade");
         sweepHistogram(sweep, pane);
-        sweepNeutral(sweep, pane);
     }
 }
 
@@ -403,7 +387,6 @@ AnalysisSettings settingsFor(const WorkerScenario& scenario, const RegionCase& r
     settings.imageSizes["org.sidescopes.waveform"] = {pane.waveformColumns, pane.waveformHeight};
     settings.imageSizes["org.sidescopes.parade"] = {pane.waveformColumns, pane.waveformHeight};
     settings.imageSizes["org.sidescopes.histogram"] = {pane.histogramWidth, pane.histogramHeight};
-    settings.imageSizes["org.sidescopes.neutral"] = {pane.neutralSize, pane.neutralSize};
 
     return settings;
 }

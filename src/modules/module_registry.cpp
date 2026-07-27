@@ -21,8 +21,10 @@ namespace {
 int canonicalRank(std::string_view id)
 {
     static constexpr std::string_view Order[] = {
-        "org.sidescopes.vectorscope", "org.sidescopes.waveform", "org.sidescopes.parade",
-        "org.sidescopes.histogram",   "org.sidescopes.neutral",
+        "org.sidescopes.vectorscope",
+        "org.sidescopes.waveform",
+        "org.sidescopes.parade",
+        "org.sidescopes.histogram",
     };
     for (int index = 0; index < static_cast<int>(std::size(Order)); ++index) {
         if (Order[index] == id) {
@@ -166,7 +168,6 @@ ModuleRegistry& builtinModules()
         (void)registry.registerModule(VectorscopeModuleEntry);
         (void)registry.registerModule(WaveformModuleEntry);
         (void)registry.registerModule(HistogramModuleEntry);
-        (void)registry.registerModule(NeutralModuleEntry);
 #endif
         return true;
     }();

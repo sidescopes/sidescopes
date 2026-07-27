@@ -67,33 +67,30 @@ TEST_CASE("The module registry orders the built-ins canonically in every build")
     // back in file-name order. The registry imposes one canonical order over
     // both, so this holds identically in the static and dynamic configurations.
     const std::vector<RegisteredScope>& scopes = builtinModules().scopes();
-    REQUIRE(scopes.size() == 5);
+    REQUIRE(scopes.size() == 4);
     CHECK(std::string(scopes[0].descriptor->id) == "org.sidescopes.vectorscope");
     CHECK(std::string(scopes[1].descriptor->id) == "org.sidescopes.waveform");
     CHECK(std::string(scopes[2].descriptor->id) == "org.sidescopes.parade");
     CHECK(std::string(scopes[3].descriptor->id) == "org.sidescopes.histogram");
-    CHECK(std::string(scopes[4].descriptor->id) == "org.sidescopes.neutral");
 }
 
 TEST_CASE("The scope registry lists the built-ins then the color picker")
 {
     const ScopeRegistry registry{builtinModules()};
     const std::vector<HostScope>& scopes = registry.scopes();
-    REQUIRE(scopes.size() == 6);
+    REQUIRE(scopes.size() == 5);
 
     CHECK(scopes[0].id == "org.sidescopes.vectorscope");
     CHECK(scopes[1].id == "org.sidescopes.waveform");
     CHECK(scopes[2].id == "org.sidescopes.parade");
     CHECK(scopes[3].id == "org.sidescopes.histogram");
-    CHECK(scopes[4].id == "org.sidescopes.neutral");
-    CHECK(scopes[5].id == "org.sidescopes.colorpicker");
+    CHECK(scopes[4].id == "org.sidescopes.colorpicker");
 
     CHECK(scopes[0].letter == 'V');
     CHECK(scopes[1].letter == 'W');
     CHECK(scopes[2].letter == 'R');
     CHECK(scopes[3].letter == 'H');
-    CHECK(scopes[4].letter == 'N');
-    CHECK(scopes[5].letter == 'C');
+    CHECK(scopes[4].letter == 'C');
 }
 
 TEST_CASE("The scope registry resolves scopes by id, letter, and index")
@@ -113,8 +110,7 @@ TEST_CASE("The scope registry resolves scopes by id, letter, and index")
 
     CHECK(registry.indexOf("org.sidescopes.vectorscope") == 0);
     CHECK(registry.indexOf("org.sidescopes.histogram") == 3);
-    CHECK(registry.indexOf("org.sidescopes.neutral") == 4);
-    CHECK(registry.indexOf("org.sidescopes.colorpicker") == 5);
+    CHECK(registry.indexOf("org.sidescopes.colorpicker") == 4);
     CHECK(registry.indexOf("org.sidescopes.nonesuch") == -1);
 }
 
@@ -153,15 +149,32 @@ TEST_CASE("A colliding letter registers the scope letterless but reachable")
     CHECK(registry.byLetter('W') == holder);
 }
 
-TEST_CASE("A built-in scope beyond the original set round-trips through the stack")
+TEST_CASE("Every registered scope round-trips through the stack")
 {
-    // The regression guard for the persistence bug: the neutral scope arrived
-    // after the fixed V/W/R/H/C set, and its letter must survive the save/load
-    // token layer so a saved stack brings it back, not the vectorscope.
+    // The regression guard for the persistence bug: a scope added after the
+    // fixed V/W/R/H/C set was written to the preferences file and read back as
+    // the vectorscope. Every scope the build registers is checked, so the next
+    // one is covered the day it is added rather than the day it is noticed.
     const ScopeRegistry registry{builtinModules()};
-    REQUIRE(registry.byId(NeutralScopeId) != nullptr);
-    CHECK(parseStackTokens(registry, "N") == std::vector<std::string>{NeutralScopeId});
-    CHECK(formatStackTokens(registry, {NeutralScopeId}) == "N");
+    for (const HostScope& scope : registry.scopes()) {
+        CAPTURE(scope.id);
+        const std::string token = formatStackTokens(registry, {scope.id});
+        CHECK_FALSE(token.empty());
+        CHECK(parseStackTokens(registry, token) == std::vector<std::string>{scope.id});
+    }
+}
+
+TEST_CASE("A saved stack naming a scope this build dropped still loads")
+{
+    // Scopes come and go before 1.0, and a preferences file outlives them: a
+    // stack naming one that is gone must lose that scope and keep the rest,
+    // and one naming nothing left must fall back rather than load empty.
+    const ScopeRegistry registry{builtinModules()};
+    REQUIRE(registry.byLetter('N') == nullptr);
+
+    CHECK(parseStackTokens(registry, "VNH") == std::vector<std::string>{VectorscopeScopeId, HistogramScopeId});
+    CHECK(parseStackTokens(registry, "[org.sidescopes.neutral]") == std::vector<std::string>{VectorscopeScopeId});
+    CHECK(parseStackTokens(registry, "N") == std::vector<std::string>{VectorscopeScopeId});
 }
 
 }  // namespace sidescopes

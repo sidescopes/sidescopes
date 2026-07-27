@@ -537,8 +537,8 @@ TEST_CASE("A scope holds no buffers until it first accumulates")
     // arrive with the constructor would be paid for by every one of them, so
     // an engine allocates at its first pass and not before. Configuring is
     // not a pass: the projections are configured on every settings change.
-    const std::array<const char*, 5> ids{"org.sidescopes.vectorscope", "org.sidescopes.waveform",
-                                         "org.sidescopes.parade", "org.sidescopes.histogram", "org.sidescopes.neutral"};
+    const std::array<const char*, 4> ids{"org.sidescopes.vectorscope", "org.sidescopes.waveform",
+                                         "org.sidescopes.parade", "org.sidescopes.histogram"};
     const TestFrame ramp = grayRamp(32, 16);
     for (const char* id : ids) {
         CAPTURE(id);

@@ -24,7 +24,6 @@ SCOPE_LETTERS = {
     "W": "org.sidescopes.waveform",
     "R": "org.sidescopes.parade",
     "H": "org.sidescopes.histogram",
-    "N": "org.sidescopes.neutral",
     "C": "org.sidescopes.colorpicker",
 }
 

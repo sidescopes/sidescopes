@@ -8,7 +8,6 @@
 #include "app/scope_registry.h"
 #include "app/scope_view.h"
 #include "core/analysis_worker.h"
-#include "core/scopes/neutral.h"
 #include "core/scopes/waveform.h"
 #include "modules/module_registry.h"
 
@@ -25,10 +24,8 @@ const ScopeRegistry& registry()
 }
 
 // Panes clearing every threshold, and panes clearing none of them.
-constexpr ScopePaneSizes LargePanes{
-    {1600.0f, 700.0f}, {1600.0f, 700.0f}, {1600.0f, 700.0f}, {700.0f, 700.0f}, {700.0f, 700.0f}};
-constexpr ScopePaneSizes SmallPanes{
-    {400.0f, 300.0f}, {400.0f, 300.0f}, {400.0f, 300.0f}, {300.0f, 300.0f}, {300.0f, 300.0f}};
+constexpr ScopePaneSizes LargePanes{{1600.0f, 700.0f}, {1600.0f, 700.0f}, {1600.0f, 700.0f}, {700.0f, 700.0f}};
+constexpr ScopePaneSizes SmallPanes{{400.0f, 300.0f}, {400.0f, 300.0f}, {400.0f, 300.0f}, {300.0f, 300.0f}};
 
 // The controller plus the state it reads, in declaration order so the refs it
 // stores outlive nothing.
@@ -107,7 +104,7 @@ TEST_CASE("Each scope's resolution follows its own pane")
     CHECK(fixture.detail.desiredWaveformSize(LargePanes, 0) == std::pair<int, int>{2048, 512});
     CHECK(fixture.detail.desiredWaveformSize(SmallPanes, 0) == std::pair<int, int>{512, WaveformLevels});
 
-    constexpr ScopePaneSizes MidPanes{{800.0f, 400.0f}, {}, {800.0f, 400.0f}, {400.0f, 400.0f}, {400.0f, 400.0f}};
+    constexpr ScopePaneSizes MidPanes{{800.0f, 400.0f}, {}, {800.0f, 400.0f}, {400.0f, 400.0f}};
     CHECK(fixture.detail.desiredWaveformSize(MidPanes, 0) == std::pair<int, int>{1024, WaveformLevels});
     // A narrow region cannot populate more columns than it has pixels.
     CHECK(fixture.detail.desiredWaveformSize(LargePanes, 1500).first == 1024);
@@ -120,29 +117,6 @@ TEST_CASE("Each scope's resolution follows its own pane")
     CHECK(fixture.detail.desiredVectorscopeSize(MidPanes) == 256);
 }
 
-TEST_CASE("The neutral plane follows its pane, which nothing used to")
-{
-    // The plane was fixed at its module default however large a pane it got, so
-    // a neutral scope filling a second monitor was a 256-pixel image stretched
-    // eightfold. Its cloud is accumulated at this resolution, so the ladder buys
-    // real detail rather than interpolation.
-    DetailFixture fixture;
-    fixture.view.stack().choose(NeutralScopeId, true);
-
-    constexpr ScopePaneSizes Huge{{}, {}, {}, {}, {2400.0f, 2100.0f}};
-    constexpr ScopePaneSizes Mid{{}, {}, {}, {}, {700.0f, 700.0f}};
-    constexpr ScopePaneSizes Tiny{{}, {}, {}, {}, {300.0f, 300.0f}};
-
-    CHECK(fixture.detail.desiredNeutralSize(Huge) == MaximumNeutralSize);
-    CHECK(fixture.detail.desiredNeutralSize(Mid) == 512);
-    CHECK(fixture.detail.desiredNeutralSize(Tiny) == 256);
-
-    // Square, so the shorter side decides: a wide, shallow pane gets the step
-    // its height can show, not its width.
-    constexpr ScopePaneSizes Wide{{}, {}, {}, {}, {2400.0f, 300.0f}};
-    CHECK(fixture.detail.desiredNeutralSize(Wide) == 256);
-}
-
 TEST_CASE("A scope filling a second monitor is resolved, not magnified")
 {
     // The reported symptom: scopes read sharp at small and medium sizes and
@@ -152,37 +126,24 @@ TEST_CASE("A scope filling a second monitor is resolved, not magnified")
     DetailFixture fixture;
     // Replace the stack, then add: stacking a scope already shown toggles it off.
     fixture.view.stack().choose(WaveformScopeId, false);
-    for (const std::string_view id : {HistogramScopeId, VectorscopeScopeId, NeutralScopeId}) {
+    for (const std::string_view id : {HistogramScopeId, VectorscopeScopeId}) {
         fixture.view.stack().choose(id, true);
     }
 
-    constexpr ScopePaneSizes FullScreen{
-        {3840.0f, 2160.0f}, {3840.0f, 2160.0f}, {3840.0f, 2160.0f}, {2160.0f, 2160.0f}, {2160.0f, 2160.0f}};
+    constexpr ScopePaneSizes FullScreen{{3840.0f, 2160.0f}, {3840.0f, 2160.0f}, {3840.0f, 2160.0f}, {2160.0f, 2160.0f}};
 
     // Given a region wide enough to populate them, the waveform takes every
-    // column the pane can show, and the neutral plane every pixel: both carry
-    // real data. Height and the vectorscope image do not follow the pane -
-    // measurement says neither resolves anything a large pane can show - so
-    // they stay at the steps their thresholds pick.
+    // column the pane can show: a column carries real data. Height and the
+    // vectorscope image do not follow the pane - measurement says neither
+    // resolves anything a large pane can show - so they stay at the steps their
+    // thresholds pick.
     CHECK(fixture.detail.desiredWaveformSize(FullScreen, 3840).first == MaximumWaveformColumns);
     CHECK(fixture.detail.desiredWaveformSize(FullScreen, 3840).second == 512);
     CHECK(fixture.detail.desiredHistogramSize(FullScreen).first == 3072);
-    CHECK(fixture.detail.desiredNeutralSize(FullScreen) == MaximumNeutralSize);
 
     // And the cost stays proportional to the region, not just the pane: the
     // same pane over a small region resolves only what that region can fill.
     CHECK(fixture.detail.desiredWaveformSize(FullScreen, 800).first == 512);
-}
-
-TEST_CASE("The neutral plane keeps its resolution while it is off screen")
-{
-    DetailFixture fixture;
-    fixture.analysis.imageSizes[NeutralScopeId] = {512, 512};
-
-    // Nothing is drawing it, so however large a pane it is measured at, the
-    // resolution in force stands.
-    constexpr ScopePaneSizes Huge{{}, {}, {}, {}, {2400.0f, 2100.0f}};
-    CHECK(fixture.detail.desiredNeutralSize(Huge) == 512);
 }
 
 TEST_CASE("A dragged region is analysed at a fraction of the detail")
@@ -194,7 +155,6 @@ TEST_CASE("A dragged region is analysed at a fraction of the detail")
     AnalysisSettings settings;
     settings.imageSizes[VectorscopeScopeId] = {512, 512};
     settings.imageSizes[HistogramScopeId] = {2048, 768};
-    settings.imageSizes[NeutralScopeId] = {512, 512};
     settings.region = RegionOfInterest{10.0, 20.0, 60.0, 70.0};
     settings.enabledScopes = {std::string(VectorscopeScopeId)};
     settings.scopeParams[VectorscopeScopeId]["gain"] = 3.0;
@@ -202,7 +162,6 @@ TEST_CASE("A dragged region is analysed at a fraction of the detail")
     const AnalysisSettings dragged = coarsenedForDrag(settings);
     CHECK(dragged.imageSizes.at(VectorscopeScopeId) == std::pair<int, int>{256, 256});
     CHECK(dragged.imageSizes.at(HistogramScopeId) == std::pair<int, int>{1024, 384});
-    CHECK(dragged.imageSizes.at(NeutralScopeId) == std::pair<int, int>{256, 256});
 
     // Only the resolutions: the region, the parameters and the scopes computed
     // are what the user asked for, dragged or still.
@@ -248,13 +207,14 @@ TEST_CASE("A small scope image is left alone while the region is dragged")
     // cells, which is a different picture rather than a coarser one.
     AnalysisSettings settings;
     settings.imageSizes[VectorscopeScopeId] = {DraggedDetailFloor + 40, DraggedDetailFloor + 40};
-    settings.imageSizes[NeutralScopeId] = {DraggedDetailFloor / 2, DraggedDetailFloor / 2};
+    settings.imageSizes[HistogramScopeId] = {DraggedDetailFloor / 2, DraggedDetailFloor / 2};
 
     const AnalysisSettings dragged = coarsenedForDrag(settings);
     CHECK(dragged.imageSizes.at(VectorscopeScopeId) == std::pair<int, int>{DraggedDetailFloor, DraggedDetailFloor});
     // Already below the floor: coarsening it further would be all that is left
     // of it, so it stands as it is.
-    CHECK(dragged.imageSizes.at(NeutralScopeId) == std::pair<int, int>{DraggedDetailFloor / 2, DraggedDetailFloor / 2});
+    CHECK(dragged.imageSizes.at(HistogramScopeId) ==
+          std::pair<int, int>{DraggedDetailFloor / 2, DraggedDetailFloor / 2});
 }
 
 TEST_CASE("A scope off screen keeps the resolution in force")
@@ -274,20 +234,17 @@ TEST_CASE("A low level asks for less of everything but the columns")
 {
     // The order measurement ranked them in: the vectorscope's image and the
     // histogram's plot are 45-49% of their passes for a tenth and a hundredth
-    // of a code, the neutral plane is the largest memory item on the list with
-    // its cast reading unmoved, and the waveform gives up its height. Its
-    // COLUMNS do not move, because a column is a place in the region.
+    // of a code, and the waveform gives up its height. Its COLUMNS do not move,
+    // because a column is a place in the region.
     DetailFixture fixture;
     // The vectorscope is the stack a fresh view starts on; the rest stack onto
     // it.
     fixture.view.stack().choose(WaveformScopeId, true);
     fixture.view.stack().choose(HistogramScopeId, true);
-    fixture.view.stack().choose(NeutralScopeId, true);
 
     const std::pair<int, int> standardWaveform = fixture.detail.desiredWaveformSize(LargePanes, 0);
     const std::pair<int, int> standardHistogram = fixture.detail.desiredHistogramSize(LargePanes);
     const int standardVectorscope = fixture.detail.desiredVectorscopeSize(LargePanes);
-    const int standardNeutral = fixture.detail.desiredNeutralSize(LargePanes);
 
     fixture.detail.setQuality(QualityLevel::Low);
     const std::pair<int, int> lowWaveform = fixture.detail.desiredWaveformSize(LargePanes, 0);
@@ -299,35 +256,30 @@ TEST_CASE("A low level asks for less of everything but the columns")
     CHECK(lowHistogram.first < standardHistogram.first);
     CHECK(lowHistogram.second < standardHistogram.second);
     CHECK(fixture.detail.desiredVectorscopeSize(LargePanes) < standardVectorscope);
-    CHECK(fixture.detail.desiredNeutralSize(LargePanes) < standardNeutral);
 }
 
 TEST_CASE("A high level asks for more where the pane can use it")
 {
     // A pane between two steps: Standard tolerates the magnification and stops
     // where it is, High does not and climbs. Every axis here is either a
-    // display resolution over a fixed grid or - for the neutral plane and the
-    // waveform's columns - real data the region can still populate.
-    constexpr ScopePaneSizes ClimbablePanes{
-        {1100.0f, 400.0f}, {1100.0f, 400.0f}, {1100.0f, 400.0f}, {400.0f, 400.0f}, {600.0f, 600.0f}};
+    // display resolution over a fixed grid or - for the waveform's columns -
+    // real data the region can still populate.
+    constexpr ScopePaneSizes ClimbablePanes{{1100.0f, 400.0f}, {1100.0f, 400.0f}, {1100.0f, 400.0f}, {400.0f, 400.0f}};
     DetailFixture fixture;
     // The vectorscope is the stack a fresh view starts on; the rest stack onto
     // it.
     fixture.view.stack().choose(WaveformScopeId, true);
     fixture.view.stack().choose(HistogramScopeId, true);
-    fixture.view.stack().choose(NeutralScopeId, true);
 
     const std::pair<int, int> standardWaveform = fixture.detail.desiredWaveformSize(ClimbablePanes, 0);
     const std::pair<int, int> standardHistogram = fixture.detail.desiredHistogramSize(ClimbablePanes);
     const int standardVectorscope = fixture.detail.desiredVectorscopeSize(ClimbablePanes);
-    const int standardNeutral = fixture.detail.desiredNeutralSize(ClimbablePanes);
 
     fixture.detail.setQuality(QualityLevel::High);
     const std::pair<int, int> highWaveform = fixture.detail.desiredWaveformSize(ClimbablePanes, 0);
     CHECK(highWaveform.first > standardWaveform.first);
     CHECK(fixture.detail.desiredHistogramSize(ClimbablePanes).first > standardHistogram.first);
     CHECK(fixture.detail.desiredVectorscopeSize(ClimbablePanes) > standardVectorscope);
-    CHECK(fixture.detail.desiredNeutralSize(ClimbablePanes) > standardNeutral);
 
     // And buys nothing on the two axes measurement closed: the waveform's
     // height only draws a finer spline through levels eight-bit input fixes at

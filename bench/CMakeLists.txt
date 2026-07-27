@@ -31,8 +31,7 @@ if(SIDESCOPES_MODULES_DYNAMIC)
     target_sources(sidescopes_perf PRIVATE
         ${CMAKE_SOURCE_DIR}/src/core/scopes/vectorscope.cpp
         ${CMAKE_SOURCE_DIR}/src/core/scopes/waveform.cpp
-        ${CMAKE_SOURCE_DIR}/src/core/scopes/histogram.cpp
-        ${CMAKE_SOURCE_DIR}/src/core/scopes/neutral.cpp)
+        ${CMAKE_SOURCE_DIR}/src/core/scopes/histogram.cpp)
 endif()
 
 target_link_libraries(sidescopes_bench PRIVATE
@@ -48,8 +47,7 @@ if(SIDESCOPES_MODULES_DYNAMIC)
     add_dependencies(sidescopes_perf
         sidescopes_module_vectorscope
         sidescopes_module_waveform
-        sidescopes_module_histogram
-        sidescopes_module_neutral)
+        sidescopes_module_histogram)
 endif()
 
 sidescopes_target_defaults(sidescopes_bench)

@@ -40,7 +40,6 @@ add_executable(sidescopes_tests
     test_layout_preset_store.cpp
     test_ui_scale.cpp
     test_ui_scaling.cpp
-    test_neutral.cpp
     test_scope_registry.cpp
     test_pane_layout.cpp
     test_scope_stack.cpp
@@ -138,8 +137,7 @@ if(SIDESCOPES_MODULES_DYNAMIC)
         ${CMAKE_SOURCE_DIR}/src/core/scopes/vectorscope.cpp
         ${CMAKE_SOURCE_DIR}/src/core/scopes/vectorscope_graticule.cpp
         ${CMAKE_SOURCE_DIR}/src/core/scopes/waveform.cpp
-        ${CMAKE_SOURCE_DIR}/src/core/scopes/histogram.cpp
-        ${CMAKE_SOURCE_DIR}/src/core/scopes/neutral.cpp)
+        ${CMAKE_SOURCE_DIR}/src/core/scopes/histogram.cpp)
 else()
     # The module loader compiles into core only in the dynamic configuration;
     # test_module_loader.cpp exercises it in either, so the static build
@@ -156,8 +154,7 @@ if(SIDESCOPES_MODULES_DYNAMIC)
     add_dependencies(sidescopes_tests
         sidescopes_module_vectorscope
         sidescopes_module_waveform
-        sidescopes_module_histogram
-        sidescopes_module_neutral)
+        sidescopes_module_histogram)
 endif()
 sidescopes_target_defaults(sidescopes_tests)
 

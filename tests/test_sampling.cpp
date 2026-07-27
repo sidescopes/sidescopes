@@ -4,7 +4,6 @@
 
 #include "core/frame.h"
 #include "core/scopes/histogram.h"
-#include "core/scopes/neutral.h"
 #include "core/scopes/sampling.h"
 #include "core/scopes/vectorscope.h"
 #include "core/scopes/waveform.h"
@@ -168,7 +167,6 @@ TEST_CASE("The budgets are the ones the measurements were taken at")
     // log-and-gamma amplifies, so the waveform's minimum is the highest here.
     CHECK(HistogramMinSamplesPerBin == 1000);
     CHECK(VectorscopeMinSamplesPerBin == 24);
-    CHECK(NeutralMinSamplesPerBin == 24);
     CHECK(WaveformMinSamplesPerBin == 32);
 }
 
@@ -209,23 +207,6 @@ TEST_CASE("A scope whose bins follow its pane thins only while it is small")
     for (const int columns : {DefaultWaveformColumns, 2048, MaximumWaveformColumns}) {
         CHECK(sampleGridFor(1, display, budgetAt(columns)).rowStride == 1);
     }
-}
-
-TEST_CASE("The neutral plane's budget is capped however many bins it grows")
-{
-    // Alone among the scopes the neutral one converts every sample to L*a*b*, so
-    // an unbounded pass over a whole display measured 69 ms against 14 at the
-    // ceiling. Its plane follows its pane up to a million bins, which would ask
-    // for twenty-five million samples; the ceiling is what keeps a large plane
-    // costing what it costs today rather than five times that.
-    const long long uncapped = budgetForBins(1024LL * 1024, NeutralMinSamplesPerBin);
-    CHECK(uncapped > SampleBudget);
-    CHECK(std::min(uncapped, SampleBudget) == SampleBudget);
-
-    // At the default plane the derived budget is what applies, and it is well
-    // below the ceiling - which is where the saving comes from.
-    const long long derived = budgetForBins(256LL * 256, NeutralMinSamplesPerBin);
-    CHECK(derived < SampleBudget);
 }
 
 TEST_CASE("An empty region asks for no samples")

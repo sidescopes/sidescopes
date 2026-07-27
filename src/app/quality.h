@@ -42,8 +42,8 @@ struct QualityProfile
 
     /// How much the display may magnify a scope image before the level counts
     /// it soft. Applies to the axes that are display resolution over a fixed
-    /// accumulation grid - the vectorscope's image, the histogram's plot, the
-    /// neutral plane - where a finer image costs compose time and no data.
+    /// accumulation grid - the vectorscope's image and the histogram's plot -
+    /// where a finer image costs compose time and no data.
     float magnificationTolerance = 1.4f;
 
     /// The same, for the waveform's columns. Held separately because a column
@@ -68,11 +68,6 @@ struct QualityProfile
     /// and 1024 reads worse on saturated content, because the limit is the
     /// 256-code accumulation grid and not the image.
     int vectorscopeCeiling = 512;
-
-    /// The largest neutral plane. Unlike the others this is real data - the
-    /// cloud is accumulated at this resolution - which is why it is also the
-    /// largest single memory item a level can give back.
-    int neutralCeiling = 1024;
 
     /// The divisor on the samples per bin the scopes that offer the thinning
     /// extension take. Measured at 1024 columns, halving them is 21% of the

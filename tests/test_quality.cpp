@@ -4,7 +4,6 @@
 
 #include "app/frame_pacing.h"
 #include "app/quality.h"
-#include "core/scopes/neutral.h"
 #include "core/scopes/vectorscope.h"
 #include "core/scopes/waveform.h"
 
@@ -22,7 +21,6 @@ TEST_CASE("Standard is the shipped behaviour")
     CHECK(standard.waveformHeightCeiling == 512);
     CHECK(standard.histogramCeiling == std::pair<int, int>{4096, 768});
     CHECK(standard.vectorscopeCeiling == 512);
-    CHECK(standard.neutralCeiling == MaximumNeutralSize);
     CHECK(standard.sampleThinning == 1);
     CHECK(standard.coarsenWhileDragged);
 }
@@ -54,7 +52,6 @@ TEST_CASE("Low gives up resolution and never a place in the region")
 
     CHECK(low.columnTolerance == standard.columnTolerance);
     CHECK(low.vectorscopeCeiling < standard.vectorscopeCeiling);
-    CHECK(low.neutralCeiling < standard.neutralCeiling);
     CHECK(low.histogramCeiling.first < standard.histogramCeiling.first);
     CHECK(low.waveformHeightCeiling < standard.waveformHeightCeiling);
     CHECK(low.sampleThinning > standard.sampleThinning);
@@ -72,7 +69,6 @@ TEST_CASE("High buys nothing on the axes measurement has closed")
 
     CHECK(high.vectorscopeCeiling <= standard.vectorscopeCeiling);
     CHECK(high.waveformHeightCeiling <= standard.waveformHeightCeiling);
-    CHECK(high.neutralCeiling <= MaximumNeutralSize);
     CHECK(high.histogramCeiling.second <= MaximumWaveformHeight);
 
     const double redrawsPerSecond = 1.0 / ContentRedrawSeconds;

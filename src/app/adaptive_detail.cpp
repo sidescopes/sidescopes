@@ -6,7 +6,6 @@
 
 #include "app/quality.h"
 #include "app/scope_view.h"
-#include "core/scopes/neutral.h"
 #include "core/scopes/waveform.h"
 
 namespace sidescopes {
@@ -23,8 +22,7 @@ PaneSize scaled(const PaneSize& pane, float density)
 ScopePaneSizes inPixels(const ScopePaneSizes& panes, float density)
 {
     return ScopePaneSizes{scaled(panes.waveform, density), scaled(panes.parade, density),
-                          scaled(panes.histogram, density), scaled(panes.vectorscope, density),
-                          scaled(panes.neutral, density)};
+                          scaled(panes.histogram, density), scaled(panes.vectorscope, density)};
 }
 
 // The smallest offered resolution that covers the pane to within @p tolerance -
@@ -168,28 +166,10 @@ int AdaptiveDetail::desiredVectorscopeSize(const ScopePaneSizes& panePixels) con
     return wantVectorscope;
 }
 
-int AdaptiveDetail::desiredNeutralSize(const ScopePaneSizes& panePixels) const
-{
-    int wantNeutral = currentSize(NeutralScopeId).second;
-    if (m_view.stack().shows(NeutralScopeId)) {
-        // The cloud is accumulated at this resolution, so this is real detail
-        // and not interpolation. It stops at a thousand because every sample is
-        // splatted over three pixels, and past that the plane would resolve
-        // structure the splat has already spread.
-        const QualityProfile& quality = profile();
-        const PaneSize scopePane = panePixels.neutral;
-        wantNeutral = std::min(resolutionCovering(std::min(scopePane.width, scopePane.height),
-                                                  {256, 512, MaximumNeutralSize}, quality.magnificationTolerance),
-                               quality.neutralCeiling);
-    }
-
-    return wantNeutral;
-}
-
 DetailSizes AdaptiveDetail::inForce() const
 {
     return DetailSizes{currentSize(WaveformScopeId), currentSize(HistogramScopeId),
-                       currentSize(VectorscopeScopeId).second, currentSize(NeutralScopeId).second};
+                       currentSize(VectorscopeScopeId).second};
 }
 
 std::optional<DetailSizes> AdaptiveDetail::update(const ScopePaneSizes& panes, float density,
@@ -206,7 +186,7 @@ std::optional<DetailSizes> AdaptiveDetail::update(const ScopePaneSizes& panes, f
     }
     const ScopePaneSizes panePixels = inPixels(panes, density);
     const DetailSizes wanted{desiredWaveformSize(panePixels, regionWidth), desiredHistogramSize(panePixels),
-                             desiredVectorscopeSize(panePixels), desiredNeutralSize(panePixels)};
+                             desiredVectorscopeSize(panePixels)};
 
     if (wanted == inForce()) {
         m_pending.reset();

@@ -4,18 +4,16 @@
 
 namespace sidescopes {
 
-/// The ceiling on one accumulate pass, whatever its bins would justify. Only the
-/// neutral scope needs it: its bins grow with its pane, and it is the one engine
-/// that converts every sample to L*a*b*, so an unbounded pass over a whole
-/// display measured 69 ms against 14 at this ceiling. Every other scope's budget
-/// is bounded by its own bin count. It sits just above half a 4K frame, so a
-/// display up to 1440p is sampled row for row.
+/// The ceiling on one accumulate pass, whatever its bins would justify. It
+/// sits just above half a 4K frame, so a display up to 1440p is sampled row
+/// for row. Every scope here derives its budget from its own bin count and
+/// stays under this; it bounds one whose bins grow faster than that.
 ///
 /// Measured over a whole 3456x2234 display against sampling every row, on
 /// gradient-plus-grain content: the vectorscope image moves by at most 7 of
-/// 255 with a mean of 0.09, the neutral plane by 0.04, and the histogram's
-/// mean is 0.08 with its rare large deltas confined to the plotted curve's own
-/// edge - the curve moves by well under a pixel.
+/// 255 with a mean of 0.09, and the histogram's mean is 0.08 with its rare
+/// large deltas confined to the plotted curve's own edge - the curve moves by
+/// well under a pixel.
 inline constexpr long long SampleBudget = 4'200'000;
 
 /// No thinning: every row in the region is sampled, whatever the region costs.
@@ -33,9 +31,9 @@ inline constexpr long long UnlimitedSamples = 0;
 /// starving the second.
 ///
 /// This is also what makes a small scope cheap. The histogram's bins are fixed,
-/// so its cost stops growing with the pane; the waveform's and the neutral's
-/// scale with theirs, so a small one thins where a large one does not - cost
-/// proportional to the scope first and the region second.
+/// so its cost stops growing with the pane; the waveform's scale with its own,
+/// so a small one thins where a large one does not - cost proportional to the
+/// scope first and the region second.
 [[nodiscard]] inline long long budgetForBins(long long binCount, int minimumSamplesPerBin)
 {
     return binCount * minimumSamplesPerBin;
