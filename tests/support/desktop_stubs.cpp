@@ -88,6 +88,28 @@ bool supportsFaceDetection()
     return g_stubs.faceDetectionSupported;
 }
 
+// The context menu reads and writes the capture's own visibility, and offers
+// the diagnostic log folder. Nothing under test asserts on them, so they are
+// the plainest stubs that link: a flag and a discarded url.
+void setCaptureVisibility(bool visible)
+{
+    g_stubs.captureVisible = visible;
+}
+
+bool captureVisible()
+{
+    return g_stubs.captureVisible;
+}
+
+bool captureVisibilityToggleSupported()
+{
+    return true;
+}
+
+void openUrl(const char*)
+{
+}
+
 std::vector<IntRect> detectFaces(const FrameView& view, float pixelsPerPoint)
 {
     g_stubs.recordDetection(view, pixelsPerPoint);

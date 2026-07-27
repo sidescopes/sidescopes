@@ -50,6 +50,8 @@ public:
 
     bool applicationHidden = false;
     std::string displayName = "Test display";
+    /// Whether this window shows up in other applications' screen captures.
+    bool captureVisible = false;
 
     /// The one-shot screen read the cursor readout falls back to off the
     /// captured display: what it answers, and how often it was asked - the

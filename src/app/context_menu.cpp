@@ -1,9 +1,11 @@
 #include "app/context_menu.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <cstdio>
 #include <map>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -337,6 +339,174 @@ void buildContextMenu(const ContextMenuModel& model, int clickedPane, std::vecto
     appendLayoutSubmenu(model, menu);
     appendPresetsSubmenu(model, menu);
     appendRegionAndAppSection(model, menu);
+}
+
+namespace {
+
+// The zoom entries set their level outright, where the key steps a cycle.
+ShortcutAction zoomAction(int level)
+{
+    ShortcutAction action = ShortcutAction::plain(ShortcutAction::Kind::SetZoom);
+    action.zoomLevel = level;
+
+    return action;
+}
+
+// The preset slots, whose two ranges each map an id back to a slot. Kept apart
+// from the fixed ids so neither reading has to carry the other's shape.
+std::optional<ShortcutAction> presetAction(int chosen)
+{
+    if (chosen > MenuLoadPresetBase && chosen <= MenuLoadPresetBase + LayoutPresetSlots) {
+        return ShortcutAction::preset(chosen - MenuLoadPresetBase, false);
+    }
+    if (chosen > MenuSavePresetBase && chosen <= MenuSavePresetBase + LayoutPresetSlots) {
+        return ShortcutAction::preset(chosen - MenuSavePresetBase, true);
+    }
+
+    return std::nullopt;
+}
+
+// Opens the folder holding the diagnostic log, so "send the log" is a click
+// instead of a hunt through the temp directory.
+void openDiagLogFolder()
+{
+    std::string folder = diagLogPath();
+    std::replace(folder.begin(), folder.end(), '\\', '/');
+    const std::size_t cut = folder.find_last_of('/');
+    if (cut == std::string::npos) {
+        return;  // a bare file name names no folder to show
+    }
+    folder.resize(cut == 0 ? 1 : cut);  // a file at the root keeps the root
+    const std::string url = (folder.front() == '/' ? "file://" : "file:///") + folder;
+    openUrl(url.c_str());
+}
+
+}  // namespace
+
+const ParamMenuAction* menuScopeParam(int chosen, const std::vector<ParamMenuAction>& paramActions)
+{
+    if (chosen < ParamMenuActionBase) {
+        return nullptr;
+    }
+    const std::size_t index = static_cast<std::size_t>(chosen - ParamMenuActionBase);
+
+    return index < paramActions.size() ? &paramActions[index] : nullptr;
+}
+
+std::optional<std::string> menuScopeToggle(int chosen, const ScopeRegistry& registry)
+{
+    // The scope-toggle ids carry the scope's registry index, so this resolves
+    // any registered scope without naming one.
+    const int index = chosen - MenuShowScopeBase;
+    const std::vector<HostScope>& scopes = registry.scopes();
+    if (index < 0 || index >= static_cast<int>(scopes.size())) {
+        return std::nullopt;
+    }
+
+    return scopes[static_cast<std::size_t>(index)].id;
+}
+
+std::optional<ShortcutAction> menuShortcutAction(int chosen)
+{
+    switch (chosen) {
+    case MenuAttachWindow:
+        return ShortcutAction::pick(RegionPickerMode::AttachWindow);
+    case MenuDrawRegion:
+        return ShortcutAction::pick(RegionPickerMode::DrawGlobal);
+    case MenuAttachFace:
+        return ShortcutAction::pick(RegionPickerMode::AttachFace);
+    case MenuPinColor:
+        return ShortcutAction::pick(RegionPickerMode::PinColor);
+    // Detach All clears every region, which is what clearing does now that
+    // there is no whole-display state left to fall back to.
+    case MenuClearRegion:
+    case MenuDetachAll:
+        return ShortcutAction::plain(ShortcutAction::Kind::ClearRegion);
+    case MenuOpenSettings:
+        return ShortcutAction::plain(ShortcutAction::Kind::OpenSettings);
+    case MenuQuit:
+        return ShortcutAction::plain(ShortcutAction::Kind::QuitWindow);
+    case MenuZoom1:
+        return zoomAction(1);
+    case MenuZoom2:
+        return zoomAction(2);
+    case MenuZoom4:
+        return zoomAction(4);
+    default:
+        break;
+    }
+
+    return presetAction(chosen);
+}
+
+std::optional<float> menuGraticuleStrength(int chosen)
+{
+    const int step = chosen - MenuGraticuleBase;
+    if (step < 0 || step >= static_cast<int>(GraticuleStrengths.size())) {
+        return std::nullopt;
+    }
+
+    return GraticuleStrengths[static_cast<std::size_t>(step)];
+}
+
+std::optional<LayoutOrientation> menuOrientation(int chosen)
+{
+    switch (chosen) {
+    case MenuLayoutAuto:
+        return LayoutOrientation::Automatic;
+    case MenuLayoutVertical:
+        return LayoutOrientation::Vertical;
+    case MenuLayoutHorizontal:
+        return LayoutOrientation::Horizontal;
+    default:
+        return std::nullopt;
+    }
+}
+
+std::optional<int> menuUiScaleStep(int chosen)
+{
+    const int step = chosen - MenuUiScaleBase;
+
+    return step >= 0 && step < static_cast<int>(UiScaleSteps.size()) ? std::optional<int>{step} : std::nullopt;
+}
+
+std::optional<QualityLevel> menuQuality(int chosen)
+{
+    const int step = chosen - MenuQualityBase;
+    if (step < 0 || step >= static_cast<int>(QualityLevels.size())) {
+        return std::nullopt;
+    }
+
+    return QualityLevels[static_cast<std::size_t>(step)];
+}
+
+bool applyDiagnosticsMenu(int chosen)
+{
+    switch (chosen) {
+    case MenuToggleCaptureVisibility:
+        setCaptureVisibility(!captureVisible());
+
+        return true;
+    case MenuToggleDiagRecording:
+        // The menu records everything; channel selection stays with the
+        // SIDESCOPES_DIAG environment for development use.
+        diagConfigure(diagRecording() ? DiagConfig{} : DiagConfig{"all", "", DiagFlush::Interval});
+
+        return true;
+    case MenuShowDiagLog:
+        openDiagLogFolder();
+
+        return true;
+    case MenuResetDiagnostics:
+        setCaptureVisibility(false);
+        if (diagRecording()) {
+            diagConfigure(DiagConfig{});
+        }
+
+        return true;
+    default:
+        return false;
+    }
 }
 
 }  // namespace sidescopes

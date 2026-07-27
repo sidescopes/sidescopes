@@ -2,12 +2,14 @@
 
 #include <array>
 #include <map>
+#include <optional>
 #include <string>
 #include <vector>
 
 #include "app/attach_controller.h"
 #include "app/param_menu.h"
 #include "app/quality.h"
+#include "app/scope_layout.h"
 #include "app/scope_registry.h"
 #include "app/scope_view.h"
 #include "app/shortcut_resolver.h"
@@ -89,8 +91,44 @@ struct ContextMenuModel
 
 /// Builds the right-click menu for @p clickedPane (-1 = a background or toolbar
 /// click) from @p model, filling @p menu and the dynamic scope-parameter side
-/// table @p paramActions that @ref dispatchMenuChoice resolves against.
+/// table @p paramActions that @ref menuScopeParam resolves against.
 void buildContextMenu(const ContextMenuModel& model, int clickedPane, std::vector<NativeMenuItem>& menu,
                       std::vector<ParamMenuAction>& paramActions);
+
+// What a chosen id means. Every one of these is the inverse of a range this
+// file lays out above, so the arithmetic that encodes a choice and the
+// arithmetic that reads it back sit together, under the same static_asserts
+// that keep the ranges from growing into each other. A choice belongs to at
+// most one of them: the ranges are disjoint by construction.
+
+/// @return The scope parameter @p chosen sets, resolved against the per-open
+///         side table @p paramActions, or null when it is no such choice.
+[[nodiscard]] const ParamMenuAction* menuScopeParam(int chosen, const std::vector<ParamMenuAction>& paramActions);
+
+/// @return The id of the scope @p chosen toggles, or nothing.
+[[nodiscard]] std::optional<std::string> menuScopeToggle(int chosen, const ScopeRegistry& registry);
+
+/// @return The action @p chosen shares with a keyboard shortcut - the region
+///         tools, the zoom levels, the preset slots, settings and quit - or
+///         nothing. The keys reach these through the resolver, which decides
+///         what a key means; a menu entry says outright which action it is.
+[[nodiscard]] std::optional<ShortcutAction> menuShortcutAction(int chosen);
+
+/// @return The graticule strength @p chosen names, or nothing.
+[[nodiscard]] std::optional<float> menuGraticuleStrength(int chosen);
+
+/// @return The layout split @p chosen names, or nothing.
+[[nodiscard]] std::optional<LayoutOrientation> menuOrientation(int chosen);
+
+/// @return The interface-size step @p chosen names, or nothing.
+[[nodiscard]] std::optional<int> menuUiScaleStep(int chosen);
+
+/// @return The quality level @p chosen names, or nothing.
+[[nodiscard]] std::optional<QualityLevel> menuQuality(int chosen);
+
+/// Carries out the diagnostics entries, which reach nothing in the shell: the
+/// recorder, the capture's own visibility, and the folder the log sits in.
+/// @return Whether @p chosen was one of them.
+bool applyDiagnosticsMenu(int chosen);
 
 }  // namespace sidescopes

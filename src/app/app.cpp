@@ -9,7 +9,6 @@
 #define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
 
-#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cstdio>
@@ -967,181 +966,60 @@ void App::handleContextMenu()
     dispatchMenuChoice(chosen, paramActions);
 }
 
+// Carries out a menu choice. What each id MEANS is the menu's own to say - it
+// laid the ranges out - so every branch here is already the action, and what is
+// left is the shell state only the host can reach.
 void App::dispatchMenuChoice(int chosen, const std::vector<ParamMenuAction>& paramActions)
 {
-    // A dynamic id sets one scope parameter from the side table; the fixed ids
-    // drive the host actions.
-    if (chosen >= ParamMenuActionBase) {
-        const std::size_t index = static_cast<std::size_t>(chosen - ParamMenuActionBase);
-        if (index < paramActions.size()) {
-            const ParamMenuAction& picked = paramActions[index];
-            m_analysis.scopeParams[picked.scopeId][picked.paramKey] = picked.value;
-            m_analysisDirty = true;
-        }
+    if (const ParamMenuAction* param = menuScopeParam(chosen, paramActions)) {
+        m_analysis.scopeParams[param->scopeId][param->paramKey] = param->value;
+        m_analysisDirty = true;
     }
-    dispatchScopeToggleMenu(chosen);
-    dispatchRegionMenu(chosen);
-    dispatchViewMenu(chosen);
-    dispatchLayoutMenu(chosen);
-    dispatchUiScaleMenu(chosen);
-    dispatchQualityMenu(chosen);
+    if (const std::optional<ShortcutAction> action = menuShortcutAction(chosen)) {
+        applyShortcutAction(*action);
+    }
+    if (const std::optional<std::string> scopeId = menuScopeToggle(chosen, m_scopeRegistry)) {
+        toggleScope(*scopeId);
+    }
+    if (const std::optional<float> strength = menuGraticuleStrength(chosen)) {
+        m_view.setGraticuleStrength(*strength);
+    }
+    if (const std::optional<LayoutOrientation> orientation = menuOrientation(chosen)) {
+        m_view.layout().setOrientation(*orientation);
+    }
+    if (const std::optional<int> step = menuUiScaleStep(chosen)) {
+        // Only recorded here - the native menu runs inside the host window's
+        // WindowPadding push, and selectStep rebuilds the whole style.
+        // applyPendingUiScale runs it once that push is popped.
+        m_pendingUiScaleStep = *step;
+    }
+    if (const std::optional<QualityLevel> quality = menuQuality(chosen)) {
+        applyQuality(*quality);
+    }
+    dispatchShellMenu(chosen);
     m_lastActivity = glfwGetTime();
     m_nextPreferencesSave = glfwGetTime() + 1.0;
 }
 
-void App::dispatchScopeToggleMenu(int chosen)
+// The entries that reach no other unit: the diagnostics recorder, the attached
+// window, the pin ring, and the About window.
+void App::dispatchShellMenu(int chosen)
 {
-    // The scope-toggle ids carry the scope's registry index, so this resolves
-    // any registered scope without naming one.
-    const int index = chosen - MenuShowScopeBase;
-    const std::vector<HostScope>& scopes = m_scopeRegistry.scopes();
-    if (index >= 0 && index < static_cast<int>(scopes.size())) {
-        toggleScope(scopes[static_cast<std::size_t>(index)].id);
+    if (applyDiagnosticsMenu(chosen)) {
+        return;
     }
-}
-
-void App::dispatchRegionMenu(int chosen)
-{
-    // The region tools are the keys' actions under a different hand, so they
-    // travel the same road; Clear Region is the menu's own, without the key's
-    // peel.
     switch (chosen) {
-    case MenuAttachWindow:
-        applyShortcutAction(ShortcutAction::pick(RegionPickerMode::AttachWindow));
-        break;
-    case MenuDrawRegion:
-        applyShortcutAction(ShortcutAction::pick(RegionPickerMode::DrawGlobal));
-        break;
-    case MenuAttachFace:
-        applyShortcutAction(ShortcutAction::pick(RegionPickerMode::AttachFace));
-        break;
-    case MenuClearRegion:
-    case MenuDetachAll:
-        applyRegionOutcome(m_regions.clearRegion());
-        break;
     case MenuDetachWindow:
         detachActiveWindow();
-        break;
-    case MenuPinColor:
-        applyShortcutAction(ShortcutAction::pick(RegionPickerMode::PinColor));
         break;
     case MenuClearPinnedMarkers:
         m_pins.clear();
         break;
-    default:
-        break;
-    }
-}
-
-namespace {
-
-// Opens the folder holding the diagnostic log, so "send the log" is a
-// click instead of a hunt through the temp directory.
-void openDiagLogFolder()
-{
-    std::string folder = diagLogPath();
-    std::replace(folder.begin(), folder.end(), '\\', '/');
-    const std::size_t cut = folder.find_last_of('/');
-    if (cut == std::string::npos) {
-        return;  // a bare file name names no folder to show
-    }
-    folder.resize(cut == 0 ? 1 : cut);  // a file at the root keeps the root
-    const std::string url = (folder.front() == '/' ? "file://" : "file:///") + folder;
-    openUrl(url.c_str());
-}
-
-}  // namespace
-
-void App::dispatchViewMenu(int chosen)
-{
-    switch (chosen) {
-    case MenuZoom1:
-        m_view.setZoom(1);
-        break;
-    case MenuZoom2:
-        m_view.setZoom(2);
-        break;
-    case MenuZoom4:
-        m_view.setZoom(4);
-        break;
-    case MenuToggleCaptureVisibility:
-        setCaptureVisibility(!captureVisible());
-        break;
-    case MenuToggleDiagRecording:
-        // The menu records everything; channel selection stays with the
-        // SIDESCOPES_DIAG environment for development use.
-        diagConfigure(diagRecording() ? DiagConfig{} : DiagConfig{"all", "", DiagFlush::Interval});
-        break;
-    case MenuShowDiagLog:
-        openDiagLogFolder();
-        break;
-    case MenuResetDiagnostics:
-        setCaptureVisibility(false);
-        if (diagRecording()) {
-            diagConfigure(DiagConfig{});
-        }
-        break;
     case MenuAbout:
         m_about.open();
         break;
-    case MenuOpenSettings:
-        applyShortcutAction(ShortcutAction::plain(ShortcutAction::Kind::OpenSettings));
-        break;
-    case MenuQuit:
-        applyShortcutAction(ShortcutAction::plain(ShortcutAction::Kind::QuitWindow));
-        break;
     default:
         break;
-    }
-    const int strengthStep = chosen - MenuGraticuleBase;
-    if (strengthStep >= 0 && strengthStep < static_cast<int>(GraticuleStrengths.size())) {
-        m_view.setGraticuleStrength(GraticuleStrengths[static_cast<std::size_t>(strengthStep)]);
-    }
-}
-
-void App::dispatchLayoutMenu(int chosen)
-{
-    // Orientation is a direct set; the preset ranges each map their id back to a
-    // slot. Persistence rides dispatchMenuChoice's tail.
-    switch (chosen) {
-    case MenuLayoutAuto:
-        m_view.layout().setOrientation(LayoutOrientation::Automatic);
-
-        return;
-    case MenuLayoutVertical:
-        m_view.layout().setOrientation(LayoutOrientation::Vertical);
-
-        return;
-    case MenuLayoutHorizontal:
-        m_view.layout().setOrientation(LayoutOrientation::Horizontal);
-
-        return;
-    default:
-        break;
-    }
-    if (chosen > MenuLoadPresetBase && chosen <= MenuLoadPresetBase + LayoutPresetSlots) {
-        applyShortcutAction(ShortcutAction::preset(chosen - MenuLoadPresetBase, false));
-    } else if (chosen > MenuSavePresetBase && chosen <= MenuSavePresetBase + LayoutPresetSlots) {
-        applyShortcutAction(ShortcutAction::preset(chosen - MenuSavePresetBase, true));
-    }
-}
-
-void App::dispatchUiScaleMenu(int chosen)
-{
-    // Only record the step here - the native menu runs inside the host window's
-    // WindowPadding push, and selectStep rebuilds the whole style. applyPending-
-    // UiScale runs it once that push is popped.
-    const int step = chosen - MenuUiScaleBase;
-    if (step >= 0 && step < static_cast<int>(UiScaleSteps.size())) {
-        m_pendingUiScaleStep = step;
-    }
-}
-
-void App::dispatchQualityMenu(int chosen)
-{
-    const int step = chosen - MenuQualityBase;
-    if (step >= 0 && step < static_cast<int>(QualityLevels.size())) {
-        applyQuality(QualityLevels[static_cast<std::size_t>(step)]);
     }
 }
 

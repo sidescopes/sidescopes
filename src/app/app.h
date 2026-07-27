@@ -232,12 +232,8 @@ private:
     // --- context menu ---
     void handleContextMenu();
     void dispatchMenuChoice(int chosen, const std::vector<ParamMenuAction>& paramActions);
-    void dispatchScopeToggleMenu(int chosen);
-    void dispatchRegionMenu(int chosen);
-    void dispatchViewMenu(int chosen);
-    void dispatchLayoutMenu(int chosen);
-    void dispatchUiScaleMenu(int chosen);
-    void dispatchQualityMenu(int chosen);
+    /// The menu entries that reach no unit but the shell itself.
+    void dispatchShellMenu(int chosen);
 
     /// Puts @p level in force: the resolutions the detail policy asks for, how
     /// thinly the region is sampled, and how often the screen is read.
