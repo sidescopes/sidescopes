@@ -658,10 +658,12 @@ void App::serviceCaptureCrop(bool otherReadersActive, double now)
     const std::optional<IntRect> crop =
         m_cropTracker.decide(regionPixels, m_frameSize->displayWidth, m_frameSize->displayHeight, otherReadersActive,
                              m_faceLock.locked(), now);
-    if (crop != m_appliedCrop) {
-        SS_DIAG(Perf, "capture narrowed to %dx%d at %d,%d", crop ? crop->width : m_frameSize->displayWidth,
-                crop ? crop->height : m_frameSize->displayHeight, crop ? crop->x : 0, crop ? crop->y : 0);
-        m_appliedCrop = crop;
+    if (m_loggedCrop.shouldLog(crop)) {
+        if (crop) {
+            SS_DIAG(Perf, "capture narrowed to %dx%d at %d,%d", crop->width, crop->height, crop->x, crop->y);
+        } else {
+            SS_DIAG(Perf, "capture covers the whole display");
+        }
     }
     m_captureController.narrowTo(crop);
 }

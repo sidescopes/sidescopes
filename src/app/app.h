@@ -33,6 +33,7 @@
 #include "app/ui_scale.h"
 #include "app/version.h"
 #include "core/analysis_worker.h"
+#include "core/diagnostics.h"
 #include "core/frame.h"
 #include "core/frame_mailbox.h"
 #include "core/preferences.h"
@@ -391,7 +392,8 @@ private:
     /// hysteresis measures against.
     VisibilityGate m_visibility;
     CropTracker m_cropTracker;
-    std::optional<IntRect> m_appliedCrop;
+    /// The crop this recording has been told about.
+    DiagOnChange<std::optional<IntRect>> m_loggedCrop{DiagChannel::Perf};
     /// Whether the session has stopped showing anything - the display asleep,
     /// the screen locked, another user switched in. Set from the platform
     /// observers, which may deliver on any thread, and read by the frame loop.
