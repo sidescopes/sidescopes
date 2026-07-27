@@ -81,6 +81,14 @@ struct TestFrame
     int height;
 };
 
+// The packed ten-bit word, shared so that a bare frame and a frame buffer
+// agree about the layout by construction rather than through two copies of the
+// same shifts.
+inline uint32_t tenBitWord(uint16_t r, uint16_t g, uint16_t b)
+{
+    return 0xC0000000u | static_cast<uint32_t>(r) << 20 | static_cast<uint32_t>(g) << 10 | b;
+}
+
 // One ten-bit frame, in the packed layout the macOS capture delivers: alpha in
 // bits 30-31, red 20-29, green 10-19, blue 0-9 of a little-endian word.
 //
@@ -99,7 +107,7 @@ struct TenBitTestFrame
 
     void setCodes(int px, int py, uint16_t r, uint16_t g, uint16_t b)
     {
-        const uint32_t word = 0xC0000000u | static_cast<uint32_t>(r) << 20 | static_cast<uint32_t>(g) << 10 | b;
+        const uint32_t word = tenBitWord(r, g, b);
         uint8_t* pixel = pixels.data() + (static_cast<std::size_t>(py) * width + px) * 4;
         pixel[0] = static_cast<uint8_t>(word);
         pixel[1] = static_cast<uint8_t>(word >> 8);
@@ -128,6 +136,35 @@ struct TenBitTestFrame
     int width;
     int height;
 };
+
+// An owned solid ten-bit frame buffer, for the tests that must travel the
+// mailbox and the worker rather than call an engine directly. Codes are on the
+// 0..1023 scale; `format` is stamped, which is the whole point - the same bytes
+// under the other label are a different picture.
+inline FrameBuffer makeTenBitFrameBuffer(int width, int height, uint16_t r, uint16_t g, uint16_t b, uint64_t sequence)
+{
+    FrameBuffer frame;
+    frame.width = width;
+    frame.height = height;
+    frame.strideBytes = width * 4;
+    frame.colorSpace = ColorSpaceHint::Srgb;
+    frame.format = PixelFormat::Argb2101010;
+    frame.sequence = sequence;
+    frame.data.resize(static_cast<std::size_t>(frame.strideBytes) * height);
+    const uint32_t word = tenBitWord(r, g, b);
+    for (int py = 0; py < height; ++py) {
+        for (int px = 0; px < width; ++px) {
+            uint8_t* pixel =
+                frame.data.data() + static_cast<std::size_t>(py) * frame.strideBytes + static_cast<std::size_t>(px) * 4;
+            pixel[0] = static_cast<uint8_t>(word);
+            pixel[1] = static_cast<uint8_t>(word >> 8);
+            pixel[2] = static_cast<uint8_t>(word >> 16);
+            pixel[3] = static_cast<uint8_t>(word >> 24);
+        }
+    }
+
+    return frame;
+}
 
 // An owned solid-color BGRA frame buffer for the mailbox and worker tests:
 // stride packed to the width and fully opaque.

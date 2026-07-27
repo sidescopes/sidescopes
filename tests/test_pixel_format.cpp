@@ -5,15 +5,22 @@
 #include <algorithm>
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
+#include <chrono>
+#include <functional>
 #include <set>
+#include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
+#include "core/analysis_worker.h"
 #include "core/frame.h"
 #include "core/scopes/histogram.h"
 #include "core/scopes/neutral.h"
 #include "core/scopes/vectorscope.h"
 #include "core/scopes/waveform.h"
+#include "modules/module_frame.h"
+#include "sidescopes/module.h"
 #include "support/scope_image.h"
 #include "support/test_frame.h"
 
@@ -21,6 +28,25 @@ using namespace sidescopes;
 using namespace sidescopes::test;
 
 namespace {
+
+// The scope the crossing test reads, keyed the way the worker keys its
+// settings and its output.
+const std::string WaveformId = "org.sidescopes.waveform";
+
+// The worker computes on a thread of its own, so its first output has to be
+// waited for rather than assumed.
+bool waitForOutput(const std::function<bool()>& condition)
+{
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(2000);
+    while (std::chrono::steady_clock::now() < deadline) {
+        if (condition()) {
+            return true;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+
+    return condition();
+}
 
 // The eight-bit frame carrying the same colour a ten-bit code rounds to, so
 // the two can be compared where the content really is eight-bit.
@@ -202,6 +228,76 @@ TEST_CASE("A bin-bound scope reads a ten-bit frame as the level it rounds to")
     const auto peak = static_cast<int>(
         std::distance(outline.begin(), std::max_element(outline.begin(), outline.begin() + Histogram::Bins)));
     CHECK(peak == 128);
+}
+
+TEST_CASE("A boundary frame's format picks the reader the host asked for")
+{
+    // The engine half of the crossing, in isolation. Every other test in this
+    // file hands an engine a FrameView directly; in the running application a
+    // scope only ever sees one built from an SsFrameView.
+    SsFrameView boundary{};
+    boundary.pixel_format = SS_PIXEL_FORMAT_ARGB2101010;
+    CHECK(frameFromBoundary(boundary).format == PixelFormat::Argb2101010);
+
+    boundary.pixel_format = SS_PIXEL_FORMAT_BGRA8;
+    CHECK(frameFromBoundary(boundary).format == PixelFormat::Bgra8);
+
+    // A host older than ABI minor 4 sends the field zeroed, and a host newer
+    // than this engine may send a format it has never heard of. Both read as
+    // the eight-bit layout every host sent before the field existed.
+    boundary.pixel_format = 4242u;
+    CHECK(frameFromBoundary(boundary).format == PixelFormat::Bgra8);
+}
+
+TEST_CASE("The pixel format survives the crossing into a scope")
+{
+    // THE GAP THIS CLOSES. A scope never reads a FrameView the host built; it
+    // reads one rebuilt from an SsFrameView, across toBoundaryFrame ->
+    // frameFromBoundary. Every SsFrameView in this suite used to carry
+    // SS_PIXEL_FORMAT_BGRA8, so the engines were covered and the CROSSING was
+    // not: inverting either ternary left the whole suite green while every
+    // scope in the running application read ten-bit words as bytes.
+    //
+    // One buffer of bytes, published twice, differing only in its label -
+    // which is what makes this a test of the label rather than of the pixels.
+    // Ten-bit (616, 0, 0) packs to 0xE6800000, whose third byte is 0x80. So
+    // the same word is red 616 of 1023 read packed, and red 128 of 255 read
+    // flat: level 154 against level 128.
+    //
+    // It pins the two LEVELS rather than merely asserting the two labels
+    // differ, and that distinction is the whole guard. Inverting a ternary
+    // EXCHANGES the two readings, so a test that only demanded they differ
+    // would pass against the very defect it exists to catch.
+    constexpr uint16_t DeepRed = 616;
+    constexpr int PackedLevel = 154;  // (616 * 255 + 511) / 1023
+    constexpr int FlatLevel = 128;    // the third byte of the packed word
+    constexpr int Columns = 64;
+
+    const auto redTraceRow = [&](PixelFormat label) {
+        FrameMailbox mailbox;
+        AnalysisWorker worker(mailbox);
+        AnalysisSettings settings;
+        settings.region = RegionOfInterest{0.0, 0.0, 100.0, 100.0};
+        settings.enabledScopes = {WaveformId};
+        settings.imageSizes[WaveformId] = {Columns, WaveformLevels};
+        worker.updateSettings(settings);
+        worker.start();
+
+        FrameBuffer frame = makeTenBitFrameBuffer(32, 16, DeepRed, 0, 0, 1);
+        frame.format = label;
+        mailbox.publish(std::move(frame));
+
+        uint64_t seen = 0;
+        AnalysisWorker::Output output;
+        REQUIRE(waitForOutput([&] { return worker.fetchOutput(seen, output); }));
+        const ScopeImage& trace = output.images.at(WaveformId);
+
+        return brightestRow(trace.rgba.data(), trace.width, trace.height, 0);
+    };
+
+    // The waveform draws level 0 at the bottom row.
+    CHECK(redTraceRow(PixelFormat::Argb2101010) == WaveformLevels - 1 - PackedLevel);
+    CHECK(redTraceRow(PixelFormat::Bgra8) == WaveformLevels - 1 - FlatLevel);
 }
 
 TEST_CASE("The colour under the cursor keeps a ten-bit frame's precision")
