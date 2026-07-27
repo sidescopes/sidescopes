@@ -7,6 +7,7 @@
 namespace sidescopes {
 
 ScopeRegistry::ScopeRegistry(const ModuleRegistry& modules)
+    : m_stateReport(diagAddStateReport([this] { reportState(); }))
 {
     std::string assigned;
     for (const RegisteredScope& scope : modules.scopes()) {
@@ -26,6 +27,20 @@ ScopeRegistry::ScopeRegistry(const ModuleRegistry& modules)
         m_scopes.push_back(HostScope{descriptor->id, letter, descriptor, false});
     }
     m_scopes.push_back(HostScope{ColorPickerScopeId, ColorPickerLetter, nullptr, true});
+}
+
+void ScopeRegistry::reportState() const
+{
+    // Derived, not remembered: the descriptor still carries the letter the
+    // module asked for, so a refusal answers for itself however long after
+    // the assignment the recording begins.
+    for (const HostScope& scope : m_scopes) {
+        if (scope.descriptor == nullptr || scope.descriptor->letter == scope.letter) {
+            continue;
+        }
+        SS_DIAG(Modules, "letter '%c' for %s unavailable; registered letterless", scope.descriptor->letter,
+                scope.id.c_str());
+    }
 }
 
 const std::vector<HostScope>& ScopeRegistry::scopes() const

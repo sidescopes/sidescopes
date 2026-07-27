@@ -1,12 +1,16 @@
 #include <catch2/catch_test_macros.hpp>
 #include <cstdint>
+#include <fstream>
+#include <sstream>
 #include <string>
 #include <vector>
 
 #include "app/scope_registry.h"
 #include "app/stack_tokens.h"
+#include "core/diagnostics.h"
 #include "modules/module_registry.h"
 #include "sidescopes/module.h"
+#include "temp_file.h"
 
 namespace sidescopes {
 namespace {
@@ -147,6 +151,25 @@ TEST_CASE("A colliding letter registers the scope letterless but reachable")
 
     // 'W' resolves to the first claimant, never the letterless collider.
     CHECK(registry.byLetter('W') == holder);
+}
+
+TEST_CASE("A refused letter is stated to a recording started later")
+{
+    // The letters are handed out once, while the application starts; a support
+    // log opened afterwards still has to answer why a scope has no shortcut.
+    const test::TempFile log("scope-registry-letters.log");
+    ModuleRegistry modules;
+    REQUIRE(modules.registerModule(HolderWModuleEntry));
+    REQUIRE(modules.registerModule(CollideWModuleEntry));
+    const ScopeRegistry registry{modules};
+
+    diagConfigure({"modules", log.path().string()});
+    diagConfigure({});
+
+    std::ifstream file(log.path());
+    std::stringstream content;
+    content << file.rdbuf();
+    CHECK(content.str().find("letter 'W' for org.sidescopes.test.collidew unavailable") != std::string::npos);
 }
 
 TEST_CASE("Every registered scope round-trips through the stack")

@@ -37,11 +37,11 @@ int canonicalRank(std::string_view id)
 
 void hostLog(const SsHost*, uint32_t level, const char* message)
 {
-    std::fprintf(stderr, "sidescopes module [%s]: %s\n",
-                 level == SS_LOG_ERROR     ? "error"
-                 : level == SS_LOG_WARNING ? "warning"
-                                           : "info",
-                 message);
+    const char* severity = level == SS_LOG_ERROR ? "error" : level == SS_LOG_WARNING ? "warning" : "info";
+    // Both: a terminal is where a developer looks, and the recorded log is the
+    // only place a user launching from Finder or Explorer can be asked to.
+    std::fprintf(stderr, "sidescopes module [%s]: %s\n", severity, message);
+    SS_DIAG(Modules, "module [%s] %s", severity, message);
 }
 
 // The room a split accumulate needs for its per-chunk bins, lent to whichever
@@ -86,12 +86,33 @@ const void* hostGetExtension(const SsHost*, const char* id)
 }  // namespace
 
 ModuleRegistry::ModuleRegistry()
+    : m_stateReport(diagAddStateReport([this] { reportState(); }))
 {
     m_host.abi_major = SS_ABI_MAJOR;
     m_host.abi_minor = SS_ABI_MINOR;
     m_host.host_data = this;
     m_host.get_extension = hostGetExtension;
     m_host.log = hostLog;
+}
+
+void ModuleRegistry::reportState() const
+{
+    SS_DIAG(Modules, "registered modules=%d scopes=%d", static_cast<int>(m_modules.size()),
+            static_cast<int>(m_scopes.size()));
+    for (const RegisteredScope& scope : m_scopes) {
+        SS_DIAG(Modules, "scope id=%s letter=%c", scope.descriptor->id,
+                scope.descriptor->letter == 0 ? '-' : scope.descriptor->letter);
+    }
+    for (const std::string& failure : m_failures) {
+        SS_DIAG(Modules, "%s", failure.c_str());
+    }
+}
+
+void ModuleRegistry::recordFailure(const std::string& message)
+{
+    m_failures.push_back(message);
+    std::fprintf(stderr, "sidescopes modules: %s\n", message.c_str());
+    SS_DIAG(Modules, "%s", message.c_str());
 }
 
 ModuleRegistry::~ModuleRegistry()
@@ -104,11 +125,12 @@ ModuleRegistry::~ModuleRegistry()
 bool ModuleRegistry::registerModule(const SsModuleEntry& entry)
 {
     if (entry.abi_major != SS_ABI_MAJOR) {
-        std::fprintf(stderr, "sidescopes module: rejected ABI %u.%u (host %u.%u)\n", entry.abi_major, entry.abi_minor,
-                     SS_ABI_MAJOR, SS_ABI_MINOR);
+        recordFailure("rejected ABI " + std::to_string(entry.abi_major) + "." + std::to_string(entry.abi_minor) +
+                      " (host " + std::to_string(SS_ABI_MAJOR) + "." + std::to_string(SS_ABI_MINOR) + ")");
         return false;
     }
     if (!entry.init()) {
+        recordFailure("a module refused to initialize");
         return false;
     }
 
@@ -119,7 +141,7 @@ bool ModuleRegistry::registerModule(const SsModuleEntry& entry)
         if (!descriptor) {
             // A misbehaving module that returns null below its own
             // scope_count() would otherwise be dereferenced at lookup time.
-            std::fprintf(stderr, "sidescopes module: null descriptor at index %u of %u\n", index, count);
+            recordFailure("null descriptor at index " + std::to_string(index) + " of " + std::to_string(count));
             continue;
         }
         m_scopes.push_back(RegisteredScope{descriptor, &entry});

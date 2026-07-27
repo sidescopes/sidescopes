@@ -20,6 +20,7 @@ enum class DiagChannel
     Suggestions,  ///< Region-picker suggestions and the pick's rectangle chain.
     FaceLock,     ///< Face-lock probe verdicts, for grading the gates.
     Perf,         ///< Frame, analysis-pass, and capture-cadence timings.
+    Modules,      ///< Scope modules: what registered, what was refused, what they log.
     Count         ///< Sentinel; keep last.
 };
 

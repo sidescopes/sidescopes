@@ -1,7 +1,7 @@
 #include "modules/module_loader.h"
 
 #include <algorithm>
-#include <cstdio>
+#include <string>
 #include <system_error>
 #include <vector>
 
@@ -43,20 +43,20 @@ void loadOne(const std::filesystem::path& file, ModuleRegistry& registry)
     HMODULE handle = LoadLibraryW(wide.c_str());
     SetThreadErrorMode(previousMode, nullptr);
     if (!handle) {
-        std::fprintf(stderr, "sidescopes loader: LoadLibrary failed for %s\n", path.c_str());
+        registry.recordFailure("LoadLibrary failed for " + path);
         return;
     }
     auto* entry = reinterpret_cast<const SsModuleEntry*>(GetProcAddress(handle, "ss_module_entry"));
 #else
     void* handle = dlopen(path.c_str(), RTLD_NOW | RTLD_LOCAL);
     if (!handle) {
-        std::fprintf(stderr, "sidescopes loader: dlopen failed for %s: %s\n", path.c_str(), dlerror());
+        registry.recordFailure("dlopen failed for " + path + ": " + dlerror());
         return;
     }
     auto* entry = reinterpret_cast<const SsModuleEntry*>(dlsym(handle, "ss_module_entry"));
 #endif
     if (!entry) {
-        std::fprintf(stderr, "sidescopes loader: no ss_module_entry in %s\n", path.c_str());
+        registry.recordFailure("no ss_module_entry in " + path);
         // The handle intentionally leaks: see the never-unload note below.
         return;
     }
@@ -74,8 +74,7 @@ bool loadModulesFrom(const std::filesystem::path& directory, ModuleRegistry& reg
     std::error_code ec;
     std::filesystem::directory_iterator it(directory, ec);
     if (ec) {
-        std::fprintf(stderr, "sidescopes loader: cannot scan %s: %s\n", directory.string().c_str(),
-                     ec.message().c_str());
+        registry.recordFailure("cannot scan " + directory.string() + ": " + ec.message());
         return false;
     }
 
@@ -90,8 +89,7 @@ bool loadModulesFrom(const std::filesystem::path& directory, ModuleRegistry& reg
     const std::filesystem::directory_iterator end;
     for (; it != end; it.increment(ec)) {
         if (ec) {
-            std::fprintf(stderr, "sidescopes loader: scan of %s interrupted: %s\n", directory.string().c_str(),
-                         ec.message().c_str());
+            registry.recordFailure("scan of " + directory.string() + " interrupted: " + ec.message());
             break;
         }
         if (it->path().extension() == ModuleExtension) {

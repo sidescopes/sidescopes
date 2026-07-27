@@ -3,6 +3,7 @@
 #include <string>
 #include <vector>
 
+#include "core/diagnostics.h"
 #include "sidescopes/module.h"
 
 namespace sidescopes {
@@ -141,6 +142,15 @@ public:
     /// Registers a module; false when the ABI major differs or the module's init failed.
     [[nodiscard]] bool registerModule(const SsModuleEntry& entry);
 
+    /// Notes @p message as a reason a scope is missing - a file that would not
+    /// load, a module built for another ABI - reporting it now and keeping it
+    /// to report again.
+    ///
+    /// Modules are registered once, from a static, before the application can
+    /// open a recording; without keeping the reasons, the support flow could
+    /// never capture the failure it exists to capture.
+    void recordFailure(const std::string& message);
+
     [[nodiscard]] const std::vector<RegisteredScope>& scopes() const
     {
         return m_scopes;
@@ -159,9 +169,16 @@ public:
     }
 
 private:
+    /// States the scopes on offer and every reason one is missing, for a
+    /// recording that opened long after the modules registered.
+    void reportState() const;
+
     std::vector<const SsModuleEntry*> m_modules;
     std::vector<RegisteredScope> m_scopes;
+    std::vector<std::string> m_failures;
     SsHost m_host{};
+    // Last, so it goes before the state it reads.
+    DiagRegistration m_stateReport;
 };
 
 /// The application's registry with every built-in module registered.

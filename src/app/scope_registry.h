@@ -4,6 +4,7 @@
 #include <string_view>
 #include <vector>
 
+#include "core/diagnostics.h"
 #include "sidescopes/module.h"
 
 namespace sidescopes {
@@ -64,7 +65,13 @@ public:
     [[nodiscard]] int indexOf(std::string_view id) const;
 
 private:
+    /// States which letter each scope ended up with, for a recording opened
+    /// long after they were assigned.
+    void reportState() const;
+
     std::vector<HostScope> m_scopes;
+    // Last, so it goes before the state it reads.
+    DiagRegistration m_stateReport;
 };
 
 }  // namespace sidescopes

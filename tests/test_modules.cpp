@@ -3,13 +3,17 @@
 #include <catch2/catch_test_macros.hpp>
 #include <cstddef>
 #include <cstdint>
+#include <fstream>
+#include <sstream>
 #include <string>
 #include <utility>
 #include <vector>
 
+#include "core/diagnostics.h"
 #include "modules/module_registry.h"
 #include "scope_image.h"
 #include "sidescopes/module.h"
+#include "temp_file.h"
 #include "test_frame.h"
 
 namespace sidescopes {
@@ -72,6 +76,16 @@ void countingDestroy(SsScopeInstance* instance)
 uint32_t twoScopes()
 {
     return 2;
+}
+
+// Everything a diagnostic log holds, for the cases that read one back.
+std::string readLog(const std::string& path)
+{
+    std::ifstream file(path);
+    std::stringstream content;
+    content << file.rdbuf();
+
+    return content.str();
 }
 
 // The brightest pixel's three channels, so a trace can be read for both how
@@ -579,6 +593,26 @@ TEST_CASE("Registry skips a scope its module never describes")
     REQUIRE(registry.registerModule(entry));
     CHECK(registry.scopes().size() == 1);
     CHECK(registry.findScope("org.sidescopes.test.fake") != nullptr);
+}
+
+TEST_CASE("A recording opened after the modules registered is told about them")
+{
+    // Modules register from a static, before the application can open a log,
+    // and being static they never register again. Nothing is recording here,
+    // which is the ordinary case.
+    const test::TempFile log("modules-report.log");
+    ModuleRegistry registry;
+    const SsModuleEntry wrongAbi{99u, 0u, trueInit, noopDeinit, oneScope, fakeDescriptor, nullCreate};
+    CHECK_FALSE(registry.registerModule(wrongAbi));
+    const SsModuleEntry sound{SS_ABI_MAJOR, SS_ABI_MINOR, trueInit, noopDeinit, oneScope, fakeDescriptor, nullCreate};
+    REQUIRE(registry.registerModule(sound));
+
+    diagConfigure({"modules", log.path().string()});
+    diagConfigure({});
+
+    const std::string content = readLog(log.path().string());
+    CHECK(content.find("scope id=org.sidescopes.test.fake") != std::string::npos);
+    CHECK(content.find("rejected ABI 99.0") != std::string::npos);
 }
 
 TEST_CASE("Registry rejects a module built for another ABI major")
