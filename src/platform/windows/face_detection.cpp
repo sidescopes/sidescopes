@@ -1,13 +1,19 @@
 // Face detection via WinRT's in-box FaceDetector - no dependency beyond
-// the Windows SDK. Compiles on every push via CI; runtime behavior awaits
-// the Windows machine.
+// the Windows SDK.
 //
-// The WinRT calls here block on their async results, which is forbidden
-// on an STA thread - and the application's main thread is one (GLFW
-// initializes OLE for drag and drop). Every detection therefore runs to
-// completion on its own short-lived MTA thread and the caller joins it,
-// which keeps the seam synchronous without ever blocking inside the
-// caller's apartment.
+// The WinRT calls here block on their async results, which an STA thread
+// must never do, and the main thread is in no apartment this application
+// creates: GLFW initializes no OLE, taking drops through WM_DROPFILES.
+// Every detection therefore runs to completion on its own short-lived MTA
+// thread and the caller joins it, which keeps the seam synchronous without
+// blocking inside the caller's apartment.
+//
+// Those threads open and close an apartment around each call, which is only
+// safe while something else in the process keeps COM alive. The last
+// CoUninitialize unloads the activation DLL, and the cached WinRT factory
+// then points into unmapped memory, so the next activation faults. Measured
+// on Windows: the application never loses it, and a console program built
+// from these sources does.
 
 #include "platform/face_detection.h"
 
