@@ -12,10 +12,6 @@ namespace sidescopes {
 /// region is sampled.
 enum class QualityLevel
 {
-    /// As little as the scopes can be read at. Every image that is a display
-    /// resolution over a fixed accumulation grid is taken down a step, the
-    /// samples are thinned, and the screen is read ten times a second.
-    Low,
     /// The shipped behaviour, and the default.
     Standard,
     /// Precision and refresh rate first, up to the point measurement stops
@@ -24,8 +20,7 @@ enum class QualityLevel
 };
 
 /// The levels in the order they are offered, ascending.
-inline constexpr std::array<QualityLevel, 3> QualityLevels{QualityLevel::Low, QualityLevel::Standard,
-                                                           QualityLevel::High};
+inline constexpr std::array<QualityLevel, 2> QualityLevels{QualityLevel::Standard, QualityLevel::High};
 
 /// The magnification Standard tolerates. The detail policy's pane thresholds
 /// are stated at it, so a level that tolerates less reads them proportionally

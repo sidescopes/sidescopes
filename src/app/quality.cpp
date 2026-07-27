@@ -1,8 +1,5 @@
 #include "app/quality.h"
 
-#include "core/scopes/vectorscope.h"
-#include "core/scopes/waveform.h"
-
 namespace sidescopes {
 namespace {
 
@@ -16,21 +13,6 @@ constexpr QualityProfile Standard{
     .histogramCeiling = {4096, 768},
     .vectorscopeCeiling = 512,
     .sampleThinning = 1,
-    .coarsenWhileDragged = true,
-};
-
-// Low takes the cheap precision first, in the order measurement ranked it: the
-// vectorscope's image and the histogram's plot are 45-49% of their passes for
-// deviations of a tenth and a hundredth of a code, and the waveform gives up
-// its height and the density of its columns but never the columns themselves.
-constexpr QualityProfile Low{
-    .captureFramesPerSecond = 10,
-    .magnificationTolerance = 2.0f,
-    .columnTolerance = Standard.columnTolerance,
-    .waveformHeightCeiling = WaveformLevels,
-    .histogramCeiling = {2048, 384},
-    .vectorscopeCeiling = DefaultVectorscopeSize,
-    .sampleThinning = 2,
     .coarsenWhileDragged = true,
 };
 
@@ -54,8 +36,6 @@ constexpr QualityProfile High{
 const QualityProfile& profileFor(QualityLevel level)
 {
     switch (level) {
-    case QualityLevel::Low:
-        return Low;
     case QualityLevel::High:
         return High;
     case QualityLevel::Standard:
@@ -68,8 +48,6 @@ const QualityProfile& profileFor(QualityLevel level)
 std::string_view qualityToken(QualityLevel level)
 {
     switch (level) {
-    case QualityLevel::Low:
-        return "low";
     case QualityLevel::High:
         return "high";
     case QualityLevel::Standard:
@@ -82,8 +60,6 @@ std::string_view qualityToken(QualityLevel level)
 const char* qualityLabel(QualityLevel level)
 {
     switch (level) {
-    case QualityLevel::Low:
-        return "Low";
     case QualityLevel::High:
         return "High";
     case QualityLevel::Standard:

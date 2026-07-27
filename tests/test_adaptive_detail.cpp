@@ -230,34 +230,6 @@ TEST_CASE("A scope off screen keeps the resolution in force")
     CHECK_FALSE(fixture.detail.update(SmallPanes, 1.0f, std::nullopt, 2.0).has_value());
 }
 
-TEST_CASE("A low level asks for less of everything but the columns")
-{
-    // The order measurement ranked them in: the vectorscope's image and the
-    // histogram's plot are 45-49% of their passes for a tenth and a hundredth
-    // of a code, and the waveform gives up its height. Its COLUMNS do not move,
-    // because a column is a place in the region.
-    DetailFixture fixture;
-    // The vectorscope is the stack a fresh view starts on; the rest stack onto
-    // it.
-    fixture.view.stack().choose(WaveformScopeId, true);
-    fixture.view.stack().choose(HistogramScopeId, true);
-
-    const std::pair<int, int> standardWaveform = fixture.detail.desiredWaveformSize(LargePanes, 0);
-    const std::pair<int, int> standardHistogram = fixture.detail.desiredHistogramSize(LargePanes);
-    const int standardVectorscope = fixture.detail.desiredVectorscopeSize(LargePanes);
-
-    fixture.detail.setQuality(QualityLevel::Low);
-    const std::pair<int, int> lowWaveform = fixture.detail.desiredWaveformSize(LargePanes, 0);
-    CHECK(lowWaveform.first == standardWaveform.first);
-    CHECK(lowWaveform.second < standardWaveform.second);
-    CHECK(lowWaveform.second == WaveformLevels);
-
-    const std::pair<int, int> lowHistogram = fixture.detail.desiredHistogramSize(LargePanes);
-    CHECK(lowHistogram.first < standardHistogram.first);
-    CHECK(lowHistogram.second < standardHistogram.second);
-    CHECK(fixture.detail.desiredVectorscopeSize(LargePanes) < standardVectorscope);
-}
-
 TEST_CASE("A high level asks for more where the pane can use it")
 {
     // A pane between two steps: Standard tolerates the magnification and stops
@@ -307,30 +279,32 @@ TEST_CASE("Changing the level moves the resolutions in force")
     // frame.
     DetailFixture fixture;
     fixture.view.stack().choose(VectorscopeScopeId, false);
-    fixture.analysis.imageSizes[VectorscopeScopeId] = {512, 512};
+    fixture.analysis.imageSizes[VectorscopeScopeId] = {256, 256};
 
-    CHECK_FALSE(fixture.detail.update(LargePanes, 1.0f, std::nullopt, 1.0).has_value());
-    fixture.detail.setQuality(QualityLevel::Low);
-    CHECK_FALSE(fixture.detail.update(LargePanes, 1.0f, std::nullopt, 2.0).has_value());
+    // A pane between two steps: Standard is content to magnify it and asks for
+    // nothing, so the only thing that can move the resolution here is the level.
+    constexpr ScopePaneSizes Between{{}, {}, {}, {400.0f, 400.0f}};
+    CHECK_FALSE(fixture.detail.update(Between, 1.0f, std::nullopt, 1.0).has_value());
+
+    fixture.detail.setQuality(QualityLevel::High);
+    CHECK_FALSE(fixture.detail.update(Between, 1.0f, std::nullopt, 2.0).has_value());
 
     const std::optional<DetailSizes> settled =
-        fixture.detail.update(LargePanes, 1.0f, std::nullopt, 2.5 + DetailSettleSeconds);
+        fixture.detail.update(Between, 1.0f, std::nullopt, 2.5 + DetailSettleSeconds);
     REQUIRE(settled.has_value());
-    CHECK(settled->vectorscope == 256);
+    CHECK(settled->vectorscope == 512);
 }
 
-TEST_CASE("A dragged pass thins on top of the level's own thinning")
+TEST_CASE("A dragged pass thins on top of the thinning already asked for")
 {
-    // The drag divisor multiplies rather than replaces, so a level that
-    // already samples thinly still gives something up under the hand. Without
-    // that, choosing Low would silently cost a drag the coarsening a Standard
-    // drag gets.
+    // The drag divisor multiplies rather than replaces, so a level that asks
+    // for thinner sampling still gives something up under the hand instead of
+    // being handed the coarsening a level that asks for none would get.
     AnalysisSettings settings;
     settings.imageSizes[WaveformScopeId] = {2048, 512};
-    settings.sampleThinning = profileFor(QualityLevel::Low).sampleThinning;
+    settings.sampleThinning = 2;
 
-    CHECK(coarsenedForDrag(settings).sampleThinning ==
-          profileFor(QualityLevel::Low).sampleThinning * DraggedSampleDivisor);
+    CHECK(coarsenedForDrag(settings).sampleThinning == 2 * DraggedSampleDivisor);
 }
 
 }  // namespace sidescopes

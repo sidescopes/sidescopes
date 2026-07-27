@@ -27,34 +27,15 @@ TEST_CASE("Standard is the shipped behaviour")
 
 TEST_CASE("Every level differs from the one below it")
 {
-    // Three levels earn their place only by being different. The pairs are
-    // checked whole, so a level that stopped differing anywhere fails here
-    // rather than quietly costing the same as its neighbour.
-    const QualityProfile& low = profileFor(QualityLevel::Low);
+    // A level earns its place only by being different. The pair is checked
+    // whole, so a level that stopped differing anywhere fails here rather than
+    // quietly costing the same as its neighbour.
     const QualityProfile& standard = profileFor(QualityLevel::Standard);
     const QualityProfile& high = profileFor(QualityLevel::High);
 
-    CHECK_FALSE(low == standard);
     CHECK_FALSE(standard == high);
-    CHECK(low.captureFramesPerSecond < standard.captureFramesPerSecond);
     CHECK(standard.captureFramesPerSecond < high.captureFramesPerSecond);
-    CHECK(low.magnificationTolerance > standard.magnificationTolerance);
     CHECK(standard.magnificationTolerance > high.magnificationTolerance);
-}
-
-TEST_CASE("Low gives up resolution and never a place in the region")
-{
-    // The waveform's columns are the one axis that carries data rather than
-    // resolution, so the level that gives up the most gives up none of them:
-    // scanning for a blown highlight is exactly when that scope matters.
-    const QualityProfile& low = profileFor(QualityLevel::Low);
-    const QualityProfile& standard = profileFor(QualityLevel::Standard);
-
-    CHECK(low.columnTolerance == standard.columnTolerance);
-    CHECK(low.vectorscopeCeiling < standard.vectorscopeCeiling);
-    CHECK(low.histogramCeiling.first < standard.histogramCeiling.first);
-    CHECK(low.waveformHeightCeiling < standard.waveformHeightCeiling);
-    CHECK(low.sampleThinning > standard.sampleThinning);
 }
 
 TEST_CASE("High buys nothing on the axes measurement has closed")
@@ -99,6 +80,9 @@ TEST_CASE("A level survives the preferences file")
     // setting rather than an error.
     CHECK(qualityFromToken("") == QualityLevel::Standard);
     CHECK(qualityFromToken("ludicrous") == QualityLevel::Standard);
+    // Including a level this build no longer offers: a file written by an
+    // older one reads as the default rather than as a missing setting.
+    CHECK(qualityFromToken("low") == QualityLevel::Standard);
 }
 
 }  // namespace sidescopes
