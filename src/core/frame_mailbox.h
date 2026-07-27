@@ -81,6 +81,14 @@ struct FrameBuffer
 class FrameMailbox
 {
 public:
+    FrameMailbox()
+        // Every recording measures its own intervals. The gap across the pause
+        // between two recordings is not a capture cadence, and a first line
+        // reporting minutes of it would be read as one.
+        : m_cadenceBaseline(diagAddStateReport([this] { forgetPublishBaseline(); }))
+    {
+    }
+
     /// Publishes a filled buffer and returns storage to reuse for the next
     /// frame (possibly empty on the first exchanges). If the previous frame
     /// was never taken, its storage is what comes back.
@@ -159,6 +167,14 @@ public:
     }
 
 private:
+    /// Drops the cadence baseline, so the next publish sets a fresh one and
+    /// logs no interval - what the first delivery of a recording does.
+    void forgetPublishBaseline()
+    {
+        std::lock_guard lock(m_mutex);
+        m_hasLastPublish = false;
+    }
+
     std::mutex m_mutex;
     std::condition_variable m_available;
     FrameBuffer m_pending;
@@ -169,6 +185,8 @@ private:
     // records; guarded by the same mutex every publish already holds.
     std::chrono::steady_clock::time_point m_lastPublish;
     bool m_hasLastPublish = false;
+    // Last, so it goes before the state it reaches into.
+    DiagRegistration m_cadenceBaseline;
 };
 
 }  // namespace sidescopes

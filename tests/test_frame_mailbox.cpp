@@ -1,8 +1,13 @@
 #include <catch2/catch_test_macros.hpp>
 #include <chrono>
+#include <fstream>
+#include <string>
+#include <string_view>
 #include <thread>
 
+#include "core/diagnostics.h"
 #include "core/frame_mailbox.h"
+#include "temp_file.h"
 #include "test_frame.h"
 
 namespace sidescopes {
@@ -19,6 +24,23 @@ using namespace std::chrono_literals;
 FrameBuffer makeFrame(uint64_t sequence, int side = 2)
 {
     return makeSolidFrameBuffer(side, side, Color{}, sequence);
+}
+
+// The milliseconds carried by the first "capture interval_ms=" line in a log,
+// or -1 when there is none.
+double firstIntervalMs(const std::string& path)
+{
+    static constexpr std::string_view Key = "capture interval_ms=";
+    std::ifstream file(path);
+    std::string line;
+    while (std::getline(file, line)) {
+        const std::size_t at = line.find(Key);
+        if (at != std::string::npos) {
+            return std::stod(line.substr(at + Key.size()));
+        }
+    }
+
+    return -1.0;
 }
 
 }  // namespace
@@ -175,6 +197,36 @@ TEST_CASE("FrameMailbox spends a nudge on a single take")
     const auto elapsed = std::chrono::steady_clock::now() - started;
     CHECK_FALSE(taken.has_value());
     CHECK(elapsed >= 45ms);  // waited its timeout, generous margin
+}
+
+TEST_CASE("The first interval of a recording is not the gap since the last one")
+{
+    const test::TempFile first("mailbox-cadence-first.log");
+    const test::TempFile second("mailbox-cadence-second.log");
+    FrameMailbox mailbox;
+
+    diagConfigure({"perf", first.path().string()});
+    mailbox.publish(makeFrame(1));  // the baseline, no line
+    std::this_thread::sleep_for(5ms);
+    mailbox.publish(makeFrame(2));
+    diagConfigure({});
+
+    // The pause between the two recordings: nothing publishes, and the
+    // mailbox outlives both.
+    std::this_thread::sleep_for(300ms);
+
+    diagConfigure({"perf", second.path().string()});
+    mailbox.publish(makeFrame(3));  // must be a baseline again
+    std::this_thread::sleep_for(5ms);
+    mailbox.publish(makeFrame(4));
+    diagConfigure({});
+
+    const double interval = firstIntervalMs(second.path().string());
+    // Everything about the cadence is generous here except the one thing
+    // asserted: a baseline left over from the first recording reports the
+    // whole 300 ms pause as a capture interval.
+    CHECK(interval >= 0.0);
+    CHECK(interval < 100.0);
 }
 
 }  // namespace sidescopes
