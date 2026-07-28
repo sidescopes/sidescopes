@@ -495,12 +495,19 @@ void unwatchWindowMotion()
 namespace {
 
 // The qualifying top-level windows, front to back, for the shared focus
-// rule: visible and not minimized.
+// rule: on screen and not minimized. A cloaked window - a store app the
+// system has suspended, anything on another virtual desktop - stays
+// visible to the z-order walk while showing nothing, and one listed
+// ahead of a tracked window would answer for it.
 std::vector<OrderedWindow> orderedTopLevelWindows()
 {
     std::vector<OrderedWindow> windows;
     for (HWND handle = GetTopWindow(nullptr); handle; handle = GetWindow(handle, GW_HWNDNEXT)) {
         if (!IsWindowVisible(handle) || IsIconic(handle)) {
+            continue;
+        }
+        DWORD cloaked = 0;
+        if (SUCCEEDED(DwmGetWindowAttribute(handle, DWMWA_CLOAKED, &cloaked, sizeof(cloaked))) && cloaked != 0) {
             continue;
         }
         RECT rect{};
