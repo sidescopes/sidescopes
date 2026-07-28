@@ -1,4 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
+#include <cstddef>
 #include <string>
 #include <vector>
 
@@ -78,6 +79,43 @@ TEST_CASE("The view holds its three parts and hands them out")
     CHECK(reading.stack().ids() == std::vector<std::string>{VectorscopeScopeId, HistogramScopeId});
     CHECK(reading.layout().stackWeights(reading.stack().ids()) == std::vector<float>{1.0f, 2.0f});
     CHECK(reading.traces().intensity(ParadeScopeId) == 40.0f);
+}
+
+TEST_CASE("Reordering a scope carries the panes with it")
+{
+    // The drag is one gesture, so the menu order and the panes move together
+    // rather than leaving a caller to remember the second half.
+    ScopeView view{registry()};
+    view.stack().restore("VWH");
+    REQUIRE(view.stack().tokens() == "VWH");
+
+    // The rows are indexed in the MENU, which lists every scope, so a row's
+    // index is not its pane's: the histogram is the third pane and a later row.
+    const int histogram = static_cast<int>(view.order().rank(HistogramScopeId));
+    REQUIRE(histogram > 2);
+    CHECK(view.reorderScopes(histogram, 0));
+    CHECK(view.order().ids().front() == HistogramScopeId);
+    CHECK(view.stack().tokens() == "HVW");
+
+    // A drop that changes nothing moves nothing, so nothing is saved for it.
+    CHECK_FALSE(view.reorderScopes(0, 1));
+    CHECK(view.stack().tokens() == "HVW");
+}
+
+TEST_CASE("Reordering a scope that is not on screen still holds its place")
+{
+    // The order covers every scope, on screen or not: the point of it is that
+    // a scope switched on later lands where it was put, not at the end.
+    ScopeView view{registry()};
+    view.stack().restore("V");
+    const std::size_t histogram = view.order().rank(HistogramScopeId);
+    REQUIRE(histogram > 0);
+
+    REQUIRE(view.reorderScopes(static_cast<int>(histogram), 0));
+    CHECK(view.stack().tokens() == "V");  // the panes are unchanged: it is not shown
+
+    view.stack().toggle(HistogramScopeId);
+    CHECK(view.stack().tokens() == "HV");
 }
 
 TEST_CASE("Two views over one registry keep their own state")

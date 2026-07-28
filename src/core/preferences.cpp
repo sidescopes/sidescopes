@@ -536,6 +536,16 @@ void migrateScopeStack(const std::map<std::string, std::string, std::less<>>& va
     preferences.scopeStack = cleanedScopeStack(preferences.scopeStack, preferences);
 }
 
+// The menu order. A file written before the order existed states one
+// implicitly - the scopes it had on screen, in the sequence they were stacked -
+// so an upgrade keeps the arrangement the user had rather than resetting it to
+// the registration order.
+void migrateScopeOrder(const std::map<std::string, std::string, std::less<>>& values, Preferences& preferences)
+{
+    const auto found = values.find("scope_order");
+    preferences.scopeOrder = found != values.end() ? found->second : preferences.scopeStack;
+}
+
 // Writes the live layout state and every used preset slot. Unused slots (an
 // empty stack) write nothing, so the file stays terse.
 void writeLayout(std::ostream& out, const Preferences& preferences)
@@ -578,6 +588,7 @@ Preferences loadPreferences(const std::filesystem::path& file)
     int storedWaveformMode = static_cast<int>(WaveformMode::Rgb);
     readInt(values, "waveform_mode", storedWaveformMode);
     migrateScopeStack(values, storedWaveformMode, preferences);
+    migrateScopeOrder(values, preferences);
 
     readFloat(values, "graticule_strength", preferences.graticuleStrength);
     readInt(values, "vectorscope_zoom", preferences.vectorscopeZoom);
@@ -627,6 +638,7 @@ bool savePreferences(const Preferences& preferences, const std::filesystem::path
         }
     }
     out << "scope_stack=" << preferences.scopeStack << '\n'
+        << "scope_order=" << preferences.scopeOrder << '\n'
         << "graticule_strength=" << preferences.graticuleStrength << '\n'
         << "vectorscope_zoom=" << preferences.vectorscopeZoom << '\n'
         << "ui_scale_factor=" << preferences.uiScaleFactor << '\n'

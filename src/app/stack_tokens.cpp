@@ -7,9 +7,9 @@
 
 namespace sidescopes {
 
-std::vector<std::string> parseStackTokens(const ScopeRegistry& registry, const std::string& text)
+std::vector<std::string> parseScopeTokens(const ScopeRegistry& registry, const std::string& text)
 {
-    std::vector<std::string> stack;
+    std::vector<std::string> scopes;
     for (std::size_t at = 0; at < text.size();) {
         const HostScope* scope = nullptr;
         if (text[at] == '[') {
@@ -23,10 +23,17 @@ std::vector<std::string> parseStackTokens(const ScopeRegistry& registry, const s
             scope = registry.byLetter(text[at]);
             ++at;
         }
-        if (scope != nullptr && std::find(stack.begin(), stack.end(), scope->id) == stack.end()) {
-            stack.push_back(scope->id);
+        if (scope != nullptr && std::find(scopes.begin(), scopes.end(), scope->id) == scopes.end()) {
+            scopes.push_back(scope->id);
         }
     }
+
+    return scopes;
+}
+
+std::vector<std::string> parseStackTokens(const ScopeRegistry& registry, const std::string& text)
+{
+    std::vector<std::string> stack = parseScopeTokens(registry, text);
     if (stack.empty()) {
         stack.emplace_back(VectorscopeScopeId);
     }

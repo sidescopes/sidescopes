@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 #include <string>
+#include <vector>
 
 #include "app/pin_board.h"
 #include "app/preferences_binding.h"
@@ -44,7 +45,8 @@ Preferences savedSession()
     saved.scopeParams["org.sidescopes.waveform"]["stride"] = 3.0;
     saved.scopeParams["org.sidescopes.waveform"]["smoothing_ms"] = 160.0;
     saved.scopeParams["org.sidescopes.histogram"]["style"] = 1.0;
-    saved.scopeStack = "WH";
+    saved.scopeStack = "HW";
+    saved.scopeOrder = "HWVRC";  // the histogram dragged to the front of the menu
     saved.graticuleStrength = 0.5f;
     saved.vectorscopeZoom = 2;
     saved.layoutOrientation = 2;
@@ -71,6 +73,7 @@ TEST_CASE("A saved session round-trips through the live objects")
     const Preferences written = capturePreferences(live.view, live.pins, live.shortcuts, live.analysis);
 
     CHECK(written.scopeStack == saved.scopeStack);
+    CHECK(written.scopeOrder == saved.scopeOrder);
     CHECK(written.graticuleStrength == saved.graticuleStrength);
     CHECK(written.vectorscopeZoom == saved.vectorscopeZoom);
     CHECK(written.layoutOrientation == saved.layoutOrientation);
@@ -124,6 +127,21 @@ TEST_CASE("The parade is seeded from the waveform it mirrors")
 
     CHECK(scopeParam(live.analysis, "org.sidescopes.parade", "gain", -1.0) == 0.2);
     CHECK(scopeParam(live.analysis, "org.sidescopes.parade", "stride", -1.0) == 3.0);
+}
+
+TEST_CASE("A restored stack is seated in the restored order")
+{
+    // The two are restored together and in the right sequence: reading the
+    // stack first would seat its scopes by the previous order, so the panes
+    // would come back arranged the way the file did not say.
+    Preferences saved = savedSession();
+    saved.scopeStack = "VW";
+    saved.scopeOrder = "WVRHC";
+    LiveSession live;
+    restorePreferences(saved, live.view, live.pins, live.shortcuts, live.analysis);
+
+    CHECK(live.view.order().ids().front() == "org.sidescopes.waveform");
+    CHECK(live.view.stack().ids() == std::vector<std::string>{"org.sidescopes.waveform", "org.sidescopes.vectorscope"});
 }
 
 TEST_CASE("Restoring states the enabled scopes the worker computes")

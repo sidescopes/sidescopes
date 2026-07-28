@@ -28,9 +28,10 @@ public:
     Toolbar(const ScopeRegistry& registry, ScopeView& view, const ShortcutResolver& shortcuts, RegionPicker& picker,
             IconTextures& icons);
 
-    /// The scope selector: an icon button whose popup checklists every scope,
-    /// the ones on screen leading in pane order and draggable to rearrange
-    /// them. @p stackModifier is unused - the menu always toggles.
+    /// The scope selector: an icon button whose popup checklists every scope
+    /// in the user's own order, which a row can be dragged to change and a
+    /// toggle never disturbs. @p stackModifier is unused - the menu always
+    /// toggles.
     [[nodiscard]] PaneRenderOutcome drawScopeToggles(bool stackModifier);
 
     /// The region toolbox: draw, attach to a window, attach to a face, and the
@@ -52,17 +53,14 @@ private:
     /// Measures the menu's columns from the widest scope name and key.
     [[nodiscard]] ScopeMenuColumns scopeColumns() const;
 
-    /// Fills the open scope popup: the scopes on screen first, then a rule and
-    /// the rest. Records any drag reorder and toggle in @p outcome.
+    /// Fills the open scope popup: every registered scope as a row, in the
+    /// user's order. Applies any drag reorder to the view and records a toggle
+    /// in @p outcome.
     void appendScopeMenu(PaneRenderOutcome& outcome);
 
-    /// Draws the on-screen scopes as draggable rows and lands any reorder.
-    /// @return Whether a drop changed the order.
-    bool appendShownScopes(std::vector<std::string>& shown, const ScopeMenuColumns& cols, PaneRenderOutcome& outcome);
-
-    /// Draws one not-yet-shown scope as a row that adds it when clicked.
-    /// @return Whether the row was clicked.
-    bool drawAddRow(const std::string& id, const ScopeMenuColumns& cols);
+    /// Draws scope @p id, the @p index'th row of the menu, as a checkbox, its
+    /// name, and its key. Records a toggle in @p outcome.
+    void drawScopeRow(const std::string& id, int index, const ScopeMenuColumns& cols, PaneRenderOutcome& outcome);
 
     /// Draws @p id's keyboard letter over the row just drawn, right-aligned a
     /// margin of @p rightPad in from the row's edge.

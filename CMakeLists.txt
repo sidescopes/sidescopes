@@ -399,6 +399,7 @@ if(APPLE OR WIN32)
         src/app/row_layout.cpp
         src/app/scope_layout.cpp
         src/app/scope_pane_renderer.cpp
+        src/app/scope_order.cpp
         src/app/scope_registry.cpp
         src/app/scope_stack.cpp
         src/app/scope_view.cpp

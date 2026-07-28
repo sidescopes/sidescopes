@@ -1,12 +1,18 @@
 #include <array>
 #include <catch2/catch_test_macros.hpp>
+#include <map>
+#include <optional>
 #include <string>
 #include <vector>
 
+#include "app/attach_controller.h"
 #include "app/context_menu.h"
 #include "app/overlay_style.h"
 #include "app/scope_registry.h"
+#include "app/scope_view.h"
+#include "app/shortcut_resolver.h"
 #include "app/ui_scaling.h"
+#include "core/preferences.h"
 #include "modules/module_registry.h"
 
 namespace sidescopes {
@@ -36,7 +42,102 @@ int claimsOf(int chosen)
     return claims;
 }
 
+// A whole menu built over a live view, so a case can read what the entries say
+// rather than only what their ids decode to.
+struct MenuUnderTest
+{
+    ScopeView view{registry()};
+    ShortcutResolver shortcuts{registry()};
+    std::map<std::string, std::map<std::string, double>> scopeParams;
+    AttachController attach;
+    std::array<LayoutPreset, LayoutPresetSlots> presets;
+    std::vector<NativeMenuItem> items;
+    std::vector<ParamMenuAction> paramActions;
+
+    // Builds the background menu (no pane clicked), which carries every list.
+    void build()
+    {
+        const ContextMenuModel model{
+            view, registry(), shortcuts, scopeParams, attach, presets, true, 0, 1.0f, QualityLevel::Standard, false};
+        items.clear();
+        paramActions.clear();
+        buildContextMenu(model, -1, items, paramActions);
+    }
+
+    // The action labels directly inside the submenu named @p title, in the
+    // order the menu states them; entries of any nested submenu are skipped.
+    [[nodiscard]] std::vector<std::string> submenu(const char* title) const
+    {
+        std::vector<std::string> labels;
+        int depth = 0;
+        for (const NativeMenuItem& item : items) {
+            if (depth == 0) {
+                depth = item.kind == NativeMenuItem::Kind::SubmenuBegin && item.label == title ? 1 : 0;
+                continue;
+            }
+            if (item.kind == NativeMenuItem::Kind::SubmenuBegin) {
+                ++depth;
+            } else if (item.kind == NativeMenuItem::Kind::SubmenuEnd && --depth == 0) {
+                break;
+            } else if (depth == 1 && item.kind == NativeMenuItem::Kind::Action) {
+                labels.push_back(item.label);
+            }
+        }
+
+        return labels;
+    }
+};
+
+// A scope's name as every menu spells it.
+const char* menuName(const HostScope& scope)
+{
+    return scope.descriptor != nullptr ? scope.descriptor->name : "Color Picker";
+}
+
 }  // namespace
+
+TEST_CASE("The scopes submenu lists them in the user's own order")
+{
+    // Both scope lists read the same: the toolbar selector and this one are
+    // the same choice offered twice, so one order settles both.
+    MenuUnderTest menu;
+    menu.build();
+    const std::vector<std::string> registered = menu.submenu("Scopes");
+    REQUIRE(registered.size() == registry().scopes().size());
+
+    const int last = static_cast<int>(registered.size()) - 1;
+    REQUIRE(menu.view.reorderScopes(last, 0));
+    menu.build();
+    const std::vector<std::string> moved = menu.submenu("Scopes");
+    REQUIRE(moved.size() == registered.size());
+    CHECK(moved.front() == registered.back());
+    CHECK(moved[1] == registered.front());
+}
+
+TEST_CASE("A reordered scopes submenu still toggles the scope it names")
+{
+    // The entry ids are registry indices, which no reorder touches: moving a
+    // row must not hand its click to the scope that used to be there.
+    MenuUnderTest menu;
+    const int last = static_cast<int>(registry().scopes().size()) - 1;
+    REQUIRE(menu.view.reorderScopes(last, 0));
+    menu.build();
+
+    int checked = 0;
+    for (const NativeMenuItem& item : menu.items) {
+        if (item.actionId < MenuShowScopeBase || item.actionId >= MenuGraticuleBase) {
+            continue;
+        }
+        const std::optional<std::string> toggled = menuScopeToggle(item.actionId, registry());
+        REQUIRE(toggled);
+        const HostScope* scope = registry().byId(*toggled);
+        REQUIRE(scope != nullptr);
+        INFO("entry " << item.label);
+        CHECK(item.label == menuName(*scope));
+        ++checked;
+    }
+    CHECK(checked == static_cast<int>(registry().scopes().size()));
+}
 
 TEST_CASE("No menu id means two things at once")
 {

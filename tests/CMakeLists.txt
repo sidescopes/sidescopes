@@ -42,6 +42,7 @@ add_executable(sidescopes_tests
     test_layout_preset_store.cpp
     test_ui_scale.cpp
     test_ui_scaling.cpp
+    test_scope_order.cpp
     test_scope_registry.cpp
     test_pane_layout.cpp
     test_scope_stack.cpp
@@ -102,6 +103,7 @@ target_sources(sidescopes_tests PRIVATE
     ${CMAKE_SOURCE_DIR}/src/app/region_motion.cpp
     ${CMAKE_SOURCE_DIR}/src/app/region_picker.cpp
     ${CMAKE_SOURCE_DIR}/src/app/scope_layout.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/scope_order.cpp
     ${CMAKE_SOURCE_DIR}/src/app/scope_registry.cpp
     ${CMAKE_SOURCE_DIR}/src/app/scope_stack.cpp
     ${CMAKE_SOURCE_DIR}/src/app/scope_view.cpp

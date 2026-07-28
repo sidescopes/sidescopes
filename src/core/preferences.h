@@ -80,6 +80,14 @@ struct Preferences
     /// waveform) is accepted only as a migration input, folded into W in its
     /// Luma style. Never empty.
     std::string scopeStack = "V";
+    /// The order the user keeps the scopes in - the sequence the menu lists
+    /// them in and the panes follow - in the same token vocabulary as
+    /// @ref scopeStack, and naming scopes whether or not they are on screen.
+    /// Empty means no preference, and the application falls back to its
+    /// registration order; scopes the string leaves out follow the ones it
+    /// names. The application is the only judge of which tokens are real, so
+    /// the value is stored as read.
+    std::string scopeOrder;
     /// How strongly the graticule is drawn, a multiplier on its shipped ink and
     /// one of the discrete GraticuleStrengths. Bounded below rather than
     /// switchable off, so a stored value can quieten the graticule but never

@@ -1,13 +1,15 @@
 #include "app/scope_stack.h"
 
 #include <algorithm>
+#include <utility>
 
 #include "app/stack_tokens.h"
 
 namespace sidescopes {
 
-ScopeStack::ScopeStack(const ScopeRegistry& registry)
-    : m_registry(registry)
+ScopeStack::ScopeStack(const ScopeRegistry& registry, const ScopeOrder& order)
+    : m_registry(registry),
+      m_order(order)
 {
 }
 
@@ -32,6 +34,7 @@ bool ScopeStack::toggle(std::string_view id)
         return false;
     }
     m_ids.emplace_back(id);
+    applyOrder();
 
     return true;
 }
@@ -47,21 +50,9 @@ bool ScopeStack::choose(std::string_view id, bool stack)
     return !wasShown;
 }
 
-void ScopeStack::reorder(const std::vector<std::string>& order)
+void ScopeStack::applyOrder()
 {
-    if (order.size() != m_ids.size()) {
-        return;
-    }
-    // Same scopes, in a new sequence: sort both and compare so any order that
-    // adds, drops, or repeats a scope is rejected outright.
-    std::vector<std::string> want = order;
-    std::vector<std::string> have = m_ids;
-    std::sort(want.begin(), want.end());
-    std::sort(have.begin(), have.end());
-    if (want != have) {
-        return;
-    }
-    m_ids = order;
+    m_ids = m_order.sorted(std::move(m_ids));
 }
 
 std::vector<std::string> ScopeStack::enabledScopeIds() const
@@ -79,7 +70,7 @@ std::vector<std::string> ScopeStack::enabledScopeIds() const
 
 void ScopeStack::restore(const std::string& tokens)
 {
-    m_ids = parseStackTokens(m_registry, tokens);
+    m_ids = m_order.sorted(parseStackTokens(m_registry, tokens));
 }
 
 std::string ScopeStack::tokens() const

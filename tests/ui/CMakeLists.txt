@@ -81,6 +81,7 @@ foreach(suite IN ITEMS pipeline view)
         ${CMAKE_SOURCE_DIR}/src/app/scope_registry.cpp
         ${CMAKE_SOURCE_DIR}/src/app/overlay_style.cpp
         ${CMAKE_SOURCE_DIR}/src/app/pane_layout.cpp
+        ${CMAKE_SOURCE_DIR}/src/app/scope_order.cpp
         ${CMAKE_SOURCE_DIR}/src/app/scope_stack.cpp
         ${CMAKE_SOURCE_DIR}/src/app/scope_view.cpp
         ${CMAKE_SOURCE_DIR}/src/app/stack_tokens.cpp

@@ -3,6 +3,7 @@
 #include <string>
 #include <vector>
 
+#include "app/scope_order.h"
 #include "app/scope_registry.h"
 #include "app/scope_stack.h"
 #include "modules/module_registry.h"
@@ -70,7 +71,8 @@ ScopeRegistry letterlessRegistry()
 
 TEST_CASE("A stack starts on the vectorscope")
 {
-    ScopeStack stack{registry()};
+    ScopeOrder order{registry()};
+    ScopeStack stack{registry(), order};
     CHECK(stack.shows(VectorscopeScopeId));
     CHECK_FALSE(stack.shows(HistogramScopeId));
     CHECK(stack.ids().size() == 1);
@@ -78,7 +80,8 @@ TEST_CASE("A stack starts on the vectorscope")
 
 TEST_CASE("Toggling adds a scope and reports it newly visible")
 {
-    ScopeStack stack{registry()};
+    ScopeOrder order{registry()};
+    ScopeStack stack{registry(), order};
     CHECK(stack.toggle(HistogramScopeId));
     CHECK(stack.shows(HistogramScopeId));
     CHECK(stack.ids().size() == 2);
@@ -89,7 +92,8 @@ TEST_CASE("Toggling adds a scope and reports it newly visible")
 
 TEST_CASE("The last scope cannot be toggled away")
 {
-    ScopeStack stack{registry()};
+    ScopeOrder order{registry()};
+    ScopeStack stack{registry(), order};
     REQUIRE(stack.ids().size() == 1);
     CHECK_FALSE(stack.toggle(VectorscopeScopeId));
     CHECK(stack.ids().size() == 1);
@@ -98,7 +102,8 @@ TEST_CASE("The last scope cannot be toggled away")
 
 TEST_CASE("Choosing solos a scope unless stacking")
 {
-    ScopeStack stack{registry()};
+    ScopeOrder order{registry()};
+    ScopeStack stack{registry(), order};
     stack.toggle(WaveformScopeId);
     REQUIRE(stack.ids().size() == 2);
 
@@ -124,50 +129,58 @@ TEST_CASE("Choosing solos a scope unless stacking")
     }
 }
 
-TEST_CASE("Reordering permutes the shown scopes")
+TEST_CASE("The panes take the preferred order, not the order switched on")
 {
-    ScopeStack stack{registry()};
-    stack.restore("VWH");
-    REQUIRE(stack.ids() == std::vector<std::string>{VectorscopeScopeId, WaveformScopeId, HistogramScopeId});
+    // The whole point of a stable menu: a scope brought back returns to its
+    // place rather than to the end, so checking and unchecking several never
+    // rearranges the panes underneath.
+    ScopeOrder order{registry()};
+    ScopeStack stack{registry(), order};
+    order.restore("HWV");
+    stack.restore("V");
 
-    stack.reorder({HistogramScopeId, VectorscopeScopeId, WaveformScopeId});
-    CHECK(stack.ids() == std::vector<std::string>{HistogramScopeId, VectorscopeScopeId, WaveformScopeId});
-    // The new order is what persists.
-    CHECK(stack.tokens() == "HVW");
+    stack.toggle(WaveformScopeId);
+    CHECK(stack.ids() == std::vector<std::string>{WaveformScopeId, VectorscopeScopeId});
+    stack.toggle(HistogramScopeId);
+    CHECK(stack.ids() == std::vector<std::string>{HistogramScopeId, WaveformScopeId, VectorscopeScopeId});
+    CHECK(stack.tokens() == "HWV");
+
+    // Off and on again lands in the same seat, not at the end.
+    stack.toggle(WaveformScopeId);
+    stack.toggle(WaveformScopeId);
+    CHECK(stack.ids() == std::vector<std::string>{HistogramScopeId, WaveformScopeId, VectorscopeScopeId});
 }
 
-TEST_CASE("Reordering rejects anything but a permutation")
+TEST_CASE("Restoring a stack seats it in the preferred order")
 {
-    ScopeStack stack{registry()};
-    stack.restore("VW");
-    const std::vector<std::string> original{VectorscopeScopeId, WaveformScopeId};
+    // The token string a preset or an older preferences file carries states
+    // which scopes, not where they sit: the order answers that.
+    ScopeOrder order{registry()};
+    ScopeStack stack{registry(), order};
+    order.restore("HWV");
+    stack.restore("VWH");
+    CHECK(stack.ids() == std::vector<std::string>{HistogramScopeId, WaveformScopeId, VectorscopeScopeId});
+}
+
+TEST_CASE("A change to the preferred order re-seats the panes")
+{
+    ScopeOrder order{registry()};
+    ScopeStack stack{registry(), order};
+    stack.restore("VWH");
+    const std::vector<std::string> original{VectorscopeScopeId, WaveformScopeId, HistogramScopeId};
     REQUIRE(stack.ids() == original);
 
-    SECTION("a different size is ignored")
-    {
-        stack.reorder({VectorscopeScopeId});
-        CHECK(stack.ids() == original);
-        stack.reorder({VectorscopeScopeId, WaveformScopeId, HistogramScopeId});
-        CHECK(stack.ids() == original);
-    }
-
-    SECTION("a changed set is ignored")
-    {
-        // Right count, wrong members: a drag that raced a toggle underneath it.
-        stack.reorder({VectorscopeScopeId, HistogramScopeId});
-        CHECK(stack.ids() == original);
-    }
-
-    SECTION("a repeated scope is ignored")
-    {
-        stack.reorder({VectorscopeScopeId, VectorscopeScopeId});
-        CHECK(stack.ids() == original);
-    }
+    // The histogram is dragged to the front of the menu; the panes follow.
+    REQUIRE(order.move(static_cast<int>(order.rank(HistogramScopeId)), 0));
+    stack.applyOrder();
+    CHECK(stack.ids() == std::vector<std::string>{HistogramScopeId, VectorscopeScopeId, WaveformScopeId});
+    CHECK(stack.tokens() == "HVW");
 }
 
 TEST_CASE("The enabled ids cover the whole stack")
 {
-    ScopeStack stack{registry()};
+    ScopeOrder order{registry()};
+    ScopeStack stack{registry(), order};
     stack.restore("V");
     CHECK(stack.enabledScopeIds() == std::vector<std::string>{VectorscopeScopeId});
 
@@ -179,7 +192,8 @@ TEST_CASE("The color picker asks nothing of the worker")
 {
     // It reads the sampled cursor color, not worker output, so it
     // contributes no id to the enabled set.
-    ScopeStack stack{registry()};
+    ScopeOrder order{registry()};
+    ScopeStack stack{registry(), order};
     stack.restore("C");
     CHECK(stack.enabledScopeIds().empty());
     // The scope is still on screen; only the worker is spared.
@@ -188,7 +202,8 @@ TEST_CASE("The color picker asks nothing of the worker")
 
 TEST_CASE("The stack round-trips through preference letters")
 {
-    ScopeStack stack{registry()};
+    ScopeOrder order{registry()};
+    ScopeStack stack{registry(), order};
     stack.restore("VWRHC");
     CHECK(stack.tokens() == "VWRHC");
     CHECK(stack.ids().size() == 5);
@@ -210,18 +225,22 @@ TEST_CASE("The stack round-trips through preference letters")
 
 TEST_CASE("The stack reads scopes by bracketed id token")
 {
-    ScopeStack stack{registry()};
+    ScopeOrder order{registry()};
+    ScopeStack stack{registry(), order};
     stack.restore("[org.sidescopes.histogram][org.sidescopes.waveform]");
-    CHECK(stack.ids() == std::vector<std::string>{HistogramScopeId, WaveformScopeId});
+    // Which scopes is the token string's answer; where they sit is the
+    // preferred order's, which here is still the registration order.
+    CHECK(stack.ids() == std::vector<std::string>{WaveformScopeId, HistogramScopeId});
     // These built-ins carry letters, so they persist back as bare letters.
-    CHECK(stack.tokens() == "HW");
+    CHECK(stack.tokens() == "WH");
 }
 
 TEST_CASE("A stack drops a letter the registry rejects but keeps a known id")
 {
     // R11: letter validation runs through the registry, never a fixed string,
     // so an unknown letter falls out while a valid id token is kept.
-    ScopeStack stack{registry()};
+    ScopeOrder order{registry()};
+    ScopeStack stack{registry(), order};
     stack.restore("Q[org.sidescopes.histogram]");
     CHECK(stack.ids() == std::vector<std::string>{HistogramScopeId});
 }
@@ -235,7 +254,8 @@ TEST_CASE("A letterless scope survives a save as an id token")
     REQUIRE(scope != nullptr);
     REQUIRE(scope->letter == 0);
 
-    ScopeStack stack{letterless};
+    ScopeOrder order{letterless};
+    ScopeStack stack{letterless, order};
     stack.restore(std::string("[") + LetterlessId + "]");
     REQUIRE(stack.ids() == std::vector<std::string>{LetterlessId});
     CHECK(stack.tokens() == std::string("[") + LetterlessId + "]");

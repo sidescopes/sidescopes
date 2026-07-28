@@ -8,6 +8,12 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- The scope selector holds one stable order. It lists every scope,
+  shown or not, so checking and unchecking several never moves a row
+  under the pointer, and dragging a row sets an order that persists and
+  that the panes follow - a scope switched back on returns to the place
+  it was left. The right-click Scopes list goes in the same order. The
+  preferences key is `scope_order`.
 - The scopes read only a region you have selected. With none they stay
   empty, keeping their graticule, and the markers and color readout go on
   following the pointer anywhere on screen, so a color can still be

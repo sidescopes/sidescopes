@@ -19,7 +19,8 @@ double TraceFlash::redrawDueSeconds() const
 }
 
 ScopeView::ScopeView(const ScopeRegistry& registry)
-    : m_stack(registry)
+    : m_order(registry),
+      m_stack(registry, m_order)
 {
 }
 
@@ -31,6 +32,26 @@ ScopeStack& ScopeView::stack()
 const ScopeStack& ScopeView::stack() const
 {
     return m_stack;
+}
+
+ScopeOrder& ScopeView::order()
+{
+    return m_order;
+}
+
+const ScopeOrder& ScopeView::order() const
+{
+    return m_order;
+}
+
+bool ScopeView::reorderScopes(int from, int gap)
+{
+    if (!m_order.move(from, gap)) {
+        return false;
+    }
+    m_stack.applyOrder();
+
+    return true;
 }
 
 PaneLayout& ScopeView::layout()

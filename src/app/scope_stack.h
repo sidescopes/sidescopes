@@ -4,23 +4,27 @@
 #include <string_view>
 #include <vector>
 
+#include "app/scope_order.h"
 #include "app/scope_registry.h"
 
 namespace sidescopes {
 
-/// @brief The scopes on screen, in activation order.
+/// @brief The scopes on screen, in the user's preferred order.
 ///
-/// Keyed by scope id. Letters, order, and mask membership are resolved through
-/// the registry it is constructed with.
+/// Keyed by scope id. Letters and mask membership are resolved through the
+/// registry it is constructed with; where a scope lands among the panes is the
+/// ScopeOrder's answer, not the sequence the scopes were switched on in, so a
+/// scope brought back returns to the place it was left.
 class ScopeStack
 {
 public:
-    explicit ScopeStack(const ScopeRegistry& registry);
+    /// Both references must outlive the stack.
+    ScopeStack(const ScopeRegistry& registry, const ScopeOrder& order);
 
     /// @return Whether @p id is on screen.
     [[nodiscard]] bool shows(std::string_view id) const;
 
-    /// @return The scope ids on screen, in activation order.
+    /// @return The scope ids on screen, in the preferred order.
     [[nodiscard]] const std::vector<std::string>& ids() const;
 
     /// Adds @p id, or removes it when already shown. The last scope stays,
@@ -33,15 +37,14 @@ public:
     /// @return Whether @p id became newly visible.
     bool choose(std::string_view id, bool stack);
 
-    /// Reorders the scopes on screen to @p order. Applied only when @p order is
-    /// a permutation of the scopes already shown, so a drag that raced a change
-    /// to the stack is ignored rather than dropping or duplicating a scope.
-    void reorder(const std::vector<std::string>& order);
+    /// Re-seats the panes into the preferred order, for when that order has
+    /// itself changed. Every other change sorts as it is made.
+    void applyOrder();
 
     /// @return The scope ids the worker should compute for what is on screen:
     ///         the visible scopes minus the host-only ones (the color picker
     ///         reads the sampled cursor color, so it asks nothing of the
-    ///         worker), in activation order.
+    ///         worker), in the preferred order.
     [[nodiscard]] std::vector<std::string> enabledScopeIds() const;
 
     /// Restores the stack from a preference token string, in the format
@@ -54,6 +57,7 @@ public:
 
 private:
     const ScopeRegistry& m_registry;
+    const ScopeOrder& m_order;
     std::vector<std::string> m_ids{VectorscopeScopeId};
 };
 

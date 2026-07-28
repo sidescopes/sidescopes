@@ -5,6 +5,7 @@
 
 #include "app/overlay_style.h"
 #include "app/pane_layout.h"
+#include "app/scope_order.h"
 #include "app/scope_registry.h"
 #include "app/scope_stack.h"
 #include "app/trace_params.h"
@@ -43,9 +44,19 @@ class ScopeView
 public:
     explicit ScopeView(const ScopeRegistry& registry);
 
-    /// The scopes on screen, in activation order.
+    /// The scopes on screen, in the preferred order.
     [[nodiscard]] ScopeStack& stack();
     [[nodiscard]] const ScopeStack& stack() const;
+
+    /// The order the user keeps every scope in, on screen or not.
+    [[nodiscard]] ScopeOrder& order();
+    [[nodiscard]] const ScopeOrder& order() const;
+
+    /// Moves the scope at @p from to the @p gap slot of the preferred order,
+    /// bringing the panes with it - the two are one gesture, so nothing else
+    /// has to remember to re-seat them.
+    /// @return Whether the order changed.
+    bool reorderScopes(int from, int gap);
 
     /// The split direction and the weights the panes divide by.
     [[nodiscard]] PaneLayout& layout();
@@ -67,6 +78,8 @@ public:
     void setZoom(int level);
 
 private:
+    // Before the stack, which reads it as it seats a scope.
+    ScopeOrder m_order;
     ScopeStack m_stack;
     PaneLayout m_layout;
     TraceParams m_traces;

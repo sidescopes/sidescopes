@@ -223,6 +223,34 @@ TEST_CASE("Preferences deduplicate scope letters")
     CHECK(loaded.scopeStack == "RW");
 }
 
+TEST_CASE("Preferences round-trip the scope order beside the stack")
+{
+    // The order names scopes whether or not they are on screen, so it is not a
+    // second spelling of the stack and has to survive on its own.
+    Preferences saved;
+    saved.scopeStack = "WV";
+    saved.scopeOrder = "VWRHC";
+
+    const TempFile file("scope-order.txt");
+    REQUIRE(savePreferences(saved, file.path()));
+
+    const Preferences loaded = loadPreferences(file.path());
+    CHECK(loaded.scopeStack == "WV");
+    CHECK(loaded.scopeOrder == "VWRHC");
+}
+
+TEST_CASE("A file with no scope order takes the one its stack implies")
+{
+    // Every file written before the order existed. Resetting to registration
+    // order would rearrange the panes of a user who had arranged them; the
+    // stack states the arrangement they had, so it seeds the order.
+    const TempFile file("no-scope-order.txt");
+    file.write("scope_stack=HWV\n");
+
+    const Preferences loaded = loadPreferences(file.path());
+    CHECK(loaded.scopeOrder == "HWV");
+}
+
 TEST_CASE("Preferences keep the color picker in the stack")
 {
     const TempFile file("picker-scope.txt");

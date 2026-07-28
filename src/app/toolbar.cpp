@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -23,19 +24,9 @@ const char* scopeDisplayName(const HostScope& scope)
     return scope.descriptor != nullptr ? scope.descriptor->name : "Color picker";
 }
 
-// The drag-and-drop payload tag for a dragged scope row: its index in the
-// shown list travels as the payload.
+// The drag-and-drop payload tag for a dragged scope row: its index in the menu
+// order travels as the payload.
 constexpr const char* ScopeRowPayload = "ss_scope_row";
-
-// Lifts the scope at @p from and reinserts it at the @p gap slot (0..size,
-// counting the gaps between rows), so the dragged row lands where the insertion
-// bar showed. Removing @p from shifts every later slot down by one.
-void moveScope(std::vector<std::string>& order, int from, int gap)
-{
-    std::string moved = std::move(order[from]);
-    order.erase(order.begin() + from);
-    order.insert(order.begin() + (gap > from ? gap - 1 : gap), std::move(moved));
-}
 
 // Draws the drop insertion bar across the open popup at height @p y: a thin rule
 // in the gap the dragged scope would land in, in a quiet near-white rather than
@@ -99,17 +90,17 @@ float insertionBarY(float listTopY, int gap, float advance, float spacing)
 }
 
 // While a scope is being dragged, draws the single insertion line and, over the
-// rows from @p listTop spanning @p width, a full-list drop catch that lands the
-// reorder wherever the release falls: live only during the drag, it overlays the
-// rows without disturbing their clicks, which the drag suspends. @return Whether
-// the order of @p shown changed.
-bool applyScopeDrop(std::vector<std::string>& shown, ImVec2 listTop, float width)
+// @p count rows from @p listTop spanning @p width, a full-list drop catch that
+// lands the reorder wherever the release falls: live only during the drag, it
+// overlays the rows without disturbing their clicks, which the drag suspends.
+// @return The row lifted and the gap it was dropped in, or nothing while no
+// drop landed.
+std::optional<std::pair<int, int>> scopeDrop(ImVec2 listTop, float width, int count)
 {
     const ImGuiPayload* drag = ImGui::GetDragDropPayload();
     if (drag == nullptr || !drag->IsDataType(ScopeRowPayload)) {
-        return false;
+        return std::nullopt;
     }
-    const int count = static_cast<int>(shown.size());
     const ImVec2 resume = ImGui::GetCursorScreenPos();
     const float spacing = ImGui::GetStyle().ItemSpacing.y;
     // The real per-row pitch from the laid-out list, so the line tracks the rows
@@ -129,13 +120,11 @@ bool applyScopeDrop(std::vector<std::string>& shown, ImVec2 listTop, float width
         ImGui::EndDragDropTarget();
     }
     ImGui::SetCursorScreenPos(resume);
-    if (from >= 0 && gap != from && gap != from + 1) {
-        moveScope(shown, from, gap);
-
-        return true;
+    if (from < 0) {
+        return std::nullopt;
     }
 
-    return false;
+    return std::make_pair(from, gap);
 }
 
 // Seats the constant-width region toolbox on the row the scope selector opened.
@@ -200,9 +189,6 @@ Toolbar::ScopeMenuColumns Toolbar::scopeColumns() const
     float maxName = 0.0f;
     float maxKey = 0.0f;
     for (const HostScope& scope : m_registry.scopes()) {
-        if (scope.letter == 0) {
-            continue;
-        }
         maxName = std::max(maxName, ImGui::CalcTextSize(scopeDisplayName(scope)).x);
         maxKey = std::max(maxKey, ImGui::CalcTextSize(m_shortcuts.bindingFor(scope.id).c_str()).x);
     }
@@ -217,14 +203,15 @@ Toolbar::ScopeMenuColumns Toolbar::scopeColumns() const
 
 void Toolbar::appendScopeMenu(PaneRenderOutcome& outcome)
 {
-    // The scopes on screen lead, in pane order, so the menu mirrors the layout
-    // and can drag-reorder it; the rest follow below a rule. Every row toggles,
-    // never solos, so the menu stays open across several clicks. The frame
-    // padding is pulled right down so the checkbox sits near the text height
-    // rather than dwarfing its label. One quiet bar highlights each whole row
-    // (drawRowHover), so the checkbox and the name Selectable must not light up
-    // on their own - both their highlights are hidden, off the theme's loud
-    // selection blue too.
+    // Every registered scope, once, in the order the user keeps them in -
+    // which is what a checkbox is for: the list holds still while several are
+    // checked and unchecked, and a row moves only when it is dragged. Every
+    // row toggles, never solos, so the menu stays open across several clicks.
+    // The frame padding is pulled right down so the checkbox sits near the
+    // text height rather than dwarfing its label. One quiet bar highlights
+    // each whole row (drawRowHover), so the checkbox and the name Selectable
+    // must not light up on their own - both their highlights are hidden, off
+    // the theme's loud selection blue too.
     const ImGuiStyle& style = ImGui::GetStyle();
     const ImVec4 clear(0.0f, 0.0f, 0.0f, 0.0f);
     const ImVec4 frameBg = ImGui::GetStyleColorVec4(ImGuiCol_FrameBg);
@@ -240,83 +227,48 @@ void Toolbar::appendScopeMenu(PaneRenderOutcome& outcome)
     ImGui::PushStyleColor(ImGuiCol_FrameBgHovered, frameBg);
     ImGui::PushStyleColor(ImGuiCol_FrameBgActive, frameBg);
     const ScopeMenuColumns cols = scopeColumns();
-    std::vector<std::string> shown = m_view.stack().ids();
-    if (shown.size() > 1) {
+    const std::vector<std::string>& order = m_view.order().ids();
+    if (order.size() > 1) {
         ImGui::TextDisabled("drag to reorder");
     }
-    if (appendShownScopes(shown, cols, outcome)) {
-        outcome.reorderedStack = shown;
-        outcome.preferencesSaveDue = true;
+    const ImVec2 listTop = ImGui::GetCursorScreenPos();
+    for (int n = 0; n < static_cast<int>(order.size()); ++n) {
+        drawScopeRow(order[n], n, cols, outcome);
     }
-    bool ruled = false;
-    for (const HostScope& scope : m_registry.scopes()) {
-        if (scope.letter == 0 || m_view.stack().shows(scope.id)) {
-            continue;
-        }
-        if (!ruled) {
-            ImGui::Separator();
-            ruled = true;
-        }
-        if (drawAddRow(scope.id, cols)) {
-            outcome.chosenScope = ScopeChoice{scope.id, true};
-        }
+    if (const auto drop = scopeDrop(listTop, cols.width, static_cast<int>(order.size()))) {
+        outcome.preferencesSaveDue = m_view.reorderScopes(drop->first, drop->second);
     }
     ImGui::PopStyleColor(4);
     ImGui::PopStyleVar(3);
 }
 
-bool Toolbar::appendShownScopes(std::vector<std::string>& shown, const ScopeMenuColumns& cols,
-                                PaneRenderOutcome& outcome)
+void Toolbar::drawScopeRow(const std::string& id, int index, const ScopeMenuColumns& cols, PaneRenderOutcome& outcome)
 {
-    // Each on-screen scope: a checkbox that removes it, then its row-tall name as
-    // the drag handle - so a reorder is never read as a remove. The line and the
-    // drop are handled once, past the loop, from the whole list's geometry.
-    const float selWidth = cols.width - cols.nameX;
-    const ImVec2 rowSize(selWidth, ImGui::GetFrameHeight());
-    const ImVec2 listTop = ImGui::GetCursorScreenPos();
-    for (int n = 0; n < static_cast<int>(shown.size()); ++n) {
-        const char* name = scopeName(shown[n]);
-        drawRowHover(ImGui::GetCursorScreenPos().y);
-        ImGui::PushID(shown[n].c_str());
-        bool on = true;
-        if (ImGui::Checkbox("##shown", &on)) {
-            outcome.chosenScope = ScopeChoice{shown[n], true};
-        }
-        ImGui::SameLine(cols.nameX);
-        // A click on the name removes the scope, like its checkbox; a drag past
-        // the movement threshold reorders instead and never reports the click.
-        if (ImGui::Selectable(name, false, ImGuiSelectableFlags_NoAutoClosePopups, rowSize)) {
-            outcome.chosenScope = ScopeChoice{shown[n], true};
-        }
-        drawRowKey(shown[n], cols.rightPad);
-        if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_None)) {
-            ImGui::SetDragDropPayload(ScopeRowPayload, &n, sizeof(n));
-            ImGui::TextUnformatted(name);
-            ImGui::EndDragDropSource();
-        }
-        ImGui::PopID();
-    }
-
-    return applyScopeDrop(shown, listTop, cols.width);
-}
-
-bool Toolbar::drawAddRow(const std::string& id, const ScopeMenuColumns& cols)
-{
-    // The same layout as an on-screen row, minus the drag: a checkbox and the
-    // full-width name both add the scope when clicked.
+    // A checkbox that shows or hides the scope, then its row-tall name as the
+    // drag handle - so a reorder is never read as a toggle. The insertion line
+    // and the drop are handled once, past the loop, from the whole list's
+    // geometry.
     drawRowHover(ImGui::GetCursorScreenPos().y);
     ImGui::PushID(id.c_str());
-    bool on = false;
-    bool clicked = ImGui::Checkbox("##add", &on);
+    bool on = m_view.stack().shows(id);
+    if (ImGui::Checkbox("##shown", &on)) {
+        outcome.chosenScope = ScopeChoice{id, true};
+    }
     ImGui::SameLine(cols.nameX);
+    const char* name = scopeName(id);
+    // A click on the name toggles the scope, like its checkbox; a drag past the
+    // movement threshold reorders instead and never reports the click.
     const ImVec2 rowSize(cols.width - cols.nameX, ImGui::GetFrameHeight());
-    if (ImGui::Selectable(scopeName(id), false, ImGuiSelectableFlags_NoAutoClosePopups, rowSize)) {
-        clicked = true;
+    if (ImGui::Selectable(name, false, ImGuiSelectableFlags_NoAutoClosePopups, rowSize)) {
+        outcome.chosenScope = ScopeChoice{id, true};
     }
     drawRowKey(id, cols.rightPad);
+    if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_None)) {
+        ImGui::SetDragDropPayload(ScopeRowPayload, &index, sizeof(index));
+        ImGui::TextUnformatted(name);
+        ImGui::EndDragDropSource();
+    }
     ImGui::PopID();
-
-    return clicked;
 }
 
 void Toolbar::drawRowKey(std::string_view id, float rightPad) const

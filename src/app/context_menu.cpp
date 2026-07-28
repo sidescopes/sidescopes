@@ -129,16 +129,20 @@ void appendScopeOptions(const ContextMenuModel& model, std::string_view id, bool
 void appendScopesSubmenu(const ContextMenuModel& model, std::vector<NativeMenuItem>& menu)
 {
     menuSubmenu(menu, "Scopes");
-    // Every registered scope gets an entry, keyed by its registry index, so a
+    // Every registered scope gets an entry, in the order the user keeps them
+    // in, so this list and the toolbar's selector read the same. The id stays
+    // the scope's REGISTRY index, which nothing the user does can change, so a
     // new module appears here with no edit. A module scope names itself; the
     // one host scope (the colour picker, which carries no descriptor) is the
     // single exception.
-    const std::vector<HostScope>& scopes = model.registry.scopes();
-    for (std::size_t index = 0; index < scopes.size(); ++index) {
-        const HostScope& scope = scopes[index];
-        const char* name = scope.descriptor != nullptr ? scope.descriptor->name : "Color Picker";
-        menuAction(menu, name, MenuShowScopeBase + static_cast<int>(index), model.view.stack().shows(scope.id),
-                   shortcutLabel(model.shortcuts.bindingFor(scope.id)));
+    for (const std::string& id : model.view.order().ids()) {
+        const HostScope* scope = model.registry.byId(id);
+        if (scope == nullptr) {
+            continue;
+        }
+        const char* name = scope->descriptor != nullptr ? scope->descriptor->name : "Color Picker";
+        menuAction(menu, name, MenuShowScopeBase + model.registry.indexOf(id), model.view.stack().shows(id),
+                   shortcutLabel(model.shortcuts.bindingFor(id)));
     }
     menuEndSubmenu(menu);
 }
