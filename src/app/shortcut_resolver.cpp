@@ -3,8 +3,10 @@
 
 #include "app/shortcut_resolver.h"
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -113,12 +115,54 @@ ShortcutAction ShortcutAction::plain(Kind kind)
 ShortcutResolver::ShortcutResolver(const ScopeRegistry& registry)
     : m_registry(registry)
 {
+    resolveScopeBindings();
 }
 
 void ShortcutResolver::restore(const ShortcutBindings& bindings, std::map<std::string, std::string> scopeOverrides)
 {
     m_bindings = bindings;
     m_scopeOverrides = std::move(scopeOverrides);
+    resolveScopeBindings();
+}
+
+std::string ShortcutResolver::claimScopeKey(const HostScope& scope, std::vector<std::string>& claimed)
+{
+    const auto unclaimed = [&claimed](const std::string& key) {
+        return !key.empty() && std::find(claimed.begin(), claimed.end(), key) == claimed.end();
+    };
+    std::string key;
+    if (const auto custom = m_scopeOverrides.find(scope.id); custom != m_scopeOverrides.end()) {
+        if (unclaimed(custom->second)) {
+            key = custom->second;
+        } else {
+            // Dropped rather than kept, so it is not written back to claim the
+            // key again on the next launch.
+            m_scopeOverrides.erase(custom);
+        }
+    }
+    if (key.empty() && scope.letter != 0 && unclaimed(std::string(1, scope.letter))) {
+        key = std::string(1, scope.letter);
+    }
+    if (!key.empty()) {
+        claimed.push_back(key);
+    }
+
+    return key;
+}
+
+// One key, one scope. Each scope takes the key a file bound it to, or its own
+// registry letter when no file did, and either is refused when a scope ahead of
+// it already holds that key - the rule the registry applies to a module's
+// letter, extended to the overrides a file can name. Two scopes on one key is
+// not a state anything below can answer for: the plain key would show whichever
+// the scan reached last, while Shift stacked both of them.
+void ShortcutResolver::resolveScopeBindings()
+{
+    m_scopeBindings.clear();
+    std::vector<std::string> claimed;
+    for (const HostScope& scope : m_registry.scopes()) {
+        m_scopeBindings.emplace(scope.id, claimScopeKey(scope, claimed));
+    }
 }
 
 const ShortcutBindings& ShortcutResolver::bindings() const
@@ -133,12 +177,9 @@ const std::map<std::string, std::string>& ShortcutResolver::scopeOverrides() con
 
 std::string ShortcutResolver::bindingFor(std::string_view id) const
 {
-    if (const auto custom = m_scopeOverrides.find(std::string{id}); custom != m_scopeOverrides.end()) {
-        return custom->second;
-    }
-    const HostScope* scope = m_registry.byId(id);
+    const auto found = m_scopeBindings.find(id);
 
-    return scope != nullptr && scope->letter != 0 ? std::string(1, scope->letter) : std::string{};
+    return found != m_scopeBindings.end() ? found->second : std::string{};
 }
 
 int ShortcutResolver::cycledZoom(int current)

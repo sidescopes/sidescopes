@@ -14,6 +14,7 @@
 namespace sidescopes {
 
 class ScopeRegistry;
+struct HostScope;
 
 /// @return How a binding is written where a user reads it - the menu's
 ///         shortcut column, a tool's tooltip - which is the stored name for
@@ -130,7 +131,8 @@ public:
     [[nodiscard]] const std::map<std::string, std::string>& scopeOverrides() const;
 
     /// A scope's key: the user's override when set, otherwise the scope's
-    /// registry letter, or empty when it has none.
+    /// registry letter, or empty when neither is available to it. One key
+    /// never reaches two scopes - see @ref resolveScopeBindings.
     [[nodiscard]] std::string bindingFor(std::string_view id) const;
 
     /// The per-frame scan: an action for every bound key @p pressed reports
@@ -159,10 +161,17 @@ private:
     [[nodiscard]] std::vector<ShortcutAction> resolvePlainKeys(const ShortcutContext& context, bool shift,
                                                                const ShortcutKeyPressed& pressed) const;
     void appendScopeKeys(bool shift, const ShortcutKeyPressed& pressed, std::vector<ShortcutAction>& actions) const;
+    /// Settles which key each scope answers to, once, so no key reaches two of
+    /// them.
+    void resolveScopeBindings();
+    /// @return The key @p scope takes, adding it to @p claimed.
+    [[nodiscard]] std::string claimScopeKey(const HostScope& scope, std::vector<std::string>& claimed);
 
     const ScopeRegistry& m_registry;
     ShortcutBindings m_bindings;
     std::map<std::string, std::string> m_scopeOverrides;
+    /// One key per scope, keyed by scope id, and never the same key twice.
+    std::map<std::string, std::string, std::less<>> m_scopeBindings;
 };
 
 }  // namespace sidescopes

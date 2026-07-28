@@ -14,9 +14,9 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (Colored) stays a style on the luma scope. A file written while the
   two shared one scope is read by the style it saved: whichever trace
   that W meant is the scope it becomes, across the stack, the menu
-  order, every preset, the pane weights and the shortcut overrides, and
-  the luma scope inherits the intensity, sampling and smoothing the
-  waveform was tuned with.
+  order, every preset and the pane weights, and the luma scope inherits
+  the intensity, sampling and smoothing the waveform was tuned with. A
+  rebound key stays on the scope it was bound to.
 - The combined histogram is a scope of its own, on G, beside the
   per-channel histogram on H. One shows where the channels overlap, the
   other their exact shapes with nothing occluding them, and a
@@ -143,6 +143,12 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Each scope answers to a key of its own. The luma waveform and the
+  combined histogram showed W and H beside their names, the letters
+  their siblings already held, and pressing one of those letters showed
+  a single scope while Shift showed both. A key a preferences file binds
+  to a scope another already holds is refused, and the scope falls back
+  to its own letter: L and G.
 - Windows: the region border stays above windows that open after it.
   Topmost there is a position in the stacking order rather than a
   property that holds, so a window entering the band afterwards took the

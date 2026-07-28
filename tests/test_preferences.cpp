@@ -388,15 +388,16 @@ TEST_CASE("Preferences load a whole legacy file to the same live state")
     // a style: it survives in the stack's letter, and the key itself is gone,
     // so a later load cannot read it a second time.
     CHECK(param(loaded, HistogramId, "style") == -1.0);
-    // The stored mode named the coloured luma waveform, so W reads as L - and
-    // the binding the user set on "the waveform" follows the scope theirs was.
+    // The stored mode named the coloured luma waveform, so W reads as L. The
+    // binding does not follow it: a key is bound to a scope, not to the style
+    // it was in.
     CHECK(loaded.scopeStack == "VLH");
     CHECK(loaded.graticuleStrength == 0.75f);
     CHECK(loaded.vectorscopeZoom == 2);
     CHECK(loaded.windowX == 100);
     CHECK(loaded.windowWidth == 500);
-    CHECK(loaded.scopeShortcuts.count(WaveformId) == 0);
-    const auto binding = loaded.scopeShortcuts.find(LumaWaveformId);
+    CHECK(loaded.scopeShortcuts.count(LumaWaveformId) == 0);
+    const auto binding = loaded.scopeShortcuts.find(WaveformId);
     REQUIRE(binding != loaded.scopeShortcuts.end());
     CHECK(binding->second == "X");
 }

@@ -102,9 +102,9 @@ std::string rewriteTokens(const std::string& tokens, const Promotion& promotion)
 }
 
 /// Moves whatever @p byId holds under the retired scope to the one it became,
-/// so a pane weight or a shortcut override follows the scope it was set on. An
-/// entry already under the new id is left alone: the file names it explicitly
-/// and knows better than this does.
+/// so a pane weight follows the scope it was set on. An entry already under the
+/// new id is left alone: the file names it explicitly and knows better than this
+/// does.
 template <typename Value>
 void rewriteKeys(std::map<std::string, Value>& byId, const Promotion& promotion)
 {
@@ -187,7 +187,11 @@ void promoteScopeStyles(Preferences& preferences)
     preferences.scopeStack = rewriteTokens(preferences.scopeStack, promotion);
     preferences.scopeOrder = rewriteTokens(preferences.scopeOrder, promotion);
     rewriteKeys(preferences.layoutWeights, promotion);
-    rewriteKeys(preferences.scopeShortcuts, promotion);
+    // The shortcut overrides deliberately stay where they are. A key is bound
+    // to a scope, not to the style it was in, and older files carry an override
+    // per scope holding nothing but that scope's own letter - so moving them
+    // handed each promoted scope its sibling's letter and left two scopes on
+    // one key.
     for (LayoutPreset& preset : preferences.layoutPresets) {
         promotePreset(preset, live);
     }

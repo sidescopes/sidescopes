@@ -128,6 +128,31 @@ TEST_CASE("The scope registry lists the built-ins then the color picker")
     CHECK(scopes[6].letter == 'C');
 }
 
+TEST_CASE("No two shipped scopes claim one letter")
+{
+    // A letter names exactly one scope wherever it is read: the stack token a
+    // preferences file holds, the selector's shortcut column, and the key press
+    // itself. Two scopes on one letter is not a resolvable state - the plain key
+    // shows whichever the scan reached last while Shift stacks both - and it
+    // shipped once, because every scope's own descriptor still read correctly
+    // and nothing asked whether any two agreed.
+    //
+    // A letter already taken is refused, so the registry answers a collision by
+    // registering the loser letterless: the scope that did not get the letter it
+    // asked for is the one that names the clash.
+    const ScopeRegistry registry{builtinModules()};
+    std::string taken;
+    for (const HostScope& scope : registry.scopes()) {
+        INFO("scope " << scope.id);
+        if (scope.descriptor != nullptr) {
+            CHECK(scope.letter == scope.descriptor->letter);
+        }
+        REQUIRE(scope.letter != 0);
+        CHECK(taken.find(scope.letter) == std::string::npos);
+        taken.push_back(scope.letter);
+    }
+}
+
 TEST_CASE("The scope registry resolves scopes by id, letter, and index")
 {
     const ScopeRegistry registry{builtinModules()};

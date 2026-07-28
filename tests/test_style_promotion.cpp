@@ -81,14 +81,18 @@ TEST_CASE("A promoted pane weight follows its scope")
     CHECK(loaded.layoutWeights.at(CombinedHistogramId) == 2.5);
 }
 
-TEST_CASE("A promoted shortcut override follows its scope")
+TEST_CASE("A shortcut override stays on the scope it names")
 {
+    // A key is bound to a scope, not to the style it was in. Moving one here
+    // handed the promoted scope its sibling's letter, because older files carry
+    // an override per scope holding nothing but that scope's own letter - so
+    // two scopes ended up naming one key.
     const TempFile file("promote-shortcut.txt");
     const Preferences loaded =
         loadWritten(file, "scope_stack=VH\nshortcut_org.sidescopes.histogram=K\norg.sidescopes.histogram.style=1\n");
 
-    CHECK(loaded.scopeShortcuts.count(HistogramId) == 0);
-    CHECK(loaded.scopeShortcuts.at(CombinedHistogramId) == "K");
+    CHECK(loaded.scopeShortcuts.at(HistogramId) == "K");
+    CHECK(loaded.scopeShortcuts.count(CombinedHistogramId) == 0);
 }
 
 TEST_CASE("A preset is promoted by the style it saved, not the live one")

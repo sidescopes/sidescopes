@@ -14,6 +14,7 @@
 #include "modules/module_registry.h"
 #include "platform/desktop.h"
 #include "sidescopes/module.h"
+#include "temp_file.h"
 
 namespace sidescopes {
 namespace {
@@ -225,6 +226,98 @@ TEST_CASE("A per-scope override replaces the registry letter")
     const ShortcutAction action = sole(resolver.resolvePressed(readyContext(), ModifierState{}, pressing("Q")));
     REQUIRE(action.kind == ShortcutAction::Kind::ChooseScope);
     CHECK(action.scopeId == AlphaId);
+}
+
+TEST_CASE("An override cannot take a key another scope already holds")
+{
+    // The shape a shipped preferences file arrived in: a scope promoted out of
+    // a style inherited its sibling's override, so two scopes named one key.
+    // Neither answer was designed - the plain key showed whichever the scan
+    // reached last, because choosing a scope replaces the stack, while Shift
+    // stacked both.
+    ShortcutResolver resolver{registry()};
+    resolver.restore(ShortcutBindings{}, {{BetaId, "V"}});
+
+    CHECK(resolver.bindingFor(AlphaId) == "V");
+    CHECK(resolver.bindingFor(BetaId) == "W");
+    // Refused rather than remembered, so it cannot claim the key again on the
+    // next launch.
+    CHECK(resolver.scopeOverrides().count(BetaId) == 0);
+
+    const std::vector<ShortcutAction> plain = resolver.resolvePressed(readyContext(), ModifierState{}, pressing("V"));
+    REQUIRE(plain.size() == 1);
+    CHECK(plain.front().scopeId == AlphaId);
+
+    ModifierState shift;
+    shift.shift = true;
+    const std::vector<ShortcutAction> stacked = resolver.resolvePressed(readyContext(), shift, pressing("V"));
+    REQUIRE(stacked.size() == 1);
+    CHECK(stacked.front().scopeId == AlphaId);
+}
+
+TEST_CASE("A scope's own letter yields to a file that bound it elsewhere")
+{
+    // The other side of the collision, moved on its own: here the override is
+    // the claim that arrives first, so the scope whose letter it took is the
+    // one that gives way. Which side loses is decided by the order the scopes
+    // are registered in, not by which kind of claim it was.
+    ShortcutResolver resolver{registry()};
+    resolver.restore(ShortcutBindings{}, {{AlphaId, "W"}});
+
+    CHECK(resolver.bindingFor(AlphaId) == "W");
+    CHECK(resolver.bindingFor(BetaId).empty());
+
+    const std::vector<ShortcutAction> plain = resolver.resolvePressed(readyContext(), ModifierState{}, pressing("W"));
+    REQUIRE(plain.size() == 1);
+    CHECK(plain.front().scopeId == AlphaId);
+}
+
+TEST_CASE("The file that shipped the collision puts every scope on its own key")
+{
+    // The incident, end to end: a file naming a key for every scope, two of
+    // them the letters the promoted scopes' siblings hold. It reached a user,
+    // so the whole path from the file to the key is worth holding down rather
+    // than the refusal alone.
+    const test::TempFile file("collided-shortcuts.txt");
+    file.write(
+        "shortcut_org.sidescopes.vectorscope=V\n"
+        "shortcut_org.sidescopes.waveform.luma=W\n"
+        "shortcut_org.sidescopes.parade=R\n"
+        "shortcut_org.sidescopes.histogram.combined=H\n"
+        "shortcut_org.sidescopes.colorpicker=C\n");
+    const Preferences loaded = loadPreferences(file.path());
+
+    const ScopeRegistry shipped{builtinModules()};
+    ShortcutResolver resolver{shipped};
+    resolver.restore(loaded.shortcuts, loaded.scopeShortcuts);
+
+    CHECK(resolver.bindingFor(VectorscopeScopeId) == "V");
+    CHECK(resolver.bindingFor(WaveformScopeId) == "W");
+    CHECK(resolver.bindingFor(LumaWaveformScopeId) == "L");
+    CHECK(resolver.bindingFor(ParadeScopeId) == "R");
+    CHECK(resolver.bindingFor(HistogramScopeId) == "H");
+    CHECK(resolver.bindingFor(CombinedHistogramScopeId) == "G");
+    CHECK(resolver.bindingFor(ColorPickerScopeId) == "C");
+}
+
+TEST_CASE("Every shipped scope binds the key its module advertises")
+{
+    // What a scope advertises and what the keyboard binds are two different
+    // things, and the defect lived in the gap between them: the descriptors
+    // carried L and G while the selector and the keys both read W and H.
+    const ScopeRegistry shipped{builtinModules()};
+    const ShortcutResolver resolver{shipped};
+    std::vector<std::string> bound;
+    for (const HostScope& scope : shipped.scopes()) {
+        INFO("scope " << scope.id);
+        const std::string binding = resolver.bindingFor(scope.id);
+        REQUIRE(binding.size() == 1);
+        if (scope.descriptor != nullptr) {
+            CHECK(binding[0] == scope.descriptor->letter);
+        }
+        CHECK(std::find(bound.begin(), bound.end(), binding) == bound.end());
+        bound.push_back(binding);
+    }
 }
 
 TEST_CASE("A system chord silences the plain keys")
