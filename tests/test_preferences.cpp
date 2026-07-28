@@ -14,6 +14,7 @@ namespace {
 
 constexpr char VectorscopeId[] = "org.sidescopes.vectorscope";
 constexpr char WaveformId[] = "org.sidescopes.waveform";
+constexpr char LumaWaveformId[] = "org.sidescopes.waveform.luma";
 constexpr char ParadeId[] = "org.sidescopes.parade";
 constexpr char HistogramId[] = "org.sidescopes.histogram";
 
@@ -115,17 +116,23 @@ TEST_CASE("Preferences invert the legacy per-channel histogram flag")
     CHECK(loadPreferences(combined.path()).scopeStack == "VG");
 }
 
-TEST_CASE("Preferences map the legacy waveform mode to a style choice")
+TEST_CASE("Preferences map the legacy waveform mode to the scope it named")
 {
     // The retired enum stored Luma as 0 and ColoredLuma as 4; every other
-    // value read as RGB (choice 0).
+    // value read as RGB. Both luma flavours are the luma waveform now, and the
+    // tint is that scope's own style, so two migrations compose onto one
+    // letter.
     const TempFile luma("legacy-mode-luma.txt");
-    luma.write("waveform_mode=0\n");
-    CHECK(param(loadPreferences(luma.path()), WaveformId, "mode") == 1.0);
+    luma.write("scope_stack=VW\nwaveform_mode=0\n");
+    const Preferences plain = loadPreferences(luma.path());
+    CHECK(plain.scopeStack == "VL");
+    CHECK(param(plain, LumaWaveformId, "style") == 0.0);
 
     const TempFile colored("legacy-mode-colored.txt");
-    colored.write("waveform_mode=4\n");
-    CHECK(param(loadPreferences(colored.path()), WaveformId, "mode") == 2.0);
+    colored.write("scope_stack=VW\nwaveform_mode=4\n");
+    const Preferences tinted = loadPreferences(colored.path());
+    CHECK(tinted.scopeStack == "VL");
+    CHECK(param(tinted, LumaWaveformId, "style") == 1.0);
 }
 
 TEST_CASE("Preferences seed the parade from the waveform")
@@ -177,25 +184,24 @@ TEST_CASE("Preferences migrate the legacy single view mode")
 
 TEST_CASE("Preferences migrate the scope bit set and waveform style")
 {
-    // The RGB+Luma composite folds into the one waveform scope, whose
-    // style now lives in the context menu.
+    // The RGB+Luma composite reaches both scopes again: it is what stacking
+    // them is, and the letter it always translated to is a scope once more.
     const TempFile file("legacy-bit-set.txt");
     file.write("visible_scopes=6\nwaveform_mode=2\n");
 
     const Preferences loaded = loadPreferences(file.path());
-    CHECK(loaded.scopeStack == "WH");
+    CHECK(loaded.scopeStack == "WLH");
 }
 
-TEST_CASE("Preferences fold the retired luma scope into the waveform style")
+TEST_CASE("Preferences carry the oldest luma letter straight through")
 {
-    // A stack saved with the short-lived separate luma waveform: the
-    // letter becomes W, the style becomes Luma, the parade stays.
+    // A stack saved with the separate luma waveform of the oldest builds. That
+    // scope exists again, so the letter reaches it directly rather than
+    // travelling through the style it was folded into for one release.
     const TempFile file("legacy-luma-letter.txt");
     file.write("scope_stack=LR\n");
 
-    const Preferences loaded = loadPreferences(file.path());
-    CHECK(loaded.scopeStack == "WR");
-    CHECK(param(loaded, WaveformId, "mode") == 1.0);  // Luma
+    CHECK(loadPreferences(file.path()).scopeStack == "LR");
 }
 
 TEST_CASE("Preferences never load an empty scope set")
@@ -325,20 +331,26 @@ TEST_CASE("Preferences load a whole legacy file to the same live state")
     CHECK(param(loaded, WaveformId, "gain") == 0.08);
     CHECK(param(loaded, WaveformId, "stride") == 1.0);
     CHECK(param(loaded, WaveformId, "smoothing_ms") == 110.0);
-    CHECK(param(loaded, WaveformId, "mode") == 2.0);  // ColoredLuma
-    CHECK(param(loaded, ParadeId, "gain") == 0.08);   // mirrors the waveform
+    // The retired mode named the coloured luma waveform, which is a scope with
+    // a style of its own now; the key itself is consumed by that reading.
+    CHECK(param(loaded, WaveformId, "mode") == -1.0);
+    CHECK(param(loaded, LumaWaveformId, "style") == 1.0);
+    CHECK(param(loaded, ParadeId, "gain") == 0.08);  // mirrors the waveform
     CHECK(param(loaded, ParadeId, "stride") == 1.0);
     CHECK(param(loaded, HistogramId, "stride") == 3.0);
     // The retired per-channel flag reads as the scope it names rather than as
     // a style: it survives in the stack's letter, and the key itself is gone,
     // so a later load cannot read it a second time.
     CHECK(param(loaded, HistogramId, "style") == -1.0);
-    CHECK(loaded.scopeStack == "VWH");
+    // The stored mode named the coloured luma waveform, so W reads as L - and
+    // the binding the user set on "the waveform" follows the scope theirs was.
+    CHECK(loaded.scopeStack == "VLH");
     CHECK(loaded.graticuleStrength == 0.75f);
     CHECK(loaded.vectorscopeZoom == 2);
     CHECK(loaded.windowX == 100);
     CHECK(loaded.windowWidth == 500);
-    const auto binding = loaded.scopeShortcuts.find(WaveformId);
+    CHECK(loaded.scopeShortcuts.count(WaveformId) == 0);
+    const auto binding = loaded.scopeShortcuts.find(LumaWaveformId);
     REQUIRE(binding != loaded.scopeShortcuts.end());
     CHECK(binding->second == "X");
 }
@@ -413,16 +425,16 @@ TEST_CASE("Preferences clamp an out-of-range vectorscope zoom")
     CHECK(loaded.vectorscopeZoom == 1);
 }
 
-TEST_CASE("Preferences round-trip the colored-luma waveform mode")
+TEST_CASE("Preferences round-trip the colored-luma style")
 {
     Preferences saved;
-    saved.scopeParams[WaveformId]["mode"] = 2.0;
+    saved.scopeParams[LumaWaveformId]["style"] = 1.0;
 
     const TempFile file("colored-luma.txt");
     REQUIRE(savePreferences(saved, file.path()));
 
     const Preferences loaded = loadPreferences(file.path());
-    CHECK(param(loaded, WaveformId, "mode") == 2.0);
+    CHECK(param(loaded, LumaWaveformId, "style") == 1.0);
 }
 
 TEST_CASE("Preferences round-trip a non-round gain within serializer precision")

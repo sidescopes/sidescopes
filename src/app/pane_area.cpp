@@ -490,18 +490,20 @@ void PaneArea::drawVectorscopePane(Pass& pass)
 
 void PaneArea::drawWaveformPane(std::string_view id, Pass& pass)
 {
-    // The waveform and its parade share one intensity control; each draws its
-    // own instance's scale and cursor markers, and the module's marker layout
-    // already follows its configured mode, so the host needs no branch.
+    // The waveform and its parade share one intensity control and the luma
+    // waveform owns its own; each pane draws its own instance's scale and
+    // cursor markers, and the module's marker layout already follows what it
+    // plots, so the host needs no branch for that.
     const DrawnScope scope = drawScopeImage(textureForId(id), pass.input.regionSelected, false);
-    const SsParamInfo* gain = firstParamOfKind(descriptorFor(WaveformScopeId), SS_PARAM_INTENSITY);
+    const std::string_view owner = traceControlOwner(id);
+    const SsParamInfo* gain = firstParamOfKind(descriptorFor(owner), SS_PARAM_INTENSITY);
     TraceParams& traces = m_view.traces();
     if (gain != nullptr) {
-        if (const auto adjusted = traceIntensityGesture(scope, WaveformScopeId, traces.intensity(WaveformScopeId),
-                                                        static_cast<float>(gain->default_value),
-                                                        static_cast<float>(gain->intensity_shift), m_flash)) {
-            traces.setIntensity(WaveformScopeId, adjusted->intensity);
-            setWaveformGain(adjusted->gain);
+        if (const auto adjusted =
+                traceIntensityGesture(scope, owner, traces.intensity(owner), static_cast<float>(gain->default_value),
+                                      static_cast<float>(gain->intensity_shift), m_flash)) {
+            traces.setIntensity(owner, adjusted->intensity);
+            setTraceGain(owner, adjusted->gain);
             pass.outcome.analysisDirty = true;
         }
     }
@@ -559,10 +561,13 @@ const std::vector<float>& PaneArea::outlineFor(std::string_view id) const
     return at != m_output.outlines.end() ? at->second : none;
 }
 
-void PaneArea::setWaveformGain(double gain)
+void PaneArea::setTraceGain(std::string_view ownerId, double gain)
 {
-    m_analysis.scopeParams[WaveformScopeId]["gain"] = gain;
-    m_analysis.scopeParams[ParadeScopeId]["gain"] = gain;
+    m_analysis.scopeParams[std::string{ownerId}]["gain"] = gain;
+    if (ownerId == WaveformScopeId) {
+        // One control, two panes: the parade's gain follows the waveform's.
+        m_analysis.scopeParams[ParadeScopeId]["gain"] = gain;
+    }
 }
 
 const ScopeImage& PaneArea::imageFor(std::string_view id) const

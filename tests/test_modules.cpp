@@ -206,14 +206,13 @@ TEST_CASE("Registry serves the waveform through the module boundary")
     CHECK(scope->descriptor->letter == 'W');
     CHECK(scope->descriptor->image_width == 1024);
     CHECK(scope->descriptor->image_height == 256);
-    CHECK(scope->descriptor->param_count == 3);
+    CHECK(scope->descriptor->param_count == 2);
 
     ScopeInstance instance = registry.createInstance("org.sidescopes.waveform");
     REQUIRE(instance.valid());
 
-    // Luma mode (choice 1): mid gray sits at luma 128, which the engine
+    // Mid gray reaches every channel plane at level 128, which the engine
     // plots on image row 255 - 128 = 127.
-    REQUIRE(instance.configure(std::vector<SsParamValue>{{"mode", 1.0}}));
     TestFrame gray(32, 16, 128);
     const SsFrameView frame{gray.pixels.data(), 32 * 4, 32, 16, SS_COLOR_SPACE_SRGB, 1, SS_PIXEL_FORMAT_BGRA8};
     REQUIRE(instance.accumulate(frame, SsRect{0, 0, 32, 16}));
@@ -221,19 +220,41 @@ TEST_CASE("Registry serves the waveform through the module boundary")
     REQUIRE(image.height == 256);
     CHECK(brightestRow(image, 0) == 127);
 
-    // Luma carries a single full-width level marker.
-    const std::vector<SsMarker> luma = instance.markers(SsColor{128.0f, 128.0f, 128.0f});
-    REQUIRE(luma.size() == 1);
-    CHECK(luma[0].kind == SS_MARKER_LEVEL);
-    CHECK(luma[0].channel_mask == 0x7u);
-
-    // RGB mode (choice 0) returns one level per channel.
-    REQUIRE(instance.configure(std::vector<SsParamValue>{{"mode", 0.0}}));
+    // The overlaid channels return one level marker each.
     const std::vector<SsMarker> rgb = instance.markers(SsColor{128.0f, 128.0f, 128.0f});
     REQUIRE(rgb.size() == 3);
     for (const SsMarker& marker : rgb) {
         CHECK(marker.kind == SS_MARKER_LEVEL);
     }
+}
+
+TEST_CASE("Registry serves the luma waveform through the module boundary")
+{
+    ModuleRegistry& registry = builtinModules();
+    const RegisteredScope* scope = registry.findScope("org.sidescopes.waveform.luma");
+    REQUIRE(scope != nullptr);
+    CHECK(scope->descriptor->letter == 'L');
+    CHECK(scope->descriptor->image_width == 1024);
+    CHECK(scope->descriptor->image_height == 256);
+    // Intensity, sampling stride, and the tint that stayed a style.
+    CHECK(scope->descriptor->param_count == 3);
+
+    ScopeInstance instance = registry.createInstance("org.sidescopes.waveform.luma");
+    REQUIRE(instance.valid());
+
+    // Mid gray sits at luma 128, on image row 255 - 128 = 127.
+    TestFrame gray(32, 16, 128);
+    const SsFrameView frame{gray.pixels.data(), 32 * 4, 32, 16, SS_COLOR_SPACE_SRGB, 1, SS_PIXEL_FORMAT_BGRA8};
+    REQUIRE(instance.accumulate(frame, SsRect{0, 0, 32, 16}));
+    const SsImageView image = instance.image();
+    REQUIRE(image.height == 256);
+    CHECK(brightestRow(image, 0) == 127);
+
+    // One trace, so one full-width level marker.
+    const std::vector<SsMarker> luma = instance.markers(SsColor{128.0f, 128.0f, 128.0f});
+    REQUIRE(luma.size() == 1);
+    CHECK(luma[0].kind == SS_MARKER_LEVEL);
+    CHECK(luma[0].channel_mask == 0x7u);
 }
 
 TEST_CASE("Registry serves the parade through the module boundary")
@@ -406,43 +427,51 @@ TEST_CASE("Neither histogram can be configured into the other")
     CHECK(overlaid.markers(SsColor{10.0f, 150.0f, 240.0f})[1].band_to == Catch::Approx(1.0f));
 }
 
-TEST_CASE("The waveform's colored luma keeps the trace's own hue")
+TEST_CASE("The luma waveform's colored style keeps the trace's own hue")
 {
-    ScopeInstance waveform = builtinModules().createInstance("org.sidescopes.waveform");
-    REQUIRE(waveform.valid());
+    ScopeInstance luma = builtinModules().createInstance("org.sidescopes.waveform.luma");
+    REQUIRE(luma.valid());
 
     TestFrame red(32, 16, 255);
     red.fill(Color{200, 0, 0});
     const SsFrameView frame = viewOf(red);
 
-    // Plain luma (choice 1) plots a neutral trace.
-    REQUIRE(waveform.configure(std::vector<SsParamValue>{{"mode", 1.0}}));
-    REQUIRE(waveform.accumulate(frame, SsRect{0, 0, 32, 16}));
-    const std::array<int, 3> neutral = peakPixel(waveform.image());
+    // Plain (choice 0) plots a neutral trace.
+    REQUIRE(luma.configure(std::vector<SsParamValue>{{"style", 0.0}}));
+    REQUIRE(luma.accumulate(frame, SsRect{0, 0, 32, 16}));
+    const std::array<int, 3> neutral = peakPixel(luma.image());
     CHECK(neutral[0] == neutral[2]);
 
-    // Colored luma (choice 2) plots the same level in the color that made it.
-    REQUIRE(waveform.configure(std::vector<SsParamValue>{{"mode", 2.0}}));
-    REQUIRE(waveform.accumulate(frame, SsRect{0, 0, 32, 16}));
-    const std::array<int, 3> colored = peakPixel(waveform.image());
+    // Colored (choice 1) plots the same level in the color that made it.
+    REQUIRE(luma.configure(std::vector<SsParamValue>{{"style", 1.0}}));
+    REQUIRE(luma.accumulate(frame, SsRect{0, 0, 32, 16}));
+    const std::array<int, 3> colored = peakPixel(luma.image());
     CHECK(colored[0] > colored[2]);
 
-    // Both luma flavors carry the one full-width level marker.
-    const std::vector<SsMarker> markers = waveform.markers(SsColor{200.0f, 0.0f, 0.0f});
+    // Both flavors carry the one full-width level marker.
+    const std::vector<SsMarker> markers = luma.markers(SsColor{200.0f, 0.0f, 0.0f});
     REQUIRE(markers.size() == 1);
     CHECK(markers[0].kind == SS_MARKER_LEVEL);
     CHECK(markers[0].channel_mask == 0x7U);
 }
 
-TEST_CASE("An unknown style choice leaves the waveform on RGB")
+TEST_CASE("No waveform scope can be configured into another")
 {
+    // Each is defined by what it plots, so a stale `mode` key from a file
+    // written while these were one scope's styles must not move any of them -
+    // and a file naming a parameter no scope declares is never refused. The
+    // marker layout reports which scope each still is: three channel levels
+    // for the RGB waveform, one full-width level for the luma one.
     ScopeInstance waveform = builtinModules().createInstance("org.sidescopes.waveform");
+    ScopeInstance luma = builtinModules().createInstance("org.sidescopes.waveform.luma");
     REQUIRE(waveform.valid());
+    REQUIRE(luma.valid());
 
-    // A choice outside the declared range must not strand the scope in a mode
-    // it cannot name; RGB is the fallback, which its three markers report.
-    REQUIRE(waveform.configure(std::vector<SsParamValue>{{"mode", 7.0}}));
+    REQUIRE(waveform.configure(std::vector<SsParamValue>{{"mode", 1.0}}));
+    REQUIRE(luma.configure(std::vector<SsParamValue>{{"mode", 0.0}}));
+
     CHECK(waveform.markers(SsColor{128.0f, 128.0f, 128.0f}).size() == 3);
+    CHECK(luma.markers(SsColor{128.0f, 128.0f, 128.0f}).size() == 1);
 }
 
 TEST_CASE("The parade reads the waveform's bins and draws the same trace")

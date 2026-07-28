@@ -18,59 +18,43 @@ const SsScopeDescriptor* descriptorFor(const ScopeRegistry& registry, std::strin
     return hostScope != nullptr ? hostScope->descriptor : nullptr;
 }
 
-void drawVectorscopeSettings(const SettingsContext& ctx)
+/// One scope's trace controls: intensity, sampling stride and marker
+/// smoothing. The sliders read their default, headroom and range from the
+/// descriptor, and the smoothing slider is host state. @p suffix keeps the
+/// widget ids apart between sections.
+void drawTraceSettings(const SettingsContext& ctx, std::string_view id, const char* label, const char* suffix)
 {
-    // The intensity and stride sliders read their default, headroom, and range
-    // from the descriptor; the smoothing slider is host state.
-    const SsParamInfo* gain = firstParamOfKind(descriptorFor(ctx.registry, VectorscopeScopeId), SS_PARAM_INTENSITY);
-    const SsParamInfo* strideParam = firstParamOfKind(descriptorFor(ctx.registry, VectorscopeScopeId), SS_PARAM_INT);
-    ImGui::TextDisabled("vectorscope");
-    float percent = ctx.view.traces().intensity(VectorscopeScopeId);
-    if (ImGui::SliderFloat("intensity##v", &percent, 0.0f, 100.0f, "%.0f%%")) {
-        ctx.view.traces().setIntensity(VectorscopeScopeId, percent);
-        ctx.analysis.scopeParams[VectorscopeScopeId][gain->key] =
-            traceGainFromIntensity(percent, static_cast<float>(gain->intensity_shift));
+    const SsScopeDescriptor* descriptor = descriptorFor(ctx.registry, id);
+    const SsParamInfo* gain = firstParamOfKind(descriptor, SS_PARAM_INTENSITY);
+    const SsParamInfo* strideParam = firstParamOfKind(descriptor, SS_PARAM_INT);
+    if (gain == nullptr || strideParam == nullptr) {
+        return;
+    }
+    // The parade shares the waveform's controls, so only the waveform is
+    // shown and each write reaches both scopes' parameters.
+    const std::string_view mirror = id == WaveformScopeId ? std::string_view{ParadeScopeId} : std::string_view{};
+    const auto write = [&](const char* key, double value) {
+        ctx.analysis.scopeParams[std::string{id}][key] = value;
+        if (!mirror.empty()) {
+            ctx.analysis.scopeParams[std::string{mirror}][key] = value;
+        }
         ctx.analysisDirty = true;
-    }
-    int stride =
-        static_cast<int>(scopeParam(ctx.analysis, VectorscopeScopeId, strideParam->key, strideParam->default_value));
-    if (ImGui::SliderInt("sampling 1:N##v", &stride, static_cast<int>(strideParam->min_value),
-                         static_cast<int>(strideParam->max_value))) {
-        ctx.analysis.scopeParams[VectorscopeScopeId][strideParam->key] = stride;
-        ctx.analysisDirty = true;
-    }
-    float smoothingMs = ctx.view.traces().smoothing(VectorscopeScopeId);
-    if (ImGui::SliderFloat("smoothing ms##v", &smoothingMs, 0.0f, 500.0f, "%.0f")) {
-        ctx.view.traces().setSmoothing(VectorscopeScopeId, smoothingMs);
-    }
-}
+    };
 
-void drawWaveformSettings(const SettingsContext& ctx)
-{
-    // The waveform and its parade share one control, so only the waveform is
-    // shown; each write reaches both scopes' parameters.
-    const SsParamInfo* gain = firstParamOfKind(descriptorFor(ctx.registry, WaveformScopeId), SS_PARAM_INTENSITY);
-    const SsParamInfo* strideParam = firstParamOfKind(descriptorFor(ctx.registry, WaveformScopeId), SS_PARAM_INT);
-    ImGui::TextDisabled("waveform");
-    float percent = ctx.view.traces().intensity(WaveformScopeId);
-    if (ImGui::SliderFloat("intensity##w", &percent, 0.0f, 100.0f, "%.0f%%")) {
-        ctx.view.traces().setIntensity(WaveformScopeId, percent);
-        const double value = traceGainFromIntensity(percent, static_cast<float>(gain->intensity_shift));
-        ctx.analysis.scopeParams[WaveformScopeId]["gain"] = value;
-        ctx.analysis.scopeParams[ParadeScopeId]["gain"] = value;
-        ctx.analysisDirty = true;
+    ImGui::TextDisabled("%s", label);
+    float percent = ctx.view.traces().intensity(id);
+    if (ImGui::SliderFloat((std::string{"intensity##"} + suffix).c_str(), &percent, 0.0f, 100.0f, "%.0f%%")) {
+        ctx.view.traces().setIntensity(id, percent);
+        write(gain->key, traceGainFromIntensity(percent, static_cast<float>(gain->intensity_shift)));
     }
-    int stride =
-        static_cast<int>(scopeParam(ctx.analysis, WaveformScopeId, strideParam->key, strideParam->default_value));
-    if (ImGui::SliderInt("sampling 1:N##w", &stride, static_cast<int>(strideParam->min_value),
-                         static_cast<int>(strideParam->max_value))) {
-        ctx.analysis.scopeParams[WaveformScopeId]["stride"] = stride;
-        ctx.analysis.scopeParams[ParadeScopeId]["stride"] = stride;
-        ctx.analysisDirty = true;
+    int stride = static_cast<int>(scopeParam(ctx.analysis, id, strideParam->key, strideParam->default_value));
+    if (ImGui::SliderInt((std::string{"sampling 1:N##"} + suffix).c_str(), &stride,
+                         static_cast<int>(strideParam->min_value), static_cast<int>(strideParam->max_value))) {
+        write(strideParam->key, stride);
     }
-    float smoothingMs = ctx.view.traces().smoothing(WaveformScopeId);
-    if (ImGui::SliderFloat("smoothing ms##w", &smoothingMs, 0.0f, 500.0f, "%.0f")) {
-        ctx.view.traces().setSmoothing(WaveformScopeId, smoothingMs);
+    float smoothingMs = ctx.view.traces().smoothing(id);
+    if (ImGui::SliderFloat((std::string{"smoothing ms##"} + suffix).c_str(), &smoothingMs, 0.0f, 500.0f, "%.0f")) {
+        ctx.view.traces().setSmoothing(id, smoothingMs);
     }
 }
 
@@ -88,8 +72,9 @@ void drawSettingsWindow(const SettingsContext& ctx)
     ImGui::Text("analysis %.2f ms | frames %llu | ui %.0f fps", ctx.output.accumulateMilliseconds,
                 static_cast<unsigned long long>(ctx.output.framesProcessed), static_cast<double>(io.Framerate));
     ImGui::Separator();
-    drawVectorscopeSettings(ctx);
-    drawWaveformSettings(ctx);
+    drawTraceSettings(ctx, VectorscopeScopeId, "vectorscope", "v");
+    drawTraceSettings(ctx, WaveformScopeId, "waveform", "w");
+    drawTraceSettings(ctx, LumaWaveformScopeId, "luma waveform", "l");
     ImGui::TextDisabled("modes and toggles: right-click a scope");
     ImGui::TextDisabled("%s", ctx.version.display.c_str());
     ImGui::End();

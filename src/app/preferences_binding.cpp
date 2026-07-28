@@ -65,11 +65,12 @@ void restorePreferences(const Preferences& saved, ScopeView& view, PinBoard& pin
         VectorscopeScopeId,
         intensityFromTraceGain(static_cast<float>(scopeParam(analysis, VectorscopeScopeId, "gain", 3.0)),
                                VectorscopeIntensityShift));
-    view.traces().setIntensity(
-        WaveformScopeId,
-        intensityFromTraceGain(static_cast<float>(scopeParam(analysis, WaveformScopeId, "gain", 0.05))));
+    for (const std::string_view id : {std::string_view{WaveformScopeId}, std::string_view{LumaWaveformScopeId}}) {
+        view.traces().setIntensity(id,
+                                   intensityFromTraceGain(static_cast<float>(scopeParam(analysis, id, "gain", 0.05))));
+        view.traces().setSmoothing(id, savedSmoothing(saved, id, 100.0));
+    }
     view.traces().setSmoothing(VectorscopeScopeId, savedSmoothing(saved, VectorscopeScopeId, 75.0));
-    view.traces().setSmoothing(WaveformScopeId, savedSmoothing(saved, WaveformScopeId, 100.0));
     shortcuts.restore(saved.shortcuts, saved.scopeShortcuts);
     analysis.enabledScopes = view.stack().enabledScopeIds();
 }
@@ -85,6 +86,7 @@ Preferences capturePreferences(const ScopeView& view, const PinBoard& pins, cons
     saved.scopeParams.erase(ParadeScopeId);
     saved.scopeParams[VectorscopeScopeId]["smoothing_ms"] = view.traces().smoothing(VectorscopeScopeId);
     saved.scopeParams[WaveformScopeId]["smoothing_ms"] = view.traces().smoothing(WaveformScopeId);
+    saved.scopeParams[LumaWaveformScopeId]["smoothing_ms"] = view.traces().smoothing(LumaWaveformScopeId);
     saved.scopeStack = view.stack().tokens();
     saved.scopeOrder = view.order().tokens();
     saved.graticuleStrength = view.graticuleStrength();

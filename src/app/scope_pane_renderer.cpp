@@ -85,7 +85,7 @@ ScopePaneSizes ScopePaneRenderer::paneSizes() const
         return largest;
     };
 
-    return ScopePaneSizes{largestOf({WaveformScopeId, ParadeScopeId}),
+    return ScopePaneSizes{largestOf({WaveformScopeId, LumaWaveformScopeId, ParadeScopeId}),
                           largestOf({HistogramScopeId, CombinedHistogramScopeId}), largestOf({VectorscopeScopeId})};
 }
 

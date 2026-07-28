@@ -11,12 +11,20 @@ namespace {
 // The ids this rewrites between. Core cannot see the application's scope
 // registry, so the ones it needs are named here, the way the loader names the
 // scopes whose retired keys it migrates.
+constexpr char WaveformId[] = "org.sidescopes.waveform";
+constexpr char LumaWaveformId[] = "org.sidescopes.waveform.luma";
 constexpr char HistogramId[] = "org.sidescopes.histogram";
 constexpr char CombinedHistogramId[] = "org.sidescopes.histogram.combined";
 
-// The retired choice key, and the value from which it named the combined
-// plot: halfway, which is where the module itself rounded a choice.
+// The retired choice keys, and the values from which each named a promoted
+// scope: halfway, which is where the modules themselves rounded a choice. The
+// waveform's mode ran RGB, Luma, Luma (Colored); the last of those is the luma
+// waveform in its own surviving style.
+constexpr char WaveformModeKey[] = "mode";
 constexpr char HistogramStyleKey[] = "style";
+constexpr char LumaStyleKey[] = "style";
+constexpr double LumaModeFrom = 0.5;
+constexpr double ColoredLumaFrom = 1.5;
 constexpr double CombinedStyleFrom = 0.5;
 
 using StyleMap = std::map<std::string, std::map<std::string, double>>;
@@ -25,12 +33,17 @@ using StyleMap = std::map<std::string, std::map<std::string, double>>;
 /// own; the live arrangement's are the scope parameters themselves.
 struct RetiredChoices
 {
+    double waveformMode = 0.0;
     double histogramStyle = 0.0;
 };
 
 /// Which scope each retired letter names, for one arrangement.
 struct Promotion
 {
+    bool waveformIsLuma = false;
+    /// Whether the luma waveform it names is the tinted one, which survives as
+    /// that scope's own style.
+    bool lumaIsColored = false;
     bool histogramIsCombined = false;
 };
 
@@ -47,12 +60,14 @@ double choiceOr(const StyleMap& styles, const char* id, const char* key, double 
 
 RetiredChoices choicesFrom(const StyleMap& styles, const RetiredChoices& fallback)
 {
-    return RetiredChoices{choiceOr(styles, HistogramId, HistogramStyleKey, fallback.histogramStyle)};
+    return RetiredChoices{choiceOr(styles, WaveformId, WaveformModeKey, fallback.waveformMode),
+                          choiceOr(styles, HistogramId, HistogramStyleKey, fallback.histogramStyle)};
 }
 
 Promotion promotionOf(const RetiredChoices& choices)
 {
-    return Promotion{choices.histogramStyle >= CombinedStyleFrom};
+    return Promotion{choices.waveformMode >= LumaModeFrom, choices.waveformMode >= ColoredLumaFrom,
+                     choices.histogramStyle >= CombinedStyleFrom};
 }
 
 /// @p tokens with each retired letter replaced by the scope it now names.
@@ -74,7 +89,13 @@ std::string rewriteTokens(const std::string& tokens, const Promotion& promotion)
         }
         const char letter = tokens[at];
         ++at;
-        rewritten += (letter == 'H' && promotion.histogramIsCombined) ? 'G' : letter;
+        if (letter == 'W' && promotion.waveformIsLuma) {
+            rewritten += 'L';
+        } else if (letter == 'H' && promotion.histogramIsCombined) {
+            rewritten += 'G';
+        } else {
+            rewritten += letter;
+        }
     }
 
     return rewritten;
@@ -95,6 +116,9 @@ void rewriteKeys(std::map<std::string, Value>& byId, const Promotion& promotion)
         byId.emplace(to, at->second);
         byId.erase(at);
     };
+    if (promotion.waveformIsLuma) {
+        move(WaveformId, LumaWaveformId);
+    }
     if (promotion.histogramIsCombined) {
         move(HistogramId, CombinedHistogramId);
     }
@@ -141,8 +165,15 @@ void promotePreset(LayoutPreset& preset, const RetiredChoices& live)
     // falling back to the live ones for a slot saved before styles were
     // captured at all.
     const Promotion promotion = promotionOf(choicesFrom(preset.styles, live));
+    const bool hadWaveform = preset.stack.find('W') != std::string::npos;
     preset.stack = rewriteTokens(preset.stack, promotion);
     rewriteKeys(preset.weights, promotion);
+    if (promotion.waveformIsLuma && hadWaveform) {
+        // The tint survives as the luma waveform's own style, so a slot saved
+        // showing the coloured trace still loads it.
+        preset.styles[LumaWaveformId][LumaStyleKey] = promotion.lumaIsColored ? 1.0 : 0.0;
+    }
+    eraseChoice(preset.styles, WaveformId, WaveformModeKey);
     eraseChoice(preset.styles, HistogramId, HistogramStyleKey);
 }
 
@@ -161,7 +192,14 @@ void promoteScopeStyles(Preferences& preferences)
         promotePreset(preset, live);
     }
 
+    inherit(preferences.scopeParams, WaveformId, LumaWaveformId, {"gain", "stride", "smoothing_ms"});
     inherit(preferences.scopeParams, HistogramId, CombinedHistogramId, {"stride"});
+    if (promotion.waveformIsLuma) {
+        // Only when the retired key really named the luma waveform: a file that
+        // states the luma scope's own style is a newer statement than this.
+        preferences.scopeParams[LumaWaveformId][LumaStyleKey] = promotion.lumaIsColored ? 1.0 : 0.0;
+    }
+    eraseChoice(preferences.scopeParams, WaveformId, WaveformModeKey);
     eraseChoice(preferences.scopeParams, HistogramId, HistogramStyleKey);
 }
 

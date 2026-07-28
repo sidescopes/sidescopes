@@ -117,7 +117,9 @@ private:
     /// @return @p id's exported curve, or an empty one while no pass has
     ///         published it.
     [[nodiscard]] const std::vector<float>& outlineFor(std::string_view id) const;
-    void setWaveformGain(double gain);
+    /// Writes @p gain to the scope that owns the control and to anything
+    /// mirroring it.
+    void setTraceGain(std::string_view ownerId, double gain);
     /// @return @p id's texture, or null while no pass has composed one.
     [[nodiscard]] ScopeTexture* textureForId(std::string_view id);
     void uploadScope(std::unique_ptr<ScopeTexture>& texture, const ScopeImage& image);

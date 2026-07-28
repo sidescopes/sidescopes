@@ -117,7 +117,7 @@ std::pair<int, int> AdaptiveDetail::desiredWaveformSize(const ScopePaneSizes& pa
     const std::pair<int, int> waveSize = currentSize(WaveformScopeId);
     int wantColumns = waveSize.first;
     int wantHeight = waveSize.second;
-    if (anyShown(m_view.stack(), {WaveformScopeId, ParadeScopeId})) {
+    if (anyShown(m_view.stack(), {WaveformScopeId, LumaWaveformScopeId, ParadeScopeId})) {
         wantColumns = resolutionCovering(panePixels.waveform.width, {512, 1024, 2048, MaximumWaveformColumns},
                                          quality.columnTolerance);
         if (regionWidth > 0) {

@@ -128,15 +128,14 @@ TEST_CASE("A lone choice is a Style submenu unprefixed but flattens when nested"
     {
         std::vector<NativeMenuItem> items;
         std::vector<ParamMenuAction> actions;
-        appendScopeChoiceMenus(*descriptorOf(registry, WaveformScopeId), {}, false, items, actions);
-        REQUIRE(items.size() == 5);
+        appendScopeChoiceMenus(*descriptorOf(registry, LumaWaveformScopeId), {}, false, items, actions);
+        REQUIRE(items.size() == 4);
         CHECK(items[0].kind == Kind::SubmenuBegin);
-        CHECK(items[0].label == "Style");  // "Waveform Style" stripped
-        CHECK(items[1].label == "RGB");
-        CHECK(items[1].checked);  // mode defaults to RGB (choice 0)
-        CHECK(items[2].label == "Luma");
-        CHECK(items[3].label == "Luma (Colored)");
-        CHECK(items[4].kind == Kind::SubmenuEnd);
+        CHECK(items[0].label == "Style");  // "Luma Waveform Style" stripped
+        CHECK(items[1].label == "Plain");
+        CHECK(items[1].checked);  // style defaults to Plain (choice 0)
+        CHECK(items[2].label == "Colored");
+        CHECK(items[3].kind == Kind::SubmenuEnd);
     }
 
     // Nested under the scope-name submenu (a global click): the lone choice's
@@ -144,12 +143,11 @@ TEST_CASE("A lone choice is a Style submenu unprefixed but flattens when nested"
     {
         std::vector<NativeMenuItem> items;
         std::vector<ParamMenuAction> actions;
-        appendScopeChoiceMenus(*descriptorOf(registry, WaveformScopeId), {}, true, items, actions);
-        REQUIRE(items.size() == 3);
+        appendScopeChoiceMenus(*descriptorOf(registry, LumaWaveformScopeId), {}, true, items, actions);
+        REQUIRE(items.size() == 2);
         CHECK(items[0].kind == Kind::Action);
-        CHECK(items[0].label == "RGB");
-        CHECK(items[1].label == "Luma");
-        CHECK(items[2].label == "Luma (Colored)");
+        CHECK(items[0].label == "Plain");
+        CHECK(items[1].label == "Colored");
     }
 }
 
@@ -169,17 +167,19 @@ TEST_CASE("Neither histogram contributes a menu option of its own")
     }
 }
 
-TEST_CASE("The parade contributes no menu options of its own")
+TEST_CASE("Neither the RGB waveform nor the parade contributes a menu option")
 {
-    // R4: the parade shares the waveform's controls and exposes no choice
-    // parameters, so a generic walk emits nothing - no duplicate control.
+    // Each is defined by what it plots and neither declares a choice, so a
+    // generic walk over either emits nothing. A style menu here would offer a
+    // scope the chance to become one of its siblings.
     const ScopeRegistry registry{builtinModules()};
-    std::vector<NativeMenuItem> items;
-    std::vector<ParamMenuAction> actions;
-
-    appendScopeChoiceMenus(*descriptorOf(registry, ParadeScopeId), {}, false, items, actions);
-    CHECK(items.empty());
-    CHECK(actions.empty());
+    for (const std::string_view id : {WaveformScopeId, ParadeScopeId}) {
+        std::vector<NativeMenuItem> items;
+        std::vector<ParamMenuAction> actions;
+        appendScopeChoiceMenus(*descriptorOf(registry, id), {}, false, items, actions);
+        CHECK(items.empty());
+        CHECK(actions.empty());
+    }
 }
 
 TEST_CASE("Side-table ids continue across scopes in one menu build")
@@ -188,17 +188,17 @@ TEST_CASE("Side-table ids continue across scopes in one menu build")
     std::vector<NativeMenuItem> items;
     std::vector<ParamMenuAction> actions;
 
-    // A stack of waveform then vectorscope, each nested under its own name.
-    appendScopeChoiceMenus(*descriptorOf(registry, WaveformScopeId), {}, true, items, actions);
+    // A stack of luma waveform then vectorscope, each nested under its own name.
+    appendScopeChoiceMenus(*descriptorOf(registry, LumaWaveformScopeId), {}, true, items, actions);
     appendScopeChoiceMenus(*descriptorOf(registry, VectorscopeScopeId), {}, true, items, actions);
 
-    REQUIRE(actions.size() == 5);  // three waveform modes, two trace responses
-    CHECK(actions[0].scopeId == "org.sidescopes.waveform");
-    CHECK(actions[0].paramKey == "mode");
-    CHECK(actions[3].scopeId == "org.sidescopes.vectorscope");
-    CHECK(actions[3].paramKey == "response");
-    // The vectorscope's first action id follows the waveform's three.
-    CHECK(items.back().actionId == ParamMenuActionBase + 4);
+    REQUIRE(actions.size() == 4);  // two luma styles, two trace responses
+    CHECK(actions[0].scopeId == "org.sidescopes.waveform.luma");
+    CHECK(actions[0].paramKey == "style");
+    CHECK(actions[2].scopeId == "org.sidescopes.vectorscope");
+    CHECK(actions[2].paramKey == "response");
+    // The vectorscope's first action id follows the luma waveform's two.
+    CHECK(items.back().actionId == ParamMenuActionBase + 3);
 }
 
 }  // namespace sidescopes

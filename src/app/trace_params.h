@@ -12,6 +12,13 @@ namespace sidescopes {
 /// The host's own controls over how a trace is drawn, distinct from the module
 /// parameters the worker reads: intensity seeds a scope's gain, and smoothing
 /// paces its cursor markers.
+/// The scope whose trace controls @p id uses: the parade shares the waveform's
+/// intensity and smoothing, because they are one trace shown two ways and one
+/// control is what the panes have always offered. Every other scope owns its
+/// own - the luma waveform included, since it is a second instrument rather
+/// than a second view of the first.
+[[nodiscard]] std::string_view traceControlOwner(std::string_view id);
+
 class TraceParams
 {
 public:

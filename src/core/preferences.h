@@ -82,18 +82,17 @@ struct Preferences
     /// does not carry has always meant.
     std::map<std::string, std::map<std::string, double>> scopeParams{
         {"org.sidescopes.vectorscope", {{"gain", 3.0}, {"stride", 1.0}, {"response", 0.0}, {"smoothing_ms", 75.0}}},
-        {"org.sidescopes.waveform", {{"gain", 0.05}, {"stride", 1.0}, {"mode", 0.0}, {"smoothing_ms", 100.0}}},
+        {"org.sidescopes.waveform", {{"gain", 0.05}, {"stride", 1.0}, {"smoothing_ms", 100.0}}},
         {"org.sidescopes.histogram", {{"stride", 1.0}}},
     };
     /// The scopes on screen in stacking order. New files store one token per
     /// scope: a bracketed `[id]` for a letterless scope, otherwise the scope's
-    /// letter. Legacy files store bare letters (V vectorscope, W waveform, R
-    /// RGB parade, H histogram, G combined histogram, C color picker); the
-    /// retired L (a separate luma waveform) is accepted only as a migration
-    /// input, folded into W in its Luma style. A file written while the
-    /// histogram's two plots were one scope's styles carries that choice under
-    /// the retired `style` key, and its H is rewritten by that reading. Never
-    /// empty.
+    /// letter. Legacy files store bare letters (V vectorscope, W waveform, L
+    /// luma waveform, R RGB parade, H histogram, G combined histogram, C color
+    /// picker). A file written while a scope's plots were its STYLES carries
+    /// that choice under a retired key - the waveform's `mode`, the
+    /// histogram's `style` - and its W and H are rewritten by that reading.
+    /// Never empty.
     std::string scopeStack = "V";
     /// The order the user keeps the scopes in - the sequence the menu lists
     /// them in and the panes follow - in the same token vocabulary as

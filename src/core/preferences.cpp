@@ -511,12 +511,11 @@ std::string legacyScopeLetters(int visibleScopes, int storedWaveformMode)
 // vectorscope. Both a bracketed `[id]` token and a bare letter pass through
 // for the registry to resolve which scope they name - core does not know the
 // scope set, so it never judges which letters are valid, only the token FORMAT
-// (an uppercase letter or a bracketed id). The retired L (a separate luma
-// waveform) becomes the waveform in its Luma style, unless an RGB waveform is
-// already stacked, which keeps the letter.
-std::string cleanedScopeStack(const std::string& stack, Preferences& preferences)
+// (an uppercase letter or a bracketed id). L is one of those letters again:
+// the separate luma waveform it named is a scope once more, so the oldest
+// files reach it without passing through the style it was folded into.
+std::string cleanedScopeStack(const std::string& stack)
 {
-    const bool hadWaveform = stack.find('W') != std::string::npos;
     std::string cleaned;
     for (std::size_t at = 0; at < stack.size();) {
         std::string token;
@@ -528,15 +527,8 @@ std::string cleanedScopeStack(const std::string& stack, Preferences& preferences
             token = stack.substr(at, close - at + 1);
             at = close + 1;
         } else {
-            char letter = stack[at];
+            const char letter = stack[at];
             ++at;
-            if (letter == 'L') {
-                if (hadWaveform) {
-                    continue;
-                }
-                letter = 'W';
-                preferences.scopeParams[WaveformId]["mode"] = 1.0;
-            }
             if (letter < 'A' || letter > 'Z') {
                 continue;  // not a scope-letter token; ids arrive bracketed
             }
@@ -565,7 +557,7 @@ void migrateScopeStack(const std::map<std::string, std::string, std::less<>>& va
         preferences.scopeStack = found->second;
     }
 
-    preferences.scopeStack = cleanedScopeStack(preferences.scopeStack, preferences);
+    preferences.scopeStack = cleanedScopeStack(preferences.scopeStack);
 }
 
 // The menu order. A file written before the order existed states one

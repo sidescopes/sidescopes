@@ -1,12 +1,15 @@
-// One module, two scopes: the waveform monitor and the RGB parade both
-// wrap the same engine behind the C vtable. The parade is the waveform
-// engine pinned to its side-by-side mode, so it needs no parameter for
-// what it always is. The engine stays idiomatic C++; only this file
-// speaks both languages, and no exception ever crosses.
+// One module, three scopes: the RGB waveform, the luma waveform and the
+// RGB parade all wrap the same engine behind the C vtable. Each is the
+// engine pinned to what it plots, so none needs a parameter for what it
+// always is; the luma waveform alone carries a style, because plain and
+// tinted luma are the same curve painted two ways. The engine stays
+// idiomatic C++; only this file speaks both languages, and no exception
+// ever crosses.
 
 #include <cstdio>
 #include <cstring>
 #include <memory>
+#include <optional>
 #include <string>
 
 #include "core/scopes/graticule.h"
@@ -33,15 +36,24 @@ struct SharedWaveformBins
     WaveformBins bins;
 };
 
-// The two scopes share every vtable function; only which fixed mode the
-// parade forces and which marker layout each draws differs, so a single
-// instance type carries a flag rather than duplicating the shim.
+/// Which of the module's scopes an instance is. Each plots something the
+/// others do not, and no configuration path may move one onto another's.
+enum class WaveformScope
+{
+    Rgb,
+    Luma,
+    Parade,
+};
+
+// The three scopes share every vtable function; only what each is pinned to
+// and which marker layout it draws differ, so a single instance type carries
+// which scope it is rather than duplicating the shim.
 struct WaveformInstance
 {
     SsScopeInstance vtable{};
     Waveform engine;
     WaveformSettings settings;
-    bool parade = false;
+    WaveformScope scope = WaveformScope::Rgb;
     /// The host that created this instance, kept for the shared
     /// accumulation arena it lends. Null when there is none.
     const SsHost* host = nullptr;
@@ -62,13 +74,16 @@ const WaveformInstance* impl(const SsScopeInstance* instance)
     return static_cast<const WaveformInstance*>(instance->instance_data);
 }
 
-WaveformMode modeOf(double choice)
+/// The mode @p scope plots in. The luma waveform's @p colored style decides
+/// only how its own trace is painted; the other two have no choice to make.
+WaveformMode modeOf(WaveformScope scope, bool colored)
 {
-    switch (static_cast<int>(choice)) {
-    case 1:
-        return WaveformMode::Luma;
-    case 2:
-        return WaveformMode::ColoredLuma;
+    switch (scope) {
+    case WaveformScope::Luma:
+        return colored ? WaveformMode::ColoredLuma : WaveformMode::Luma;
+    case WaveformScope::Parade:
+        return WaveformMode::RgbParade;
+    case WaveformScope::Rgb:
     default:
         return WaveformMode::Rgb;
     }
@@ -78,22 +93,22 @@ bool configure(SsScopeInstance* instance, const SsParamValue* values, uint32_t c
 {
     try {
         WaveformInstance* self = impl(instance);
+        bool colored = self->settings.mode == WaveformMode::ColoredLuma;
         for (uint32_t index = 0; index < count; ++index) {
             const SsParamValue& value = values[index];
             if (std::strcmp(value.key, "gain") == 0) {
                 self->settings.gain = static_cast<float>(value.value);
             } else if (std::strcmp(value.key, "stride") == 0) {
                 self->settings.samplingStride = static_cast<int>(value.value);
-            } else if (std::strcmp(value.key, "mode") == 0 && !self->parade) {
-                self->settings.mode = modeOf(value.value);
+            } else if (std::strcmp(value.key, "style") == 0) {
+                colored = value.value >= 0.5;
             }
         }
 
-        // The parade is defined by its mode; no configuration path may
-        // move it off the side-by-side layout it exists to show.
-        if (self->parade) {
-            self->settings.mode = WaveformMode::RgbParade;
-        }
+        // Each scope is defined by what it plots, so the mode is resolved from
+        // the scope rather than carried: a stale key from a file written while
+        // these were one scope's styles can never move one onto another's.
+        self->settings.mode = modeOf(self->scope, colored);
         self->engine.configure(self->settings);
         return true;
     } catch (...) {
@@ -193,7 +208,7 @@ uint32_t markers(const SsScopeInstance* instance, SsColor color, SsMarker* out, 
 {
     try {
         const WaveformInstance* self = impl(instance);
-        if (self->parade) {
+        if (self->scope == WaveformScope::Parade) {
             return channelLevels(color, out, capacity, true);
         }
 
@@ -263,41 +278,48 @@ void destroy(SsScopeInstance* instance)
     delete impl(instance);
 }
 
-const char* const ModeChoices[] = {"RGB", "Luma", "Luma (Colored)", nullptr};
+// Plain and tinted luma are the same curve on the same axis, one painted in
+// the average colour of the pixels that put it there. Nobody wants both on
+// screen, so this stays a style where RGB and luma became scopes.
+const char* const LumaStyleChoices[] = {"Plain", "Colored", nullptr};
 
-const SsParamInfo WaveformParams[] = {
-    {"gain", "Intensity", SS_PARAM_INTENSITY, 0.0, 0.0, 0.05, 0.0, nullptr, nullptr},
-    {"stride", "Sampling stride", SS_PARAM_INT, 1.0, 8.0, 1.0, 0.0, nullptr, nullptr},
-    {"mode", "Style", SS_PARAM_CHOICE, 0.0, 2.0, 0.0, 0.0, "Waveform Style", ModeChoices},
-};
-
-const SsParamInfo ParadeParams[] = {
+const SsParamInfo TraceParams[] = {
     {"gain", "Intensity", SS_PARAM_INTENSITY, 0.0, 0.0, 0.05, 0.0, nullptr, nullptr},
     {"stride", "Sampling stride", SS_PARAM_INT, 1.0, 8.0, 1.0, 0.0, nullptr, nullptr},
 };
+
+const SsParamInfo LumaParams[] = {
+    {"gain", "Intensity", SS_PARAM_INTENSITY, 0.0, 0.0, 0.05, 0.0, nullptr, nullptr},
+    {"stride", "Sampling stride", SS_PARAM_INT, 1.0, 8.0, 1.0, 0.0, nullptr, nullptr},
+    {"style", "Style", SS_PARAM_CHOICE, 0.0, 1.0, 0.0, 0.0, "Luma Waveform Style", LumaStyleChoices},
+};
+
+constexpr uint32_t TraceParamCount = static_cast<uint32_t>(sizeof(TraceParams) / sizeof(TraceParams[0]));
+constexpr uint32_t LumaParamCount = static_cast<uint32_t>(sizeof(LumaParams) / sizeof(LumaParams[0]));
 
 const SsScopeDescriptor WaveformDescriptor{
-    "org.sidescopes.waveform",
-    "Waveform",
-    'W',
+    "org.sidescopes.waveform", "Waveform", 'W', Waveform::Columns, Waveform::Levels, 0u, TraceParams,
+    TraceParamCount,           3.0f,
+};
+
+// One reads exposure and the other reads balance, and a colourist wants both
+// on screen: two instruments sharing an implementation rather than one drawn
+// two ways. L was this exact scope before it was folded into a style.
+const SsScopeDescriptor LumaDescriptor{
+    "org.sidescopes.waveform.luma",
+    "Luma Waveform",
+    'L',
     Waveform::Columns,
     Waveform::Levels,
     0u,
-    WaveformParams,
-    static_cast<uint32_t>(sizeof(WaveformParams) / sizeof(WaveformParams[0])),
+    LumaParams,
+    LumaParamCount,
     3.0f,
 };
 
 const SsScopeDescriptor ParadeDescriptor{
-    "org.sidescopes.parade",
-    "RGB Parade",
-    'R',
-    Waveform::Columns,
-    Waveform::Levels,
-    0u,
-    ParadeParams,
-    static_cast<uint32_t>(sizeof(ParadeParams) / sizeof(ParadeParams[0])),
-    3.0f,
+    "org.sidescopes.parade", "RGB Parade", 'R', Waveform::Columns, Waveform::Levels, 0u, TraceParams,
+    TraceParamCount,         3.0f,
 };
 
 bool moduleInit()
@@ -311,7 +333,7 @@ void moduleDeinit()
 
 uint32_t scopeCount()
 {
-    return 2;
+    return 3;
 }
 
 const SsScopeDescriptor* descriptor(uint32_t index)
@@ -320,25 +342,41 @@ const SsScopeDescriptor* descriptor(uint32_t index)
         return &WaveformDescriptor;
     }
     if (index == 1) {
+        return &LumaDescriptor;
+    }
+    if (index == 2) {
         return &ParadeDescriptor;
     }
     return nullptr;
 }
 
+/// Which scope @p scopeId names, or nothing when it names none of them.
+std::optional<WaveformScope> scopeOf(const char* scopeId)
+{
+    if (std::strcmp(scopeId, WaveformDescriptor.id) == 0) {
+        return WaveformScope::Rgb;
+    }
+    if (std::strcmp(scopeId, LumaDescriptor.id) == 0) {
+        return WaveformScope::Luma;
+    }
+    if (std::strcmp(scopeId, ParadeDescriptor.id) == 0) {
+        return WaveformScope::Parade;
+    }
+
+    return std::nullopt;
+}
+
 SsScopeInstance* create(const char* scopeId, const SsHost* host)
 {
     try {
-        const bool waveform = std::strcmp(scopeId, WaveformDescriptor.id) == 0;
-        const bool parade = std::strcmp(scopeId, ParadeDescriptor.id) == 0;
-        if (!waveform && !parade) {
+        const std::optional<WaveformScope> scope = scopeOf(scopeId);
+        if (!scope) {
             return nullptr;
         }
 
         auto* self = new WaveformInstance;
-        self->parade = parade;
-        if (parade) {
-            self->settings.mode = WaveformMode::RgbParade;
-        }
+        self->scope = *scope;
+        self->settings.mode = modeOf(*scope, false);
         self->engine.configure(self->settings);
         self->host = host;
         self->vtable.instance_data = self;
