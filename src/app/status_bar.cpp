@@ -145,10 +145,14 @@ void StatusBar::drawPinTool(bool pinsAvailable)
     }
 }
 
+/// A status message covers the live readout, so it clears itself. Long enough to
+/// read a sentence without looking away from the photo.
+constexpr double StatusDwellSeconds = 5.0;
+
 void StatusBar::setStatus(std::string message)
 {
     m_message = std::move(message);
-    m_until = glfwGetTime() + 2.0;
+    m_until = glfwGetTime() + StatusDwellSeconds;
 }
 
 double StatusBar::redrawDueSeconds() const
