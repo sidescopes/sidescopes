@@ -5,6 +5,7 @@
 
 #include "core/frame.h"
 #include "core/scopes/chunk_scratch.h"
+#include "core/scopes/histogram_bins.h"
 #include "core/scopes/sampling.h"
 #include "core/scopes/scope_types.h"
 
@@ -57,15 +58,13 @@ struct HistogramSettings
 class Histogram
 {
 public:
-    static constexpr int Bins = 256;
+    static constexpr int Bins = HistogramBinsPerChannel;
     /// Defaults: supersampled horizontally - several image columns per
     /// bin, heights following a Catmull-Rom spline through the bin
     /// centers - so the histogram reads as a plotted function rather
     /// than a bar chart, without kinks at the bins.
     static constexpr int ImageWidth = Bins * 8;
     static constexpr int Height = 768;
-
-    Histogram();
 
     /// Applies @p settings, clamping each value to its documented range.
     void configure(const HistogramSettings& settings);
@@ -79,7 +78,7 @@ public:
     /// own, which is what a test or a benchmark does.
     void lendScratch(ChunkScratch::Lender lender, const void* context)
     {
-        m_scratch.lendFrom(lender, context);
+        m_bins.lendScratch(lender, context);
     }
 
     /// The composed scope image.
@@ -100,15 +99,6 @@ public:
     }
 
 private:
-    /// Folds sampled rows [@p rowBegin, @p rowEnd) of @p region into @p bins.
-    /// The bin layout is fixed at three planes of Bins, so this depends on
-    /// nothing an instance holds.
-    static void scatterRows(const FrameView& frame, IntRect region, const SampleGrid& grid, int rowBegin, int rowEnd,
-                            uint32_t* bins);
-    /// The same, compiled for one pixel layout.
-    template <typename Pixels>
-    static void scatterRowsAs(const FrameView& frame, IntRect region, const SampleGrid& grid, int rowBegin, int rowEnd,
-                              uint32_t* bins);
     void mapBinsToImage();
     [[nodiscard]] std::vector<double> computeHeights() const;
     void exportOutline(const std::vector<double>& heights);
@@ -123,11 +113,7 @@ private:
     HistogramSettings m_settings;
     int m_width = ImageWidth;
     int m_height = Height;
-    // Three planes of Bins counts: red, green, blue.
-    std::vector<uint32_t> m_bins;
-    // Per-chunk private bin sets for the parallel accumulate, merged into
-    // m_bins by integer addition.
-    ChunkScratch m_scratch;
+    HistogramBins m_bins;
     std::vector<float> m_outline;
     ScopeImage m_image;
 };

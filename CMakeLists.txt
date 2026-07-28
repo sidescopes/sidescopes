@@ -149,7 +149,8 @@ sidescopes_add_module(sidescopes_module_waveform
     src/core/scopes/waveform_bins.cpp)
 sidescopes_add_module(sidescopes_module_histogram
     src/modules/histogram_module.cpp
-    src/core/scopes/histogram.cpp)
+    src/core/scopes/histogram.cpp
+    src/core/scopes/histogram_bins.cpp)
 
 # Consumers (app, tests) link these ahead of core. In static mode the module
 # libs carry the built-in entries the registry references and the engines the

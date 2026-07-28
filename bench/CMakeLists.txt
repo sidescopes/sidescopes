@@ -28,12 +28,14 @@ if(SIDESCOPES_MODULES_DYNAMIC)
         ${CMAKE_SOURCE_DIR}/src/core/scopes/vectorscope.cpp
         ${CMAKE_SOURCE_DIR}/src/core/scopes/waveform.cpp
         ${CMAKE_SOURCE_DIR}/src/core/scopes/waveform_bins.cpp
-        ${CMAKE_SOURCE_DIR}/src/core/scopes/histogram.cpp)
+        ${CMAKE_SOURCE_DIR}/src/core/scopes/histogram.cpp
+        ${CMAKE_SOURCE_DIR}/src/core/scopes/histogram_bins.cpp)
     target_sources(sidescopes_perf PRIVATE
         ${CMAKE_SOURCE_DIR}/src/core/scopes/vectorscope.cpp
         ${CMAKE_SOURCE_DIR}/src/core/scopes/waveform.cpp
         ${CMAKE_SOURCE_DIR}/src/core/scopes/waveform_bins.cpp
-        ${CMAKE_SOURCE_DIR}/src/core/scopes/histogram.cpp)
+        ${CMAKE_SOURCE_DIR}/src/core/scopes/histogram.cpp
+        ${CMAKE_SOURCE_DIR}/src/core/scopes/histogram_bins.cpp)
 endif()
 
 target_link_libraries(sidescopes_bench PRIVATE
