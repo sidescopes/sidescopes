@@ -9,17 +9,31 @@
 
 #include <algorithm>
 #include <cstring>
+#include <memory>
 #include <vector>
 
 #include "core/scopes/histogram.h"
+#include "core/scopes/histogram_bins.h"
 #include "modules/module_export.h"
 #include "modules/module_frame.h"
 #include "modules/module_registry.h"
 #include "modules/module_scratch.h"
+#include "modules/module_shared_state.h"
 #include "sidescopes/module.h"
 
 namespace sidescopes {
 namespace {
+
+/// The bins every histogram scope of one host scatters into.
+///
+/// The two plots are this module over the same region, and the bin layout
+/// depends on nothing either of them holds, so their scatters agree bin for
+/// bin and everything after the scatter genuinely differs. Sharing one of these
+/// pays for it once.
+struct SharedHistogramBins
+{
+    HistogramBins bins;
+};
 
 struct HistogramInstance
 {
@@ -29,6 +43,11 @@ struct HistogramInstance
     /// The host that created this instance, kept for the shared
     /// accumulation arena it lends. Null when there is none.
     const SsHost* host = nullptr;
+    /// The bins shared with this host's other histogram scopes, taken on the
+    /// first pass. Held rather than looked up per pass, and held only by the
+    /// instances that really accumulate: a projection instance never asks, so
+    /// a stack with no region goes on holding no bins at all.
+    std::shared_ptr<SharedHistogramBins> shared;
 };
 
 HistogramInstance* impl(SsScopeInstance* instance)
@@ -61,9 +80,17 @@ bool configure(SsScopeInstance* instance, const SsParamValue* values, uint32_t c
 bool accumulate(SsScopeInstance* instance, const SsFrameView* frame, SsRect region)
 {
     try {
+        HistogramInstance* self = impl(instance);
         const FrameView view = frameFromBoundary(*frame);
-        lendHostScratch(impl(instance)->engine, impl(instance)->host);
-        impl(instance)->engine.accumulate(view, IntRect{region.x, region.y, region.width, region.height});
+        if (!self->shared) {
+            self->shared = sharedStateFor<SharedHistogramBins>(self->host);
+            self->engine.lendBins(self->shared ? &self->shared->bins : nullptr);
+        }
+        // After the bins, so the arena reaches the set actually in use. Both
+        // are re-applied every pass, so neither depends on the other having
+        // happened first on any particular one.
+        lendHostScratch(self->engine, self->host);
+        self->engine.accumulate(view, IntRect{region.x, region.y, region.width, region.height});
         return true;
     } catch (...) {
         return false;

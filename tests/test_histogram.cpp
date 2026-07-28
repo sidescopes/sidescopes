@@ -4,6 +4,7 @@
 #include <vector>
 
 #include "core/scopes/histogram.h"
+#include "core/scopes/histogram_bins.h"
 #include "core/scopes/sampling.h"
 #include "scope_image.h"
 #include "test_frame.h"
@@ -44,7 +45,171 @@ std::vector<int> litValues(const ScopeImage& image, int channel)
     return values;
 }
 
+// A photograph-ish frame: the shared and unshared paths must agree over content
+// with real structure, not only over a flat fill that every path draws
+// identically.
+TestFrame texturedFrame()
+{
+    TestFrame frame(200, 120, 0);
+    for (int py = 0; py < 120; ++py) {
+        for (int px = 0; px < 200; ++px) {
+            const auto value = static_cast<uint8_t>((px * 7 + py * 13) % 256);
+            frame.setColor(px, py,
+                           Color{value, static_cast<uint8_t>(255 - value), static_cast<uint8_t>((value * 3) % 256)});
+        }
+    }
+
+    return frame;
+}
+
+// The image an engine of its own draws in @p style, which is what a shared one
+// has to reproduce byte for byte.
+std::vector<uint8_t> unsharedImage(const TestFrame& frame, HistogramStyle style)
+{
+    HistogramSettings settings;
+    settings.style = style;
+    Histogram scope;
+    scope.configure(settings);
+    scope.accumulate(frame.view(), IntRect{0, 0, frame.width, frame.height});
+
+    return scope.image().rgba;
+}
+
 }  // namespace
+
+TEST_CASE("Two histogram scopes over one frame scatter it once")
+{
+    // The bin layout depends on nothing an engine holds, so the two plots bin a
+    // region identically and the second must find its answer already there.
+    const TestFrame frame = texturedFrame();
+    HistogramBins shared;
+    Histogram banded;
+    Histogram overlaid;
+    banded.lendBins(&shared);
+    overlaid.lendBins(&shared);
+    HistogramSettings combined;
+    combined.style = HistogramStyle::Combined;
+    overlaid.configure(combined);
+
+    banded.accumulate(frame.view(), IntRect{0, 0, 200, 120});
+    overlaid.accumulate(frame.view(), IntRect{0, 0, 200, 120});
+
+    CHECK(shared.scatters() == 1);
+}
+
+TEST_CASE("A shared histogram scatter draws exactly what an unshared one draws")
+{
+    // The condition on the whole optimization. Both images are compared byte
+    // for byte against the same scope reading bins of its own, because a plot
+    // that is merely close is a different measurement.
+    const TestFrame frame = texturedFrame();
+    const std::vector<uint8_t> bandedAlone = unsharedImage(frame, HistogramStyle::PerChannel);
+    const std::vector<uint8_t> overlaidAlone = unsharedImage(frame, HistogramStyle::Combined);
+
+    HistogramBins shared;
+    Histogram banded;
+    Histogram overlaid;
+    banded.lendBins(&shared);
+    overlaid.lendBins(&shared);
+    HistogramSettings combined;
+    combined.style = HistogramStyle::Combined;
+    overlaid.configure(combined);
+    banded.accumulate(frame.view(), IntRect{0, 0, 200, 120});
+    overlaid.accumulate(frame.view(), IntRect{0, 0, 200, 120});
+
+    CHECK(banded.image().rgba == bandedAlone);
+    CHECK(overlaid.image().rgba == overlaidAlone);
+}
+
+TEST_CASE("A histogram sampling more thinly does not read the denser scatter")
+{
+    // The two scopes carry their own sampling strides, so one can genuinely ask
+    // for fewer pixels than the other. Its answer is a different measurement
+    // and must not be served the one already in the bins.
+    const TestFrame frame = texturedFrame();
+    const std::vector<uint8_t> thinAlone = [&] {
+        HistogramSettings thin;
+        thin.samplingStride = 4;
+        Histogram scope;
+        scope.configure(thin);
+        scope.accumulate(frame.view(), IntRect{0, 0, 200, 120});
+
+        return scope.image().rgba;
+    }();
+
+    HistogramBins shared;
+    Histogram dense;
+    Histogram sparse;
+    dense.lendBins(&shared);
+    sparse.lendBins(&shared);
+    HistogramSettings thin;
+    thin.samplingStride = 4;
+    sparse.configure(thin);
+    dense.accumulate(frame.view(), IntRect{0, 0, 200, 120});
+    sparse.accumulate(frame.view(), IntRect{0, 0, 200, 120});
+
+    CHECK(shared.scatters() == 2);
+    CHECK(sparse.image().rgba == thinAlone);
+}
+
+TEST_CASE("A second frame is scattered into the histogram's bins again")
+{
+    // The bins answer for one frame. The next one must reach them however
+    // little the pixels moved, so the key carries the frame's own identity and
+    // not merely the geometry that was asked for.
+    const TestFrame frame = texturedFrame();
+    HistogramBins shared;
+    Histogram scope;
+    scope.lendBins(&shared);
+
+    FrameView view = frame.view();
+    scope.accumulate(view, IntRect{0, 0, 200, 120});
+    CHECK(shared.scatters() == 1);
+
+    view.sequence = 2;
+    scope.accumulate(view, IntRect{0, 0, 200, 120});
+    CHECK(shared.scatters() == 2);
+}
+
+TEST_CASE("Another buffer is scattered into the histogram's bins whatever it is numbered")
+{
+    // The frame's number is the producer's promise that its pixels moved on,
+    // and both capture backends keep it. The bins do not rest on that promise
+    // alone: pixels somewhere else are a different frame however they are
+    // numbered, which is the case a test or a second producer can reach.
+    const TestFrame first = texturedFrame();
+    TestFrame second(200, 120, 0);
+    second.fill(Color{200, 30, 90});
+
+    HistogramBins shared;
+    Histogram scope;
+    scope.lendBins(&shared);
+    scope.accumulate(first.view(), IntRect{0, 0, 200, 120});
+    const std::vector<uint8_t> textured = scope.image().rgba;
+    scope.accumulate(second.view(), IntRect{0, 0, 200, 120});
+
+    CHECK(shared.scatters() == 2);
+    CHECK(scope.image().rgba != textured);
+}
+
+TEST_CASE("A carried region is scattered into the histogram's bins again")
+{
+    // Scopes share only what they measure over the SAME region. The region is
+    // CARRIED here rather than resized, which is what a user dragging one does
+    // and the one case the sampling grid cannot stand in for: a grid is decided
+    // by a region's size and says nothing about where it sits.
+    const TestFrame frame = texturedFrame();
+    HistogramBins shared;
+    Histogram scope;
+    scope.lendBins(&shared);
+
+    scope.accumulate(frame.view(), IntRect{0, 0, 100, 60});
+    const std::vector<uint8_t> atOrigin = scope.image().rgba;
+    scope.accumulate(frame.view(), IntRect{40, 20, 100, 60});
+
+    CHECK(shared.scatters() == 2);
+    CHECK(scope.image().rgba != atOrigin);
+}
 
 TEST_CASE("Histogram places uniform color at its channel values")
 {
