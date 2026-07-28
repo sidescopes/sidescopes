@@ -296,6 +296,32 @@ TEST_CASE("Preferences tolerate unknown keys and malformed lines")
     CHECK(param(loaded, VectorscopeId, "gain") == 3.0);
 }
 
+// SYMPTOM IF BROKEN: the app stops sizing its interface from the display on a
+// first run - silently, because 1.0 is also a perfectly good factor. The two
+// readings have to stay distinguishable, so the zero is asserted rather than
+// assumed.
+TEST_CASE("Preferences tell an unset interface size from a chosen 100%")
+{
+    const TempFile named("ui-scale-named.txt");
+    named.write("ui_scale_factor=1\n");
+    CHECK(loadPreferences(named.path()).uiScaleFactor == 1.0f);
+
+    const TempFile silent("ui-scale-silent.txt");
+    silent.write("waveform_gain=0.2\n");
+    CHECK(loadPreferences(silent.path()).uiScaleFactor == 0.0f);
+
+    // A file that has never existed says nothing either.
+    CHECK(Preferences{}.uiScaleFactor == 0.0f);
+
+    // And a chosen step survives the round trip as itself, so the first save
+    // turns a recommendation into a choice.
+    Preferences saved;
+    saved.uiScaleFactor = 1.25f;
+    const TempFile written("ui-scale-written.txt");
+    REQUIRE(savePreferences(saved, written.path()));
+    CHECK(loadPreferences(written.path()).uiScaleFactor == 1.25f);
+}
+
 TEST_CASE("Preferences load a whole legacy file to the same live state")
 {
     // A realistic file written by the last typed build: legacy per-scope keys,

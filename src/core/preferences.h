@@ -122,7 +122,10 @@ struct Preferences
     int layoutActiveSlot = 0;
     /// User interface-size factor, a multiplier on the OS scale (1.0 = match
     /// the system). One of the discrete UiScaleSteps; per user, not per display.
-    float uiScaleFactor = 1.0f;
+    /// Zero means the file names none, which lets the app open at the size the
+    /// display's own density recommends; the first save writes the resolved
+    /// factor, so a display only ever decides a first run.
+    float uiScaleFactor = 0.0f;
     /// How much of the machine the analysis may spend, as the level's own word:
     /// "standard" or "high". The app resolves it; anything else reads as the
     /// default.

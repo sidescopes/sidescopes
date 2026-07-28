@@ -1,8 +1,20 @@
 #include "app/ui_scaling.h"
 
+#include <algorithm>
 #include <cmath>
 
 namespace sidescopes {
+namespace {
+
+constexpr float MillimetresPerInch = 25.4f;
+
+/// The densest a real display gets. Above this the panel has misstated its
+/// physical size - a stated width of a few millimetres reads as thousands of
+/// units an inch - and the recommendation is worth nothing. Only the upper end
+/// needs stating: a density under the reference already asks for nothing.
+constexpr float GreatestPlausibleDensity = 600.0f;
+
+}  // namespace
 
 float cleanedUiScaleFactor(float requested)
 {
@@ -25,6 +37,24 @@ float cleanedUiScaleFactor(float requested)
     }
 
     return best;
+}
+
+float recommendedUiScaleFactor(int modeWidth, int physicalWidthMm, float osUiScale)
+{
+    if (modeWidth <= 0 || physicalWidthMm <= 0 || !(osUiScale > 0.0f)) {
+        return 1.0f;
+    }
+    const float inches = static_cast<float>(physicalWidthMm) / MillimetresPerInch;
+    const float density = static_cast<float>(modeWidth) / inches / osUiScale;
+    if (density > GreatestPlausibleDensity) {
+        return 1.0f;
+    }
+    const float wanted = density / ReferenceUiDensity;
+    if (wanted <= 1.0f) {
+        return 1.0f;
+    }
+
+    return cleanedUiScaleFactor(std::min(wanted, MaximumAutomaticUiScaleFactor));
 }
 
 float interfaceFontDensity(int windowWidthPx, int framebufferWidthPx)

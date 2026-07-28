@@ -36,7 +36,11 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - A UI Scaling submenu, from 50% to 200% around Default. It multiplies
   the system scale rather than replacing it, so the operating system's
   own per-monitor scaling still leads and a window keeps the preference
-  as it crosses displays.
+  as it crosses displays. Until you choose a size, Default is the one
+  the display's own density suggests rather than a flat 100%: a dense
+  laptop panel the system leaves unscaled opens at the 125% step instead
+  of waiting to be found in the menu, a display the system already
+  scales is left alone, and a size you have chosen is never overridden.
 - macOS reads the screen at ten bits a channel where the compositor
   offers them. The vectorscope is where it shows: a smooth gradient's
   chroma resolves into distinct positions instead of collapsing onto the

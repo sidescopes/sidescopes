@@ -47,6 +47,12 @@ void stopRendering(GLFWwindow* window, GraphicsBackend* graphics);
 /// how many of them the interface should treat as one.
 [[nodiscard]] float computeUiScale(GLFWwindow* window);
 
+/// The interface-size factor to start the session at: the one @p startup names,
+/// or - for a file that names none - the one @p window's display recommends
+/// from its own density, so a dense panel the system left unscaled opens at a
+/// readable size instead of waiting to be found in a menu.
+[[nodiscard]] float startupUiScaleFactor(const Preferences& startup, GLFWwindow* window);
+
 /// The main window and the graphics backend whose hints shaped it; a null
 /// window means creation failed and GLFW is already terminated.
 struct MainWindow

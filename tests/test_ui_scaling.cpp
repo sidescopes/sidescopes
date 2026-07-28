@@ -89,6 +89,112 @@ TEST_CASE("A stored interface-size factor snaps to an offered step")
     CHECK(cleanedUiScaleFactor(std::nanf("")) == Approx(1.0f));
 }
 
+// The two panels below are measured, not imagined, and both are pinned with the
+// numbers that were read off them:
+//
+//   a 14-inch MacBook Pro states a 1512 x 982 mode across a 301 x 195 mm panel
+//   at content scale 2.0, which is 127.6 interface units an inch;
+//   a 14-inch 1920x1080 ThinkPad states 1920 pixels across 310 mm, which is
+//   157.3.
+//
+// The macOS mode width is in POINTS and its uiScaleForWindow is 1.0 - the
+// framebuffer carries the Retina factor, not the interface - so 1512 and 1.0 go
+// in together. Passing 3024, or 2.0, would be reading one platform's numbers in
+// the other's units.
+TEST_CASE("A display's density recommends the size a first run opens at")
+{
+    // The Retina panel at its 2x default is where the shipped size reads
+    // correctly, so the app asks for nothing on top of it.
+    CHECK(recommendedUiScaleFactor(1512, 301, 1.0f) == Approx(1.0f));
+
+    // The same interface on the denser Windows panel, left at 100% scaling, is
+    // a quarter smaller - which is exactly the step that answers it.
+    CHECK(recommendedUiScaleFactor(1920, 310, 1.0f) == Approx(1.25f));
+
+    // With Windows itself at 125% that panel is already at the reference, so
+    // the recommendation divides the OS scale back out and asks for nothing.
+    // Without that division the two would compound to 156%.
+    CHECK(recommendedUiScaleFactor(1920, 310, 1.25f) == Approx(1.0f));
+
+    // A standard-density desktop monitor - 1920 across 510 mm, 96 an inch - is
+    // the case the interface is authored for.
+    CHECK(recommendedUiScaleFactor(1920, 510, 1.0f) == Approx(1.0f));
+}
+
+// SYMPTOM IF BROKEN: two people on identical laptops get differently sized
+// interfaces because one of them moved a Windows display setting - or the same
+// person does, by changing it.
+//
+// This is the property that makes the derivation a panel measurement rather
+// than a tuned constant, so it is asserted as a property and not as three
+// values. The factor is a MULTIPLIER on the OS scale, so what the interface
+// finally occupies is the product; deriving from physical density and dividing
+// the OS scale back out makes that product depend on the panel alone, and the
+// display setting cancels exactly.
+TEST_CASE("The system's own scaling cancels out of the size that results")
+{
+    // The ThinkPad panel, at the setting Windows recommends for it and at the
+    // one step below that its owner actually runs. Same panel, same product.
+    const float atRecommended = 1.25f * recommendedUiScaleFactor(1920, 310, 1.25f);
+    const float atOneStepDown = 1.0f * recommendedUiScaleFactor(1920, 310, 1.0f);
+    CHECK(atRecommended == Approx(atOneStepDown));
+    CHECK(atRecommended == Approx(1.25f));
+
+    // Above the reference the app defers to the system instead of shrinking, so
+    // the cancellation stops there by design: a panel the system already scales
+    // past the reference keeps the larger interface its owner asked for.
+    CHECK(1.5f * recommendedUiScaleFactor(1920, 310, 1.5f) == Approx(1.5f));
+}
+
+TEST_CASE("The recommended size never shrinks the interface")
+{
+    // Below the reference the interface is already as large as it was authored
+    // to be; making it smaller is the size menu's business, never the display's.
+    CHECK(recommendedUiScaleFactor(1366, 340, 1.0f) == Approx(1.0f));
+    CHECK(recommendedUiScaleFactor(1920, 700, 1.0f) == Approx(1.0f));
+}
+
+TEST_CASE("The recommended size stops at one and a half")
+{
+    // A 13-inch 4K panel left unscaled reads 333 units an inch, which would ask
+    // for 2.6. A panel that misstates its size can cost a step and a half of
+    // chrome and no more - and that is recoverable from a menu the factor never
+    // touches.
+    CHECK(recommendedUiScaleFactor(3840, 293, 1.0f) == Approx(1.5f));
+}
+
+TEST_CASE("A display that cannot state its size gets no recommendation")
+{
+    // GLFW reports a zero physical size for a display whose EDID it could not
+    // read, and a headless or virtual display can report a zero mode.
+    CHECK(recommendedUiScaleFactor(1920, 0, 1.0f) == Approx(1.0f));
+    CHECK(recommendedUiScaleFactor(0, 310, 1.0f) == Approx(1.0f));
+    CHECK(recommendedUiScaleFactor(-1920, 310, 1.0f) == Approx(1.0f));
+    CHECK(recommendedUiScaleFactor(1920, 310, 0.0f) == Approx(1.0f));
+    CHECK(recommendedUiScaleFactor(1920, 310, std::nanf("")) == Approx(1.0f));
+
+    // A stated width of two millimetres reads as 24000 units an inch. Without
+    // the plausibility bound that is not rejected but CAPPED, so a panel with a
+    // broken EDID would open the interface at 150% and look deliberate.
+    CHECK(recommendedUiScaleFactor(1920, 2, 1.0f) == Approx(1.0f));
+}
+
+TEST_CASE("The reference interface density holds both measured panels")
+{
+    // Pinned because it came from a measurement rather than from arithmetic:
+    // the Retina panel's own 127.6 units an inch, at the size its user reads
+    // comfortably. The band that keeps both panels' answers is 114 to 139 - one
+    // step boundary each side - so 128 has room, and moving it is deliberate.
+    CHECK(ReferenceUiDensity == Approx(128.0f));
+    CHECK(MaximumAutomaticUiScaleFactor == Approx(1.5f));
+
+    // The band itself, stated as the answers it protects rather than as its
+    // ends: a reference far below turns the Retina panel's 100% into 125%, and
+    // one far above drops the Windows panel back to 100%.
+    CHECK(127.6f / ReferenceUiDensity < 1.125f);
+    CHECK(157.3f / ReferenceUiDensity >= 1.125f);
+}
+
 TEST_CASE("Every interface-size step is a visibly distinct font size")
 {
     // ImGui rounds the baked font size, so the useful test of the step set is

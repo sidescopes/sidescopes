@@ -48,15 +48,23 @@ struct MonitorWorkArea
     int height;
 };
 
-// The work area of the monitor carrying most of the window; the primary when
-// the window overlaps none.
-MonitorWorkArea monitorMostlyContaining(GLFWmonitor** monitors, int monitorCount, int x, int y, int width, int height)
+// The display carrying most of the window; the primary when the window overlaps
+// none, and null when the toolkit lists no display at all.
+GLFWmonitor* monitorUnderWindow(GLFWwindow* window)
 {
-    int workX = 0;
-    int workY = 0;
-    int workWidth = 0;
-    int workHeight = 0;
-    glfwGetMonitorWorkarea(monitors[0], &workX, &workY, &workWidth, &workHeight);
+    int monitorCount = 0;
+    GLFWmonitor** monitors = glfwGetMonitors(&monitorCount);
+    if (!monitors || monitorCount == 0) {
+        return nullptr;
+    }
+
+    int x = 0;
+    int y = 0;
+    int width = 0;
+    int height = 0;
+    glfwGetWindowPos(window, &x, &y);
+    glfwGetWindowSize(window, &width, &height);
+    GLFWmonitor* best = monitors[0];
     long long bestOverlap = 0;
     for (int index = 0; index < monitorCount; ++index) {
         int monitorX = 0;
@@ -70,14 +78,19 @@ MonitorWorkArea monitorMostlyContaining(GLFWmonitor** monitors, int monitorCount
         const long long overlap = std::max<long long>(overlapWidth, 0) * std::max<long long>(overlapHeight, 0);
         if (overlap > bestOverlap) {
             bestOverlap = overlap;
-            workX = monitorX;
-            workY = monitorY;
-            workWidth = monitorWidth;
-            workHeight = monitorHeight;
+            best = monitors[index];
         }
     }
 
-    return {workX, workY, workWidth, workHeight};
+    return best;
+}
+
+MonitorWorkArea workAreaOf(GLFWmonitor* monitor)
+{
+    MonitorWorkArea work{};
+    glfwGetMonitorWorkarea(monitor, &work.x, &work.y, &work.width, &work.height);
+
+    return work;
 }
 
 void restoreWindowPlacement(GLFWwindow* window, const Preferences& startup)
@@ -87,9 +100,8 @@ void restoreWindowPlacement(GLFWwindow* window, const Preferences& startup)
         glfwSetWindowSize(window, startup.windowWidth, startup.windowHeight);
     }
 
-    int monitorCount = 0;
-    GLFWmonitor** monitors = glfwGetMonitors(&monitorCount);
-    if (!monitors || monitorCount == 0) {
+    GLFWmonitor* display = monitorUnderWindow(window);
+    if (display == nullptr) {
         return;
     }
 
@@ -105,7 +117,7 @@ void restoreWindowPlacement(GLFWwindow* window, const Preferences& startup)
     int frameBottom = 0;
     glfwGetWindowFrameSize(window, &frameLeft, &frameTop, &frameRight, &frameBottom);
 
-    const MonitorWorkArea work = monitorMostlyContaining(monitors, monitorCount, x, y, width, height);
+    const MonitorWorkArea work = workAreaOf(display);
     const int availableWidth = std::max(1, work.width - frameLeft - frameRight);
     const int availableHeight = std::max(1, work.height - frameTop - frameBottom);
     const int clampedWidth = std::min(width, availableWidth);
@@ -243,6 +255,28 @@ float computeUiScale(GLFWwindow* window)
     glfwGetFramebufferSize(window, &framebufferWidth, nullptr);
 
     return uiScaleForWindow(scaleX, windowWidth, framebufferWidth);
+}
+
+float startupUiScaleFactor(const Preferences& startup, GLFWwindow* window)
+{
+    // A file that names a factor keeps it, whatever the display says. The
+    // recommendation is only what a first run starts from, and the first save
+    // writes it down as any other chosen value.
+    if (startup.uiScaleFactor > 0.0f) {
+        return startup.uiScaleFactor;
+    }
+    GLFWmonitor* display = monitorUnderWindow(window);
+    if (display == nullptr) {
+        return 1.0f;
+    }
+    int physicalWidthMm = 0;
+    glfwGetMonitorPhysicalSize(display, &physicalWidthMm, nullptr);
+    const GLFWvidmode* mode = glfwGetVideoMode(display);
+    if (mode == nullptr) {
+        return 1.0f;
+    }
+
+    return recommendedUiScaleFactor(mode->width, physicalWidthMm, computeUiScale(window));
 }
 
 MainWindow createMainWindow(const Preferences& startup, const VersionInfo& version, AppCallbackState& callbackState)

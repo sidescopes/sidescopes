@@ -28,6 +28,37 @@ inline constexpr std::array<float, 7> UiScaleSteps = {0.5f, 0.75f, 1.0f, 1.25f, 
 /// hand-edited.
 [[nodiscard]] float cleanedUiScaleFactor(float requested);
 
+/// The interface density the offered steps are calibrated against, in interface
+/// units per inch.
+///
+/// One interface unit spans the OS content scale in physical pixels, so a
+/// display presents its pixels per inch divided by that scale: 127.6 on a
+/// 254 ppi Retina panel at its 2x default, where the shipped size reads
+/// correctly, and 157.3 on a 157 ppi laptop panel left at 100% scaling, where
+/// the same interface is a quarter smaller. Any value from 114 to 139 keeps
+/// both of those readings; 128 sits between them with room on each side.
+inline constexpr float ReferenceUiDensity = 128.0f;
+
+/// The largest factor a display's density may ask for on its own. Past this the
+/// interface is better left small and enlarged by hand: a panel that misreports
+/// its physical size then costs a step and a half of chrome at worst, and the
+/// size menu is a native OS menu that the factor never touches.
+inline constexpr float MaximumAutomaticUiScaleFactor = 1.5f;
+
+/// The interface-size factor a display's own density recommends, for a user who
+/// has never chosen one.
+///
+/// @p modeWidth is the display's current mode width in the units the platform
+/// states it (physical pixels on Windows, points on macOS), @p physicalWidthMm
+/// the panel's width, and @p osUiScale what the OS scaling already contributes -
+/// the factor @ref uiScaleForWindow answers - which is divided back out so a
+/// display already scaled by the system is asked for nothing more.
+///
+/// Never below 1.0: a low-density display is the case the interface is authored
+/// for, and shrinking it there would take away what the size menu is for. A
+/// panel whose stated size implies an implausible density gets 1.0 as well.
+[[nodiscard]] float recommendedUiScaleFactor(int modeWidth, int physicalWidthMm, float osUiScale);
+
 /// The rasterizer density the interface font should bake at.
 ///
 /// ImGui multiplies this into the framebuffer scale it derives each frame, so

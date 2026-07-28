@@ -179,11 +179,12 @@ bool App::init()
     seedImageSizes(m_analysis);
     restorePreferences(startup, m_view, m_pins, m_shortcuts, m_analysis);
     m_presets.restore(startup.layoutPresets, startup.layoutActiveSlot);
-    // The stored factor is cleaned to an offered step here, at the app boundary,
-    // so core preferences never depend on the app's scaling policy. setupImGui
-    // already applied the OS scale at the 1.0 default; fold the preference in
-    // now, before the first frame.
-    m_uiScale.restore(startup.uiScaleFactor, m_window);
+    // The stored factor - or, for a file that names none, the one this display's
+    // density recommends - is cleaned to an offered step here, at the app
+    // boundary, so core preferences never depend on the app's scaling policy.
+    // setupImGui already applied the OS scale at the 1.0 default; fold the
+    // preference in now, before the first frame.
+    m_uiScale.restore(startupUiScaleFactor(startup, m_window), m_window);
     const ScopePaneContext paneContext{*m_graphics,         m_view,         m_scopeRegistry, m_analysis, m_output,
                                        m_captureController, m_regionPicker, m_pins,          m_shortcuts};
     m_panes = std::make_unique<ScopePaneRenderer>(paneContext, createProjectionInstances(m_scopeRegistry),
