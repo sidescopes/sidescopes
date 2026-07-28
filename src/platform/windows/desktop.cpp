@@ -20,6 +20,7 @@
 #include <vector>
 
 #include "core/preferences.h"
+#include "platform/shell_windows.h"
 #include "platform/windows/capture_visibility.h"
 #include "platform/windows/display_identity.h"
 #include "platform/windows/wide_strings.h"
@@ -95,6 +96,16 @@ struct WindowCollector
     std::vector<DesktopWindow>* windows = nullptr;
 };
 
+// The window's registered class, for the shell rules. A name longer than
+// the buffer is truncated, which no shell class comes near.
+std::wstring windowClassName(HWND window)
+{
+    wchar_t name[64];
+    const int length = GetClassNameW(window, name, 64);
+
+    return length > 0 ? std::wstring(name, static_cast<std::size_t>(length)) : std::wstring();
+}
+
 BOOL CALLBACK collectWindow(HWND window, LPARAM context)
 {
     auto* collector = reinterpret_cast<WindowCollector*>(context);
@@ -106,6 +117,14 @@ BOOL CALLBACK collectWindow(HWND window, LPARAM context)
     }
     const LONG_PTR exStyle = GetWindowLongPtrW(window, GWL_EXSTYLE);
     if (exStyle & WS_EX_TOOLWINDOW) {
+        return TRUE;
+    }
+    // The desktop passes every rule above - visible, titled "Program
+    // Manager", no tool window - and is display-sized and owned by the
+    // same process as every File Explorer window, so leaving it listed
+    // both offers the desktop as a pick and reads those windows as its
+    // own chrome.
+    if (isShellOwnedWindowClass(windowClassName(window))) {
         return TRUE;
     }
 
@@ -363,22 +382,11 @@ namespace {
 std::function<void()> g_foregroundCallback;
 HWINEVENTHOOK g_foregroundHook = nullptr;
 
-// The shell surfaces that take the foreground mid focus switch: the alt-tab
-// and task-view hosts and the staging window foreground changes pass
-// through. The user works in none of them, so none may reroute the region.
+// The shell surfaces that take the foreground mid focus switch. The user
+// works in none of them, so none may reroute the region.
 bool isFocusTransitionSurface(HWND window)
 {
-    wchar_t className[64];
-    const int length = GetClassNameW(window, className, 64);
-    if (length <= 0) {
-        return false;
-    }
-
-    return wcscmp(className, L"XamlExplorerHostIslandWindow") == 0 ||  // Windows 11 alt-tab and task view
-           wcscmp(className, L"MultitaskingViewFrame") == 0 ||         // Windows 10 alt-tab and task view
-           wcscmp(className, L"ForegroundStaging") == 0 ||             // transient staging between switches
-           wcscmp(className, L"TaskSwitcherWnd") == 0 ||               // classic alt-tab
-           wcscmp(className, L"TaskSwitcherOverlayWnd") == 0;
+    return isFocusTransitionWindowClass(windowClassName(window));
 }
 
 // The switcher's acrylic backdrop samples the desktop through a capture,

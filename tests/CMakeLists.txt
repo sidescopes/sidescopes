@@ -63,6 +63,7 @@ add_executable(sidescopes_tests
     test_region_geometry.cpp
     test_icons.cpp
     test_focus_resolution.cpp
+    test_shell_windows.cpp
     test_border_label.cpp
     test_window_place.cpp
     test_window_suggestions.cpp
@@ -120,6 +121,10 @@ target_sources(sidescopes_tests PRIVATE
 target_sources(sidescopes_tests PRIVATE ${CMAKE_SOURCE_DIR}/src/platform/region_geometry.cpp)
 target_sources(sidescopes_tests PRIVATE ${CMAKE_SOURCE_DIR}/src/platform/icons.cpp)
 target_sources(sidescopes_tests PRIVATE ${CMAKE_SOURCE_DIR}/src/platform/focus_resolution.cpp)
+# The shell window classes are Windows knowledge held as portable code for
+# exactly this reason: the desktop layer that reads them runs on no other
+# platform, so the names are pinned here instead.
+target_sources(sidescopes_tests PRIVATE ${CMAKE_SOURCE_DIR}/src/platform/shell_windows.cpp)
 set_source_files_properties(${CMAKE_SOURCE_DIR}/src/platform/icons.cpp
     PROPERTIES COMPILE_OPTIONS "$<$<CXX_COMPILER_ID:MSVC>:/wd4702>")
 target_include_directories(sidescopes_tests PRIVATE ${nanosvg_SOURCE_DIR}/src)
