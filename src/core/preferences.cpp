@@ -383,6 +383,34 @@ void readPins(const std::map<std::string, std::string, std::less<>>& values, Pre
     }
 }
 
+// Takes the spaces off both ends of @p text, leaving nothing when it is all
+// spaces.
+void trimSpaces(std::string& text)
+{
+    const auto first = text.find_first_not_of(' ');
+    if (first == std::string::npos) {
+        text.clear();
+
+        return;
+    }
+    text = text.substr(first, text.find_last_not_of(' ') - first + 1);
+}
+
+// Cuts @p text to at most MaximumPresetNameLength bytes without splitting a
+// UTF-8 sequence: a cut landing inside one backs off to where the character
+// began, dropping it whole rather than leaving a byte no font can draw.
+void truncateOnCharacter(std::string& text)
+{
+    if (text.size() <= MaximumPresetNameLength) {
+        return;
+    }
+    std::size_t at = MaximumPresetNameLength;
+    while (at > 0 && (static_cast<unsigned char>(text[at]) & 0xC0) == 0x80) {
+        --at;
+    }
+    text.resize(at);
+}
+
 // An orientation is 0 automatic, 1 vertical, or 2 horizontal; anything else
 // falls back to automatic, so a corrupt value never wedges the layout.
 int cleanedOrientation(int value)
@@ -405,8 +433,8 @@ void readLiveLayout(const std::map<std::string, std::string, std::less<>>& value
 }
 
 // The saved layout slots, one prefixed group each: layout.presetN.stack,
-// .orientation, .weights, and .styles. An absent stack leaves the slot
-// unused.
+// .name, .orientation, .weights, and .styles. An absent stack leaves the slot
+// unused, and an absent name leaves it on its default one.
 void readLayoutPresets(const std::map<std::string, std::string, std::less<>>& values, Preferences& preferences)
 {
     for (int slot = 0; slot < LayoutPresetSlots; ++slot) {
@@ -414,6 +442,9 @@ void readLayoutPresets(const std::map<std::string, std::string, std::less<>>& va
         LayoutPreset& preset = preferences.layoutPresets[static_cast<std::size_t>(slot)];
         if (const auto found = values.find(prefix + "stack"); found != values.end()) {
             preset.stack = found->second;
+        }
+        if (const auto found = values.find(prefix + "name"); found != values.end()) {
+            preset.name = sanitizedPresetName(found->second);
         }
         readInt(values, (prefix + "orientation").c_str(), preset.orientation);
         preset.orientation = cleanedOrientation(preset.orientation);
@@ -546,8 +577,9 @@ void migrateScopeOrder(const std::map<std::string, std::string, std::less<>>& va
     preferences.scopeOrder = found != values.end() ? found->second : preferences.scopeStack;
 }
 
-// Writes the live layout state and every used preset slot. Unused slots (an
-// empty stack) write nothing, so the file stays terse.
+// Writes the live layout state and every preset slot worth a line. An unused
+// slot writes nothing beyond a name it has been given, so the file stays terse
+// without losing a name the user chose before filling the slot.
 void writeLayout(std::ostream& out, const Preferences& preferences)
 {
     out << "layout_orientation=" << preferences.layoutOrientation << '\n'
@@ -555,10 +587,15 @@ void writeLayout(std::ostream& out, const Preferences& preferences)
         << "layout_active_slot=" << preferences.layoutActiveSlot << '\n';
     for (int slot = 0; slot < LayoutPresetSlots; ++slot) {
         const LayoutPreset& preset = preferences.layoutPresets[static_cast<std::size_t>(slot)];
+        const std::string prefix = "layout.preset" + std::to_string(slot + 1) + '.';
+        // Sanitized rather than trusted: a name carrying a newline would end
+        // the line early and the rest of it would read back as a key.
+        if (!preset.name.empty()) {
+            out << prefix << "name=" << sanitizedPresetName(preset.name) << '\n';
+        }
         if (preset.stack.empty()) {
             continue;
         }
-        const std::string prefix = "layout.preset" + std::to_string(slot + 1) + '.';
         out << prefix << "stack=" << preset.stack << '\n'
             << prefix << "orientation=" << preset.orientation << '\n'
             << prefix << "weights=" << encodeWeights(preset.weights) << '\n';
@@ -569,6 +606,27 @@ void writeLayout(std::ostream& out, const Preferences& preferences)
 }
 
 }  // namespace
+
+std::string sanitizedPresetName(std::string_view name)
+{
+    std::string cleaned;
+    for (const char character : name) {
+        // Everything below a space, and the delete code, would either end the
+        // line the file stores this on or draw as nothing.
+        const auto code = static_cast<unsigned char>(character);
+        if (code >= 0x20 && code != 0x7F) {
+            cleaned += character;
+        }
+    }
+    // Trimmed before the cut, so the limit bounds the name the user sees
+    // rather than the whitespace they happened to type around it, and again
+    // after, because the cut itself can leave a trailing space.
+    trimSpaces(cleaned);
+    truncateOnCharacter(cleaned);
+    trimSpaces(cleaned);
+
+    return cleaned;
+}
 
 Preferences loadPreferences(const std::filesystem::path& file)
 {

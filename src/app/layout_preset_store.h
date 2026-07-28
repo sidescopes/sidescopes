@@ -1,10 +1,17 @@
 #pragma once
 
 #include <array>
+#include <string>
+#include <string_view>
 
 #include "core/preferences.h"
 
 namespace sidescopes {
+
+/// @return What @p slot (1-based) is called wherever it is listed: the name
+///         its user gave it, or "Preset N" until one is given. Every surface
+///         asks this, so a slot is never named two ways.
+[[nodiscard]] std::string presetDisplayName(int slot, const LayoutPreset& preset);
 
 /// Owns the layout preset slots and which one is active. Capturing a preset
 /// from the live view and applying one back to it stay with the host (they are
@@ -22,6 +29,12 @@ public:
 
     /// Records @p slot (1-based) as active after a load.
     void markLoaded(int slot);
+
+    /// Calls @p slot (1-based) @p name, cleaned the way the file will carry
+    /// it. An empty or all-blank name puts the slot back on its default one.
+    /// Renaming neither fills nor empties a slot, so a name can be given
+    /// before there is a layout to give it to.
+    void rename(int slot, std::string_view name);
 
     /// @return The active slot (1-based), or 0 when none is active.
     [[nodiscard]] int activeSlot() const;

@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <map>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "core/frame.h"
@@ -21,13 +22,23 @@ inline constexpr int LayoutPresetSlots = 9;
 /// constants are asserted equal where the board is seeded.
 inline constexpr std::size_t MaximumPins = 8;
 
-/// One saved layout slot: the scope stack, its split orientation, and the
-/// per-scope pane weights. An empty @ref stack marks an unused slot, which
-/// loading treats as a no-op. Weights are keyed by scope id; a scope absent
-/// from the map keeps the default weight of 1.
+/// How long a preset's name may be, in bytes. The menus size themselves to
+/// their widest entry, so a name is bounded to keep a list the width of a
+/// list.
+inline constexpr std::size_t MaximumPresetNameLength = 24;
+
+/// One saved layout slot: the scope stack, its split orientation, the
+/// per-scope pane weights, and what the user calls it. An empty @ref stack
+/// marks an unused slot, which loading treats as a no-op. Weights are keyed by
+/// scope id; a scope absent from the map keeps the default weight of 1.
 struct LayoutPreset
 {
-    std::string stack;                      ///< Stack tokens, the scopeStack format; empty = unused.
+    std::string stack;  ///< Stack tokens, the scopeStack format; empty = unused.
+    /// What the user calls this slot. Empty means it has never been renamed,
+    /// and the application shows the slot's default name; a name is kept even
+    /// for a slot holding no layout, so a set of slots can be named before
+    /// they are filled.
+    std::string name;
     int orientation = 0;                    ///< 0 automatic, 1 vertical, 2 horizontal.
     std::map<std::string, double> weights;  ///< Scope id to pane weight.
     /// Choice-parameter values - the right-click style menus' state - per
@@ -131,6 +142,14 @@ struct Preferences
     /// that assigns one.
     std::map<std::string, std::string> scopeShortcuts;
 };
+
+/// @return @p name as a preset may carry it: control characters dropped, the
+///         ends trimmed of spaces, and at most @ref MaximumPresetNameLength
+///         bytes, cut on a character boundary so a multi-byte character is
+///         never left half written. A newline would end the line the file
+///         stores the name on, so this runs on the way in from the user and
+///         again on the way in from the file.
+[[nodiscard]] std::string sanitizedPresetName(std::string_view name);
 
 /// The environment variable that moves the preferences file elsewhere.
 inline constexpr char PreferencesFileVariable[] = "SIDESCOPES_PREFS_FILE";

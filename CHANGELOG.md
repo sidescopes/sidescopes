@@ -14,6 +14,15 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   that the panes follow - a scope switched back on returns to the place
   it was left. The right-click Scopes list goes in the same order. The
   preferences key is `scope_order`.
+- Preset slots go by name rather than by the letters of the scopes they
+  hold. A slot is called Preset 1 until it is renamed, which a
+  double-click on its name in the picker does; the name persists,
+  survives a save over the slot, and can be given before the slot holds
+  a layout. The picker's rows and the right-click preset lists follow
+  the scope selector's shape and wording.
+- A preset saved by an earlier build can show the drift star as soon as
+  it is loaded: the panes follow the scope order now, not the sequence
+  the preset recorded. Saving over the slot settles it.
 - The scopes read only a region you have selected. With none they stay
   empty, keeping their graticule, and the markers and color readout go on
   following the pointer anywhere on screen, so a color can still be

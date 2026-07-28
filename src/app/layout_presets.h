@@ -60,10 +60,24 @@ public:
     [[nodiscard]] LayoutPresetOutcome load(int slot);
 
     /// The toolbar preset dropdown: the preview names the active slot
-    /// (starred when dirty); the popup loads on click, saves on Shift+click.
+    /// (starred when dirty); the popup lists every slot by name and loads on
+    /// click, saves on Shift+click, and renames on double-click.
     [[nodiscard]] LayoutPresetOutcome drawPicker();
 
 private:
+    /// Draws one slot's row - the active marker, its name, and its digit -
+    /// or, while that slot is being renamed, the field it is renamed in.
+    void drawSlotRow(int slot, float width, LayoutPresetOutcome& outcome);
+
+    /// Draws the field the name being renamed is edited in, committing on
+    /// Enter or on the focus leaving it.
+    void drawRenameField(float width, LayoutPresetOutcome& outcome);
+
+    /// Puts @p slot into rename mode with its current name in the field.
+    void beginRename(int slot);
+
+    /// Takes the edited name and leaves rename mode.
+    LayoutPresetOutcome commitRename();
     /// The live layout as it would save into a preset slot.
     [[nodiscard]] LayoutPreset capture() const;
 
@@ -88,6 +102,14 @@ private:
     const ScopeRegistry& m_registry;
     AnalysisSettings& m_analysis;
     LayoutPresetStore m_store;
+    /// The slot being renamed (1-based), or 0 while none is. The name is
+    /// edited in a fixed buffer a byte longer than a name may be, so the field
+    /// stops taking input where the cleaning would have cut it.
+    int m_renamingSlot = 0;
+    /// Whether the field still has to be handed the keyboard, which is true
+    /// for the one frame after a rename opens.
+    bool m_renameFocusDue = false;
+    std::array<char, MaximumPresetNameLength + 1> m_renameBuffer{};
 };
 
 }  // namespace sidescopes

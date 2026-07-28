@@ -532,6 +532,78 @@ TEST_CASE("Preferences round-trip a saved layout preset")
     CHECK(loaded.layoutPresets[8].stack.empty());
 }
 
+TEST_CASE("Preferences round-trip a preset's name")
+{
+    Preferences saved;
+    saved.layoutPresets[0].stack = "VWH";
+    saved.layoutPresets[0].name = "Portrait check";
+    // Slot 3 is named but holds no layout: the name is the only thing worth
+    // writing about it, and it must not be dropped with the empty slot.
+    saved.layoutPresets[2].name = "Skin tones";
+
+    const TempFile file("layout-preset-names.txt");
+    REQUIRE(savePreferences(saved, file.path()));
+
+    const Preferences loaded = loadPreferences(file.path());
+    CHECK(loaded.layoutPresets[0].name == "Portrait check");
+    CHECK(loaded.layoutPresets[2].name == "Skin tones");
+    CHECK(loaded.layoutPresets[2].stack.empty());
+    // A slot never named carries no name, which is what the default rests on.
+    CHECK(loaded.layoutPresets[1].name.empty());
+}
+
+TEST_CASE("A preset file written before names still loads")
+{
+    // The key is added, never repurposed: an older file names no slot and every
+    // slot falls back to its default name with the rest of it intact.
+    const TempFile file("layout-preset-no-names.txt");
+    file.write(
+        "layout.preset1.stack=VH\n"
+        "layout.preset1.orientation=2\n"
+        "layout.preset1.weights=org.sidescopes.vectorscope:2\n");
+
+    const Preferences loaded = loadPreferences(file.path());
+    CHECK(loaded.layoutPresets[0].stack == "VH");
+    CHECK(loaded.layoutPresets[0].orientation == 2);
+    CHECK(loaded.layoutPresets[0].weights.at(VectorscopeId) == 2.0);
+    CHECK(loaded.layoutPresets[0].name.empty());
+}
+
+TEST_CASE("A preset name is cleaned to what one line can carry")
+{
+    // The file splits on the first '=' and ends at a newline, so a name is
+    // bounded and stripped of anything that would end its line early.
+    CHECK(sanitizedPresetName("Portrait check") == "Portrait check");
+    CHECK(sanitizedPresetName("  Portrait check  ") == "Portrait check");
+    CHECK(sanitizedPresetName("Portrait\ncheck") == "Portraitcheck");
+    CHECK(sanitizedPresetName("Portrait\tcheck") == "Portraitcheck");
+    // An '=' is safe: the loader splits at the FIRST one, which the key owns.
+    CHECK(sanitizedPresetName("a=b") == "a=b");
+    CHECK(sanitizedPresetName("   ").empty());
+    CHECK(sanitizedPresetName("").empty());
+
+    const std::string tooLong(MaximumPresetNameLength + 8, 'x');
+    CHECK(sanitizedPresetName(tooLong).size() == MaximumPresetNameLength);
+
+    // A cut landing inside a multi-byte character drops that character whole
+    // rather than leaving a byte no font can draw.
+    const std::string wide = std::string(MaximumPresetNameLength - 1, 'x') + "\xC3\xA9";
+    const std::string cut = sanitizedPresetName(wide);
+    CHECK(cut.size() == MaximumPresetNameLength - 1);
+    CHECK(cut == std::string(MaximumPresetNameLength - 1, 'x'));
+}
+
+TEST_CASE("A hand-edited preset name is cleaned as it is read")
+{
+    // A name arrives from the file as well as from the user, and a file can be
+    // edited by hand, so the reading applies the same rules.
+    const TempFile file("layout-preset-long-name.txt");
+    file.write("layout.preset1.name=   " + std::string(MaximumPresetNameLength + 5, 'y') + "\n");
+
+    const Preferences loaded = loadPreferences(file.path());
+    CHECK(loaded.layoutPresets[0].name == std::string(MaximumPresetNameLength, 'y'));
+}
+
 TEST_CASE("Preferences drop malformed preset style pairs")
 {
     // The styles list is scopeId.key:value pairs; a pair without a colon or

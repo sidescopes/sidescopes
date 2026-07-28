@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "app/attach_controller.h"
+#include "app/layout_preset_store.h"
 #include "app/param_menu.h"
 #include "app/quality.h"
 #include "app/scope_layout.h"
@@ -84,9 +85,9 @@ struct ContextMenuModel
     bool regionSelected;
 };
 
-/// A preset slot's menu label: "N - empty" for an unused slot, otherwise a
-/// short summary like "1 - VWH", naming the orientation only when the preset
-/// pins one.
+/// A preset slot's menu label: what the slot is called, marked "(empty)" while
+/// it holds no layout. The digit that loads it is the entry's shortcut, not
+/// part of its name.
 [[nodiscard]] std::string presetLabel(int slot, const LayoutPreset& preset);
 
 /// Builds the right-click menu for @p clickedPane (-1 = a background or toolbar

@@ -1,5 +1,6 @@
 #include <array>
 #include <catch2/catch_test_macros.hpp>
+#include <cstddef>
 #include <map>
 #include <optional>
 #include <string>
@@ -137,6 +138,30 @@ TEST_CASE("A reordered scopes submenu still toggles the scope it names")
         ++checked;
     }
     CHECK(checked == static_cast<int>(registry().scopes().size()));
+}
+
+TEST_CASE("The preset menus name their slots rather than spell them out")
+{
+    MenuUnderTest menu;
+    menu.presets[0].stack = "VWH";
+    menu.presets[0].orientation = 1;
+    menu.presets[2].name = "Skin tones";
+    menu.build();
+
+    const std::vector<std::string> loads = menu.submenu("Presets");
+    REQUIRE(loads.size() == static_cast<std::size_t>(LayoutPresetSlots));
+    // A stack summary is not a name: "VWH Vertical" told the user nothing they
+    // had not already chosen.
+    CHECK(loads[0] == "Preset 1");
+    CHECK(loads[2] == "Skin tones (empty)");
+    CHECK(loads[8] == "Preset 9 (empty)");
+
+    // The save list goes by the same names, so the two read as one set of
+    // slots rather than as names on one side and bare digits on the other.
+    const std::vector<std::string> saves = menu.submenu("Save Current To");
+    REQUIRE(saves.size() == static_cast<std::size_t>(LayoutPresetSlots));
+    CHECK(saves[0] == "Preset 1");
+    CHECK(saves[2] == "Skin tones");
 }
 
 TEST_CASE("No menu id means two things at once")

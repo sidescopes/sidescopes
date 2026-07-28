@@ -91,6 +91,75 @@ TEST_CASE("Loading a slot makes it active without touching what is stored")
     CHECK_FALSE(store.isDirty(presetOf("V", 1)));
 }
 
+TEST_CASE("A slot goes by its number until it is given a name")
+{
+    LayoutPreset preset;
+    CHECK(presetDisplayName(1, preset) == "Preset 1");
+    CHECK(presetDisplayName(9, preset) == "Preset 9");
+
+    preset.name = "Portrait check";
+    CHECK(presetDisplayName(1, preset) == "Portrait check");
+}
+
+TEST_CASE("Renaming a slot leaves what it holds alone")
+{
+    LayoutPresetStore store;
+    store.save(2, presetOf("VW", 2));
+    REQUIRE(store.activeSlot() == 2);
+
+    store.rename(2, "Portrait check");
+    CHECK(presetDisplayName(2, store.at(2)) == "Portrait check");
+    CHECK(store.at(2).stack == "VW");
+    // A rename is not a load: which slot is active is untouched.
+    CHECK(store.activeSlot() == 2);
+    // Nor is it a drift of the live layout, which still matches what is stored.
+    CHECK_FALSE(store.isDirty(presetOf("VW", 2)));
+}
+
+TEST_CASE("An empty slot can be named before it holds anything")
+{
+    // Naming a set of slots up front is the point of naming them at all, so a
+    // name does not wait for a layout - and does not conjure one either.
+    LayoutPresetStore store;
+    store.rename(4, "Skin tones");
+
+    CHECK(presetDisplayName(4, store.at(4)) == "Skin tones");
+    CHECK(store.at(4).stack.empty());
+    CHECK(store.activeSlot() == 0);
+}
+
+TEST_CASE("Saving over a named slot keeps its name")
+{
+    // What the live view captures carries no name, so a save that took the
+    // capture wholesale would wipe the name every time the slot was updated.
+    LayoutPresetStore store;
+    store.rename(3, "Portrait check");
+    store.save(3, presetOf("VWH", 1));
+
+    CHECK(presetDisplayName(3, store.at(3)) == "Portrait check");
+    CHECK(store.at(3).stack == "VWH");
+}
+
+TEST_CASE("A blank name puts a slot back on its default")
+{
+    LayoutPresetStore store;
+    store.rename(5, "Skin tones");
+    REQUIRE(store.at(5).name == "Skin tones");
+
+    store.rename(5, "   ");
+    CHECK(store.at(5).name.empty());
+    CHECK(presetDisplayName(5, store.at(5)) == "Preset 5");
+}
+
+TEST_CASE("A name is cleaned on the way into a slot")
+{
+    // The store is the one door a typed name comes through, so it is where the
+    // file's rules are applied rather than at the moment of writing.
+    LayoutPresetStore store;
+    store.rename(1, "  Portrait\ncheck  ");
+    CHECK(store.at(1).name == "Portraitcheck");
+}
+
 TEST_CASE("Restoring replaces every slot and the active one")
 {
     LayoutPresetStore store;

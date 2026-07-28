@@ -49,20 +49,6 @@ void menuEndSubmenu(std::vector<NativeMenuItem>& menu)
     menu.push_back({NativeMenuItem::Kind::SubmenuEnd, "", -1, false, ""});
 }
 
-// The lowercase orientation word for a menu summary line.
-const char* orientationName(LayoutOrientation orientation)
-{
-    switch (orientation) {
-    case LayoutOrientation::Vertical:
-        return "vertical";
-    case LayoutOrientation::Horizontal:
-        return "horizontal";
-    case LayoutOrientation::Automatic:
-    default:
-        return "auto";
-    }
-}
-
 const std::map<std::string, double>& paramsFor(const ContextMenuModel& model, std::string_view id)
 {
     static const std::map<std::string, double> noParams;
@@ -241,8 +227,9 @@ void appendQualitySubmenu(const ContextMenuModel& model, std::vector<NativeMenuI
 
 void appendPresetsSubmenu(const ContextMenuModel& model, std::vector<NativeMenuItem>& menu)
 {
-    // Each slot lists its saved summary or "empty"; the digit hint teaches the
-    // load shortcut. Saving rides a nested submenu with the Shift+digit hint.
+    // Each slot goes by its name, marked when it holds nothing yet; the digit
+    // hint teaches the load shortcut. Saving rides a nested submenu with the
+    // Shift+digit hint, over the same names, so the two lists read alike.
     menuSubmenu(menu, "Presets");
     for (int slot = 1; slot <= LayoutPresetSlots; ++slot) {
         const LayoutPreset& preset = model.presets[static_cast<std::size_t>(slot - 1)];
@@ -252,7 +239,8 @@ void appendPresetsSubmenu(const ContextMenuModel& model, std::vector<NativeMenuI
     menuSeparator(menu);
     menuSubmenu(menu, "Save Current To");
     for (int slot = 1; slot <= LayoutPresetSlots; ++slot) {
-        menuAction(menu, std::to_string(slot).c_str(), MenuSavePresetBase + slot, false,
+        const LayoutPreset& preset = model.presets[static_cast<std::size_t>(slot - 1)];
+        menuAction(menu, presetDisplayName(slot, preset).c_str(), MenuSavePresetBase + slot, false,
                    "Shift+" + std::to_string(slot));
     }
     menuEndSubmenu(menu);
@@ -309,18 +297,9 @@ void appendRegionAndAppSection(const ContextMenuModel& model, std::vector<Native
 
 std::string presetLabel(int slot, const LayoutPreset& preset)
 {
-    const std::string number = std::to_string(slot);
-    if (preset.stack.empty()) {
-        return number + " - empty";
-    }
-    std::string label = number + " - " + preset.stack;
-    const LayoutOrientation orientation = orientationFromInt(preset.orientation);
-    if (orientation != LayoutOrientation::Automatic) {
-        label += ' ';
-        label += orientationName(orientation);
-    }
+    const std::string name = presetDisplayName(slot, preset);
 
-    return label;
+    return preset.stack.empty() ? name + " (empty)" : name;
 }
 
 void buildContextMenu(const ContextMenuModel& model, int clickedPane, std::vector<NativeMenuItem>& menu,
