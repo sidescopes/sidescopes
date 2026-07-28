@@ -25,11 +25,10 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   preferences key is `scope_order`.
 - Preset slots go by name rather than by the letters of the scopes they
   hold. A slot is called Preset 1 until it is renamed, which the pen
-  button at the end of its row in the picker does - a double-click on
-  the name does the same. The name persists, survives a save over the
-  slot, and can be given before the slot holds a layout. The picker's
-  rows and the right-click preset lists follow the scope selector's
-  shape and wording.
+  button at the end of its row in the picker does. The name persists,
+  survives a save over the slot, and can be given before the slot holds
+  a layout. The picker's rows and the right-click preset lists follow
+  the scope selector's shape and wording.
 - A preset saved by an earlier build can show the drift star as soon as
   it is loaded: the panes follow the scope order now, not the sequence
   the preset recorded. Saving over the slot settles it.

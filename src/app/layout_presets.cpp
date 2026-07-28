@@ -231,12 +231,6 @@ void LayoutPresetController::drawSlotRow(int slot, float width, IconTextures& ic
     if (ImGui::Selectable(name.c_str(), false, ImGuiSelectableFlags_NoAutoClosePopups, rowSize)) {
         outcome = ImGui::GetIO().KeyShift ? save(slot) : load(slot);
     }
-    // A double-click on the name renames too. It is the second way in, not the
-    // only one: the button beside it is what says the slot can be renamed at
-    // all, and a gesture nothing on screen mentions teaches nobody.
-    if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
-        beginRename(slot);
-    }
     drawMenuRowAccelerator(std::to_string(slot).c_str(), ImGui::GetFontSize() * 0.75f);
     ImGui::SameLine(0.0f, 0.0f);
     const std::string tooltip = "Rename " + name;

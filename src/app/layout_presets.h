@@ -63,7 +63,8 @@ public:
     /// The toolbar preset dropdown: the preview names the active slot
     /// (starred when dirty); the popup lists every slot by name and loads on
     /// click, saves on Shift+click, and renames from the pen button standing
-    /// at the end of each row. @p icons is the shared glyph cache that button
+    /// at the end of each row - the one way in, so a click on a row never has
+    /// to mean two things. @p icons is the shared glyph cache that button
     /// draws from.
     [[nodiscard]] LayoutPresetOutcome drawPicker(IconTextures& icons);
 
