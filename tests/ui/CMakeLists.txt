@@ -61,6 +61,17 @@ target_compile_definitions(sidescopes_imgui_test_engine PUBLIC
     IMGUI_TEST_ENGINE_ENABLE_COROUTINE_STDTHREAD_IMPL=1)
 target_link_libraries(sidescopes_imgui_test_engine PUBLIC sidescopes_imgui_te)
 
+# The Dear ImGui-dependent app units, built a second time against the hooked
+# Dear ImGui. Same sources as the app's sidescopes_app_imgui, one list in the
+# top-level CMakeLists; only the ImGuiContext layout differs, and a suite links
+# whichever variant matches its own Dear ImGui.
+sidescopes_add_app_imgui_library(sidescopes_app_imgui_te sidescopes_imgui_te)
+# Keep this variant out of the compile database. Its sources are already in
+# there from the app's variant, and clang-tidy analyses every matching entry -
+# two entries per file would double the tidy job over the whole app layer. The
+# app's variant is the one worth analysing: it is what ships.
+set_target_properties(sidescopes_app_imgui_te PROPERTIES EXPORT_COMPILE_COMMANDS OFF)
+
 # The headless smoke test proving the harness runs.
 add_executable(sidescopes_ui_tests test_smoke.cpp)
 target_link_libraries(sidescopes_ui_tests PRIVATE sidescopes_imgui_test_engine)
@@ -79,7 +90,8 @@ foreach(suite IN ITEMS pipeline view)
         ui_test_harness.cpp)
     target_include_directories(sidescopes_ui_${suite}_tests PRIVATE ${CMAKE_SOURCE_DIR}/tests/support)
     target_link_libraries(sidescopes_ui_${suite}_tests PRIVATE
-        sidescopes_imgui_test_engine sidescopes_app ${SIDESCOPES_MODULE_LINK_LIBS} sidescopes_core)
+        sidescopes_imgui_test_engine sidescopes_app_imgui_te sidescopes_app
+        ${SIDESCOPES_MODULE_LINK_LIBS} sidescopes_core)
     sidescopes_target_defaults(sidescopes_ui_${suite}_tests)
     add_test(NAME sidescopes_ui_${suite} COMMAND sidescopes_ui_${suite}_tests)
 endforeach()
@@ -93,11 +105,10 @@ endforeach()
 # in src/app/row_layout.cpp.
 add_executable(sidescopes_ui_layout_tests
     test_layout_ui.cpp
-    ui_test_harness.cpp
-    ${CMAKE_SOURCE_DIR}/src/app/interface_style.cpp
-    ${CMAKE_SOURCE_DIR}/src/app/row_layout.cpp)
+    ui_test_harness.cpp)
 target_include_directories(sidescopes_ui_layout_tests PRIVATE ${CMAKE_SOURCE_DIR}/src)
-target_link_libraries(sidescopes_ui_layout_tests PRIVATE sidescopes_imgui_test_engine)
+target_link_libraries(sidescopes_ui_layout_tests PRIVATE
+    sidescopes_imgui_test_engine sidescopes_app_imgui_te)
 sidescopes_target_defaults(sidescopes_ui_layout_tests)
 add_test(NAME sidescopes_ui_layout COMMAND sidescopes_ui_layout_tests)
 
@@ -106,12 +117,11 @@ add_test(NAME sidescopes_ui_layout COMMAND sidescopes_ui_layout_tests)
 # strength's whole path - style, render shim, toolkit - can be seen at once.
 add_executable(sidescopes_ui_graticule_tests
     test_graticule_ui.cpp
-    ui_test_harness.cpp
-    ${CMAKE_SOURCE_DIR}/src/app/overlay_render.cpp)
+    ui_test_harness.cpp)
 target_include_directories(sidescopes_ui_graticule_tests PRIVATE
     ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/include)
 target_link_libraries(sidescopes_ui_graticule_tests PRIVATE
-    sidescopes_imgui_test_engine sidescopes_app)
+    sidescopes_imgui_test_engine sidescopes_app_imgui_te sidescopes_app)
 sidescopes_target_defaults(sidescopes_ui_graticule_tests)
 add_test(NAME sidescopes_ui_graticule COMMAND sidescopes_ui_graticule_tests)
 
@@ -120,10 +130,10 @@ add_test(NAME sidescopes_ui_graticule COMMAND sidescopes_ui_graticule_tests)
 # Scaling menu, driven headlessly against the hooked build.
 add_executable(sidescopes_ui_scale_tests
     test_scale_ui.cpp
-    ui_test_harness.cpp
-    ${CMAKE_SOURCE_DIR}/src/app/interface_style.cpp)
+    ui_test_harness.cpp)
 target_include_directories(sidescopes_ui_scale_tests PRIVATE ${CMAKE_SOURCE_DIR}/src)
-target_link_libraries(sidescopes_ui_scale_tests PRIVATE sidescopes_imgui_test_engine)
+target_link_libraries(sidescopes_ui_scale_tests PRIVATE
+    sidescopes_imgui_test_engine sidescopes_app_imgui_te)
 sidescopes_target_defaults(sidescopes_ui_scale_tests)
 add_test(NAME sidescopes_ui_scale COMMAND sidescopes_ui_scale_tests)
 

@@ -239,15 +239,14 @@ if(WIN32)
 endif()
 
 # --- application logic ---
-# The application units that do not depend on Dear ImGui: controllers, state
-# and pure logic lifted out of main. A library, so the app, the unit tests and
-# the UI-test suites all link one build of these from one list.
+# Every src/app unit belongs to a library, listed once. The app, the unit tests
+# and the UI-test suites link those libraries; none of them names a source.
 #
-# The Dear ImGui-dependent units cannot join them, and belong to the app target
-# below. The UI tests build Dear ImGui with IMGUI_ENABLE_TEST_ENGINE, which
-# changes the ImGuiContext layout; a unit compiled against the app's Dear ImGui
-# has a different one and cannot be linked into them. Those suites compile the
-# few they need themselves (see tests/ui/CMakeLists.txt).
+# The split is by Dear ImGui dependency, because the UI tests build Dear ImGui
+# with IMGUI_ENABLE_TEST_ENGINE, which changes the ImGuiContext layout. Units
+# that include Dear ImGui therefore need one build per layout, so their list
+# below is compiled into two libraries from the same sources; units that do not
+# are layout-independent and need only one.
 add_library(sidescopes_app STATIC
     src/app/adaptive_detail.cpp
     src/app/attach_controller.cpp
@@ -289,6 +288,68 @@ add_library(sidescopes_app STATIC
 # real platform layer in the app, the scripted stubs in the test binaries.
 target_link_libraries(sidescopes_app PUBLIC sidescopes_core)
 sidescopes_target_defaults(sidescopes_app)
+
+# The Dear ImGui-dependent units. Absolute paths because tests/ui builds the
+# second variant of this same list; sidescopes_app_library() below is the one
+# place either variant is defined.
+set(SIDESCOPES_APP_IMGUI_SOURCES
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/app/about_window.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/app/app.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/app/app_attach.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/app/app_region_pick.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/app/app_startup.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/app/color_picker_common.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/app/color_picker_deck.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/app/color_picker_difference.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/app/color_picker_hero.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/app/color_readout.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/app/frame_timer.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/app/hex_font.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/app/icon_textures.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/app/imgui_ui.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/app/interface_style.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/app/layout_presets.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/app/menu_rows.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/app/overlay_render.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/app/pane_area.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/app/row_layout.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/app/scope_pane_renderer.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/app/settings_window.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/app/status_bar.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/app/toolbar.cpp
+)
+
+# Build-time version stamp, included by app.cpp. The custom target regenerates
+# the header from `git describe` whenever it changes, so every build reflects
+# the checked-out commit without relinking on a no-op build. Nothing runs it
+# unless a library variant below depends on it.
+set(SIDESCOPES_VERSION_HEADER ${CMAKE_BINARY_DIR}/generated/sidescopes_version.h)
+add_custom_target(sidescopes_version
+    BYPRODUCTS ${SIDESCOPES_VERSION_HEADER}
+    COMMAND ${CMAKE_COMMAND}
+        -DSIDESCOPES_VERSION=${PROJECT_VERSION}
+        -DSIDESCOPES_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+        -DSIDESCOPES_OUTPUT=${SIDESCOPES_VERSION_HEADER}
+        -P ${CMAKE_SOURCE_DIR}/cmake/GenerateVersion.cmake
+    COMMENT "Stamping build version")
+
+# One variant of the Dear ImGui-dependent library, bound to a given Dear ImGui
+# build. `imgui_target` is the app's Dear ImGui or the test engine's hooked one;
+# the sources are identical and only the ImGuiContext layout differs. Callers
+# link the variant matching their own Dear ImGui and never both.
+function(sidescopes_add_app_imgui_library name imgui_target)
+    add_library(${name} STATIC ${SIDESCOPES_APP_IMGUI_SOURCES})
+    target_link_libraries(${name} PUBLIC sidescopes_app ${imgui_target})
+    # app.cpp includes the stamped version header, and the window-owning units
+    # include GLFW. GLFW's HEADERS only, deliberately not its link: the test
+    # engine's Dear ImGui runs on the null backend, so a suite that ever pulls
+    # a window-owning object fails at link instead of quietly acquiring GLFW.
+    target_include_directories(${name} PRIVATE
+        ${CMAKE_BINARY_DIR}/generated
+        $<TARGET_PROPERTY:glfw,INTERFACE_INCLUDE_DIRECTORIES>)
+    add_dependencies(${name} sidescopes_version)
+    sidescopes_target_defaults(${name})
+endfunction()
 
 if(APPLE OR WIN32)
     # --- application ---
@@ -408,48 +469,10 @@ if(APPLE OR WIN32)
         sidescopes_target_defaults(SideScopes)
     endif()
 
-    # The Dear ImGui-dependent half of the application; the rest is
-    # sidescopes_app, linked above.
-    target_sources(SideScopes PRIVATE
-        src/app/about_window.cpp
-        src/app/app.cpp
-        src/app/app_attach.cpp
-        src/app/app_region_pick.cpp
-        src/app/app_startup.cpp
-        src/app/color_picker_common.cpp
-        src/app/color_picker_deck.cpp
-        src/app/color_picker_difference.cpp
-        src/app/color_picker_hero.cpp
-        src/app/color_readout.cpp
-        src/app/frame_timer.cpp
-        src/app/hex_font.cpp
-        src/app/icon_textures.cpp
-        src/app/imgui_ui.cpp
-        src/app/interface_style.cpp
-        src/app/layout_presets.cpp
-        src/app/menu_rows.cpp
-        src/app/overlay_render.cpp
-        src/app/pane_area.cpp
-        src/app/row_layout.cpp
-        src/app/scope_pane_renderer.cpp
-        src/app/settings_window.cpp
-        src/app/status_bar.cpp
-        src/app/toolbar.cpp)
-
-    # Build-time version stamp. The custom target regenerates the header from
-    # `git describe` whenever it changes, so every build reflects the checked-
-    # out commit without relinking on a no-op build. Only the app includes it.
-    set(SIDESCOPES_VERSION_HEADER ${CMAKE_BINARY_DIR}/generated/sidescopes_version.h)
-    add_custom_target(sidescopes_version
-        BYPRODUCTS ${SIDESCOPES_VERSION_HEADER}
-        COMMAND ${CMAKE_COMMAND}
-            -DSIDESCOPES_VERSION=${PROJECT_VERSION}
-            -DSIDESCOPES_SOURCE_DIR=${CMAKE_SOURCE_DIR}
-            -DSIDESCOPES_OUTPUT=${SIDESCOPES_VERSION_HEADER}
-            -P ${CMAKE_SOURCE_DIR}/cmake/GenerateVersion.cmake
-        COMMENT "Stamping build version")
-    add_dependencies(SideScopes sidescopes_version)
-    target_include_directories(SideScopes PRIVATE ${CMAKE_BINARY_DIR}/generated)
+    # Both Dear ImGui-dependent variants are built from one list; the app links
+    # the one bound to its own Dear ImGui.
+    sidescopes_add_app_imgui_library(sidescopes_app_imgui imgui)
+    target_link_libraries(SideScopes PRIVATE sidescopes_app_imgui)
 
     if(SIDESCOPES_MODULES_DYNAMIC)
         # Nothing links the modules in dynamic mode; make the app wait for
