@@ -37,6 +37,11 @@ constexpr uint32_t GraticuleSkinTone = packColor(230, 170, 140, 160);
 /// clamp together and a target box would stop reading louder than a grid line.
 inline constexpr std::array<float, 4> GraticuleStrengths = {0.5f, 0.75f, 1.0f, 1.25f};
 
+/// What each step of @ref GraticuleStrengths is called where it is offered: a
+/// ladder of weight rather than of arithmetic, one word per step and in the
+/// same order. Named beside the values so the two cannot fall out of step.
+inline constexpr std::array<const char*, 4> GraticuleStrengthNames = {"Faint", "Normal", "Strong", "Bold"};
+
 /// The strength a scope is graded at, and what a fresh installation draws.
 inline constexpr float DefaultGraticuleStrength = 1.0f;
 

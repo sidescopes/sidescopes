@@ -120,6 +120,23 @@ TEST_CASE("The loudest graticule keeps its hierarchy")
     CHECK(alphaOf(graticuleInk(GraticuleMajor, ceiling)) > alphaOf(graticuleInk(GraticuleMinor, ceiling)));
 }
 
+TEST_CASE("Every strength has one name, and the ladder climbs")
+{
+    // The words are a ladder of weight - Faint below Normal below Strong below
+    // Bold - so they only tell the truth while the values climb in the same
+    // order. Reordering or inserting a step without touching the words would
+    // leave the menu describing the wrong ink, which nothing else would catch.
+    REQUIRE(GraticuleStrengthNames.size() == GraticuleStrengths.size());
+    for (std::size_t step = 1; step < GraticuleStrengths.size(); ++step) {
+        INFO("step " << step << " named " << GraticuleStrengthNames[step]);
+        CHECK(GraticuleStrengths[step] > GraticuleStrengths[step - 1]);
+    }
+    for (const char* name : GraticuleStrengthNames) {
+        REQUIRE(name != nullptr);
+        CHECK(std::string(name).find('%') == std::string::npos);
+    }
+}
+
 TEST_CASE("A stored strength snaps to an offered step")
 {
     for (const float step : GraticuleStrengths) {

@@ -164,6 +164,18 @@ TEST_CASE("The preset menus name their slots rather than spell them out")
     CHECK(saves[2] == "Skin tones");
 }
 
+TEST_CASE("The graticule steps are offered as words, not percentages")
+{
+    // What the user picks is how the lines read over a trace; a percentage
+    // states the arithmetic instead and leaves them to work out which is
+    // heavier. The shipped step still says so - a checkmark tells you where
+    // you are, not where you started.
+    MenuUnderTest menu;
+    menu.build();
+
+    CHECK(menu.submenu("Graticule") == std::vector<std::string>{"Faint", "Normal", "Strong (default)", "Bold"});
+}
+
 TEST_CASE("No menu id means two things at once")
 {
     // Past the last fixed range every id is a scope parameter, so the sweep
