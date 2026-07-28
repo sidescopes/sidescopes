@@ -149,11 +149,10 @@ TEST_CASE("Vectorscope renderings match their goldens")
 
     Vectorscope linear;
     VectorscopeSettings linearSettings;
-    linearSettings.matrix = ChromaMatrix::Bt601;
     linearSettings.response = TraceResponse::Linear;
     linear.configure(linearSettings);
     linear.accumulate(bars.view(), IntRect{0, 0, 64, 16});
-    checkGolden("vectorscope-bars-bt601-linear", linear.image(), 0xd2de33dbfda02dd9ULL);
+    checkGolden("vectorscope-bars-bt709-linear", linear.image(), 0x91736f2a071db074ULL);
 }
 
 TEST_CASE("Waveform renderings match their goldens")

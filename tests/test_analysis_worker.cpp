@@ -444,14 +444,17 @@ TEST_CASE("AnalysisWorker recomputes on settings changes without a new frame")
     uint64_t seen = 0;
     AnalysisWorker::Output output;
     REQUIRE(waitFor([&] { return worker.fetchOutput(seen, output); }));
-    CHECK(pixelLit(output.images.at(VectorscopeId), 109, 43));  // default BT.709 target
+    CHECK(pixelLit(output.images.at(VectorscopeId), 109, 43));  // BT.709 target
+    const std::vector<uint8_t> boosted = output.images.at(VectorscopeId).rgba;
 
-    // Switching the vectorscope's chroma matrix to BT.601 moves 75% red's
-    // target, and the worker recomputes on the frame it already holds.
-    settings.scopeParams[VectorscopeId]["matrix"] = 0.0;
+    // Switching the vectorscope's trace response redraws the same cloud on a
+    // different density curve, and the worker recomputes on the frame it
+    // already holds rather than waiting for a new one.
+    settings.scopeParams[VectorscopeId]["response"] = 1.0;  // Linear
     worker.updateSettings(settings);
     REQUIRE(waitFor([&] { return worker.fetchOutput(seen, output); }));
-    CHECK(pixelLit(output.images.at(VectorscopeId), 100, 43));  // BT.601 target
+    CHECK(output.images.at(VectorscopeId).rgba != boosted);
+    CHECK(pixelLit(output.images.at(VectorscopeId), 109, 43));  // the same target
     CHECK(output.framesProcessed == 1);                         // same frame, reanalyzed
 }
 

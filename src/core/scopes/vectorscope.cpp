@@ -16,8 +16,15 @@ namespace {
 // small region's scatter finishes before spawned threads would pay off.
 constexpr int AccumulateRowsPerChunk = 64;
 
-// Fixed-point (x256) full-range RGB -> Cb/Cr coefficients from the BT.601
-// and BT.709 specifications. Chroma lands in [0, 255] with neutral at 128.
+// Fixed-point (x256) full-range RGB -> Cb/Cr coefficients from the BT.709
+// specification. Chroma lands in [0, 255] with neutral at 128.
+//
+// BT.709 is the only matrix this scope offers, and that is a correctness
+// decision rather than a simplification: sRGB's primaries are colorimetrically
+// identical to Rec.709's, and these coefficients derive from exactly those
+// primaries. BT.601's are tied to 1953 NTSC phosphors, so against the screen
+// content this tool measures they are not another convention - they are the
+// wrong matrix, and offering them would be a way to read bad numbers quietly.
 struct ChromaCoefficients
 {
     int cbFromR, cbFromG, cbFromB;
@@ -27,13 +34,7 @@ struct ChromaCoefficients
 // Each row sums to zero exactly: a gray input must land dead on the
 // neutral center, so the rounding error goes into the green coefficient
 // (0.3% of its weight) rather than into a bias of the neutral axis.
-constexpr ChromaCoefficients Bt601{-38, -74, 112, 112, -94, -18};
 constexpr ChromaCoefficients Bt709{-26, -86, 112, 112, -102, -10};
-
-constexpr const ChromaCoefficients& coefficientsFor(ChromaMatrix matrix)
-{
-    return matrix == ChromaMatrix::Bt601 ? Bt601 : Bt709;
-}
 
 // The chroma coefficients carry eight fractional bits and the channels feeding
 // them carry VectorscopeLevelBits more, so the product is shifted by both. An
@@ -98,16 +99,9 @@ void Vectorscope::ensureBuffers()
 
 void Vectorscope::configure(const VectorscopeSettings& settings)
 {
-    const bool matrixChanged = settings.matrix != m_settings.matrix;
     m_settings = settings;
     m_settings.samplingStride = std::clamp(m_settings.samplingStride, 1, 8);
     m_settings.size = std::clamp(m_settings.size, CodeGridSize, 512);
-    // A size change is recorded and honoured by the next pass. The tint table
-    // is rebuilt here only for a live engine holding the matched size; the
-    // resize that a changed size triggers rebuilds it anyway.
-    if (matrixChanged && !m_tint.empty() && m_settings.size == m_imageSize) {
-        rebuildTintTable();
-    }
 }
 
 void Vectorscope::resize(int size)
@@ -135,7 +129,7 @@ void Vectorscope::scatterRowsAs(const FrameView& frame, IntRect region, const Sa
     // truncation used to alias the code lattice into texture even at 256, and
     // parked the whole cloud half a bin off the positions the projection - and
     // with it every marker and graticule target - reports.
-    const ChromaCoefficients& matrix = coefficientsFor(m_settings.matrix);
+    const ChromaCoefficients& matrix = Bt709;
     const int size = CodeGridSize;
     const int span = size * 16;
     for (int i = rowBegin; i < rowEnd; ++i) {
@@ -220,10 +214,10 @@ void Vectorscope::accumulate(const FrameView& frame, IntRect region)
     mapBinsToImage(sampleCount);
 }
 
-NormalizedPoint Vectorscope::project(const FloatColor& color) const
+NormalizedPoint Vectorscope::project(const FloatColor& color)
 {
     // Floating point throughout: markers need sub-bin positions.
-    const ChromaCoefficients& matrix = coefficientsFor(m_settings.matrix);
+    const ChromaCoefficients& matrix = Bt709;
     const float cb = (static_cast<float>(matrix.cbFromR) * color.r + static_cast<float>(matrix.cbFromG) * color.g +
                       static_cast<float>(matrix.cbFromB) * color.b) /
                          256.0f +
@@ -238,8 +232,9 @@ NormalizedPoint Vectorscope::project(const FloatColor& color) const
 void Vectorscope::rebuildTintTable()
 {
     // Each bin is shown in the hue it represents: invert the chroma
-    // transform at a fixed mid luma. BT.601 inverse coefficients are close
-    // enough for display tinting in both matrix modes.
+    // transform at a fixed mid luma. The inverse coefficients here are the
+    // classic ones and are close enough for display tinting, which paints a
+    // hue rather than reproducing a colour.
     constexpr float DisplayLuma = 160.0f;
     // Chroma is exaggerated for display: the trace paints the hue a bin
     // represents, not a colorimetric reproduction, and at true saturation

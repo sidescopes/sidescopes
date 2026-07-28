@@ -25,7 +25,6 @@ struct VectorscopeSettings
     float gain = 3.0f;
     /// Sample every Nth pixel horizontally and vertically (1..8).
     int samplingStride = 1;
-    ChromaMatrix matrix = ChromaMatrix::Bt709;
     TraceResponse response = TraceResponse::Boosted;
     /// Display image resolution per axis. Accumulation always happens on
     /// the 256-code chroma grid - 8-bit content quantizes to it, and a
@@ -75,7 +74,10 @@ public:
     /// Where a color lands on the scope, in normalized image coordinates.
     /// Graticule targets, the cursor marker, and any future indicators all go
     /// through this projection, which guarantees overlays agree with the data.
-    [[nodiscard]] NormalizedPoint project(const FloatColor& color) const;
+    ///
+    /// Static since the chroma matrix became a constant: the projection depends
+    /// on nothing an instance holds, exactly as the waveform's does.
+    [[nodiscard]] static NormalizedPoint project(const FloatColor& color);
 
 private:
     /// Brings the buffers up to the configured size, allocating them if this

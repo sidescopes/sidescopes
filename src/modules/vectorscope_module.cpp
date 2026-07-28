@@ -47,8 +47,6 @@ bool configure(SsScopeInstance* instance, const SsParamValue* values, uint32_t c
                 self->settings.gain = static_cast<float>(value.value);
             } else if (std::strcmp(value.key, "stride") == 0) {
                 self->settings.samplingStride = static_cast<int>(value.value);
-            } else if (std::strcmp(value.key, "matrix") == 0) {
-                self->settings.matrix = value.value < 0.5 ? ChromaMatrix::Bt601 : ChromaMatrix::Bt709;
             } else if (std::strcmp(value.key, "response") == 0) {
                 self->settings.response = value.value < 0.5 ? TraceResponse::Boosted : TraceResponse::Linear;
             }
@@ -191,13 +189,11 @@ void destroy(SsScopeInstance* instance)
     delete impl(instance);
 }
 
-const char* const MatrixChoices[] = {"BT.601", "BT.709", nullptr};
 const char* const ResponseChoices[] = {"Boosted", "Linear", nullptr};
 
 const SsParamInfo Params[] = {
     {"gain", "Intensity", SS_PARAM_INTENSITY, 0.0, 0.0, 3.0, 20.0, nullptr, nullptr},
     {"stride", "Sampling stride", SS_PARAM_INT, 1.0, 8.0, 1.0, 0.0, nullptr, nullptr},
-    {"matrix", "Matrix", SS_PARAM_CHOICE, 0.0, 1.0, 1.0, 0.0, "Vectorscope Matrix", MatrixChoices},
     {"response", "Trace response", SS_PARAM_CHOICE, 0.0, 1.0, 0.0, 0.0, "Trace Response", ResponseChoices},
 };
 

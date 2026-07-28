@@ -6,6 +6,15 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Removed
+
+- The vectorscope's Matrix choice. It measures with BT.709 always. sRGB
+  shares Rec.709's primaries and BT.709's coefficients come from those
+  primaries, while BT.601's come from 1953 NTSC phosphors, so for screen
+  content BT.601 was not an alternative but a wrong reading. A
+  preferences file that still names it loads unchanged and measures with
+  BT.709.
+
 ### Changed
 
 - The scope selector holds one stable order. It lists every scope,

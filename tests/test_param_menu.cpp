@@ -65,13 +65,13 @@ TEST_CASE("findParam resolves a descriptor parameter by key")
 {
     const ScopeRegistry registry{builtinModules()};
 
-    const SsParamInfo* matrix = findParam(descriptorOf(registry, VectorscopeScopeId), "matrix");
-    REQUIRE(matrix != nullptr);
-    CHECK(matrix->kind == SS_PARAM_CHOICE);
+    const SsParamInfo* response = findParam(descriptorOf(registry, VectorscopeScopeId), "response");
+    REQUIRE(response != nullptr);
+    CHECK(response->kind == SS_PARAM_CHOICE);
 
     // An unknown key and the descriptorless color picker both come back null.
     CHECK(findParam(descriptorOf(registry, VectorscopeScopeId), "no-such-key") == nullptr);
-    CHECK(findParam(descriptorOf(registry, ColorPickerScopeId), "matrix") == nullptr);
+    CHECK(findParam(descriptorOf(registry, ColorPickerScopeId), "response") == nullptr);
 }
 
 TEST_CASE("Choice submenus strip the scope-name prefix and check the current value")
@@ -80,38 +80,28 @@ TEST_CASE("Choice submenus strip the scope-name prefix and check the current val
     std::vector<NativeMenuItem> items;
     std::vector<ParamMenuAction> actions;
 
-    // Defaults (empty params): matrix defaults to BT.709 (choice 1), response
-    // to Boosted (choice 0).
+    // Defaults (empty params): response defaults to Boosted (choice 0).
     appendScopeChoiceMenus(*descriptorOf(registry, VectorscopeScopeId), {}, false, items, actions);
 
-    REQUIRE(items.size() == 8);
+    REQUIRE(items.size() == 4);
     CHECK(items[0].kind == Kind::SubmenuBegin);
-    CHECK(items[0].label == "Matrix");  // "Vectorscope Matrix" with the prefix stripped
-    CHECK(items[1].label == "BT.601");
-    CHECK_FALSE(items[1].checked);
-    CHECK(items[2].label == "BT.709");
-    CHECK(items[2].checked);
+    CHECK(items[0].label == "Trace Response");  // no scope prefix, unchanged
+    CHECK(items[1].label == "Boosted");
+    CHECK(items[1].checked);
+    CHECK(items[2].label == "Linear");
+    CHECK_FALSE(items[2].checked);
     CHECK(items[3].kind == Kind::SubmenuEnd);
-    CHECK(items[4].kind == Kind::SubmenuBegin);
-    CHECK(items[4].label == "Trace Response");  // no scope prefix, unchanged
-    CHECK(items[5].label == "Boosted");
-    CHECK(items[5].checked);
-    CHECK(items[6].label == "Linear");
-    CHECK_FALSE(items[6].checked);
-    CHECK(items[7].kind == Kind::SubmenuEnd);
 
     // The side table pairs each choice action with its (scope, key, value),
     // ided from ParamMenuActionBase upward.
-    REQUIRE(actions.size() == 4);
+    REQUIRE(actions.size() == 2);
     CHECK(items[1].actionId == ParamMenuActionBase);
     CHECK(items[2].actionId == ParamMenuActionBase + 1);
-    CHECK(items[5].actionId == ParamMenuActionBase + 2);
-    CHECK(items[6].actionId == ParamMenuActionBase + 3);
     CHECK(actions[0].scopeId == "org.sidescopes.vectorscope");
-    CHECK(actions[0].paramKey == "matrix");
+    CHECK(actions[0].paramKey == "response");
     CHECK(actions[0].value == 0.0);
-    CHECK(actions[3].paramKey == "response");
-    CHECK(actions[3].value == 1.0);
+    CHECK(actions[1].paramKey == "response");
+    CHECK(actions[1].value == 1.0);
 }
 
 TEST_CASE("Stored parameter values drive the checkmarks")
@@ -120,16 +110,13 @@ TEST_CASE("Stored parameter values drive the checkmarks")
     std::vector<NativeMenuItem> items;
     std::vector<ParamMenuAction> actions;
 
-    const std::map<std::string, double> params{{"matrix", 0.0}, {"response", 1.0}};
+    const std::map<std::string, double> params{{"response", 1.0}};
     appendScopeChoiceMenus(*descriptorOf(registry, VectorscopeScopeId), params, false, items, actions);
 
-    REQUIRE(items.size() == 8);
-    CHECK(items[1].label == "BT.601");
-    CHECK(items[1].checked);  // matrix == 0
-    CHECK_FALSE(items[2].checked);
-    CHECK_FALSE(items[5].checked);
-    CHECK(items[6].label == "Linear");
-    CHECK(items[6].checked);  // response == 1
+    REQUIRE(items.size() == 4);
+    CHECK_FALSE(items[1].checked);
+    CHECK(items[2].label == "Linear");
+    CHECK(items[2].checked);  // response == 1
 }
 
 TEST_CASE("A lone choice is a Style submenu unprefixed but flattens when nested")

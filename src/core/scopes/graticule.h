@@ -60,7 +60,7 @@ struct WaveformScaleLine
     std::string label;
 };
 
-/// Builds the classic vectorscope graticule for the scope's current matrix:
+/// Builds the classic vectorscope graticule:
 /// crosshair, two rings with hour ticks, primary/secondary color targets, and
 /// the skin-tone line.
 [[nodiscard]] VectorscopeGraticule buildVectorscopeGraticule(const Vectorscope& scope);

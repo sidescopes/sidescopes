@@ -15,53 +15,31 @@ namespace sidescopes {
 
 using namespace test;
 
-TEST_CASE("Vectorscope places 75% red on the classic BT.601 target")
+TEST_CASE("Vectorscope places 75% red on its BT.709 target")
 {
-    // 75% red (191, 0, 0) sits at Cb = 99.65, Cr = 211.56 under BT.601.
-    // The bilinear splat peaks on the ROUNDED position - bin
-    // (100, 255 - 212 = 43) - where integer truncation used to floor it
-    // to (99, 44), half a bin away from where the projection puts the
-    // markers.
+    // BT.709: Cb = -26 * 191 / 256 + 128 = 108.6, Cr = 211.56. The bilinear
+    // splat peaks on the ROUNDED position - bin (109, 255 - 212 = 43) - where
+    // integer truncation used to floor it half a bin away from where the
+    // projection puts the markers.
     TestFrame frame(8, 8, 255);
     frame.fill(0, 8, Color{191, 0, 0});
 
     Vectorscope scope;
-    VectorscopeSettings settings;
-    settings.matrix = ChromaMatrix::Bt601;
-    scope.configure(settings);
     scope.accumulate(frame.view(), IntRect{0, 0, 8, 8});
 
-    CHECK(brightestPixel(scope.image()) == std::pair<int, int>{100, 43});
+    CHECK(brightestPixel(scope.image()) == std::pair<int, int>{109, 43});
 }
 
 TEST_CASE("Vectorscope folds a tall region across threads onto the same bin")
 {
     // A region tall enough to split across worker threads must land 75% red on
-    // the same BT.601 bin the single-threaded 8x8 case does: each thread
-    // scatters into its own code grid, and integer addition merges them
-    // order-independently.
+    // the same bin the single-threaded 8x8 case does: each thread scatters into
+    // its own code grid, and integer addition merges them order-independently.
     TestFrame frame(8, 1024, 255);
     frame.fill(0, 8, Color{191, 0, 0});
 
     Vectorscope scope;
-    VectorscopeSettings settings;
-    settings.matrix = ChromaMatrix::Bt601;
-    scope.configure(settings);
     scope.accumulate(frame.view(), IntRect{0, 0, 8, 1024});
-
-    CHECK(brightestPixel(scope.image()) == std::pair<int, int>{100, 43});
-}
-
-TEST_CASE("Vectorscope defaults to the BT.709 matrix")
-{
-    // Every HD-era scope measures with 709; with no configuration at all
-    // 75% red must land on the 709 position (Cb 108.6 -> bin 109), not
-    // the 601 one.
-    TestFrame frame(8, 8, 255);
-    frame.fill(0, 8, Color{191, 0, 0});
-
-    Vectorscope scope;
-    scope.accumulate(frame.view(), IntRect{0, 0, 8, 8});
 
     CHECK(brightestPixel(scope.image()) == std::pair<int, int>{109, 43});
 }
@@ -80,29 +58,10 @@ TEST_CASE("Vectorscope maps neutral gray to the center")
 TEST_CASE("Vectorscope projection agrees with accumulation")
 {
     Vectorscope scope;
-    VectorscopeSettings settings;
-    settings.matrix = ChromaMatrix::Bt601;
-    scope.configure(settings);
     const NormalizedPoint point = scope.project(FloatColor{191.0f, 0.0f, 0.0f});
-    // Floating-point chroma for 75% red: Cb = 99.65, Cr = 211.56.
-    CHECK(point.x == Catch::Approx(99.65 / 255.0).margin(0.005));
+    // Floating-point BT.709 chroma for 75% red: Cb = 108.60, Cr = 211.56.
+    CHECK(point.x == Catch::Approx(108.60 / 255.0).margin(0.005));
     CHECK(point.y == Catch::Approx((255.0 - 211.56) / 255.0).margin(0.005));
-}
-
-TEST_CASE("Vectorscope matrix selection moves chroma targets")
-{
-    TestFrame frame(8, 8, 255);
-    frame.fill(0, 8, Color{191, 0, 0});
-
-    Vectorscope scope;
-    VectorscopeSettings settings;
-    settings.matrix = ChromaMatrix::Bt709;
-    scope.configure(settings);
-    scope.accumulate(frame.view(), IntRect{0, 0, 8, 8});
-
-    // BT.709: Cb = -26 * 191 / 256 + 128 = 108.6, rounding to bin 109;
-    // Cr unchanged from BT.601 (both use 112), peaking at row 43.
-    CHECK(brightestPixel(scope.image()) == std::pair<int, int>{109, 43});
 }
 
 TEST_CASE("Vectorscope carries real detail on a finer grid")
@@ -115,15 +74,16 @@ TEST_CASE("Vectorscope carries real detail on a finer grid")
 
     Vectorscope scope;
     VectorscopeSettings settings;
-    settings.matrix = ChromaMatrix::Bt601;
     settings.size = 512;
     scope.configure(settings);
     scope.accumulate(frame.view(), IntRect{0, 0, 32, 32});
 
+    // BT.709 puts 75% red at bin (109, 43) on the 256 grid, so the 512 grid
+    // must place it near twice that rather than at a magnified 256 bin.
     CHECK(scope.image().width == 512);
     const auto [px, py] = brightestPixel(scope.image());
-    CHECK(px >= 197);
-    CHECK(px <= 201);
+    CHECK(px >= 216);
+    CHECK(px <= 220);
     CHECK(py >= 86);
     CHECK(py <= 90);
 }

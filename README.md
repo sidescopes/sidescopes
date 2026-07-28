@@ -13,7 +13,7 @@ screen itself, so it works with every editor and needs no plugins.
 
 ## Features
 
-- Vectorscope (BT.601/BT.709) with classic graticule and skin-tone line
+- Vectorscope (BT.709) with classic graticule and skin-tone line
 - Waveform with RGB, luma, and colored-luma styles, plus an RGB parade
 - Histogram with per-channel or combined bars
 - Color picker that holds the live color against pinned references, with

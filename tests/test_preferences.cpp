@@ -39,7 +39,6 @@ TEST_CASE("Preferences round-trip through a file")
     saved.scopeParams[WaveformId]["gain"] = 0.12;
     saved.scopeParams[WaveformId]["stride"] = 2.0;
     saved.scopeParams[VectorscopeId]["smoothing_ms"] = 60.0;
-    saved.scopeParams[VectorscopeId]["matrix"] = 1.0;
     saved.scopeParams[VectorscopeId]["response"] = 1.0;
     saved.vectorscopeZoom = 2;
     saved.scopeStack = "HWV";  // stacking order is part of the setting
@@ -56,7 +55,6 @@ TEST_CASE("Preferences round-trip through a file")
     CHECK(param(loaded, WaveformId, "gain") == 0.12);
     CHECK(param(loaded, WaveformId, "stride") == 2.0);
     CHECK(param(loaded, VectorscopeId, "smoothing_ms") == 60.0);
-    CHECK(param(loaded, VectorscopeId, "matrix") == 1.0);
     CHECK(param(loaded, VectorscopeId, "response") == 1.0);
     CHECK(loaded.vectorscopeZoom == 2);
     CHECK(loaded.scopeStack == "HWV");
@@ -87,14 +85,20 @@ TEST_CASE("Preferences read a legacy per-scope gain")
     CHECK(param(loaded, VectorscopeId, "gain") == 4.5);
 }
 
-TEST_CASE("Preferences read the legacy chroma matrix and trace response")
+TEST_CASE("Preferences read the legacy trace response and drop the matrix")
 {
+    // BT.601 is gone, so the legacy `matrix` key is no longer translated into
+    // anything and leaves nothing behind; every other key in the same file is
+    // still read. A generic `<id>.matrix` written by an older build survives in
+    // the map like any key no scope declares, and stays inert because a value
+    // only reaches an engine when the descriptor names its key.
     const TempFile file("legacy-enum.txt");
     file.write("matrix=0\ntrace_response=1\n");
 
     const Preferences loaded = loadPreferences(file.path());
-    CHECK(param(loaded, VectorscopeId, "matrix") == 0.0);    // BT.601
     CHECK(param(loaded, VectorscopeId, "response") == 1.0);  // Linear
+    const auto& vectorscope = loaded.scopeParams.at(VectorscopeId);
+    CHECK(vectorscope.find("matrix") == vectorscope.end());
 }
 
 TEST_CASE("Preferences invert the legacy per-channel histogram flag")
@@ -316,7 +320,6 @@ TEST_CASE("Preferences load a whole legacy file to the same live state")
     CHECK(param(loaded, VectorscopeId, "gain") == 5.0);
     CHECK(param(loaded, VectorscopeId, "stride") == 2.0);
     CHECK(param(loaded, VectorscopeId, "smoothing_ms") == 90.0);
-    CHECK(param(loaded, VectorscopeId, "matrix") == 0.0);    // BT.601
     CHECK(param(loaded, VectorscopeId, "response") == 1.0);  // Linear
     CHECK(param(loaded, WaveformId, "gain") == 0.08);
     CHECK(param(loaded, WaveformId, "stride") == 1.0);
@@ -404,17 +407,6 @@ TEST_CASE("Preferences clamp an out-of-range vectorscope zoom")
 
     const Preferences loaded = loadPreferences(file.path());
     CHECK(loaded.vectorscopeZoom == 1);
-}
-
-TEST_CASE("Preferences fall back to BT.709 for an unknown legacy matrix")
-{
-    // The legacy matrix was 0 for BT.601 and 1 for BT.709; any other value
-    // read as 709, the default, which is style choice 1.
-    const TempFile file("bad-matrix.txt");
-    file.write("matrix=9\n");
-
-    const Preferences loaded = loadPreferences(file.path());
-    CHECK(param(loaded, VectorscopeId, "matrix") == 1.0);
 }
 
 TEST_CASE("Preferences round-trip the colored-luma waveform mode")

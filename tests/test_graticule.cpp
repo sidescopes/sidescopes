@@ -27,26 +27,6 @@ TEST_CASE("Vectorscope graticule targets sit exactly on the projections")
     CHECK(redTarget->center.y == red75.y);
 }
 
-TEST_CASE("Vectorscope graticule targets follow the matrix")
-{
-    Vectorscope bt601;
-    Vectorscope bt709;
-    VectorscopeSettings settings;
-    settings.matrix = ChromaMatrix::Bt601;
-    bt601.configure(settings);
-    settings.matrix = ChromaMatrix::Bt709;
-    bt709.configure(settings);
-
-    const auto findRed = [](const VectorscopeGraticule& graticule) {
-        return std::find_if(graticule.targets.begin(), graticule.targets.end(),
-                            [](const auto& t) { return t.label == "R"; })
-            ->center;
-    };
-    const NormalizedPoint red601 = findRed(buildVectorscopeGraticule(bt601));
-    const NormalizedPoint red709 = findRed(buildVectorscopeGraticule(bt709));
-    CHECK(red601.x != red709.x);  // the overlay moves with the data
-}
-
 TEST_CASE("Vectorscope graticule includes the skin-tone line on the ring")
 {
     Vectorscope scope;

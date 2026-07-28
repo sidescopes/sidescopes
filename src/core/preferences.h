@@ -79,8 +79,7 @@ struct Preferences
     /// held here on save: it mirrors the waveform, and is re-seeded from it on
     /// load.
     std::map<std::string, std::map<std::string, double>> scopeParams{
-        {"org.sidescopes.vectorscope",
-         {{"gain", 3.0}, {"stride", 1.0}, {"matrix", 1.0}, {"response", 0.0}, {"smoothing_ms", 75.0}}},
+        {"org.sidescopes.vectorscope", {{"gain", 3.0}, {"stride", 1.0}, {"response", 0.0}, {"smoothing_ms", 75.0}}},
         {"org.sidescopes.waveform", {{"gain", 0.05}, {"stride", 1.0}, {"mode", 0.0}, {"smoothing_ms", 100.0}}},
         {"org.sidescopes.histogram", {{"stride", 1.0}, {"style", 0.0}}},
     };

@@ -163,7 +163,7 @@ TEST_CASE("Registry serves the vectorscope through the module boundary")
     const RegisteredScope* scope = registry.findScope("org.sidescopes.vectorscope");
     REQUIRE(scope != nullptr);
     CHECK(scope->descriptor->letter == 'V');
-    CHECK(scope->descriptor->param_count == 4);
+    CHECK(scope->descriptor->param_count == 3);
 
     ScopeInstance instance = registry.createInstance("org.sidescopes.vectorscope");
     REQUIRE(instance.valid());
@@ -178,11 +178,13 @@ TEST_CASE("Registry serves the vectorscope through the module boundary")
     REQUIRE(image.width == 256);
     CHECK(brightestPixel(image) == std::pair<int, int>{109, 43});
 
-    // Reconfigure to BT.601 through parameters: the peak moves to (100, 43).
+    // A retired choice reaching a scope through parameters is ignored rather
+    // than refused: BT.601 is gone, and a preferences file still naming it must
+    // load and simply measure with BT.709.
     std::vector<SsParamValue> values{{"matrix", 0.0}};
     REQUIRE(instance.configure(values));
     REQUIRE(instance.accumulate(frame, SsRect{0, 0, 8, 8}));
-    CHECK(brightestPixel(instance.image()) == std::pair<int, int>{100, 43});
+    CHECK(brightestPixel(instance.image()) == std::pair<int, int>{109, 43});
 
     // Overlays and markers arrive as declarative data.
     CHECK(instance.graticule().size() > 8);
