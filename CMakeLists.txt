@@ -145,7 +145,8 @@ sidescopes_add_module(sidescopes_module_vectorscope
     src/core/scopes/vectorscope_graticule.cpp)
 sidescopes_add_module(sidescopes_module_waveform
     src/modules/waveform_module.cpp
-    src/core/scopes/waveform.cpp)
+    src/core/scopes/waveform.cpp
+    src/core/scopes/waveform_bins.cpp)
 sidescopes_add_module(sidescopes_module_histogram
     src/modules/histogram_module.cpp
     src/core/scopes/histogram.cpp)

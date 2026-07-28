@@ -11,19 +11,11 @@
 namespace sidescopes {
 namespace {
 
-// Below this many sampled rows (accumulate) or image rows (compose) per chunk,
-// the pass stays single-threaded: the work finishes before spawned threads
-// would pay off.
-constexpr int AccumulateRowsPerChunk = 64;
+// Below this many image rows per chunk the compose stays single-threaded: the
+// work finishes before spawned threads would pay off.
 constexpr int ComposeRowsPerChunk = 16;
 
-// Rec.709 luma weights, fixed-point x256, applied to display-encoded values.
-inline int luma709(int r, int g, int b)
-{
-    return (54 * r + 183 * g + 19 * b) >> 8;
-}
-
-// The same weights in float, for the sub-level projection: the level marker
+// Rec.709 luma weights in float, for the sub-level projection: the level marker
 // wants a fractional position, not the accumulator's truncated code.
 inline float luma709(float r, float g, float b)
 {
@@ -38,76 +30,6 @@ constexpr double ReferenceRowCount = 1'000.0;
 // In the combined mode the luma trace rides over the RGB traces dimmed to
 // this fraction, so it reads as a distinct overlay rather than a fourth channel.
 constexpr float RgbLumaDim = 0.7f;
-
-// Which planes a mode draws: the RGB channels, the luma trace, and whether
-// luma carries the source color. Derived once and threaded through
-// accumulation, correction, and composition so the three stay in step.
-struct ModeFlags
-{
-    bool rgb;
-    bool luma;
-    bool coloredLuma;
-};
-
-ModeFlags modeFlagsFor(WaveformMode mode)
-{
-    const bool coloredLuma = mode == WaveformMode::ColoredLuma;
-    return ModeFlags{
-        mode != WaveformMode::Luma && !coloredLuma,
-        mode == WaveformMode::Luma || mode == WaveformMode::RgbAndLuma || coloredLuma,
-        coloredLuma,
-    };
-}
-
-/// The planes a mode actually populates, as one contiguous range of the four.
-/// The three channel planes lead and luma trails, so every mode's working set
-/// is a range rather than a scattered set.
-struct PlaneSpan
-{
-    int first;
-    int count;
-};
-
-// Clearing, scattering, merging and correcting all four planes regardless of
-// mode costs a plane's worth of bin traffic per frame for nothing: at a wide
-// pane that is megabytes, and the plain RGB mode - the default - never draws
-// the luma plane at all. The colored-luma mode tints from the channel planes,
-// so it needs them even though it draws no RGB trace.
-PlaneSpan planeSpanFor(const ModeFlags& flags)
-{
-    if (!flags.rgb && !flags.coloredLuma) {
-        return PlaneSpan{3, 1};
-    }
-
-    return PlaneSpan{0, flags.luma ? 4 : 3};
-}
-
-/// The planes the scatter writes, resolved against a plane set whose first
-/// plane is @p firstPlane. A plane the mode does not draw stays null: the span
-/// holds no storage for it, so no pointer to it is ever formed.
-struct ScatterPlanes
-{
-    uint32_t* red = nullptr;
-    uint32_t* green = nullptr;
-    uint32_t* blue = nullptr;
-    uint32_t* luma = nullptr;
-};
-
-ScatterPlanes scatterPlanesFor(const ModeFlags& flags, uint32_t* bins, int firstPlane, std::size_t planeSize)
-{
-    const auto planeAt = [&](int index) { return bins + static_cast<std::size_t>(index - firstPlane) * planeSize; };
-    ScatterPlanes planes;
-    if (flags.rgb || flags.coloredLuma) {
-        planes.red = planeAt(0);
-        planes.green = planeAt(1);
-        planes.blue = planeAt(2);
-    }
-    if (flags.luma) {
-        planes.luma = planeAt(3);
-    }
-
-    return planes;
-}
 
 // Sum each level's population across a plane's columns.
 //
@@ -471,7 +393,7 @@ struct WaveformPlanes
 // level tap and is invoked only for the planes the mode draws.
 template <typename SampleFn>
 void emitWaveformPixel(uint8_t* out, const SampleFn& sample, int column, const WaveformPlanes& planes,
-                       const ModeFlags& flags, double gain, double intensityScale)
+                       const WaveformModeFlags& flags, double gain, double intensityScale)
 {
     float r = 0.0f;
     float g = 0.0f;
@@ -546,7 +468,7 @@ Waveform::Waveform() = default;
 
 void Waveform::ensureBuffers()
 {
-    if (!m_bins.empty() && m_columns == m_settings.columns && m_imageHeight == m_settings.imageHeight) {
+    if (!m_image.rgba.empty() && m_columns == m_settings.columns && m_imageHeight == m_settings.imageHeight) {
         return;
     }
     resize(m_settings.columns, m_settings.imageHeight);
@@ -565,84 +487,10 @@ void Waveform::resize(int columns, int imageHeight)
 {
     m_columns = columns;
     m_imageHeight = imageHeight;
-    m_bins.assign(planeSize() * 4, 0);
     m_columnDensities.assign(static_cast<std::size_t>(m_columns), ColumnDensity{});
     m_image.width = m_columns;
     m_image.height = m_imageHeight;
     m_image.rgba.assign(static_cast<std::size_t>(m_columns) * m_imageHeight * 4, 0);
-}
-
-template <typename Pixels>
-void Waveform::scatterRowsAs(const FrameView& frame, IntRect region, const SampleGrid& grid, int rowBegin, int rowEnd,
-                             uint32_t* bins, int firstPlane) const
-{
-    const ModeFlags flags = modeFlagsFor(m_settings.mode);
-    const ScatterPlanes planes = scatterPlanesFor(flags, bins, firstPlane, planeSize());
-    // Hoisted: this is the innermost write in the whole engine.
-    const std::size_t pitch = rowPitch();
-
-    for (int i = rowBegin; i < rowEnd; ++i) {
-        const int py = sampleRowOf(grid, region, i);
-        const uint8_t* row = frame.rawPixelAt(region.x, py);
-        for (int px = 0; px < region.width; px += grid.columnStride) {
-            // The level a code rounds to. An 8-bit code IS its level; a deeper
-            // one is rounded to the same 256, which is all this scope's bins
-            // can express - see the note beside the histogram's splat.
-            const Sample sample = Pixels::read(row + static_cast<std::size_t>(px) * 4);
-            const int b = levelIn<Pixels, WholeLevelBits>(sample.b);
-            const int g = levelIn<Pixels, WholeLevelBits>(sample.g);
-            const int r = levelIn<Pixels, WholeLevelBits>(sample.r);
-            // Samples splat fractionally across the two columns they
-            // straddle, in sixteenths. Integer bucketing made columns
-            // aggregate alternately two and three image columns at
-            // typical region widths - a density comb that rendered as
-            // fine vertical striping on large panes.
-            const auto position = static_cast<std::size_t>(static_cast<int64_t>(px) * m_columns * 16 / region.width);
-            const std::size_t column = position >> 4;
-            const uint32_t rightWeight = position & 15u;
-            const uint32_t leftWeight = 16u - rightWeight;
-            const std::size_t next = column + 1 < static_cast<std::size_t>(m_columns) ? column + 1 : column;
-            const auto splat = [&](uint32_t* plane, int level, uint32_t value) {
-                uint32_t* line = plane + static_cast<std::size_t>(WaveformLevels - 1 - level) * pitch;
-                line[column] += leftWeight * value;
-                line[next] += rightWeight * value;
-            };
-            if (flags.rgb) {
-                splat(planes.red, r, 1);
-                splat(planes.green, g, 1);
-                splat(planes.blue, b, 1);
-            }
-            // Luma is taken on the frame's own code scale and converted after,
-            // so that an 8-bit frame reaches the level its weights have always
-            // rounded it to: the truncation in luma709 is not distributive
-            // over the conversion, and taking it the other way round would
-            // move every eight-bit luma trace by up to a level.
-            if (flags.coloredLuma) {
-                // The luma plane carries the density; the channel
-                // planes carry value-weighted mass at the same rows,
-                // so each cell remembers the average color of the
-                // pixels that landed on it.
-                const int level = levelIn<Pixels, WholeLevelBits>(luma709(sample.r, sample.g, sample.b));
-                splat(planes.red, level, static_cast<uint32_t>(r));
-                splat(planes.green, level, static_cast<uint32_t>(g));
-                splat(planes.blue, level, static_cast<uint32_t>(b));
-                splat(planes.luma, level, 1);
-            } else if (flags.luma) {
-                splat(planes.luma, levelIn<Pixels, WholeLevelBits>(luma709(sample.r, sample.g, sample.b)), 1);
-            }
-        }
-    }
-}
-
-void Waveform::scatterRows(const FrameView& frame, IntRect region, const SampleGrid& grid, int rowBegin, int rowEnd,
-                           uint32_t* bins, int firstPlane) const
-{
-    // Dispatched once per chunk, never per pixel.
-    if (frame.format == PixelFormat::Argb2101010) {
-        scatterRowsAs<Argb2101010Pixels>(frame, region, grid, rowBegin, rowEnd, bins, firstPlane);
-    } else {
-        scatterRowsAs<Bgra8Pixels>(frame, region, grid, rowBegin, rowEnd, bins, firstPlane);
-    }
 }
 
 void Waveform::accumulate(const FrameView& frame, IntRect region)
@@ -652,32 +500,12 @@ void Waveform::accumulate(const FrameView& frame, IntRect region)
     const int perBin = std::max(WaveformMinSamplesPerBin / m_settings.sampleThinning, 1);
     const SampleGrid grid = sampleGridFor(m_settings.samplingStride, region,
                                           budgetForBins(static_cast<long long>(m_columns) * Levels, perBin));
-    const int rowCount = grid.rows;
-
-    const PlaneSpan span = planeSpanFor(modeFlagsFor(m_settings.mode));
-    const std::size_t spanOffset = static_cast<std::size_t>(span.first) * planeSize();
-    const std::size_t spanCount = static_cast<std::size_t>(span.count) * planeSize();
-
-    const int chunks = parallelChunkCount(rowCount, AccumulateRowsPerChunk);
-    if (chunks <= 1) {
-        std::fill_n(m_bins.data() + spanOffset, spanCount, uint32_t{0});
-        scatterRows(frame, region, grid, 0, rowCount, m_bins.data() + spanOffset, span.first);
-    } else {
-        // Each chunk owns a private plane set it clears and scatters into;
-        // integer addition then merges them back to a bit-exact total.
-        uint32_t* threadBins = m_scratch.borrow(spanCount * static_cast<std::size_t>(chunks));
-        runParallelChunks(chunks, rowCount, [&](int chunk, int begin, int end) {
-            uint32_t* bins = threadBins + static_cast<std::size_t>(chunk) * spanCount;
-            std::fill_n(bins, spanCount, uint32_t{0});
-            scatterRows(frame, region, grid, begin, end, bins, span.first);
-        });
-        mergeBins(threadBins, spanCount, chunks, m_bins.data() + spanOffset);
-    }
+    m_bins.scatter(frame, region, grid, m_settings.mode, m_columns);
 
     // A column receives one sample per sampled row, so the sampled-row count
     // that normalizes column brightness is a plain quotient - identical
     // however the rows split across threads.
-    mapBinsToImage(static_cast<uint64_t>(rowCount));
+    mapBinsToImage(static_cast<uint64_t>(grid.rows));
 }
 
 NormalizedPoint Waveform::project(const FloatColor& color)
@@ -692,7 +520,7 @@ void Waveform::mapBinsToImage(uint64_t sampledRows)
     const std::vector<uint32_t>& traces = m_smoothed;
     const std::size_t planeSize = this->planeSize();
 
-    const ModeFlags flags = modeFlagsFor(m_settings.mode);
+    const WaveformModeFlags flags = waveformModeFlags(m_settings.mode);
     const uint32_t densest =
         peakDensity(traces, planeSize, rowPitch(), m_columns, flags.rgb, flags.luma, m_columnDensities.data());
 
@@ -739,7 +567,7 @@ void Waveform::correctBinDensities()
     // Only the mode's own planes: a plane it does not draw holds no counts,
     // and correcting one is the whole per-frame cost of a plane spent on an
     // image nothing reads.
-    const PlaneSpan span = planeSpanFor(modeFlagsFor(m_settings.mode));
+    const WaveformPlaneSpan span = waveformPlaneSpan(waveformModeFlags(m_settings.mode));
     for (int plane = span.first; plane < span.first + span.count; ++plane) {
         const uint32_t* in = m_bins.data() + static_cast<std::size_t>(plane) * planeSize;
         uint32_t* out = m_smoothed.data() + static_cast<std::size_t>(plane) * planeSize;
@@ -799,7 +627,7 @@ void Waveform::buildParade(const uint32_t* redPlane, const uint32_t* greenPlane,
 void Waveform::composeImage(const uint32_t* redPlane, const uint32_t* greenPlane, const uint32_t* bluePlane,
                             const uint32_t* lumaPlane, double gain, double intensityScale)
 {
-    const ModeFlags flags = modeFlagsFor(m_settings.mode);
+    const WaveformModeFlags flags = waveformModeFlags(m_settings.mode);
     const WaveformPlanes planes{redPlane, greenPlane, bluePlane, lumaPlane};
 
     // The composer. At native height rows map one-to-one onto levels; a

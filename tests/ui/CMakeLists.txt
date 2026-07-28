@@ -136,6 +136,7 @@ if(SIDESCOPES_MODULES_DYNAMIC)
         target_sources(sidescopes_ui_${suite}_tests PRIVATE
             ${CMAKE_SOURCE_DIR}/src/core/scopes/vectorscope.cpp
             ${CMAKE_SOURCE_DIR}/src/core/scopes/waveform.cpp
+            ${CMAKE_SOURCE_DIR}/src/core/scopes/waveform_bins.cpp
             ${CMAKE_SOURCE_DIR}/src/core/scopes/histogram.cpp)
         add_dependencies(sidescopes_ui_${suite}_tests
             sidescopes_module_vectorscope

@@ -113,6 +113,7 @@ if(SIDESCOPES_MODULES_DYNAMIC)
         ${CMAKE_SOURCE_DIR}/src/core/scopes/vectorscope.cpp
         ${CMAKE_SOURCE_DIR}/src/core/scopes/vectorscope_graticule.cpp
         ${CMAKE_SOURCE_DIR}/src/core/scopes/waveform.cpp
+        ${CMAKE_SOURCE_DIR}/src/core/scopes/waveform_bins.cpp
         ${CMAKE_SOURCE_DIR}/src/core/scopes/histogram.cpp)
 else()
     # The module loader compiles into core only in the dynamic configuration;
