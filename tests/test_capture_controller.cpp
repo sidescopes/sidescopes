@@ -235,7 +235,7 @@ TEST_CASE("a stream that stays unreachable is retried less and less often")
     // half-minute it used to be was long enough to read as never.
     double clock = 0.0;
     int attempts = source.startCount;
-    for (const double wait : {2.0, 4.0, 8.0, 8.0, 8.0, 8.0}) {
+    for (const double wait : {2.0, 4.0, 5.0, 5.0, 5.0, 5.0}) {
         clock += 0.001;
         controller.service(clock);
         CHECK(source.startCount == attempts + 1);
@@ -247,11 +247,11 @@ TEST_CASE("a stream that stays unreachable is retried less and less often")
         clock += wait;
     }
 
-    // Six failures spread over thirty-eight seconds. A flat two-second retry
-    // would have made nineteen attempts across the same span.
+    // Six failures spread over twenty-six seconds. A flat two-second retry
+    // would have made thirteen attempts across the same span.
     CHECK(source.startCount - 1 == 6);
-    CHECK(clock > 37.0);
-    CHECK(clock < 39.0);
+    CHECK(clock > 25.0);
+    CHECK(clock < 27.0);
 }
 
 TEST_CASE("a wake earns a prompt retry however long the backoff had grown")
@@ -266,7 +266,7 @@ TEST_CASE("a wake earns a prompt retry however long the backoff had grown")
     source.startSucceeds = false;
 
     double clock = 0.0;
-    for (const double wait : {2.0, 4.0, 8.0, 16.0}) {
+    for (const double wait : {2.0, 4.0, 5.0, 5.0}) {
         clock += 0.001;
         controller.service(clock);
         clock += wait;
@@ -297,7 +297,7 @@ TEST_CASE("a stream that comes back forgets the failures before it")
     source.startSucceeds = false;
 
     double clock = 0.0;
-    for (const double wait : {2.0, 4.0, 8.0}) {
+    for (const double wait : {2.0, 4.0, 5.0}) {
         clock += 0.001;
         controller.service(clock);
         clock += wait;
@@ -501,7 +501,7 @@ TEST_CASE("capture wanted and absent is retried for as long as it is absent")
     // Never longer than the ceiling plus the tick that lands past it: a user
     // watching the reconnection notice waits seconds, not minutes. The slack
     // is one more tick, for the clock this walks in fiftieths of a second.
-    CHECK(longestGap < 8.0 + (2.0 * Tick));
+    CHECK(longestGap < 5.0 + (2.0 * Tick));
     // And not a handful of attempts that quietly gave up.
     CHECK(attempts > 70);
 

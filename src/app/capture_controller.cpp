@@ -18,10 +18,14 @@ namespace {
 // says the capture is coming back. An attempt costs a display enumeration and
 // nothing else - there are no frames to process while capture is broken - and
 // the platforms that observe a lock suspend the pipeline outright, so they
-// make no attempts at all. Paying four hundred and fifty enumerations an hour
-// on the platforms that do not is the better side of that trade.
+// make no attempts at all. Paying seven hundred and twenty enumerations an
+// hour on the platforms that do not is the better side of that trade.
+//
+// Five rather than a tuned value: nothing measured picks a number here, and a
+// figure that looks calculated invites the next reader to hunt for the
+// measurement behind it. The cost of being wrong is small in both directions.
 constexpr double FirstRetrySeconds = 2.0;
-constexpr double LongestRetrySeconds = 8.0;
+constexpr double LongestRetrySeconds = 5.0;
 
 // The wait after @p failures consecutive failed restarts, doubling from the
 // first up to the ceiling.
