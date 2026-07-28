@@ -390,6 +390,12 @@ if(APPLE OR WIN32)
         target_sources(imgui PRIVATE ${imgui_SOURCE_DIR}/backends/imgui_impl_opengl3.cpp)
     endif()
 
+    # Both Dear ImGui-dependent variants are built from one list; the app links
+    # the one bound to its own Dear ImGui. Defined before the executable so it
+    # can be named in the same link list as the libraries it depends on, in
+    # dependency order.
+    sidescopes_add_app_imgui_library(sidescopes_app_imgui imgui)
+
     # The graphics backends live with the platform code but compile into
     # the application: they own the ImGui render backends, and only the
     # application links ImGui.
@@ -410,8 +416,11 @@ if(APPLE OR WIN32)
             MACOSX_BUNDLE_BUNDLE_VERSION ${PROJECT_VERSION}
             MACOSX_BUNDLE_SHORT_VERSION_STRING ${PROJECT_VERSION}
         )
+        # Dependency order: sidescopes_app_imgui first, then what it draws on.
+        # graphics.mm includes the GLFW and Dear ImGui backend headers itself, so
+        # both are named here as well as reached through the library.
         target_link_libraries(SideScopes PRIVATE
-            sidescopes_app
+            sidescopes_app_imgui
             ${SIDESCOPES_MODULE_LINK_LIBS}
             sidescopes_platform
             imgui
@@ -460,8 +469,10 @@ if(APPLE OR WIN32)
             ${CMAKE_CURRENT_BINARY_DIR}/sidescopes.rc
         )
         target_link_options(SideScopes PRIVATE /ENTRY:mainCRTStartup)
+        # Dependency order, as in the Apple branch above: graphics.cpp includes
+        # the GLFW and Dear ImGui backend headers itself.
         target_link_libraries(SideScopes PRIVATE
-            sidescopes_app
+            sidescopes_app_imgui
             ${SIDESCOPES_MODULE_LINK_LIBS}
             sidescopes_platform
             imgui
@@ -470,11 +481,6 @@ if(APPLE OR WIN32)
         )
         sidescopes_target_defaults(SideScopes)
     endif()
-
-    # Both Dear ImGui-dependent variants are built from one list; the app links
-    # the one bound to its own Dear ImGui.
-    sidescopes_add_app_imgui_library(sidescopes_app_imgui imgui)
-    target_link_libraries(SideScopes PRIVATE sidescopes_app_imgui)
 
     if(SIDESCOPES_MODULES_DYNAMIC)
         # Nothing links the modules in dynamic mode; make the app wait for
