@@ -13,11 +13,13 @@
 // Dear ImGui Test Engine (c) 2018-2026 Omar Cornut / DISCO HELLO, used under
 // its Free License; fetched at build time, never vendored.
 
+#include <algorithm>
 #include <cmath>
 #include <vector>
 
 #define IMGUI_DEFINE_MATH_OPERATORS
 #include "app/interface_style.h"
+#include "app/pane_note.h"
 #include "app/row_layout.h"
 #include "imgui.h"
 #include "imgui_internal.h"
@@ -202,27 +204,123 @@ void seatingHoldsAtEveryScale(ImGuiTestContext* ctx)
     ctx->Yield();
 }
 
-/// SYMPTOM IF BROKEN: with no region selected, the note telling the user how to
-/// fill the scopes pushes the live colour readout off a narrow window - the one
-/// reading that still works with nothing selected.
+/// SYMPTOM IF BROKEN: the note telling the user how to fill an empty scope is
+/// cut off by the edge of a pane dragged narrow.
 ///
-/// The note gives way rather than pushing, so the rule is stated at the exact
-/// width where both stop fitting, from both sides of it.
-void theStandingNoteGivesWayBeforeTheReadout(ImGuiTestContext*)
+/// The note gives way rather than being clipped, so the rule is stated at the
+/// exact width where it stops fitting, from both sides of it.
+void thePaneNoteGivesWayBeforeItIsCut(ImGuiTestContext*)
 {
-    constexpr float Tool = 24.0f;
-    constexpr float Note = 200.0f;
-    constexpr float Swatch = 14.0f;
-    const float exact = Tool + RowSeparation + Note + RowSeparation + Swatch;
+    constexpr float Note = 120.0f;
+    const float exact = Note + 2.0f * RowSeparation;
 
-    IM_CHECK(statusNoteFits(Tool, Note, Swatch, exact));
-    IM_CHECK(statusNoteFits(Tool, Note, Swatch, exact + 1.0f));
-    IM_CHECK(!statusNoteFits(Tool, Note, Swatch, exact - 1.0f));
+    IM_CHECK(paneNoteFits(Note, exact));
+    IM_CHECK(paneNoteFits(Note, exact + 1.0f));
+    IM_CHECK(!paneNoteFits(Note, exact - 1.0f));
 
-    // The swatch is what the note yields to: a row that fits the note alone
-    // still drops it when the swatch has to stand on the same line.
-    IM_CHECK(statusNoteFits(Tool, Note, 0.0f, exact - Swatch));
-    IM_CHECK(!statusNoteFits(Tool, Note, Swatch, exact - Swatch));
+    // It keeps a margin at both edges, not one: a pane exactly as wide as the
+    // words drops them.
+    IM_CHECK(!paneNoteFits(Note, Note));
+}
+
+/// What one call to drawPaneNote left in the draw list: how many vertices, and
+/// the box the glyph quads spanned.
+struct DrawnNote
+{
+    int vertices = 0;
+    ImVec2 min{0.0f, 0.0f};
+    ImVec2 max{0.0f, 0.0f};
+};
+
+/// Draws the note into a pane of @p paneSize at the window's cursor and reports
+/// what reached the toolkit. Kept well inside the window: Dear ImGui culls TEXT
+/// against the clip rectangle, so a pane at arbitrary screen coordinates would
+/// drop every glyph and leave this blind.
+DrawnNote drawnNote(const ImVec2& paneSize)
+{
+    const ImDrawList* draw = ImGui::GetWindowDrawList();
+    const int before = draw->VtxBuffer.Size;
+    drawPaneNote(ImGui::GetCursorScreenPos(), paneSize, "Draw a region (D)");
+
+    DrawnNote drawn;
+    drawn.vertices = draw->VtxBuffer.Size - before;
+    if (drawn.vertices == 0) {
+        return drawn;
+    }
+    drawn.min = draw->VtxBuffer[before].pos;
+    drawn.max = drawn.min;
+    for (int vertex = before; vertex < draw->VtxBuffer.Size; ++vertex) {
+        const ImVec2 at = draw->VtxBuffer[vertex].pos;
+        drawn.min = ImVec2(std::min(drawn.min.x, at.x), std::min(drawn.min.y, at.y));
+        drawn.max = ImVec2(std::max(drawn.max.x, at.x), std::max(drawn.max.y, at.y));
+    }
+
+    return drawn;
+}
+
+// The suite's readings, taken in the GuiFunc where a draw list exists and
+// asserted in the TestFunc. A function-local static keeps them reachable from
+// the engine's captureless callbacks.
+struct NoteReadings
+{
+    DrawnNote small;
+    DrawnNote wider;
+    DrawnNote taller;
+    DrawnNote narrow;
+    ImVec2 paneOrigin{0.0f, 0.0f};
+    bool taken = false;
+};
+
+NoteReadings& noteReadings()
+{
+    static NoteReadings instance;
+
+    return instance;
+}
+
+void paneNoteGui(ImGuiTestContext*)
+{
+    ImGui::SetNextWindowSize(ImVec2(600.0f, 400.0f), ImGuiCond_Always);
+    ImGui::Begin("PaneNote", nullptr, ImGuiWindowFlags_NoSavedSettings);
+    NoteReadings& taken = noteReadings();
+    // Every pane starts at the same corner, so a difference between readings can
+    // only come from the size.
+    taken.paneOrigin = ImGui::GetCursorScreenPos();
+    taken.small = drawnNote(ImVec2(300.0f, 200.0f));
+    taken.wider = drawnNote(ImVec2(400.0f, 200.0f));
+    taken.taller = drawnNote(ImVec2(300.0f, 300.0f));
+    taken.narrow = drawnNote(ImVec2(40.0f, 200.0f));
+    taken.taken = true;
+    ImGui::End();
+}
+
+/// SYMPTOM IF BROKEN: the note explaining an empty scope sits in a corner of the
+/// pane, or drifts as the pane is resized, instead of standing where the missing
+/// trace would be.
+///
+/// Asserted as a difference rather than as an absolute position: glyph quads
+/// carry their own side bearings, so where the ink starts is a font's business,
+/// but the same words in a pane 100 wider must stand exactly 50 further across
+/// and not a pixel further down.
+void thePaneNoteStandsWhereTheTraceWouldBe(ImGuiTestContext* ctx)
+{
+    ctx->Yield();  // one frame, so the GuiFunc has drawn and measured
+    const NoteReadings& taken = noteReadings();
+    IM_CHECK(taken.taken);
+    IM_CHECK(taken.small.vertices > 0);
+
+    IM_CHECK_EQ(taken.wider.min.x - taken.small.min.x, 50.0f);
+    IM_CHECK_EQ(taken.wider.min.y - taken.small.min.y, 0.0f);
+    IM_CHECK_EQ(taken.taller.min.y - taken.small.min.y, 50.0f);
+    IM_CHECK_EQ(taken.taller.min.x - taken.small.min.x, 0.0f);
+
+    // And it stands inside the pane it names, clear of both edges.
+    IM_CHECK(taken.small.min.x >= taken.paneOrigin.x + RowSeparation);
+    IM_CHECK(taken.small.max.x <= taken.paneOrigin.x + 300.0f - RowSeparation);
+
+    // SYMPTOM IF BROKEN: a pane dragged narrow shows a truncated instruction.
+    // Nothing at all reaches the toolkit there - not a clipped quad.
+    IM_CHECK_EQ(taken.narrow.vertices, 0);
 }
 
 /// SYMPTOM IF BROKEN: the region toolbox drops to a second row and climbs back
@@ -275,8 +373,12 @@ void registerLayoutTests(ImGuiTestEngine* engine)
     ImGuiTest* scaled = IM_REGISTER_TEST(engine, "layout", "seating_holds_at_every_scale");
     scaled->TestFunc = seatingHoldsAtEveryScale;
 
-    ImGuiTest* note = IM_REGISTER_TEST(engine, "layout", "standing_note_gives_way_to_readout");
-    note->TestFunc = theStandingNoteGivesWayBeforeTheReadout;
+    ImGuiTest* note = IM_REGISTER_TEST(engine, "layout", "pane_note_gives_way_before_it_is_cut");
+    note->TestFunc = thePaneNoteGivesWayBeforeItIsCut;
+
+    ImGuiTest* seated = IM_REGISTER_TEST(engine, "layout", "pane_note_stands_where_the_trace_would_be");
+    seated->GuiFunc = paneNoteGui;
+    seated->TestFunc = thePaneNoteStandsWhereTheTraceWouldBe;
 
     ImGuiTest* toolbox = IM_REGISTER_TEST(engine, "layout", "toolbox_seats_by_the_window_alone");
     toolbox->TestFunc = theToolboxSeatsByTheWindowAlone;
@@ -289,5 +391,5 @@ int main()
 {
     using namespace sidescopes;
 
-    return uitest::runSuite("layout", registerLayoutTests, /*expectedTests=*/8);
+    return uitest::runSuite("layout", registerLayoutTests, /*expectedTests=*/9);
 }

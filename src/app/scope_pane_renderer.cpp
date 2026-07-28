@@ -13,7 +13,7 @@ ScopePaneRenderer::ScopePaneRenderer(const ScopePaneContext& context, std::map<s
     : m_icons(context.graphics),
       m_toolbar(context.registry, context.view, context.shortcuts, context.regionPicker, m_icons),
       m_panes(PaneAreaContext{context.graphics, context.view, context.registry, context.analysis, context.output,
-                              context.capture, context.pins},
+                              context.capture, context.pins, context.shortcuts},
               std::move(projections), std::move(textures)),
       m_statusBar(context.shortcuts, context.regionPicker, m_icons)
 {
@@ -41,7 +41,7 @@ PaneRenderOutcome ScopePaneRenderer::drawScopePanes(const PaneRenderInput& input
 
 void ScopePaneRenderer::drawStatusBar(const PaneRenderInput& input)
 {
-    m_statusBar.draw(input.regionSelected, input.pinsAvailable, input.readoutColor);
+    m_statusBar.draw(input.pinsAvailable, input.readoutColor);
 }
 
 void ScopePaneRenderer::configureProjections()

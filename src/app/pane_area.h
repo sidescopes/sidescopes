@@ -11,6 +11,7 @@
 #include "app/pin_board.h"
 #include "app/scope_registry.h"
 #include "app/scope_view.h"
+#include "app/shortcut_resolver.h"
 #include "core/analysis_worker.h"
 #include "core/frame.h"
 #include "core/scopes/histogram.h"
@@ -41,6 +42,8 @@ struct PaneAreaContext
     const CaptureController& capture;
     /// The pinned reference colors the vectorscope and the picker draw.
     PinBoard& pins;
+    /// The bindings the standing note names the drawing key by.
+    const ShortcutResolver& shortcuts;
 };
 
 /// @brief The band between the toolbar and the status bar.
@@ -137,6 +140,10 @@ private:
     void drawScopeById(std::string_view id, Pass& pass);
     void drawVectorscopePane(Pass& pass);
     void drawWaveformPane(std::string_view id, Pass& pass);
+    /// The note laid over a scope reading nothing, centred on the pane at
+    /// @p paneMin spanning @p paneSize: the one gesture that fills it, named
+    /// with its key.
+    void drawNoRegionNote(const ImVec2& paneMin, const ImVec2& paneSize) const;
 
     GraphicsBackend& m_graphics;
     ScopeView& m_view;
@@ -145,6 +152,7 @@ private:
     const AnalysisWorker::Output& m_output;
     const CaptureController& m_capture;
     PinBoard& m_pins;
+    const ShortcutResolver& m_shortcuts;
 
     std::map<std::string, ScopeInstance> m_projections;
     std::map<std::string, std::unique_ptr<ScopeTexture>> m_scopeTextures;

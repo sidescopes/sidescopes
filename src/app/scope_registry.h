@@ -115,4 +115,10 @@ private:
 ///         its shortcut all stand down together, so they all ask this.
 [[nodiscard]] bool anyPinTarget(const ScopeRegistry& registry, const std::vector<std::string>& scopeIds);
 
+/// @return Whether @p scopeId draws from the analysis region at all. Every
+///         module scope does, and empties when there is none; the host's color
+///         picker reads the pointer instead and is unaffected by a region. Only
+///         the first kind may say a region is missing.
+[[nodiscard]] bool scopeReadsRegion(const ScopeRegistry& registry, std::string_view scopeId);
+
 }  // namespace sidescopes

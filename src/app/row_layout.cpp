@@ -49,11 +49,6 @@ float statusRowOffset()
     return std::max(0.0f, std::round((style.WindowPadding.y - style.ItemSpacing.y) / 2.0f));
 }
 
-bool statusNoteFits(float taken, float noteWidth, float swatchWidth, float rowWidth)
-{
-    return taken + RowSeparation + noteWidth + RowSeparation + swatchWidth <= rowWidth;
-}
-
 bool regionToolboxWraps(float taken, float toolboxWidth, float rowWidth)
 {
     return taken + toolboxWidth + RowSeparation > rowWidth;

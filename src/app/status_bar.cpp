@@ -81,7 +81,7 @@ StatusBar::StatusBar(const ShortcutResolver& shortcuts, RegionPicker& picker, Ic
 {
 }
 
-void StatusBar::draw(bool regionSelected, bool pinsAvailable, const std::optional<FloatColor>& cursorColor)
+void StatusBar::draw(bool pinsAvailable, const std::optional<FloatColor>& cursorColor)
 {
     // The reserved strip under the panes. Output owns its own row - it never
     // paints over the scopes' pixels. Idle, the row spans corner to corner:
@@ -105,31 +105,8 @@ void StatusBar::draw(bool regionSelected, bool pinsAvailable, const std::optiona
     }
     ImGui::SameLine(0.0f, 0.0f);
     drawPinTool(pinsAvailable);
-    float taken = ImGui::GetItemRectMax().x - ImGui::GetWindowPos().x;
-    if (!regionSelected) {
-        taken = drawNoRegionNote(taken);
-    }
+    const float taken = ImGui::GetItemRectMax().x - ImGui::GetWindowPos().x;
     drawCursorReadout(taken, cursorColor);
-}
-
-// What the row says while the scopes are reading nothing: the one gesture that
-// fills them, in the register of standing furniture rather than of a warning.
-// The scopes themselves stay legible - graticule, markers and readout all keep
-// working - so this teaches rather than explains a fault.
-float StatusBar::drawNoRegionNote(float taken)
-{
-    char note[80];
-    std::snprintf(note, sizeof(note), "Draw a region (%s) to fill the scopes",
-                  shortcutLabel(m_shortcuts.bindings().drawRegion).c_str());
-    if (!statusNoteFits(taken, ImGui::CalcTextSize(note).x, ImGui::GetTextLineHeight(),
-                        ImGui::GetWindowContentRegionMax().x)) {
-        return taken;
-    }
-    ImGui::SameLine(taken + RowSeparation);
-    ImGui::SetCursorPosY(ImGui::GetCursorPosY() + rowTextDrop());
-    ImGui::TextDisabled("%s", note);
-
-    return ImGui::GetItemRectMax().x - ImGui::GetWindowPos().x;
 }
 
 // The tool that samples a colour sits beside the colour it samples, not among

@@ -21,9 +21,8 @@ class RegionPicker;
 ///
 /// The pin tool holds the left corner and the live swatch the right, with the
 /// channel readout gathered against it; a message clears the row and takes it
-/// whole. While no region is selected a standing note sits between the two,
-/// giving way where the row is too narrow for both. It owns that message and
-/// how long it stands.
+/// whole. Everything on this row works whether or not a region is selected. It
+/// owns that message and how long it stands.
 class StatusBar
 {
 public:
@@ -32,9 +31,8 @@ public:
     StatusBar(const ShortcutResolver& shortcuts, RegionPicker& picker, IconTextures& icons);
 
     /// Draws the strip: the pin tool, which stands down without a scope that
-    /// takes pins (@p pinsAvailable), the note that stands while no region is
-    /// selected (@p regionSelected), and the readout for @p cursorColor.
-    void draw(bool regionSelected, bool pinsAvailable, const std::optional<FloatColor>& cursorColor);
+    /// takes pins (@p pinsAvailable), and the readout for @p cursorColor.
+    void draw(bool pinsAvailable, const std::optional<FloatColor>& cursorColor);
 
     /// Shows @p message in the status strip for the next couple of seconds.
     void setStatus(std::string message);
@@ -46,11 +44,6 @@ public:
 private:
     /// The bar's colour sampler, anchored to the strip's left corner.
     void drawPinTool(bool pinsAvailable);
-
-    /// The note that stands while the scopes are reading nothing, after
-    /// @p taken of the row. @return The row used up once it has had its say,
-    /// which is @p taken unchanged where it did not fit.
-    [[nodiscard]] float drawNoRegionNote(float taken);
 
     const ShortcutResolver& m_shortcuts;
     RegionPicker& m_picker;
