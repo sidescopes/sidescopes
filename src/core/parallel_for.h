@@ -21,6 +21,15 @@ namespace sidescopes {
 /// on an eighteen-core M5 Pro - which has no hyperthreading to blame - they
 /// bought nothing at all below saturation and cost 22% more CPU for the same
 /// output. Frames per core, i5-8350U: 9.3 at eight chunks, 15.3 at four.
+///
+/// Four and not two, which is the same trade read from the other side. Two
+/// spends 11-14% less CPU on the M5 Pro at an unchanged pass rate; on the same
+/// four-core i5-8350U it buys that by analysing fewer frames instead. Over a
+/// 200x200 region the waveform's pass grows from 32 ms to 48 ms and the
+/// worker goes from skipping 0.7% of the frames to skipping 26%; over a
+/// 1000x700 one the same pass grows from 66 ms to 83 ms, past the gap
+/// between captures. Scopes whose private set is small - the vectorscope's
+/// grid is a quarter of a megabyte - gain nothing either way.
 inline constexpr int MaxParallelChunks = 4;
 
 /// The number of contiguous chunks to split @p rowCount rows across. Bounded

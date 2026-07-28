@@ -23,6 +23,15 @@ TEST_CASE("parallelChunkCount stays single-threaded until the work justifies thr
     }
 }
 
+TEST_CASE("The chunk cap is the measured four")
+{
+    // Bounded from both sides by measurement rather than by habit, so changing
+    // it is a deliberate act: on a four-core machine eight chunks cost 87% more
+    // CPU for 14% more frames, and two lengthen the waveform's pass past the
+    // gap between captures. The rationale sits beside the constant.
+    CHECK(MaxParallelChunks == 4);
+}
+
 TEST_CASE("runParallelChunks visits every row exactly once")
 {
     // Each chunk writes only its own half-open range, so disjoint indices are
