@@ -65,6 +65,21 @@ struct WaveformPlaneSpan
 /// so it needs them even though it draws no RGB trace.
 [[nodiscard]] WaveformPlaneSpan waveformPlaneSpan(const WaveformModeFlags& flags);
 
+/// The smallest range covering both. The four planes are few enough that every
+/// union this produces is contiguous, and a range wider than the union would
+/// still be correct - it writes planes nobody reads rather than leaving one
+/// unwritten.
+[[nodiscard]] WaveformPlaneSpan waveformSpanUnion(const WaveformPlaneSpan& a, const WaveformPlaneSpan& b);
+
+/// The mode a pass must run in to fill @p span, given that @p requested is what
+/// some scope asked for.
+///
+/// This is the job WaveformMode::RgbAndLuma exists for now. It is not a mode
+/// anybody selects - the RGB and luma waveforms are separate scopes, and
+/// stacking them IS asking for both - it is what ONE pass runs in when both
+/// are on screen, so that the pixels are walked once instead of twice.
+[[nodiscard]] WaveformMode waveformModeForSpan(const WaveformPlaneSpan& span, WaveformMode requested);
+
 /// Everything one scatter's result depends on. Two passes with equal keys write
 /// bit-identical bins, which is what lets the second read the first's instead
 /// of repeating the work.
@@ -131,6 +146,13 @@ public:
     [[nodiscard]] uint64_t scatters() const
     {
         return m_scatters;
+    }
+
+    /// The planes the last pass really wrote, which is what any of them may be
+    /// read as an answer for. Empty before the first scatter.
+    [[nodiscard]] WaveformPlaneSpan writtenSpan() const
+    {
+        return m_key.span;
     }
 
     /// The bins, laid out as four planes a planeSize() apart. Null before the
@@ -224,10 +246,33 @@ private:
     void scatterRowsAs(const FrameView& frame, IntRect region, const SampleGrid& grid, int rowBegin, int rowEnd,
                        uint32_t* bins, int firstPlane, WaveformMode mode) const;
 
+    /// The scatter this pass would be part of, ignoring which planes are asked
+    /// for and how they are filled: everything two scopes of one frame agree on.
+    /// A change in it is a new frame or a new region, which is what starts a
+    /// fresh reckoning of what the family wants.
+    [[nodiscard]] static WaveformScatterKey subjectOf(const WaveformScatterKey& key);
+    /// The planes this pass writes: @p wanted, widened by what the family asked
+    /// of these bins over the previous frame so the FIRST pass of a frame
+    /// answers the ones after it.
+    [[nodiscard]] WaveformPlaneSpan spanToScatter(const WaveformPlaneSpan& wanted) const;
+
     int m_columns = 0;
     // What the bins currently hold, so a second scope asking for the same
     // thing is answered rather than served again.
     WaveformScatterKey m_key;
+    // The subject the wants below were gathered over, so a new frame or a moved
+    // region starts a new generation of them.
+    WaveformScatterKey m_subject;
+    // The planes the plain-mode scopes asked for over the subject in the bins,
+    // and over the one before it. Predicting from the previous frame is what
+    // lets ONE pass answer a stack the pass cannot see: it costs a wider pass
+    // for one frame after a scope appears, and decays on its own once one stops
+    // asking, so a stack that settles pays exactly what it uses. A colored-luma
+    // request is left out: it fills the same planes with different numbers, so
+    // nothing another mode writes could answer it and widening a plain pass on
+    // its account would buy a plane of traffic for nobody.
+    WaveformPlaneSpan m_wanted{0, 0};
+    WaveformPlaneSpan m_wantedBefore{0, 0};
     uint64_t m_scatters = 0;
     // Planes: red, green, blue, luma — each columns x WaveformLevels, a row
     // per level with level 255 in row zero.

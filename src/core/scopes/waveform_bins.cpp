@@ -44,6 +44,24 @@ ScatterPlanes scatterPlanesFor(const WaveformModeFlags& flags, uint32_t* bins, i
     return planes;
 }
 
+/// Whether the pass @p held describes answers a request for @p wanted.
+///
+/// Every field but the plane range must be equal, and the range must CONTAIN
+/// the one asked for. Wider is an answer - the pass wrote those planes from
+/// these pixels - while narrower never is, because the planes it skipped hold
+/// an older frame. Compared by zeroing the one field that is allowed to differ,
+/// so a field added to the key is compared without this having to learn it.
+bool answersRequest(const WaveformScatterKey& held, const WaveformScatterKey& wanted)
+{
+    WaveformScatterKey heldRest = held;
+    WaveformScatterKey wantedRest = wanted;
+    heldRest.span = WaveformPlaneSpan{0, 0};
+    wantedRest.span = WaveformPlaneSpan{0, 0};
+
+    return heldRest == wantedRest && held.span.count > 0 && held.span.first <= wanted.span.first &&
+           held.span.first + held.span.count >= wanted.span.first + wanted.span.count;
+}
+
 }  // namespace
 
 WaveformModeFlags waveformModeFlags(WaveformMode mode)
@@ -64,6 +82,51 @@ WaveformPlaneSpan waveformPlaneSpan(const WaveformModeFlags& flags)
     }
 
     return WaveformPlaneSpan{0, flags.luma ? 4 : 3};
+}
+
+WaveformPlaneSpan waveformSpanUnion(const WaveformPlaneSpan& a, const WaveformPlaneSpan& b)
+{
+    if (a.count <= 0) {
+        return b;
+    }
+    if (b.count <= 0) {
+        return a;
+    }
+    const int first = std::min(a.first, b.first);
+    const int last = std::max(a.first + a.count, b.first + b.count);
+
+    return WaveformPlaneSpan{first, last - first};
+}
+
+WaveformMode waveformModeForSpan(const WaveformPlaneSpan& span, WaveformMode requested)
+{
+    if (waveformModeFlags(requested).coloredLuma) {
+        return requested;
+    }
+    // The plane range decides the mode, and only one range needs a mode no
+    // scope asks for: all four planes, which is an RGB scatter and a luma one
+    // over the same pixels.
+    if (span.first + span.count > 3 && span.first == 0) {
+        return WaveformMode::RgbAndLuma;
+    }
+
+    return requested;
+}
+
+WaveformScatterKey WaveformBins::subjectOf(const WaveformScatterKey& key)
+{
+    WaveformScatterKey subject = key;
+    subject.span = WaveformPlaneSpan{0, 0};
+    subject.coloredLuma = false;
+
+    return subject;
+}
+
+WaveformPlaneSpan WaveformBins::spanToScatter(const WaveformPlaneSpan& wanted) const
+{
+    // A colored-luma request needs no special case here: it already asks for
+    // all four planes, so nothing recorded can widen it.
+    return waveformSpanUnion(wanted, m_wantedBefore);
 }
 
 void WaveformBins::ensureBuffers(int columns)
@@ -187,17 +250,35 @@ void WaveformBins::scatter(const FrameView& frame, IntRect region, const SampleG
     const WaveformPlaneSpan span = waveformPlaneSpan(flags);
     const WaveformScatterKey key{frame.pixels, frame.strideBytes, frame.sequence, frame.format,     region,
                                  grid,         columns,           span,           flags.coloredLuma};
-    if (m_key == key) {
+
+    // Recorded before the answer below, not after it: a scope whose request was
+    // already met still wants those planes, and forgetting that would narrow
+    // the next frame's pass straight back onto two.
+    const WaveformScatterKey subject = subjectOf(key);
+    if (m_subject != subject) {
+        m_subject = subject;
+        m_wantedBefore = m_wanted;
+        m_wanted = WaveformPlaneSpan{0, 0};
+    }
+    if (!flags.coloredLuma) {
+        m_wanted = waveformSpanUnion(m_wanted, span);
+    }
+
+    if (answersRequest(m_key, key)) {
         return;
     }
 
+    const WaveformPlaneSpan scattered = spanToScatter(span);
     // Cleared before the pass rather than written after it: a scatter that
     // threw would otherwise leave half-filled bins under a key claiming they
     // hold this frame, and every scope after it would read that as an answer.
     m_key = WaveformScatterKey{};
     ++m_scatters;
-    scatterInto(frame, region, grid, mode, span);
+    scatterInto(frame, region, grid, waveformModeForSpan(scattered, mode), scattered);
+    // Under the planes it REALLY wrote, which is what the next scope's request
+    // is judged against.
     m_key = key;
+    m_key.span = scattered;
 }
 
 }  // namespace sidescopes

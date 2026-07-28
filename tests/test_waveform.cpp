@@ -139,6 +139,162 @@ TEST_CASE("A scope binning the same planes differently does not share them")
     CHECK(colored.image().rgba == coloredAlone);
 }
 
+TEST_CASE("An RGB and a luma waveform settle into one scatter a frame")
+{
+    // The two ask for different planes, so the first frame costs two passes -
+    // neither can answer the other, and the bins cannot see a stack. From the
+    // second on, ONE pass writes all four planes because that is what the
+    // family asked for over the frame before, and the second scope finds its
+    // answer already there.
+    const TestFrame frame = texturedFrame();
+    WaveformBins shared;
+    Waveform overlay;
+    Waveform luma;
+    overlay.lendBins(&shared);
+    luma.lendBins(&shared);
+    luma.configure(settingsFor(WaveformMode::Luma));
+
+    FrameView view = frame.view();
+    overlay.accumulate(view, IntRect{0, 0, 200, 120});
+    luma.accumulate(view, IntRect{0, 0, 200, 120});
+    CHECK(shared.scatters() == 2);
+
+    // Every frame after it costs ONE, and goes on costing one: a scope whose
+    // request the leading pass already met still wants those planes, so what
+    // the frame asked for has to be recorded whether or not it did any work.
+    // Four frames rather than two, because a stack that forgets an answered
+    // request oscillates between one pass and two rather than settling.
+    for (uint64_t sequence = 2; sequence <= 4; ++sequence) {
+        view.sequence = sequence;
+        overlay.accumulate(view, IntRect{0, 0, 200, 120});
+        luma.accumulate(view, IntRect{0, 0, 200, 120});
+    }
+    CHECK(shared.scatters() == 5);
+    CHECK(shared.writtenSpan() == WaveformPlaneSpan{0, 4});
+
+    // And either scope may lead it: the pass is decided by what the family
+    // asked for, not by which of them runs first.
+    view.sequence = 5;
+    luma.accumulate(view, IntRect{0, 0, 200, 120});
+    overlay.accumulate(view, IntRect{0, 0, 200, 120});
+    CHECK(shared.scatters() == 6);
+}
+
+TEST_CASE("A widened scatter draws exactly what an unwidened one draws")
+{
+    // The condition on the widening: writing more planes than a scope reads
+    // must leave the ones it does read bit-identical. The RGB splat and the
+    // luma splat write different planes and neither sees the other, which is
+    // what makes that true - and what this pins.
+    const TestFrame frame = texturedFrame();
+    const std::vector<uint8_t> overlayAlone = unsharedImage(frame, WaveformMode::Rgb);
+    const std::vector<uint8_t> lumaAlone = unsharedImage(frame, WaveformMode::Luma);
+
+    WaveformBins shared;
+    Waveform overlay;
+    Waveform luma;
+    overlay.lendBins(&shared);
+    luma.lendBins(&shared);
+    luma.configure(settingsFor(WaveformMode::Luma));
+
+    FrameView view = frame.view();
+    for (uint64_t sequence = 1; sequence <= 3; ++sequence) {
+        view.sequence = sequence;
+        overlay.accumulate(view, IntRect{0, 0, 200, 120});
+        luma.accumulate(view, IntRect{0, 0, 200, 120});
+    }
+
+    // The last frame ran as one widened pass, and both images are what each
+    // scope draws reading bins of its own.
+    REQUIRE(shared.writtenSpan() == WaveformPlaneSpan{0, 4});
+    CHECK(overlay.image().rgba == overlayAlone);
+    CHECK(luma.image().rgba == lumaAlone);
+}
+
+TEST_CASE("A colored luma pass is never widened into")
+{
+    // Colored luma fills the three channel planes with value-weighted mass
+    // where every other mode puts counts at each channel's own. No pass may be
+    // widened to cover both: the numbers are different measurements, so one
+    // scatter can never answer for the two of them however many planes it
+    // writes.
+    const TestFrame frame = texturedFrame();
+    const std::vector<uint8_t> overlayAlone = unsharedImage(frame, WaveformMode::Rgb);
+    const std::vector<uint8_t> coloredAlone = unsharedImage(frame, WaveformMode::ColoredLuma);
+
+    WaveformBins shared;
+    Waveform overlay;
+    Waveform colored;
+    overlay.lendBins(&shared);
+    colored.lendBins(&shared);
+    colored.configure(settingsFor(WaveformMode::ColoredLuma));
+
+    FrameView view = frame.view();
+    for (uint64_t sequence = 1; sequence <= 3; ++sequence) {
+        view.sequence = sequence;
+        overlay.accumulate(view, IntRect{0, 0, 200, 120});
+        colored.accumulate(view, IntRect{0, 0, 200, 120});
+    }
+
+    CHECK(shared.scatters() == 6);
+    CHECK(overlay.image().rgba == overlayAlone);
+    CHECK(colored.image().rgba == coloredAlone);
+}
+
+TEST_CASE("A colored luma scope does not widen the plain passes")
+{
+    // Nothing a plain pass writes can answer a colored-luma one, so its
+    // request must not enter what the plain passes widen to: doing so would
+    // buy a plane of bin traffic every frame for a scope that cannot read it.
+    const TestFrame frame = texturedFrame();
+    WaveformBins shared;
+    Waveform overlay;
+    Waveform colored;
+    overlay.lendBins(&shared);
+    colored.lendBins(&shared);
+    colored.configure(settingsFor(WaveformMode::ColoredLuma));
+
+    FrameView view = frame.view();
+    for (uint64_t sequence = 1; sequence <= 3; ++sequence) {
+        view.sequence = sequence;
+        colored.accumulate(view, IntRect{0, 0, 200, 120});
+        overlay.accumulate(view, IntRect{0, 0, 200, 120});
+    }
+
+    // The overlay ran last, so what stands in the bins is its own pass.
+    CHECK(shared.writtenSpan() == WaveformPlaneSpan{0, 3});
+}
+
+TEST_CASE("A pass narrows again once a scope stops asking")
+{
+    // The widening is a prediction from the frame before, so it has to decay:
+    // a stack that loses its luma waveform must stop paying for the luma plane
+    // rather than writing it forever.
+    const TestFrame frame = texturedFrame();
+    WaveformBins shared;
+    Waveform overlay;
+    Waveform luma;
+    overlay.lendBins(&shared);
+    luma.lendBins(&shared);
+    luma.configure(settingsFor(WaveformMode::Luma));
+
+    FrameView view = frame.view();
+    for (uint64_t sequence = 1; sequence <= 3; ++sequence) {
+        view.sequence = sequence;
+        overlay.accumulate(view, IntRect{0, 0, 200, 120});
+        luma.accumulate(view, IntRect{0, 0, 200, 120});
+    }
+    REQUIRE(shared.writtenSpan() == WaveformPlaneSpan{0, 4});
+
+    // The luma waveform is taken off screen; the passes after it narrow.
+    for (uint64_t sequence = 4; sequence <= 6; ++sequence) {
+        view.sequence = sequence;
+        overlay.accumulate(view, IntRect{0, 0, 200, 120});
+    }
+
+    CHECK(shared.writtenSpan() == WaveformPlaneSpan{0, 3});
+}
+
 TEST_CASE("A second frame is scattered again")
 {
     // The bins answer for one frame. The next one must reach them however
