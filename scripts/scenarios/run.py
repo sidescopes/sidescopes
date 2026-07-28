@@ -66,8 +66,11 @@ def _list_catalogue():
             marks.append("NOT COMPARABLE across builds")
         suffix = f"  [{'; '.join(marks)}]" if marks else ""
         print(f"  {scenario.id:<22} {scenario.summary}{suffix}")
+    # The whole identifier past the vendor prefix, not its last segment: a
+    # scope named for its family reads as "waveform.luma" rather than "luma".
     print("\nstacks are strings of scope letters: " + ", ".join(
-        f"{letter} {identifier.rsplit('.', 1)[1]}" for letter, identifier in catalog.SCOPE_LETTERS.items()))
+        f"{letter} {identifier.removeprefix('org.sidescopes.')}"
+        for letter, identifier in catalog.SCOPE_LETTERS.items()))
 
 
 def _target_display(wanted):
