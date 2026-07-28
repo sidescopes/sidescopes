@@ -77,45 +77,6 @@ add_executable(sidescopes_tests
 target_include_directories(sidescopes_tests PRIVATE support)
 target_sources(sidescopes_tests PRIVATE support/desktop_stubs.cpp support/region_overlay_stubs.cpp)
 
-# These are application-level state, not part of the core library the tests
-# link, so their sources compile directly into the test binary.
-target_sources(sidescopes_tests PRIVATE
-    ${CMAKE_SOURCE_DIR}/src/app/adaptive_detail.cpp
-    ${CMAKE_SOURCE_DIR}/src/app/attach_controller.cpp
-    ${CMAKE_SOURCE_DIR}/src/app/border_label.cpp
-    ${CMAKE_SOURCE_DIR}/src/app/capture_controller.cpp
-    ${CMAKE_SOURCE_DIR}/src/app/context_menu.cpp
-    ${CMAKE_SOURCE_DIR}/src/app/cursor_sampler.cpp
-    ${CMAKE_SOURCE_DIR}/src/app/face_lock.cpp
-    ${CMAKE_SOURCE_DIR}/src/app/face_lock_controller.cpp
-    ${CMAKE_SOURCE_DIR}/src/app/capture_crop.cpp
-    ${CMAKE_SOURCE_DIR}/src/app/capture_supervisor.cpp
-    ${CMAKE_SOURCE_DIR}/src/app/frame_pacing.cpp
-    ${CMAKE_SOURCE_DIR}/src/app/layout_preset_store.cpp
-    ${CMAKE_SOURCE_DIR}/src/app/region_geometry.cpp
-    ${CMAKE_SOURCE_DIR}/src/app/overlay_style.cpp
-    ${CMAKE_SOURCE_DIR}/src/app/param_menu.cpp
-    ${CMAKE_SOURCE_DIR}/src/app/pane_layout.cpp
-    ${CMAKE_SOURCE_DIR}/src/app/pin_board.cpp
-    ${CMAKE_SOURCE_DIR}/src/app/preferences_binding.cpp
-    ${CMAKE_SOURCE_DIR}/src/app/quality.cpp
-    ${CMAKE_SOURCE_DIR}/src/app/region_coordinator.cpp
-    ${CMAKE_SOURCE_DIR}/src/app/region_motion.cpp
-    ${CMAKE_SOURCE_DIR}/src/app/region_picker.cpp
-    ${CMAKE_SOURCE_DIR}/src/app/scope_layout.cpp
-    ${CMAKE_SOURCE_DIR}/src/app/scope_order.cpp
-    ${CMAKE_SOURCE_DIR}/src/app/scope_registry.cpp
-    ${CMAKE_SOURCE_DIR}/src/app/scope_stack.cpp
-    ${CMAKE_SOURCE_DIR}/src/app/scope_view.cpp
-    ${CMAKE_SOURCE_DIR}/src/app/shortcut_resolver.cpp
-    ${CMAKE_SOURCE_DIR}/src/app/stack_tokens.cpp
-    ${CMAKE_SOURCE_DIR}/src/app/trace_params.cpp
-    ${CMAKE_SOURCE_DIR}/src/app/ui_scale.cpp
-    ${CMAKE_SOURCE_DIR}/src/app/ui_scaling.cpp
-    ${CMAKE_SOURCE_DIR}/src/app/version.cpp
-    ${CMAKE_SOURCE_DIR}/src/app/window_place.cpp
-    ${CMAKE_SOURCE_DIR}/src/app/window_suggestions.cpp)
-
 # The region geometry (src/platform/region_geometry.cpp) is pure,
 # cross-platform logic; its tests compile straight into the test binary on
 # every platform. It needs only core, so the tests never link the
@@ -159,12 +120,15 @@ else()
     # compiles it straight into the test binary.
     target_sources(sidescopes_tests PRIVATE ${CMAKE_SOURCE_DIR}/src/modules/module_loader.cpp)
 endif()
-# The module libraries link ahead of core (see the top-level comment on
-# link order). In dynamic mode SIDESCOPES_MODULE_LINK_LIBS is empty and the
-# modules are loaded from disk at runtime, so the test binary only needs to
-# be built after them.
+
+# sidescopes_app carries the application state and controllers these suites
+# cover; the platform seams its units call come from the stubs above. The
+# module libraries link ahead of core (see the top-level comment on link
+# order). In dynamic mode SIDESCOPES_MODULE_LINK_LIBS is empty and the modules
+# are loaded from disk at runtime, so the test binary only needs to be built
+# after them.
 target_link_libraries(sidescopes_tests PRIVATE
-    ${SIDESCOPES_MODULE_LINK_LIBS} sidescopes_core Catch2::Catch2WithMain)
+    sidescopes_app ${SIDESCOPES_MODULE_LINK_LIBS} sidescopes_core Catch2::Catch2WithMain)
 if(SIDESCOPES_MODULES_DYNAMIC)
     add_dependencies(sidescopes_tests
         sidescopes_module_vectorscope

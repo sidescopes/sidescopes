@@ -68,37 +68,29 @@ target_link_libraries(sidescopes_ui_tests PRIVATE sidescopes_imgui_test_engine)
 add_test(NAME sidescopes_ui_smoke COMMAND sidescopes_ui_tests)
 
 # Feature suites that drive the REAL scope pipeline and the real app-state
-# classes through a representative headless UI. Each links the core pipeline
-# and the scope modules exactly as the unit tests do (see tests/CMakeLists.txt),
-# plus the hooked Dear ImGui and Test Engine, and compiles the app-state
-# translation units directly - they have no Dear ImGui dependency, so they mix
-# freely with the hooked build. ui_test_harness.cpp is the shared null-backend
-# runner.
+# classes through a representative headless UI. Each links the core pipeline,
+# the scope modules and sidescopes_app exactly as the unit tests do (see
+# tests/CMakeLists.txt), plus the hooked Dear ImGui and Test Engine. The
+# sidescopes_app units have no Dear ImGui dependency, so they mix freely with
+# the hooked build. ui_test_harness.cpp is the shared null-backend runner.
 foreach(suite IN ITEMS pipeline view)
     add_executable(sidescopes_ui_${suite}_tests
         test_${suite}_ui.cpp
-        ui_test_harness.cpp
-        ${CMAKE_SOURCE_DIR}/src/app/scope_registry.cpp
-        ${CMAKE_SOURCE_DIR}/src/app/overlay_style.cpp
-        ${CMAKE_SOURCE_DIR}/src/app/pane_layout.cpp
-        ${CMAKE_SOURCE_DIR}/src/app/scope_order.cpp
-        ${CMAKE_SOURCE_DIR}/src/app/scope_stack.cpp
-        ${CMAKE_SOURCE_DIR}/src/app/scope_view.cpp
-        ${CMAKE_SOURCE_DIR}/src/app/stack_tokens.cpp
-        ${CMAKE_SOURCE_DIR}/src/app/trace_params.cpp
-        ${CMAKE_SOURCE_DIR}/src/app/pin_board.cpp
-        ${CMAKE_SOURCE_DIR}/src/app/capture_controller.cpp)
+        ui_test_harness.cpp)
     target_include_directories(sidescopes_ui_${suite}_tests PRIVATE ${CMAKE_SOURCE_DIR}/tests/support)
     target_link_libraries(sidescopes_ui_${suite}_tests PRIVATE
-        sidescopes_imgui_test_engine ${SIDESCOPES_MODULE_LINK_LIBS} sidescopes_core)
+        sidescopes_imgui_test_engine sidescopes_app ${SIDESCOPES_MODULE_LINK_LIBS} sidescopes_core)
     sidescopes_target_defaults(sidescopes_ui_${suite}_tests)
     add_test(NAME sidescopes_ui_${suite} COMMAND sidescopes_ui_${suite}_tests)
 endforeach()
 
+# The suites below compile Dear ImGui-dependent app translation units, which is
+# why those cannot live in sidescopes_app: linking the test engine gives them
+# the hooked build's headers, so they see the same ImGuiContext layout as
+# everything else here, and the app's own Dear ImGui build would not.
+#
 # The seating-rule suite needs none of the pipeline: it asserts the arithmetic
-# in src/app/row_layout.cpp, the one app translation unit that DOES depend on
-# Dear ImGui - linking the test engine gives it the hooked build's headers, so
-# it sees the same ImGuiContext layout as everything else here.
+# in src/app/row_layout.cpp.
 add_executable(sidescopes_ui_layout_tests
     test_layout_ui.cpp
     ui_test_harness.cpp
@@ -115,11 +107,11 @@ add_test(NAME sidescopes_ui_layout COMMAND sidescopes_ui_layout_tests)
 add_executable(sidescopes_ui_graticule_tests
     test_graticule_ui.cpp
     ui_test_harness.cpp
-    ${CMAKE_SOURCE_DIR}/src/app/overlay_render.cpp
-    ${CMAKE_SOURCE_DIR}/src/app/overlay_style.cpp)
+    ${CMAKE_SOURCE_DIR}/src/app/overlay_render.cpp)
 target_include_directories(sidescopes_ui_graticule_tests PRIVATE
     ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/include)
-target_link_libraries(sidescopes_ui_graticule_tests PRIVATE sidescopes_imgui_test_engine)
+target_link_libraries(sidescopes_ui_graticule_tests PRIVATE
+    sidescopes_imgui_test_engine sidescopes_app)
 sidescopes_target_defaults(sidescopes_ui_graticule_tests)
 add_test(NAME sidescopes_ui_graticule COMMAND sidescopes_ui_graticule_tests)
 

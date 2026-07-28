@@ -237,6 +237,58 @@ if(WIN32)
     sidescopes_target_defaults(sidescopes_platform)
 endif()
 
+# --- application logic ---
+# The application units that do not depend on Dear ImGui: controllers, state
+# and pure logic lifted out of main. A library, so the app, the unit tests and
+# the UI-test suites all link one build of these from one list.
+#
+# The Dear ImGui-dependent units cannot join them, and belong to the app target
+# below. The UI tests build Dear ImGui with IMGUI_ENABLE_TEST_ENGINE, which
+# changes the ImGuiContext layout; a unit compiled against the app's Dear ImGui
+# has a different one and cannot be linked into them. Those suites compile the
+# few they need themselves (see tests/ui/CMakeLists.txt).
+add_library(sidescopes_app STATIC
+    src/app/adaptive_detail.cpp
+    src/app/attach_controller.cpp
+    src/app/border_label.cpp
+    src/app/capture_controller.cpp
+    src/app/capture_crop.cpp
+    src/app/capture_supervisor.cpp
+    src/app/context_menu.cpp
+    src/app/cursor_sampler.cpp
+    src/app/face_lock.cpp
+    src/app/face_lock_controller.cpp
+    src/app/frame_pacing.cpp
+    src/app/layout_preset_store.cpp
+    src/app/overlay_style.cpp
+    src/app/pane_layout.cpp
+    src/app/param_menu.cpp
+    src/app/pin_board.cpp
+    src/app/preferences_binding.cpp
+    src/app/quality.cpp
+    src/app/region_coordinator.cpp
+    src/app/region_geometry.cpp
+    src/app/region_motion.cpp
+    src/app/region_picker.cpp
+    src/app/scope_layout.cpp
+    src/app/scope_order.cpp
+    src/app/scope_registry.cpp
+    src/app/scope_stack.cpp
+    src/app/scope_view.cpp
+    src/app/shortcut_resolver.cpp
+    src/app/stack_tokens.cpp
+    src/app/trace_params.cpp
+    src/app/ui_scale.cpp
+    src/app/ui_scaling.cpp
+    src/app/version.cpp
+    src/app/window_place.cpp
+    src/app/window_suggestions.cpp
+)
+# The platform seams these call are supplied by whoever links the library: the
+# real platform layer in the app, the scripted stubs in the test binaries.
+target_link_libraries(sidescopes_app PUBLIC sidescopes_core)
+sidescopes_target_defaults(sidescopes_app)
+
 if(APPLE OR WIN32)
     # --- application ---
     include(FetchContent)
@@ -295,6 +347,7 @@ if(APPLE OR WIN32)
             MACOSX_BUNDLE_SHORT_VERSION_STRING ${PROJECT_VERSION}
         )
         target_link_libraries(SideScopes PRIVATE
+            sidescopes_app
             ${SIDESCOPES_MODULE_LINK_LIBS}
             sidescopes_platform
             imgui
@@ -344,6 +397,7 @@ if(APPLE OR WIN32)
         )
         target_link_options(SideScopes PRIVATE /ENTRY:mainCRTStartup)
         target_link_libraries(SideScopes PRIVATE
+            sidescopes_app
             ${SIDESCOPES_MODULE_LINK_LIBS}
             sidescopes_platform
             imgui
@@ -353,68 +407,33 @@ if(APPLE OR WIN32)
         sidescopes_target_defaults(SideScopes)
     endif()
 
-    # Application logic shared by both platforms: cohesive controllers lifted
-    # out of main.
+    # The Dear ImGui-dependent half of the application; the rest is
+    # sidescopes_app, linked above.
     target_sources(SideScopes PRIVATE
         src/app/about_window.cpp
-        src/app/adaptive_detail.cpp
         src/app/app.cpp
         src/app/app_attach.cpp
         src/app/app_region_pick.cpp
         src/app/app_startup.cpp
-        src/app/attach_controller.cpp
-        src/app/border_label.cpp
-        src/app/capture_controller.cpp
-        src/app/capture_crop.cpp
-        src/app/capture_supervisor.cpp
         src/app/color_picker_common.cpp
         src/app/color_picker_deck.cpp
         src/app/color_picker_difference.cpp
         src/app/color_picker_hero.cpp
         src/app/color_readout.cpp
-        src/app/context_menu.cpp
-        src/app/cursor_sampler.cpp
-        src/app/face_lock.cpp
-        src/app/face_lock_controller.cpp
-        src/app/frame_pacing.cpp
         src/app/frame_timer.cpp
         src/app/hex_font.cpp
         src/app/icon_textures.cpp
         src/app/imgui_ui.cpp
         src/app/interface_style.cpp
-        src/app/layout_preset_store.cpp
         src/app/layout_presets.cpp
         src/app/menu_rows.cpp
         src/app/overlay_render.cpp
-        src/app/overlay_style.cpp
         src/app/pane_area.cpp
-        src/app/pane_layout.cpp
-        src/app/param_menu.cpp
-        src/app/pin_board.cpp
-        src/app/preferences_binding.cpp
-        src/app/quality.cpp
-        src/app/region_coordinator.cpp
-        src/app/region_geometry.cpp
-        src/app/region_motion.cpp
-        src/app/region_picker.cpp
         src/app/row_layout.cpp
-        src/app/scope_layout.cpp
         src/app/scope_pane_renderer.cpp
-        src/app/scope_order.cpp
-        src/app/scope_registry.cpp
-        src/app/scope_stack.cpp
-        src/app/scope_view.cpp
         src/app/settings_window.cpp
-        src/app/shortcut_resolver.cpp
-        src/app/stack_tokens.cpp
         src/app/status_bar.cpp
-        src/app/toolbar.cpp
-        src/app/trace_params.cpp
-        src/app/ui_scale.cpp
-        src/app/ui_scaling.cpp
-        src/app/version.cpp
-        src/app/window_place.cpp
-        src/app/window_suggestions.cpp)
+        src/app/toolbar.cpp)
 
     # Build-time version stamp. The custom target regenerates the header from
     # `git describe` whenever it changes, so every build reflects the checked-
