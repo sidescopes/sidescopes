@@ -75,11 +75,6 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   empty, keeping their graticule, and the markers and color readout go on
   following the pointer anywhere on screen, so a color can still be
   measured against the graticule with nothing selected.
-- The note saying a region has to be drawn stands in the empty scope
-  itself, centered where its trace would be, rather than on the status
-  row. It never appears over the color picker, which follows the pointer
-  and reads the same with or without a region, and a pane too narrow for
-  the words leaves them out.
 - Escape, the last region tool, and the right-click menu clear the region
   instead of returning it to the whole screen. The menu entry is Clear
   Region, and the preferences key is `shortcut_clear_region`.

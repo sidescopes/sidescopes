@@ -17,7 +17,6 @@
 #include "app/capture_controller.h"
 #include "app/color_readout.h"
 #include "app/overlay_render.h"
-#include "app/pane_note.h"
 #include "app/param_menu.h"
 #include "app/scope_layout.h"
 #include "app/status_bar.h"
@@ -250,7 +249,6 @@ PaneArea::PaneArea(const PaneAreaContext& context, std::map<std::string, ScopeIn
       m_output(context.output),
       m_capture(context.capture),
       m_pins(context.pins),
-      m_shortcuts(context.shortcuts),
       m_projections(std::move(projections)),
       m_scopeTextures(std::move(textures.textures)),
       m_panePoints(std::move(textures.panePoints)),
@@ -451,19 +449,6 @@ void PaneArea::drawScopeById(std::string_view id, Pass& pass)
     } else {
         drawWaveformPane(id, pass);
     }
-    // Last, so it lays over the graticule this pane just drew. Only a scope that
-    // reads the region may say one is missing: the picker follows the pointer
-    // and works exactly as well without one.
-    if (!pass.input.regionSelected && scopeReadsRegion(m_registry, id)) {
-        drawNoRegionNote(paneMin, paneAvail);
-    }
-}
-
-void PaneArea::drawNoRegionNote(const ImVec2& paneMin, const ImVec2& paneSize) const
-{
-    char note[64];
-    std::snprintf(note, sizeof(note), "Draw a region (%s)", shortcutLabel(m_shortcuts.bindings().drawRegion).c_str());
-    drawPaneNote(paneMin, paneSize, note);
 }
 
 void PaneArea::drawVectorscopePane(Pass& pass)

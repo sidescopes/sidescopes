@@ -249,42 +249,4 @@ TEST_CASE("Pins mark the scopes that declare themselves targets")
     CHECK_FALSE(anyPinTarget(registry, {std::string{"org.example.unknown"}}));
 }
 
-// SYMPTOM IF BROKEN: the note saying a region must be drawn appears over the
-// colour picker, which reads the pointer and works exactly as well without one -
-// so it reads as if the picker were unavailable.
-TEST_CASE("Only a scope fed by the region can say one is missing")
-{
-    const ScopeRegistry registry{builtinModules()};
-
-    // Every module scope draws from the region and empties without one. The
-    // list is every scope the registry carries, deliberately: a scope promoted
-    // to its own id inherits the note without anyone remembering to ask, and
-    // this is where that stays true.
-    CHECK(scopeReadsRegion(registry, VectorscopeScopeId));
-    CHECK(scopeReadsRegion(registry, WaveformScopeId));
-    CHECK(scopeReadsRegion(registry, LumaWaveformScopeId));
-    CHECK(scopeReadsRegion(registry, ParadeScopeId));
-    CHECK(scopeReadsRegion(registry, HistogramScopeId));
-    CHECK(scopeReadsRegion(registry, CombinedHistogramScopeId));
-
-    // Said once more as a sweep, so a scope added later is covered without an
-    // edit here: exactly one registered scope is not fed by the region.
-    int fedByPointer = 0;
-    for (const HostScope& scope : registry.scopes()) {
-        if (!scopeReadsRegion(registry, scope.id)) {
-            ++fedByPointer;
-            CHECK(scope.id == ColorPickerScopeId);
-        }
-    }
-    CHECK(fedByPointer == 1);
-
-    // The host's colour picker follows the pointer instead. It is registered
-    // like any other scope and stands in the same stack, so what separates it
-    // is the missing descriptor rather than its place.
-    CHECK_FALSE(scopeReadsRegion(registry, ColorPickerScopeId));
-
-    // A scope the registry has never heard of speaks for nothing.
-    CHECK_FALSE(scopeReadsRegion(registry, "org.example.unknown"));
-}
-
 }  // namespace sidescopes

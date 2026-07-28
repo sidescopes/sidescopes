@@ -100,13 +100,4 @@ bool anyPinTarget(const ScopeRegistry& registry, const std::vector<std::string>&
     return false;
 }
 
-bool scopeReadsRegion(const ScopeRegistry& registry, std::string_view scopeId)
-{
-    // A module descriptor is what asks the worker for a pass over the region;
-    // the color picker has none and follows the pointer instead.
-    const HostScope* hostScope = registry.byId(scopeId);
-
-    return hostScope != nullptr && hostScope->descriptor != nullptr;
-}
-
 }  // namespace sidescopes

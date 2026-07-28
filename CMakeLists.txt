@@ -314,7 +314,6 @@ set(SIDESCOPES_APP_IMGUI_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/src/app/menu_rows.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/app/overlay_render.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/app/pane_area.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/app/pane_note.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/app/row_layout.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/app/scope_pane_renderer.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/app/settings_window.cpp
