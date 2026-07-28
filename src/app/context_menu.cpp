@@ -193,21 +193,15 @@ void appendGraticuleSubmenu(const ContextMenuModel& model, std::vector<NativeMen
 {
     // How heavily the graticule is drawn, in words: a percentage states the
     // arithmetic rather than the result, and what the user is choosing is how
-    // the lines read over a trace. The list stops at the floor: the graticule
-    // quietens for a busy trace but never leaves, so there is no off. The
-    // shipped step still says so, since a checkmark tells you where you are
-    // but not where you started. The checked step is an exact
+    // the lines read over a trace. Normal names the strength the scopes are
+    // graded at, so the way back to what shipped is a word rather than a
+    // marker. The list stops at the floor: the graticule quietens for a busy
+    // trace but never leaves, so there is no off. The checked step is an exact
     // GraticuleStrengths value, so the equality is safe.
     menuSubmenu(menu, "Graticule");
     for (std::size_t step = 0; step < GraticuleStrengths.size(); ++step) {
-        const float strength = GraticuleStrengths[step];
-        const bool checked = strength == model.view.graticuleStrength();
-        const int id = MenuGraticuleBase + static_cast<int>(step);
-        std::string label = GraticuleStrengthNames[step];
-        if (strength == DefaultGraticuleStrength) {
-            label += " (default)";
-        }
-        menuAction(menu, label.c_str(), id, checked);
+        const bool checked = GraticuleStrengths[step] == model.view.graticuleStrength();
+        menuAction(menu, GraticuleStrengthNames[step], MenuGraticuleBase + static_cast<int>(step), checked);
     }
     menuEndSubmenu(menu);
 }

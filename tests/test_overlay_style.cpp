@@ -1,8 +1,11 @@
+#include <algorithm>
 #include <catch2/catch_test_macros.hpp>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <iterator>
 #include <limits>
 #include <optional>
 #include <string>
@@ -135,6 +138,16 @@ TEST_CASE("Every strength has one name, and the ladder climbs")
         REQUIRE(name != nullptr);
         CHECK(std::string(name).find('%') == std::string::npos);
     }
+
+    // NORMAL MUST NAME THE DEFAULT. The menu marks no step as the shipped one,
+    // so this word is the only way back to what the scopes were graded at; put
+    // it on a different rung and a user reaching for stock lands one step off,
+    // with nothing on screen to tell them. The first wording shipped for review
+    // did exactly that.
+    const auto normal = std::find(GraticuleStrengthNames.begin(), GraticuleStrengthNames.end(), std::string("Normal"));
+    REQUIRE(normal != GraticuleStrengthNames.end());
+    const auto step = static_cast<std::size_t>(std::distance(GraticuleStrengthNames.begin(), normal));
+    CHECK(GraticuleStrengths[step] == DefaultGraticuleStrength);
 }
 
 TEST_CASE("A stored strength snaps to an offered step")

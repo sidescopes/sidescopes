@@ -168,12 +168,12 @@ TEST_CASE("The graticule steps are offered as words, not percentages")
 {
     // What the user picks is how the lines read over a trace; a percentage
     // states the arithmetic instead and leaves them to work out which is
-    // heavier. The shipped step still says so - a checkmark tells you where
-    // you are, not where you started.
+    // heavier. No step is marked as the default: Normal is the word for it,
+    // and a checkmark already says where the user is.
     MenuUnderTest menu;
     menu.build();
 
-    CHECK(menu.submenu("Graticule") == std::vector<std::string>{"Faint", "Normal", "Strong (default)", "Bold"});
+    CHECK(menu.submenu("Graticule") == std::vector<std::string>{"Faint", "Soft", "Normal", "Bold"});
 }
 
 TEST_CASE("No menu id means two things at once")

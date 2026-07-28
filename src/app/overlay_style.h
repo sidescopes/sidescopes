@@ -39,8 +39,10 @@ inline constexpr std::array<float, 4> GraticuleStrengths = {0.5f, 0.75f, 1.0f, 1
 
 /// What each step of @ref GraticuleStrengths is called where it is offered: a
 /// ladder of weight rather than of arithmetic, one word per step and in the
-/// same order. Named beside the values so the two cannot fall out of step.
-inline constexpr std::array<const char*, 4> GraticuleStrengthNames = {"Faint", "Normal", "Strong", "Bold"};
+/// same order. Named beside the values so the two cannot fall out of step, and
+/// so that "Normal" stays on @ref DefaultGraticuleStrength - the word is how a
+/// user finds the way back to what the scopes were graded at.
+inline constexpr std::array<const char*, 4> GraticuleStrengthNames = {"Faint", "Soft", "Normal", "Bold"};
 
 /// The strength a scope is graded at, and what a fresh installation draws.
 inline constexpr float DefaultGraticuleStrength = 1.0f;

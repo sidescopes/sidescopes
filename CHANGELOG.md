@@ -41,11 +41,11 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   instead of returning it to the whole screen. The menu entry is Clear
   Region, and the preferences key is `shortcut_clear_region`.
 - The graticule has a strength instead of an on/off: the right-click menu
-  offers Faint, Normal, Strong and Bold, dimming lines, rings, target
+  offers Faint, Soft, Normal and Bold, dimming lines, rings, target
   boxes and labels together so it can be quietened over a busy trace.
-  The steps climb in that order, the one the scopes were graded at says
-  it is the default, the faintest still reads, and the preferences key
-  is `graticule_strength`.
+  The steps climb in that order, Normal is the strength the scopes are
+  graded at, the faintest still reads, and the preferences key is
+  `graticule_strength`.
 - Moving an attached window holds the scopes on their last reading until
   it lands, instead of analysing a region in transit. Moving the region
   itself goes on reading live, at a coarser image while it is moving -
