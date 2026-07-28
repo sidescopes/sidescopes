@@ -1,5 +1,7 @@
 #pragma once
 
+#include "imgui.h"
+
 namespace sidescopes {
 
 /// @file
@@ -35,5 +37,15 @@ void drawMenuRowHover(float rowTopY);
 /// the row's edge and dimmed, the way a menu shows an accelerator. An empty
 /// @p key draws nothing.
 void drawMenuRowAccelerator(const char* key, float rightPad);
+
+/// An icon button that stands in a menu row: the toolbar's glyph and hover
+/// box, but only as tall as the row it shares, so a row carrying one is no
+/// taller than a row of plain checkboxes and the two menus keep one rhythm.
+/// @return Whether it was pressed.
+[[nodiscard]] bool menuRowIconButton(const char* id, ImTextureID texture, const char* tooltip);
+
+/// The width @ref menuRowIconButton takes, for a caller measuring its columns
+/// before it draws them.
+[[nodiscard]] float menuRowIconWidth();
 
 }  // namespace sidescopes

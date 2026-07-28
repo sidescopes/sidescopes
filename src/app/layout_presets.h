@@ -5,6 +5,7 @@
 #include <string>
 #include <string_view>
 
+#include "app/icon_textures.h"
 #include "app/layout_preset_store.h"
 #include "core/analysis_worker.h"
 #include "core/preferences.h"
@@ -61,13 +62,16 @@ public:
 
     /// The toolbar preset dropdown: the preview names the active slot
     /// (starred when dirty); the popup lists every slot by name and loads on
-    /// click, saves on Shift+click, and renames on double-click.
-    [[nodiscard]] LayoutPresetOutcome drawPicker();
+    /// click, saves on Shift+click, and renames from the pen button standing
+    /// at the end of each row. @p icons is the shared glyph cache that button
+    /// draws from.
+    [[nodiscard]] LayoutPresetOutcome drawPicker(IconTextures& icons);
 
 private:
-    /// Draws one slot's row - the active marker, its name, and its digit -
-    /// or, while that slot is being renamed, the field it is renamed in.
-    void drawSlotRow(int slot, float width, LayoutPresetOutcome& outcome);
+    /// Draws one slot's row - the active marker, its name, its digit, and the
+    /// button that renames it - or, while that slot is being renamed, the
+    /// field it is renamed in.
+    void drawSlotRow(int slot, float width, IconTextures& icons, LayoutPresetOutcome& outcome);
 
     /// Draws the field the name being renamed is edited in, committing on
     /// Enter or on the focus leaving it.

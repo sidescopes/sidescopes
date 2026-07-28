@@ -207,13 +207,15 @@ void LayoutPresetController::drawRenameField(float width, LayoutPresetOutcome& o
     }
 }
 
-void LayoutPresetController::drawSlotRow(int slot, float width, LayoutPresetOutcome& outcome)
+void LayoutPresetController::drawSlotRow(int slot, float width, IconTextures& icons, LayoutPresetOutcome& outcome)
 {
     const LayoutPreset& preset = m_store.at(slot);
     drawMenuRowHover(ImGui::GetCursorScreenPos().y);
     ImGui::PushID(slot);
     if (slot == m_renamingSlot) {
-        drawRenameField(width, outcome);
+        // The field spans the name column AND the button's, so the row keeps
+        // its width and nothing beside it shifts while a name is typed.
+        drawRenameField(width + menuRowIconWidth(), outcome);
         ImGui::PopID();
 
         return;
@@ -229,14 +231,22 @@ void LayoutPresetController::drawSlotRow(int slot, float width, LayoutPresetOutc
     if (ImGui::Selectable(name.c_str(), false, ImGuiSelectableFlags_NoAutoClosePopups, rowSize)) {
         outcome = ImGui::GetIO().KeyShift ? save(slot) : load(slot);
     }
+    // A double-click on the name renames too. It is the second way in, not the
+    // only one: the button beside it is what says the slot can be renamed at
+    // all, and a gesture nothing on screen mentions teaches nobody.
     if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
         beginRename(slot);
     }
     drawMenuRowAccelerator(std::to_string(slot).c_str(), ImGui::GetFontSize() * 0.75f);
+    ImGui::SameLine(0.0f, 0.0f);
+    const std::string tooltip = "Rename " + name;
+    if (menuRowIconButton("##rename", icons.textureId(Icon::PenLine, iconPixelSize()), tooltip.c_str())) {
+        beginRename(slot);
+    }
     ImGui::PopID();
 }
 
-LayoutPresetOutcome LayoutPresetController::drawPicker()
+LayoutPresetOutcome LayoutPresetController::drawPicker(IconTextures& icons)
 {
     // A chip like the scope letters, leading the row: the label names the
     // active slot (starred once the live layout drifts; "-" when none), and
@@ -262,10 +272,9 @@ LayoutPresetOutcome LayoutPresetController::drawPicker()
         pushMenuRowStyle();
         const float width = presetRowWidth(m_store.all());
         for (int slot = 1; slot <= LayoutPresetSlots; ++slot) {
-            drawSlotRow(slot, width, outcome);
+            drawSlotRow(slot, width, icons, outcome);
         }
         ImGui::TextDisabled("click loads - Shift+click saves");
-        ImGui::TextDisabled("double-click a name to rename");
         popMenuRowStyle();
         ImGui::EndPopup();
     } else {

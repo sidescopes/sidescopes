@@ -130,6 +130,11 @@ public:
     ///         application otherwise quiet.
     [[nodiscard]] double redrawDueSeconds() const;
 
+    /// The shared glyph cache. The toolbar and the status bar hold a reference
+    /// to it; the preset picker, which the host draws beside them, borrows it
+    /// per frame so one cache still serves every surface that shows an icon.
+    [[nodiscard]] IconTextures& icons();
+
 private:
     // The icon cache is declared first: both rows that draw glyphs hold a
     // reference to it.

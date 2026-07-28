@@ -19,6 +19,11 @@ ScopePaneRenderer::ScopePaneRenderer(const ScopePaneContext& context, std::map<s
 {
 }
 
+IconTextures& ScopePaneRenderer::icons()
+{
+    return m_icons;
+}
+
 PaneRenderOutcome ScopePaneRenderer::drawScopeToggles(bool stackModifier)
 {
     return m_toolbar.drawScopeToggles(stackModifier);

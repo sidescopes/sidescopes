@@ -18,10 +18,11 @@ enum class Icon
     Pipette,
     SquareDashed,
     ChartColumn,
+    PenLine,
 };
 
 /// The number of icons in the set, for texture caches sized by Icon.
-constexpr std::size_t IconCount = 8;
+constexpr std::size_t IconCount = 9;
 
 /// Rasterizes @p icon into a tightly packed RGBA8 square of
 /// @p sizePixels a side: near-white strokes on transparency, ready to

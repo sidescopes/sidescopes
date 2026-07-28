@@ -1,5 +1,8 @@
 #include "app/menu_rows.h"
 
+#include <cmath>
+
+#include "app/imgui_ui.h"
 #include "imgui.h"
 
 namespace sidescopes {
@@ -53,6 +56,35 @@ void drawMenuRowHover(float rowTopY)
     }
     ImGui::GetWindowDrawList()->AddRectFilled(barMin, barMax, ImGui::GetColorU32(ImGuiCol_ButtonHovered),
                                               style.FrameRounding);
+}
+
+float menuRowIconWidth()
+{
+    return ImGui::GetFrameHeight() + ImGui::GetFontSize() * 0.5f;
+}
+
+bool menuRowIconButton(const char* id, ImTextureID texture, const char* tooltip)
+{
+    // Sized to the row rather than to the toolbar: iconButton's box is a fixed
+    // amount taller than a line of text, which in a popup whose frame padding
+    // is pulled right down would make the rows carrying one visibly taller
+    // than the rest. The GLYPH keeps the toolbar's size, so it reads as the
+    // same icon at the same weight.
+    const bool pressed = ImGui::InvisibleButton(id, ImVec2(menuRowIconWidth(), ImGui::GetFrameHeight()));
+    ImDrawList* draw = ImGui::GetWindowDrawList();
+    const ImVec2 min = ImGui::GetItemRectMin();
+    const ImVec2 max = ImGui::GetItemRectMax();
+    if (ImGui::IsItemHovered()) {
+        draw->AddRectFilled(min, max, ImGui::GetColorU32(ImGuiCol_ButtonHovered), ImGui::GetStyle().FrameRounding);
+    }
+    const float side = ImGui::GetTextLineHeight();
+    const ImVec2 glyph(std::round(min.x + (max.x - min.x - side) / 2.0f),
+                       std::round(min.y + (max.y - min.y - side) / 2.0f));
+    draw->AddImage(texture, glyph, ImVec2(glyph.x + side, glyph.y + side), ImVec2(0, 0), ImVec2(1, 1),
+                   ImGui::GetColorU32(ImGuiCol_Text));
+    wrappedTooltip(tooltip);
+
+    return pressed;
 }
 
 void drawMenuRowAccelerator(const char* key, float rightPad)

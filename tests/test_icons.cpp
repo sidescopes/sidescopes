@@ -23,7 +23,7 @@ double alphaCoverage(const std::vector<uint8_t>& pixels)
 TEST_CASE("Every icon rasterizes with plausible stroke coverage")
 {
     for (const Icon icon : {Icon::Pin, Icon::PinOff, Icon::SquarePen, Icon::Pencil, Icon::User, Icon::Pipette,
-                            Icon::SquareDashed, Icon::ChartColumn}) {
+                            Icon::SquareDashed, Icon::ChartColumn, Icon::PenLine}) {
         for (const int size : {16, 24, 48}) {
             const auto pixels = rasterizeIcon(icon, size);
             REQUIRE(pixels.size() == static_cast<std::size_t>(size) * size * 4);
@@ -48,6 +48,12 @@ TEST_CASE("Icons are distinct images")
     CHECK(pin != pinOff);
     CHECK(pin != squarePen);
     CHECK(squarePen != pencil);
+    // PenLine renames a preset and Pencil draws a region - two edit-shaped
+    // glyphs in one set, so the underline that tells them apart is worth
+    // pinning rather than trusting to a glance.
+    const auto penLine = rasterizeIcon(Icon::PenLine, 24);
+    CHECK(penLine != pencil);
+    CHECK(penLine != squarePen);
 }
 
 TEST_CASE("The pin-off keeps its slash")
