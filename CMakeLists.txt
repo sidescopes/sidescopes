@@ -384,6 +384,7 @@ if(APPLE OR WIN32)
         src/app/interface_style.cpp
         src/app/layout_preset_store.cpp
         src/app/layout_presets.cpp
+        src/app/menu_rows.cpp
         src/app/overlay_render.cpp
         src/app/overlay_style.cpp
         src/app/pane_area.cpp

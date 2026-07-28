@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "app/imgui_ui.h"
+#include "app/menu_rows.h"
 #include "app/region_picker.h"
 #include "app/row_layout.h"
 #include "imgui.h"
@@ -38,30 +39,6 @@ void drawInsertionBar(float y)
     const ImVec2 left(windowPos.x + pad, y);
     const ImVec2 right(windowPos.x + ImGui::GetWindowSize().x - pad, y);
     ImGui::GetWindowDrawList()->AddLine(left, right, ImGui::GetColorU32(ImGuiCol_Text, 0.85f), 1.0f);
-}
-
-// Draws one hover highlight behind a whole menu row whose content starts at
-// @p rowTopY, so hovering reads as a single row rather than the checkbox and
-// the label lighting up apart. The band reaches a little above and below the
-// row content, and runs nearly the popup's full width - just shy of the border,
-// past the content into the window padding - so a native-menu-style highlight
-// covers the row edge to edge. Skipped mid-drag, where the insertion bar is the cue.
-void drawRowHover(float rowTopY)
-{
-    if (ImGui::GetDragDropPayload() != nullptr) {
-        return;
-    }
-    const ImGuiStyle& style = ImGui::GetStyle();
-    const float pad = style.ItemSpacing.y * 0.3f;
-    const float inset = style.WindowPadding.x * 0.4f;
-    const ImVec2 windowPos = ImGui::GetWindowPos();
-    const ImVec2 barMin(windowPos.x + inset, rowTopY - pad);
-    const ImVec2 barMax(windowPos.x + ImGui::GetWindowSize().x - inset, rowTopY + ImGui::GetFrameHeight() + pad);
-    if (!ImGui::IsMouseHoveringRect(barMin, barMax)) {
-        return;
-    }
-    ImGui::GetWindowDrawList()->AddRectFilled(barMin, barMax, ImGui::GetColorU32(ImGuiCol_ButtonHovered),
-                                              style.FrameRounding);
 }
 
 // The insertion slot (0..count) the cursor is over, in a list of @p count rows
@@ -207,25 +184,7 @@ void Toolbar::appendScopeMenu(PaneRenderOutcome& outcome)
     // which is what a checkbox is for: the list holds still while several are
     // checked and unchecked, and a row moves only when it is dragged. Every
     // row toggles, never solos, so the menu stays open across several clicks.
-    // The frame padding is pulled right down so the checkbox sits near the
-    // text height rather than dwarfing its label. One quiet bar highlights
-    // each whole row (drawRowHover), so the checkbox and the name Selectable
-    // must not light up on their own - both their highlights are hidden, off
-    // the theme's loud selection blue too.
-    const ImGuiStyle& style = ImGui::GetStyle();
-    const ImVec4 clear(0.0f, 0.0f, 0.0f, 0.0f);
-    const ImVec4 frameBg = ImGui::GetStyleColorVec4(ImGuiCol_FrameBg);
-    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(style.FramePadding.x, ImGui::GetFontSize() * 0.05f));
-    // Row-tall name Selectables (below) carry their label centred, so the whole
-    // row is one drag handle and drop target, not just the text line.
-    ImGui::PushStyleVar(ImGuiStyleVar_SelectableTextAlign, ImVec2(0.0f, 0.5f));
-    // Roomier rows than the theme default, so the short checkbox rows are not
-    // condensed and the hover band has space to breathe.
-    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(style.ItemSpacing.x, ImGui::GetFontSize() * 0.7f));
-    ImGui::PushStyleColor(ImGuiCol_HeaderHovered, clear);
-    ImGui::PushStyleColor(ImGuiCol_HeaderActive, clear);
-    ImGui::PushStyleColor(ImGuiCol_FrameBgHovered, frameBg);
-    ImGui::PushStyleColor(ImGuiCol_FrameBgActive, frameBg);
+    pushMenuRowStyle();
     const ScopeMenuColumns cols = scopeColumns();
     const std::vector<std::string>& order = m_view.order().ids();
     if (order.size() > 1) {
@@ -238,8 +197,7 @@ void Toolbar::appendScopeMenu(PaneRenderOutcome& outcome)
     if (const auto drop = scopeDrop(listTop, cols.width, static_cast<int>(order.size()))) {
         outcome.preferencesSaveDue = m_view.reorderScopes(drop->first, drop->second);
     }
-    ImGui::PopStyleColor(4);
-    ImGui::PopStyleVar(3);
+    popMenuRowStyle();
 }
 
 void Toolbar::drawScopeRow(const std::string& id, int index, const ScopeMenuColumns& cols, PaneRenderOutcome& outcome)
@@ -248,7 +206,7 @@ void Toolbar::drawScopeRow(const std::string& id, int index, const ScopeMenuColu
     // drag handle - so a reorder is never read as a toggle. The insertion line
     // and the drop are handled once, past the loop, from the whole list's
     // geometry.
-    drawRowHover(ImGui::GetCursorScreenPos().y);
+    drawMenuRowHover(ImGui::GetCursorScreenPos().y);
     ImGui::PushID(id.c_str());
     bool on = m_view.stack().shows(id);
     if (ImGui::Checkbox("##shown", &on)) {
@@ -273,17 +231,7 @@ void Toolbar::drawScopeRow(const std::string& id, int index, const ScopeMenuColu
 
 void Toolbar::drawRowKey(std::string_view id, float rightPad) const
 {
-    const std::string key = m_shortcuts.bindingFor(id);
-    if (key.empty()) {
-        return;
-    }
-    // Drawn over the row just laid down, right-aligned a margin in from its edge
-    // and dimmed, the way a menu shows an accelerator.
-    const ImVec2 keySize = ImGui::CalcTextSize(key.c_str());
-    const ImVec2 rowMin = ImGui::GetItemRectMin();
-    const ImVec2 rowMax = ImGui::GetItemRectMax();
-    const ImVec2 at(rowMax.x - rightPad - keySize.x, rowMin.y + (rowMax.y - rowMin.y - keySize.y) * 0.5f);
-    ImGui::GetWindowDrawList()->AddText(at, ImGui::GetColorU32(ImGuiCol_TextDisabled), key.c_str());
+    drawMenuRowAccelerator(m_shortcuts.bindingFor(id).c_str(), rightPad);
 }
 
 const char* Toolbar::scopeName(std::string_view id) const
