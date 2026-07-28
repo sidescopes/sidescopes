@@ -3,6 +3,7 @@
 #include <chrono>
 #include <cstddef>
 #include <functional>
+#include <string>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -11,6 +12,7 @@
 #include "core/analysis_worker.h"
 #include "core/scopes/sampling.h"
 #include "core/scopes/waveform.h"
+#include "modules/module_registry.h"
 #include "scope_image.h"
 #include "test_frame.h"
 
@@ -445,17 +447,36 @@ TEST_CASE("AnalysisWorker recomputes on settings changes without a new frame")
     AnalysisWorker::Output output;
     REQUIRE(waitFor([&] { return worker.fetchOutput(seen, output); }));
     CHECK(pixelLit(output.images.at(VectorscopeId), 109, 43));  // BT.709 target
-    const std::vector<uint8_t> boosted = output.images.at(VectorscopeId).rgba;
+    const std::vector<uint8_t> shipped = output.images.at(VectorscopeId).rgba;
 
-    // Switching the vectorscope's trace response redraws the same cloud on a
-    // different density curve, and the worker recomputes on the frame it
-    // already holds rather than waiting for a new one.
-    settings.scopeParams[VectorscopeId]["response"] = 1.0;  // Linear
+    // Moving the vectorscope's trace gamma redraws the same cloud on a
+    // differently shaped density curve, and the worker recomputes on the frame
+    // it already holds rather than waiting for a new one.
+    settings.scopeParams[VectorscopeId]["gamma"] = 1.4;
     worker.updateSettings(settings);
     REQUIRE(waitFor([&] { return worker.fetchOutput(seen, output); }));
-    CHECK(output.images.at(VectorscopeId).rgba != boosted);
+    CHECK(output.images.at(VectorscopeId).rgba != shipped);
     CHECK(pixelLit(output.images.at(VectorscopeId), 109, 43));  // the same target
     CHECK(output.framesProcessed == 1);                         // same frame, reanalyzed
+}
+
+TEST_CASE("Only the keys a descriptor declares are handed to its scope")
+{
+    // The gate every retired setting relies on. A preferences file written
+    // before the vectorscope's trace response was retired still names
+    // `response`, and it survives the read like any key the host does not
+    // know; what keeps it inert is that a value reaches a module only when the
+    // scope's own descriptor declares its key.
+    const RegisteredScope* scope = builtinModules().findScope(VectorscopeId);
+    REQUIRE(scope != nullptr);
+    REQUIRE(scope->descriptor != nullptr);
+
+    const std::vector<SsParamValue> assembled =
+        assembleScopeParams({{"response", 1.0}, {"gamma", 0.9}, {"smoothing_ms", 75.0}}, *scope->descriptor);
+
+    REQUIRE(assembled.size() == 1);
+    CHECK(std::string(assembled[0].key) == "gamma");
+    CHECK(assembled[0].value == 0.9);
 }
 
 TEST_CASE("AnalysisWorker computes nothing without a region")

@@ -143,16 +143,28 @@ TEST_CASE("Vectorscope renderings match their goldens")
 {
     TestFrame bars = colorBars();
 
-    Vectorscope boosted;
-    boosted.accumulate(bars.view(), IntRect{0, 0, 64, 16});
-    checkGolden("vectorscope-bars-bt709-boosted", boosted.image(), 0xacede1806935413eULL);
+    // The default case keeps the hash it was recorded with under the retired
+    // Boosted response: making the gamma a setting left the shipped rendering
+    // bit-for-bit as it was, and this is what says so.
+    Vectorscope shipped;
+    shipped.accumulate(bars.view(), IntRect{0, 0, 64, 16});
+    checkGolden("vectorscope-bars-gamma-default", shipped.image(), 0xacede1806935413eULL);
 
-    Vectorscope linear;
-    VectorscopeSettings linearSettings;
-    linearSettings.response = TraceResponse::Linear;
-    linear.configure(linearSettings);
-    linear.accumulate(bars.view(), IntRect{0, 0, 64, 16});
-    checkGolden("vectorscope-bars-bt709-linear", linear.image(), 0x91736f2a071db074ULL);
+    // Both ends of the gamma's range, recorded fresh. The case they replace
+    // was the linear response, whose input this change deleted.
+    Vectorscope lifted;
+    VectorscopeSettings liftedSettings;
+    liftedSettings.traceGamma = MinTraceGamma;
+    lifted.configure(liftedSettings);
+    lifted.accumulate(bars.view(), IntRect{0, 0, 64, 16});
+    checkGolden("vectorscope-bars-gamma-min", lifted.image(), 0x628982161fd5228dULL);
+
+    Vectorscope flat;
+    VectorscopeSettings flatSettings;
+    flatSettings.traceGamma = MaxTraceGamma;
+    flat.configure(flatSettings);
+    flat.accumulate(bars.view(), IntRect{0, 0, 64, 16});
+    checkGolden("vectorscope-bars-gamma-max", flat.image(), 0x0e2773c5aa94569cULL);
 }
 
 TEST_CASE("Waveform renderings match their goldens")

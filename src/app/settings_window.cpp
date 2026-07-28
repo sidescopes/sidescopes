@@ -18,10 +18,11 @@ const SsScopeDescriptor* descriptorFor(const ScopeRegistry& registry, std::strin
     return hostScope != nullptr ? hostScope->descriptor : nullptr;
 }
 
-/// One scope's trace controls: intensity, sampling stride and marker
-/// smoothing. The sliders read their default, headroom and range from the
-/// descriptor, and the smoothing slider is host state. @p suffix keeps the
-/// widget ids apart between sections.
+/// One scope's trace controls: intensity, sampling stride, whatever
+/// continuous setting the scope declares, and marker smoothing. The sliders
+/// read their default, headroom and range from the descriptor, and the
+/// smoothing slider is host state. @p suffix keeps the widget ids apart
+/// between sections.
 void drawTraceSettings(const SettingsContext& ctx, std::string_view id, const char* label, const char* suffix)
 {
     const SsScopeDescriptor* descriptor = descriptorFor(ctx.registry, id);
@@ -51,6 +52,15 @@ void drawTraceSettings(const SettingsContext& ctx, std::string_view id, const ch
     if (ImGui::SliderInt((std::string{"sampling 1:N##"} + suffix).c_str(), &stride,
                          static_cast<int>(strideParam->min_value), static_cast<int>(strideParam->max_value))) {
         write(strideParam->key, stride);
+    }
+    // A scope's own continuous setting, drawn only where one is declared: the
+    // vectorscope's trace gamma today, anything a module names tomorrow.
+    if (const SsParamInfo* scale = firstParamOfKind(descriptor, SS_PARAM_FLOAT); scale != nullptr) {
+        float value = static_cast<float>(scopeParam(ctx.analysis, id, scale->key, scale->default_value));
+        if (ImGui::SliderFloat((std::string{scale->label} + "##" + suffix).c_str(), &value,
+                               static_cast<float>(scale->min_value), static_cast<float>(scale->max_value), "%.2f")) {
+            write(scale->key, value);
+        }
     }
     float smoothingMs = ctx.view.traces().smoothing(id);
     if (ImGui::SliderFloat((std::string{"smoothing ms##"} + suffix).c_str(), &smoothingMs, 0.0f, 500.0f, "%.0f")) {

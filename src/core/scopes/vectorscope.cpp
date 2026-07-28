@@ -55,11 +55,9 @@ constexpr float AdaptiveFullWideBelow = 0.001f;
 constexpr float AdaptiveSharpAbove = 0.02f;
 constexpr float AdaptiveWideCap = 3.0f;
 
-// Phosphor bloom: past the knee the tint desaturates toward white, at
-// different knees for the linear and boosted responses, up to this maximum
-// whiteness.
-constexpr float BloomKneeLinear = 0.72f;
-constexpr float BloomKneeBoosted = 0.88f;
+// Phosphor bloom: past the knee the tint desaturates toward white, up to this
+// maximum whiteness.
+constexpr float BloomKnee = 0.88f;
 constexpr float BloomMaxWhiteness = 0.9f;
 
 // A half-strength 3x3 binomial on a square grid: half the source value plus
@@ -101,6 +99,7 @@ void Vectorscope::configure(const VectorscopeSettings& settings)
 {
     m_settings = settings;
     m_settings.samplingStride = std::clamp(m_settings.samplingStride, 1, 8);
+    m_settings.traceGamma = std::clamp(m_settings.traceGamma, MinTraceGamma, MaxTraceGamma);
     m_settings.size = std::clamp(m_settings.size, CodeGridSize, 512);
 }
 
@@ -378,19 +377,11 @@ void Vectorscope::renderTrace(const float* densities, int densitySize, uint64_t 
     const double gain = static_cast<double>(m_settings.gain) * perSampleScale;
     const double logCeiling = densest > 0.0f ? std::log1p(densest * gain) : 0.0;
     const double intensityScale = logCeiling > 0.0 ? 1.0 / logCeiling : 0.0;
-    const bool linear = m_settings.response == TraceResponse::Linear;
-    // The linear response emulates a phosphor: exposure saturates
-    // exponentially, so the densest mass just reaches full glow at the
-    // default gain and faint spread stays honestly faint. The gain acts
-    // as the phosphor's sensitivity.
-    const double phosphorRate =
-        densest > 0.0f ? static_cast<double>(m_settings.gain) / static_cast<double>(densest) : 0.0;
 
     // Where the beam parks, phosphor overexposes toward white: past the
     // bloom knee the tint desaturates with density. The white-hot core
     // over neutral content doubles as an at-a-glance neutrality check.
-    const float bloomKnee = linear ? BloomKneeLinear : BloomKneeBoosted;
-    const float bloomScale = BloomMaxWhiteness / (1.0f - bloomKnee);
+    const float bloomScale = BloomMaxWhiteness / (1.0f - BloomKnee);
 
     uint8_t* out = m_image.rgba.data();
     const uint8_t* tint = m_tint.data();
@@ -401,17 +392,13 @@ void Vectorscope::renderTrace(const float* densities, int densitySize, uint64_t 
             out[3] = 255;
             continue;
         }
-        float brightness;
-        if (linear) {
-            brightness = static_cast<float>(1.0 - std::exp(-static_cast<double>(count) * phosphorRate));
-        } else {
-            // The gamma lifts the mid-density body of the cloud:
-            // normalizing to the densest bin pushes everything else
-            // down, and a linear ramp leaves the trace dim at any gain.
-            const float normalized = static_cast<float>(std::log1p(static_cast<double>(count) * gain) * intensityScale);
-            brightness = applyMidDensityGamma(normalized);
-        }
-        const float whiteness = std::clamp((brightness - bloomKnee) * bloomScale, 0.0f, BloomMaxWhiteness);
+        // The gamma lifts the mid-density body of the cloud: normalizing
+        // to the densest bin pushes everything else down, and a linear
+        // ramp leaves the trace dim at any gain. How hard it lifts is the
+        // one shape control the scope offers.
+        const float normalized = static_cast<float>(std::log1p(static_cast<double>(count) * gain) * intensityScale);
+        const float brightness = applyTraceGamma(normalized, m_settings.traceGamma);
+        const float whiteness = std::clamp((brightness - BloomKnee) * bloomScale, 0.0f, BloomMaxWhiteness);
         out[0] = static_cast<uint8_t>(
             (static_cast<float>(tint[0]) + (255.0f - static_cast<float>(tint[0])) * whiteness) * brightness);
         out[1] = static_cast<uint8_t>(

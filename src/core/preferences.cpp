@@ -153,14 +153,12 @@ void readLegacyScopeParams(const std::map<std::string, std::string, std::less<>>
     readLegacyDouble(values, "waveform_smoothing_ms", waveform, "smoothing_ms");
     readLegacyDouble(values, "histogram_stride", histogram, "stride");
 
-    // The retired `matrix` key is deliberately not read. BT.601 is gone, so a
-    // file naming it - under either its legacy name or the generic
-    // `<id>.matrix` - simply goes unread, the way every key no scope declares
-    // does. A file is never refused over a choice that no longer exists.
-    // trace_response: 1 was Linear (choice 1); any other value was Boosted (0).
-    if (const auto found = values.find("trace_response"); found != values.end()) {
-        vectorscope["response"] = std::strtol(found->second.c_str(), nullptr, 10) == 1 ? 1.0 : 0.0;
-    }
+    // The retired `matrix` and `trace_response` keys are deliberately not read.
+    // BT.601 and the linear response are both gone, so a file naming either -
+    // under its legacy name or the generic `<id>.matrix`, `<id>.response` -
+    // simply goes unread, the way every key no scope declares does. A file is
+    // never refused over a choice that no longer exists, and the vectorscope
+    // runs on its own trace gamma instead.
     if (const auto found = values.find("waveform_mode"); found != values.end()) {
         waveform["mode"] = waveformModeChoice(std::strtol(found->second.c_str(), nullptr, 10));
     }

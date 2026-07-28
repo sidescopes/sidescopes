@@ -5,16 +5,6 @@
 
 namespace sidescopes {
 
-/// How trace density maps to brightness. Boosted lifts dim regions with a
-/// log curve so sparse traces stay readable; Linear behaves like a
-/// phosphor scope, where only genuinely dense mass glows brightly and
-/// faint spread stays faint.
-enum class TraceResponse
-{
-    Boosted,
-    Linear
-};
-
 /// What the waveform plots. RGB overlay is the default: separated colored
 /// traces make color casts readable at a glance. ColoredLuma plots
 /// luminance and paints each part of the trace in the average color of

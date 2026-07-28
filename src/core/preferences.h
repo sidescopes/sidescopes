@@ -81,7 +81,7 @@ struct Preferences
     /// it - runs on its module's own defaults, which is what a key this map
     /// does not carry has always meant.
     std::map<std::string, std::map<std::string, double>> scopeParams{
-        {"org.sidescopes.vectorscope", {{"gain", 3.0}, {"stride", 1.0}, {"response", 0.0}, {"smoothing_ms", 75.0}}},
+        {"org.sidescopes.vectorscope", {{"gain", 3.0}, {"stride", 1.0}, {"gamma", 0.65}, {"smoothing_ms", 75.0}}},
         {"org.sidescopes.waveform", {{"gain", 0.05}, {"stride", 1.0}, {"smoothing_ms", 100.0}}},
         {"org.sidescopes.histogram", {{"stride", 1.0}}},
     };

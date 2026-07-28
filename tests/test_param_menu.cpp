@@ -6,6 +6,7 @@
 #include "app/param_menu.h"
 #include "app/scope_registry.h"
 #include "app/scope_view.h"
+#include "core/scopes/vectorscope.h"
 #include "modules/module_registry.h"
 #include "platform/native_menu.h"
 #include "sidescopes/module.h"
@@ -20,6 +21,21 @@ const SsScopeDescriptor* descriptorOf(const ScopeRegistry& registry, std::string
     const HostScope* scope = registry.byId(id);
     return scope != nullptr ? scope->descriptor : nullptr;
 }
+
+// A descriptor of its own for the unprefixed menu_label rule, which no
+// built-in exercises now that the vectorscope's trace response is retired: the
+// luma waveform's "Luma Waveform Style" is the prefixed case, and this is the
+// bare one. Its default is choice 1, so a checkmark test cannot pass by
+// reading zero.
+const char* const TintChoices[] = {"Warm", "Cool", nullptr};
+
+const SsParamInfo TintParams[] = {
+    {"tint", "Tint", SS_PARAM_CHOICE, 0.0, 1.0, 1.0, 0.0, "Tint", TintChoices},
+};
+
+const SsScopeDescriptor TintScope{
+    "org.sidescopes.test.tint", "Test Scope", 'T', 256, 256, 0u, TintParams, 1u, 1.0f,
+};
 
 }  // namespace
 
@@ -44,6 +60,28 @@ TEST_CASE("firstParamOfKind finds a scope's intensity and integer parameters")
     CHECK(firstParamOfKind(descriptorOf(registry, ColorPickerScopeId), SS_PARAM_INTENSITY) == nullptr);
 }
 
+TEST_CASE("The vectorscope's declared gamma is the engine's own range")
+{
+    // The slider is drawn from the descriptor and the engine clamps to its own
+    // constants, so a descriptor that disagreed would offer a setting the
+    // engine silently refuses. Only the vectorscope declares a continuous
+    // parameter today.
+    const ScopeRegistry registry{builtinModules()};
+
+    const SsParamInfo* gamma = firstParamOfKind(descriptorOf(registry, VectorscopeScopeId), SS_PARAM_FLOAT);
+    REQUIRE(gamma != nullptr);
+    CHECK(std::string(gamma->key) == "gamma");
+    CHECK(static_cast<float>(gamma->min_value) == MinTraceGamma);
+    CHECK(static_cast<float>(gamma->max_value) == MaxTraceGamma);
+    // The default is the waveform's fixed lift, which is what keeps an
+    // untouched vectorscope rendering exactly as it always has.
+    CHECK(static_cast<float>(gamma->default_value) == MidDensityGamma);
+
+    for (const std::string_view id : {WaveformScopeId, LumaWaveformScopeId, HistogramScopeId}) {
+        CHECK(firstParamOfKind(descriptorOf(registry, id), SS_PARAM_FLOAT) == nullptr);
+    }
+}
+
 TEST_CASE("Built-in descriptors declare pin targeting and pane aspects")
 {
     // The pin tool and the automatic layout read these declarations instead
@@ -65,31 +103,30 @@ TEST_CASE("findParam resolves a descriptor parameter by key")
 {
     const ScopeRegistry registry{builtinModules()};
 
-    const SsParamInfo* response = findParam(descriptorOf(registry, VectorscopeScopeId), "response");
-    REQUIRE(response != nullptr);
-    CHECK(response->kind == SS_PARAM_CHOICE);
+    const SsParamInfo* gamma = findParam(descriptorOf(registry, VectorscopeScopeId), "gamma");
+    REQUIRE(gamma != nullptr);
+    CHECK(gamma->kind == SS_PARAM_FLOAT);
 
     // An unknown key and the descriptorless color picker both come back null.
     CHECK(findParam(descriptorOf(registry, VectorscopeScopeId), "no-such-key") == nullptr);
-    CHECK(findParam(descriptorOf(registry, ColorPickerScopeId), "response") == nullptr);
+    CHECK(findParam(descriptorOf(registry, ColorPickerScopeId), "gamma") == nullptr);
 }
 
-TEST_CASE("Choice submenus strip the scope-name prefix and check the current value")
+TEST_CASE("A choice submenu titled without the scope name keeps its label")
 {
-    const ScopeRegistry registry{builtinModules()};
     std::vector<NativeMenuItem> items;
     std::vector<ParamMenuAction> actions;
 
-    // Defaults (empty params): response defaults to Boosted (choice 0).
-    appendScopeChoiceMenus(*descriptorOf(registry, VectorscopeScopeId), {}, false, items, actions);
+    // Defaults (empty params): the choice starts on its declared default, 1.
+    appendScopeChoiceMenus(TintScope, {}, false, items, actions);
 
     REQUIRE(items.size() == 4);
     CHECK(items[0].kind == Kind::SubmenuBegin);
-    CHECK(items[0].label == "Trace Response");  // no scope prefix, unchanged
-    CHECK(items[1].label == "Boosted");
-    CHECK(items[1].checked);
-    CHECK(items[2].label == "Linear");
-    CHECK_FALSE(items[2].checked);
+    CHECK(items[0].label == "Tint");  // no scope prefix, unchanged
+    CHECK(items[1].label == "Warm");
+    CHECK_FALSE(items[1].checked);
+    CHECK(items[2].label == "Cool");
+    CHECK(items[2].checked);
     CHECK(items[3].kind == Kind::SubmenuEnd);
 
     // The side table pairs each choice action with its (scope, key, value),
@@ -97,26 +134,42 @@ TEST_CASE("Choice submenus strip the scope-name prefix and check the current val
     REQUIRE(actions.size() == 2);
     CHECK(items[1].actionId == ParamMenuActionBase);
     CHECK(items[2].actionId == ParamMenuActionBase + 1);
-    CHECK(actions[0].scopeId == "org.sidescopes.vectorscope");
-    CHECK(actions[0].paramKey == "response");
+    CHECK(actions[0].scopeId == "org.sidescopes.test.tint");
+    CHECK(actions[0].paramKey == "tint");
     CHECK(actions[0].value == 0.0);
-    CHECK(actions[1].paramKey == "response");
+    CHECK(actions[1].paramKey == "tint");
     CHECK(actions[1].value == 1.0);
 }
 
 TEST_CASE("Stored parameter values drive the checkmarks")
 {
+    std::vector<NativeMenuItem> items;
+    std::vector<ParamMenuAction> actions;
+
+    // The stored value differs from the declared default, so the checkmark
+    // moving proves the stored one is what the walk reads.
+    const std::map<std::string, double> params{{"tint", 0.0}};
+    appendScopeChoiceMenus(TintScope, params, false, items, actions);
+
+    REQUIRE(items.size() == 4);
+    CHECK(items[1].label == "Warm");
+    CHECK(items[1].checked);
+    CHECK_FALSE(items[2].checked);
+}
+
+TEST_CASE("The vectorscope contributes no menu option of its own")
+{
+    // Its trace curve is a setting on a scale, not a mode, so the scope
+    // declares no choice at all and a generic walk over it emits nothing. What
+    // is left under the vectorscope's own section is host state: zoom and pins.
     const ScopeRegistry registry{builtinModules()};
     std::vector<NativeMenuItem> items;
     std::vector<ParamMenuAction> actions;
 
-    const std::map<std::string, double> params{{"response", 1.0}};
-    appendScopeChoiceMenus(*descriptorOf(registry, VectorscopeScopeId), params, false, items, actions);
+    appendScopeChoiceMenus(*descriptorOf(registry, VectorscopeScopeId), {}, false, items, actions);
 
-    REQUIRE(items.size() == 4);
-    CHECK_FALSE(items[1].checked);
-    CHECK(items[2].label == "Linear");
-    CHECK(items[2].checked);  // response == 1
+    CHECK(items.empty());
+    CHECK(actions.empty());
 }
 
 TEST_CASE("A lone choice is a Style submenu unprefixed but flattens when nested")
@@ -188,16 +241,17 @@ TEST_CASE("Side-table ids continue across scopes in one menu build")
     std::vector<NativeMenuItem> items;
     std::vector<ParamMenuAction> actions;
 
-    // A stack of luma waveform then vectorscope, each nested under its own name.
+    // A stack of luma waveform then the tint scope, each nested under its own
+    // name.
     appendScopeChoiceMenus(*descriptorOf(registry, LumaWaveformScopeId), {}, true, items, actions);
-    appendScopeChoiceMenus(*descriptorOf(registry, VectorscopeScopeId), {}, true, items, actions);
+    appendScopeChoiceMenus(TintScope, {}, true, items, actions);
 
-    REQUIRE(actions.size() == 4);  // two luma styles, two trace responses
+    REQUIRE(actions.size() == 4);  // two luma styles, two tints
     CHECK(actions[0].scopeId == "org.sidescopes.waveform.luma");
     CHECK(actions[0].paramKey == "style");
-    CHECK(actions[2].scopeId == "org.sidescopes.vectorscope");
-    CHECK(actions[2].paramKey == "response");
-    // The vectorscope's first action id follows the luma waveform's two.
+    CHECK(actions[2].scopeId == "org.sidescopes.test.tint");
+    CHECK(actions[2].paramKey == "tint");
+    // The second scope's first action id follows the luma waveform's two.
     CHECK(items.back().actionId == ParamMenuActionBase + 3);
 }
 

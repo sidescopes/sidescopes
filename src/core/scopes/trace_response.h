@@ -4,17 +4,26 @@
 
 namespace sidescopes {
 
-/// The mid-density gamma the vectorscope and the waveform both apply after
-/// the log curve: normalizing to the densest bin pushes the mid-body of the
-/// trace down, and this lift keeps it readable at any gain.
+/// The mid-density gamma the waveform applies after the log curve, and the
+/// vectorscope's own default: normalizing to the densest bin pushes the
+/// mid-body of the trace down, and this lift keeps it readable at any gain.
+/// The waveform holds it fixed; the vectorscope offers it as a setting and
+/// starts here, so the two scopes agree until the setting is moved.
 inline constexpr float MidDensityGamma = 0.65f;
 
-/// Applies the mid-density gamma to a log-normalized density in [0, 1], in
+/// Applies a mid-density @p gamma to a log-normalized density in [0, 1], in
 /// the caller's own precision.
+template <typename Float>
+[[nodiscard]] inline Float applyTraceGamma(Float normalized, Float gamma)
+{
+    return std::pow(normalized, gamma);
+}
+
+/// Applies the fixed mid-density gamma, for a scope that does not offer it.
 template <typename Float>
 [[nodiscard]] inline Float applyMidDensityGamma(Float normalized)
 {
-    return std::pow(normalized, static_cast<Float>(MidDensityGamma));
+    return applyTraceGamma(normalized, static_cast<Float>(MidDensityGamma));
 }
 
 /// The four Catmull-Rom weights for interpolation parameter @p t in [0, 1],

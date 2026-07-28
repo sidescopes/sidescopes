@@ -7,10 +7,20 @@
 #include "core/scopes/chunk_scratch.h"
 #include "core/scopes/sampling.h"
 #include "core/scopes/scope_types.h"
+#include "core/scopes/trace_response.h"
 
 namespace sidescopes {
 
 inline constexpr int DefaultVectorscopeSize = 256;
+
+/// The range the trace gamma is held to. Both ends are where the trace stops
+/// saying anything, measured on a photograph-shaped chroma distribution and
+/// pinned by a test: below the minimum the cloud flattens towards one
+/// brightness (the ninetieth percentile is under twice the tenth, against
+/// three times at the default), and above the maximum its body falls away
+/// into the dark faster than a screen shows.
+inline constexpr float MinTraceGamma = 0.4f;
+inline constexpr float MaxTraceGamma = 1.4f;
 
 /// Samples the vectorscope needs in each of its bins. Its bins are the 256x256
 /// chroma code grid, fixed whatever the pane, and its adaptive density estimate
@@ -25,7 +35,12 @@ struct VectorscopeSettings
     float gain = 3.0f;
     /// Sample every Nth pixel horizontally and vertically (1..8).
     int samplingStride = 1;
-    TraceResponse response = TraceResponse::Boosted;
+    /// The gamma the log-normalized density is raised to before display, held
+    /// to MinTraceGamma..MaxTraceGamma. Lower lifts the mid-density body of
+    /// the trace harder; higher leaves it nearer the peak, so only the denser
+    /// mass reads brightly. The default is the fixed lift the waveform makes,
+    /// so an untouched vectorscope and the waveform beside it agree.
+    float traceGamma = MidDensityGamma;
     /// Display image resolution per axis. Accumulation always happens on
     /// the 256-code chroma grid - 8-bit content quantizes to it, and a
     /// finer accumulation grid renders the quantization as gridded

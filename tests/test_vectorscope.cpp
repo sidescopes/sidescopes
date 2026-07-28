@@ -103,9 +103,8 @@ TEST_CASE("Vectorscope leaves no gap between adjacent chroma codes on the fine g
     Vectorscope scope;
     VectorscopeSettings settings;
     settings.size = 512;
-    // Linear response at unit gain keeps the peak below the bloom knee,
-    // so the ratio below measures the interpolation alone.
-    settings.response = TraceResponse::Linear;
+    // The two codes carry equal mass, so both reach the ceiling and bloom
+    // alike; what the ratios below measure is the interpolation between them.
     settings.gain = 1.0f;
     scope.configure(settings);
     scope.accumulate(frame.view(), IntRect{0, 0, 32, 32});
@@ -133,35 +132,193 @@ TEST_CASE("Vectorscope leaves no gap between adjacent chroma codes on the fine g
     CHECK(valley * 4 >= second * 3);
 }
 
-TEST_CASE("Vectorscope linear response keeps sparse mass faint")
+namespace {
+
+/// 75% blue under BT.709: Cb = 112 * 191 / 256 = 83.6 -> bin 212, Cr =
+/// -10 * 191 / 256 = -7.5 -> row 255 - 121 = 134. Read as the sum of the
+/// three channels, the way every brightness comparison here does.
+int brightnessAtBlue(const ScopeImage& image)
 {
-    // 63 parts red to 1 part blue. The boosted log curve lifts the blue
-    // speck into clear visibility; the phosphor-linear response must
-    // leave it far dimmer than the dominant mass, the way a hardware
-    // scope would.
+    const uint8_t* pixel = image.rgba.data() + (static_cast<std::size_t>(134) * 256 + 212) * 4;
+
+    return static_cast<int>(pixel[0]) + pixel[1] + pixel[2];
+}
+
+/// A photograph's chroma distribution in SHAPE rather than in content: a dense
+/// near-neutral body, a moderate mid-saturation ring, and a thin saturated
+/// tail, which is what a picture looks like on this scope. Deterministic - the
+/// counter below is a fixed sequence, not a random one - so the percentiles
+/// the range test reads mean the same thing on every runner.
+TestFrame photographicChroma()
+{
+    constexpr int Side = 512;
+    TestFrame frame(Side, Side, 0);
+    uint32_t state = 12345u;
+    const auto next = [&state] {
+        state = state * 1664525u + 1013904223u;
+
+        return state;
+    };
+    const auto clamp8 = [](int value) { return static_cast<uint8_t>(std::clamp(value, 0, 255)); };
+    for (int y = 0; y < Side; ++y) {
+        for (int x = 0; x < Side; ++x) {
+            const uint32_t roll = next() % 1000u;
+            const int luma = 40 + static_cast<int>(next() % 180u);
+            const int spread = roll < 700u ? 13 : (roll < 950u ? 61 : 161);
+            const int red = static_cast<int>(next() % static_cast<uint32_t>(spread)) - spread / 2;
+            const int blue = static_cast<int>(next() % static_cast<uint32_t>(spread)) - spread / 2;
+            frame.setColor(x, y, Color{clamp8(luma + red), clamp8(luma), clamp8(luma + blue)});
+        }
+    }
+
+    return frame;
+}
+
+/// The lit pixels' peak channels, sorted, so a percentile of the trace's
+/// brightness can be read off it.
+std::vector<int> litBrightnesses(const ScopeImage& image)
+{
+    std::vector<int> lit;
+    for (std::size_t i = 0; i < image.rgba.size(); i += 4) {
+        const int peak = std::max({image.rgba[i], image.rgba[i + 1], image.rgba[i + 2]});
+        if (peak > 0) {
+            lit.push_back(peak);
+        }
+    }
+    std::sort(lit.begin(), lit.end());
+
+    return lit;
+}
+
+}  // namespace
+
+TEST_CASE("Vectorscope trace gamma is the one thing that lifts sparse mass")
+{
+    // 63 parts red to 1 part blue: the blue speck sits far below the peak the
+    // trace normalizes to, which is exactly where the gamma acts. Gamma is the
+    // ONLY setting that moves between these three passes - same frame, same
+    // gain, same stride, same size - so the brightness it reads is the gamma's
+    // and nothing else's.
+    const auto blueAtGamma = [](float gamma) {
+        TestFrame frame(64, 64, 255);
+        frame.fill(0, 63, Color{191, 0, 0});
+        frame.fill(63, 64, Color{0, 0, 191});
+
+        Vectorscope scope;
+        VectorscopeSettings settings;
+        settings.traceGamma = gamma;
+        scope.configure(settings);
+        scope.accumulate(frame.view(), IntRect{0, 0, 64, 64});
+
+        return brightnessAtBlue(scope.image());
+    };
+
+    const int lifted = blueAtGamma(MinTraceGamma);
+    const int shipped = blueAtGamma(MidDensityGamma);
+    const int flat = blueAtGamma(MaxTraceGamma);
+    // Lower gamma lifts the sparse trace towards the peak, higher leaves it
+    // nearer its own evidence, and the shipped default sits between them.
+    CHECK(lifted > shipped);
+    CHECK(shipped > flat);
+    // The default keeps a speck this sparse plainly visible; that is what the
+    // log curve and this lift exist for.
+    CHECK(shipped > 150);
+}
+
+TEST_CASE("Vectorscope defaults to the lift the waveform makes")
+{
+    // The default is not a number of its own: it is the fixed mid-density
+    // gamma the waveform applies, so an untouched vectorscope and the waveform
+    // beside it read the same density the same way. Moving it here would move
+    // the scope the owner has used every day, which is the one thing this
+    // control must not do on its own.
+    CHECK(VectorscopeSettings{}.traceGamma == MidDensityGamma);
+
+    // ...and configure leaves it alone, rather than clamping it to an end.
+    Vectorscope scope;
+    VectorscopeSettings settings;
+    scope.configure(settings);
+    TestFrame frame(64, 64, 255);
+    frame.fill(0, 63, Color{191, 0, 0});
+    frame.fill(63, 64, Color{0, 0, 191});
+    scope.accumulate(frame.view(), IntRect{0, 0, 64, 64});
+
+    Vectorscope explicitly;
+    VectorscopeSettings pinned;
+    pinned.traceGamma = MidDensityGamma;
+    explicitly.configure(pinned);
+    explicitly.accumulate(frame.view(), IntRect{0, 0, 64, 64});
+
+    CHECK(scope.image().rgba == explicitly.image().rgba);
+}
+
+TEST_CASE("Vectorscope clamps the trace gamma to its measured range")
+{
+    // The range ends are a display decision, so a value past either end must
+    // behave exactly as that end rather than render a curve nobody has looked
+    // at.
     TestFrame frame(64, 64, 255);
     frame.fill(0, 63, Color{191, 0, 0});
     frame.fill(63, 64, Color{0, 0, 191});
 
-    const auto brightnessAtBlue = [](TraceResponse response) {
+    const auto imageAtGamma = [&frame](float gamma) {
         Vectorscope scope;
         VectorscopeSettings settings;
-        settings.response = response;
+        settings.traceGamma = gamma;
         scope.configure(settings);
-        TestFrame frame(64, 64, 255);
-        frame.fill(0, 63, Color{191, 0, 0});
-        frame.fill(63, 64, Color{0, 0, 191});
         scope.accumulate(frame.view(), IntRect{0, 0, 64, 64});
-        // 75% blue under BT.709: Cb = 112 * 191 / 256 = 83.6 -> bin 212,
-        // Cr = -10 * 191 / 256 = -7.5 -> row 255 - 121 = 134.
-        const uint8_t* pixel = scope.image().rgba.data() + (static_cast<std::size_t>(134) * 256 + 212) * 4;
-        return static_cast<int>(pixel[0]) + pixel[1] + pixel[2];
+
+        return scope.image().rgba;
     };
 
-    const int boosted = brightnessAtBlue(TraceResponse::Boosted);
-    const int linear = brightnessAtBlue(TraceResponse::Linear);
-    CHECK(boosted > 150);
-    CHECK(linear * 3 < boosted);
+    CHECK(imageAtGamma(0.01f) == imageAtGamma(MinTraceGamma));
+    CHECK(imageAtGamma(9.0f) == imageAtGamma(MaxTraceGamma));
+    // Not a clamp to one constant: the two ends are different images.
+    CHECK(imageAtGamma(MinTraceGamma) != imageAtGamma(MaxTraceGamma));
+}
+
+TEST_CASE("Both ends of the trace gamma still draw a usable trace")
+{
+    // What makes an end an end, measured on a photograph-shaped chroma
+    // distribution. Each end fails in its own way, so each is pinned by the
+    // measure it fails: the lifted end flattens the cloud towards one
+    // brightness, the flat end drops its body into the dark.
+    TestFrame frame = photographicChroma();
+    const auto litAtGamma = [&frame](float gamma) {
+        Vectorscope scope;
+        VectorscopeSettings settings;
+        settings.traceGamma = gamma;
+        scope.configure(settings);
+        scope.accumulate(frame.view(), IntRect{0, 0, 512, 512});
+
+        return litBrightnesses(scope.image());
+    };
+    const auto percentile = [](const std::vector<int>& sorted, std::size_t tenths) {
+        REQUIRE_FALSE(sorted.empty());
+
+        return sorted[sorted.size() * tenths / 10];
+    };
+
+    // The lifted end still separates dense trace from sparse: measured, the
+    // ninetieth percentile is 2.2x the tenth (152 against 68), where the
+    // shipped default is 3.1x. Lowering the end to 0.2 collapses it to 1.6x -
+    // a cloud that says nothing about where the mass is.
+    const std::vector<int> lifted = litAtGamma(MinTraceGamma);
+    CHECK(percentile(lifted, 9) >= 2 * percentile(lifted, 1));
+
+    // The flat end still draws a trace rather than a few bright specks:
+    // measured, the median lit pixel is 40 of 255 and 5% of the trace falls
+    // under 8. At 2.0 the median is 19, which on screen is nearly nothing.
+    const std::vector<int> flat = litAtGamma(MaxTraceGamma);
+    CHECK(percentile(flat, 5) >= 32);
+    const auto barelyLit = [](int brightness) { return brightness < 8; };
+    const std::size_t faint = static_cast<std::size_t>(std::count_if(flat.begin(), flat.end(), barelyLit));
+    CHECK(faint * 100 <= flat.size() * 6);
+
+    // And the default sits inside both, which is the point of the range.
+    const std::vector<int> shipped = litAtGamma(MidDensityGamma);
+    CHECK(percentile(shipped, 9) >= 2 * percentile(shipped, 1));
+    CHECK(percentile(shipped, 5) >= 32);
 }
 
 TEST_CASE("Vectorscope blooms the densest mass toward white")

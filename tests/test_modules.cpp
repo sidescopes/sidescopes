@@ -559,11 +559,11 @@ TEST_CASE("The sampling stride reaches every engine that declares it")
     CHECK(litColumns(histogram.image()) < denseHistogram);
 }
 
-TEST_CASE("The intensity and response parameters reach the vectorscope")
+TEST_CASE("The intensity and gamma parameters reach the vectorscope")
 {
     // A dominant color with a thin second one beside it: the peak normalizes
-    // to the dense bin either way, so what gain and response move is how far
-    // the sparse trace is lifted towards it.
+    // to the dense bin whatever the settings, so what gain and gamma move is
+    // how far the sparse trace is lifted towards it.
     TestFrame mixed(16, 16, 255);
     mixed.fill(Color{191, 0, 0});
     mixed.setColor(0, 0, Color{0, 191, 0});
@@ -572,24 +572,56 @@ TEST_CASE("The intensity and response parameters reach the vectorscope")
     ScopeInstance vectorscope = builtinModules().createInstance("org.sidescopes.vectorscope");
     REQUIRE(vectorscope.valid());
 
-    // A sparse trace is what the boosted response exists for: linear leaves
-    // it dimmer than the default boost does.
-    REQUIRE(vectorscope.configure(std::vector<SsParamValue>{{"response", 1.0}}));
+    // The gamma is the curve's shape: a flat setting leaves the sparse trace
+    // nearer its own evidence than a lifted one does.
+    REQUIRE(vectorscope.configure(std::vector<SsParamValue>{{"gamma", 1.4}}));
     REQUIRE(vectorscope.accumulate(frame, SsRect{0, 0, 16, 16}));
-    const int linear = totalInk(vectorscope.image());
+    const int flat = totalInk(vectorscope.image());
 
-    REQUIRE(vectorscope.configure(std::vector<SsParamValue>{{"response", 0.0}}));
+    REQUIRE(vectorscope.configure(std::vector<SsParamValue>{{"gamma", 0.4}}));
     REQUIRE(vectorscope.accumulate(frame, SsRect{0, 0, 16, 16}));
-    const int boosted = totalInk(vectorscope.image());
-    CHECK(boosted > linear);
+    const int lifted = totalInk(vectorscope.image());
+    CHECK(lifted > flat);
 
-    // Gain scales the same trace on top of whichever response is in force.
+    // Gain scales the same trace on top of whatever curve is in force.
     REQUIRE(vectorscope.configure(std::vector<SsParamValue>{{"gain", 0.005}}));
     REQUIRE(vectorscope.accumulate(frame, SsRect{0, 0, 16, 16}));
     const int quiet = totalInk(vectorscope.image());
     REQUIRE(vectorscope.configure(std::vector<SsParamValue>{{"gain", 0.5}}));
     REQUIRE(vectorscope.accumulate(frame, SsRect{0, 0, 16, 16}));
     CHECK(totalInk(vectorscope.image()) > quiet);
+}
+
+TEST_CASE("A retired parameter key leaves the vectorscope on its default")
+{
+    // A preferences file written before the trace response was retired still
+    // names `response`. It reaches the module only if something hands it over,
+    // and even then the module must ignore a key it no longer declares rather
+    // than fail to configure - a file is never refused over a dead setting.
+    TestFrame mixed(16, 16, 255);
+    mixed.fill(Color{191, 0, 0});
+    mixed.setColor(0, 0, Color{0, 191, 0});
+    const SsFrameView frame = viewOf(mixed);
+
+    ScopeInstance untouched = builtinModules().createInstance("org.sidescopes.vectorscope");
+    REQUIRE(untouched.valid());
+    REQUIRE(untouched.accumulate(frame, SsRect{0, 0, 16, 16}));
+    const int defaultInk = totalInk(untouched.image());
+
+    ScopeInstance migrated = builtinModules().createInstance("org.sidescopes.vectorscope");
+    REQUIRE(migrated.valid());
+    REQUIRE(migrated.configure(std::vector<SsParamValue>{{"response", 1.0}}));
+    REQUIRE(migrated.accumulate(frame, SsRect{0, 0, 16, 16}));
+    CHECK(totalInk(migrated.image()) == defaultInk);
+
+    // The descriptor no longer names it either, which is the gate that keeps a
+    // retired key from reaching a module at all.
+    const RegisteredScope* scope = builtinModules().findScope("org.sidescopes.vectorscope");
+    REQUIRE(scope != nullptr);
+    REQUIRE(scope->descriptor != nullptr);
+    for (uint32_t index = 0; index < scope->descriptor->param_count; ++index) {
+        CHECK(std::string(scope->descriptor->params[index].key) != "response");
+    }
 }
 
 TEST_CASE("The adaptive-image extension sizes the vectorscope by its height")

@@ -40,7 +40,7 @@ TEST_CASE("Preferences round-trip through a file")
     saved.scopeParams[WaveformId]["gain"] = 0.12;
     saved.scopeParams[WaveformId]["stride"] = 2.0;
     saved.scopeParams[VectorscopeId]["smoothing_ms"] = 60.0;
-    saved.scopeParams[VectorscopeId]["response"] = 1.0;
+    saved.scopeParams[VectorscopeId]["gamma"] = 0.9;
     saved.vectorscopeZoom = 2;
     saved.scopeStack = "HWV";  // stacking order is part of the setting
     saved.graticuleStrength = 0.5f;
@@ -56,7 +56,7 @@ TEST_CASE("Preferences round-trip through a file")
     CHECK(param(loaded, WaveformId, "gain") == 0.12);
     CHECK(param(loaded, WaveformId, "stride") == 2.0);
     CHECK(param(loaded, VectorscopeId, "smoothing_ms") == 60.0);
-    CHECK(param(loaded, VectorscopeId, "response") == 1.0);
+    CHECK(param(loaded, VectorscopeId, "gamma") == 0.9);
     CHECK(loaded.vectorscopeZoom == 2);
     CHECK(loaded.scopeStack == "HWV");
     CHECK(loaded.graticuleStrength == 0.5f);
@@ -86,20 +86,37 @@ TEST_CASE("Preferences read a legacy per-scope gain")
     CHECK(param(loaded, VectorscopeId, "gain") == 4.5);
 }
 
-TEST_CASE("Preferences read the legacy trace response and drop the matrix")
+TEST_CASE("Preferences drop the legacy matrix and trace response")
 {
-    // BT.601 is gone, so the legacy `matrix` key is no longer translated into
-    // anything and leaves nothing behind; every other key in the same file is
-    // still read. A generic `<id>.matrix` written by an older build survives in
-    // the map like any key no scope declares, and stays inert because a value
-    // only reaches an engine when the descriptor names its key.
+    // BT.601 and the linear trace response are both gone, so neither legacy
+    // key is translated into anything and neither leaves anything behind. The
+    // file loads and the vectorscope keeps its shipped gamma: a file is never
+    // refused, and a retired setting never quietly becomes a live one.
     const TempFile file("legacy-enum.txt");
-    file.write("matrix=0\ntrace_response=1\n");
+    file.write("matrix=0\ntrace_response=1\nvectorscope_gain=4.5\n");
 
     const Preferences loaded = loadPreferences(file.path());
-    CHECK(param(loaded, VectorscopeId, "response") == 1.0);  // Linear
     const auto& vectorscope = loaded.scopeParams.at(VectorscopeId);
     CHECK(vectorscope.find("matrix") == vectorscope.end());
+    CHECK(vectorscope.find("response") == vectorscope.end());
+    CHECK(param(loaded, VectorscopeId, "gamma") == 0.65);
+    // Every other key in the same file is still read.
+    CHECK(param(loaded, VectorscopeId, "gain") == 4.5);
+}
+
+TEST_CASE("Preferences keep a generic retired key without acting on it")
+{
+    // A file written by a build that still had the choice names it generically
+    // too. Core does not know which scopes exist, so the pair survives the read
+    // like any key no scope declares - and stays inert, because a value only
+    // reaches an engine when the descriptor names its key. What must NOT happen
+    // is the retired value landing on the live setting.
+    const TempFile file("generic-retired.txt");
+    file.write("org.sidescopes.vectorscope.response=1\n");
+
+    const Preferences loaded = loadPreferences(file.path());
+    CHECK(param(loaded, VectorscopeId, "response") == 1.0);
+    CHECK(param(loaded, VectorscopeId, "gamma") == 0.65);
 }
 
 TEST_CASE("Preferences invert the legacy per-channel histogram flag")
@@ -353,7 +370,10 @@ TEST_CASE("Preferences load a whole legacy file to the same live state")
     CHECK(param(loaded, VectorscopeId, "gain") == 5.0);
     CHECK(param(loaded, VectorscopeId, "stride") == 2.0);
     CHECK(param(loaded, VectorscopeId, "smoothing_ms") == 90.0);
-    CHECK(param(loaded, VectorscopeId, "response") == 1.0);  // Linear
+    // Both of the vectorscope's retired choices go unread; its live setting is
+    // the trace gamma, which no legacy key can name.
+    CHECK(param(loaded, VectorscopeId, "response") == -1.0);
+    CHECK(param(loaded, VectorscopeId, "gamma") == 0.65);
     CHECK(param(loaded, WaveformId, "gain") == 0.08);
     CHECK(param(loaded, WaveformId, "stride") == 1.0);
     CHECK(param(loaded, WaveformId, "smoothing_ms") == 110.0);
@@ -544,7 +564,7 @@ TEST_CASE("Preferences round-trip a saved layout preset")
     saved.layoutPresets[0].orientation = 1;  // vertical
     saved.layoutPresets[0].weights[VectorscopeId] = 3.0;
     saved.layoutPresets[0].weights[HistogramId] = 0.75;
-    saved.layoutPresets[0].styles[VectorscopeId]["response"] = 1.0;
+    saved.layoutPresets[0].styles[LumaWaveformId]["style"] = 1.0;
     saved.layoutPresets[0].styles[VectorscopeId]["stride"] = 2.0;
     saved.layoutPresets[4].stack = "C";  // slot 5, another used slot
 
@@ -556,7 +576,7 @@ TEST_CASE("Preferences round-trip a saved layout preset")
     CHECK(loaded.layoutPresets[0].orientation == 1);
     CHECK(loaded.layoutPresets[0].weights.at(VectorscopeId) == 3.0);
     CHECK(loaded.layoutPresets[0].weights.at(HistogramId) == 0.75);
-    CHECK(loaded.layoutPresets[0].styles.at(VectorscopeId).at("response") == 1.0);
+    CHECK(loaded.layoutPresets[0].styles.at(LumaWaveformId).at("style") == 1.0);
     CHECK(loaded.layoutPresets[0].styles.at(VectorscopeId).at("stride") == 2.0);
     CHECK(loaded.layoutPresets[4].stack == "C");
     // Unused slots write nothing and reload empty, and a preset without
@@ -645,14 +665,14 @@ TEST_CASE("Preferences drop malformed preset style pairs")
     const TempFile file("layout-bad-styles.txt");
     file.write(
         "layout.preset1.stack=VH\n"
-        "layout.preset1.styles=org.sidescopes.vectorscope.response:1,garbage,nodot:2,.style:1,"
+        "layout.preset1.styles=org.sidescopes.waveform.luma.style:1,garbage,nodot:2,.style:1,"
         "org.sidescopes.nonesuch.style:1\n");
 
     // Core does not know which scopes exist, so it judges a pair's FORM and
     // nothing else: an id no build has ever registered survives the read.
     const Preferences loaded = loadPreferences(file.path());
     CHECK(loaded.layoutPresets[0].styles.size() == 2);
-    CHECK(loaded.layoutPresets[0].styles.at(VectorscopeId).at("response") == 1.0);
+    CHECK(loaded.layoutPresets[0].styles.at(LumaWaveformId).at("style") == 1.0);
     CHECK(loaded.layoutPresets[0].styles.at("org.sidescopes.nonesuch").at("style") == 1.0);
 }
 

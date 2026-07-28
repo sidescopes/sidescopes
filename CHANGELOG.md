@@ -58,6 +58,16 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `SIDESCOPES_PREFS_FILE` places the preferences file, so a throwaway
   instance can take its own scope stack and window placement without
   disturbing the real one.
+- A Trace gamma slider for the vectorscope, in Settings beside its
+  intensity and sampling. It sets how hard the middle of the trace is
+  lifted towards the densest chroma in the frame: lower brings the
+  sparse body of the cloud up, higher leaves it nearer its own density.
+  The range is 0.40 to 1.40 and it ships at 0.65, which draws exactly
+  what every earlier build drew, so an untouched install sees no change.
+  The preferences key is `org.sidescopes.vectorscope.gamma`.
+- Module ABI 0.5: a descriptor may declare a continuous parameter
+  bounded by its own minimum and maximum, which the host draws as a
+  slider.
 
 ### Changed
 
@@ -122,6 +132,13 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - The full-screen region and the Watch Full Screen action. A session
   starts with nothing selected rather than with the whole display.
+- The vectorscope's Trace Response choice. Linear emulated a phosphor
+  tube, whose faint trace was legible because the glass held it between
+  sweeps; a single frame on a screen renders it close to black. Boosted
+  is what the scope has always been read on, and the waveform has never
+  offered anything else. Its curve is now the Trace gamma slider above,
+  and a preferences file that still names the response loads unchanged
+  and draws the shipped curve.
 - The vectorscope's Matrix choice. It measures with BT.709 always. sRGB
   shares Rec.709's primaries and BT.709's coefficients come from those
   primaries, while BT.601's come from 1953 NTSC phosphors, so for screen

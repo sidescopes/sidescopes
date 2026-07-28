@@ -43,7 +43,7 @@ extern "C" {
  * extensions. Until 1.0 the layout itself may still change under a minor
  * bump; rebuild modules against the current header. */
 #define SS_ABI_MAJOR 0u
-#define SS_ABI_MINOR 4u
+#define SS_ABI_MINOR 5u
 
 /* ---- core types ---------------------------------------------------- */
 
@@ -111,6 +111,9 @@ typedef struct SsImageView
 /* A labeled context-menu submenu of exclusive choices; the value is the
  * zero-based choice index. */
 #define SS_PARAM_CHOICE 3u
+/* Continuous slider over min_value..max_value, the float counterpart of
+ * SS_PARAM_INT: a setting on a scale rather than a gesture or a mode. */
+#define SS_PARAM_FLOAT 4u
 
 typedef struct SsParamInfo
 {
