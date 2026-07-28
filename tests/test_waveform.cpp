@@ -6,6 +6,7 @@
 
 #include "core/scopes/sampling.h"
 #include "core/scopes/waveform.h"
+#include "core/scopes/waveform_bins.h"
 #include "scope_image.h"
 #include "test_frame.h"
 
@@ -22,7 +23,180 @@ WaveformSettings settingsFor(WaveformMode mode)
     return settings;
 }
 
+// A photograph-ish frame: the shared and unshared paths must agree over
+// content with real structure, not only over a flat fill that every path
+// draws identically.
+TestFrame texturedFrame()
+{
+    TestFrame frame(200, 120, 0);
+    for (int py = 0; py < 120; ++py) {
+        for (int px = 0; px < 200; ++px) {
+            const auto value = static_cast<uint8_t>((px * 7 + py * 13) % 256);
+            frame.setColor(px, py,
+                           Color{value, static_cast<uint8_t>(255 - value), static_cast<uint8_t>((value * 3) % 256)});
+        }
+    }
+
+    return frame;
+}
+
+// The image an engine of its own draws for @p mode, which is what a shared one
+// has to reproduce byte for byte.
+std::vector<uint8_t> unsharedImage(const TestFrame& frame, WaveformMode mode)
+{
+    Waveform scope;
+    scope.configure(settingsFor(mode));
+    scope.accumulate(frame.view(), IntRect{0, 0, frame.width, frame.height});
+
+    return scope.image().rgba;
+}
+
 }  // namespace
+
+TEST_CASE("Two waveform scopes over one frame scatter it once")
+{
+    // The waveform and the parade bin a region identically - one engine, one
+    // geometry, one sampling grid - so the first to run fills the shared bins
+    // and the second must find its answer already there.
+    const TestFrame frame = texturedFrame();
+    WaveformBins shared;
+    Waveform overlay;
+    Waveform parade;
+    overlay.lendBins(&shared);
+    parade.lendBins(&shared);
+    parade.configure(settingsFor(WaveformMode::RgbParade));
+
+    overlay.accumulate(frame.view(), IntRect{0, 0, 200, 120});
+    parade.accumulate(frame.view(), IntRect{0, 0, 200, 120});
+
+    CHECK(shared.scatters() == 1);
+}
+
+TEST_CASE("A shared scatter draws exactly what an unshared one draws")
+{
+    // The condition on the whole optimization. Every scope image is compared
+    // byte for byte against the same scope reading bins of its own, because a
+    // trace that is merely close is a different measurement.
+    const TestFrame frame = texturedFrame();
+    const std::vector<uint8_t> overlayAlone = unsharedImage(frame, WaveformMode::Rgb);
+    const std::vector<uint8_t> paradeAlone = unsharedImage(frame, WaveformMode::RgbParade);
+
+    WaveformBins shared;
+    Waveform overlay;
+    Waveform parade;
+    overlay.lendBins(&shared);
+    parade.lendBins(&shared);
+    parade.configure(settingsFor(WaveformMode::RgbParade));
+    overlay.accumulate(frame.view(), IntRect{0, 0, 200, 120});
+    parade.accumulate(frame.view(), IntRect{0, 0, 200, 120});
+
+    CHECK(overlay.image().rgba == overlayAlone);
+    CHECK(parade.image().rgba == paradeAlone);
+}
+
+TEST_CASE("A scope reading fewer planes does not answer for the rest")
+{
+    // Luma writes only its own plane, so the three channel planes still hold
+    // whatever frame filled them last. A scope wanting those must scatter
+    // again rather than read a pass that never touched them.
+    const TestFrame frame = texturedFrame();
+    const std::vector<uint8_t> paradeAlone = unsharedImage(frame, WaveformMode::RgbParade);
+
+    WaveformBins shared;
+    Waveform luma;
+    Waveform parade;
+    luma.lendBins(&shared);
+    parade.lendBins(&shared);
+    luma.configure(settingsFor(WaveformMode::Luma));
+    parade.configure(settingsFor(WaveformMode::RgbParade));
+    luma.accumulate(frame.view(), IntRect{0, 0, 200, 120});
+    parade.accumulate(frame.view(), IntRect{0, 0, 200, 120});
+
+    CHECK(shared.scatters() == 2);
+    CHECK(parade.image().rgba == paradeAlone);
+}
+
+TEST_CASE("A scope binning the same planes differently does not share them")
+{
+    // Colored luma fills the three channel planes with value-weighted mass at
+    // the luma level, where the combined mode fills them with counts at each
+    // channel's own. The planes are the same three and the numbers in them are
+    // not, so the two must never read each other's.
+    const TestFrame frame = texturedFrame();
+    const std::vector<uint8_t> coloredAlone = unsharedImage(frame, WaveformMode::ColoredLuma);
+
+    WaveformBins shared;
+    Waveform combined;
+    Waveform colored;
+    combined.lendBins(&shared);
+    colored.lendBins(&shared);
+    combined.configure(settingsFor(WaveformMode::RgbAndLuma));
+    colored.configure(settingsFor(WaveformMode::ColoredLuma));
+    combined.accumulate(frame.view(), IntRect{0, 0, 200, 120});
+    colored.accumulate(frame.view(), IntRect{0, 0, 200, 120});
+
+    CHECK(shared.scatters() == 2);
+    CHECK(colored.image().rgba == coloredAlone);
+}
+
+TEST_CASE("A second frame is scattered again")
+{
+    // The bins answer for one frame. The next one must reach them however
+    // little the pixels moved, so the key carries the frame's own identity and
+    // not merely the geometry that was asked for.
+    const TestFrame frame = texturedFrame();
+    WaveformBins shared;
+    Waveform overlay;
+    overlay.lendBins(&shared);
+
+    FrameView view = frame.view();
+    overlay.accumulate(view, IntRect{0, 0, 200, 120});
+    CHECK(shared.scatters() == 1);
+
+    view.sequence = 2;
+    overlay.accumulate(view, IntRect{0, 0, 200, 120});
+    CHECK(shared.scatters() == 2);
+}
+
+TEST_CASE("Another buffer is scattered again whatever it is numbered")
+{
+    // The frame's number is the producer's promise that its pixels moved on,
+    // and both capture backends keep it. The bins do not rest on that promise
+    // alone: pixels somewhere else are a different frame however they are
+    // numbered, which is the case a test or a second producer can reach.
+    const TestFrame first = texturedFrame();
+    TestFrame second(200, 120, 0);
+    second.fill(Color{200, 30, 90});
+
+    WaveformBins shared;
+    Waveform overlay;
+    overlay.lendBins(&shared);
+    overlay.accumulate(first.view(), IntRect{0, 0, 200, 120});
+    const std::vector<uint8_t> textured = overlay.image().rgba;
+    overlay.accumulate(second.view(), IntRect{0, 0, 200, 120});
+
+    CHECK(shared.scatters() == 2);
+    CHECK(overlay.image().rgba != textured);
+}
+
+TEST_CASE("A region that moves without resizing is scattered again")
+{
+    // Scopes share only what they measure over the SAME region. The region is
+    // CARRIED here rather than resized, which is what a user dragging one does
+    // and the one case the sampling grid cannot stand in for: a grid is decided
+    // by a region's size and says nothing about where it sits.
+    const TestFrame frame = texturedFrame();
+    WaveformBins shared;
+    Waveform overlay;
+    overlay.lendBins(&shared);
+
+    overlay.accumulate(frame.view(), IntRect{0, 0, 100, 60});
+    const std::vector<uint8_t> atOrigin = overlay.image().rgba;
+    overlay.accumulate(frame.view(), IntRect{40, 20, 100, 60});
+
+    CHECK(shared.scatters() == 2);
+    CHECK(overlay.image().rgba != atOrigin);
+}
 
 TEST_CASE("Waveform in luma mode plots mid gray on one level")
 {

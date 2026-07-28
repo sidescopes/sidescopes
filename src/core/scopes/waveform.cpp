@@ -500,7 +500,7 @@ void Waveform::accumulate(const FrameView& frame, IntRect region)
     const int perBin = std::max(WaveformMinSamplesPerBin / m_settings.sampleThinning, 1);
     const SampleGrid grid = sampleGridFor(m_settings.samplingStride, region,
                                           budgetForBins(static_cast<long long>(m_columns) * Levels, perBin));
-    m_bins.scatter(frame, region, grid, m_settings.mode, m_columns);
+    bins().scatter(frame, region, grid, m_settings.mode, m_columns);
 
     // A column receives one sample per sampled row, so the sampled-row count
     // that normalizes column brightness is a plain quotient - identical
@@ -562,14 +562,14 @@ void Waveform::correctBinDensities()
     // dominant flat tones exceed the clamp and survive, compressed
     // further by the log display.
     const std::size_t planeSize = this->planeSize();
-    m_smoothed.resize(m_bins.size());
+    m_smoothed.resize(bins().size());
     m_corrected.resize(planeSize);
     // Only the mode's own planes: a plane it does not draw holds no counts,
     // and correcting one is the whole per-frame cost of a plane spent on an
     // image nothing reads.
     const WaveformPlaneSpan span = waveformPlaneSpan(waveformModeFlags(m_settings.mode));
     for (int plane = span.first; plane < span.first + span.count; ++plane) {
-        const uint32_t* in = m_bins.data() + static_cast<std::size_t>(plane) * planeSize;
+        const uint32_t* in = bins().data() + static_cast<std::size_t>(plane) * planeSize;
         uint32_t* out = m_smoothed.data() + static_cast<std::size_t>(plane) * planeSize;
 
         uint64_t global[Levels] = {};

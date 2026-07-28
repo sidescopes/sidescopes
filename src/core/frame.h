@@ -159,6 +159,12 @@ struct FrameView
     int width = 0;
     int height = 0;
     ColorSpaceHint colorSpace = ColorSpaceHint::Unknown;
+    /// Which frame this is, counted up by the producer. Both capture backends
+    /// hand out the same buffer over and over, so this and the pointer TOGETHER
+    /// are what identify the content: a scope that has already binned this
+    /// pointer at this sequence takes the frame as unchanged and reuses what it
+    /// computed. A producer that reused a number for new pixels would hand it a
+    /// stale reading.
     uint64_t sequence = 0;
     /// Where this frame's top-left pixel sits on the display it came from, and
     /// how large that display is in pixels. A frame covering its whole display

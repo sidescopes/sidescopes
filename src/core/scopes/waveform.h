@@ -106,7 +106,19 @@ public:
     /// own, which is what a test or a benchmark does.
     void lendScratch(ChunkScratch::Lender lender, const void* context)
     {
-        m_bins.lendScratch(lender, context);
+        bins().lendScratch(lender, context);
+    }
+
+    /// Scatters into @p bins rather than into its own, so several scopes over
+    /// one region at one geometry pay for that scatter once and the ones after
+    /// the first find it already done. Null puts it back on its own, which is
+    /// what an engine nobody has lent to - a test, a benchmark - always uses.
+    ///
+    /// The bins must outlive this engine, and only one thread may drive the
+    /// engines sharing a set.
+    void lendBins(WaveformBins* bins)
+    {
+        m_lentBins = bins;
     }
 
     /// The composed scope image.
@@ -134,24 +146,37 @@ private:
     void composeImage(const uint32_t* redPlane, const uint32_t* greenPlane, const uint32_t* bluePlane,
                       const uint32_t* lumaPlane, double gain, double intensityScale);
 
-    /// The bin geometry the image is composed against, which is the shared
-    /// bins' own. Named here so the composer reads one word rather than a
-    /// chain.
+    /// The bins this pass reads: the lent set when there is one, otherwise the
+    /// engine's own.
+    [[nodiscard]] WaveformBins& bins()
+    {
+        return m_lentBins != nullptr ? *m_lentBins : m_ownBins;
+    }
+
+    [[nodiscard]] const WaveformBins& bins() const
+    {
+        return m_lentBins != nullptr ? *m_lentBins : m_ownBins;
+    }
+
+    /// The bin geometry the image is composed against, which is the bins' own.
+    /// Named here so the composer reads one word rather than a chain.
     [[nodiscard]] std::size_t rowPitch() const
     {
-        return m_bins.rowPitch();
+        return bins().rowPitch();
     }
 
     [[nodiscard]] std::size_t planeSize() const
     {
-        return m_bins.planeSize();
+        return bins().planeSize();
     }
 
     WaveformSettings m_settings;
     int m_columns = DefaultWaveformColumns;
     int m_imageHeight = WaveformLevels;
-    // The scattered bins, and the pass that fills them.
-    WaveformBins m_bins;
+    // The bins this engine scatters into when nobody has lent it a set, and
+    // the set it was lent. Both are never in use at once.
+    WaveformBins m_ownBins;
+    WaveformBins* m_lentBins = nullptr;
     // One plane's per-column densities, the evidence the normalization ceiling
     // is chosen from. Sized with the planes and rewritten per plane, so
     // choosing the ceiling allocates nothing.

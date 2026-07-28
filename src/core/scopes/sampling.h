@@ -48,6 +48,8 @@ struct SampleGrid
     /// Rows the pass visits, and samples it takes from each.
     int rows = 0;
     int columnsPerRow = 0;
+
+    [[nodiscard]] bool operator==(const SampleGrid&) const = default;
 };
 
 /// The grid for @p region at the caller's @p requestedStride, which is the

@@ -65,15 +65,50 @@ struct WaveformPlaneSpan
 /// so it needs them even though it draws no RGB trace.
 [[nodiscard]] WaveformPlaneSpan waveformPlaneSpan(const WaveformModeFlags& flags);
 
+/// Everything one scatter's result depends on. Two passes with equal keys write
+/// bit-identical bins, which is what lets the second read the first's instead
+/// of repeating the work.
+struct WaveformScatterKey
+{
+    /// The frame, by the identity that decides its content: where the pixels
+    /// are, how they are laid out, and which frame they came from. The sequence
+    /// alone would trust a producer never to reuse a number and the pointer
+    /// alone would trust it never to reuse a buffer, so both are here.
+    const uint8_t* pixels = nullptr;
+    int strideBytes = 0;
+    uint64_t sequence = 0;
+    PixelFormat format = PixelFormat::Bgra8;
+    /// The region already clamped to the frame, which is what the scatter walks.
+    IntRect region;
+    SampleGrid grid;
+    int columns = 0;
+    /// The planes the pass writes. It belongs in the key: a mode writing only
+    /// the luma plane leaves the channel planes holding an OLDER FRAME, so a
+    /// scope wanting those must not read this pass as if it had filled them.
+    WaveformPlaneSpan span{0, 0};
+    /// The colored-luma scatter puts value-weighted mass at the luma level
+    /// where every other mode puts counts at each channel's own, so it fills the
+    /// same planes with different numbers and can never be read as theirs.
+    bool coloredLuma = false;
+
+    [[nodiscard]] bool operator==(const WaveformScatterKey&) const = default;
+};
+
 /// @brief The bins one waveform pass scatters a region into, and the pass that
 ///        fills them.
 ///
 /// Held apart from the engine because the bins are the expensive half and the
 /// only half several scopes agree on. The waveform and the RGB parade are the
-/// same module over the same region at the same geometry - the host gives them
-/// one image size on purpose - so their scatters agree bin for bin, and
-/// everything after the scatter genuinely differs. One of these shared between
-/// them pays for that scatter once.
+/// same module over the same region at the same geometry, so their scatters
+/// agree bin for bin and everything after the scatter genuinely differs. One of
+/// these shared between them pays for that scatter once.
+///
+/// THE GEOMETRY HAS TO BE ONE GEOMETRY, and the host is what makes it so: it
+/// measures every waveform-family pane and applies the larger as one image size
+/// to all of them. Scopes sharing a set at DIFFERENT column counts would still
+/// draw correctly - each pass re-lays the bins for what it asked - but they
+/// would reallocate megabytes at every scope of every frame. Any new member of
+/// the family must be given the family's size, not its own.
 ///
 /// Not thread-safe. Scopes accumulate strictly one at a time on the analysis
 /// thread, which is what makes sharing one of these between them safe without
@@ -81,11 +116,22 @@ struct WaveformPlaneSpan
 class WaveformBins
 {
 public:
-    /// Folds sampled rows of @p region into the bins, replacing whatever they
-    /// held. Only the planes @p mode draws are cleared and written; the rest
-    /// keep whatever an earlier mode left, which no reader of a plane outside
-    /// the span ever sees.
+    /// Folds sampled rows of @p region into the bins, unless they already hold
+    /// exactly this scatter - which is the whole point of sharing one of these:
+    /// the second scope of a pass finds its answer already computed.
+    ///
+    /// Only the planes @p mode draws are cleared and written; the rest keep
+    /// whatever an earlier pass left, and the span in the key is what stops
+    /// anybody reading one of those as if this pass had filled it.
     void scatter(const FrameView& frame, IntRect region, const SampleGrid& grid, WaveformMode mode, int columns);
+
+    /// How many passes have really scattered, against how many asked. The
+    /// sharing's own evidence: a stack of waveform-family scopes over one frame
+    /// must move this by one, not by its size.
+    [[nodiscard]] uint64_t scatters() const
+    {
+        return m_scatters;
+    }
 
     /// The bins, laid out as four planes a planeSize() apart. Null before the
     /// first scatter: an engine that has never accumulated holds none.
@@ -165,6 +211,9 @@ private:
     /// Brings the bins up to @p columns, allocating them if this is the first
     /// pass. Nothing else may allocate them.
     void ensureBuffers(int columns);
+    /// The scatter itself, split across as many chunks as the rows justify.
+    void scatterInto(const FrameView& frame, IntRect region, const SampleGrid& grid, WaveformMode mode,
+                     const WaveformPlaneSpan& span);
     /// Folds sampled rows [@p rowBegin, @p rowEnd) into @p bins, which points
     /// at plane @p firstPlane of a plane set laid out like m_bins from there
     /// on. Only the planes the active mode draws are written.
@@ -176,6 +225,10 @@ private:
                        uint32_t* bins, int firstPlane, WaveformMode mode) const;
 
     int m_columns = 0;
+    // What the bins currently hold, so a second scope asking for the same
+    // thing is answered rather than served again.
+    WaveformScatterKey m_key;
+    uint64_t m_scatters = 0;
     // Planes: red, green, blue, luma — each columns x WaveformLevels, a row
     // per level with level 255 in row zero.
     std::vector<uint32_t> m_bins;

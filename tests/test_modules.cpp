@@ -425,6 +425,48 @@ TEST_CASE("An unknown style choice leaves the waveform on RGB")
     CHECK(waveform.markers(SsColor{128.0f, 128.0f, 128.0f}).size() == 3);
 }
 
+TEST_CASE("The parade reads the waveform's bins and draws the same trace")
+{
+    // The two are one module over one region at one geometry, so their scatters
+    // agree bin for bin and the application pays for one. What it must not
+    // change is the picture: this compares the parade drawn beside a waveform,
+    // which reads bins it did not fill, against the same parade drawn alone,
+    // byte for byte through the real boundary.
+    TestFrame content(160, 96, 0);
+    for (int py = 0; py < 96; ++py) {
+        for (int px = 0; px < 160; ++px) {
+            const auto value = static_cast<uint8_t>((px * 5 + py * 11) % 256);
+            content.setColor(px, py,
+                             Color{value, static_cast<uint8_t>(255 - value), static_cast<uint8_t>((value * 3) % 256)});
+        }
+    }
+    const SsRect region{0, 0, 160, 96};
+
+    std::vector<uint8_t> alone;
+    {
+        const ScopeInstance parade = builtinModules().createInstance("org.sidescopes.parade");
+        REQUIRE(parade.valid());
+        REQUIRE(parade.accumulate(viewOf(content), region));
+        const SsImageView image = parade.image();
+        alone.assign(image.rgba, image.rgba + static_cast<std::size_t>(image.width) * image.height * 4);
+    }
+
+    // A later frame of identical content: the pair must scatter it afresh, and
+    // the parade must then read what the waveform left.
+    SsFrameView second = viewOf(content);
+    second.sequence = 2;
+    const ScopeInstance waveform = builtinModules().createInstance("org.sidescopes.waveform");
+    const ScopeInstance parade = builtinModules().createInstance("org.sidescopes.parade");
+    REQUIRE(waveform.valid());
+    REQUIRE(parade.valid());
+    REQUIRE(waveform.accumulate(second, region));
+    REQUIRE(parade.accumulate(second, region));
+
+    const SsImageView shared = parade.image();
+    REQUIRE(alone.size() == static_cast<std::size_t>(shared.width) * shared.height * 4);
+    CHECK(std::vector<uint8_t>(shared.rgba, shared.rgba + alone.size()) == alone);
+}
+
 TEST_CASE("The parade refuses to be configured off its own layout")
 {
     ScopeInstance parade = builtinModules().createInstance("org.sidescopes.parade");

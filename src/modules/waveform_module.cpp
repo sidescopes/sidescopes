@@ -6,18 +6,32 @@
 
 #include <cstdio>
 #include <cstring>
+#include <memory>
 #include <string>
 
 #include "core/scopes/graticule.h"
 #include "core/scopes/waveform.h"
+#include "core/scopes/waveform_bins.h"
 #include "modules/module_export.h"
 #include "modules/module_frame.h"
 #include "modules/module_registry.h"
 #include "modules/module_scratch.h"
+#include "modules/module_shared_state.h"
 #include "sidescopes/module.h"
 
 namespace sidescopes {
 namespace {
+
+/// The bins every waveform-family scope of one host scatters into.
+///
+/// The waveform and the parade are this module over the same region at the same
+/// geometry - the application gives them one image size deliberately - so their
+/// scatters agree bin for bin, and everything after the scatter genuinely
+/// differs. Sharing one of these pays for it once.
+struct SharedWaveformBins
+{
+    WaveformBins bins;
+};
 
 // The two scopes share every vtable function; only which fixed mode the
 // parade forces and which marker layout each draws differs, so a single
@@ -31,6 +45,11 @@ struct WaveformInstance
     /// The host that created this instance, kept for the shared
     /// accumulation arena it lends. Null when there is none.
     const SsHost* host = nullptr;
+    /// The bins shared with this host's other waveform-family scopes, taken on
+    /// the first pass. Held rather than looked up per pass, and held only by
+    /// the instances that really accumulate: a projection instance never asks,
+    /// so a stack with no region goes on holding no bins at all.
+    std::shared_ptr<SharedWaveformBins> shared;
 };
 
 WaveformInstance* impl(SsScopeInstance* instance)
@@ -85,9 +104,17 @@ bool configure(SsScopeInstance* instance, const SsParamValue* values, uint32_t c
 bool accumulate(SsScopeInstance* instance, const SsFrameView* frame, SsRect region)
 {
     try {
+        WaveformInstance* self = impl(instance);
         const FrameView view = frameFromBoundary(*frame);
-        lendHostScratch(impl(instance)->engine, impl(instance)->host);
-        impl(instance)->engine.accumulate(view, IntRect{region.x, region.y, region.width, region.height});
+        if (!self->shared) {
+            self->shared = sharedStateFor<SharedWaveformBins>(self->host);
+            self->engine.lendBins(self->shared ? &self->shared->bins : nullptr);
+        }
+        // After the bins, so the arena reaches the set actually in use. Both
+        // are re-applied every pass, so neither depends on the other having
+        // happened first on any particular one.
+        lendHostScratch(self->engine, self->host);
+        self->engine.accumulate(view, IntRect{region.x, region.y, region.width, region.height});
         return true;
     } catch (...) {
         return false;

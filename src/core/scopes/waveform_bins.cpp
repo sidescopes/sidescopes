@@ -73,6 +73,11 @@ void WaveformBins::ensureBuffers(int columns)
     }
     m_columns = columns;
     m_bins.assign(planeSize() * 4, 0);
+    // Zeroed bins hold no scatter at all, and the key must say so. A column
+    // change already differs from every key that came before it, so this is
+    // belt and braces - but a key outliving the bins it describes is exactly
+    // the failure that would hand a scope somebody else's frame.
+    m_key = WaveformScatterKey{};
 }
 
 template <typename Pixels>
@@ -148,12 +153,9 @@ void WaveformBins::scatterRows(const FrameView& frame, IntRect region, const Sam
     }
 }
 
-void WaveformBins::scatter(const FrameView& frame, IntRect region, const SampleGrid& grid, WaveformMode mode,
-                           int columns)
+void WaveformBins::scatterInto(const FrameView& frame, IntRect region, const SampleGrid& grid, WaveformMode mode,
+                               const WaveformPlaneSpan& span)
 {
-    ensureBuffers(columns);
-
-    const WaveformPlaneSpan span = waveformPlaneSpan(waveformModeFlags(mode));
     const std::size_t spanOffset = static_cast<std::size_t>(span.first) * planeSize();
     const std::size_t spanCount = static_cast<std::size_t>(span.count) * planeSize();
 
@@ -174,6 +176,28 @@ void WaveformBins::scatter(const FrameView& frame, IntRect region, const SampleG
         scatterRows(frame, region, grid, begin, end, bins, span.first, mode);
     });
     mergeBins(threadBins, spanCount, chunks, m_bins.data() + spanOffset);
+}
+
+void WaveformBins::scatter(const FrameView& frame, IntRect region, const SampleGrid& grid, WaveformMode mode,
+                           int columns)
+{
+    ensureBuffers(columns);
+
+    const WaveformModeFlags flags = waveformModeFlags(mode);
+    const WaveformPlaneSpan span = waveformPlaneSpan(flags);
+    const WaveformScatterKey key{frame.pixels, frame.strideBytes, frame.sequence, frame.format,     region,
+                                 grid,         columns,           span,           flags.coloredLuma};
+    if (m_key == key) {
+        return;
+    }
+
+    // Cleared before the pass rather than written after it: a scatter that
+    // threw would otherwise leave half-filled bins under a key claiming they
+    // hold this frame, and every scope after it would read that as an answer.
+    m_key = WaveformScatterKey{};
+    ++m_scatters;
+    scatterInto(frame, region, grid, mode, span);
+    m_key = key;
 }
 
 }  // namespace sidescopes
