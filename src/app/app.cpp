@@ -552,6 +552,9 @@ void App::drainAsyncSignals()
         followAttachedWindow();
         m_clocks.noteActivity(glfwGetTime());
     }
+    if (m_callbackState.displaysChanged.exchange(false)) {
+        m_captureController.markStale();
+    }
     m_regionPicker.drainFaceScans();
     if (m_callbackState.iconifyChanged.exchange(false)) {
         m_regions.syncBorder(borderState());

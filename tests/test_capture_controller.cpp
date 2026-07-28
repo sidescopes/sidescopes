@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <catch2/catch_test_macros.hpp>
 #include <chrono>
 #include <cstddef>
@@ -225,12 +226,16 @@ TEST_CASE("a stream that stays unreachable is retried less and less often")
     source.startSucceeds = false;
 
     // The first retry is as prompt as it ever was, then each failure doubles
-    // the wait: 2, 4, 8, 16, then the half-minute ceiling. Each wait is timed
-    // from the attempt that failed, not from a round number, so the clock walks
-    // a moment past each deadline.
+    // the wait: 2, 4, then the ceiling. Each wait is timed from the attempt
+    // that failed, not from a round number, so the clock walks a moment past
+    // each deadline.
+    //
+    // The ceiling is a handful of seconds because it is also the longest a
+    // user can be left on a page that says the capture is coming back - the
+    // half-minute it used to be was long enough to read as never.
     double clock = 0.0;
     int attempts = source.startCount;
-    for (const double wait : {2.0, 4.0, 8.0, 16.0, 30.0, 30.0}) {
+    for (const double wait : {2.0, 4.0, 8.0, 8.0, 8.0, 8.0}) {
         clock += 0.001;
         controller.service(clock);
         CHECK(source.startCount == attempts + 1);
@@ -242,11 +247,11 @@ TEST_CASE("a stream that stays unreachable is retried less and less often")
         clock += wait;
     }
 
-    // Six failures spread over ninety seconds. A flat two-second retry would
-    // have made forty-five attempts across the same span.
+    // Six failures spread over thirty-eight seconds. A flat two-second retry
+    // would have made nineteen attempts across the same span.
     CHECK(source.startCount - 1 == 6);
-    CHECK(clock > 89.0);
-    CHECK(clock < 91.0);
+    CHECK(clock > 37.0);
+    CHECK(clock < 39.0);
 }
 
 TEST_CASE("a wake earns a prompt retry however long the backoff had grown")
@@ -436,15 +441,178 @@ TEST_CASE("a stream that dies while suspended is not restarted until it returns"
     CaptureController controller(source, mailbox);
     REQUIRE(controller.requestPermission());
     REQUIRE(controller.start());
-    controller.suspend("paused");
+    controller.suspend("paused - no region selected");
 
-    // The backend reports the stop from its own thread after suspend returned.
-    source.fireStatus("capture stopped");
+    // The backend reports the stop from its own thread after suspend returned,
+    // which is the shape the application was stranded by: the report says the
+    // stream is gone, and a paused controller will not build another. It must
+    // therefore not read as a failure either, or the application stands on a
+    // page promising a reconnection nothing is attempting - and with no region
+    // selected nothing will resume the pipeline until the user draws one.
+    source.fireStatus("capture stopped: no displays or windows to capture");
     controller.service(600.0);
     CHECK(source.startCount == 1);
+    CHECK_FALSE(controller.dead());
+    // And the line the user reads says why the pipeline is paused, not what
+    // the stream said on its way out.
+    CHECK(controller.status() == "paused - no region selected");
 
     controller.resume();
     CHECK(source.startCount == 2);
+    CHECK_FALSE(controller.dead());
+}
+
+TEST_CASE("capture wanted and absent is retried for as long as it is absent")
+{
+    // THE INVARIANT THE RECOVERY RESTS ON, stated without naming a cause. The
+    // stream is gone; nothing tells the controller why, nothing announces that
+    // conditions changed, and no region, frame, wake or window event ever
+    // arrives. Attempts must keep coming anyway, and no wait between them may
+    // exceed the ceiling - which is what makes recovery a property of being
+    // broken rather than of the application recognising how it broke.
+    FakeCaptureSource source;
+    source.targets = {makeTarget(1, "main")};
+    FrameMailbox mailbox;
+    CaptureController controller(source, mailbox);
+    REQUIRE(controller.requestPermission());
+    REQUIRE(controller.start());
+    source.fireStatus("capture stopped");
+    source.startSucceeds = false;
+
+    // Ten minutes of frame loop at the idle tick, and not one signal.
+    constexpr double Tick = 0.05;
+    constexpr int Ticks = 600 * 20;
+    int attempts = 0;
+    double lastAttempt = 0.0;
+    double longestGap = 0.0;
+    for (int tick = 1; tick <= Ticks; ++tick) {
+        const double now = static_cast<double>(tick) * Tick;
+        const int before = source.startCount;
+        controller.service(now);
+        if (source.startCount != before) {
+            longestGap = std::max(longestGap, now - lastAttempt);
+            lastAttempt = now;
+            ++attempts;
+        }
+    }
+
+    // Still trying, and still saying so.
+    CHECK(controller.dead());
+    // Never longer than the ceiling plus the tick that lands past it: a user
+    // watching the reconnection notice waits seconds, not minutes. The slack
+    // is one more tick, for the clock this walks in fiftieths of a second.
+    CHECK(longestGap < 8.0 + (2.0 * Tick));
+    // And not a handful of attempts that quietly gave up.
+    CHECK(attempts > 70);
+
+    // The world allows it again, with nothing to announce that it has.
+    source.startSucceeds = true;
+    controller.service(static_cast<double>(Ticks) * Tick + 8.1);
+    CHECK_FALSE(controller.dead());
+    CHECK(controller.status() == "capturing main");
+}
+
+TEST_CASE("a healthy pause stays paused, stays quiet and stays honest")
+{
+    // The other half of the invariant, and the one that protects the measured
+    // idle cost: a pipeline paused because nothing is asking for frames must
+    // make no attempts at all, however long it is left. The empty state is the
+    // one this application sits in most, so a retry loop leaking into it would
+    // cost more than the pause ever saved.
+    FakeCaptureSource source;
+    source.targets = {makeTarget(4, "main")};
+    FrameMailbox mailbox;
+    CaptureController controller(source, mailbox);
+    REQUIRE(controller.requestPermission());
+    REQUIRE(controller.start());
+    controller.suspend("paused - no region selected");
+
+    for (int tick = 1; tick <= 600 * 20; ++tick) {
+        controller.service(static_cast<double>(tick) * 0.05);
+    }
+    CHECK(source.startCount == 1);
+    CHECK(source.stopCount == 1);
+    CHECK_FALSE(controller.dead());
+    CHECK(controller.status() == "paused - no region selected");
+}
+
+TEST_CASE("a resume that cannot reach a display keeps trying until it can")
+{
+    // Waking to displays that have not all come back, or to the one being
+    // captured gone for good. Nothing was running to report the failure, so
+    // the resume's own start is the only thing that knows about it - and the
+    // controller has to keep going from there without being told.
+    FakeCaptureSource source;
+    source.targets = {makeTarget(4, "main")};
+    FrameMailbox mailbox;
+    CaptureController controller(source, mailbox);
+    REQUIRE(controller.requestPermission());
+    REQUIRE(controller.start());
+    controller.suspend("paused - the window is out of sight");
+
+    source.targets.clear();
+    controller.resume();
+    CHECK_FALSE(controller.suspended());
+    CHECK(controller.dead());
+    CHECK(controller.status() == "no display available - scopes resume when one returns");
+
+    const int afterResume = source.startCount;
+    controller.service(3.0);
+    CHECK(source.startCount == afterResume);  // listed, found nothing, no stream
+
+    source.targets = {makeTarget(4, "main")};
+    controller.service(20.0);
+    CHECK(source.startCount == afterResume + 1);
+    CHECK_FALSE(controller.dead());
+}
+
+TEST_CASE("a display chosen while paused is taken up by the resume, not behind it")
+{
+    // The window is dragged, or its monitor unplugged and the window moved for
+    // it, while the pipeline is paused. Capture follows the window, so a new
+    // display is asked for - but starting one here would leave a live stream
+    // behind a controller that is servicing nothing, delivering frames nobody
+    // asked for until something happens to notice.
+    FakeCaptureSource source;
+    source.targets = {makeTarget(7, "external"), makeTarget(4, "built-in")};
+    FrameMailbox mailbox;
+    CaptureController controller(source, mailbox);
+    REQUIRE(controller.requestPermission());
+    controller.requestDisplay(7);
+    REQUIRE(controller.start());
+    controller.suspend("paused - no region selected");
+
+    controller.requestDisplay(4);
+    CHECK_FALSE(controller.start());
+    CHECK(source.startCount == 1);
+    CHECK(controller.suspended());
+    CHECK_FALSE(controller.dead());
+
+    // The choice was not lost, only deferred to the moment frames are wanted.
+    controller.resume();
+    CHECK(source.startCount == 2);
+    CHECK(source.lastStartedDisplay == 4);
+    CHECK(controller.capturedDisplay() == 4);
+}
+
+TEST_CASE("a first start that fails is retried like any other")
+{
+    // Launching while the display is asleep, or into a session that has none
+    // yet. There is no earlier stream to have died, so nothing reports this -
+    // and a controller that treated a failed first start as quietly stopped
+    // would never capture anything for the rest of the run.
+    FakeCaptureSource source;
+    FrameMailbox mailbox;
+    CaptureController controller(source, mailbox);
+    REQUIRE(controller.requestPermission());
+
+    CHECK_FALSE(controller.start());
+    CHECK(controller.dead());
+    CHECK(controller.status() == "no display available - scopes resume when one returns");
+
+    source.targets = {makeTarget(4, "main")};
+    controller.service(1.0);
+    CHECK(source.startCount == 1);
     CHECK_FALSE(controller.dead());
 }
 

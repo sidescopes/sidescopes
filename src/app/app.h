@@ -67,6 +67,12 @@ struct AppCallbackState
     /// deliver from an operating-system callback context, so the flag is all
     /// the callback touches; the frame loop drains it and does the routing.
     std::atomic<bool> foregroundChanged{false};
+    /// A monitor was connected or disconnected. That is evidence the reason a
+    /// capture could not be established may have ended, so the frame loop
+    /// drains this into the stale mark and the stream is rebuilt promptly
+    /// rather than after whatever wait the failures before it had earned. Set
+    /// by the GLFW monitor callback.
+    std::atomic<bool> displaysChanged{false};
     /// When a window event from the user last arrived: pointer, wheel, key or
     /// focus. The frame loop draws only while the picture can still be
     /// changing, and every hover highlight, tooltip and text cursor in the

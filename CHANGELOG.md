@@ -173,6 +173,17 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   - a confirming click or drag as much as Escape - or clicking the
   region border's band left the application with no key window, and
   every shortcut dead until a window was clicked again.
+- Screen capture recovers on its own from every interruption, instead of
+  standing on "Reconnecting automatically..." while nothing reconnected.
+  A stream reported as stopped while the pipeline was paused - which it
+  is whenever no region is selected - left the application waiting for
+  a reconnection it would never attempt, and only drawing a region
+  brought it back. Unplugging a monitor and leaving the machine to sleep
+  was enough to reach it. The wait between attempts now tops out at
+  eight seconds rather than thirty, and a monitor connected or
+  disconnected drops it back to the first, so recovery is prompt as well
+  as certain. A paused pipeline still makes no attempts and no longer
+  reports a failure it is not having.
 
 ## [0.4.0] - 2026-07-22
 

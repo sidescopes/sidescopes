@@ -25,6 +25,15 @@ inline constexpr int DefaultCaptureFramesPerSecond = 15;
 /// captured versus desired, the status line, and the restart policy for a
 /// stream that died or went stale. Frames keep flowing through the mailbox;
 /// this owns control, not pixels.
+///
+/// ONE INVARIANT CARRIES THE RECOVERY: while capture is wanted and no stream
+/// is serving it, service() is building another. It is stated over the
+/// controller's own two facts - whether a stream was created, and whether the
+/// backend still calls it alive - so no caller has to record a failure and no
+/// caller can record one nothing will act on. The alternative, a mark set
+/// wherever capture is known to break, needs the application to know every way
+/// it can break; this needs it to know only that it is broken, which it
+/// observes directly.
 class CaptureController
 {
 public:
@@ -42,7 +51,10 @@ public:
     /// Starts capturing the desired display, or the first target when none is
     /// desired, stopping any running stream first. A desired display absent
     /// from the target list leaves the stream stopped and posts the
-    /// disconnect status. Does nothing without permission.
+    /// disconnect status. Does nothing without permission, and nothing while
+    /// suspended: a paused pipeline must not acquire a stream behind the
+    /// visibility gate's back, and the display asked for meanwhile is
+    /// remembered, so resume() starts on it.
     /// @return Whether a stream is running.
     bool start();
 
@@ -62,11 +74,16 @@ public:
     /// the next start reads the new rate anyway.
     void setFrameRate(int framesPerSecond);
 
-    /// Marks the stream stale so the next service() restarts it (system wake
-    /// or unlock). Safe to call from any thread.
+    /// Marks the stream stale so the next service() restarts it (system wake,
+    /// unlock, or a monitor connected or disconnected). Safe to call from any
+    /// thread. It is a responsiveness signal only - it says the conditions
+    /// that were failing may have changed, so the schedule those failures
+    /// earned is dropped - and recovery does not depend on one arriving.
     void markStale();
 
-    /// @return Whether the stream has died and awaits a restart.
+    /// @return Whether capture is wanted and no stream is serving it, which is
+    /// exactly the state service() is retrying out of. A paused pipeline is
+    /// not dead: it has asked for no stream.
     [[nodiscard]] bool dead() const;
 
     /// Stops capturing until resume(), because nothing is asking for frames.
@@ -82,7 +99,9 @@ public:
 
     /// Starts capturing again after a suspend(). This start is also the
     /// restart a wake or unlock during the pause would have asked for, so the
-    /// stale and dead marks are cleared rather than acted on twice.
+    /// stale and dead marks are cleared rather than acted on twice. A start
+    /// that fails here leaves the stream marked dead, since nothing was
+    /// running to report the failure and service() is what tries again.
     void resume();
 
     /// @return Whether capture is suspended.
@@ -95,9 +114,15 @@ public:
     /// re-applies whatever is wanted.
     void narrowTo(const std::optional<IntRect>& rect);
 
-    /// Once per frame: consumes a stale mark, then restarts a dead stream
-    /// after its backoff. @p now is the frame clock in seconds; the
-    /// controller never reads the clock itself, so tests drive time here.
+    /// Once per frame, and the whole of the recovery mechanism: while capture
+    /// is wanted and no stream is serving it, another is built, on a backoff
+    /// that no failure can push past a handful of seconds. It asks nothing
+    /// about why the last one stopped - a stream reported dead, a start that
+    /// failed, a display that went away and a wake all leave the same state
+    /// behind, and this acts on the state rather than on the reason. While
+    /// suspended it restates the pause instead. @p now is the frame clock in
+    /// seconds; the controller never reads the clock itself, so tests drive
+    /// time here.
     void service(double now);
 
     /// @return The current capture status line.
@@ -110,10 +135,13 @@ private:
     FrameMailbox& m_mailbox;
 
     // The status callback lands on a backend thread while the frame loop
-    // reads the line, so the string is mutex-guarded and death is an atomic.
+    // reads the line, so the string is mutex-guarded and the stream's health
+    // is an atomic. That health is a fact the backend reports, not a mark to
+    // be consumed: dead() is derived from it, so a failure cannot be recorded
+    // in a state nothing will act on.
     mutable std::mutex m_statusMutex;
     std::string m_status = "starting";
-    std::atomic<bool> m_dead{false};
+    std::atomic<bool> m_streamAlive{false};
     // Set from the system-wake observer on any thread, consumed by service().
     std::atomic<bool> m_stale{false};
 
@@ -125,13 +153,15 @@ private:
     // when there is one; the first start has nothing to stop.
     bool m_running = false;
     // Whether the stream is stopped on purpose, which service() must not
-    // mistake for a stream to revive.
+    // mistake for a stream to revive, and the line that says why - restored
+    // when a stopped stream's own report of stopping lands after the pause.
     bool m_suspended = false;
-    // The frame-clock deadline a dead stream waits out before a restart, and
-    // how many restarts have failed in a row - the wait doubles with them, so a
-    // lock or a display asleep for hours stops costing a retry every two
-    // seconds. Reset by a successful start and by a wake, which changes the
-    // conditions that were failing.
+    std::string m_pauseReason;
+    // The frame-clock deadline the next attempt waits out, and how many
+    // attempts have failed in a row - the wait doubles with them, so a lock or
+    // a display asleep for hours stops costing a retry every two seconds.
+    // Reset by a successful start, by a resume, and by a wake or a display
+    // change, all of which change the conditions that were failing.
     double m_nextRetry = 0.0;
     int m_failedRestarts = 0;
 };

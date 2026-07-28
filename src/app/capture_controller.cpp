@@ -6,15 +6,22 @@
 namespace sidescopes {
 namespace {
 
-// How long a dead stream waits before the next restart, and the ceiling that
-// wait doubles up to. A stream that cannot be re-established is usually a
-// screen that is locked or asleep, and that lasts hours: a fixed two-second
-// retry then wakes the machine seven hundred times an hour for a window nobody
-// can see. Doubling keeps a transient failure quick to recover from - the
-// first retry is as prompt as it ever was - while a long one settles into a
-// tick the machine can sleep through.
+// How long a stream that is wanted but absent waits before the next attempt,
+// and the ceiling that wait doubles up to. A fixed two-second retry runs
+// eighteen hundred times an hour, which is worth avoiding for a screen that
+// stays locked; doubling keeps a transient failure as quick to recover from as
+// it ever was and settles a long one into a tick the machine can sleep
+// through.
+//
+// The ceiling is a handful of seconds rather than the half-minute it was,
+// because it is also the longest a user can be left looking at a page that
+// says the capture is coming back. An attempt costs a display enumeration and
+// nothing else - there are no frames to process while capture is broken - and
+// the platforms that observe a lock suspend the pipeline outright, so they
+// make no attempts at all. Paying four hundred and fifty enumerations an hour
+// on the platforms that do not is the better side of that trade.
 constexpr double FirstRetrySeconds = 2.0;
-constexpr double LongestRetrySeconds = 30.0;
+constexpr double LongestRetrySeconds = 8.0;
 
 // The wait after @p failures consecutive failed restarts, doubling from the
 // first up to the ceiling.
@@ -35,11 +42,12 @@ CaptureController::CaptureController(ScreenCaptureSource& source, FrameMailbox& 
       m_mailbox(mailbox)
 {
     // Capture is a service that can die at any time on any thread (lock
-    // screen, display sleep); the callback records why and marks the stream
-    // dead for the frame loop to restart.
+    // screen, display sleep, a monitor unplugged); the callback records why and
+    // withdraws the stream, which is all service() needs to start building
+    // another.
     m_source.setStatusCallback([this](const std::string& message) {
         setStatus(message);
-        m_dead.store(true);
+        m_streamAlive.store(false);
     });
 }
 
@@ -62,29 +70,31 @@ bool CaptureController::permissionGranted() const
 
 bool CaptureController::start()
 {
-    if (!m_permissionGranted) {
+    // A suspended pipeline is stopped because nothing on screen is asking for
+    // frames. Starting one here would defeat the pause and leave a live stream
+    // behind a controller that services nothing - and that stream's eventual
+    // death is a mark no suspended service() can act on.
+    if (!m_permissionGranted || m_suspended) {
         return false;
     }
 
-    // A stream that was running but could not be re-established counts as
-    // dead, so service() keeps retrying it; a first start with nothing yet
-    // running stays quietly stopped on failure, as it always has.
-    const bool wasRunning = m_running;
+    // Every exit below leaves the controller wanting a stream and holding none,
+    // which is the state service() retries out of. Nothing has to be marked on
+    // the way out, and no exit can forget to.
     if (m_running) {
         m_source.stop();
         m_running = false;
+        m_streamAlive.store(false);
     }
-    const auto fail = [&]() -> bool {
-        if (wasRunning) {
-            m_dead.store(true);
-        }
-
-        return false;
-    };
 
     const auto targets = m_source.listTargets();
     if (targets.empty()) {
-        return fail();
+        // No display at all, which is what a session on its way to sleep and a
+        // sole monitor unplugged both look like from here. Naming it keeps the
+        // status line from standing on whatever was true before.
+        setStatus("no display available - scopes resume when one returns");
+
+        return false;
     }
 
     const CaptureTarget* target = &targets.front();
@@ -98,19 +108,19 @@ bool CaptureController::start()
             // retry loop resumes the same region the moment it returns.
             setStatus("display disconnected - scopes resume when it returns");
 
-            return fail();
+            return false;
         }
         target = &*wanted;
     }
 
     if (!m_source.start(*target, m_frameRate, m_mailbox)) {
-        return fail();
+        return false;
     }
 
     m_capturedDisplay = target->displayId;
     m_desiredDisplay = target->displayId;
     setStatus("capturing " + target->description);
-    m_dead.store(false);
+    m_streamAlive.store(true);
     m_running = true;
 
     return true;
@@ -154,7 +164,12 @@ void CaptureController::markStale()
 
 bool CaptureController::dead() const
 {
-    return m_dead.load();
+    // Read off the facts rather than remembered: capture is wanted, and there
+    // is no stream serving it. Nothing has to set this and nothing has to
+    // clear it, so no path through the controller can strand the application
+    // in a failure it is not working on - or on a page claiming a
+    // reconnection while the pipeline is deliberately stopped.
+    return m_permissionGranted && !m_suspended && !(m_running && m_streamAlive.load());
 }
 
 void CaptureController::suspend(const std::string& reason)
@@ -163,18 +178,16 @@ void CaptureController::suspend(const std::string& reason)
         return;
     }
     m_suspended = true;
+    m_pauseReason = reason;
     if (m_running) {
         m_source.stop();
         m_running = false;
     }
+    m_streamAlive.store(false);
     // The producer has stopped by here, so its buffers are nobody's: freeing
     // them is what turns a suspend into a memory saving rather than only a
     // CPU one.
     m_mailbox.release();
-    // Stopping the stream can land the source's status callback, which marks
-    // it dead; a stream stopped on purpose has not died, and clearing the mark
-    // after the stop is what keeps resume() from restarting twice.
-    m_dead.store(false);
     setStatus(reason);
 }
 
@@ -185,8 +198,12 @@ void CaptureController::resume()
     }
     m_suspended = false;
     m_stale.store(false);
-    m_dead.store(false);
+    // Frames are wanted again from a clean sheet: whatever failures the last
+    // stream earned belong to conditions that have had every chance to change,
+    // and a start that fails here leaves the controller wanting a stream with
+    // none - which is the state service() retries out of, with no mark to set.
     m_failedRestarts = 0;
+    m_nextRetry = 0.0;
     (void)start();
 }
 
@@ -205,27 +222,34 @@ bool CaptureController::suspended() const
 
 void CaptureController::service(double now)
 {
-    // A suspended stream is stopped because nothing is on screen to show it.
-    // Leave it alone: the marks it would be revived on are cleared by resume(),
-    // which is the restart.
+    // A suspended pipeline is stopped because nothing on screen is asking for
+    // frames, so there is no stream to rebuild and no failure to report. The
+    // reason is restated rather than remembered as having been posted: the
+    // backend reports a stop from its own thread, and a stop this controller
+    // asked for can land after the pause, overwriting the line that says why
+    // the pipeline is paused. Restating it every tick cannot be forgotten and
+    // cannot be consumed by the wrong caller. The stale mark keeps until
+    // resume(), whose start is the restart it asks for.
     if (m_suspended) {
+        setStatus(m_pauseReason);
+
         return;
     }
     // Waking the display or unlocking the session can leave the stream a
     // zombie: it either stops delivering without an error, or a retry that
     // ran while the screen was locked bound a stream to the wrong session.
-    // Both look alive, so the wake signal forces a restart - cheap on a
-    // screen that was just black.
+    // Both look alive, so the wake signal withdraws the stream outright -
+    // cheap on a screen that was just black.
     if (m_stale.exchange(false)) {
         std::fprintf(stderr, "sidescopes: restarting capture after wake or unlock\n");
-        m_dead.store(true);
+        m_streamAlive.store(false);
         // Give the session a moment to finish coming back.
         m_nextRetry = now + 1.0;
         // Conditions just changed, so whatever had been failing deserves a
         // prompt attempt rather than the backoff the last failures earned.
         m_failedRestarts = 0;
     }
-    if (m_permissionGranted && m_dead.load() && now > m_nextRetry) {
+    if (dead() && now > m_nextRetry) {
         if (start()) {
             m_failedRestarts = 0;
         } else {

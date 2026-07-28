@@ -25,6 +25,13 @@ namespace {
 
 using namespace sidescopes;
 
+// The monitor list belongs to the toolkit rather than to any window, so its
+// callback carries no window to recover state through the way every other one
+// here does. One file-scope hook stands in, set beside the window callbacks
+// and outlived by nothing: the state it points at is the shell's own, and the
+// shell owns the toolkit for as long as it runs.
+AppCallbackState* g_monitorCallbackState = nullptr;
+
 // Applies the saved window placement and keeps the window on screen.
 //
 // Saved sizes are in the platform's own window units (physical pixels on
@@ -240,6 +247,10 @@ void stopRendering(GLFWwindow* window, GraphicsBackend* graphics)
         graphics->shutdown();
     }
     ImGui::DestroyContext();
+    // The monitor callback outlives the window it was installed beside, so the
+    // state it reaches is dropped before the shell's own goes out of scope.
+    glfwSetMonitorCallback(nullptr);
+    g_monitorCallbackState = nullptr;
     glfwDestroyWindow(window);
     glfwTerminate();
 }
@@ -309,6 +320,17 @@ MainWindow createMainWindow(const Preferences& startup, const VersionInfo& versi
     }
     glfwSetWindowIconifyCallback(window, [](GLFWwindow* iconifyTarget, int) {
         static_cast<AppCallbackState*>(glfwGetWindowUserPointer(iconifyTarget))->iconifyChanged.store(true);
+    });
+    // A monitor arriving or leaving is the one change the capture layer cannot
+    // see for itself, and it is evidence that a capture which could not be
+    // established may now succeed. Recovery does not depend on it - the retry
+    // runs regardless - so all this does is skip the wait the failures before
+    // it had earned.
+    g_monitorCallbackState = &callbackState;
+    glfwSetMonitorCallback([](GLFWmonitor*, int) {
+        if (g_monitorCallbackState != nullptr) {
+            g_monitorCallbackState->displaysChanged.store(true);
+        }
     });
     installInputClock(window);
 
