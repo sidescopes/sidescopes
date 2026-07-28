@@ -456,6 +456,29 @@ void setRegionPickChipColor(const std::optional<FloatColor>& color)
     }
 }
 
+namespace {
+
+// The border's place in the z-order: directly beneath this application's
+// frontmost own window when there is one, so the border never covers the
+// scopes, and at the top of the topmost band otherwise.
+HWND borderInsertAfter()
+{
+    const std::vector<HWND> own = ownWindows();
+
+    return own.empty() ? HWND_TOPMOST : own.front();
+}
+
+// Puts the border back in that place without moving, sizing, or
+// repainting it. Topmost is a position in the z-order rather than a
+// property that holds: a window entering the band afterwards takes the
+// place above this one and keeps it, and nothing else moves the border.
+void reassertBorderZOrder()
+{
+    SetWindowPos(g_border.window, borderInsertAfter(), 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+}
+
+}  // namespace
+
 // Sizes, places, and repaints the border window for the current region.
 // Directly beneath the scope window when one is visible: the border must
 // never cover the scopes, and both live in the topmost band. The surface
@@ -464,11 +487,7 @@ void setRegionPickChipColor(const std::optional<FloatColor>& color)
 void presentBorderWindow(double scale, const std::wstring& label)
 {
     const auto pad = static_cast<int>(WindowPad * scale);
-    HWND insertAfter = HWND_TOPMOST;
-    const std::vector<HWND> own = ownWindows();
-    if (!own.empty()) {
-        insertAfter = own.front();
-    }
+    HWND insertAfter = borderInsertAfter();
     const int strip = static_cast<int>(LabelBand * scale);
     const int width = (g_border.region.right - g_border.region.left) + 2 * pad;
     const int height = (g_border.region.bottom - g_border.region.top) + 2 * pad + strip;
@@ -511,12 +530,17 @@ void showRegionBorder(uint32_t displayId, const RegionOfInterest& region, const 
     wanted.top = static_cast<int>(geometry->originY + region.topPercent / 100.0 * geometry->heightPoints);
     wanted.right = static_cast<int>(geometry->originX + region.rightPercent / 100.0 * geometry->widthPoints);
     wanted.bottom = static_cast<int>(geometry->originY + region.bottomPercent / 100.0 * geometry->heightPoints);
-    // The host reconciles every frame; an unchanged border must cost
-    // nothing. Mid-entrance the live rect lags the target, so the
-    // comparison is against the target.
+    // The host reconciles every frame; an unchanged border costs the
+    // z-order claim below and nothing else. Mid-entrance the live rect
+    // lags the target, so the comparison is against the target.
     const bool visible = IsWindowVisible(g_border.window) != FALSE;
     if (visible && EqualRect(&wanted, &g_border.appearTarget) && label == g_border.attachedLabel &&
         attached == g_border.attachedRegion) {
+        // Nothing to move or repaint, but the place in the z-order still
+        // has to be claimed: it is the only thing another window can take
+        // while the region itself stands still.
+        reassertBorderZOrder();
+
         return;
     }
     SS_DIAG(Border, "show wanted=%ld,%ld,%ld,%ld visible=%d appearing=%d", wanted.left, wanted.top, wanted.right,
