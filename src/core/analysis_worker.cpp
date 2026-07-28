@@ -347,9 +347,9 @@ void writeOutput(AnalysisWorker::Output& output, std::vector<WorkerScope>& scope
 
         copyImage(scope.instance.image(), output.images[scope.id]);
         if (scope.outline) {
-            output.histogramOutline.resize(scope.outline->heights(scope.instance.raw(), nullptr, 0));
-            scope.outline->heights(scope.instance.raw(), output.histogramOutline.data(),
-                                   static_cast<uint32_t>(output.histogramOutline.size()));
+            std::vector<float>& outline = output.outlines[scope.id];
+            outline.resize(scope.outline->heights(scope.instance.raw(), nullptr, 0));
+            scope.outline->heights(scope.instance.raw(), outline.data(), static_cast<uint32_t>(outline.size()));
         }
     }
 

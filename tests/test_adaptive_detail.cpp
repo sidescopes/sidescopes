@@ -24,8 +24,8 @@ const ScopeRegistry& registry()
 }
 
 // Panes clearing every threshold, and panes clearing none of them.
-constexpr ScopePaneSizes LargePanes{{1600.0f, 700.0f}, {1600.0f, 700.0f}, {1600.0f, 700.0f}, {700.0f, 700.0f}};
-constexpr ScopePaneSizes SmallPanes{{400.0f, 300.0f}, {400.0f, 300.0f}, {400.0f, 300.0f}, {300.0f, 300.0f}};
+constexpr ScopePaneSizes LargePanes{{1600.0f, 700.0f}, {1600.0f, 700.0f}, {700.0f, 700.0f}};
+constexpr ScopePaneSizes SmallPanes{{400.0f, 300.0f}, {400.0f, 300.0f}, {300.0f, 300.0f}};
 
 // The controller plus the state it reads, in declaration order so the refs it
 // stores outlive nothing.
@@ -99,12 +99,13 @@ TEST_CASE("Each scope's resolution follows its own pane")
     fixture.view.stack().choose(WaveformScopeId, true);
     fixture.view.stack().choose(HistogramScopeId, true);
 
-    // The wider of the waveform and its parade decides the columns, the taller
-    // the levels; the panes here are in framebuffer pixels already.
+    // The family's own pane - the largest any of its scopes drew at, which the
+    // renderer resolves - decides the columns and the levels; the panes here
+    // are in framebuffer pixels already.
     CHECK(fixture.detail.desiredWaveformSize(LargePanes, 0) == std::pair<int, int>{2048, 512});
     CHECK(fixture.detail.desiredWaveformSize(SmallPanes, 0) == std::pair<int, int>{512, WaveformLevels});
 
-    constexpr ScopePaneSizes MidPanes{{800.0f, 400.0f}, {}, {800.0f, 400.0f}, {400.0f, 400.0f}};
+    constexpr ScopePaneSizes MidPanes{{800.0f, 400.0f}, {800.0f, 400.0f}, {400.0f, 400.0f}};
     CHECK(fixture.detail.desiredWaveformSize(MidPanes, 0) == std::pair<int, int>{1024, WaveformLevels});
     // A narrow region cannot populate more columns than it has pixels.
     CHECK(fixture.detail.desiredWaveformSize(LargePanes, 1500).first == 1024);
@@ -130,7 +131,7 @@ TEST_CASE("A scope filling a second monitor is resolved, not magnified")
         fixture.view.stack().choose(id, true);
     }
 
-    constexpr ScopePaneSizes FullScreen{{3840.0f, 2160.0f}, {3840.0f, 2160.0f}, {3840.0f, 2160.0f}, {2160.0f, 2160.0f}};
+    constexpr ScopePaneSizes FullScreen{{3840.0f, 2160.0f}, {3840.0f, 2160.0f}, {2160.0f, 2160.0f}};
 
     // Given a region wide enough to populate them, the waveform takes every
     // column the pane can show: a column carries real data. Height and the
@@ -236,7 +237,7 @@ TEST_CASE("A high level asks for more where the pane can use it")
     // where it is, High does not and climbs. Every axis here is either a
     // display resolution over a fixed grid or - for the waveform's columns -
     // real data the region can still populate.
-    constexpr ScopePaneSizes ClimbablePanes{{1100.0f, 400.0f}, {1100.0f, 400.0f}, {1100.0f, 400.0f}, {400.0f, 400.0f}};
+    constexpr ScopePaneSizes ClimbablePanes{{1100.0f, 400.0f}, {1100.0f, 400.0f}, {400.0f, 400.0f}};
     DetailFixture fixture;
     // The vectorscope is the stack a fresh view starts on; the rest stack onto
     // it.
@@ -283,7 +284,7 @@ TEST_CASE("Changing the level moves the resolutions in force")
 
     // A pane between two steps: Standard is content to magnify it and asks for
     // nothing, so the only thing that can move the resolution here is the level.
-    constexpr ScopePaneSizes Between{{}, {}, {}, {400.0f, 400.0f}};
+    constexpr ScopePaneSizes Between{{}, {}, {400.0f, 400.0f}};
     CHECK_FALSE(fixture.detail.update(Between, 1.0f, std::nullopt, 1.0).has_value());
 
     fixture.detail.setQuality(QualityLevel::High);

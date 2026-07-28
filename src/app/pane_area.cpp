@@ -134,10 +134,10 @@ std::optional<TraceAdjustment> traceIntensityGesture(const DrawnScope& scope, st
 // baked into the texture it would stretch anisotropically with the pane - thick
 // on flats, thin on slopes. Sampled through the same spline the fill uses, so
 // line and fill edge agree.
-void strokeHistogramOutline(const DrawnScope& scope, const AnalysisWorker::Output& output, HistogramStyle style,
+void strokeHistogramOutline(const DrawnScope& scope, const std::vector<float>& outline, HistogramStyle style,
                             std::vector<ImVec2>& points)
 {
-    if (output.histogramOutline.size() != static_cast<std::size_t>(3) * Histogram::Bins) {
+    if (outline.size() != static_cast<std::size_t>(3) * Histogram::Bins) {
         return;
     }
     ImDrawList* draw = ImGui::GetWindowDrawList();
@@ -145,7 +145,7 @@ void strokeHistogramOutline(const DrawnScope& scope, const AnalysisWorker::Outpu
     const bool bands = style == HistogramStyle::PerChannel;
     const int samples = std::clamp(static_cast<int>(scope.size.x), 128, 2 * Histogram::Bins);
     for (int channel = 0; channel < 3; ++channel) {
-        const float* plane = output.histogramOutline.data() + static_cast<std::ptrdiff_t>(channel) * Histogram::Bins;
+        const float* plane = outline.data() + static_cast<std::ptrdiff_t>(channel) * Histogram::Bins;
         const float bandTop = scope.origin.y + (bands ? static_cast<float>(channel) * scope.size.y / 3.0f : 0.0f);
         const float bandHeight = bands ? scope.size.y / 3.0f : scope.size.y;
         points.clear();
@@ -182,7 +182,14 @@ void strokeHistogramOutline(const DrawnScope& scope, const AnalysisWorker::Outpu
     draw->PopClipRect();
 }
 
-void drawHistogram(const ScopeTexture* texture, bool traceLive, const AnalysisWorker::Output& output,
+// Which plot a histogram scope draws. It is the scope's own identity rather
+// than a setting: the two ids exist to be shown side by side.
+HistogramStyle histogramStyleOf(std::string_view id)
+{
+    return id == CombinedHistogramScopeId ? HistogramStyle::Combined : HistogramStyle::PerChannel;
+}
+
+void drawHistogram(const ScopeTexture* texture, bool traceLive, const std::vector<float>& outline,
                    const ScopeInstance& instance, HistogramStyle style, const GraticuleStyle& graticule,
                    const std::optional<FloatColor>& markerColor, std::vector<ImVec2>& points)
 {
@@ -190,7 +197,7 @@ void drawHistogram(const ScopeTexture* texture, bool traceLive, const AnalysisWo
     // itself, the way every editor draws it.
     const DrawnScope scope = drawScopeImage(texture, traceLive, false);
     if (traceLive && texture != nullptr) {
-        strokeHistogramOutline(scope, output, style, points);
+        strokeHistogramOutline(scope, outline, style, points);
     }
     drawGraticule(scope, instance.graticule(), graticule);
     if (markerColor) {
@@ -431,12 +438,11 @@ void PaneArea::drawScopeById(std::string_view id, Pass& pass)
     m_paneRects[index] = ImVec4(paneMin.x, paneMin.y, paneMin.x + paneAvail.x, paneMin.y + paneAvail.y);
     if (id == VectorscopeScopeId) {
         drawVectorscopePane(pass);
-    } else if (id == HistogramScopeId) {
-        const ScopeInstance* instance = projectionFor(HistogramScopeId);
+    } else if (inHistogramFamily(id)) {
+        const ScopeInstance* instance = projectionFor(id);
         if (instance != nullptr) {
-            drawHistogram(textureForId(HistogramScopeId), pass.input.regionSelected, m_output, *instance,
-                          histogramStyle(), graticuleStyle(DefaultLineWidth), pass.input.vectorscopeColor,
-                          m_histogramScratch);
+            drawHistogram(textureForId(id), pass.input.regionSelected, outlineFor(id), *instance, histogramStyleOf(id),
+                          graticuleStyle(DefaultLineWidth), pass.input.vectorscopeColor, m_histogramScratch);
         }
     } else if (id == ColorPickerScopeId) {
         drawColorPicker(pass.input.readoutColor, m_pins, pass.input.monospaceFont);
@@ -545,16 +551,12 @@ void PaneArea::configureProjections()
     }
 }
 
-HistogramStyle PaneArea::histogramStyle() const
+const std::vector<float>& PaneArea::outlineFor(std::string_view id) const
 {
-    const auto scope = m_analysis.scopeParams.find(HistogramScopeId);
-    if (scope == m_analysis.scopeParams.end()) {
-        return HistogramStyle::PerChannel;
-    }
-    const auto style = scope->second.find("style");
-    const double value = style != scope->second.end() ? style->second : 0.0;
+    static const std::vector<float> none;
+    const auto at = m_output.outlines.find(std::string{id});
 
-    return value < 0.5 ? HistogramStyle::PerChannel : HistogramStyle::Combined;
+    return at != m_output.outlines.end() ? at->second : none;
 }
 
 void PaneArea::setWaveformGain(double gain)

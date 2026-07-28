@@ -3,8 +3,10 @@
 #include <algorithm>
 #include <initializer_list>
 #include <string>
+#include <string_view>
 
 #include "app/quality.h"
+#include "app/scope_registry.h"
 #include "app/scope_view.h"
 #include "core/scopes/waveform.h"
 
@@ -21,8 +23,21 @@ PaneSize scaled(const PaneSize& pane, float density)
 
 ScopePaneSizes inPixels(const ScopePaneSizes& panes, float density)
 {
-    return ScopePaneSizes{scaled(panes.waveform, density), scaled(panes.parade, density),
-                          scaled(panes.histogram, density), scaled(panes.vectorscope, density)};
+    return ScopePaneSizes{scaled(panes.waveform, density), scaled(panes.histogram, density),
+                          scaled(panes.vectorscope, density)};
+}
+
+// Whether any scope of @p family is on screen. A family shares one image, so
+// one member showing is enough to keep the ladder following the panes.
+bool anyShown(const ScopeStack& stack, std::initializer_list<std::string_view> family)
+{
+    for (const std::string_view id : family) {
+        if (stack.shows(id)) {
+            return true;
+        }
+    }
+
+    return false;
 }
 
 // The smallest offered resolution that covers the pane to within @p tolerance -
@@ -102,10 +117,9 @@ std::pair<int, int> AdaptiveDetail::desiredWaveformSize(const ScopePaneSizes& pa
     const std::pair<int, int> waveSize = currentSize(WaveformScopeId);
     int wantColumns = waveSize.first;
     int wantHeight = waveSize.second;
-    if (m_view.stack().shows(WaveformScopeId) || m_view.stack().shows(ParadeScopeId)) {
-        const float wfWidth = std::max(panePixels.waveform.width, panePixels.parade.width);
-        const float wfHeight = std::max(panePixels.waveform.height, panePixels.parade.height);
-        wantColumns = resolutionCovering(wfWidth, {512, 1024, 2048, MaximumWaveformColumns}, quality.columnTolerance);
+    if (anyShown(m_view.stack(), {WaveformScopeId, ParadeScopeId})) {
+        wantColumns = resolutionCovering(panePixels.waveform.width, {512, 1024, 2048, MaximumWaveformColumns},
+                                         quality.columnTolerance);
         if (regionWidth > 0) {
             wantColumns =
                 std::min(wantColumns, resolutionWithin(regionWidth, {512, 1024, 2048, MaximumWaveformColumns}));
@@ -116,7 +130,8 @@ std::pair<int, int> AdaptiveDetail::desiredWaveformSize(const ScopePaneSizes& pa
         // 4.5% for free from the columns. So this threshold stays where
         // measurement put it whatever the level tolerates, and only the ceiling
         // moves - down, never up.
-        wantHeight = std::min(wfHeight >= 560.0f ? 512 : WaveformLevels, quality.waveformHeightCeiling);
+        wantHeight =
+            std::min(panePixels.waveform.height >= 560.0f ? 512 : WaveformLevels, quality.waveformHeightCeiling);
     }
 
     return {wantColumns, wantHeight};
@@ -127,7 +142,7 @@ std::pair<int, int> AdaptiveDetail::desiredHistogramSize(const ScopePaneSizes& p
     const std::pair<int, int> histSize = currentSize(HistogramScopeId);
     int wantHistWidth = histSize.first;
     int wantHistHeight = histSize.second;
-    if (m_view.stack().shows(HistogramScopeId)) {
+    if (anyShown(m_view.stack(), {HistogramScopeId, CombinedHistogramScopeId})) {
         // Near one texture pixel per screen pixel keeps the outline's width even
         // on flats and steep slopes alike.
         const QualityProfile& quality = profile();
@@ -210,8 +225,8 @@ AnalysisSettings coarsenedForDrag(AnalysisSettings settings)
 {
     settings.sampleThinning *= DraggedSampleDivisor;
     for (auto& [id, size] : settings.imageSizes) {
-        const bool columnsArePlaces = id == WaveformScopeId || id == ParadeScopeId;
-        if (!columnsArePlaces) {
+        // A waveform-family column is a place in the region, not resolution.
+        if (!inWaveformFamily(id)) {
             size.first = coarserSide(size.first);
         }
         size.second = coarserSide(size.second);

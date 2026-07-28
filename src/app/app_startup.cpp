@@ -284,9 +284,12 @@ MainWindow createMainWindow(const Preferences& startup, const VersionInfo& versi
 void seedImageSizes(AnalysisSettings& analysis)
 {
     analysis.imageSizes[VectorscopeScopeId] = {DefaultVectorscopeSize, DefaultVectorscopeSize};
-    analysis.imageSizes[WaveformScopeId] = {DefaultWaveformColumns, WaveformLevels};
-    analysis.imageSizes[ParadeScopeId] = {DefaultWaveformColumns, WaveformLevels};
-    analysis.imageSizes[HistogramScopeId] = {Histogram::ImageWidth, Histogram::Height};
+    for (const std::string_view id : WaveformFamily) {
+        analysis.imageSizes[std::string{id}] = {DefaultWaveformColumns, WaveformLevels};
+    }
+    for (const std::string_view id : HistogramFamily) {
+        analysis.imageSizes[std::string{id}] = {Histogram::ImageWidth, Histogram::Height};
+    }
 }
 
 std::map<std::string, ScopeInstance> createProjectionInstances(const ScopeRegistry& registry)

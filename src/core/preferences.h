@@ -77,18 +77,23 @@ struct Preferences
     /// Scope id to parameter key to value. Seeded to the built-in defaults so a
     /// missing file or key yields the shipped live state. The parade is not
     /// held here on save: it mirrors the waveform, and is re-seeded from it on
-    /// load.
+    /// load. A scope with no entry at all - a promoted one, until a file names
+    /// it - runs on its module's own defaults, which is what a key this map
+    /// does not carry has always meant.
     std::map<std::string, std::map<std::string, double>> scopeParams{
         {"org.sidescopes.vectorscope", {{"gain", 3.0}, {"stride", 1.0}, {"response", 0.0}, {"smoothing_ms", 75.0}}},
         {"org.sidescopes.waveform", {{"gain", 0.05}, {"stride", 1.0}, {"mode", 0.0}, {"smoothing_ms", 100.0}}},
-        {"org.sidescopes.histogram", {{"stride", 1.0}, {"style", 0.0}}},
+        {"org.sidescopes.histogram", {{"stride", 1.0}}},
     };
     /// The scopes on screen in stacking order. New files store one token per
     /// scope: a bracketed `[id]` for a letterless scope, otherwise the scope's
     /// letter. Legacy files store bare letters (V vectorscope, W waveform, R
-    /// RGB parade, H histogram, C color picker); the retired L (a separate luma
-    /// waveform) is accepted only as a migration input, folded into W in its
-    /// Luma style. Never empty.
+    /// RGB parade, H histogram, G combined histogram, C color picker); the
+    /// retired L (a separate luma waveform) is accepted only as a migration
+    /// input, folded into W in its Luma style. A file written while the
+    /// histogram's two plots were one scope's styles carries that choice under
+    /// the retired `style` key, and its H is rewritten by that reading. Never
+    /// empty.
     std::string scopeStack = "V";
     /// The order the user keeps the scopes in - the sequence the menu lists
     /// them in and the panes follow - in the same token vocabulary as

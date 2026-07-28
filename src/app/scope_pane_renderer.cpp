@@ -71,14 +71,22 @@ const ScopeImage& ScopePaneRenderer::imageFor(std::string_view id) const
 
 ScopePaneSizes ScopePaneRenderer::paneSizes() const
 {
-    const auto sizeOf = [this](std::string_view id) {
-        const ImVec2 points = m_panes.paneSizePoints(id);
+    // The largest pane the family got, because its scopes share one image: a
+    // small parade beside a wide waveform must not cost the waveform its
+    // columns, and neither may be given a size of its own.
+    const auto largestOf = [this](std::initializer_list<std::string_view> family) {
+        PaneSize largest;
+        for (const std::string_view id : family) {
+            const ImVec2 points = m_panes.paneSizePoints(id);
+            largest.width = std::max(largest.width, points.x);
+            largest.height = std::max(largest.height, points.y);
+        }
 
-        return PaneSize{points.x, points.y};
+        return largest;
     };
 
-    return ScopePaneSizes{sizeOf(WaveformScopeId), sizeOf(ParadeScopeId), sizeOf(HistogramScopeId),
-                          sizeOf(VectorscopeScopeId)};
+    return ScopePaneSizes{largestOf({WaveformScopeId, ParadeScopeId}),
+                          largestOf({HistogramScopeId, CombinedHistogramScopeId}), largestOf({VectorscopeScopeId})};
 }
 
 int ScopePaneRenderer::paneAt(const ImVec2& point) const

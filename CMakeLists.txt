@@ -65,6 +65,7 @@ add_library(sidescopes_core STATIC
     src/core/marker_smoother.cpp
     src/core/analysis_worker.cpp
     src/core/preferences.cpp
+    src/core/style_promotion.cpp
     src/core/region_suggestions.cpp
     src/core/scopes/graticule.cpp
     src/core/scopes/sampling.cpp

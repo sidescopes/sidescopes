@@ -264,7 +264,7 @@ TEST_CASE("Registry serves the histogram through the module boundary")
     const RegisteredScope* scope = registry.findScope("org.sidescopes.histogram");
     REQUIRE(scope != nullptr);
     CHECK(scope->descriptor->letter == 'H');
-    CHECK(scope->descriptor->param_count == 2);
+    CHECK(scope->descriptor->param_count == 1);
 
     ScopeInstance instance = registry.createInstance("org.sidescopes.histogram");
     REQUIRE(instance.valid());
@@ -363,29 +363,47 @@ TEST_CASE("A graticule reports the room it needs past the buffer it was given")
     }
 }
 
-TEST_CASE("The histogram's combined style lifts its markers to full height")
+TEST_CASE("The combined histogram lifts its markers to full height")
 {
-    ScopeInstance histogram = builtinModules().createInstance("org.sidescopes.histogram");
-    REQUIRE(histogram.valid());
+    ScopeInstance banded = builtinModules().createInstance("org.sidescopes.histogram");
+    ScopeInstance overlaid = builtinModules().createInstance("org.sidescopes.histogram.combined");
+    REQUIRE(banded.valid());
+    REQUIRE(overlaid.valid());
 
-    // Per channel (the default) stacks the three plots, so each marker is
+    // The per-channel histogram stacks the three plots, so each marker is
     // confined to its own third.
-    const std::vector<SsMarker> banded = histogram.markers(SsColor{10.0f, 150.0f, 240.0f});
-    REQUIRE(banded.size() == 3);
-    CHECK(banded[1].band_from == Catch::Approx(1.0f / 3.0f));
-    CHECK(banded[1].band_to == Catch::Approx(2.0f / 3.0f));
-    CHECK(banded[2].x == Catch::Approx(240.0f / 255.0f));
-    CHECK(banded[2].channel_mask == 0x4U);
+    const std::vector<SsMarker> inBands = banded.markers(SsColor{10.0f, 150.0f, 240.0f});
+    REQUIRE(inBands.size() == 3);
+    CHECK(inBands[1].band_from == Catch::Approx(1.0f / 3.0f));
+    CHECK(inBands[1].band_to == Catch::Approx(2.0f / 3.0f));
+    CHECK(inBands[2].x == Catch::Approx(240.0f / 255.0f));
+    CHECK(inBands[2].channel_mask == 0x4U);
 
-    // Combined overlays the plots, so every marker spans the whole plot.
-    REQUIRE(histogram.configure(std::vector<SsParamValue>{{"style", 1.0}}));
-    const std::vector<SsMarker> combined = histogram.markers(SsColor{10.0f, 150.0f, 240.0f});
-    REQUIRE(combined.size() == 3);
-    for (const SsMarker& marker : combined) {
+    // The combined one overlays them, so every marker spans the whole plot.
+    const std::vector<SsMarker> full = overlaid.markers(SsColor{10.0f, 150.0f, 240.0f});
+    REQUIRE(full.size() == 3);
+    for (const SsMarker& marker : full) {
         CHECK(marker.kind == SS_MARKER_VALUE);
         CHECK(marker.band_from == Catch::Approx(0.0f));
         CHECK(marker.band_to == Catch::Approx(1.0f));
     }
+}
+
+TEST_CASE("Neither histogram can be configured into the other")
+{
+    // Each is defined by the plot it draws, so a stale `style` key from a file
+    // written before they were separate scopes must not move either off it -
+    // and a file naming a parameter no scope declares is never refused.
+    ScopeInstance banded = builtinModules().createInstance("org.sidescopes.histogram");
+    ScopeInstance overlaid = builtinModules().createInstance("org.sidescopes.histogram.combined");
+    REQUIRE(banded.valid());
+    REQUIRE(overlaid.valid());
+
+    REQUIRE(banded.configure(std::vector<SsParamValue>{{"style", 1.0}}));
+    REQUIRE(overlaid.configure(std::vector<SsParamValue>{{"style", 0.0}}));
+
+    CHECK(banded.markers(SsColor{10.0f, 150.0f, 240.0f})[1].band_to == Catch::Approx(2.0f / 3.0f));
+    CHECK(overlaid.markers(SsColor{10.0f, 150.0f, 240.0f})[1].band_to == Catch::Approx(1.0f));
 }
 
 TEST_CASE("The waveform's colored luma keeps the trace's own hue")

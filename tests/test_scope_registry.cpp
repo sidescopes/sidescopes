@@ -1,8 +1,11 @@
 #include <catch2/catch_test_macros.hpp>
 #include <cstdint>
 #include <fstream>
+#include <map>
 #include <sstream>
 #include <string>
+#include <string_view>
+#include <utility>
 #include <vector>
 
 #include "app/scope_registry.h"
@@ -71,30 +74,55 @@ TEST_CASE("The module registry orders the built-ins canonically in every build")
     // back in file-name order. The registry imposes one canonical order over
     // both, so this holds identically in the static and dynamic configurations.
     const std::vector<RegisteredScope>& scopes = builtinModules().scopes();
-    REQUIRE(scopes.size() == 4);
+    REQUIRE(scopes.size() == 5);
     CHECK(std::string(scopes[0].descriptor->id) == "org.sidescopes.vectorscope");
     CHECK(std::string(scopes[1].descriptor->id) == "org.sidescopes.waveform");
     CHECK(std::string(scopes[2].descriptor->id) == "org.sidescopes.parade");
     CHECK(std::string(scopes[3].descriptor->id) == "org.sidescopes.histogram");
+    CHECK(std::string(scopes[4].descriptor->id) == "org.sidescopes.histogram.combined");
+}
+
+TEST_CASE("A scope shares its family with everything its module registers")
+{
+    // The families are what stop a scope being given an image size of its own.
+    // Two scopes of one module wrap one engine at one geometry and share one
+    // set of bins, so the host has to decide their size together - and a
+    // member the list leaves out is handed its own, which DRAWS CORRECTLY
+    // while re-laying those bins at every scope of every frame. Nothing else
+    // would fail if the list fell behind the module.
+    std::map<const SsModuleEntry*, std::pair<bool, bool>> families;
+    for (const RegisteredScope& scope : builtinModules().scopes()) {
+        const std::string_view id = scope.descriptor->id;
+        const std::pair<bool, bool> family{inWaveformFamily(id), inHistogramFamily(id)};
+        const auto seen = families.find(scope.module);
+        if (seen == families.end()) {
+            families.emplace(scope.module, family);
+            continue;
+        }
+        INFO("scope " << id << " is in a different family from its module's first scope");
+        CHECK(seen->second == family);
+    }
 }
 
 TEST_CASE("The scope registry lists the built-ins then the color picker")
 {
     const ScopeRegistry registry{builtinModules()};
     const std::vector<HostScope>& scopes = registry.scopes();
-    REQUIRE(scopes.size() == 5);
+    REQUIRE(scopes.size() == 6);
 
     CHECK(scopes[0].id == "org.sidescopes.vectorscope");
     CHECK(scopes[1].id == "org.sidescopes.waveform");
     CHECK(scopes[2].id == "org.sidescopes.parade");
     CHECK(scopes[3].id == "org.sidescopes.histogram");
-    CHECK(scopes[4].id == "org.sidescopes.colorpicker");
+    CHECK(scopes[4].id == "org.sidescopes.histogram.combined");
+    CHECK(scopes[5].id == "org.sidescopes.colorpicker");
 
     CHECK(scopes[0].letter == 'V');
     CHECK(scopes[1].letter == 'W');
     CHECK(scopes[2].letter == 'R');
     CHECK(scopes[3].letter == 'H');
-    CHECK(scopes[4].letter == 'C');
+    CHECK(scopes[4].letter == 'G');
+    CHECK(scopes[5].letter == 'C');
 }
 
 TEST_CASE("The scope registry resolves scopes by id, letter, and index")
@@ -114,7 +142,7 @@ TEST_CASE("The scope registry resolves scopes by id, letter, and index")
 
     CHECK(registry.indexOf("org.sidescopes.vectorscope") == 0);
     CHECK(registry.indexOf("org.sidescopes.histogram") == 3);
-    CHECK(registry.indexOf("org.sidescopes.colorpicker") == 4);
+    CHECK(registry.indexOf("org.sidescopes.colorpicker") == 5);
     CHECK(registry.indexOf("org.sidescopes.nonesuch") == -1);
 }
 

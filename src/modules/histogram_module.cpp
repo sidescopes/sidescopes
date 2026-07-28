@@ -1,8 +1,11 @@
-// The RGB histogram behind the module boundary. Alongside the adaptive
-// image size every scope carries, it exports the outline extension: the
-// engine's normalized curve heights, which the host strokes at display
-// resolution over the filled texture. The engine stays idiomatic C++;
-// only this file speaks both languages, and no exception ever crosses.
+// One module, two scopes: the per-channel histogram and the combined one
+// both wrap the same engine behind the C vtable. Each is defined by the
+// style it draws, so neither needs a parameter for what it always is.
+// Alongside the adaptive image size every scope carries, both export the
+// outline extension: the engine's normalized curve heights, which the host
+// strokes at display resolution over the filled texture. The engine stays
+// idiomatic C++; only this file speaks both languages, and no exception
+// ever crosses.
 
 #include <algorithm>
 #include <cstring>
@@ -46,10 +49,6 @@ bool configure(SsScopeInstance* instance, const SsParamValue* values, uint32_t c
             const SsParamValue& value = values[index];
             if (std::strcmp(value.key, "stride") == 0) {
                 self->settings.samplingStride = static_cast<int>(value.value);
-            } else if (std::strcmp(value.key, "style") == 0) {
-                // Choice 0 is the per-channel default; 1 overlays the
-                // channels additively into one combined plot.
-                self->settings.style = value.value < 0.5 ? HistogramStyle::PerChannel : HistogramStyle::Combined;
             }
         }
         self->engine.configure(self->settings);
@@ -179,12 +178,11 @@ void destroy(SsScopeInstance* instance)
     delete impl(instance);
 }
 
-const char* const StyleChoices[] = {"Per Channel", "Combined", nullptr};
-
 const SsParamInfo Params[] = {
     {"stride", "Sampling stride", SS_PARAM_INT, 1.0, 8.0, 1.0, 0.0, nullptr, nullptr},
-    {"style", "Style", SS_PARAM_CHOICE, 0.0, 1.0, 0.0, 0.0, "Histogram Style", StyleChoices},
 };
+
+constexpr uint32_t ParamCount = static_cast<uint32_t>(sizeof(Params) / sizeof(Params[0]));
 
 const SsScopeDescriptor HistogramDescriptor{
     "org.sidescopes.histogram",
@@ -194,7 +192,23 @@ const SsScopeDescriptor HistogramDescriptor{
     Histogram::Height,
     0u,
     Params,
-    static_cast<uint32_t>(sizeof(Params) / sizeof(Params[0])),
+    ParamCount,
+    2.0f,
+};
+
+// The same measurement drawn a second way: three channels overlaid over the
+// full height rather than stacked in bands. Its own scope rather than a style
+// because a photographer reads overlap on one and exact per-channel shapes on
+// the other, and wants both on screen.
+const SsScopeDescriptor CombinedDescriptor{
+    "org.sidescopes.histogram.combined",
+    "Combined Histogram",
+    'G',
+    Histogram::ImageWidth,
+    Histogram::Height,
+    0u,
+    Params,
+    ParamCount,
     2.0f,
 };
 
@@ -209,22 +223,34 @@ void moduleDeinit()
 
 uint32_t scopeCount()
 {
-    return 1;
+    return 2;
 }
 
 const SsScopeDescriptor* descriptor(uint32_t index)
 {
-    return index == 0 ? &HistogramDescriptor : nullptr;
+    if (index == 0) {
+        return &HistogramDescriptor;
+    }
+    if (index == 1) {
+        return &CombinedDescriptor;
+    }
+
+    return nullptr;
 }
 
 SsScopeInstance* create(const char* scopeId, const SsHost* host)
 {
     try {
-        if (std::strcmp(scopeId, HistogramDescriptor.id) != 0) {
+        const bool perChannel = std::strcmp(scopeId, HistogramDescriptor.id) == 0;
+        const bool combined = std::strcmp(scopeId, CombinedDescriptor.id) == 0;
+        if (!perChannel && !combined) {
             return nullptr;
         }
 
         auto* self = new HistogramInstance;
+        // Which scope this is decides the style, and no configuration path may
+        // move either off the plot it exists to draw.
+        self->settings.style = combined ? HistogramStyle::Combined : HistogramStyle::PerChannel;
         // Push the constructed defaults through the engine explicitly, so the
         // instance never relies on the engine's own ctor defaults matching.
         self->engine.configure(self->settings);

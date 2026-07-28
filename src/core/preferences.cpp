@@ -13,6 +13,7 @@
 
 #include "core/environment.h"
 #include "core/scopes/scope_types.h"
+#include "core/style_promotion.h"
 
 namespace sidescopes {
 namespace {
@@ -670,6 +671,11 @@ Preferences loadPreferences(const std::filesystem::path& file)
     readInt(values, "window_y", preferences.windowY);
     readInt(values, "window_width", preferences.windowWidth);
     readInt(values, "window_height", preferences.windowHeight);
+
+    // Last, because it rewrites what every read above produced: the stack, the
+    // order, each preset, the weights and the shortcut overrides all state
+    // arrangements in the vocabulary it translates.
+    promoteScopeStyles(preferences);
 
     return preferences;
 }

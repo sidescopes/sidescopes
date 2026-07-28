@@ -19,12 +19,15 @@ struct PaneSize
     float height = 0.0f;
 };
 
-/// The panes the measured scopes last drew at. The waveform and the parade
-/// share one image, so both are measured and the larger decides.
+/// The panes the measured scopes last drew at, one size per scope FAMILY: the
+/// scopes of a family share one image, so the largest pane any of them got is
+/// what the ladder reads. Stated per family rather than per scope because a
+/// member given an image size of its own draws correctly while reallocating
+/// megabytes at every scope of every frame - working code with the cost hidden
+/// inside it - and a struct with no room for that size cannot express it.
 struct ScopePaneSizes
 {
     PaneSize waveform;
-    PaneSize parade;
     PaneSize histogram;
     PaneSize vectorscope;
 };
@@ -33,9 +36,10 @@ struct ScopePaneSizes
 /// force.
 struct DetailSizes
 {
-    /// The waveform image, columns by levels; the parade shares it.
+    /// The waveform image, columns by levels; every waveform-family scope
+    /// shares it.
     std::pair<int, int> waveform;
-    /// The histogram image, bins by height.
+    /// The histogram image, bins by height; both histograms share it.
     std::pair<int, int> histogram;
     /// The vectorscope image, square.
     int vectorscope = 0;
@@ -113,14 +117,15 @@ public:
     [[nodiscard]] std::optional<DetailSizes> update(const ScopePaneSizes& panes, float density,
                                                     std::optional<AnalysisWorker::FrameSize> frameSize, double now);
 
-    /// The waveform's desired image, columns by levels, for the panes in
+    /// The waveform family's desired image, columns by levels, for the panes in
     /// @p panePixels. @p regionWidth caps the columns at what the region can
     /// populate; 0 means no frame yet and no cap. Stays at the resolution in
-    /// force while neither the waveform nor the parade is on screen.
+    /// force while no member of the family is on screen.
     [[nodiscard]] std::pair<int, int> desiredWaveformSize(const ScopePaneSizes& panePixels, int regionWidth) const;
 
-    /// The histogram's desired image, bins by height, for the pane in
-    /// @p panePixels. Stays at the resolution in force while it is off screen.
+    /// The histogram family's desired image, bins by height, for the panes in
+    /// @p panePixels. Stays at the resolution in force while neither is on
+    /// screen.
     [[nodiscard]] std::pair<int, int> desiredHistogramSize(const ScopePaneSizes& panePixels) const;
 
     /// The vectorscope's desired image edge for the pane in @p panePixels.

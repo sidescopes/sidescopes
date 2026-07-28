@@ -73,7 +73,9 @@ TEST_CASE("A saved session round-trips through the live objects")
     const Preferences written = capturePreferences(live.view, live.pins, live.shortcuts, live.analysis);
 
     CHECK(written.scopeStack == saved.scopeStack);
-    CHECK(written.scopeOrder == saved.scopeOrder);
+    // The order names five of the scopes; any the file leaves out follow the
+    // ones it names, so what comes back opens with what went in.
+    CHECK(written.scopeOrder.rfind(saved.scopeOrder, 0) == 0);
     CHECK(written.graticuleStrength == saved.graticuleStrength);
     CHECK(written.vectorscopeZoom == saved.vectorscopeZoom);
     CHECK(written.layoutOrientation == saved.layoutOrientation);

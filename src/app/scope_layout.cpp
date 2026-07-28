@@ -83,10 +83,10 @@ float preferredScopeAspect(const std::string& scopeId)
 {
     // Dogfood-tuned starting points, not measurements: the wide traces want
     // width far more than height, the vectorscope is square by construction.
-    if (scopeId == WaveformScopeId || scopeId == ParadeScopeId) {
+    if (inWaveformFamily(scopeId)) {
         return 3.0f;
     }
-    if (scopeId == HistogramScopeId) {
+    if (inHistogramFamily(scopeId)) {
         return 2.0f;
     }
     if (scopeId == VectorscopeScopeId) {

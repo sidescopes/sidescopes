@@ -726,10 +726,11 @@ TEST_CASE("AnalysisWorker routes every enabled scope and skips the disabled one"
     CHECK(brightestPixel(output.images.at(ParadeId)) != std::pair<int, int>{-1, -1});
     CHECK(brightestPixel(output.images.at(HistogramId)) != std::pair<int, int>{-1, -1});
 
-    // The histogram outline rides alongside its image: three channels of
-    // 256 bin heights, at least one of them raised.
-    REQUIRE(output.histogramOutline.size() == static_cast<std::size_t>(3) * 256);
-    CHECK(*std::max_element(output.histogramOutline.begin(), output.histogramOutline.end()) > 0.0f);
+    // The histogram outline rides alongside its image, under its own id:
+    // three channels of 256 bin heights, at least one of them raised.
+    const std::vector<float>& outline = output.outlines.at(HistogramId);
+    REQUIRE(outline.size() == static_cast<std::size_t>(3) * 256);
+    CHECK(*std::max_element(outline.begin(), outline.end()) > 0.0f);
 }
 
 TEST_CASE("AnalysisWorker sampleDisplayColor honors the averaging radius")

@@ -103,15 +103,16 @@ TEST_CASE("Preferences read the legacy trace response and drop the matrix")
 
 TEST_CASE("Preferences invert the legacy per-channel histogram flag")
 {
-    // The retired bool is stored 1 for per-channel, which is style choice 0;
-    // and 0 for combined, which is style choice 1.
+    // The retired bool is stored 1 for per-channel and 0 for combined, and
+    // reads out as the scope each of those became: the two migrations compose,
+    // so a file two formats old still lands on the right letter.
     const TempFile perChannel("legacy-hist-on.txt");
-    perChannel.write("histogram_per_channel=1\n");
-    CHECK(param(loadPreferences(perChannel.path()), HistogramId, "style") == 0.0);
+    perChannel.write("scope_stack=VH\nhistogram_per_channel=1\n");
+    CHECK(loadPreferences(perChannel.path()).scopeStack == "VH");
 
     const TempFile combined("legacy-hist-off.txt");
-    combined.write("histogram_per_channel=0\n");
-    CHECK(param(loadPreferences(combined.path()), HistogramId, "style") == 1.0);
+    combined.write("scope_stack=VH\nhistogram_per_channel=0\n");
+    CHECK(loadPreferences(combined.path()).scopeStack == "VG");
 }
 
 TEST_CASE("Preferences map the legacy waveform mode to a style choice")
@@ -328,7 +329,10 @@ TEST_CASE("Preferences load a whole legacy file to the same live state")
     CHECK(param(loaded, ParadeId, "gain") == 0.08);   // mirrors the waveform
     CHECK(param(loaded, ParadeId, "stride") == 1.0);
     CHECK(param(loaded, HistogramId, "stride") == 3.0);
-    CHECK(param(loaded, HistogramId, "style") == 0.0);  // per-channel inverts to choice 0
+    // The retired per-channel flag reads as the scope it names rather than as
+    // a style: it survives in the stack's letter, and the key itself is gone,
+    // so a later load cannot read it a second time.
+    CHECK(param(loaded, HistogramId, "style") == -1.0);
     CHECK(loaded.scopeStack == "VWH");
     CHECK(loaded.graticuleStrength == 0.75f);
     CHECK(loaded.vectorscopeZoom == 2);
@@ -502,8 +506,8 @@ TEST_CASE("Preferences round-trip a saved layout preset")
     saved.layoutPresets[0].orientation = 1;  // vertical
     saved.layoutPresets[0].weights[VectorscopeId] = 3.0;
     saved.layoutPresets[0].weights[HistogramId] = 0.75;
-    saved.layoutPresets[0].styles[VectorscopeId]["matrix"] = 0.0;
-    saved.layoutPresets[0].styles[HistogramId]["style"] = 1.0;
+    saved.layoutPresets[0].styles[VectorscopeId]["response"] = 1.0;
+    saved.layoutPresets[0].styles[VectorscopeId]["stride"] = 2.0;
     saved.layoutPresets[4].stack = "C";  // slot 5, another used slot
 
     const TempFile file("layout-presets.txt");
@@ -514,8 +518,8 @@ TEST_CASE("Preferences round-trip a saved layout preset")
     CHECK(loaded.layoutPresets[0].orientation == 1);
     CHECK(loaded.layoutPresets[0].weights.at(VectorscopeId) == 3.0);
     CHECK(loaded.layoutPresets[0].weights.at(HistogramId) == 0.75);
-    CHECK(loaded.layoutPresets[0].styles.at(VectorscopeId).at("matrix") == 0.0);
-    CHECK(loaded.layoutPresets[0].styles.at(HistogramId).at("style") == 1.0);
+    CHECK(loaded.layoutPresets[0].styles.at(VectorscopeId).at("response") == 1.0);
+    CHECK(loaded.layoutPresets[0].styles.at(VectorscopeId).at("stride") == 2.0);
     CHECK(loaded.layoutPresets[4].stack == "C");
     // Unused slots write nothing and reload empty, and a preset without
     // styles keeps its empty map rather than inventing keys.
@@ -603,13 +607,15 @@ TEST_CASE("Preferences drop malformed preset style pairs")
     const TempFile file("layout-bad-styles.txt");
     file.write(
         "layout.preset1.stack=VH\n"
-        "layout.preset1.styles=org.sidescopes.vectorscope.matrix:0,garbage,nodot:2,.style:1,"
-        "org.sidescopes.histogram.style:1\n");
+        "layout.preset1.styles=org.sidescopes.vectorscope.response:1,garbage,nodot:2,.style:1,"
+        "org.sidescopes.nonesuch.style:1\n");
 
+    // Core does not know which scopes exist, so it judges a pair's FORM and
+    // nothing else: an id no build has ever registered survives the read.
     const Preferences loaded = loadPreferences(file.path());
     CHECK(loaded.layoutPresets[0].styles.size() == 2);
-    CHECK(loaded.layoutPresets[0].styles.at(VectorscopeId).at("matrix") == 0.0);
-    CHECK(loaded.layoutPresets[0].styles.at(HistogramId).at("style") == 1.0);
+    CHECK(loaded.layoutPresets[0].styles.at(VectorscopeId).at("response") == 1.0);
+    CHECK(loaded.layoutPresets[0].styles.at("org.sidescopes.nonesuch").at("style") == 1.0);
 }
 
 TEST_CASE("Preferences skip empty preset slots in the file")

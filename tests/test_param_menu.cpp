@@ -153,19 +153,20 @@ TEST_CASE("A lone choice is a Style submenu unprefixed but flattens when nested"
     }
 }
 
-TEST_CASE("The histogram style choice strips its prefix like the waveform")
+TEST_CASE("Neither histogram contributes a menu option of its own")
 {
+    // The two plots are scopes now rather than one scope's style, so neither
+    // declares a choice parameter and a generic walk over either emits
+    // nothing. A style menu here would offer a scope the chance to become the
+    // other one.
     const ScopeRegistry registry{builtinModules()};
-    std::vector<NativeMenuItem> items;
-    std::vector<ParamMenuAction> actions;
-
-    appendScopeChoiceMenus(*descriptorOf(registry, HistogramScopeId), {}, false, items, actions);
-    REQUIRE(items.size() == 4);
-    CHECK(items[0].label == "Style");  // "Histogram Style" stripped
-    CHECK(items[1].label == "Per Channel");
-    CHECK(items[1].checked);  // style defaults to Per Channel (choice 0)
-    CHECK(items[2].label == "Combined");
-    CHECK(items[3].kind == Kind::SubmenuEnd);
+    for (const std::string_view id : {HistogramScopeId, CombinedHistogramScopeId}) {
+        std::vector<NativeMenuItem> items;
+        std::vector<ParamMenuAction> actions;
+        appendScopeChoiceMenus(*descriptorOf(registry, id), {}, false, items, actions);
+        CHECK(items.empty());
+        CHECK(actions.empty());
+    }
 }
 
 TEST_CASE("The parade contributes no menu options of its own")
@@ -187,16 +188,16 @@ TEST_CASE("Side-table ids continue across scopes in one menu build")
     std::vector<NativeMenuItem> items;
     std::vector<ParamMenuAction> actions;
 
-    // A stack of waveform then histogram, each nested under its own name.
+    // A stack of waveform then vectorscope, each nested under its own name.
     appendScopeChoiceMenus(*descriptorOf(registry, WaveformScopeId), {}, true, items, actions);
-    appendScopeChoiceMenus(*descriptorOf(registry, HistogramScopeId), {}, true, items, actions);
+    appendScopeChoiceMenus(*descriptorOf(registry, VectorscopeScopeId), {}, true, items, actions);
 
-    REQUIRE(actions.size() == 5);  // three waveform modes, two histogram styles
+    REQUIRE(actions.size() == 5);  // three waveform modes, two trace responses
     CHECK(actions[0].scopeId == "org.sidescopes.waveform");
     CHECK(actions[0].paramKey == "mode");
-    CHECK(actions[3].scopeId == "org.sidescopes.histogram");
-    CHECK(actions[3].paramKey == "style");
-    // The histogram's first action id follows the waveform's three.
+    CHECK(actions[3].scopeId == "org.sidescopes.vectorscope");
+    CHECK(actions[3].paramKey == "response");
+    // The vectorscope's first action id follows the waveform's three.
     CHECK(items.back().actionId == ParamMenuActionBase + 4);
 }
 
