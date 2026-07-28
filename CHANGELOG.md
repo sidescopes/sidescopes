@@ -4,19 +4,76 @@ All notable changes to this project are documented in this file. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.5.0] - 2026-07-28
 
-### Removed
+### Added
 
-- The vectorscope's Matrix choice. It measures with BT.709 always. sRGB
-  shares Rec.709's primaries and BT.709's coefficients come from those
-  primaries, while BT.601's come from 1953 NTSC phosphors, so for screen
-  content BT.601 was not an alternative but a wrong reading. A
-  preferences file that still names it loads unchanged and measures with
-  BT.709.
+- The luma waveform is a scope of its own, on L, beside the RGB waveform
+  on W. One reads exposure and the other reads balance, and both can
+  stand on screen at once instead of one replacing the other. Luma
+  (Colored) stays a style on the luma scope. A file written while the
+  two shared one scope is read by the style it saved: whichever trace
+  that W meant is the scope it becomes, across the stack, the menu
+  order, every preset, the pane weights and the shortcut overrides, and
+  the luma scope inherits the intensity, sampling and smoothing the
+  waveform was tuned with.
+- The combined histogram is a scope of its own, on G, beside the
+  per-channel histogram on H. One shows where the channels overlap, the
+  other their exact shapes with nothing occluding them, and a
+  photographer wants both. H keeps the per-channel plot, so an untouched
+  install sees no change, and a file written while the two shared one
+  scope is carried over the way the waveforms are.
+- A Quality choice in the right-click menu. Standard is the default and
+  is what every earlier build did. High reads the screen twenty times a
+  second instead of fifteen, keeps full detail under the hand while a
+  region is dragged, and computes the vectorscope image and the
+  histogram plot at a finer step on a smaller pane. It buys nothing on
+  the axes where measurement showed no difference. The preferences key
+  is `quality`.
+- A scope selector in place of the letter chips: a button whose popup
+  lists every registered scope with a checkbox, the shown ones leading.
+  The letters go on working as shortcuts.
+- A UI Scaling submenu, from 50% to 200% around Default. It multiplies
+  the system scale rather than replacing it, so the operating system's
+  own per-monitor scaling still leads and a window keeps the preference
+  as it crosses displays.
+- macOS reads the screen at ten bits a channel where the compositor
+  offers them. The vectorscope is where it shows: a smooth gradient's
+  chroma resolves into distinct positions instead of collapsing onto the
+  eight-bit lattice, which is where banding was visible in the first
+  place. The waveform and the histogram plot into 256 levels and are
+  unchanged. This carries no HDR range - highlights clip where they
+  clipped before - and a system that declines the deeper format degrades
+  to whatever it does send. Windows is unchanged.
+- A diagnostic recording now opens by stating what is already true - the
+  capture format, its crop and its cadence, the scopes on offer and the
+  letters they hold - rather than recording only what changes after it
+  starts. The scope modules report on a `modules` channel, so a module
+  that failed to load, or one built for another ABI, reaches the log
+  instead of a console nobody can be asked to look at.
+- `SIDESCOPES_PREFS_FILE` places the preferences file, so a throwaway
+  instance can take its own scope stack and window placement without
+  disturbing the real one.
 
 ### Changed
 
+- The scopes read only a region you have selected. With none they stay
+  empty, keeping their graticule, and the markers and color readout go on
+  following the pointer anywhere on screen, so a color can still be
+  measured against the graticule with nothing selected.
+- Escape, the last region tool, and the right-click menu clear the region
+  instead of returning it to the whole screen. The menu entry is Clear
+  Region, and the preferences key is `shortcut_clear_region`.
+- The application spends processor time only on what changed. With no
+  region selected it captures, analyzes and draws nothing at all, and it
+  stands down the same way while the window is hidden or minimized,
+  while the display sleeps, and while the screen is locked. Capture is
+  cropped to the region instead of taking the whole display, the
+  interface redraws at most twenty times a second, and presentation
+  stops outright while nothing can move. An idle session costs a small
+  fraction of a processor core where it used to cost more than two, and
+  holds substantially less memory. Most of that is work that no longer
+  happens rather than work made faster.
 - The scope selector holds one stable order. It lists every scope,
   shown or not, so checking and unchecking several never moves a row
   under the pointer, and dragging a row sets an order that persists and
@@ -32,29 +89,63 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - A preset saved by an earlier build can show the drift star as soon as
   it is loaded: the panes follow the scope order now, not the sequence
   the preset recorded. Saving over the slot settles it.
-- The scopes read only a region you have selected. With none they stay
-  empty, keeping their graticule, and the markers and color readout go on
-  following the pointer anywhere on screen, so a color can still be
-  measured against the graticule with nothing selected.
-- Escape, the last region tool, and the right-click menu clear the region
-  instead of returning it to the whole screen. The menu entry is Clear
-  Region, and the preferences key is `shortcut_clear_region`.
 - The graticule has a strength instead of an on/off: the right-click menu
   offers Faint, Soft, Normal and Bold, dimming lines, rings, target
   boxes and labels together so it can be quietened over a busy trace.
   The steps climb in that order, Normal is the strength the scopes are
   graded at, the faintest still reads, and the preferences key is
   `graticule_strength`.
-- Moving an attached window holds the scopes on their last reading until
-  it lands, instead of analysing a region in transit. Moving the region
-  itself goes on reading live, at a coarser image while it is moving -
-  except the waveform, which keeps every column so a highlight or a skin
-  tone stays where it is while you scan for it.
+- A region being dragged is followed by its border as it moves, rather
+  than trailing the hand by a frame or two. Moving an attached window
+  holds the scopes on their last reading until it lands, instead of
+  analyzing a region in transit. Moving the region itself goes on
+  reading live, at a coarser image while it is moving - except the
+  waveform, which keeps every column so a highlight or a skin tone stays
+  where it is while you scan for it.
+- A transient status message stands for five seconds again. It sits in
+  the bottom bar over the live readout, so it has to be read in one
+  glance, and two seconds was not enough for a sentence. The two notices
+  an attached region leaves - a window closing out from under it, a lost
+  face - now appear there with every other message instead of above the
+  panes.
 
 ### Removed
 
 - The full-screen region and the Watch Full Screen action. A session
   starts with nothing selected rather than with the whole display.
+- The vectorscope's Matrix choice. It measures with BT.709 always. sRGB
+  shares Rec.709's primaries and BT.709's coefficients come from those
+  primaries, while BT.601's come from 1953 NTSC phosphors, so for screen
+  content BT.601 was not an alternative but a wrong reading. A
+  preferences file that still names it loads unchanged and measures with
+  BT.709.
+
+### Fixed
+
+- Windows: the region border stays above windows that open after it.
+  Topmost there is a position in the stacking order rather than a
+  property that holds, so a window entering the band afterwards took the
+  place above the border and kept it until the region itself changed.
+- Windows: the desktop is no longer offered as a window to scope. It
+  passes every rule the listing applies, and because it belongs to the
+  same process as every File Explorer window and is larger than all of
+  them, offering it also dropped those windows from the picker.
+- Windows: a cloaked window - a suspended store app, or one on another
+  virtual desktop - no longer answers as the window in focus, which left
+  an attached region following nothing on screen.
+- A column of one flat tone no longer dims the rest of the waveform or
+  the parade. Sliding a region a few pixels off the picture onto the
+  editor's chrome raised the ceiling the trace is normalized against
+  several fold, dimming everything else by a quarter.
+- The color readout reads at full strength away from the captured
+  stream. A one-shot screen sample comes back letterboxed, and averaging
+  its padding in reported every color at the fraction of the buffer the
+  content covered - white read as 56% on a 16:9 display. This affected
+  displays other than the one being captured.
+- macOS: the keyboard comes back when an overlay hides. Finishing a pick
+  - a confirming click or drag as much as Escape - or clicking the
+  region border's band left the application with no key window, and
+  every shortcut dead until a window was clicked again.
 
 ## [0.4.0] - 2026-07-22
 
