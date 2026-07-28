@@ -4,7 +4,7 @@
 // which SideScopes is used.
 //
 //   content_window --rect X,Y,W,H [--pattern NAME[,NAME...]] [--image PATH[,PATH...]]
-//                  [--mode still|switch|animate] [--period SECONDS] [--fps N]
+//                  [--mode still|switch|animate|video] [--period SECONDS] [--fps N]
 //                  [--title TEXT]
 //
 // The rectangle is the CONTENT rectangle in the global point space the pointer
@@ -45,6 +45,15 @@ static const double PanSurplus = 1.25;
 // The fraction of an image the window shows at once, the reciprocal of the
 // surplus, so that content is displayed at one image pixel per screen pixel.
 static const double PanWindow = 1.0 / PanSurplus;
+
+// How far the video mode's pan travels between frames, in image pixels. A
+// constant whole number of them, so that every frame the application captures
+// differs from the one before by construction rather than by luck of geometry.
+// The animate mode's pan follows a sine and slows to nothing at each turning
+// point, so how much of it moves less than a pixel a frame depends on the
+// window size it is given - and a frame that did not move is one the
+// application is right to skip, which is not what watching footage costs.
+static const double VideoPanPixelsPerFrame = 4.0;
 
 #pragma mark - Deterministic noise
 
@@ -352,6 +361,12 @@ static CGImageRef newImageFromFile(NSString* path, size_t width, size_t height)
 @property(nonatomic, strong) NSMutableArray* images;  // CGImageRef, boxed as id
 @property(nonatomic, assign) NSUInteger index;
 @property(nonatomic, assign) double phase;
+// Where the video mode's pan has reached, in image pixels, and which way it is
+// going. Held in pixels rather than in the layer's normalized units so that the
+// step per frame is a whole number of pixels whatever the image size.
+@property(nonatomic, assign) double panPixels;
+@property(nonatomic, assign) double panDirection;
+@property(nonatomic, assign) double panTravelPixels;
 @property(nonatomic, assign) pid_t parent;
 @end
 
@@ -384,6 +399,32 @@ static CGImageRef newImageFromFile(NSString* path, size_t width, size_t height)
     self.phase += 0.06;
     const double surplus = 1.0 - PanWindow;
     const double offset = surplus * 0.5 * (1.0 + sin(self.phase));
+    CALayer* layer = self.window.contentView.layer;
+    [CATransaction begin];
+    [CATransaction setDisableActions:YES];
+    layer.contentsRect = CGRectMake(offset, 0.0, PanWindow, 1.0);
+    [CATransaction commit];
+}
+
+// Pans at a CONSTANT speed, turning round at each end of the surplus, which is
+// the difference between this and advancePan: a constant speed has no turning
+// point at which the content stands still, so every frame the application
+// captures really is different from the one before. Watching footage is the one
+// workload where nothing the application skips can be skipped, and a scenario
+// meant to price that must not hand it frames it is entitled to skip.
+- (void)advanceVideo:(NSTimer*)timer
+{
+    (void)timer;
+    self.panPixels += VideoPanPixelsPerFrame * self.panDirection;
+    if (self.panPixels >= self.panTravelPixels) {
+        self.panPixels = self.panTravelPixels;
+        self.panDirection = -1.0;
+    } else if (self.panPixels <= 0.0) {
+        self.panPixels = 0.0;
+        self.panDirection = 1.0;
+    }
+    const double surplus = 1.0 - PanWindow;
+    const double offset = self.panTravelPixels > 0.0 ? surplus * (self.panPixels / self.panTravelPixels) : 0.0;
     CALayer* layer = self.window.contentView.layer;
     [CATransaction begin];
     [CATransaction setDisableActions:YES];
@@ -563,6 +604,12 @@ static void startTimers(ContentController* controller, const Options* options)
                                        selector:@selector(advancePan:)
                                        userInfo:nil
                                         repeats:YES];
+    } else if (strcmp(options->mode, "video") == 0) {
+        [NSTimer scheduledTimerWithTimeInterval:1.0 / fmax(options->fps, 1.0)
+                                         target:controller
+                                       selector:@selector(advanceVideo:)
+                                       userInfo:nil
+                                        repeats:YES];
     }
 }
 
@@ -615,8 +662,18 @@ int main(int argc, const char** argv)
         controller.window = window;
         controller.images = images;
         controller.parent = getppid();
+        // The video pan's travel, in the image's own pixels. Reported below so
+        // that a run records how far the content moved between frames rather
+        // than leaving a reader to work it out from three constants.
+        controller.panTravelPixels =
+            floor((1.0 - PanWindow) * (double)CGImageGetWidth((__bridge CGImageRef)images[0]));
+        controller.panDirection = 1.0;
         [controller showImageAtIndex:0];
         startTimers(controller, &options);
+        if (strcmp(options.mode, "video") == 0) {
+            // Before the ready line, which is where the caller stops reading.
+            printf("pan %.0f,%.0f,%.1f\n", VideoPanPixelsPerFrame, controller.panTravelPixels, options.fps);
+        }
         reportReady(window, images.count);
 
         [NSApp run];

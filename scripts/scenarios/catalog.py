@@ -33,6 +33,13 @@ SCOPE_LETTERS = {
 # make that phrase mean two different things.
 DEFAULT_STACKS = ("W", "WVR", "VWRHC")
 
+# The rate the video scenario plays at. Cinema's frame rate rather than the
+# display's: the case being priced is a colourist watching footage, and what the
+# application costs there is set by the fact that every frame it captures is a
+# different one - not by how fast the source runs, as long as it runs faster
+# than the capture cadence.
+VIDEO_FRAMES_PER_SECOND = 24.0
+
 
 class Profile:
     """A build's behaviour, as far as driving it is concerned."""
@@ -74,12 +81,16 @@ class Scenario:
     """
 
     def __init__(self, identifier, summary, content, region, action, seconds=15.0, needs=(), comparable=True,
-                 incomparable_reason="", from_launch=False):
+                 incomparable_reason="", from_launch=False, content_fps=None):
         self.id = identifier
         self.summary = summary
         self.content = content
         self.region = region
         self.action = action
+        # How often the content window advances, for the modes where the rate is
+        # part of what the scenario means. Video is watched at a frame rate, and
+        # a scenario that did not name one would be measuring an arbitrary one.
+        self.content_fps = content_fps
         self.seconds = seconds
         self.needs = frozenset(needs)
         self.comparable = comparable
@@ -102,7 +113,7 @@ class Scenario:
         the detector is right to skip them. What that scenario costs is the
         tracking, not the analysis.
         """
-        return self.content in ("switch", "animate") or self.action in ("region-drag", "region-flick")
+        return self.content in ("switch", "animate", "video") or self.action in ("region-drag", "region-flick")
 
 
 SCENARIOS = (
@@ -124,6 +135,10 @@ SCENARIOS = (
     Scenario(
         "content-animate", "content under a static region changing every frame",
         "animate", "draw", "still",
+    ),
+    Scenario(
+        "video-watch", "a region over footage playing at 24 frames a second, the pointer parked",
+        "video", "draw", "still", content_fps=VIDEO_FRAMES_PER_SECOND,
     ),
     Scenario(
         "region-scan", "the region dragged back and forth across the content",

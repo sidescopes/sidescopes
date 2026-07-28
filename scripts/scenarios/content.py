@@ -163,9 +163,11 @@ class ContentWindow:
     region at that rather than at what they asked for.
     """
 
-    def __init__(self, binary, rect, content_set, mode="still", period=2.0):
+    def __init__(self, binary, rect, content_set, mode="still", period=2.0, fps=None):
         arguments = [str(binary), "--rect", ",".join(f"{value:.0f}" for value in rect), "--mode", mode,
                      "--period", str(period)]
+        if fps is not None:
+            arguments += ["--fps", str(fps)]
         if content_set.files:
             arguments += ["--image", ",".join(str(path) for path in content_set.files)]
         else:
@@ -173,6 +175,11 @@ class ContentWindow:
         self._process = subprocess.Popen(arguments, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         self.rect = rect
         self.pid = self._process.pid
+        # How far the video mode moves the content between frames, and over what
+        # travel, straight from the window that does the moving. A pan of under
+        # a pixel a frame would leave frames the application is entitled to skip,
+        # which is the one thing a video measurement must not contain.
+        self.pan = None
         self._read_header()
 
     def _read_header(self):
@@ -184,6 +191,9 @@ class ContentWindow:
             line = line.strip()
             if line.startswith("content_rect "):
                 self.rect = tuple(float(part) for part in line.split(" ", 1)[1].split(","))
+            elif line.startswith("pan "):
+                step, travel, fps = (float(part) for part in line.split(" ", 1)[1].split(","))
+                self.pan = {"pixels_per_frame": step, "travel_pixels": travel, "frames_per_second": fps}
             elif line == "ready":
                 return
         raise RuntimeError("the content window never reported itself ready")

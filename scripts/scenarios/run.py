@@ -135,7 +135,9 @@ def _run_one(scenario, stack, bundle, plan, guard, helper, content_set, diagnost
     tail = session.DiagnosticTail(diagnostics_path) if diagnostics_path else None
     try:
         if scenario.content is not None:
-            window = content_module.ContentWindow(helper, plan.content_rect, content_set, mode=scenario.content)
+            window = content_module.ContentWindow(helper, plan.content_rect, content_set, mode=scenario.content,
+                                                  fps=scenario.content_fps)
+            warnings.extend(_motion_complaints(scenario, window))
         region = plan.region_in(window.rect if window else plan.content_rect)
         # Park the pointer clear of both windows, so that a scenario which does
         # not move it starts from the same place every time.
@@ -174,6 +176,30 @@ def _run_one(scenario, stack, bundle, plan, guard, helper, content_set, diagnost
                 teardown()
             except Exception as failure:  # noqa: BLE001 - cleanup must not mask the original failure
                 print(f"    cleanup: {failure}", file=sys.stderr)
+
+
+def _motion_complaints(scenario, window):
+    """Why this run's content is not moving the way the scenario says it does.
+
+    The video scenario's whole claim is that every captured frame differs from
+    the one before, which is what makes it the case where nothing the
+    application skips can be skipped. A pan of under a pixel a frame would leave
+    frames identical and the application would rightly skip them - and the run
+    would report the cost of watching a still picture as the cost of watching
+    footage. So the window states what it is actually doing and this checks it,
+    rather than the constants being trusted from the source.
+    """
+    if scenario.content != "video":
+        return []
+    if window.pan is None:
+        return ["the content window did not report a pan, so this build of it cannot play video"]
+    print(f"    content pans {window.pan['pixels_per_frame']:.0f} px/frame over "
+          f"{window.pan['travel_pixels']:.0f} px at {window.pan['frames_per_second']:.0f}/s")
+    if window.pan["pixels_per_frame"] < 1.0 or window.pan["travel_pixels"] < 1.0:
+        return [f"the content pans {window.pan['pixels_per_frame']:.2f} pixels a frame over "
+                f"{window.pan['travel_pixels']:.0f}, so some frames are identical and this is not video"]
+
+    return []
 
 
 def _rows(result, build):
