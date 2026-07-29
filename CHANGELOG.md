@@ -4,37 +4,32 @@ All notable changes to this project are documented in this file. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.5.0] - 2026-07-28
+## [0.5.0] - 2026-07-29
 
 ### Added
 
 - The luma waveform is a scope of its own, on L, beside the RGB waveform
   on W. One reads exposure and the other reads balance, and both can
-  stand on screen at once instead of one replacing the other. Luma
-  (Colored) stays a style on the luma scope. A file written while the
-  two shared one scope is read by the style it saved: whichever trace
-  that W meant is the scope it becomes, across the stack, the menu
-  order, every preset and the pane weights, and the luma scope inherits
-  the intensity, sampling and smoothing the waveform was tuned with. A
-  rebound key stays on the scope it was bound to.
-- A Quality choice in the right-click menu. Standard is the default and
-  is what every earlier build did. High reads the screen twenty times a
-  second instead of fifteen, keeps full detail under the hand while a
-  region is dragged, and computes the vectorscope image and the
-  histogram plot at a finer step on a smaller pane. It buys nothing on
-  the axes where measurement showed no difference. The preferences key
-  is `quality`.
-- A scope selector in place of the letter chips: a button whose popup
-  lists every registered scope with a checkbox, the shown ones leading.
-  The letters go on working as shortcuts.
+  stand on screen at once instead of one replacing the other. Plain or
+  Colored is its own style choice; the waveform no longer carries one.
+- A scope selector in place of the letter chips: a toolbar button whose
+  popup lists every registered scope with a checkbox, and a row can be
+  dragged to set the order the panes follow. The letters go on working
+  as shortcuts.
+- A Quality choice in the right-click menu. Standard is the default.
+  High reads the screen twenty times a second rather than fifteen, keeps
+  full detail under the hand while a region is dragged, and computes the
+  vectorscope image and the histogram plot at a finer step on a smaller
+  pane. It buys nothing on the axes where measurement showed no
+  difference. The preferences key is `quality`.
 - A UI Scaling submenu, from 50% to 200% around Default. It multiplies
   the system scale rather than replacing it, so the operating system's
   own per-monitor scaling still leads and a window keeps the preference
   as it crosses displays. Until you choose a size, Default is the one
   the display's own density suggests rather than a flat 100%: a dense
-  laptop panel the system leaves unscaled opens at the 125% step instead
-  of waiting to be found in the menu, a display the system already
-  scales is left alone, and a size you have chosen is never overridden.
+  laptop panel the system leaves unscaled opens a step larger, a display
+  the system already scales is left alone, and a size you have chosen is
+  never overridden. The preferences key is `ui_scale_factor`.
 - macOS reads the screen at ten bits a channel where the compositor
   offers them. The vectorscope is where it shows: a smooth gradient's
   chroma resolves into distinct positions instead of collapsing onto the
@@ -43,66 +38,96 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   unchanged. This carries no HDR range - highlights clip where they
   clipped before - and a system that declines the deeper format degrades
   to whatever it does send. Windows is unchanged.
-- A diagnostic recording now opens by stating what is already true - the
-  capture format, its crop and its cadence, the scopes on offer and the
-  letters they hold - rather than recording only what changes after it
-  starts. The scope modules report on a `modules` channel, so a module
-  that failed to load, or one built for another ABI, reaches the log
-  instead of a console nobody can be asked to look at.
-- `SIDESCOPES_PREFS_FILE` places the preferences file, so a throwaway
-  instance can take its own scope stack and window placement without
-  disturbing the real one.
 - A Trace gamma slider for the vectorscope, in Settings beside its
   intensity and sampling. It sets how hard the middle of the trace is
   lifted towards the densest chroma in the frame: lower brings the
   sparse body of the cloud up, higher leaves it nearer its own density.
   The range is 0.40 to 1.40 and it ships at 0.65, which draws exactly
   what every earlier build drew, so an untouched install sees no change.
-  The preferences key is `org.sidescopes.vectorscope.gamma`.
-- Module ABI 0.5: a descriptor may declare a continuous parameter
-  bounded by its own minimum and maximum, which the host draws as a
-  slider.
+- A diagnostic recording opens by stating what is already true - the
+  capture format, its crop and its cadence, the scopes on offer and the
+  letters they hold - rather than recording only what changes after it
+  starts. Two channels join the others: `modules`, where a scope module
+  that failed to load or was built for another ABI reaches the log
+  instead of a console nobody can be asked to look at, and `interface`,
+  carrying the errors the interface toolkit reports about its own use. A
+  release build reports those into the log alone; the window it used to
+  raise over the application stays in development builds.
+- Documentation for the application in docs/: what each scope measures
+  and how to read it, the region tools and the border on the desktop,
+  the complete keyboard and mouse reference, and troubleshooting for
+  permissions, interrupted capture and diagnostic logs.
+- `SIDESCOPES_PREFS_FILE` places the preferences file, so a throwaway
+  instance can take its own scope stack and window placement without
+  disturbing the real one.
+- Module ABI 0.5. A frame states how its pixels are packed, and the
+  field carrying them is renamed, so a module built against this header
+  cannot go on reading a ten-bit frame as bytes. A descriptor may
+  declare a continuous parameter bounded by its own minimum and
+  maximum, which the host draws as a slider. Two host extensions:
+  accumulation scratch a scope borrows for the length of a pass instead
+  of holding for its life, and the sample thinning the quality levels
+  drive.
 
 ### Changed
 
 - The scopes read only a region you have selected. With none they stay
-  empty, keeping their graticule, and the markers and color readout go on
-  following the pointer anywhere on screen, so a color can still be
-  measured against the graticule with nothing selected.
-- Escape, the last region tool, and the right-click menu clear the region
-  instead of returning it to the whole screen. The menu entry is Clear
-  Region, and the preferences key is `shortcut_clear_region`.
+  empty, keeping their graticule, and the marker and the color readout
+  go on following the pointer anywhere on screen, so a color can still
+  be measured against the graticule with nothing selected.
+- Escape, the last region tool, and the right-click menu clear the
+  region instead of returning it to the whole screen. The menu entry is
+  Clear Region, and the preferences key is `shortcut_clear_region`.
 - The application spends processor time only on what changed. With no
   region selected it captures, analyzes and draws nothing at all, and it
   stands down the same way while the window is hidden or minimized,
   while the display sleeps, and while the screen is locked. Capture is
-  cropped to the region instead of taking the whole display, the
-  interface redraws at most twenty times a second, and presentation
-  stops outright while nothing can move. An idle session costs a small
-  fraction of a processor core where it used to cost more than two, and
-  holds substantially less memory. Most of that is work that no longer
-  happens rather than work made faster.
-- The scope selector holds one stable order. It lists every scope,
-  shown or not, so checking and unchecking several never moves a row
-  under the pointer, and dragging a row sets an order that persists and
-  that the panes follow - a scope switched back on returns to the place
-  it was left. The right-click Scopes list goes in the same order. The
-  preferences key is `scope_order`.
+  cropped to the region instead of taking the whole display, the screen
+  is read fifteen times a second rather than thirty, the interface
+  redraws at most twenty times a second, and presentation stops outright
+  while nothing can move. An idle session costs a small fraction of a
+  processor core where it used to cost more than two, and holds
+  substantially less memory. Most of that is work that no longer happens
+  rather than work made faster, though the analysis pass itself is
+  cheaper too.
+- The panes follow one order you keep, rather than the order the scopes
+  were switched on. The selector lists every scope, shown or not, so
+  checking and unchecking several never moves a row under the pointer,
+  and a scope switched back on returns to the place it was left. The
+  right-click Scopes list goes in the same order, and the order belongs
+  to the preset, so two slots can lay the same scopes out differently.
+  The preferences key is `scope_order`.
 - Preset slots go by name rather than by the letters of the scopes they
-  hold. A slot is called Preset 1 until it is renamed, which the pen
-  button at the end of its row in the picker does. The name persists,
-  survives a save over the slot, and can be given before the slot holds
-  a layout. The picker's rows and the right-click preset lists follow
-  the scope selector's shape and wording.
-- A preset saved by an earlier build can show the drift star as soon as
-  it is loaded: the panes follow the scope order now, not the sequence
-  the preset recorded. Saving over the slot settles it.
-- The graticule has a strength instead of an on/off: the right-click menu
-  offers Faint, Soft, Normal and Bold, dimming lines, rings, target
+  hold. A slot is called Preset 1 until it is renamed, which the pen at
+  the head of its row in the picker does. The name persists, survives a
+  save over the slot, and can be given before the slot holds a layout.
+- Saving a layout is one action aimed at different slots. The toolbar
+  carries a save button beside the preset picker: it lights when what is
+  on screen differs from the slot it came from and is dark when there is
+  nothing to save, which is the only place the interface says so - the
+  asterisk the preset chip carried is gone. Cmd+S, or Ctrl+S on Windows,
+  saves into the slot you are on and Shift with a digit into one you are
+  not, and neither moves you.
+- What is on screen is kept whether or not it has been saved. Quit with
+  the save button lit and the next session opens on the same slot, the
+  same arrangement and the same lit button. The slots and the layout
+  being worked on persist separately, so a mistyped scope letter is an
+  annoyance rather than the loss of a preset - nothing reaches a slot
+  without being asked. A first run opens on Preset 1 like any other
+  session, and a slot nothing has been saved into opens on the
+  vectorscope alone.
+- The preset control is a button carrying a panel glyph and the slot it
+  is on, instead of a bare digit that looked like a label rather than
+  something to click. It stands after the scope selector rather than
+  before it: a preset is a set of scopes, and scopes are switched far
+  more often than a preset is loaded. In its list the loaded slot is the
+  row that is tinted, and the row whose pen stands at full strength
+  while the others recede.
+- The graticule has a strength instead of an on/off: the right-click
+  menu offers Faint, Soft, Normal and Bold, dimming lines, rings, target
   boxes and labels together so it can be quietened over a busy trace.
-  The steps climb in that order, Normal is the strength the scopes are
-  graded at, the faintest still reads, and the preferences key is
-  `graticule_strength`.
+  Normal is the strength the scopes are graded at, the faintest still
+  reads, and the preferences key is `graticule_strength`.
 - A region being dragged is followed by its border as it moves, rather
   than trailing the hand by a frame or two. Moving an attached window
   holds the scopes on their last reading until it lands, instead of
@@ -110,89 +135,69 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   reading live, at a coarser image while it is moving - except the
   waveform, which keeps every column so a highlight or a skin tone stays
   where it is while you scan for it.
-- A transient status message stands for five seconds again. It sits in
-  the bottom bar over the live readout, so it has to be read in one
-  glance, and two seconds was not enough for a sentence. The two notices
-  an attached region leaves - a window closing out from under it, a lost
-  face - now appear there with every other message instead of above the
-  panes.
-- An `interface` diagnostic channel, carrying the errors the interface
-  toolkit reports about its own use. It normally says these in a window
-  over the application, which only whoever is sitting in front of the
-  build ever sees - one went unread long enough to ship - and on this
-  channel they land in the file a report can attach instead. A release
-  build reports only into the log; the window stays in development
-  builds, where whoever is building wants it at once. The same error
-  repeats on every frame it is raised, so only a message the recording
-  has not already been told is written.
-- A preset carries the order its panes sit in. Dragging a scope in the
-  selector arranges that slot alone, so one can read exposure first and
-  another balance first, and loading a slot restores how it was laid out
-  rather than only which scopes it showed.
-- A save button in the toolbar, beside the scope and preset controls. It
-  lights when the layout on screen differs from the slot it came from and
-  is dark when there is nothing to save, which is the only place the
-  interface says so - the asterisk the preset button carried is gone.
-  Cmd+S, or Ctrl+S on Windows, does the same. Shift with a digit does the
-  same into a slot you are not on, and none of the three moves you: they
-  are one operation aimed at different slots.
-- What is on screen is kept whether or not it has been saved. Quit with
-  the save button lit and the next session opens on the same slot, the
-  same arrangement and the same lit button. The slots and the layout being
-  worked on persist separately, so a mistyped scope letter is an
-  annoyance rather than the loss of a preset - nothing reaches a slot
-  without being asked. A slot nothing has been saved into opens on the
-  vectorscope alone.
-- The preset control is a button like the scope selector beside it,
-  carrying a panel glyph and the slot it is on, instead of a bare digit
-  that looked like a label rather than something to click. It now stands
-  after the scope selector rather than before it: a preset is a set of
-  scopes, and scopes are switched far more often than a preset is loaded.
-- In the preset list, the loaded slot is the row that is tinted, and the
-  row whose pen stands at full strength while the others recede.
+- The word for choosing a window or a face is select rather than attach,
+  in the toolbar, the menus and the picker, and the actions that end an
+  attachment say stop following rather than detach. Attaching is the
+  mechanism; what you are doing is choosing what the scopes read.
+- A transient status message stands for five seconds rather than two. It
+  sits in the bottom bar over the live readout, so it has to be read in
+  one glance, and two seconds was not enough for a sentence. The two
+  notices an attached region leaves - a window closing out from under
+  it, a lost face - now appear there with every other message instead of
+  above the panes.
 
 ### Removed
 
-- Scope letters from the preferences file. A stack and a preset's order
-  name each scope by its id - `[org.sidescopes.waveform]` - rather than by
-  the letter it answers to. A letter is a property of a scope and not its
-  identity: the registry hands one out only if it is still free, so a
-  collision or a change in the order modules register in would silently
-  re-point every token already written, and users can rebind keys besides.
-  The file is longer and says what it means. Older files fall back to the
-  default arrangement, and the readers for retired formats go with the
-  letters they spoke in.
-- Saving a preset, as an action. There is no save button, no Shift+click
-  on a row, no Save Current To menu and no drift marker on the toolbar,
-  because a slot is never out of date with the screen. Shift with a digit
-  survives on the keyboard alone, and copies the current layout into that
-  slot while leaving you where you are - which is how you leave an
-  arrangement that holds still now that the slot you are on follows the
-  screen. It is documented in docs/SHORTCUTS.md and offered nowhere in
-  the interface.
 - The full-screen region and the Watch Full Screen action. A session
   starts with nothing selected rather than with the whole display.
 - The vectorscope's Trace Response choice. Linear emulated a phosphor
   tube, whose faint trace was legible because the glass held it between
   sweeps; a single frame on a screen renders it close to black. Boosted
   is what the scope has always been read on, and the waveform has never
-  offered anything else. Its curve is now the Trace gamma slider above,
-  and a preferences file that still names the response loads unchanged
-  and draws the shipped curve.
+  offered anything else. Its curve is now the Trace gamma slider above.
 - The vectorscope's Matrix choice. It measures with BT.709 always. sRGB
   shares Rec.709's primaries and BT.709's coefficients come from those
   primaries, while BT.601's come from 1953 NTSC phosphors, so for screen
-  content BT.601 was not an alternative but a wrong reading. A
-  preferences file that still names it loads unchanged and measures with
-  BT.709.
+  content BT.601 was not an alternative but a wrong reading.
+- The waveform's Style choice. Its two luma styles are the luma waveform
+  above, which stands beside the waveform rather than in its place.
+- The Save Current To menu, and saving from a preset row by Shift+click.
+  A row loads; the save button and the two chords save.
+- Scope letters from the preferences file. A stack and a preset's order
+  name each scope by its id - `[org.sidescopes.waveform]` - rather than
+  by the letter it answers to. A letter is a property of a scope and not
+  its identity: the registry hands one out only if it is still free, so
+  a collision or a change in the order modules register in would
+  silently re-point every token already written, and users can rebind
+  keys besides. The file is longer and says what it means.
 
 ### Fixed
 
-- Each scope answers to a key of its own. The luma waveform showed W
-  beside its name, the letter the RGB waveform already held, and
-  pressing W showed a single scope while Shift showed both. A key a
-  preferences file binds to a scope another already holds is refused,
-  and the scope falls back to its own letter: L.
+- Screen capture is retried whenever it is wanted and gone, instead of
+  standing on "Reconnecting automatically..." while nothing reconnected.
+  A start that failed with nothing running yet was never retried at all,
+  so a launch that reached the displays before they were ready left the
+  scopes empty for good. The first attempt is as prompt as it ever was,
+  at two seconds, and later ones widen to a ceiling of five while a
+  display stays away.
+- A column of one flat tone no longer dims the rest of the waveform or
+  the parade. Sliding a region a few pixels off the picture onto the
+  editor's chrome raised the ceiling the trace is normalized against
+  several fold, dimming everything else by a quarter.
+- The color readout reads at full strength away from the captured
+  stream. A one-shot screen sample comes back letterboxed, and averaging
+  its padding in reported every color at the fraction of the buffer the
+  content covered - white read as 56% on a 16:9 display. This affected
+  displays other than the one being captured.
+- Clicking a preset slot nothing has been saved into loads the
+  arrangement the application opens on - the vectorscope alone - rather
+  than putting "preset N is empty" on the status bar and doing nothing.
+  On a first run that was eight slots of nine offering an action and
+  then refusing it.
+- macOS: the keyboard comes back when an overlay hides. Finishing a pick
+  - a confirming click or drag as much as Escape - or clicking the
+  region border's band left the application with no key window, and
+  every shortcut dead until a window was clicked again.
 - Windows: the region border stays above windows that open after it.
   Topmost there is a position in the stacking order rather than a
   property that holds, so a window entering the band afterwards took the
@@ -204,82 +209,6 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Windows: a cloaked window - a suspended store app, or one on another
   virtual desktop - no longer answers as the window in focus, which left
   an attached region following nothing on screen.
-- A column of one flat tone no longer dims the rest of the waveform or
-  the parade. Sliding a region a few pixels off the picture onto the
-  editor's chrome raised the ceiling the trace is normalized against
-  several fold, dimming everything else by a quarter.
-- The color readout reads at full strength away from the captured
-  stream. A one-shot screen sample comes back letterboxed, and averaging
-  its padding in reported every color at the fraction of the buffer the
-  content covered - white read as 56% on a 16:9 display. This affected
-  displays other than the one being captured.
-- macOS: the keyboard comes back when an overlay hides. Finishing a pick
-  - a confirming click or drag as much as Escape - or clicking the
-  region border's band left the application with no key window, and
-  every shortcut dead until a window was clicked again.
-- Screen capture recovers on its own from every interruption, instead of
-  standing on "Reconnecting automatically..." while nothing reconnected.
-  A stream reported as stopped while the pipeline was paused - which it
-  is whenever no region is selected - left the application waiting for
-  a reconnection it would never attempt, and only drawing a region
-  brought it back. Unplugging a monitor and leaving the machine to sleep
-  was enough to reach it. The wait between attempts now tops out at
-  eight seconds rather than thirty, and a monitor connected or
-  disconnected drops it back to the first, so recovery is prompt as well
-  as certain. A paused pipeline still makes no attempts and no longer
-  reports a failure it is not having.
-- Clicking a preset slot nothing has been arranged on loads the
-  arrangement the application opens on - the vectorscope alone - rather
-  than putting "Preset N is empty" on the status bar and doing nothing.
-  On a first run that was eight slots of nine offering an action and
-  then refusing it. A first run, or a preferences file naming no slot,
-  now opens on Preset 1, like any other, instead of a state reachable
-  only by never having used a preset at all. The `layout_active_slot`
-  key no longer carries 0; a file that has one is read as naming the
-  first slot.
-- Dragging a scope to reorder it no longer raises Dear ImGui's own error
-  window over the popup. The catch laid over the list to receive the drop
-  moved the cursor without submitting anything afterwards, which that
-  check exists to report; it is sized to need no such move now.
-- A scope can be dragged to the end of the list. Every other position sits
-  between two rows, so only the last one has to be aimed at below the final
-  row - and the strip under that row had been taken back three days earlier
-  to settle a complaint from the toolkit about the cursor. It was not slack;
-  it was that position.
-- Toolbar tooltips read as labels rather than explanations: a verb, its
-  object and the shortcut in brackets, the shape "Clear the region (Esc)"
-  already had. The em-dash clauses that explained a control are gone, and
-  so is the one on the pin tool that described Shift-clicking a colour -
-  a tooltip describes the control under the pointer, and that gesture
-  happens elsewhere, during a mode not yet entered. The picker already
-  says it on screen while it is up, and docs/SHORTCUTS.md now lists it.
-- The presets button's tooltip no longer repeats the preset's name. The
-  button shows the slot, the list shows the name and the status line names
-  it on load and save.
-- The colour picker is called "Color Picker" everywhere, in the Title Case
-  every scope name beside it uses.
-- Preset status messages lead with the verb and quote the name: Loaded
-  "Whatever" rather than Whatever loaded. A name is whatever the user typed,
-  so bare in a sentence it becomes part of the grammar - a preset called
-  "loaded" read as nonsense either way round. The same quoting is used
-  wherever a preset is named inside a sentence.
-- The rename field opens on the name rather than a few pixels right of it.
-  A framed input insets its own text where a label does not, so the field's
-  box was in the right place and its text was not.
-- The clear-region button carries a struck-through square rather than a
-  dashed one. The dashed square was drawn when the button made the region
-  full-screen; it has cleared the region since that default was removed, and
-  a dashed square depicts a region being made rather than removed.
-- Dragging a scope in the selector keeps the move when that scope is not
-  currently shown. The order already covered every registered scope and
-  the file already carried them all, but the check that decides whether
-  the arrangement has to be written back ignored the order - and moving a
-  scope that IS shown also re-seats the panes, so only the unshown case
-  was ever dropped. It is the case the stable order exists for: a scope's
-  place does not depend on whether it is switched on.
-- A row's shortcut digit sits on the same line as the name beside it, in
-  both toolbar lists. It was drawn a pixel low, against a rectangle that
-  is deliberately larger than the one the name is laid out in.
 
 ## [0.4.0] - 2026-07-22
 
