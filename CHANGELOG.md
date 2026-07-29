@@ -122,6 +122,17 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   an attached region leaves - a window closing out from under it, a lost
   face - now appear there with every other message instead of above the
   panes.
+- The preset control is a button like the scope selector beside it,
+  carrying a panel glyph and the slot it is on, instead of a bare digit
+  that looked like a label rather than something to click. The drift
+  star is unchanged. It now stands after the scope selector rather than
+  before it: a preset is a saved set of scopes, and scopes are switched
+  far more often than a preset is loaded.
+- In the preset list, the slot that is loaded is marked by its own
+  shortcut digit becoming a filled badge, with its row tinted behind it,
+  in place of a dot in a column of its own. The digit also keeps real
+  distance from the rename button, which used to begin exactly where the
+  digit ended.
 
 ### Removed
 
@@ -184,6 +195,15 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   disconnected drops it back to the first, so recovery is prompt as well
   as certain. A paused pipeline still makes no attempts and no longer
   reports a failure it is not having.
+- Clicking a preset slot nothing has been saved into loads the
+  arrangement the application opens on - the vectorscope alone - rather
+  than putting "Preset N is empty" on the status bar and doing nothing.
+  On a first run that was eight slots of nine offering an action and
+  then refusing it. A first run, or a preferences file naming no slot,
+  now opens on Preset 1, saveable like any other, instead of a state
+  reachable only by never having used a preset at all. The
+  `layout_active_slot` key no longer carries 0; a file that has one is
+  read as naming the first slot.
 
 ## [0.4.0] - 2026-07-22
 
