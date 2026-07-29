@@ -54,14 +54,36 @@ RowBand rowBand(float rowTopY)
                    ImVec2(windowPos.x + ImGui::GetWindowSize().x - inset, rowTopY + ImGui::GetFrameHeight() + pad)};
 }
 
+// The box a Selectable laid its own LABEL out in, recovered from its item rect.
+//
+// ImGui deliberately grows a Selectable's item rect beyond that box - half the
+// item spacing above and to the left, the remainder below and to the right - so
+// a list of them packs together with no dead gap between rows to click in. The
+// label is centred in the UNGROWN box. Anything else the row draws against the
+// item rect therefore sits low and wide of the name beside it, by half a
+// spacing on each axis, which is what the key hint did.
+RowBand selectableLabelBox()
+{
+    const ImGuiStyle& style = ImGui::GetStyle();
+    // Truncated, not rounded: this mirrors ImGui's own IM_TRUNC in the growth
+    // it is undoing, and half a pixel of disagreement here would put the key
+    // back off the name's line.
+    const float grownLeft = std::trunc(style.ItemSpacing.x * 0.5f);
+    const float grownTop = std::trunc(style.ItemSpacing.y * 0.5f);
+    const ImVec2 min = ImGui::GetItemRectMin();
+    const ImVec2 max = ImGui::GetItemRectMax();
+
+    return RowBand{ImVec2(min.x + grownLeft, min.y + grownTop),
+                   ImVec2(max.x - (style.ItemSpacing.x - grownLeft), max.y - (style.ItemSpacing.y - grownTop))};
+}
+
 // Where a key of @p keySize sits over the row just laid down: right-aligned
-// @p rightPad in from that row's edge, on the row's own centre line.
+// @p rightPad in from that row's own edge, on the centre line its name is on.
 ImVec2 acceleratorOrigin(const ImVec2& keySize, float rightPad)
 {
-    const ImVec2 rowMin = ImGui::GetItemRectMin();
-    const ImVec2 rowMax = ImGui::GetItemRectMax();
+    const RowBand label = selectableLabelBox();
 
-    return ImVec2(rowMax.x - rightPad - keySize.x, rowMin.y + (rowMax.y - rowMin.y - keySize.y) * 0.5f);
+    return ImVec2(label.max.x - rightPad - keySize.x, label.min.y + (label.max.y - label.min.y - keySize.y) * 0.5f);
 }
 
 }  // namespace

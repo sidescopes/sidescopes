@@ -14,6 +14,7 @@
 // its Free License; fetched at build time, never vendored.
 
 #include <algorithm>
+#include <cfloat>
 #include <cmath>
 #include <vector>
 
@@ -418,6 +419,102 @@ void rowIconsHoldOneLayoutAtEveryStrength(ImGuiTestContext* ctx)
     IM_CHECK_GT(menuRowKeyRightPad(), 0.0f);
 }
 
+// The vertical extent of everything a row put in the draw list, measured from
+// the vertices themselves rather than from cursor positions - box tops can
+// agree while the ink does not, and the ink is what the eye compares.
+struct RowInkProbe
+{
+    float iconTop = 0.0f, iconBottom = 0.0f;
+    float nameTop = 0.0f, nameBottom = 0.0f;
+    float keyTop = 0.0f, keyBottom = 0.0f;
+};
+
+RowInkProbe& rowInkProbe()
+{
+    static RowInkProbe instance;
+
+    return instance;
+}
+
+void inkSpan(const ImDrawList* draw, int mark, float& top, float& bottom)
+{
+    top = FLT_MAX;
+    bottom = -FLT_MAX;
+    for (int index = mark; index < draw->VtxBuffer.Size; ++index) {
+        top = ImMin(top, draw->VtxBuffer[index].pos.y);
+        bottom = ImMax(bottom, draw->VtxBuffer[index].pos.y);
+    }
+}
+
+/// Draws a preset row exactly as the picker lays one out - leading icons, the
+/// name in a Selectable, the key hint over it - recording what each put down.
+void rowInkGui(ImGuiTestContext*)
+{
+    ImGui::SetNextWindowSize(ImVec2(400.0f, 200.0f), ImGuiCond_Always);
+    ImGui::Begin("Ink", nullptr, ImGuiWindowFlags_NoSavedSettings);
+    pushMenuRowStyle();
+    ImDrawList* draw = ImGui::GetWindowDrawList();
+    RowInkProbe& probe = rowInkProbe();
+
+    int mark = draw->VtxBuffer.Size;
+    const bool saved = menuRowIconButton("##save", ImTextureID{}, "Save", true);
+    ImGui::SameLine(0.0f, 0.0f);
+    const bool renamed = menuRowIconButton("##rename", ImTextureID{}, "Rename", true);
+    IM_UNUSED(saved);
+    IM_UNUSED(renamed);
+    inkSpan(draw, mark, probe.iconTop, probe.iconBottom);
+
+    ImGui::SameLine(menuRowNameX(2.0f * menuRowIconWidth()));
+    mark = draw->VtxBuffer.Size;
+    ImGui::Selectable("Preset 1", false, ImGuiSelectableFlags_NoAutoClosePopups,
+                      ImVec2(200.0f, ImGui::GetFrameHeight()));
+    inkSpan(draw, mark, probe.nameTop, probe.nameBottom);
+
+    mark = draw->VtxBuffer.Size;
+    drawMenuRowAccelerator("4", menuRowKeyRightPad());
+    inkSpan(draw, mark, probe.keyTop, probe.keyBottom);
+
+    popMenuRowStyle();
+    ImGui::End();
+}
+
+/// SYMPTOM IF BROKEN: the shortcut digit sits visibly below the preset name
+/// beside it, and the row reads as though its parts belong to different lines.
+///
+/// A Selectable's ITEM RECT is not the box it centres its own label in: ImGui
+/// grows the rect by half the item spacing on every side so a list of them
+/// packs with no dead gap to click in. Positioning the key hint against that
+/// rect put it half a spacing low, which is what shipped. Both lists draw their
+/// hint through this one unit, so both were wrong by the same amount.
+///
+/// The icon is allowed a little more slack, and deliberately: its glyph is
+/// seated on WHOLE PIXELS to stay crisp, which can cost up to half a pixel of
+/// centring. That trade is asserted by glyph_seats_on_whole_pixels and must not
+/// be undone to chase perfect optical centring here.
+void aRowsPartsShareOneCentreLine(ImGuiTestContext* ctx)
+{
+    ctx->SetRef("Ink");
+    ctx->Yield();
+    const RowInkProbe& probe = rowInkProbe();
+
+    const float nameCentre = (probe.nameTop + probe.nameBottom) * 0.5f;
+    const float keyCentre = (probe.keyTop + probe.keyBottom) * 0.5f;
+    const float iconCentre = (probe.iconTop + probe.iconBottom) * 0.5f;
+
+    // Everything actually drew something to measure.
+    IM_CHECK_LT(probe.nameTop, probe.nameBottom);
+    IM_CHECK_LT(probe.keyTop, probe.keyBottom);
+    IM_CHECK_LT(probe.iconTop, probe.iconBottom);
+
+    // The name and its key sit on ONE line. Both are text of the same size
+    // drawn from the same row, so there is no rounding to excuse a gap here.
+    IM_CHECK_LE(ImFabs(keyCentre - nameCentre), 0.5f);
+
+    // The icons sit on it too, within the half pixel that seating a glyph on
+    // whole pixels can cost.
+    IM_CHECK_LE(ImFabs(iconCentre - nameCentre), 1.0f);
+}
+
 // What each way of overlaying a drop catch left behind: whether the cursor
 // came back to where it started, whether ImGui was left believing it had been
 // asked to grow the window, and by how much the cursor overran the extent of
@@ -560,6 +657,10 @@ void registerLayoutTests(ImGuiTestEngine* engine)
     katch->GuiFunc = dropCatchGui;
     katch->TestFunc = aDropCatchRestoresTheCursorByBeingSubmitted;
 
+    ImGuiTest* ink = IM_REGISTER_TEST(engine, "layout", "row_parts_share_one_centre_line");
+    ink->GuiFunc = rowInkGui;
+    ink->TestFunc = aRowsPartsShareOneCentreLine;
+
     ImGuiTest* reveal = IM_REGISTER_TEST(engine, "layout", "row_icons_hold_one_layout");
     reveal->GuiFunc = chosenBandGui;
     reveal->TestFunc = rowIconsHoldOneLayoutAtEveryStrength;
@@ -572,5 +673,5 @@ int main()
 {
     using namespace sidescopes;
 
-    return uitest::runSuite("layout", registerLayoutTests, /*expectedTests=*/11);
+    return uitest::runSuite("layout", registerLayoutTests, /*expectedTests=*/12);
 }
