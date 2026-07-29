@@ -23,7 +23,7 @@ double alphaCoverage(const std::vector<uint8_t>& pixels)
 TEST_CASE("Every icon rasterizes with plausible stroke coverage")
 {
     for (const Icon icon : {Icon::Pin, Icon::PinOff, Icon::SquarePen, Icon::Pencil, Icon::User, Icon::Pipette,
-                            Icon::SquareDashed, Icon::ChartColumn, Icon::PenLine}) {
+                            Icon::SquareDashed, Icon::ChartColumn, Icon::PenLine, Icon::PanelsTopLeft}) {
         for (const int size : {16, 24, 48}) {
             const auto pixels = rasterizeIcon(icon, size);
             REQUIRE(pixels.size() == static_cast<std::size_t>(size) * size * 4);
@@ -54,6 +54,35 @@ TEST_CASE("Icons are distinct images")
     const auto penLine = rasterizeIcon(Icon::PenLine, 24);
     CHECK(penLine != pencil);
     CHECK(penLine != squarePen);
+    // PanelsTopLeft opens the preset list and ChartColumn the scope list -
+    // two buttons standing side by side on the toolbar, so the one thing
+    // telling them apart is that they are not the same picture.
+    const auto panels = rasterizeIcon(Icon::PanelsTopLeft, 24);
+    const auto chartColumn = rasterizeIcon(Icon::ChartColumn, 24);
+    CHECK(panels != chartColumn);
+    CHECK(panels != squarePen);
+}
+
+TEST_CASE("The preset glyph is a frame divided into panes")
+{
+    // What makes it read as a layout rather than as a plain box: a rule across
+    // it and another down from that rule. Losing either leaves a square, which
+    // is what several other icons in the set already are.
+    const int size = 48;
+    const auto panels = rasterizeIcon(Icon::PanelsTopLeft, size);
+    REQUIRE(panels.size() == static_cast<std::size_t>(size) * size * 4);
+    const auto alphaAt = [&panels](double unitX, double unitY) {
+        const int x = static_cast<int>(unitX / 24.0 * size);
+        const int y = static_cast<int>(unitY / 24.0 * size);
+
+        return panels[(static_cast<std::size_t>(y) * size + x) * 4 + 3];
+    };
+    // The horizontal rule crosses the middle of the frame at y = 9...
+    CHECK(alphaAt(14.0, 9.0) > 32);
+    // ...the vertical one runs below it at x = 9...
+    CHECK(alphaAt(9.0, 15.0) > 32);
+    // ...and the large pane they leave is empty.
+    CHECK(alphaAt(15.0, 15.0) <= 32);
 }
 
 TEST_CASE("The pin-off keeps its slash")

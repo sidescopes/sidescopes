@@ -11,14 +11,20 @@ namespace sidescopes {
 /// drawn immediately before the call.
 void wrappedTooltip(const char* text);
 
-/// A scope toggle drawn as a letter chip: professional tools label scopes with
-/// text because no icon language exists for them, and the letters double as the
-/// keyboard shortcuts. Returns true when the button is pressed.
-bool scopeToggleButton(const char* id, const char* letter, bool enabled, const char* tooltip);
-
 /// A tool drawn as an icon glyph in a square button: the region tools above the
 /// panes and the pin tool in the status bar. @p dimmed draws the glyph faint,
 /// for a tool that is standing down. Returns true when the button is pressed.
 bool iconButton(const char* id, ImTextureID texture, const char* tooltip, bool dimmed = false);
+
+/// The same button carrying @p label beside its glyph, for a control that has
+/// a short value to show as well as an identity - the preset picker, which
+/// names the slot it is on. It stands beside a plain @ref iconButton as a
+/// sibling: one height, one glyph size, one hover box, wider only by the value.
+///
+/// @p labelWidth is the width RESERVED for the label, measured from the widest
+/// one the button will ever carry, and the label is drawn left-aligned in it,
+/// so a character coming or going moves nothing on the row. Returns true when
+/// the button is pressed.
+bool labelledIconButton(const char* id, ImTextureID texture, const char* label, float labelWidth, const char* tooltip);
 
 }  // namespace sidescopes

@@ -1,7 +1,6 @@
 #include "app/imgui_ui.h"
 
 #include <algorithm>
-#include <cmath>
 
 #include "app/row_layout.h"
 #include "imgui.h"
@@ -26,26 +25,6 @@ void wrappedTooltip(const char* text)
     ImGui::EndTooltip();
 }
 
-bool scopeToggleButton(const char* id, const char* letter, bool enabled, const char* tooltip)
-{
-    const float height = ImGui::GetTextLineHeight() + 4.0f;
-    const bool pressed = ImGui::InvisibleButton(id, ImVec2(height + 8.0f, height));
-    ImDrawList* draw = ImGui::GetWindowDrawList();
-    const ImVec2 min = ImGui::GetItemRectMin();
-    const ImVec2 max = ImGui::GetItemRectMax();
-    if (enabled) {
-        draw->AddRectFilled(min, max, ImGui::GetColorU32(ImGuiCol_ButtonActive), 3.0f);
-    } else if (ImGui::IsItemHovered()) {
-        draw->AddRectFilled(min, max, ImGui::GetColorU32(ImGuiCol_ButtonHovered), 3.0f);
-    }
-    const ImU32 color = ImGui::GetColorU32(enabled ? ImGuiCol_Text : ImGuiCol_TextDisabled);
-    const ImVec2 size = ImGui::CalcTextSize(letter);
-    const ImVec2 at(std::floor(min.x + (max.x - min.x - size.x) / 2), std::floor(min.y + (max.y - min.y - size.y) / 2));
-    draw->AddText(at, color, letter);
-    wrappedTooltip(tooltip);
-    return pressed;
-}
-
 bool iconButton(const char* id, ImTextureID texture, const char* tooltip, bool dimmed)
 {
     const bool pressed = ImGui::InvisibleButton(id, ImVec2(iconButtonWidth(), iconButtonHeight()));
@@ -59,6 +38,29 @@ bool iconButton(const char* id, ImTextureID texture, const char* tooltip, bool d
     const ImVec2 glyph = iconGlyphOrigin(min, max, side);
     draw->AddImage(texture, glyph, ImVec2(glyph.x + side, glyph.y + side), ImVec2(0, 0), ImVec2(1, 1),
                    ImGui::GetColorU32(ImGuiCol_Text, dimmed ? 0.4f : 1.0f));
+    wrappedTooltip(tooltip);
+
+    return pressed;
+}
+
+bool labelledIconButton(const char* id, ImTextureID texture, const char* label, float labelWidth, const char* tooltip)
+{
+    const bool pressed = ImGui::InvisibleButton(id, ImVec2(labelledIconButtonWidth(labelWidth), iconButtonHeight()));
+    ImDrawList* draw = ImGui::GetWindowDrawList();
+    const ImVec2 min = ImGui::GetItemRectMin();
+    const ImVec2 max = ImGui::GetItemRectMax();
+    if (ImGui::IsItemHovered()) {
+        draw->AddRectFilled(min, max, ImGui::GetColorU32(ImGuiCol_ButtonHovered), 3.0f);
+    }
+    // The glyph is seated in the PLAIN button's box at the head of this one,
+    // not centred in the widened box, so it lands exactly where the icon of a
+    // plain button beside it does.
+    const float side = ImGui::GetTextLineHeight();
+    const ImVec2 glyph = iconGlyphOrigin(min, ImVec2(min.x + iconButtonWidth(), max.y), side);
+    draw->AddImage(texture, glyph, ImVec2(glyph.x + side, glyph.y + side), ImVec2(0, 0), ImVec2(1, 1),
+                   ImGui::GetColorU32(ImGuiCol_Text));
+    const ImVec2 at(min.x + iconButtonWidth(), min.y + rowTextDrop());
+    draw->AddText(at, ImGui::GetColorU32(ImGuiCol_Text), label);
     wrappedTooltip(tooltip);
 
     return pressed;

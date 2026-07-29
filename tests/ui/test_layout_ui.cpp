@@ -73,6 +73,52 @@ void rowElementsShareOneCentreLine(ImGuiTestContext*)
     IM_CHECK_EQ(glyph.y - min.y, rowTextDrop());
 }
 
+/// SYMPTOM IF BROKEN: the preset button sits a shade off its neighbour on the
+/// toolbar - a taller box, a glyph on a different line, or its own row shifting
+/// as the drift star arrives and leaves.
+///
+/// The preset picker carries a value beside its glyph; the scope selector
+/// beside it does not. They must still read as one pair: same height, same
+/// glyph seat, wider only by the value - and by the width of the WIDEST value,
+/// never by the one being shown, because everything to their right moves with
+/// them.
+void labelledIconSeatsLikeItsPlainSibling(ImGuiTestContext* ctx)
+{
+    const auto check = [] {
+        const float side = ImGui::GetTextLineHeight();
+        const float widest = ImGui::CalcTextSize("9*").x;
+        const float width = labelledIconButtonWidth(widest);
+
+        // Never narrower than the plain button beside it, and never so narrow
+        // that the label would print over the glyph.
+        IM_CHECK_GT(width, iconButtonWidth());
+        IM_CHECK_GT(iconButtonWidth(), iconButtonInset() + side);
+
+        // The margin past the label matches the one before the glyph, so the
+        // ink is inset the same at both ends of the box.
+        IM_CHECK_EQ(width - iconButtonWidth() - widest, iconButtonInset());
+        IM_CHECK_GT(iconButtonInset(), 0.0f);
+
+        // The box is sized to the WIDEST label, not the one being shown: the
+        // two differ, which is the whole cost of getting that wrong - the row
+        // shifting every time the drift star arrives or leaves.
+        IM_CHECK_GT(width, labelledIconButtonWidth(ImGui::CalcTextSize("9").x));
+    };
+
+    check();
+
+    // The rule is a ratio of the line height, so it holds at every interface
+    // scale - including the extremes, where a fixed margin would vanish.
+    const ImGuiStyle saved = ImGui::GetStyle();
+    for (const float scale : {0.5f, 2.0f}) {
+        applyInterfaceScale(scale);
+        ctx->Yield();
+        check();
+    }
+    ImGui::GetStyle() = saved;
+    ctx->Yield();
+}
+
 /// SYMPTOM IF BROKEN: a reading looks bound to the wrong channel - "R 99% G"
 /// reads as though the 99% belongs to the G on its right.
 ///
@@ -240,6 +286,9 @@ void registerLayoutTests(ImGuiTestEngine* engine)
     ImGuiTest* centreLine = IM_REGISTER_TEST(engine, "layout", "row_shares_one_centre_line");
     centreLine->TestFunc = rowElementsShareOneCentreLine;
 
+    ImGuiTest* labelled = IM_REGISTER_TEST(engine, "layout", "labelled_icon_seats_like_its_sibling");
+    labelled->TestFunc = labelledIconSeatsLikeItsPlainSibling;
+
     ImGuiTest* columns = IM_REGISTER_TEST(engine, "layout", "readout_columns_bind_to_labels");
     columns->TestFunc = readoutColumnsBindValuesToTheirOwnLabel;
 
@@ -264,5 +313,5 @@ int main()
 {
     using namespace sidescopes;
 
-    return uitest::runSuite("layout", registerLayoutTests, /*expectedTests=*/7);
+    return uitest::runSuite("layout", registerLayoutTests, /*expectedTests=*/8);
 }

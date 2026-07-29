@@ -15,6 +15,11 @@ float iconButtonHeight()
     return ImGui::GetTextLineHeight() + 4.0f;
 }
 
+float labelledIconButtonWidth(float labelWidth)
+{
+    return iconButtonWidth() + labelWidth + iconButtonInset();
+}
+
 float iconButtonInset()
 {
     return std::round((iconButtonWidth() - ImGui::GetTextLineHeight()) / 2.0f);

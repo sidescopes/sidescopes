@@ -17,6 +17,16 @@ namespace sidescopes {
 /// The height of an icon button's box, the tallest thing a row can carry.
 [[nodiscard]] float iconButtonHeight();
 
+/// The width of an icon button carrying @p labelWidth of text beside its
+/// glyph: the plain button's box, then the label, then the same margin the
+/// glyph keeps on its left, so the ink is inset equally at both ends.
+///
+/// @p labelWidth is what the WIDEST label the button will ever show measures,
+/// not the one it is showing. A box that grew and shrank with its own text
+/// would move everything to its right, and the toolbox beyond that reflows on
+/// a threshold - the "it dropped to a second row by itself" defect.
+[[nodiscard]] float labelledIconButtonWidth(float labelWidth);
+
 /// How far the glyph sits inside its button's box - the left margin a line of
 /// text needs to start where an icon in that box appears to start.
 [[nodiscard]] float iconButtonInset();

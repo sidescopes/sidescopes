@@ -13,6 +13,11 @@
 namespace sidescopes {
 namespace {
 
+// The widest thing the toolbar button's label can ever say: the last slot,
+// drifted. The button reserves this width whatever it is showing, so the star
+// arriving and leaving never moves the row.
+constexpr const char* WidestPresetLabel = "9*";
+
 // The width every row of the picker shares, from the widest name it will show,
 // so the names left-align and the digits right-align to one edge with room to
 // breathe between. Measured from the name column rightward, which is where the
@@ -112,20 +117,23 @@ void LayoutPresetPicker::drawSlotRow(int slot, float width, IconTextures& icons,
 
 LayoutPresetOutcome LayoutPresetPicker::draw(IconTextures& icons)
 {
-    // A chip like the scope letters, leading the row: the label names the
-    // active slot, starred once the live layout drifts from it, and clicking
-    // opens the slot list - the mouse mirror of the digit keys. The list is
-    // shaped like the scope selector's, because it is the same gesture.
+    // A sibling of the scope selector beside it: the same button, carrying the
+    // slot it is on rather than a bare digit, starred once the live layout
+    // drifts from that slot. Clicking opens the list - the mouse mirror of the
+    // digit keys - which is shaped like the scope selector's, because it is
+    // the same gesture.
     const int active = m_presets.activeSlot();
-    char preview[8] = "";
-    std::snprintf(preview, sizeof(preview), "%d%s", active, m_presets.activeDirty() ? "*" : "");
+    char label[8] = "";
+    std::snprintf(label, sizeof(label), "%d%s", active, m_presets.activeDirty() ? "*" : "");
     const std::string tooltip = presetDisplayName(active, m_presets.at(active)) + " - digits load, Shift+digits save";
-    if (scopeToggleButton("##preset-picker", preview, false, tooltip.c_str())) {
+    const float labelWidth = ImGui::CalcTextSize(WidestPresetLabel).x;
+    if (labelledIconButton("##preset-picker", icons.textureId(Icon::PanelsTopLeft, iconPixelSize()), label, labelWidth,
+                           tooltip.c_str())) {
         ImGui::OpenPopup("##preset-popup");
     }
-    const ImVec2 chipMin = ImGui::GetItemRectMin();
-    const ImVec2 chipMax = ImGui::GetItemRectMax();
-    ImGui::SetNextWindowPos(ImVec2(chipMin.x, chipMax.y + 2.0f));
+    const ImVec2 buttonMin = ImGui::GetItemRectMin();
+    const ImVec2 buttonMax = ImGui::GetItemRectMax();
+    ImGui::SetNextWindowPos(ImVec2(buttonMin.x, buttonMax.y + 2.0f));
     LayoutPresetOutcome outcome;
     if (ImGui::BeginPopup("##preset-popup")) {
         pushMenuRowStyle();
