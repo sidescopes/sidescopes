@@ -204,20 +204,28 @@ TEST_CASE("A lone choice is a Style submenu unprefixed but flattens when nested"
     }
 }
 
-TEST_CASE("Neither histogram contributes a menu option of its own")
+TEST_CASE("The histogram offers its two plots as one style choice")
 {
-    // The two plots are scopes now rather than one scope's style, so neither
-    // declares a choice parameter and a generic walk over either emits
-    // nothing. A style menu here would offer a scope the chance to become the
-    // other one.
+    // One measurement drawn two ways, so the plot is a style on the scope
+    // rather than a second scope. Per Channel leads and is the default.
     const ScopeRegistry registry{builtinModules()};
-    for (const std::string_view id : {HistogramScopeId, CombinedHistogramScopeId}) {
-        std::vector<NativeMenuItem> items;
-        std::vector<ParamMenuAction> actions;
-        appendScopeChoiceMenus(*descriptorOf(registry, id), {}, false, items, actions);
-        CHECK(items.empty());
-        CHECK(actions.empty());
-    }
+    std::vector<NativeMenuItem> items;
+    std::vector<ParamMenuAction> actions;
+    appendScopeChoiceMenus(*descriptorOf(registry, HistogramScopeId), {}, false, items, actions);
+
+    REQUIRE(items.size() == 4);
+    CHECK(items[0].kind == Kind::SubmenuBegin);
+    CHECK(items[0].label == "Style");  // "Histogram Style" stripped
+    CHECK(items[1].label == "Per Channel");
+    CHECK(items[1].checked);
+    CHECK(items[2].label == "Combined");
+    CHECK_FALSE(items[2].checked);
+    CHECK(items[3].kind == Kind::SubmenuEnd);
+
+    REQUIRE(actions.size() == 2);
+    CHECK(actions[0].scopeId == HistogramScopeId);
+    CHECK(actions[0].paramKey == "style");
+    CHECK(actions[1].value == 1.0);
 }
 
 TEST_CASE("Neither the RGB waveform nor the parade contributes a menu option")

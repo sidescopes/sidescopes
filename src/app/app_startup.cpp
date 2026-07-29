@@ -345,9 +345,7 @@ void seedImageSizes(AnalysisSettings& analysis)
     for (const std::string_view id : WaveformFamily) {
         analysis.imageSizes[std::string{id}] = {DefaultWaveformColumns, WaveformLevels};
     }
-    for (const std::string_view id : HistogramFamily) {
-        analysis.imageSizes[std::string{id}] = {Histogram::ImageWidth, Histogram::Height};
-    }
+    analysis.imageSizes[HistogramScopeId] = {Histogram::ImageWidth, Histogram::Height};
 }
 
 std::map<std::string, ScopeInstance> createProjectionInstances(const ScopeRegistry& registry)

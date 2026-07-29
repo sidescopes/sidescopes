@@ -17,12 +17,6 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   order, every preset and the pane weights, and the luma scope inherits
   the intensity, sampling and smoothing the waveform was tuned with. A
   rebound key stays on the scope it was bound to.
-- The combined histogram is a scope of its own, on G, beside the
-  per-channel histogram on H. One shows where the channels overlap, the
-  other their exact shapes with nothing occluding them, and a
-  photographer wants both. H keeps the per-channel plot, so an untouched
-  install sees no change, and a file written while the two shared one
-  scope is carried over the way the waveforms are.
 - A Quality choice in the right-click menu. Standard is the default and
   is what every earlier build did. High reads the screen twenty times a
   second instead of fifteen, keeps full detail under the hand while a
@@ -194,12 +188,11 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
-- Each scope answers to a key of its own. The luma waveform and the
-  combined histogram showed W and H beside their names, the letters
-  their siblings already held, and pressing one of those letters showed
-  a single scope while Shift showed both. A key a preferences file binds
-  to a scope another already holds is refused, and the scope falls back
-  to its own letter: L and G.
+- Each scope answers to a key of its own. The luma waveform showed W
+  beside its name, the letter the RGB waveform already held, and
+  pressing W showed a single scope while Shift showed both. A key a
+  preferences file binds to a scope another already holds is refused,
+  and the scope falls back to its own letter: L.
 - Windows: the region border stays above windows that open after it.
   Topmost there is a position in the stacking order rather than a
   property that holds, so a window entering the band afterwards took the

@@ -182,13 +182,6 @@ void strokeHistogramOutline(const DrawnScope& scope, const std::vector<float>& o
     draw->PopClipRect();
 }
 
-// Which plot a histogram scope draws. It is the scope's own identity rather
-// than a setting: the two ids exist to be shown side by side.
-HistogramStyle histogramStyleOf(std::string_view id)
-{
-    return id == CombinedHistogramScopeId ? HistogramStyle::Combined : HistogramStyle::PerChannel;
-}
-
 void drawHistogram(const ScopeTexture* texture, bool traceLive, const std::vector<float>& outline,
                    const ScopeInstance& instance, HistogramStyle style, const GraticuleStyle& graticule,
                    const std::optional<FloatColor>& markerColor, std::vector<ImVec2>& points)
@@ -438,10 +431,10 @@ void PaneArea::drawScopeById(std::string_view id, Pass& pass)
     m_paneRects[index] = ImVec4(paneMin.x, paneMin.y, paneMin.x + paneAvail.x, paneMin.y + paneAvail.y);
     if (id == VectorscopeScopeId) {
         drawVectorscopePane(pass);
-    } else if (inHistogramFamily(id)) {
+    } else if (id == HistogramScopeId) {
         const ScopeInstance* instance = projectionFor(id);
         if (instance != nullptr) {
-            drawHistogram(textureForId(id), pass.input.regionSelected, outlineFor(id), *instance, histogramStyleOf(id),
+            drawHistogram(textureForId(id), pass.input.regionSelected, outlineFor(id), *instance, histogramStyle(),
                           graticuleStyle(DefaultLineWidth), pass.input.vectorscopeColor, m_histogramScratch);
         }
     } else if (id == ColorPickerScopeId) {
@@ -551,6 +544,18 @@ void PaneArea::configureProjections()
         }
         (void)instance.configure(values);
     }
+}
+
+HistogramStyle PaneArea::histogramStyle() const
+{
+    const auto scope = m_analysis.scopeParams.find(HistogramScopeId);
+    if (scope == m_analysis.scopeParams.end()) {
+        return HistogramStyle::PerChannel;
+    }
+    const auto style = scope->second.find("style");
+    const double value = style != scope->second.end() ? style->second : 0.0;
+
+    return value < 0.5 ? HistogramStyle::PerChannel : HistogramStyle::Combined;
 }
 
 const std::vector<float>& PaneArea::outlineFor(std::string_view id) const

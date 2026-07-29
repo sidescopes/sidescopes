@@ -84,9 +84,9 @@ struct Preferences
     /// Scope id to parameter key to value. Seeded to the built-in defaults so a
     /// missing file or key yields the shipped live state. The parade is not
     /// held here on save: it mirrors the waveform, and is re-seeded from it on
-    /// load. A scope with no entry at all - a promoted one, until a file names
-    /// it - runs on its module's own defaults, which is what a key this map
-    /// does not carry has always meant.
+    /// load. A scope with no entry at all - the luma waveform, until a file
+    /// names it - runs on its module's own defaults, which is what a key this
+    /// map does not carry has always meant.
     std::map<std::string, std::map<std::string, double>> scopeParams{
         {"org.sidescopes.vectorscope", {{"gain", 3.0}, {"stride", 1.0}, {"gamma", 0.65}, {"smoothing_ms", 75.0}}},
         {"org.sidescopes.waveform", {{"gain", 0.05}, {"stride", 1.0}, {"smoothing_ms", 100.0}}},

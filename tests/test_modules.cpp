@@ -134,6 +134,22 @@ int litColumns(const SsImageView& image)
     return columns;
 }
 
+// The topmost row carrying any of @p channel, or -1 for a channel that drew
+// nothing: where a curve sits vertically, which is what a banded plot decides
+// and an overlaid one does not.
+int topLitRow(const SsImageView& image, int channel)
+{
+    for (int py = 0; py < image.height; ++py) {
+        for (int px = 0; px < image.width; ++px) {
+            if (image.rgba[(static_cast<std::size_t>(py) * image.width + px) * 4 + channel] > 0) {
+                return py;
+            }
+        }
+    }
+
+    return -1;
+}
+
 // A horizontal ramp: every column a different gray, so a stride that skips
 // columns visibly narrows what the scopes see.
 TestFrame grayRamp(int width, int height)
@@ -285,7 +301,7 @@ TEST_CASE("Registry serves the histogram through the module boundary")
     const RegisteredScope* scope = registry.findScope("org.sidescopes.histogram");
     REQUIRE(scope != nullptr);
     CHECK(scope->descriptor->letter == 'H');
-    CHECK(scope->descriptor->param_count == 1);
+    CHECK(scope->descriptor->param_count == 2);
 
     ScopeInstance instance = registry.createInstance("org.sidescopes.histogram");
     REQUIRE(instance.valid());
@@ -384,47 +400,63 @@ TEST_CASE("A graticule reports the room it needs past the buffer it was given")
     }
 }
 
-TEST_CASE("The combined histogram lifts its markers to full height")
+TEST_CASE("The histogram's combined style lifts its markers to full height")
 {
-    ScopeInstance banded = builtinModules().createInstance("org.sidescopes.histogram");
-    ScopeInstance overlaid = builtinModules().createInstance("org.sidescopes.histogram.combined");
-    REQUIRE(banded.valid());
-    REQUIRE(overlaid.valid());
+    // The style is the whole difference between the two plots, and it has to
+    // reach the overlay as well as the fill: the per-channel plot stacks the
+    // three curves, so a marker belongs in its own third, while the combined
+    // one overlays them and every marker spans the plot. Both directions,
+    // because a style that only ever moved one way would pass either reading.
+    ScopeInstance histogram = builtinModules().createInstance("org.sidescopes.histogram");
+    REQUIRE(histogram.valid());
 
-    // The per-channel histogram stacks the three plots, so each marker is
-    // confined to its own third.
-    const std::vector<SsMarker> inBands = banded.markers(SsColor{10.0f, 150.0f, 240.0f});
+    const std::vector<SsMarker> inBands = histogram.markers(SsColor{10.0f, 150.0f, 240.0f});
     REQUIRE(inBands.size() == 3);
     CHECK(inBands[1].band_from == Catch::Approx(1.0f / 3.0f));
     CHECK(inBands[1].band_to == Catch::Approx(2.0f / 3.0f));
     CHECK(inBands[2].x == Catch::Approx(240.0f / 255.0f));
     CHECK(inBands[2].channel_mask == 0x4U);
 
-    // The combined one overlays them, so every marker spans the whole plot.
-    const std::vector<SsMarker> full = overlaid.markers(SsColor{10.0f, 150.0f, 240.0f});
+    REQUIRE(histogram.configure(std::vector<SsParamValue>{{"style", 1.0}}));
+    const std::vector<SsMarker> full = histogram.markers(SsColor{10.0f, 150.0f, 240.0f});
     REQUIRE(full.size() == 3);
     for (const SsMarker& marker : full) {
         CHECK(marker.kind == SS_MARKER_VALUE);
         CHECK(marker.band_from == Catch::Approx(0.0f));
         CHECK(marker.band_to == Catch::Approx(1.0f));
     }
+
+    // And back, so the choice is a setting rather than a latch.
+    REQUIRE(histogram.configure(std::vector<SsParamValue>{{"style", 0.0}}));
+    CHECK(histogram.markers(SsColor{10.0f, 150.0f, 240.0f})[1].band_to == Catch::Approx(2.0f / 3.0f));
 }
 
-TEST_CASE("Neither histogram can be configured into the other")
+TEST_CASE("The histogram's style redraws the plot itself")
 {
-    // Each is defined by the plot it draws, so a stale `style` key from a file
-    // written before they were separate scopes must not move either off it -
-    // and a file naming a parameter no scope declares is never refused.
-    ScopeInstance banded = builtinModules().createInstance("org.sidescopes.histogram");
-    ScopeInstance overlaid = builtinModules().createInstance("org.sidescopes.histogram.combined");
-    REQUIRE(banded.valid());
-    REQUIRE(overlaid.valid());
+    // The markers alone would pass a build whose style reached the overlay and
+    // not the image, which is the half a user looks at. Blue is the telling
+    // channel: per channel it is confined to the bottom third, combined it
+    // rises from the floor of the whole plot.
+    ScopeInstance histogram = builtinModules().createInstance("org.sidescopes.histogram");
+    REQUIRE(histogram.valid());
 
-    REQUIRE(banded.configure(std::vector<SsParamValue>{{"style", 1.0}}));
-    REQUIRE(overlaid.configure(std::vector<SsParamValue>{{"style", 0.0}}));
+    TestFrame flat(32, 32, 255);
+    flat.fill(Color{10, 150, 240});
+    const SsFrameView frame = viewOf(flat);
 
-    CHECK(banded.markers(SsColor{10.0f, 150.0f, 240.0f})[1].band_to == Catch::Approx(2.0f / 3.0f));
-    CHECK(overlaid.markers(SsColor{10.0f, 150.0f, 240.0f})[1].band_to == Catch::Approx(1.0f));
+    REQUIRE(histogram.accumulate(frame, SsRect{0, 0, 32, 32}));
+    const SsImageView banded = histogram.image();
+    const int bandedTop = topLitRow(banded, 2);
+    const int third = banded.height / 3;
+
+    REQUIRE(histogram.configure(std::vector<SsParamValue>{{"style", 1.0}}));
+    REQUIRE(histogram.accumulate(frame, SsRect{0, 0, 32, 32}));
+    const int overlaidTop = topLitRow(histogram.image(), 2);
+
+    REQUIRE(bandedTop >= 0);
+    REQUIRE(overlaidTop >= 0);
+    CHECK(bandedTop >= 2 * third);
+    CHECK(overlaidTop < third);
 }
 
 TEST_CASE("The luma waveform's colored style keeps the trace's own hue")

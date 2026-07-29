@@ -22,7 +22,7 @@ int canonicalRank(std::string_view id)
 {
     static constexpr std::string_view Order[] = {
         "org.sidescopes.vectorscope", "org.sidescopes.waveform",  "org.sidescopes.waveform.luma",
-        "org.sidescopes.parade",      "org.sidescopes.histogram", "org.sidescopes.histogram.combined",
+        "org.sidescopes.parade",      "org.sidescopes.histogram",
     };
     for (int index = 0; index < static_cast<int>(std::size(Order)); ++index) {
         if (Order[index] == id) {

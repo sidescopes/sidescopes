@@ -114,6 +114,8 @@ private:
     /// The graticule styling for one pane: the view's strength, plus the weight
     /// @p majorLineWidth this scope draws its major lines at.
     [[nodiscard]] GraticuleStyle graticuleStyle(float majorLineWidth) const;
+    /// @return The plot the histogram draws, from the style its parameters name.
+    [[nodiscard]] HistogramStyle histogramStyle() const;
     /// @return @p id's exported curve, or an empty one while no pass has
     ///         published it.
     [[nodiscard]] const std::vector<float>& outlineFor(std::string_view id) const;

@@ -14,7 +14,6 @@ stacks.
 | L | luma waveform |
 | R | RGB parade |
 | H | histogram |
-| G | combined histogram |
 | C | color picker |
 | Z | step the vectorscope's zoom: 1x, 2x, 4x, round again |
 

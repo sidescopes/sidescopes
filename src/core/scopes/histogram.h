@@ -78,19 +78,7 @@ public:
     /// own, which is what a test or a benchmark does.
     void lendScratch(ChunkScratch::Lender lender, const void* context)
     {
-        bins().lendScratch(lender, context);
-    }
-
-    /// Scatters into @p bins rather than into its own, so several scopes over
-    /// one region pay for that scatter once and the ones after the first find
-    /// it already done. Null puts it back on its own, which is what an engine
-    /// nobody has lent to - a test, a benchmark - always uses.
-    ///
-    /// The bins must outlive this engine, and only one thread may drive the
-    /// engines sharing a set.
-    void lendBins(HistogramBins* bins)
-    {
-        m_lentBins = bins;
+        m_bins.lendScratch(lender, context);
     }
 
     /// The composed scope image.
@@ -111,18 +99,6 @@ public:
     }
 
 private:
-    /// The bins this pass reads: the lent set when there is one, otherwise the
-    /// engine's own.
-    [[nodiscard]] HistogramBins& bins()
-    {
-        return m_lentBins != nullptr ? *m_lentBins : m_ownBins;
-    }
-
-    [[nodiscard]] const HistogramBins& bins() const
-    {
-        return m_lentBins != nullptr ? *m_lentBins : m_ownBins;
-    }
-
     void mapBinsToImage();
     [[nodiscard]] std::vector<double> computeHeights() const;
     void exportOutline(const std::vector<double>& heights);
@@ -137,10 +113,7 @@ private:
     HistogramSettings m_settings;
     int m_width = ImageWidth;
     int m_height = Height;
-    // The bins this engine scatters into when nobody has lent it a set, and
-    // the set it was lent. Both are never in use at once.
-    HistogramBins m_ownBins;
-    HistogramBins* m_lentBins = nullptr;
+    HistogramBins m_bins;
     std::vector<float> m_outline;
     ScopeImage m_image;
 };

@@ -275,8 +275,8 @@ TEST_CASE("A scope's own letter yields to a file that bound it elsewhere")
 
 TEST_CASE("The file that shipped the collision puts every scope on its own key")
 {
-    // The incident, end to end: a file naming a key for every scope, two of
-    // them the letters the promoted scopes' siblings hold. It reached a user,
+    // The incident, end to end: a file naming a key for every scope, one of
+    // them the letter the promoted scope's sibling holds. It reached a user,
     // so the whole path from the file to the key is worth holding down rather
     // than the refusal alone.
     const test::TempFile file("collided-shortcuts.txt");
@@ -284,7 +284,6 @@ TEST_CASE("The file that shipped the collision puts every scope on its own key")
         "shortcut_org.sidescopes.vectorscope=V\n"
         "shortcut_org.sidescopes.waveform.luma=W\n"
         "shortcut_org.sidescopes.parade=R\n"
-        "shortcut_org.sidescopes.histogram.combined=H\n"
         "shortcut_org.sidescopes.colorpicker=C\n");
     const Preferences loaded = loadPreferences(file.path());
 
@@ -297,8 +296,26 @@ TEST_CASE("The file that shipped the collision puts every scope on its own key")
     CHECK(resolver.bindingFor(LumaWaveformScopeId) == "L");
     CHECK(resolver.bindingFor(ParadeScopeId) == "R");
     CHECK(resolver.bindingFor(HistogramScopeId) == "H");
-    CHECK(resolver.bindingFor(CombinedHistogramScopeId) == "G");
     CHECK(resolver.bindingFor(ColorPickerScopeId) == "C");
+}
+
+TEST_CASE("An override for a scope this build lacks claims nothing")
+{
+    // A file written by a build that had a scope this one does not - the
+    // combined histogram, on its own key until it folded back into a style.
+    // Its override must not hold the letter hostage: a key is claimed for a
+    // scope the registry lists, so an id nothing answers to reaches no scope
+    // and takes no letter from one that exists.
+    const test::TempFile file("retired-scope-shortcut.txt");
+    file.write("shortcut_org.sidescopes.histogram.combined=H\n");
+    const Preferences loaded = loadPreferences(file.path());
+    REQUIRE(loaded.scopeShortcuts.count("org.sidescopes.histogram.combined") == 1);
+
+    const ScopeRegistry shipped{builtinModules()};
+    ShortcutResolver resolver{shipped};
+    resolver.restore(loaded.shortcuts, loaded.scopeShortcuts);
+
+    CHECK(resolver.bindingFor(HistogramScopeId) == "H");
 }
 
 TEST_CASE("Every shipped scope binds the key its module advertises")

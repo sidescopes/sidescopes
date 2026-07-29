@@ -111,8 +111,8 @@ void Histogram::accumulate(const FrameView& frame, IntRect region)
     region = region.clampedTo(frame.width, frame.height);
     const SampleGrid grid =
         sampleGridFor(m_settings.samplingStride, region,
-                      budgetForBins(static_cast<long long>(bins().size()), HistogramMinSamplesPerBin));
-    bins().scatter(frame, region, grid);
+                      budgetForBins(static_cast<long long>(m_bins.size()), HistogramMinSamplesPerBin));
+    m_bins.scatter(frame, region, grid);
 
     mapBinsToImage();
 }
@@ -132,7 +132,7 @@ std::vector<double> Histogram::computeHeights() const
     // this size.
     std::vector<double> smoothed(static_cast<std::size_t>(Bins) * 3, 0.0);
     for (int channel = 0; channel < 3; ++channel) {
-        const uint32_t* plane = bins().data() + static_cast<std::ptrdiff_t>(channel) * Bins;
+        const uint32_t* plane = m_bins.data() + static_cast<std::ptrdiff_t>(channel) * Bins;
         double* out = smoothed.data() + static_cast<std::ptrdiff_t>(channel) * Bins;
         for (int value = 0; value < Bins; ++value) {
             const auto at = [&](int index) { return plane[std::clamp(index, 0, Bins - 1)]; };

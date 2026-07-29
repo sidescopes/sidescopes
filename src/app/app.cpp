@@ -660,14 +660,12 @@ void App::updateAdaptiveDetail(int framebufferWidth)
     if (!sizes) {
         return;
     }
-    // One size per family, put in force for every member: they share a set of
-    // bins, and a member at a different size would re-lay them every pass.
+    // One size for the whole waveform family: its members share a set of bins,
+    // and a member at a different size would re-lay them every pass.
     for (const std::string_view id : WaveformFamily) {
         m_analysis.imageSizes[std::string{id}] = sizes->waveform;
     }
-    for (const std::string_view id : HistogramFamily) {
-        m_analysis.imageSizes[std::string{id}] = sizes->histogram;
-    }
+    m_analysis.imageSizes[HistogramScopeId] = sizes->histogram;
     m_analysis.imageSizes[VectorscopeScopeId] = {sizes->vectorscope, sizes->vectorscope};
     m_analysisDirty = true;
 }

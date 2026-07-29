@@ -44,7 +44,7 @@ narrowing — the least capable backend defines the contract.
 
 ## Scopes
 
-SideScopes ships six scopes and a color picker; any subset can be shown at
+SideScopes ships five scopes and a color picker; any subset can be shown at
 once, splitting the window in a configured order the panes follow. What each
 one shows and how to read it is [docs/SCOPES.md](docs/SCOPES.md).
 
@@ -63,9 +63,10 @@ one shows and how to read it is [docs/SCOPES.md](docs/SCOPES.md).
   screen at once.
 - **RGB parade** — the waveform engine with the three channels laid side by
   side.
-- **Histogram** — the classic distribution, the channels stacked in bands.
-- **Combined histogram** — the same measurement with the channels overlaid
-  at full height, where the overlap itself is what is read.
+- **Histogram** — the classic distribution, the channels stacked in bands by
+  default, or overlaid at full height as a style, where the overlap itself is
+  what is read. One measurement drawn two ways, so a style rather than two
+  scopes.
 - **Color picker** — not a plot but a comparison pane: the color under the
   cursor held against a pinned reference, with readouts you can copy.
 

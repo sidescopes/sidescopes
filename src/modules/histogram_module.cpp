@@ -1,39 +1,23 @@
-// One module, two scopes: the per-channel histogram and the combined one
-// both wrap the same engine behind the C vtable. Each is defined by the
-// style it draws, so neither needs a parameter for what it always is.
-// Alongside the adaptive image size every scope carries, both export the
-// outline extension: the engine's normalized curve heights, which the host
-// strokes at display resolution over the filled texture. The engine stays
-// idiomatic C++; only this file speaks both languages, and no exception
-// ever crosses.
+// The RGB histogram behind the module boundary, drawn in one of two styles:
+// the channels in bands or overlaid. Alongside the adaptive image size every
+// scope carries, it exports the outline extension: the engine's normalized
+// curve heights, which the host strokes at display resolution over the filled
+// texture. The engine stays idiomatic C++; only this file speaks both
+// languages, and no exception ever crosses.
 
 #include <algorithm>
 #include <cstring>
-#include <memory>
 #include <vector>
 
 #include "core/scopes/histogram.h"
-#include "core/scopes/histogram_bins.h"
 #include "modules/module_export.h"
 #include "modules/module_frame.h"
 #include "modules/module_registry.h"
 #include "modules/module_scratch.h"
-#include "modules/module_shared_state.h"
 #include "sidescopes/module.h"
 
 namespace sidescopes {
 namespace {
-
-/// The bins every histogram scope of one host scatters into.
-///
-/// The two plots are this module over the same region, and the bin layout
-/// depends on nothing either of them holds, so their scatters agree bin for
-/// bin and everything after the scatter genuinely differs. Sharing one of these
-/// pays for it once.
-struct SharedHistogramBins
-{
-    HistogramBins bins;
-};
 
 struct HistogramInstance
 {
@@ -43,11 +27,6 @@ struct HistogramInstance
     /// The host that created this instance, kept for the shared
     /// accumulation arena it lends. Null when there is none.
     const SsHost* host = nullptr;
-    /// The bins shared with this host's other histogram scopes, taken on the
-    /// first pass. Held rather than looked up per pass, and held only by the
-    /// instances that really accumulate: a projection instance never asks, so
-    /// a stack with no region goes on holding no bins at all.
-    std::shared_ptr<SharedHistogramBins> shared;
 };
 
 HistogramInstance* impl(SsScopeInstance* instance)
@@ -68,6 +47,10 @@ bool configure(SsScopeInstance* instance, const SsParamValue* values, uint32_t c
             const SsParamValue& value = values[index];
             if (std::strcmp(value.key, "stride") == 0) {
                 self->settings.samplingStride = static_cast<int>(value.value);
+            } else if (std::strcmp(value.key, "style") == 0) {
+                // Choice 0 is the per-channel default; 1 overlays the
+                // channels additively into one combined plot.
+                self->settings.style = value.value < 0.5 ? HistogramStyle::PerChannel : HistogramStyle::Combined;
             }
         }
         self->engine.configure(self->settings);
@@ -82,13 +65,6 @@ bool accumulate(SsScopeInstance* instance, const SsFrameView* frame, SsRect regi
     try {
         HistogramInstance* self = impl(instance);
         const FrameView view = frameFromBoundary(*frame);
-        if (!self->shared) {
-            self->shared = sharedStateFor<SharedHistogramBins>(self->host);
-            self->engine.lendBins(self->shared ? &self->shared->bins : nullptr);
-        }
-        // After the bins, so the arena reaches the set actually in use. Both
-        // are re-applied every pass, so neither depends on the other having
-        // happened first on any particular one.
         lendHostScratch(self->engine, self->host);
         self->engine.accumulate(view, IntRect{region.x, region.y, region.width, region.height});
         return true;
@@ -143,9 +119,9 @@ uint32_t markers(const SsScopeInstance* instance, SsColor color, SsMarker* out, 
             SsMarker marker{};
             marker.kind = SS_MARKER_VALUE;
             marker.x = channels[channel] / 255.0f;
-            // Per-channel stacks the channels into thirds; combined draws
-            // them across the full height. The host reads the band as a
-            // vertical confinement for value markers.
+            // The per-channel style stacks the channels into thirds; the
+            // combined one draws them across the full height. The host reads
+            // the band as a vertical confinement for value markers.
             marker.band_from = bands ? static_cast<float>(channel) / 3.0f : 0.0f;
             marker.band_to = bands ? static_cast<float>(channel + 1) / 3.0f : 1.0f;
             marker.channel_mask = 1u << channel;
@@ -205,8 +181,15 @@ void destroy(SsScopeInstance* instance)
     delete impl(instance);
 }
 
+// One measurement drawn two ways: the channels stacked in bands, each shape
+// complete, or overlaid at full height where the overlap itself is what is
+// read. A style rather than two scopes because neither is an instrument the
+// other cannot stand in for - and because two of them could not be named.
+const char* const StyleChoices[] = {"Per Channel", "Combined", nullptr};
+
 const SsParamInfo Params[] = {
     {"stride", "Sampling stride", SS_PARAM_INT, 1.0, 8.0, 1.0, 0.0, nullptr, nullptr},
+    {"style", "Style", SS_PARAM_CHOICE, 0.0, 1.0, 0.0, 0.0, "Histogram Style", StyleChoices},
 };
 
 constexpr uint32_t ParamCount = static_cast<uint32_t>(sizeof(Params) / sizeof(Params[0]));
@@ -215,22 +198,6 @@ const SsScopeDescriptor HistogramDescriptor{
     "org.sidescopes.histogram",
     "Histogram",
     'H',
-    Histogram::ImageWidth,
-    Histogram::Height,
-    0u,
-    Params,
-    ParamCount,
-    2.0f,
-};
-
-// The same measurement drawn a second way: three channels overlaid over the
-// full height rather than stacked in bands. Its own scope rather than a style
-// because a photographer reads overlap on one and exact per-channel shapes on
-// the other, and wants both on screen.
-const SsScopeDescriptor CombinedDescriptor{
-    "org.sidescopes.histogram.combined",
-    "Combined Histogram",
-    'G',
     Histogram::ImageWidth,
     Histogram::Height,
     0u,
@@ -250,34 +217,22 @@ void moduleDeinit()
 
 uint32_t scopeCount()
 {
-    return 2;
+    return 1;
 }
 
 const SsScopeDescriptor* descriptor(uint32_t index)
 {
-    if (index == 0) {
-        return &HistogramDescriptor;
-    }
-    if (index == 1) {
-        return &CombinedDescriptor;
-    }
-
-    return nullptr;
+    return index == 0 ? &HistogramDescriptor : nullptr;
 }
 
 SsScopeInstance* create(const char* scopeId, const SsHost* host)
 {
     try {
-        const bool perChannel = std::strcmp(scopeId, HistogramDescriptor.id) == 0;
-        const bool combined = std::strcmp(scopeId, CombinedDescriptor.id) == 0;
-        if (!perChannel && !combined) {
+        if (std::strcmp(scopeId, HistogramDescriptor.id) != 0) {
             return nullptr;
         }
 
         auto* self = new HistogramInstance;
-        // Which scope this is decides the style, and no configuration path may
-        // move either off the plot it exists to draw.
-        self->settings.style = combined ? HistogramStyle::Combined : HistogramStyle::PerChannel;
         // Push the constructed defaults through the engine explicitly, so the
         // instance never relies on the engine's own ctor defaults matching.
         self->engine.configure(self->settings);

@@ -38,9 +38,6 @@ namespace sidescopes::testing {
         case 'H':
             id = HistogramScopeId;
             break;
-        case 'G':
-            id = CombinedHistogramScopeId;
-            break;
         case 'C':
             id = ColorPickerScopeId;
             break;

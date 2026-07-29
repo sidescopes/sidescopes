@@ -142,7 +142,7 @@ std::pair<int, int> AdaptiveDetail::desiredHistogramSize(const ScopePaneSizes& p
     const std::pair<int, int> histSize = currentSize(HistogramScopeId);
     int wantHistWidth = histSize.first;
     int wantHistHeight = histSize.second;
-    if (anyShown(m_view.stack(), {HistogramScopeId, CombinedHistogramScopeId})) {
+    if (m_view.stack().shows(HistogramScopeId)) {
         // Near one texture pixel per screen pixel keeps the outline's width even
         // on flats and steep slopes alike.
         const QualityProfile& quality = profile();

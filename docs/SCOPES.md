@@ -1,6 +1,6 @@
 # The scopes
 
-Six scopes and a color picker. Any combination of them can be on screen at
+Five scopes and a color picker. Any combination of them can be on screen at
 once, splitting the window into panes; the scope selector in the toolbar
 chooses which, and the letters do the same from the keyboard.
 
@@ -66,17 +66,14 @@ hides things, and three separate traces let you compare their shapes
 exactly — which is the usual way to see which channel clips first, or that
 the shadows of one channel sit higher than the others.
 
-## Histogram (H) and combined histogram (G)
+## Histogram (H)
 
-How many pixels sit at each level. The per-channel histogram stacks red,
-green and blue in bands, each shape complete with nothing occluding it. The
-combined histogram overlays all three at full height, where the overlap
-itself is the information — a gray subject shows the three curves lying on
-top of one another.
-
-They are separate scopes rather than one drawn two ways because the two
-questions come up at different moments, and having both on screen answers
-them at once.
+How many pixels sit at each level. The Per Channel style stacks red, green
+and blue in bands, each shape complete with nothing occluding it, and is
+what the scope opens on. Combined overlays all three at full height, where
+the overlap itself is the information — a gray subject shows the three
+curves lying on top of one another, and most photo editors draw it this
+way.
 
 Bar heights follow a square-root curve, the way photo editors draw a
 histogram, so one tall peak does not flatten everything around it.
@@ -121,7 +118,8 @@ are graded at, and the faintest still reads.
 
 **Zoom**, on the vectorscope, magnifies 1x, 2x or 4x around the center.
 
-**Style**, on the luma waveform, chooses Plain or Colored.
+**Style**, on the luma waveform, chooses Plain or Colored; on the
+histogram, Per Channel or Combined.
 
 **Quality** sets how often the screen is read and how finely the scope
 images are computed. Standard is the default and reads the screen fifteen
@@ -134,7 +132,7 @@ gain on the other axes.
 ### By gesture, and in the Settings window
 
 The Settings window opens from the right-click menu, or with Command+comma
-on macOS. It lists three sets of sliders rather than six, because the
+on macOS. It lists three sets of sliders rather than five, because the
 waveform and the parade are one measurement drawn twice and share their
 tuning, while the luma waveform and the vectorscope each have their own.
 
@@ -143,7 +141,7 @@ sample contributes before the plot saturates. Scroll over the vectorscope
 or a waveform to change it, and double-click to return to the default; the
 value shows briefly on the pane as you turn it. A low intensity shows only
 where the image is dense, a high one brings out the sparse edges of the
-cloud. The histograms have no such control: a bar is a count.
+cloud. The histogram has no such control: a bar is a count.
 
 **Sampling stride** takes every Nth pixel instead of all of them, from 1 to
 8. The scopes plot the same shape either way on a photograph, and a larger

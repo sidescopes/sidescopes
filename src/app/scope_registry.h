@@ -19,7 +19,6 @@ inline constexpr char WaveformScopeId[] = "org.sidescopes.waveform";
 inline constexpr char LumaWaveformScopeId[] = "org.sidescopes.waveform.luma";
 inline constexpr char ParadeScopeId[] = "org.sidescopes.parade";
 inline constexpr char HistogramScopeId[] = "org.sidescopes.histogram";
-inline constexpr char CombinedHistogramScopeId[] = "org.sidescopes.histogram.combined";
 
 /// The waveform family: one module over one engine, and one set of bins,
 /// because the host gives every member the same image size. A member given a
@@ -29,23 +28,9 @@ inline constexpr char CombinedHistogramScopeId[] = "org.sidescopes.histogram.com
 /// pane size reads the list rather than an id.
 inline constexpr std::string_view WaveformFamily[] = {WaveformScopeId, LumaWaveformScopeId, ParadeScopeId};
 
-/// The histogram family, on the same terms: one bin layout, one image size.
-inline constexpr std::string_view HistogramFamily[] = {HistogramScopeId, CombinedHistogramScopeId};
-
 [[nodiscard]] inline bool inWaveformFamily(std::string_view id)
 {
     for (const std::string_view member : WaveformFamily) {
-        if (member == id) {
-            return true;
-        }
-    }
-
-    return false;
-}
-
-[[nodiscard]] inline bool inHistogramFamily(std::string_view id)
-{
-    for (const std::string_view member : HistogramFamily) {
         if (member == id) {
             return true;
         }

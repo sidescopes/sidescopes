@@ -60,22 +60,6 @@ void HistogramBins::scatterRows(const FrameView& frame, IntRect region, const Sa
 
 void HistogramBins::scatter(const FrameView& frame, IntRect region, const SampleGrid& grid)
 {
-    const HistogramScatterKey key{frame.pixels, frame.strideBytes, frame.sequence, frame.format, region, grid};
-    if (m_key == key) {
-        return;
-    }
-
-    // Cleared before the pass rather than written after it: a scatter that
-    // threw would otherwise leave half-filled bins under a key claiming they
-    // hold this frame, and every scope after it would read that as an answer.
-    m_key = HistogramScatterKey{};
-    ++m_scatters;
-    scatterInto(frame, region, grid);
-    m_key = key;
-}
-
-void HistogramBins::scatterInto(const FrameView& frame, IntRect region, const SampleGrid& grid)
-{
     const int rowCount = grid.rows;
     const int chunks = parallelChunkCount(rowCount, AccumulateRowsPerChunk);
     if (chunks <= 1) {

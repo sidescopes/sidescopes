@@ -86,7 +86,7 @@ float preferredScopeAspect(const std::string& scopeId)
     if (inWaveformFamily(scopeId)) {
         return 3.0f;
     }
-    if (inHistogramFamily(scopeId)) {
+    if (scopeId == HistogramScopeId) {
         return 2.0f;
     }
     if (scopeId == VectorscopeScopeId) {

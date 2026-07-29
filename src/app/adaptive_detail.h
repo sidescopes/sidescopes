@@ -39,7 +39,7 @@ struct DetailSizes
     /// The waveform image, columns by levels; every waveform-family scope
     /// shares it.
     std::pair<int, int> waveform;
-    /// The histogram image, bins by height; both histograms share it.
+    /// The histogram image, bins by height.
     std::pair<int, int> histogram;
     /// The vectorscope image, square.
     int vectorscope = 0;
@@ -123,9 +123,8 @@ public:
     /// force while no member of the family is on screen.
     [[nodiscard]] std::pair<int, int> desiredWaveformSize(const ScopePaneSizes& panePixels, int regionWidth) const;
 
-    /// The histogram family's desired image, bins by height, for the panes in
-    /// @p panePixels. Stays at the resolution in force while neither is on
-    /// screen.
+    /// The histogram's desired image, bins by height, for the pane in
+    /// @p panePixels. Stays at the resolution in force while it is off screen.
     [[nodiscard]] std::pair<int, int> desiredHistogramSize(const ScopePaneSizes& panePixels) const;
 
     /// The vectorscope's desired image edge for the pane in @p panePixels.

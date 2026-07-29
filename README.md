@@ -18,10 +18,10 @@ are the scopes themselves, one pane each, splitting the window as you turn
 more of them on. Along the bottom sits the color under your pointer with
 its RGB percentages, and the tool that pins a color for later comparison.
 
-There are six scopes, and any combination of them can be on screen at once:
-a vectorscope, an RGB waveform, a luma waveform, an RGB parade, a
-per-channel histogram and a combined one. A color picker pane joins them,
-holding the live color against the ones you have pinned.
+There are five scopes, and any combination of them can be on screen at
+once: a vectorscope, an RGB waveform, a luma waveform, an RGB parade and a
+histogram. A color picker pane joins them, holding the live color against
+the ones you have pinned.
 
 The region being measured carries a live border on the desktop, labeled
 with the window it belongs to. Drag the border to move the region, drag a

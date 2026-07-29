@@ -25,15 +25,14 @@ SCOPE_LETTERS = {
     "L": "org.sidescopes.waveform.luma",
     "R": "org.sidescopes.parade",
     "H": "org.sidescopes.histogram",
-    "G": "org.sidescopes.histogram.combined",
     "C": "org.sidescopes.colorpicker",
 }
 
 # The stacks a run measures unless told otherwise: one scope, the owner's
 # working set, and every scope that has existed since 0.4. "Every scope" is
 # deliberately not spelled as "all" - a build with a scope the other lacks would
-# make that phrase mean two different things, and the luma waveform and the
-# combined histogram are exactly such scopes. Ask for them by name.
+# make that phrase mean two different things, and the luma waveform is exactly
+# such a scope. Ask for it by name.
 DEFAULT_STACKS = ("W", "WVR", "VWRHC")
 
 # The rate the video scenario plays at. Cinema's frame rate rather than the

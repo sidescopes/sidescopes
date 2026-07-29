@@ -102,9 +102,9 @@ public:
         std::map<std::string, ScopeImage> images;
         /// Each outline-carrying scope's curve, keyed by scope id and stroked
         /// by the interface at display resolution (three channels of
-        /// normalized heights). Only the histograms export the outline
-        /// extension today, and per id rather than in one slot because two of
-        /// them draw at once: one slot would hold whichever ran last.
+        /// normalized heights). Only the histogram exports the outline
+        /// extension today; keyed like the images so a second one would not
+        /// have to displace it.
         std::map<std::string, std::vector<float>> outlines;
         double accumulateMilliseconds = 0.0;
         uint64_t framesProcessed = 0;
