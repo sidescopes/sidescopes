@@ -30,7 +30,13 @@ LayoutPreset LayoutPresetStore::effective(int slot, const LayoutPreset& defaults
     return preset;
 }
 
-void LayoutPresetStore::save(int slot, LayoutPreset preset)
+bool sameLayout(const LayoutPreset& first, const LayoutPreset& second)
+{
+    return first.stack == second.stack && first.orientation == second.orientation && first.weights == second.weights &&
+           first.styles == second.styles;
+}
+
+void LayoutPresetStore::store(int slot, LayoutPreset preset)
 {
     LayoutPreset& stored = m_presets[static_cast<std::size_t>(slot - 1)];
     // A name outlives the layout it was given to: saving over a slot replaces
@@ -38,7 +44,6 @@ void LayoutPresetStore::save(int slot, LayoutPreset preset)
     // carries a name, so taking the stored one is also the only way to keep it.
     preset.name = stored.name;
     stored = std::move(preset);
-    m_activeSlot = slot;
 }
 
 void LayoutPresetStore::markLoaded(int slot)
@@ -54,14 +59,6 @@ void LayoutPresetStore::rename(int slot, std::string_view name)
 int LayoutPresetStore::activeSlot() const
 {
     return m_activeSlot;
-}
-
-bool LayoutPresetStore::isDirty(const LayoutPreset& live, const LayoutPreset& defaults) const
-{
-    const LayoutPreset stored = effective(m_activeSlot, defaults);
-
-    return live.stack != stored.stack || live.orientation != stored.orientation || live.weights != stored.weights ||
-           live.styles != stored.styles;
 }
 
 const std::array<LayoutPreset, LayoutPresetSlots>& LayoutPresetStore::all() const

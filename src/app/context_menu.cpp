@@ -222,22 +222,14 @@ void appendQualitySubmenu(const ContextMenuModel& model, std::vector<NativeMenuI
 void appendPresetsSubmenu(const ContextMenuModel& model, std::vector<NativeMenuItem>& menu)
 {
     // Each slot goes by its name, marked when it holds nothing yet; the digit
-    // hint teaches the load shortcut. Saving rides a nested submenu with the
-    // Shift+digit hint, over the same names, so the two lists read alike.
+    // hint teaches the load shortcut. There is nothing here about saving: what
+    // is on screen is already in the slot it belongs to.
     menuSubmenu(menu, "Presets");
     for (int slot = 1; slot <= LayoutPresetSlots; ++slot) {
         const LayoutPreset& preset = model.presets[static_cast<std::size_t>(slot - 1)];
         menuAction(menu, presetLabel(slot, preset).c_str(), MenuLoadPresetBase + slot, slot == model.activePresetSlot,
                    std::to_string(slot));
     }
-    menuSeparator(menu);
-    menuSubmenu(menu, "Save Current To");
-    for (int slot = 1; slot <= LayoutPresetSlots; ++slot) {
-        const LayoutPreset& preset = model.presets[static_cast<std::size_t>(slot - 1)];
-        menuAction(menu, presetDisplayName(slot, preset).c_str(), MenuSavePresetBase + slot, false,
-                   "Shift+" + std::to_string(slot));
-    }
-    menuEndSubmenu(menu);
     menuEndSubmenu(menu);
 }
 
@@ -335,9 +327,6 @@ std::optional<ShortcutAction> presetAction(int chosen)
 {
     if (chosen > MenuLoadPresetBase && chosen <= MenuLoadPresetBase + LayoutPresetSlots) {
         return ShortcutAction::preset(chosen - MenuLoadPresetBase, false);
-    }
-    if (chosen > MenuSavePresetBase && chosen <= MenuSavePresetBase + LayoutPresetSlots) {
-        return ShortcutAction::preset(chosen - MenuSavePresetBase, true);
     }
 
     return std::nullopt;

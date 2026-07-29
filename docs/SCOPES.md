@@ -171,19 +171,17 @@ longer axis, so panes stack in a tall window and sit side by side in a wide
 one; Vertical (stacked) and Horizontal (side by side) force it either way.
 Dragging the divider between two panes changes their share.
 
-Nine preset slots hold layouts. A digit loads its slot, and Shift with a
-digit saves the live layout into it. The picker in the toolbar opens the
-same nine as a list: clicking a row loads that slot, and each row carries
-a pen that renames it and a save button that puts the live layout into it.
+Nine preset slots hold layouts, and there is nothing to save: the slot you
+are on is whatever is on screen. Rearrange the scopes and that slot holds
+the new arrangement. A digit loads its slot; the picker in the toolbar
+opens the same nine as a list, where clicking a row loads it and the pen
+on each row renames it. Switching away keeps what you arranged behind you,
+so there is never anything to confirm on the way out.
 
-Saving means one thing in both directions — the live layout now lives in
-that slot, and that slot is the one you are on. Saving over the slot you
-loaded updates it; saving into any other takes the layout there and moves
-you onto it. Nothing is left drifted either way, which is the point: the
-toolbar button carries the slot you are on, starred once the live layout
-has drifted from it, and a save is what clears the star. A name outlives
-the layout it was given to, so saving over a slot replaces what it holds
-and not what it is called.
+A slot nothing has been arranged on yet opens on the vectorscope alone,
+which is where the application starts. Visiting one does not claim it —
+only arranging something does — so the list goes on showing which slots
+are yours.
 
 A preset stores which scopes are shown, their order, the split, the pane
 weights and each scope's style — but not intensity, sampling, smoothing or

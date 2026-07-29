@@ -42,10 +42,8 @@ TEST_CASE("A fresh preset store holds nine empty slots and opens on the first")
     for (int slot = 1; slot <= LayoutPresetSlots; ++slot) {
         CHECK(store.at(slot).stack.empty());
     }
-    // The live layout is the one an empty slot restores, so nothing has
-    // drifted and the toolbar carries no star.
-    CHECK_FALSE(store.isDirty(defaults(), defaults()));
-    CHECK(store.isDirty(presetOf("VW", 1), defaults()));
+    // An empty slot restores the defaults, which is what makes it loadable.
+    CHECK(sameLayout(store.effective(1, defaults()), defaults()));
 }
 
 TEST_CASE("A slot holding nothing restores the defaults under its own name")
@@ -63,16 +61,19 @@ TEST_CASE("A slot holding nothing restores the defaults under its own name")
     CHECK(presetDisplayName(4, restored) == "Skin tones");
 
     // A slot that holds something is returned as it is, defaults untouched.
-    store.save(4, presetOf("WH", 2));
+    store.store(4, presetOf("WH", 2));
     CHECK(store.effective(4, defaults()).stack == "WH");
 }
 
-TEST_CASE("Saving a preset stores it and makes its slot active")
+TEST_CASE("Storing a preset leaves which slot is active alone")
 {
+    // A write is not a move. The live layout writes itself into the slot it is
+    // already on, and Shift+digit writes into one it is deliberately NOT on -
+    // so storing must never be the thing that decides where you are.
     LayoutPresetStore store;
-    store.save(3, presetOf("VW", 2));
+    store.store(3, presetOf("VW", 2));
 
-    CHECK(store.activeSlot() == 3);
+    CHECK(store.activeSlot() == 1);
     CHECK(store.at(3).stack == "VW");
     CHECK(store.at(3).orientation == 2);
     // The other slots are untouched.
@@ -80,47 +81,48 @@ TEST_CASE("Saving a preset stores it and makes its slot active")
     CHECK(store.at(9).stack.empty());
 }
 
-TEST_CASE("The active slot is dirty as soon as the live layout differs")
+TEST_CASE("Two presets differ if any captured field does")
 {
-    LayoutPresetStore store;
+    // What decides whether the live layout has to be written back into its
+    // slot. Styles and weights are the two a shallow comparison would miss,
+    // and missing one means a change the user made is quietly not kept.
     const LayoutPreset saved = presetOf("VW", 2);
-    store.save(4, saved);
+    CHECK(sameLayout(saved, presetOf("VW", 2)));
 
-    // What was saved is what is live: the chip carries no star.
-    CHECK_FALSE(store.isDirty(saved, defaults()));
-
-    // Each captured field on its own is enough to have drifted, styles and
-    // weights included - the two a shallow comparison would miss.
     LayoutPreset stack = saved;
     stack.stack = "VWH";
-    CHECK(store.isDirty(stack, defaults()));
+    CHECK_FALSE(sameLayout(saved, stack));
 
     LayoutPreset orientation = saved;
     orientation.orientation = 1;
-    CHECK(store.isDirty(orientation, defaults()));
+    CHECK_FALSE(sameLayout(saved, orientation));
 
     LayoutPreset weights = saved;
     weights.weights["org.sidescopes.waveform"] = 0.75;
-    CHECK(store.isDirty(weights, defaults()));
+    CHECK_FALSE(sameLayout(saved, weights));
 
     LayoutPreset styles = saved;
     styles.styles["org.sidescopes.waveform"]["mode"] = 2.0;
-    CHECK(store.isDirty(styles, defaults()));
+    CHECK_FALSE(sameLayout(saved, styles));
+
+    // A name is not part of the layout: it belongs to the slot, so renaming
+    // one must not read as a change that needs writing back.
+    LayoutPreset named = saved;
+    named.name = "Skin tones";
+    CHECK(sameLayout(saved, named));
 }
 
 TEST_CASE("Loading a slot makes it active without touching what is stored")
 {
     LayoutPresetStore store;
-    store.save(2, presetOf("V", 1));
-    store.save(5, presetOf("WH", 2));
-    REQUIRE(store.activeSlot() == 5);
+    store.store(2, presetOf("V", 1));
+    store.store(5, presetOf("WH", 2));
+    REQUIRE(store.activeSlot() == 1);
 
     store.markLoaded(2);
     CHECK(store.activeSlot() == 2);
     CHECK(store.at(2).stack == "V");
     CHECK(store.at(5).stack == "WH");
-    // The live layout is what slot 2 holds, so nothing has drifted yet.
-    CHECK_FALSE(store.isDirty(presetOf("V", 1), defaults()));
 }
 
 TEST_CASE("A slot goes by its number until it is given a name")
@@ -136,7 +138,8 @@ TEST_CASE("A slot goes by its number until it is given a name")
 TEST_CASE("Renaming a slot leaves what it holds alone")
 {
     LayoutPresetStore store;
-    store.save(2, presetOf("VW", 2));
+    store.store(2, presetOf("VW", 2));
+    store.markLoaded(2);
     REQUIRE(store.activeSlot() == 2);
 
     store.rename(2, "Portrait check");
@@ -144,8 +147,6 @@ TEST_CASE("Renaming a slot leaves what it holds alone")
     CHECK(store.at(2).stack == "VW");
     // A rename is not a load: which slot is active is untouched.
     CHECK(store.activeSlot() == 2);
-    // Nor is it a drift of the live layout, which still matches what is stored.
-    CHECK_FALSE(store.isDirty(presetOf("VW", 2), defaults()));
 }
 
 TEST_CASE("An empty slot can be named before it holds anything")
@@ -167,7 +168,7 @@ TEST_CASE("Saving over a named slot keeps its name")
     // capture wholesale would wipe the name every time the slot was updated.
     LayoutPresetStore store;
     store.rename(3, "Portrait check");
-    store.save(3, presetOf("VWH", 1));
+    store.store(3, presetOf("VWH", 1));
 
     CHECK(presetDisplayName(3, store.at(3)) == "Portrait check");
     CHECK(store.at(3).stack == "VWH");
@@ -196,7 +197,7 @@ TEST_CASE("A name is cleaned on the way into a slot")
 TEST_CASE("Restoring replaces every slot and the active one")
 {
     LayoutPresetStore store;
-    store.save(1, presetOf("V", 1));
+    store.store(1, presetOf("V", 1));
 
     std::array<LayoutPreset, LayoutPresetSlots> presets;
     presets[0] = presetOf("WH", 2);
@@ -206,7 +207,6 @@ TEST_CASE("Restoring replaces every slot and the active one")
     CHECK(store.activeSlot() == 9);
     CHECK(store.at(1).stack == "WH");
     CHECK(store.at(9).stack == "R");
-    CHECK(store.isDirty(presetOf("V", 1), defaults()));
 }
 
 TEST_CASE("Restoring an active slot outside the nine opens on the first")

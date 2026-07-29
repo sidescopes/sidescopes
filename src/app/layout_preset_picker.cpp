@@ -14,17 +14,16 @@
 namespace sidescopes {
 namespace {
 
-// The widest thing the toolbar button's label can ever say: the last slot,
-// drifted. The button reserves this width whatever it is showing, so the star
-// arriving and leaving never moves the row.
-constexpr const char* WidestPresetLabel = "9*";
+// The widest thing the toolbar button's label can ever say. The button reserves
+// this width whatever it is showing, so no slot number moves the row.
+constexpr const char* WidestPresetLabel = "9";
 
 // The controls that lead a preset row, and so where its name starts. This list
 // leads with buttons where the scope menu leads with a checkbox, so the two
 // share the gap that follows them rather than the x it works out to.
 float presetLeadingWidth()
 {
-    return 2.0f * menuRowIconWidth();
+    return menuRowIconWidth();
 }
 
 float presetNameX()
@@ -123,30 +122,23 @@ void LayoutPresetPicker::drawSlotRow(int slot, float width, IconTextures& icons,
         return;
     }
     const std::string name = presetDisplayName(slot, m_presets.at(slot));
-    // Two controls lead the row - rename it, and save the live layout into it -
-    // in the column the scope menu gives its checkbox, so the two lists share a
-    // left edge as well as a right one. Both are always there and both recede:
-    // eighteen glyphs at full strength beside nine names is a wall rather than
-    // a list, and eighteen HIDDEN ones leave the column they still have to
-    // reserve empty down the whole list.
+    // The pen leads the row, in the column the scope menu gives its checkbox,
+    // so the two lists share a left edge as well as a right one. It is always
+    // there and it recedes: nine pens at full strength beside nine names is a
+    // wall rather than a list, and nine HIDDEN ones leave the column they
+    // still have to reserve empty down the whole list.
     //
-    // They come up on the row under the pointer, and on the loaded row, which
+    // It comes up on the row under the pointer, and on the loaded row, which
     // is what tells that row apart from the rest by something other than the
     // hue of the band behind it.
-    const bool emphasized = hovered || chosen;
     const std::string renameTip = "Rename " + name;
-    if (menuRowIconButton("##rename", icons.textureId(Icon::PenLine, iconPixelSize()), renameTip.c_str(), emphasized)) {
+    if (menuRowIconButton("##rename", icons.textureId(Icon::PenLine, iconPixelSize()), renameTip.c_str(),
+                          hovered || chosen)) {
         beginRename(slot);
     }
-    ImGui::SameLine(0.0f, 0.0f);
-    const std::string saveTip = "Save the current layout into " + name;
-    if (menuRowIconButton("##save", icons.textureId(Icon::Save, iconPixelSize()), saveTip.c_str(), emphasized)) {
-        outcome = m_presets.save(slot);
-    }
     ImGui::SameLine(presetNameX());
-    // The row itself only ever loads. Saving was a modifier on this same click
-    // and is a button of its own now: a gesture that means two things depending
-    // on a held key teaches nobody the second one.
+    // A row does one thing: it loads. What is on screen is written into the
+    // slot it belongs to as it is arranged, so there is nothing here to save.
     const ImVec2 rowSize(nameWidth, ImGui::GetFrameHeight());
     if (ImGui::Selectable(name.c_str(), false, ImGuiSelectableFlags_NoAutoClosePopups, rowSize)) {
         outcome = m_presets.load(slot);
@@ -160,14 +152,13 @@ LayoutPresetOutcome LayoutPresetPicker::draw(IconTextures& icons)
     // A sibling of the scope selector, standing after it: a preset IS a set of
     // scopes, so the compound control follows the thing it is composed of, and
     // scopes are switched constantly where a preset is loaded occasionally.
-    // The same button, carrying the slot it is on rather than a bare digit,
-    // starred once the live layout drifts from that slot. Clicking opens the
-    // list - the mouse mirror of the digit keys - which is shaped like the
-    // scope selector's, because it is the same gesture.
+    // The same button, carrying the slot it is on rather than a bare digit.
+    // Clicking opens the list - the mouse mirror of the digit keys - which is
+    // shaped like the scope selector's, because it is the same gesture.
     const int active = m_presets.activeSlot();
     char label[8] = "";
-    std::snprintf(label, sizeof(label), "%d%s", active, m_presets.activeDirty() ? "*" : "");
-    const std::string tooltip = presetDisplayName(active, m_presets.at(active)) + " - digits load, Shift+digits save";
+    std::snprintf(label, sizeof(label), "%d", active);
+    const std::string tooltip = presetDisplayName(active, m_presets.at(active)) + " - digits load";
     const float labelWidth = ImGui::CalcTextSize(WidestPresetLabel).x;
     if (labelledIconButton("##preset-picker", icons.textureId(Icon::PanelsTopLeft, iconPixelSize()), label, labelWidth,
                            tooltip.c_str())) {

@@ -29,8 +29,8 @@ struct LayoutPresetOutcome
 };
 
 /// Owns the layout preset slots and the capture and apply over them: what a
-/// slot records of the live layout, and whether the live layout has drifted
-/// from the active slot. It reads and writes the view and the settings it is
+/// slot records of the live layout, and the writing back that keeps the active
+/// slot equal to it. It reads and writes the view and the settings it is
 /// constructed with; the status line and the persistence clocks travel back as
 /// a LayoutPresetOutcome the host applies. The picker that draws all this is a
 /// class of its own, so nothing here depends on the toolkit.
@@ -56,36 +56,42 @@ public:
     ///         always on a preset.
     [[nodiscard]] int activeSlot() const;
 
-    /// Records the live layout in @p slot (1-based) and makes that slot the
-    /// one being worked on.
+    /// Writes the live layout into the active slot if it has moved since the
+    /// last look. Called once a frame: there is no explicit save, so a slot IS
+    /// whatever is on screen while you are on it.
+    /// @return Whether anything was written, so the host can schedule the
+    ///         preferences file's own debounced write.
+    [[nodiscard]] bool syncActiveSlot();
+
+    /// Copies the live layout into @p slot (1-based) and STAYS WHERE IT IS.
     ///
-    /// ONE RULE COVERS BOTH READINGS, and it is worth stating because the two
-    /// look like different actions: saving into the slot already loaded
-    /// updates it, and saving into any other puts the live layout there and
-    /// moves to it. Both are "this layout now lives in that slot, and that is
-    /// the slot I am on" - which is also the only reading that leaves nothing
-    /// drifted afterwards, since the star compares the live layout against the
-    /// ACTIVE slot.
-    [[nodiscard]] LayoutPresetOutcome save(int slot);
+    /// The keyboard's Shift+digit, and deliberately not in the interface. It
+    /// is the one way to make a stable reference point under auto-save: every
+    /// slot you are ON keeps changing under you, so stamping the current
+    /// arrangement into a slot you are NOT on is what leaves something that
+    /// holds still. Following the copy would defeat it - you would land on the
+    /// copy and immediately start editing it. The destination keeps its own
+    /// name; a name outlives the layout it was given to.
+    [[nodiscard]] LayoutPresetOutcome copyInto(int slot);
 
     /// Puts @p slot's (1-based) layout on screen - the stack, the split, the
     /// weights, and the styles - and makes it the active slot. A slot holding
     /// nothing yet restores @ref defaultLayout, so no click on a slot is ever
     /// refused.
+    ///
+    /// The slot being LEFT keeps whatever was on screen: it was written there
+    /// as it was arranged, so switching away is not a discard and there is
+    /// nothing to confirm.
     [[nodiscard]] LayoutPresetOutcome load(int slot);
 
     /// Calls @p slot (1-based) @p typed, or puts it back on its default name
     /// when that is what was typed.
     [[nodiscard]] LayoutPresetOutcome rename(int slot, std::string_view typed);
 
-    /// Whether the live layout has drifted from the active slot - what the
-    /// toolbar's star marks.
-    [[nodiscard]] bool activeDirty() const;
-
     /// The arrangement the application opens on and a slot holding nothing
     /// restores: the vectorscope alone, split automatically, at the styles its
     /// module declares. Built to the shape @ref capture produces, so a slot
-    /// restored from it reads back identical and nothing shows as drifted.
+    /// restored from it reads back identical and needs no writing back.
     [[nodiscard]] LayoutPreset defaultLayout() const;
 
 private:

@@ -444,9 +444,12 @@ TEST_CASE("A preset digit loads its slot and Shift saves into it")
 
     ModifierState modifiers;
     modifiers.shift = true;
-    const ShortcutAction save = sole(resolver.resolvePressed(context, modifiers, pressing("7")));
-    REQUIRE(save.kind == ShortcutAction::Kind::SavePreset);
-    CHECK(save.presetSlot == 7);
+    // Shift+digit survives as a keyboard-only copy: it stamps the live layout
+    // into a slot you are not on, which is the one way to make something that
+    // holds still now that the slot you ARE on follows the screen.
+    const ShortcutAction copy = sole(resolver.resolvePressed(context, modifiers, pressing("7")));
+    REQUIRE(copy.kind == ShortcutAction::Kind::CopyPresetTo);
+    CHECK(copy.presetSlot == 7);
 }
 
 TEST_CASE("The window chords follow the platform that owns them")

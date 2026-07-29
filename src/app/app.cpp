@@ -707,6 +707,11 @@ void App::drawFrameUi()
     drawSettingsWindow(settingsCtx);
     m_about.draw(m_versionInfo);
 
+    // Last, once every hand on the layout has had its frame. Only the FILE
+    // waits, on the debounce every other preference rides.
+    if (m_presets.syncActiveSlot()) {
+        m_nextPreferencesSave = glfwGetTime() + 1.0;
+    }
     if (ImGui::IsAnyItemActive()) {
         m_clocks.noteActivity(glfwGetTime());
         m_nextPreferencesSave = glfwGetTime() + 1.0;
@@ -776,8 +781,8 @@ void App::applyShortcutAction(const ShortcutAction& action)
     case ShortcutAction::Kind::LoadPreset:
         applyPresetOutcome(m_presets.load(action.presetSlot));
         break;
-    case ShortcutAction::Kind::SavePreset:
-        applyPresetOutcome(m_presets.save(action.presetSlot));
+    case ShortcutAction::Kind::CopyPresetTo:
+        applyPresetOutcome(m_presets.copyInto(action.presetSlot));
         break;
     case ShortcutAction::Kind::HideApplication:
         hideApplication();

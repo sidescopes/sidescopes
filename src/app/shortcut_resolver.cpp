@@ -74,7 +74,8 @@ ShortcutAction resolveWindowChord(const ShortcutContext& context, const Modifier
     return {};
 }
 
-// Digit N loads preset slot N; Shift+N saves the live layout into it.
+// Digit N loads preset slot N; Shift+N copies the live layout into it and
+// stays where it is.
 void appendPresetDigits(bool shift, const ShortcutKeyPressed& pressed, std::vector<ShortcutAction>& actions)
 {
     for (int slot = 1; slot <= LayoutPresetSlots; ++slot) {
@@ -98,7 +99,7 @@ ShortcutAction ShortcutAction::pick(RegionPickerMode mode)
 ShortcutAction ShortcutAction::preset(int slot, bool save)
 {
     ShortcutAction action;
-    action.kind = save ? Kind::SavePreset : Kind::LoadPreset;
+    action.kind = save ? Kind::CopyPresetTo : Kind::LoadPreset;
     action.presetSlot = slot;
 
     return action;

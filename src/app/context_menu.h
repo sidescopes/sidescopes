@@ -45,10 +45,11 @@ enum MenuAction
     MenuLayoutAuto = 60,
     MenuLayoutVertical,
     MenuLayoutHorizontal,
-    // Preset load ids are MenuLoadPresetBase + slot (1-9); save ids are
-    // MenuSavePresetBase + slot. Both ranges stay clear of ParamMenuActionBase.
+    // Preset load ids are MenuLoadPresetBase + slot (1-9), clear of
+    // ParamMenuActionBase. 80-89 was the save range and is now spare; the
+    // ranges after it are pinned by static_asserts, so leave the gap alone
+    // rather than closing it up.
     MenuLoadPresetBase = 70,
-    MenuSavePresetBase = 80,
     // Interface-size ids are MenuUiScaleBase + the UiScaleSteps index.
     MenuUiScaleBase = 90,
     // Quality ids are MenuQualityBase + the QualityLevels index.

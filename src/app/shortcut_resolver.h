@@ -42,7 +42,7 @@ struct ShortcutAction
         CloseSettings,
         ClearRegion,
         LoadPreset,
-        SavePreset,
+        CopyPresetTo,
         HideApplication,
         MinimizeWindow,
         QuitWindow,
@@ -53,7 +53,7 @@ struct ShortcutAction
     /// ask for it.
     [[nodiscard]] static ShortcutAction pick(RegionPickerMode mode);
 
-    /// Layout preset @p slot, saved when @p save and loaded otherwise, as the
+    /// Layout preset @p slot, copied into when @p save and loaded otherwise, as the
     /// digit keys and the layout menu both ask for it.
     [[nodiscard]] static ShortcutAction preset(int slot, bool save);
 
@@ -64,7 +64,7 @@ struct ShortcutAction
     std::string scopeId;                                         ///< ChooseScope: the scope to show.
     bool stack = false;                                          ///< ChooseScope: Shift stacks.
     RegionPickerMode pickMode = RegionPickerMode::AttachWindow;  ///< RequestPick: which tool opens.
-    int presetSlot = 0;                                          ///< Load/SavePreset: the slot, 1-9.
+    int presetSlot = 0;                                          ///< Load/CopyPresetTo: the slot, 1-9.
     int zoomLevel = 1;                                           ///< SetZoom: the level to apply.
 };
 

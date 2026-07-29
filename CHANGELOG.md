@@ -122,20 +122,30 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   an attached region leaves - a window closing out from under it, a lost
   face - now appear there with every other message instead of above the
   panes.
+- Preset slots keep themselves. The slot you are on is whatever is on
+  screen: rearrange the scopes and that slot holds the new arrangement,
+  with no save to remember and nothing left unsaved. Switching away keeps
+  what you arranged behind you. A slot nothing has been arranged on yet
+  opens on the vectorscope alone, and visiting one does not claim it, so
+  the list goes on showing which slots are yours.
 - The preset control is a button like the scope selector beside it,
   carrying a panel glyph and the slot it is on, instead of a bare digit
-  that looked like a label rather than something to click. The drift
-  star is unchanged. It now stands after the scope selector rather than
-  before it: a preset is a saved set of scopes, and scopes are switched
-  far more often than a preset is loaded.
-- In the preset list, the slot that is loaded is marked by its own
-  shortcut digit becoming a filled badge, with its row tinted behind it,
-  in place of a dot in a column of its own. The digit also keeps real
-  distance from the rename button, which used to begin exactly where the
-  digit ended.
+  that looked like a label rather than something to click. It now stands
+  after the scope selector rather than before it: a preset is a set of
+  scopes, and scopes are switched far more often than a preset is loaded.
+- In the preset list, the loaded slot is the row that is tinted, and the
+  row whose pen stands at full strength while the others recede.
 
 ### Removed
 
+- Saving a preset, as an action. There is no save button, no Shift+click
+  on a row, no Save Current To menu and no drift marker on the toolbar,
+  because a slot is never out of date with the screen. Shift with a digit
+  survives on the keyboard alone, and copies the current layout into that
+  slot while leaving you where you are - which is how you leave an
+  arrangement that holds still now that the slot you are on follows the
+  screen. It is documented in docs/SHORTCUTS.md and offered nowhere in
+  the interface.
 - The full-screen region and the Watch Full Screen action. A session
   starts with nothing selected rather than with the whole display.
 - The vectorscope's Trace Response choice. Linear emulated a phosphor
@@ -195,15 +205,22 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   disconnected drops it back to the first, so recovery is prompt as well
   as certain. A paused pipeline still makes no attempts and no longer
   reports a failure it is not having.
-- Clicking a preset slot nothing has been saved into loads the
+- Clicking a preset slot nothing has been arranged on loads the
   arrangement the application opens on - the vectorscope alone - rather
   than putting "Preset N is empty" on the status bar and doing nothing.
   On a first run that was eight slots of nine offering an action and
   then refusing it. A first run, or a preferences file naming no slot,
-  now opens on Preset 1, saveable like any other, instead of a state
-  reachable only by never having used a preset at all. The
-  `layout_active_slot` key no longer carries 0; a file that has one is
-  read as naming the first slot.
+  now opens on Preset 1, like any other, instead of a state reachable
+  only by never having used a preset at all. The `layout_active_slot`
+  key no longer carries 0; a file that has one is read as naming the
+  first slot.
+- Dragging a scope to reorder it no longer raises Dear ImGui's own error
+  window over the popup. The catch laid over the list to receive the drop
+  moved the cursor without submitting anything afterwards, which that
+  check exists to report; it is sized to need no such move now.
+- A row's shortcut digit sits on the same line as the name beside it, in
+  both toolbar lists. It was drawn a pixel low, against a rectangle that
+  is deliberately larger than the one the name is laid out in.
 
 ## [0.4.0] - 2026-07-22
 

@@ -36,22 +36,24 @@ void arrangeSomethingElse(Fixture& fixture)
 
 }  // namespace
 
-TEST_CASE("The application opens on the first preset with nothing drifted")
+TEST_CASE("The application opens on the first preset")
 {
     // The state a first run lands in. It used to be "no preset", reachable
     // only by never having touched one, where the toolbar showed a dash and
     // every slot refused to load.
-    const Fixture fixture;
+    Fixture fixture;
 
     CHECK(fixture.presets.activeSlot() == 1);
-    CHECK_FALSE(fixture.presets.activeDirty());
+    // Nothing has been arranged, so the slot already holds what is on screen.
+    CHECK_FALSE(fixture.presets.syncActiveSlot());
 }
 
 TEST_CASE("The default layout is what a capture of a fresh view produces")
 {
-    // The invariant the star depends on: the arrangement an unsaved slot
-    // restores must read back through the same capture the star compares
-    // against, field for field, or a fresh install would open already starred.
+    // The invariant auto-save depends on: the arrangement an unvisited slot
+    // restores has to read back through the same capture that decides whether
+    // anything changed, or a fresh install would write to its slot every frame
+    // and never settle.
     const Fixture fixture;
     const LayoutPreset defaults = fixture.presets.defaultLayout();
 
@@ -61,26 +63,49 @@ TEST_CASE("The default layout is what a capture of a fresh view produces")
     CHECK(defaults.weights.at(VectorscopeScopeId) == DefaultPaneWeight);
 }
 
-TEST_CASE("Loading a slot that holds nothing restores the default layout")
+TEST_CASE("Arranging the view writes into the slot it is on")
 {
-    // The dead end this replaces: clicking an unsaved slot reported an error
-    // on the status strip and did nothing at all.
+    // The whole model: there is no save, so a slot IS what is on screen while
+    // you are on it.
     Fixture fixture;
     arrangeSomethingElse(fixture);
-    REQUIRE(fixture.view.stack().ids().size() == 3);
 
-    const LayoutPresetOutcome outcome = fixture.presets.load(6);
+    CHECK(fixture.presets.syncActiveSlot());
+    CHECK(fixture.presets.at(1).stack == fixture.view.stack().tokens());
+    // ...and having written it, there is nothing left to write until the next
+    // change, so the file is not rewritten every frame.
+    CHECK_FALSE(fixture.presets.syncActiveSlot());
+}
 
-    CHECK(fixture.view.stack().ids() == std::vector<std::string>{VectorscopeScopeId});
-    CHECK(fixture.view.layout().orientation() == LayoutOrientation::Automatic);
-    CHECK(fixture.view.layout().weight(WaveformScopeId) == DefaultPaneWeight);
-    // It loaded, and says so: no slot reports that it cannot be used.
-    CHECK(outcome.status == "Preset 6 loaded");
-    CHECK(outcome.analysisDirty);
+TEST_CASE("Visiting a slot that holds nothing does not fill it")
+{
+    // A slot nothing has been saved into restores the default, and writing
+    // that default straight back would cost the list the one thing it knows:
+    // which slots are the user's own.
+    Fixture fixture;
+    arrangeSomethingElse(fixture);
+    REQUIRE(fixture.presets.syncActiveSlot());
+
+    CHECK_FALSE(fixture.presets.load(6).status.empty());
     CHECK(fixture.presets.activeSlot() == 6);
-    // ...and the layout on screen is exactly what that slot restores, so the
-    // toolbar carries no star the moment after a load.
-    CHECK_FALSE(fixture.presets.activeDirty());
+    CHECK_FALSE(fixture.presets.syncActiveSlot());
+    CHECK(fixture.presets.at(6).stack.empty());
+}
+
+TEST_CASE("Switching away keeps what was arranged behind you")
+{
+    // The reading of a load that auto-save makes true, and the reason nothing
+    // has to be confirmed on the way out.
+    Fixture fixture;
+    arrangeSomethingElse(fixture);
+    REQUIRE(fixture.presets.syncActiveSlot());
+    const std::string arranged = fixture.view.stack().tokens();
+
+    CHECK_FALSE(fixture.presets.load(4).status.empty());
+    CHECK(fixture.view.stack().ids() == std::vector<std::string>{VectorscopeScopeId});
+
+    CHECK_FALSE(fixture.presets.load(1).status.empty());
+    CHECK(fixture.view.stack().tokens() == arranged);
 }
 
 TEST_CASE("A slot named before it is filled loads under its own name")
@@ -93,64 +118,41 @@ TEST_CASE("A slot named before it is filled loads under its own name")
     CHECK(outcome.status == "Skin tones loaded");
 }
 
-TEST_CASE("A saved slot loads what it holds rather than the defaults")
+TEST_CASE("Copying into a slot leaves you where you are")
 {
+    // Shift+digit, the one way to make something that holds still: every slot
+    // you are ON keeps changing under you, so a copy is only useful if it
+    // lands somewhere you are not and you stay put.
     Fixture fixture;
     arrangeSomethingElse(fixture);
-    const LayoutPresetOutcome saved = fixture.presets.save(2);
-    CHECK(saved.status == "Preset 2 saved");
-    CHECK(saved.preferencesSaveDue);
-    CHECK_FALSE(fixture.presets.activeDirty());
+    REQUIRE(fixture.presets.syncActiveSlot());
+    const std::string arranged = fixture.view.stack().tokens();
 
-    // Away to a slot holding nothing, then back: the arrangement returns.
-    CHECK_FALSE(fixture.presets.load(7).status.empty());
-    REQUIRE(fixture.view.stack().ids().size() == 1);
+    const LayoutPresetOutcome copied = fixture.presets.copyInto(7);
+    CHECK(copied.preferencesSaveDue);
+    CHECK(fixture.presets.activeSlot() == 1);
+    CHECK(fixture.presets.at(7).stack == arranged);
 
-    CHECK_FALSE(fixture.presets.load(2).status.empty());
-    CHECK(fixture.view.stack().ids().size() == 3);
-    CHECK(fixture.view.layout().orientation() == LayoutOrientation::Horizontal);
-    CHECK(fixture.view.layout().weight(WaveformScopeId) == 2.5f);
-    CHECK_FALSE(fixture.presets.activeDirty());
-}
-
-TEST_CASE("Saving into another slot moves onto that slot")
-{
-    // The rule behind the row's save button, and the only part of it that is
-    // not self-evident: saving into the slot you are on updates it, and saving
-    // into any other takes the live layout there AND moves you to it. One rule
-    // covers both, and it is the only one that leaves nothing drifted, since
-    // the star measures the live layout against the ACTIVE slot.
-    Fixture fixture;
-    REQUIRE(fixture.presets.activeSlot() == 1);
-    arrangeSomethingElse(fixture);
-    REQUIRE(fixture.presets.activeDirty());
-
-    CHECK_FALSE(fixture.presets.save(5).status.empty());
-    CHECK(fixture.presets.activeSlot() == 5);
-    CHECK_FALSE(fixture.presets.activeDirty());
-    // The slot left behind was not written to on the way past.
-    CHECK(fixture.presets.at(1).stack.empty());
-    CHECK_FALSE(fixture.presets.at(5).stack.empty());
-
-    // Saving again, now into the slot already active, updates it in place.
+    // The copy is inert: arranging on where you still are does not follow it.
     fixture.view.stack().choose(ParadeScopeId, true);
-    REQUIRE(fixture.presets.activeDirty());
-    CHECK_FALSE(fixture.presets.save(5).status.empty());
-    CHECK(fixture.presets.activeSlot() == 5);
-    CHECK_FALSE(fixture.presets.activeDirty());
+    REQUIRE(fixture.presets.syncActiveSlot());
+    CHECK(fixture.presets.at(7).stack == arranged);
+    CHECK(fixture.presets.at(1).stack != arranged);
 }
 
-TEST_CASE("Changing the live layout stars the active slot")
+TEST_CASE("A copy keeps the name of the slot it lands in")
 {
+    // A name outlives the layout it was given to, so stamping a layout over a
+    // slot replaces what it holds and not what it is called.
     Fixture fixture;
-    REQUIRE_FALSE(fixture.presets.activeDirty());
-
+    const LayoutPresetOutcome renamed = fixture.presets.rename(5, "Skin tones");
+    REQUIRE(renamed.preferencesSaveDue);
     arrangeSomethingElse(fixture);
-    CHECK(fixture.presets.activeDirty());
 
-    // Saving into the slot that is starred settles it again.
-    CHECK_FALSE(fixture.presets.save(1).status.empty());
-    CHECK_FALSE(fixture.presets.activeDirty());
+    const LayoutPresetOutcome copied = fixture.presets.copyInto(5);
+    CHECK(copied.status == "Copied to Skin tones");
+    CHECK(presetDisplayName(5, fixture.presets.at(5)) == "Skin tones");
+    CHECK_FALSE(fixture.presets.at(5).stack.empty());
 }
 
 }  // namespace sidescopes

@@ -60,7 +60,11 @@ P is silent when no scope that takes pins is on screen.
 | Key | Action |
 | --- | ------ |
 | 1 - 9 | load that preset slot |
-| Shift+1 - 9 | save the live layout into that slot |
+| Shift+1 - 9 | copy the current layout into that slot, staying put |
+
+The slot you are on follows the screen, so a copy is how you leave
+something that holds still: it lands in a slot you are not on, and stays
+as you left it until you go there.
 
 ## The window
 

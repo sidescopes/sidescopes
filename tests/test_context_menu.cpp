@@ -156,12 +156,9 @@ TEST_CASE("The preset menus name their slots rather than spell them out")
     CHECK(loads[2] == "Skin tones (empty)");
     CHECK(loads[8] == "Preset 9 (empty)");
 
-    // The save list goes by the same names, so the two read as one set of
-    // slots rather than as names on one side and bare digits on the other.
-    const std::vector<std::string> saves = menu.submenu("Save Current To");
-    REQUIRE(saves.size() == static_cast<std::size_t>(LayoutPresetSlots));
-    CHECK(saves[0] == "Preset 1");
-    CHECK(saves[2] == "Skin tones");
+    // There is one list, not two. Saving was a second copy of these same nine
+    // names and went with the explicit save it existed for.
+    CHECK(menu.submenu("Save Current To").empty());
 }
 
 TEST_CASE("The graticule steps are offered as words, not percentages")
@@ -292,17 +289,10 @@ TEST_CASE("Every preset slot loads and saves through its own id")
         REQUIRE(load);
         CHECK(load->kind == ShortcutAction::Kind::LoadPreset);
         CHECK(load->presetSlot == slot);
-
-        const auto save = menuShortcutAction(MenuSavePresetBase + slot);
-        REQUIRE(save);
-        CHECK(save->kind == ShortcutAction::Kind::SavePreset);
-        CHECK(save->presetSlot == slot);
     }
-    // Slot zero is no slot: the bases themselves name nothing.
+    // Slot zero is no slot: the base itself names nothing.
     CHECK_FALSE(menuShortcutAction(MenuLoadPresetBase));
-    CHECK_FALSE(menuShortcutAction(MenuSavePresetBase));
     CHECK_FALSE(menuShortcutAction(MenuLoadPresetBase + LayoutPresetSlots + 1));
-    CHECK_FALSE(menuShortcutAction(MenuSavePresetBase + LayoutPresetSlots + 1));
 }
 
 TEST_CASE("The three splits decode to the orientation they name")

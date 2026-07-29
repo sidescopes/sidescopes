@@ -135,7 +135,7 @@ LayoutPreset LayoutPresetController::defaultLayout() const
     // Built field by field the way capture() builds one, over the same scope:
     // the tokens through the registry that writes them, the weight the layout
     // hands out unasked, and the styles the descriptor declares. Anything less
-    // exact and a slot loaded from this would read back as already drifted.
+    // exact and a slot loaded from this would be written back to at once.
     const std::string id{VectorscopeScopeId};
     LayoutPreset preset;
     preset.stack = formatStackTokens(m_registry, {id});
@@ -149,18 +149,29 @@ LayoutPreset LayoutPresetController::defaultLayout() const
     return preset;
 }
 
-bool LayoutPresetController::activeDirty() const
+bool LayoutPresetController::syncActiveSlot()
 {
-    return m_store.isDirty(capture(), defaultLayout());
+    // Compared against what the slot would RESTORE rather than against what it
+    // literally holds, so merely visiting a slot nothing has been saved into
+    // does not fill it with the default and cost the list the one thing it
+    // knows: which slots are the user's own.
+    const int slot = m_store.activeSlot();
+    LayoutPreset live = capture();
+    if (sameLayout(live, m_store.effective(slot, defaultLayout()))) {
+        return false;
+    }
+    m_store.store(slot, std::move(live));
+
+    return true;
 }
 
-LayoutPresetOutcome LayoutPresetController::save(int slot)
+LayoutPresetOutcome LayoutPresetController::copyInto(int slot)
 {
-    m_store.save(slot, capture());
+    m_store.store(slot, capture());
 
-    // Read back after the save, which keeps the slot's name: a slot is
+    // Read back after the write, which keeps the slot's name: a slot is
     // reported by what the user calls it, the way every list of them names it.
-    return LayoutPresetOutcome{presetDisplayName(slot, m_store.at(slot)) + " saved", false, true};
+    return LayoutPresetOutcome{"Copied to " + presetDisplayName(slot, m_store.at(slot)), false, true};
 }
 
 LayoutPresetOutcome LayoutPresetController::load(int slot)

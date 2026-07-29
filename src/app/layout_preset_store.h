@@ -8,6 +8,10 @@
 
 namespace sidescopes {
 
+/// @return Whether two presets hold the same layout. Names are not compared:
+///         a slot's name belongs to the slot, not to what it holds.
+[[nodiscard]] bool sameLayout(const LayoutPreset& first, const LayoutPreset& second);
+
 /// @return What @p slot (1-based) is called wherever it is listed: the name
 ///         its user gave it, or "Preset N" until one is given. Every surface
 ///         asks this, so a slot is never named two ways.
@@ -15,8 +19,7 @@ namespace sidescopes {
 
 /// Owns the layout preset slots and which one is active. Capturing a preset
 /// from the live view and applying one back to it stay with the host (they are
-/// view I/O); this holds the stored slots and answers whether the live layout
-/// has drifted from the active one.
+/// view I/O); this holds the stored slots and nothing else.
 ///
 /// One slot is always active: the application is always on a preset, so there
 /// is no state in which loading is meaningless and none a click can be refused
@@ -33,8 +36,11 @@ public:
     ///         either way - a slot may be named before it is filled.
     [[nodiscard]] LayoutPreset effective(int slot, const LayoutPreset& defaults) const;
 
-    /// Stores @p preset in @p slot (1-based) and makes it the active slot.
-    void save(int slot, LayoutPreset preset);
+    /// Stores @p preset in @p slot (1-based), keeping whatever that slot is
+    /// called. Which slot is ACTIVE is not touched: a write is not a move, and
+    /// the two callers want opposite things - the live layout writing itself
+    /// into the slot it is already on, and a copy landing in one it is not.
+    void store(int slot, LayoutPreset preset);
 
     /// Records @p slot (1-based) as active after a load.
     void markLoaded(int slot);
@@ -47,10 +53,6 @@ public:
 
     /// @return The active slot, always one of the nine.
     [[nodiscard]] int activeSlot() const;
-
-    /// @return Whether @p live differs from what the active slot would
-    ///         restore, @p defaults included where that slot holds nothing.
-    [[nodiscard]] bool isDirty(const LayoutPreset& live, const LayoutPreset& defaults) const;
 
     /// @return All slots, for the picker to list and for persistence.
     [[nodiscard]] const std::array<LayoutPreset, LayoutPresetSlots>& all() const;
