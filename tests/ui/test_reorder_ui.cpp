@@ -53,6 +53,10 @@ struct RowList
     /// The strip under the last row, where a drop after everything is aimed.
     float rowsBottom = 0.0f;
     float lastRowBottom = 0.0f;
+    /// Where the rows start, and the window's own content top above them -
+    /// the band between the two is where an imprecise drag to the top ends.
+    float listTopY = 0.0f;
+    float innerTop = 0.0f;
     /// What the window's content measured, with and without a drag in flight.
     ImVec2 contentAtRest{0.0f, 0.0f};
     ImVec2 contentWhileDragging{0.0f, 0.0f};
@@ -85,6 +89,8 @@ void rowListGui(ImGuiTestContext*)
 
     const float nameX = menuRowNameX(ImGui::GetFrameHeight());
     const ImVec2 listTop = ImGui::GetCursorScreenPos();
+    list.listTopY = listTop.y;
+    list.innerTop = window->InnerRect.Min.y;
     const int count = static_cast<int>(list.order.size());
     list.rowBoxes.clear();
     for (int n = 0; n < count; ++n) {
@@ -246,6 +252,36 @@ void aRowDraggedPastTheLastRowLandsAtTheEnd(ImGuiTestContext* ctx)
     IM_CHECK_STR_EQ(list.order[3].c_str(), "one");
 }
 
+/// SYMPTOM IF BROKEN: a scope dropped ABOVE the first row snaps back. The
+/// insertion line stands at the top slot for any height above the list, so
+/// the gesture promises the move; the catch began exactly at the first row,
+/// so a release past it - in the window's own padding - landed on nothing.
+///
+/// Hit in real use on both platforms. A release inside the top row's upper
+/// half (the upward test above) worked, which is why this suite stayed green:
+/// the boundary sat between the row and the window's edge, and no test aimed
+/// there. The catch now spans the window's inner top, so everywhere the line
+/// stands is somewhere a release lands.
+void aRowDroppedAboveTheListLandsFirst(ImGuiTestContext* ctx)
+{
+    freshList(ctx);
+    RowList& list = rows();
+
+    // The band has to exist before anything can be aimed at it: the rows
+    // start below the window's own content top by at least the padding.
+    IM_CHECK_LT(list.innerTop, list.listTopY - 1.0f);
+    const float aboveRows = (list.innerTop + list.listTopY) * 0.5f;
+    dragRowTo(ctx, 2, ImVec2(withinRow(0, 0.5f).x, aboveRows));
+
+    IM_CHECK_GT(list.dragFrames, 0);
+    IM_CHECK_EQ(list.drops, 1);
+    IM_CHECK_EQ(list.lastGap, 0);
+    IM_CHECK_STR_EQ(list.order[0].c_str(), "three");
+    IM_CHECK_STR_EQ(list.order[1].c_str(), "one");
+    IM_CHECK_STR_EQ(list.order[2].c_str(), "two");
+    IM_CHECK_STR_EQ(list.order[3].c_str(), "four");
+}
+
 /// SYMPTOM IF BROKEN: the drop-down grows taller and wider the moment a drag
 /// starts, and shrinks back when it ends - the list changing size under the
 /// pointer at the exact moment the user is aiming at a place in it.
@@ -322,6 +358,10 @@ void registerReorderTests(ImGuiTestEngine* engine)
     last->GuiFunc = rowListGui;
     last->TestFunc = aRowDraggedPastTheLastRowLandsAtTheEnd;
 
+    ImGuiTest* top = IM_REGISTER_TEST(engine, "reorder", "a_drop_above_the_list_lands_first");
+    top->GuiFunc = rowListGui;
+    top->TestFunc = aRowDroppedAboveTheListLandsFirst;
+
     ImGuiTest* size = IM_REGISTER_TEST(engine, "reorder", "the_list_is_one_size_dragged_or_not");
     size->GuiFunc = rowListGui;
     size->TestFunc = theListIsOneSizeDraggedOrNot;
@@ -338,5 +378,5 @@ int main()
 {
     using namespace sidescopes;
 
-    return uitest::runSuite("reorder", registerReorderTests, /*expectedTests=*/5);
+    return uitest::runSuite("reorder", registerReorderTests, /*expectedTests=*/6);
 }

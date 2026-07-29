@@ -161,9 +161,17 @@ float reserveDropStrip()
 void layDropCatch(const char* id, const ImVec2& listTop, float rowsBottomY)
 {
     const float claimedRight = ImGui::GetCurrentWindow()->DC.CursorMaxPos.x;
-    const float bottom = std::max(listTop.y, rowsBottomY);
-    ImGui::SetCursorScreenPos(listTop);
-    ImGui::InvisibleButton(id, ImVec2(std::max(1.0f, claimedRight - listTop.x), std::max(1.0f, bottom - listTop.y)));
+    // From the window's own content top, not the first row's edge. The
+    // insertion line stands at the top slot for any height above the list, so
+    // the band of window padding above the first row is somewhere a drop is
+    // being promised: begun at the row instead, a release in that band landed
+    // on nothing and the drag snapped back. A release inside the top row's
+    // upper half worked, so the failure was a few pixels of aim - the kind a
+    // real hand supplies and a test aimed at a row never does.
+    const float top = std::min(listTop.y, ImGui::GetCurrentWindow()->InnerRect.Min.y);
+    const float bottom = std::max(top, rowsBottomY);
+    ImGui::SetCursorScreenPos(ImVec2(listTop.x, top));
+    ImGui::InvisibleButton(id, ImVec2(std::max(1.0f, claimedRight - listTop.x), std::max(1.0f, bottom - top)));
 }
 
 }  // namespace
@@ -273,10 +281,14 @@ std::optional<MenuRowMove> landMenuRowDrag(const char* payloadType, const ImVec2
     // ROWS ended, never past the strip.
     const float advance = (rowsBottom - listTop.y) / static_cast<float>(count);
     const int gap = insertionGap(listTop.y, count, advance, spacing);
-    drawInsertionBar(insertionBarY(listTop.y, gap, advance, spacing));
     layDropCatch("##menu-row-drop", listTop, rowsBottom);
     int from = -1;
     if (ImGui::BeginDragDropTarget()) {
+        // The line draws inside the target block, so it stands exactly where a
+        // release will land and nowhere else. Drawn unconditionally it kept
+        // promising the top slot while the pointer was past the catch
+        // entirely - a promise the release then broke.
+        drawInsertionBar(insertionBarY(listTop.y, gap, advance, spacing));
         const ImGuiPayload* payload =
             ImGui::AcceptDragDropPayload(payloadType, ImGuiDragDropFlags_AcceptNoDrawDefaultRect);
         if (payload != nullptr) {
