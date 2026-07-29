@@ -53,7 +53,7 @@ cask "sidescopes" do
 
   url "https://github.com/sidescopes/sidescopes/releases/download/v#{version}/SideScopes-v#{version}-macos.zip"
   name "SideScopes"
-  desc "Real-time color scopes for photo editing"
+  desc "Real-time color scopes for any region of your screen"
   homepage "https://sidescopes.org"
 
   depends_on macos: ">= :sonoma"

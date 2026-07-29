@@ -1,15 +1,15 @@
 # SideScopes
 
-Real-time color scopes for photo editing. SideScopes watches a region of your
-screen and shows a live vectorscope and waveform beside any editor — Lightroom,
-Capture One, darktable, or anything else that draws pixels.
+Real-time color scopes for any region of your screen. SideScopes shows a live
+vectorscope and waveform beside any editor — Lightroom, Capture One, darktable,
+Resolve, or anything else that draws pixels.
 
-Photo editors ship a histogram and little else. Colorists have relied on
+Most editors ship a histogram and little else. Colorists have relied on
 vectorscopes and waveforms for decades because they answer questions a
 histogram cannot: is the white balance actually neutral, how far does the
 sky stretch toward cyan, do the highlights clip past the level you care
-about. SideScopes brings those instruments to photographers, reading the
-screen itself, so it works with every editor and needs no plugins.
+about. SideScopes brings those instruments to any editor, reading the
+screen itself, so it works with all of them and needs no plugins.
 
 ## Features
 
@@ -21,7 +21,7 @@ screen itself, so it works with every editor and needs no plugins.
 - Smart region selection: click a window or a detected face, or draw the region
   yourself — the screenshot-tool idiom you already know
 - Live marker showing the color under your cursor on every scope, with
-  pinnable reference colors for matching skin tones across photos
+  pinnable reference colors for matching tones across images
 - Compact, always-on-top window designed for small laptop screens
 - Native context menus and direct manipulation; scroll to adjust trace intensity
 

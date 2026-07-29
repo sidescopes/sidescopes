@@ -21,7 +21,7 @@ BEGIN
         BLOCK "040904b0"
         BEGIN
             VALUE "CompanyName", "The SideScopes project"
-            VALUE "FileDescription", "SideScopes - real-time scopes beside your photo editor"
+            VALUE "FileDescription", "SideScopes - real-time scopes for any region of your screen"
             VALUE "FileVersion", "@PROJECT_VERSION@"
             VALUE "InternalName", "sidescopes"
             VALUE "LegalCopyright", "Copyright (C) 2026 the SideScopes authors. GPL-3.0-or-later."
