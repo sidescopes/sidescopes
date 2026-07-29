@@ -218,9 +218,9 @@
             withAttributes:labelAttributes];
     }
     if (self.facesMode) {
-        NSString* secondary = @"[A] attach to a window    [D] draw    [Esc] clear region";
+        NSString* secondary = @"[A] select a window    [D] draw    [Esc] clear region";
         if (!m_suggestions.empty()) {
-            [self drawBanner:@"Attach to a face" secondary:secondary preferCenter:NO];
+            [self drawBanner:@"Select a face" secondary:secondary preferCenter:NO];
         } else if (self.facesScanned) {
             // Scanned, nothing found: the honest verdict, centered and quiet.
             // Before the scan lands there is no banner - absence is not yet known.
@@ -228,7 +228,7 @@
         }
     } else {
         [self drawBanner:@"Click a window or drag a region inside it"
-               secondary:sidescopes::supportsFaceDetection() ? @"[F] attach to a face    [D] draw    [Esc] clear region"
+               secondary:sidescopes::supportsFaceDetection() ? @"[F] select a face    [D] draw    [Esc] clear region"
                                                              : @"[D] draw    [Esc] clear region"
             preferCenter:NO];
     }
@@ -282,9 +282,9 @@
     }
     NSString* secondary = @"[Esc] clear region";
     if (!m_windows.empty() && sidescopes::supportsFaceDetection()) {
-        secondary = @"[A] attach to a window    [F] attach to a face    [Esc] clear region";
+        secondary = @"[A] select a window    [F] select a face    [Esc] clear region";
     } else if (!m_windows.empty()) {
-        secondary = @"[A] attach to a window    [Esc] clear region";
+        secondary = @"[A] select a window    [Esc] clear region";
     }
     [self drawBanner:@"Drag to draw a region" secondary:secondary preferCenter:NO];
 }

@@ -233,26 +233,30 @@ void appendPresetsSubmenu(const ContextMenuModel& model, std::vector<NativeMenuI
     menuEndSubmenu(menu);
 }
 
+// The user's words for these are SELECT and STOP FOLLOWING; the code's are
+// attach and detach, and they stay that way. Attaching is what the model does
+// - a region bound to a window - where selecting is what the user does, and
+// the menu is written for the user. A module the host cannot see could not be
+// described in the model's vocabulary anyway.
 void appendRegionAndAppSection(const ContextMenuModel& model, std::vector<NativeMenuItem>& menu)
 {
     menuSeparator(menu);
-    menuAction(menu, "Attach to Window...", MenuAttachWindow, false,
+    menuAction(menu, "Select Window...", MenuAttachWindow, false,
                shortcutLabel(model.shortcuts.bindings().attachWindow));
     menuAction(menu, "Draw Region...", MenuDrawRegion, false, shortcutLabel(model.shortcuts.bindings().drawRegion));
     if (supportsFaceDetection()) {
-        menuAction(menu, "Attach to Face...", MenuAttachFace, false,
-                   shortcutLabel(model.shortcuts.bindings().attachFace));
+        menuAction(menu, "Select Face...", MenuAttachFace, false, shortcutLabel(model.shortcuts.bindings().attachFace));
     }
     if (model.regionSelected) {
         menuAction(menu, "Clear Region", MenuClearRegion, false, shortcutLabel(model.shortcuts.bindings().clearRegion));
     }
     if (model.attach.attachedCount() > 1) {
         if (model.attach.activeIdentity() != 0) {
-            menuAction(menu, "Detach Front Window", MenuDetachWindow, false);
+            menuAction(menu, "Stop Following Front Window", MenuDetachWindow, false);
         }
-        menuAction(menu, "Detach All Windows", MenuDetachAll, false);
+        menuAction(menu, "Stop Following All Windows", MenuDetachAll, false);
     } else if (model.attach.attached()) {
-        menuAction(menu, "Detach from Window", MenuDetachWindow, false);
+        menuAction(menu, "Stop Following Window", MenuDetachWindow, false);
     }
 
     menuSeparator(menu);

@@ -278,9 +278,9 @@ void paintSuggestionScene(PickerState& picker, Gdiplus::Graphics& canvas, double
                           &text);
     }
     if (picker.facesMode) {
-        const wchar_t* secondary = L"[A] attach to a window    [D] draw    [Esc] clear region";
+        const wchar_t* secondary = L"[A] select a window    [D] draw    [Esc] clear region";
         if (!picker.suggestions.empty()) {
-            drawBanner(canvas, picker, L"Attach to a face", secondary, false, scale);
+            drawBanner(canvas, picker, L"Select a face", secondary, false, scale);
         } else if (picker.facesScanned) {
             // Scanned, nothing found: the honest verdict. Before the scan
             // lands there is no banner - absence is not yet known.
@@ -288,7 +288,7 @@ void paintSuggestionScene(PickerState& picker, Gdiplus::Graphics& canvas, double
         }
     } else {
         drawBanner(canvas, picker, L"Click a window or drag a region inside it",
-                   supportsFaceDetection() ? L"[F] attach to a face    [D] draw    [Esc] clear region"
+                   supportsFaceDetection() ? L"[F] select a face    [D] draw    [Esc] clear region"
                                            : L"[D] draw    [Esc] clear region",
                    false, scale);
     }
@@ -326,9 +326,9 @@ void paintDrawScene(PickerState& picker, Gdiplus::Graphics& canvas, double scale
     } else {
         const wchar_t* secondary = L"[Esc] clear region";
         if (!picker.windows.empty() && supportsFaceDetection()) {
-            secondary = L"[A] attach to a window    [F] attach to a face    [Esc] clear region";
+            secondary = L"[A] select a window    [F] select a face    [Esc] clear region";
         } else if (!picker.windows.empty()) {
-            secondary = L"[A] attach to a window    [Esc] clear region";
+            secondary = L"[A] select a window    [Esc] clear region";
         }
         drawBanner(canvas, picker, L"Drag to draw a region", secondary, false, scale);
     }

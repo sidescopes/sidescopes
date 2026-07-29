@@ -11,7 +11,7 @@ exact information — real window rectangles and detected faces — and leaves
 everything else to a manual draw, on the principle that an unreliable guess
 is worse than an honest selection.
 
-## Attach to a window (A)
+## Select a window (A)
 
 Click a window and the region becomes that window, pulled in from its edges
 far enough that the border's own chrome and label clear the title bar and
@@ -38,7 +38,7 @@ Drag a rectangle anywhere on the screen. It belongs to the screen rather
 than to any window, so it stays where it was drawn no matter what moves
 over it.
 
-## Attach to a face (F)
+## Select a face (F)
 
 Where the platform can detect faces, the picker offers the ones it found;
 clicking one scopes the skin around it, and the region then follows that
