@@ -20,19 +20,51 @@ LayoutPreset presetOf(std::string stack, int orientation)
     return preset;
 }
 
+// What a slot holding nothing restores. The store never looks inside it, so
+// any distinct preset serves; the host builds the real one from the registry.
+const LayoutPreset& defaults()
+{
+    static const LayoutPreset instance = presetOf("V", 0);
+
+    return instance;
+}
+
 }  // namespace
 
-TEST_CASE("A fresh preset store holds nine empty slots and no active one")
+TEST_CASE("A fresh preset store holds nine empty slots and opens on the first")
 {
     const LayoutPresetStore store;
 
-    CHECK(store.activeSlot() == 0);
+    // There is no "no preset": a first run is on slot 1, saveable like any
+    // other, rather than in a state reachable only by never having used one.
+    CHECK(store.activeSlot() == 1);
     CHECK(store.all().size() == 9);
     for (int slot = 1; slot <= LayoutPresetSlots; ++slot) {
         CHECK(store.at(slot).stack.empty());
     }
-    // Nothing is active, so nothing can have drifted.
-    CHECK_FALSE(store.isDirty(presetOf("V", 1)));
+    // The live layout is the one an empty slot restores, so nothing has
+    // drifted and the toolbar carries no star.
+    CHECK_FALSE(store.isDirty(defaults(), defaults()));
+    CHECK(store.isDirty(presetOf("VW", 1), defaults()));
+}
+
+TEST_CASE("A slot holding nothing restores the defaults under its own name")
+{
+    LayoutPresetStore store;
+    store.rename(4, "Skin tones");
+
+    const LayoutPreset restored = store.effective(4, defaults());
+    CHECK(restored.stack == defaults().stack);
+    CHECK(restored.orientation == defaults().orientation);
+    CHECK(restored.weights == defaults().weights);
+    CHECK(restored.styles == defaults().styles);
+    // The name is the slot's, not the defaults': a slot may be named before
+    // anything is saved into it, and loading it must not rename it.
+    CHECK(presetDisplayName(4, restored) == "Skin tones");
+
+    // A slot that holds something is returned as it is, defaults untouched.
+    store.save(4, presetOf("WH", 2));
+    CHECK(store.effective(4, defaults()).stack == "WH");
 }
 
 TEST_CASE("Saving a preset stores it and makes its slot active")
@@ -55,25 +87,25 @@ TEST_CASE("The active slot is dirty as soon as the live layout differs")
     store.save(4, saved);
 
     // What was saved is what is live: the chip carries no star.
-    CHECK_FALSE(store.isDirty(saved));
+    CHECK_FALSE(store.isDirty(saved, defaults()));
 
     // Each captured field on its own is enough to have drifted, styles and
     // weights included - the two a shallow comparison would miss.
     LayoutPreset stack = saved;
     stack.stack = "VWH";
-    CHECK(store.isDirty(stack));
+    CHECK(store.isDirty(stack, defaults()));
 
     LayoutPreset orientation = saved;
     orientation.orientation = 1;
-    CHECK(store.isDirty(orientation));
+    CHECK(store.isDirty(orientation, defaults()));
 
     LayoutPreset weights = saved;
     weights.weights["org.sidescopes.waveform"] = 0.75;
-    CHECK(store.isDirty(weights));
+    CHECK(store.isDirty(weights, defaults()));
 
     LayoutPreset styles = saved;
     styles.styles["org.sidescopes.waveform"]["mode"] = 2.0;
-    CHECK(store.isDirty(styles));
+    CHECK(store.isDirty(styles, defaults()));
 }
 
 TEST_CASE("Loading a slot makes it active without touching what is stored")
@@ -88,7 +120,7 @@ TEST_CASE("Loading a slot makes it active without touching what is stored")
     CHECK(store.at(2).stack == "V");
     CHECK(store.at(5).stack == "WH");
     // The live layout is what slot 2 holds, so nothing has drifted yet.
-    CHECK_FALSE(store.isDirty(presetOf("V", 1)));
+    CHECK_FALSE(store.isDirty(presetOf("V", 1), defaults()));
 }
 
 TEST_CASE("A slot goes by its number until it is given a name")
@@ -113,7 +145,7 @@ TEST_CASE("Renaming a slot leaves what it holds alone")
     // A rename is not a load: which slot is active is untouched.
     CHECK(store.activeSlot() == 2);
     // Nor is it a drift of the live layout, which still matches what is stored.
-    CHECK_FALSE(store.isDirty(presetOf("VW", 2)));
+    CHECK_FALSE(store.isDirty(presetOf("VW", 2), defaults()));
 }
 
 TEST_CASE("An empty slot can be named before it holds anything")
@@ -125,7 +157,8 @@ TEST_CASE("An empty slot can be named before it holds anything")
 
     CHECK(presetDisplayName(4, store.at(4)) == "Skin tones");
     CHECK(store.at(4).stack.empty());
-    CHECK(store.activeSlot() == 0);
+    // A rename is not a load, so it does not move which slot is active.
+    CHECK(store.activeSlot() == 1);
 }
 
 TEST_CASE("Saving over a named slot keeps its name")
@@ -173,7 +206,29 @@ TEST_CASE("Restoring replaces every slot and the active one")
     CHECK(store.activeSlot() == 9);
     CHECK(store.at(1).stack == "WH");
     CHECK(store.at(9).stack == "R");
-    CHECK(store.isDirty(presetOf("V", 1)));
+    CHECK(store.isDirty(presetOf("V", 1), defaults()));
+}
+
+TEST_CASE("Restoring an active slot outside the nine opens on the first")
+{
+    // A file written before the application was always on a preset carries 0,
+    // and a hand-edited one can carry anything. Neither may leave the store
+    // pointing at a slot that does not exist.
+    LayoutPresetStore store;
+    const std::array<LayoutPreset, LayoutPresetSlots> presets;
+
+    store.restore(presets, 0);
+    CHECK(store.activeSlot() == 1);
+
+    store.restore(presets, LayoutPresetSlots + 1);
+    CHECK(store.activeSlot() == 1);
+
+    store.restore(presets, -3);
+    CHECK(store.activeSlot() == 1);
+
+    // The nine themselves survive untouched.
+    store.restore(presets, LayoutPresetSlots);
+    CHECK(store.activeSlot() == LayoutPresetSlots);
 }
 
 }  // namespace sidescopes

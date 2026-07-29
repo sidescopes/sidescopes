@@ -113,17 +113,13 @@ void LayoutPresetPicker::drawSlotRow(int slot, float width, IconTextures& icons,
 LayoutPresetOutcome LayoutPresetPicker::draw(IconTextures& icons)
 {
     // A chip like the scope letters, leading the row: the label names the
-    // active slot (starred once the live layout drifts; "-" when none), and
-    // clicking opens the slot list - the mouse mirror of the digit keys. The
-    // list is shaped like the scope selector's, because it is the same gesture.
+    // active slot, starred once the live layout drifts from it, and clicking
+    // opens the slot list - the mouse mirror of the digit keys. The list is
+    // shaped like the scope selector's, because it is the same gesture.
     const int active = m_presets.activeSlot();
-    char preview[8] = "-";
-    if (active != 0) {
-        std::snprintf(preview, sizeof(preview), "%d%s", active, m_presets.activeDirty() ? "*" : "");
-    }
-    const std::string tooltip =
-        active != 0 ? presetDisplayName(active, m_presets.at(active)) + " - digits load, Shift+digits save"
-                    : std::string{"Layout presets - digits load, Shift+digits save"};
+    char preview[8] = "";
+    std::snprintf(preview, sizeof(preview), "%d%s", active, m_presets.activeDirty() ? "*" : "");
+    const std::string tooltip = presetDisplayName(active, m_presets.at(active)) + " - digits load, Shift+digits save";
     if (scopeToggleButton("##preset-picker", preview, false, tooltip.c_str())) {
         ImGui::OpenPopup("##preset-popup");
     }

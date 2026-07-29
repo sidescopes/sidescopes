@@ -4,10 +4,12 @@
 #include <cstdint>
 #include <string>
 
+#include "app/pane_layout.h"
 #include "app/param_menu.h"
 #include "app/scope_layout.h"
 #include "app/scope_registry.h"
 #include "app/scope_view.h"
+#include "app/stack_tokens.h"
 #include "sidescopes/module.h"
 
 namespace sidescopes {
@@ -83,6 +85,23 @@ std::map<std::string, std::map<std::string, double>> LayoutPresetController::cur
     return styles;
 }
 
+std::map<std::string, double> LayoutPresetController::declaredStyles(std::string_view scopeId) const
+{
+    std::map<std::string, double> values;
+    const HostScope* hostScope = m_registry.byId(scopeId);
+    if (hostScope == nullptr || hostScope->descriptor == nullptr) {
+        return values;
+    }
+    for (uint32_t index = 0; index < hostScope->descriptor->param_count; ++index) {
+        const SsParamInfo& info = hostScope->descriptor->params[index];
+        if (info.kind == SS_PARAM_CHOICE) {
+            values[info.key] = info.default_value;
+        }
+    }
+
+    return values;
+}
+
 void LayoutPresetController::applyStyles(const std::map<std::string, std::map<std::string, double>>& styles)
 {
     for (const auto& [scopeId, params] : styles) {
@@ -111,9 +130,28 @@ LayoutPreset LayoutPresetController::capture() const
     return preset;
 }
 
+LayoutPreset LayoutPresetController::defaultLayout() const
+{
+    // Built field by field the way capture() builds one, over the same scope:
+    // the tokens through the registry that writes them, the weight the layout
+    // hands out unasked, and the styles the descriptor declares. Anything less
+    // exact and a slot loaded from this would read back as already drifted.
+    const std::string id{VectorscopeScopeId};
+    LayoutPreset preset;
+    preset.stack = formatStackTokens(m_registry, {id});
+    preset.orientation = orientationToInt(LayoutOrientation::Automatic);
+    preset.weights[id] = DefaultPaneWeight;
+    std::map<std::string, double> styles = declaredStyles(id);
+    if (!styles.empty()) {
+        preset.styles[id] = std::move(styles);
+    }
+
+    return preset;
+}
+
 bool LayoutPresetController::activeDirty() const
 {
-    return m_store.isDirty(capture());
+    return m_store.isDirty(capture(), defaultLayout());
 }
 
 LayoutPresetOutcome LayoutPresetController::save(int slot)
@@ -127,11 +165,11 @@ LayoutPresetOutcome LayoutPresetController::save(int slot)
 
 LayoutPresetOutcome LayoutPresetController::load(int slot)
 {
-    const LayoutPreset& preset = m_store.at(slot);
+    // Every slot loads. One holding nothing yet restores the arrangement the
+    // application opens on, which is the only reading of a click on it that is
+    // not an error message where an action was offered.
+    const LayoutPreset preset = m_store.effective(slot, defaultLayout());
     const std::string name = presetDisplayName(slot, preset);
-    if (preset.stack.empty()) {
-        return LayoutPresetOutcome{name + " is empty", false, false};
-    }
     m_view.stack().restore(preset.stack);
     m_view.layout().setOrientation(orientationFromInt(preset.orientation));
     m_view.layout().setWeights(preset.weights);

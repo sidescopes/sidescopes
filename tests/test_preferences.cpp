@@ -529,13 +529,29 @@ TEST_CASE("Preferences round-trip the live layout orientation and weights")
 
 TEST_CASE("Preferences clamp an out-of-range active preset slot")
 {
-    // A slot beyond 1-9 (or negative) means no active preset, never an
-    // out-of-bounds badge.
-    const TempFile file("layout-bad-slot.txt");
-    file.write("layout_active_slot=12\n");
+    // The application is always on a preset, so a slot beyond 1-9 opens on the
+    // first rather than on nothing - and never on an out-of-bounds badge.
+    const TempFile high("layout-bad-slot.txt");
+    high.write("layout_active_slot=12\n");
+    CHECK(loadPreferences(high.path()).layoutActiveSlot == 1);
 
-    const Preferences loaded = loadPreferences(file.path());
-    CHECK(loaded.layoutActiveSlot == 0);
+    const TempFile negative("layout-negative-slot.txt");
+    negative.write("layout_active_slot=-1\n");
+    CHECK(loadPreferences(negative.path()).layoutActiveSlot == 1);
+
+    // Zero is what a file written before there was always an active preset
+    // carries. It reads as the first slot, not as none.
+    const TempFile none("layout-no-slot.txt");
+    none.write("layout_active_slot=0\n");
+    CHECK(loadPreferences(none.path()).layoutActiveSlot == 1);
+}
+
+TEST_CASE("A fresh install opens on the first preset slot")
+{
+    // The default a missing file yields, which is the one a first run gets.
+    const TempFile file("layout-fresh.txt");
+    CHECK(loadPreferences(file.path()).layoutActiveSlot == 1);
+    CHECK(Preferences{}.layoutActiveSlot == 1);
 }
 
 TEST_CASE("Preferences default the layout to automatic with no weights")

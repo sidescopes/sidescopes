@@ -10,6 +10,11 @@
 
 namespace sidescopes {
 
+/// The pane weight a scope carries until one is chosen for it. Equal weights
+/// across the stack reproduce an even split, which is what the application
+/// opens on.
+inline constexpr float DefaultPaneWeight = 1.0f;
+
 /// @brief How the scopes on screen divide the window.
 ///
 /// The split direction and a relative weight per scope id. It holds no pane

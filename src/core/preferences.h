@@ -29,8 +29,9 @@ inline constexpr std::size_t MaximumPresetNameLength = 24;
 
 /// One saved layout slot: the scope stack, its split orientation, the
 /// per-scope pane weights, and what the user calls it. An empty @ref stack
-/// marks an unused slot, which loading treats as a no-op. Weights are keyed by
-/// scope id; a scope absent from the map keeps the default weight of 1.
+/// marks a slot nothing has been saved into, which loading fills with the
+/// arrangement the application opens on. Weights are keyed by scope id; a
+/// scope absent from the map keeps the default weight of 1.
 struct LayoutPreset
 {
     std::string stack;  ///< Stack tokens, the scopeStack format; empty = unused.
@@ -117,9 +118,10 @@ struct Preferences
     std::map<std::string, double> layoutWeights;
     /// Saved layout slots 1-9 (index 0 is slot 1); an empty stack marks unused.
     std::array<LayoutPreset, LayoutPresetSlots> layoutPresets;
-    /// The last loaded or saved preset slot, 1-9; 0 when no preset is active.
-    /// Drives the toolbar's preset badge across sessions.
-    int layoutActiveSlot = 0;
+    /// The last loaded or saved preset slot, 1-9. There is no value for "no
+    /// preset": the application is always on one, and a fresh install opens on
+    /// the first. Drives the toolbar's preset badge across sessions.
+    int layoutActiveSlot = 1;
     /// User interface-size factor, a multiplier on the OS scale (1.0 = match
     /// the system). One of the discrete UiScaleSteps; per user, not per display.
     /// Zero means the file names none, which lets the app open at the size the

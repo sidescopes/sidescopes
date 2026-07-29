@@ -41,6 +41,7 @@ add_executable(sidescopes_tests
     test_overlay_style.cpp
     test_scope_layout.cpp
     test_layout_preset_store.cpp
+    test_layout_presets.cpp
     test_ui_scale.cpp
     test_ui_scaling.cpp
     test_scope_order.cpp

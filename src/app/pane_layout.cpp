@@ -16,7 +16,7 @@ float PaneLayout::weight(std::string_view id) const
 {
     const auto at = m_weights.find(id);
 
-    return at != m_weights.end() ? at->second : 1.0f;
+    return at != m_weights.end() ? at->second : DefaultPaneWeight;
 }
 
 void PaneLayout::setWeight(std::string_view id, float value)

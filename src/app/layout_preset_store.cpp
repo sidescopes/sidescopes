@@ -15,6 +15,21 @@ const LayoutPreset& LayoutPresetStore::at(int slot) const
     return m_presets[static_cast<std::size_t>(slot - 1)];
 }
 
+LayoutPreset LayoutPresetStore::effective(int slot, const LayoutPreset& defaults) const
+{
+    const LayoutPreset& stored = at(slot);
+    if (!stored.stack.empty()) {
+        return stored;
+    }
+    // A slot holding nothing is still a slot that loads: it restores the
+    // arrangement the application opens on. The name is the slot's own
+    // whatever it holds, so one named before it was filled keeps its name.
+    LayoutPreset preset = defaults;
+    preset.name = stored.name;
+
+    return preset;
+}
+
 void LayoutPresetStore::save(int slot, LayoutPreset preset)
 {
     LayoutPreset& stored = m_presets[static_cast<std::size_t>(slot - 1)];
@@ -41,12 +56,9 @@ int LayoutPresetStore::activeSlot() const
     return m_activeSlot;
 }
 
-bool LayoutPresetStore::isDirty(const LayoutPreset& live) const
+bool LayoutPresetStore::isDirty(const LayoutPreset& live, const LayoutPreset& defaults) const
 {
-    if (m_activeSlot == 0) {
-        return false;
-    }
-    const LayoutPreset& stored = m_presets[static_cast<std::size_t>(m_activeSlot - 1)];
+    const LayoutPreset stored = effective(m_activeSlot, defaults);
 
     return live.stack != stored.stack || live.orientation != stored.orientation || live.weights != stored.weights ||
            live.styles != stored.styles;
@@ -60,7 +72,7 @@ const std::array<LayoutPreset, LayoutPresetSlots>& LayoutPresetStore::all() cons
 void LayoutPresetStore::restore(const std::array<LayoutPreset, LayoutPresetSlots>& presets, int activeSlot)
 {
     m_presets = presets;
-    m_activeSlot = activeSlot;
+    m_activeSlot = activeSlot >= 1 && activeSlot <= LayoutPresetSlots ? activeSlot : 1;
 }
 
 }  // namespace sidescopes

@@ -425,9 +425,12 @@ void readLiveLayout(const std::map<std::string, std::string, std::less<>>& value
     if (const auto found = values.find("layout_weights"); found != values.end()) {
         preferences.layoutWeights = decodeWeights(found->second);
     }
+    // There is no "no preset" any more, so a file naming one - a hand edit, or
+    // one written before the application was always on a preset - opens on the
+    // first slot rather than on nothing.
     readInt(values, "layout_active_slot", preferences.layoutActiveSlot);
-    if (preferences.layoutActiveSlot < 0 || preferences.layoutActiveSlot > LayoutPresetSlots) {
-        preferences.layoutActiveSlot = 0;
+    if (preferences.layoutActiveSlot < 1 || preferences.layoutActiveSlot > LayoutPresetSlots) {
+        preferences.layoutActiveSlot = 1;
     }
 }
 

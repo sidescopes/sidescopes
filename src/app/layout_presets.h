@@ -52,14 +52,17 @@ public:
     /// @return What @p slot (1-based) holds, empty stack and all.
     [[nodiscard]] const LayoutPreset& at(int slot) const;
 
-    /// @return The active slot (1-based), or 0 when none is active.
+    /// @return The active slot, always one of the nine: the application is
+    ///         always on a preset.
     [[nodiscard]] int activeSlot() const;
 
     /// Records the live layout in @p slot (1-based).
     [[nodiscard]] LayoutPresetOutcome save(int slot);
 
-    /// Puts @p slot's (1-based) stored layout on screen - the stack, the
-    /// split, the weights, and the styles. An empty slot only says so.
+    /// Puts @p slot's (1-based) layout on screen - the stack, the split, the
+    /// weights, and the styles - and makes it the active slot. A slot holding
+    /// nothing yet restores @ref defaultLayout, so no click on a slot is ever
+    /// refused.
     [[nodiscard]] LayoutPresetOutcome load(int slot);
 
     /// Calls @p slot (1-based) @p typed, or puts it back on its default name
@@ -67,8 +70,14 @@ public:
     [[nodiscard]] LayoutPresetOutcome rename(int slot, std::string_view typed);
 
     /// Whether the live layout has drifted from the active slot - what the
-    /// toolbar's star marks; false when no slot is active.
+    /// toolbar's star marks.
     [[nodiscard]] bool activeDirty() const;
+
+    /// The arrangement the application opens on and a slot holding nothing
+    /// restores: the vectorscope alone, split automatically, at the styles its
+    /// module declares. Built to the shape @ref capture produces, so a slot
+    /// restored from it reads back identical and nothing shows as drifted.
+    [[nodiscard]] LayoutPreset defaultLayout() const;
 
 private:
     /// The live layout as it would save into a preset slot.
@@ -79,6 +88,11 @@ private:
     /// The stacked scopes' choice-parameter values - the style menus' state -
     /// for a preset to recall alongside the geometry.
     [[nodiscard]] std::map<std::string, std::map<std::string, double>> currentStackStyles() const;
+
+    /// @p scopeId's choice parameters at the values its own descriptor
+    /// declares, which is what the scope shows before anything is chosen for
+    /// it.
+    [[nodiscard]] std::map<std::string, double> declaredStyles(std::string_view scopeId) const;
 
     [[nodiscard]] const std::map<std::string, double>& paramsOf(std::string_view id) const;
 
