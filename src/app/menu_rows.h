@@ -1,5 +1,7 @@
 #pragma once
 
+#include <optional>
+
 #include "imgui.h"
 
 namespace sidescopes {
@@ -87,26 +89,41 @@ void drawMenuRowChosen(float rowTopY);
 /// sharing that edge. An empty @p key draws nothing.
 void drawMenuRowAccelerator(const char* key, float rightPad);
 
-/// Lays an invisible catch over the rows already drawn, from @p listTop down to
-/// where the cursor now stands and @p width across, so a drag released anywhere
-/// over the list lands on one target rather than on whichever row happened to
-/// be under it.
+/// A row lifted out of a menu list and where it was let go: the gaps between
+/// rows numbered from 0 before the first to the row count after the last.
+struct MenuRowMove
+{
+    int from;
+    int gap;
+};
+
+/// Offers the menu row just submitted as a drag handle, carrying @p index under
+/// @p payloadType with @p label as what the pointer takes with it. A plain
+/// click still reaches the row; only movement past the toolkit's drag threshold
+/// lifts it, so a reorder is never read as a toggle.
+void offerMenuRowDrag(const char* payloadType, int index, const char* label);
+
+/// Takes the drop half of a menu row reorder over the @p count rows just laid
+/// from @p listTop: while a drag of @p payloadType is in flight it draws the
+/// single insertion line and lays the invisible catch that receives the
+/// release, so a drop lands on one target rather than on whichever row happened
+/// to be under it.
 ///
-/// IT COVERS THE GAP UNDER THE LAST ROW, and that is not slack. Every drop
-/// position but the last sits between two rows; the last one - after everything
-/// - can only be aimed at below the final row, so the strip under it IS that
-/// position and a catch stopping at the last row's edge cannot express it.
+/// Call it on EVERY frame the list is drawn, immediately after the rows and
+/// before anything else is submitted. Both halves of that matter: the row pitch
+/// is measured from where the rows ended, and IT ALSO RESERVES THE STRIP UNDER
+/// THE LAST ROW, which it must do drag or no drag.
 ///
-/// The cursor is put back by SUBMITTING something rather than by being moved.
-/// The obvious way to write this - move up, submit, move back - ends on a bare
-/// cursor move with nothing after it, and ImGui reads that as being asked to
-/// grow the window around nothing. It says so in a red error window over the
-/// popup, in release builds as much as local ones, since the tooltip is only
-/// compiled out by IMGUI_DISABLE_DEBUG_TOOLS.
+/// THAT STRIP IS A DROP POSITION, not slack. Every position but the last sits
+/// between two rows; the last - after everything - can only be aimed at below
+/// the final row. So the list stands one row gap taller than its rows at rest,
+/// deliberately: reserving it only while a drag is in flight would grow the
+/// list the moment the gesture starts, moving the target while the user is
+/// aiming at it.
 ///
-/// @return How far down the catch reaches. The drop does not need it; it is
-///         what lets a test see that the last position is inside.
-float layMenuRowDropCatch(const char* id, const ImVec2& listTop, float width);
+/// @return The row lifted and the gap it was let go in, or nothing while no
+///         drop has landed.
+[[nodiscard]] std::optional<MenuRowMove> landMenuRowDrag(const char* payloadType, const ImVec2& listTop, int count);
 
 /// An icon button that stands in a menu row: the toolbar's glyph and hover
 /// box, but only as tall as the row it shares, so a row carrying one is no

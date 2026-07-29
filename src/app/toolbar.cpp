@@ -5,7 +5,6 @@
 #include <optional>
 #include <string>
 #include <string_view>
-#include <utility>
 #include <vector>
 
 #include "app/imgui_ui.h"
@@ -31,79 +30,6 @@ const char* scopeDisplayName(const HostScope& scope)
 // The drag-and-drop payload tag for a dragged scope row: its index in the menu
 // order travels as the payload.
 constexpr const char* ScopeRowPayload = "ss_scope_row";
-
-// Draws the drop insertion bar across the open popup at height @p y: a thin rule
-// in the gap the dragged scope would land in, in a quiet near-white rather than
-// the loud drag-drop accent.
-void drawInsertionBar(float y)
-{
-    const ImVec2 windowPos = ImGui::GetWindowPos();
-    const float pad = ImGui::GetStyle().WindowPadding.x;
-    const ImVec2 left(windowPos.x + pad, y);
-    const ImVec2 right(windowPos.x + ImGui::GetWindowSize().x - pad, y);
-    ImGui::GetWindowDrawList()->AddLine(left, right, ImGui::GetColorU32(ImGuiCol_Text, 0.85f), 1.0f);
-}
-
-// The insertion slot (0..count) the cursor is over, in a list of @p count rows
-// pitched @p advance apart from @p listTopY with @p spacing between them: the
-// count of rows whose centre the cursor has passed. One computation for the
-// whole list, so exactly one line is drawn - never two rows claiming a gap.
-int insertionGap(float listTopY, int count, float advance, float spacing)
-{
-    const float mouseY = ImGui::GetMousePos().y;
-    int gap = 0;
-    for (int n = 0; n < count; ++n) {
-        if (mouseY > listTopY + static_cast<float>(n) * advance + (advance - spacing) * 0.5f) {
-            gap = n + 1;
-        }
-    }
-
-    return gap;
-}
-
-// The y of the insertion line for slot @p gap: the centre of the @p spacing
-// strip between the rows either side, from their measured @p advance - so the
-// line sits midway between two rows whatever their true height.
-float insertionBarY(float listTopY, int gap, float advance, float spacing)
-{
-    return listTopY + static_cast<float>(gap) * advance - spacing * 0.5f;
-}
-
-// While a scope is being dragged, draws the single insertion line and, over the
-// @p count rows from @p listTop spanning @p width, a full-list drop catch that
-// lands the reorder wherever the release falls: live only during the drag, it
-// overlays the rows without disturbing their clicks, which the drag suspends.
-// @return The row lifted and the gap it was dropped in, or nothing while no
-// drop landed.
-std::optional<std::pair<int, int>> scopeDrop(ImVec2 listTop, float width, int count)
-{
-    const ImGuiPayload* drag = ImGui::GetDragDropPayload();
-    if (drag == nullptr || !drag->IsDataType(ScopeRowPayload)) {
-        return std::nullopt;
-    }
-    const ImVec2 resume = ImGui::GetCursorScreenPos();
-    const float spacing = ImGui::GetStyle().ItemSpacing.y;
-    // The real per-row pitch from the laid-out list, so the line tracks the rows
-    // whatever their height rather than a computed guess.
-    const float advance = (resume.y - listTop.y) / static_cast<float>(count);
-    const int gap = insertionGap(listTop.y, count, advance, spacing);
-    drawInsertionBar(insertionBarY(listTop.y, gap, advance, spacing));
-    layMenuRowDropCatch("##scope-drop", listTop, width);
-    int from = -1;
-    if (ImGui::BeginDragDropTarget()) {
-        const ImGuiPayload* payload =
-            ImGui::AcceptDragDropPayload(ScopeRowPayload, ImGuiDragDropFlags_AcceptNoDrawDefaultRect);
-        if (payload != nullptr) {
-            from = *static_cast<const int*>(payload->Data);
-        }
-        ImGui::EndDragDropTarget();
-    }
-    if (from < 0) {
-        return std::nullopt;
-    }
-
-    return std::make_pair(from, gap);
-}
 
 // Seats the constant-width region toolbox on the row the scope selector opened.
 //
@@ -199,8 +125,8 @@ void Toolbar::appendScopeMenu(PaneRenderOutcome& outcome)
     for (int n = 0; n < static_cast<int>(order.size()); ++n) {
         drawScopeRow(order[n], n, cols, outcome);
     }
-    if (const auto drop = scopeDrop(listTop, cols.width, static_cast<int>(order.size()))) {
-        outcome.preferencesSaveDue = m_view.reorderScopes(drop->first, drop->second);
+    if (const auto moved = landMenuRowDrag(ScopeRowPayload, listTop, static_cast<int>(order.size()))) {
+        outcome.preferencesSaveDue = m_view.reorderScopes(moved->from, moved->gap);
     }
     popMenuRowStyle();
 }
@@ -226,11 +152,7 @@ void Toolbar::drawScopeRow(const std::string& id, int index, const ScopeMenuColu
         outcome.chosenScope = ScopeChoice{id, true};
     }
     drawRowKey(id, cols.rightPad);
-    if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_None)) {
-        ImGui::SetDragDropPayload(ScopeRowPayload, &index, sizeof(index));
-        ImGui::TextUnformatted(name);
-        ImGui::EndDragDropSource();
-    }
+    offerMenuRowDrag(ScopeRowPayload, index, name);
     ImGui::PopID();
 }
 

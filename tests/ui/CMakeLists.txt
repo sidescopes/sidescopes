@@ -112,6 +112,19 @@ target_link_libraries(sidescopes_ui_layout_tests PRIVATE
 sidescopes_target_defaults(sidescopes_ui_layout_tests)
 add_test(NAME sidescopes_ui_layout COMMAND sidescopes_ui_layout_tests)
 
+# The reorder suite drives the WHOLE drag gesture over a menu row list - press,
+# move, release - and asserts the order that comes out. Three defects have
+# shipped in that gesture, each past a test that asserted one PART of it, so
+# this suite exists to assert it end to end and nothing else.
+add_executable(sidescopes_ui_reorder_tests
+    test_reorder_ui.cpp
+    ui_test_harness.cpp)
+target_include_directories(sidescopes_ui_reorder_tests PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(sidescopes_ui_reorder_tests PRIVATE
+    sidescopes_imgui_test_engine sidescopes_app_imgui_te)
+sidescopes_target_defaults(sidescopes_ui_reorder_tests)
+add_test(NAME sidescopes_ui_reorder COMMAND sidescopes_ui_reorder_tests)
+
 # The graticule suite drives the real overlay renderer against a hooked Dear
 # ImGui and reads back what landed in the draw list, which is the only place the
 # strength's whole path - style, render shim, toolkit - can be seen at once.
