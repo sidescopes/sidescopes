@@ -285,12 +285,13 @@ void theToolboxSeatsByTheWindowAlone(ImGuiTestContext*)
 struct ChosenProbe
 {
     ImU32 bandColor = 0;
-    /// One entry per way the row's pair of leading icons can be painted:
-    /// both, one, neither.
-    static constexpr int Ways = 3;
+    /// One entry per strength a row's pair of leading icons can be drawn at:
+    /// emphasized (hovered, or the chosen row) and resting.
+    static constexpr int Ways = 2;
     ImVec2 leadingSize[Ways] = {};
-    float nameX[Ways] = {-1.0f, -1.0f, -1.0f};
-    int vertices[Ways] = {-1, -1, -1};
+    float nameX[Ways] = {-1.0f, -1.0f};
+    int vertices[Ways] = {-1, -1};
+    ImU32 glyphColor[Ways] = {0, 0};
 };
 
 ChosenProbe& chosenProbe()
@@ -314,29 +315,29 @@ void chosenBandGui(ImGuiTestContext*)
     probe.bandColor = draw->VtxBuffer.Size > before ? draw->VtxBuffer[before].col : 0;
 
     // A row led by the same PAIR of icon buttons the preset list uses, drawn
-    // with both painted, one painted and neither, each followed by the name
-    // standing after it - so the test can compare where that name landed in
-    // every combination rather than only in the two extremes.
+    // once emphasized and once at rest, each followed by the name standing
+    // after it - so the test can compare what each strength put in the draw
+    // list and where that name landed under both.
     const float leading = 2.0f * menuRowIconWidth();
-    const auto probeRow = [draw, leading, &probe](int way, bool first, bool second) {
+    const auto probeRow = [draw, leading, &probe](int way, bool emphasized) {
         ImGui::PushID(way);
         const int mark = draw->VtxBuffer.Size;
-        const bool renamed = menuRowIconButton("##rename", ImTextureID{}, "Rename", first);
+        const bool renamed = menuRowIconButton("##rename", ImTextureID{}, "Rename", emphasized);
         const ImVec2 size = ImGui::GetItemRectSize();
         ImGui::SameLine(0.0f, 0.0f);
-        const bool saved = menuRowIconButton("##save", ImTextureID{}, "Save", second);
+        const bool saved = menuRowIconButton("##save", ImTextureID{}, "Save", emphasized);
         IM_UNUSED(renamed);
         IM_UNUSED(saved);
         probe.leadingSize[way] = ImVec2(size.x + ImGui::GetItemRectSize().x, size.y);
         probe.vertices[way] = draw->VtxBuffer.Size - mark;
+        probe.glyphColor[way] = draw->VtxBuffer.Size > mark ? draw->VtxBuffer[mark].col : 0;
         ImGui::SameLine(menuRowNameX(leading));
         ImGui::TextUnformatted("Preset 1");
         probe.nameX[way] = ImGui::GetItemRectMin().x;
         ImGui::PopID();
     };
-    probeRow(0, true, true);
-    probeRow(1, true, false);
-    probeRow(2, false, false);
+    probeRow(0, true);
+    probeRow(1, false);
     ImGui::End();
 }
 
@@ -366,36 +367,48 @@ void theChosenBandIsNotTheHoverBand(ImGuiTestContext* ctx)
     IM_CHECK_LT(alpha, 255u);
 }
 
-/// SYMPTOM IF BROKEN: every name in the preset list steps sideways as the
-/// pointer runs down it, and the whole menu ripples under the cursor.
+/// SYMPTOM IF BROKEN: either every name in the preset list steps sideways as
+/// the pointer runs down it, or the list carries an empty gutter down its whole
+/// left edge.
 ///
-/// The rename pen shows only on the row under the pointer. A hover-revealed
-/// control must still OCCUPY its space when it is not drawn - reserving the box
-/// only while it shows is the classic form of this bug, and one that looks
-/// perfectly right in a still picture and is unusable in motion. Only the paint
-/// may differ between the two states; the layout may not.
-void aHiddenRowIconStillHoldsItsSpace(ImGuiTestContext* ctx)
+/// A row's leading controls have to hold their box open whatever they are
+/// doing, or the names shift; hold that box open around NOTHING and the column
+/// is dead space, which is what a plain hide-until-hover produced here and what
+/// the owner rejected on sight. Both are avoided the same way: the glyphs are
+/// always drawn and only their strength changes.
+///
+/// DO NOT DELETE THIS AS VACUOUS. The layout half is now satisfied by
+/// construction - there is no hidden state left to get wrong - and that is
+/// exactly the property worth pinning, because the obvious "fix" for a noisy
+/// column is to stop drawing the glyph, which silently brings the gutter back.
+/// The vertex-count check is what catches that, and it is not vacuous at all.
+void rowIconsHoldOneLayoutAtEveryStrength(ImGuiTestContext* ctx)
 {
     ctx->SetRef("Bands");
     ctx->Yield();
     const ChosenProbe& probe = chosenProbe();
 
-    // The pair takes a real box, and the SAME box, whether both glyphs are
-    // painted, one is, or neither - so the name after them lands at one x in
-    // every combination. That is the thing the eye would catch.
+    // The pair takes a real box, and the same box, at either strength - so the
+    // name after them lands at one x however they are drawn.
     IM_CHECK_GT(probe.leadingSize[0].x, 0.0f);
     IM_CHECK_GT(probe.nameX[0], 0.0f);
-    for (int way = 1; way < ChosenProbe::Ways; ++way) {
-        IM_CHECK_EQ(probe.leadingSize[way].x, probe.leadingSize[0].x);
-        IM_CHECK_EQ(probe.leadingSize[way].y, probe.leadingSize[0].y);
-        IM_CHECK_EQ(probe.nameX[way], probe.nameX[0]);
-    }
+    IM_CHECK_EQ(probe.leadingSize[1].x, probe.leadingSize[0].x);
+    IM_CHECK_EQ(probe.leadingSize[1].y, probe.leadingSize[0].y);
+    IM_CHECK_EQ(probe.nameX[1], probe.nameX[0]);
 
-    // What DOES differ is the paint, and in proportion to how much of it there
-    // is, or the reveal would not be a reveal.
-    IM_CHECK_GT(probe.vertices[0], probe.vertices[1]);
-    IM_CHECK_GT(probe.vertices[1], probe.vertices[2]);
-    IM_CHECK_EQ(probe.vertices[2], 0);
+    // Nothing is hidden at either strength: the same glyphs are put down both
+    // times. A resting row that drew nothing would leave the column it still
+    // has to reserve empty.
+    IM_CHECK_GT(probe.vertices[0], 0);
+    IM_CHECK_EQ(probe.vertices[1], probe.vertices[0]);
+
+    // What differs is the strength, and only the strength.
+    IM_CHECK_NE(probe.glyphColor[1], probe.glyphColor[0]);
+    const ImU32 emphasized = probe.glyphColor[0] >> IM_COL32_A_SHIFT & 0xFFu;
+    const ImU32 resting = probe.glyphColor[1] >> IM_COL32_A_SHIFT & 0xFFu;
+    IM_CHECK_LT(resting, emphasized);
+    // ...and a resting glyph is still visible, not a hide wearing an alpha.
+    IM_CHECK_GT(resting, 0u);
 
     // The name column clears the controls that lead the row, so they never
     // overlap however either is measured.
@@ -436,9 +449,9 @@ void registerLayoutTests(ImGuiTestEngine* engine)
     chosen->GuiFunc = chosenBandGui;
     chosen->TestFunc = theChosenBandIsNotTheHoverBand;
 
-    ImGuiTest* reveal = IM_REGISTER_TEST(engine, "layout", "hidden_row_icon_holds_its_space");
+    ImGuiTest* reveal = IM_REGISTER_TEST(engine, "layout", "row_icons_hold_one_layout");
     reveal->GuiFunc = chosenBandGui;
-    reveal->TestFunc = aHiddenRowIconStillHoldsItsSpace;
+    reveal->TestFunc = rowIconsHoldOneLayoutAtEveryStrength;
 }
 
 }  // namespace

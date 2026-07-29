@@ -44,9 +44,9 @@ void pushMenuRowStyle();
 void popMenuRowStyle();
 
 /// Whether the pointer is over the band of the row starting at @p rowTopY -
-/// what a control that shows only under the pointer asks before painting
-/// itself. It is the WHOLE row that answers, not the control, so a pen the
-/// pointer has not reached yet still appears when its row is entered.
+/// what a row's own controls ask before deciding how strongly to draw
+/// themselves. It is the WHOLE row that answers, not the control, so a pen the
+/// pointer has not reached yet brightens as soon as its row is entered.
 [[nodiscard]] bool menuRowHovered(float rowTopY);
 
 /// Draws the hover band behind a whole row whose content starts at @p rowTopY,
@@ -78,12 +78,19 @@ void drawMenuRowAccelerator(const char* key, float rightPad);
 /// box, but only as tall as the row it shares, so a row carrying one is no
 /// taller than a row of plain checkboxes and the two menus keep one rhythm.
 ///
-/// @p painted false draws nothing and STILL TAKES THE SAME BOX, which is what
-/// a control that appears only under the pointer needs: reserving the space
-/// only while it shows would step every name in the list sideways as the
-/// pointer moves down it. Pass @ref menuRowHovered for that row.
+/// The glyph is ALWAYS drawn; @p emphasized only decides how strongly. False
+/// draws it dim - present, but receding far enough that the row reads
+/// name-first.
+///
+/// This is the resolution of a real tension, and it is worth knowing before
+/// anyone reaches for a plain hide. A row action that appears on hover has to
+/// hold its box open when it is not showing, or every name in the list steps
+/// sideways as the pointer moves down it; hold the box open around nothing and
+/// the list carries an empty gutter down its whole length instead. Dimming
+/// escapes both at once: the space is occupied by something meaningful, so
+/// there is no gutter, and nothing moves because nothing was ever hidden.
 /// @return Whether it was pressed.
-[[nodiscard]] bool menuRowIconButton(const char* id, ImTextureID texture, const char* tooltip, bool painted = true);
+[[nodiscard]] bool menuRowIconButton(const char* id, ImTextureID texture, const char* tooltip, bool emphasized = true);
 
 /// The width @ref menuRowIconButton takes, for a caller measuring its columns
 /// before it draws them.

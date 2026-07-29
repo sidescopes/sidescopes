@@ -103,8 +103,9 @@ void LayoutPresetPicker::drawSlotRow(int slot, float width, IconTextures& icons,
     const float rowTop = ImGui::GetCursorScreenPos().y;
     const bool hovered = menuRowHovered(rowTop);
     drawMenuRowHover(rowTop);
-    // The loaded slot is the row that is tinted. Every row's key hint is drawn
-    // the same way, so nothing in the row itself marks it.
+    // The loaded slot is the row that is tinted, and the row whose own controls
+    // stand at full strength while every other row's recede - so which slot is
+    // loaded survives being unable to tell the tint from the background.
     if (chosen) {
         drawMenuRowChosen(rowTop);
     }
@@ -124,17 +125,22 @@ void LayoutPresetPicker::drawSlotRow(int slot, float width, IconTextures& icons,
     const std::string name = presetDisplayName(slot, m_presets.at(slot));
     // Two controls lead the row - rename it, and save the live layout into it -
     // in the column the scope menu gives its checkbox, so the two lists share a
-    // left edge as well as a right one. Both show only on the row under the
-    // pointer, since eighteen glyphs standing beside nine names is a wall
-    // rather than a list, and both hold their boxes either way, so no name
-    // moves as the pointer runs down the list.
+    // left edge as well as a right one. Both are always there and both recede:
+    // eighteen glyphs at full strength beside nine names is a wall rather than
+    // a list, and eighteen HIDDEN ones leave the column they still have to
+    // reserve empty down the whole list.
+    //
+    // They come up on the row under the pointer, and on the loaded row, which
+    // is what tells that row apart from the rest by something other than the
+    // hue of the band behind it.
+    const bool emphasized = hovered || chosen;
     const std::string renameTip = "Rename " + name;
-    if (menuRowIconButton("##rename", icons.textureId(Icon::PenLine, iconPixelSize()), renameTip.c_str(), hovered)) {
+    if (menuRowIconButton("##rename", icons.textureId(Icon::PenLine, iconPixelSize()), renameTip.c_str(), emphasized)) {
         beginRename(slot);
     }
     ImGui::SameLine(0.0f, 0.0f);
     const std::string saveTip = "Save the current layout into " + name;
-    if (menuRowIconButton("##save", icons.textureId(Icon::Save, iconPixelSize()), saveTip.c_str(), hovered)) {
+    if (menuRowIconButton("##save", icons.textureId(Icon::Save, iconPixelSize()), saveTip.c_str(), emphasized)) {
         outcome = m_presets.save(slot);
     }
     ImGui::SameLine(presetNameX());

@@ -18,6 +18,15 @@ constexpr int PushedColors = 4;
 // one hiding the other.
 constexpr float ChosenBandOpacity = 0.55f;
 
+// How strongly a row's leading icon is drawn while its row is neither under the
+// pointer nor the chosen one. Derived rather than picked: the key hint lands at
+// 0.50 disabled text times AcceleratorOpacity, and the icon is drawn from the
+// 0.86 body text, so this is what puts a resting glyph at the same ink weight
+// as the numeral across the row from it. A glyph carries more weight than a
+// numeral at equal alpha, so matching the ink is what makes a row read
+// name-first rather than icon-first.
+constexpr float RestingIconOpacity = 0.45f;
+
 // How strongly the key hint is drawn, on top of the theme's already-dim
 // disabled text. It states which key reaches a row; it is not a control, and
 // it shares the row's right edge with one that is.
@@ -127,7 +136,7 @@ float menuRowIconWidth()
     return ImGui::GetFrameHeight() + ImGui::GetFontSize() * 0.5f;
 }
 
-bool menuRowIconButton(const char* id, ImTextureID texture, const char* tooltip, bool painted)
+bool menuRowIconButton(const char* id, ImTextureID texture, const char* tooltip, bool emphasized)
 {
     // Sized to the row rather than to the toolbar: iconButton's box is a fixed
     // amount taller than a line of text, which in a popup whose frame padding
@@ -135,15 +144,13 @@ bool menuRowIconButton(const char* id, ImTextureID texture, const char* tooltip,
     // than the rest. The GLYPH keeps the toolbar's size, so it reads as the
     // same icon at the same weight.
     //
-    // THE BOX IS TAKEN WHETHER OR NOT THE GLYPH IS PAINTED. A control that
-    // appears under the pointer must not also widen the row it appears in, or
-    // every name in the list steps sideways as the pointer moves down it - the
-    // classic form of this, and one that looks right in a still picture and is
-    // unusable in motion.
+    // THE GLYPH IS ALWAYS DRAWN; only its strength answers to @p emphasized.
+    // Hiding it outright and holding its box open - which is what a row action
+    // that appears on hover asks for - leaves a gutter of nothing down the
+    // whole list, and NOT holding the box open steps every name sideways as
+    // the pointer moves. Dimming escapes both: the space is occupied by
+    // something meaningful, so there is no gutter and nothing to shift.
     const bool pressed = ImGui::InvisibleButton(id, ImVec2(menuRowIconWidth(), ImGui::GetFrameHeight()));
-    if (!painted) {
-        return pressed;
-    }
     ImDrawList* draw = ImGui::GetWindowDrawList();
     const ImVec2 min = ImGui::GetItemRectMin();
     const ImVec2 max = ImGui::GetItemRectMax();
@@ -154,7 +161,7 @@ bool menuRowIconButton(const char* id, ImTextureID texture, const char* tooltip,
     const ImVec2 glyph(std::round(min.x + (max.x - min.x - side) / 2.0f),
                        std::round(min.y + (max.y - min.y - side) / 2.0f));
     draw->AddImage(texture, glyph, ImVec2(glyph.x + side, glyph.y + side), ImVec2(0, 0), ImVec2(1, 1),
-                   ImGui::GetColorU32(ImGuiCol_Text));
+                   ImGui::GetColorU32(ImGuiCol_Text, emphasized ? 1.0f : RestingIconOpacity));
     wrappedTooltip(tooltip);
 
     return pressed;
