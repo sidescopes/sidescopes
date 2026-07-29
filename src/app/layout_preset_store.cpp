@@ -32,8 +32,8 @@ LayoutPreset LayoutPresetStore::effective(int slot, const LayoutPreset& defaults
 
 bool sameLayout(const LayoutPreset& first, const LayoutPreset& second)
 {
-    return first.stack == second.stack && first.orientation == second.orientation && first.weights == second.weights &&
-           first.styles == second.styles;
+    return first.stack == second.stack && first.order == second.order && first.orientation == second.orientation &&
+           first.weights == second.weights && first.styles == second.styles;
 }
 
 void LayoutPresetStore::store(int slot, LayoutPreset preset)

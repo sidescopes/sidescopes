@@ -139,6 +139,68 @@ TEST_CASE("The order the panes sit in belongs to the slot")
     CHECK(fixture.view.order().ids() == arranged);
 }
 
+TEST_CASE("Moving a scope that is not shown is kept like any other")
+{
+    // THE CASE THAT WENT MISSING. Dragging a SHOWN scope also re-seats the
+    // panes, so the stack's own tokens change and the move was written back as
+    // a side effect of that. Move one that is NOT shown and the order is the
+    // only thing that changed - so a comparison blind to the order dropped it
+    // silently, and the menu forgot the move the moment the popup closed.
+    Fixture fixture;
+    const std::vector<std::string> registered = fixture.view.order().ids();
+    REQUIRE(registered.size() > 2);
+    const std::string& last = registered.back();
+    REQUIRE_FALSE(fixture.view.stack().shows(last));
+    const std::string shownStack = fixture.view.stack().tokens();
+
+    REQUIRE(fixture.view.reorderScopes(static_cast<int>(registered.size()) - 1, 0));
+    REQUIRE(fixture.view.order().ids().front() == last);
+    // Nothing about which scopes are on screen moved.
+    REQUIRE(fixture.view.stack().tokens() == shownStack);
+
+    CHECK(fixture.presets.syncActiveSlot());
+    CHECK(fixture.presets.at(1).order == fixture.view.order().tokens());
+}
+
+TEST_CASE("Switching slots carries the whole order, shown or not")
+{
+    // A scope's place is a property of the arrangement rather than of being on
+    // screen, so a slot restores where every scope sits and not only where the
+    // shown ones do.
+    Fixture fixture;
+    const std::size_t count = fixture.view.order().ids().size();
+    REQUIRE(fixture.view.reorderScopes(static_cast<int>(count) - 1, 0));
+    const std::vector<std::string> arranged = fixture.view.order().ids();
+    REQUIRE(fixture.presets.syncActiveSlot());
+
+    CHECK_FALSE(fixture.presets.load(4).status.empty());
+    REQUIRE(fixture.view.order().ids() != arranged);
+
+    CHECK_FALSE(fixture.presets.load(1).status.empty());
+    CHECK(fixture.view.order().ids() == arranged);
+    CHECK(fixture.view.order().ids().size() == count);
+}
+
+TEST_CASE("The panes and the menu are seated by one order")
+{
+    // They were deliberately unified: a scope brought back returns to the
+    // place it was left, which only holds if the panes read the same order the
+    // menu lists.
+    Fixture fixture;
+    fixture.view.stack().choose(WaveformScopeId, true);
+    fixture.view.stack().choose(HistogramScopeId, true);
+    REQUIRE(fixture.view.stack().ids().size() == 3);
+
+    // Drag the histogram to the front of the MENU; the PANES follow.
+    const std::vector<std::string>& order = fixture.view.order().ids();
+    const auto at = std::find(order.begin(), order.end(), std::string{HistogramScopeId});
+    REQUIRE(at != order.end());
+    REQUIRE(fixture.view.reorderScopes(static_cast<int>(std::distance(order.begin(), at)), 0));
+
+    CHECK(fixture.view.order().ids().front() == HistogramScopeId);
+    CHECK(fixture.view.stack().ids().front() == HistogramScopeId);
+}
+
 TEST_CASE("A slot resumed from the file opens in its own order")
 {
     // The order is restored from the slot being resumed rather than from a
