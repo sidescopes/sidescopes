@@ -29,7 +29,7 @@ namespace {
 constexpr double FlushIntervalSeconds = 0.1;
 
 // Indexed by DiagChannel; the env-list parser and the line prefix share it.
-constexpr const char* ChannelNames[] = {"attach", "border", "suggestions", "facelock", "perf", "modules"};
+constexpr const char* ChannelNames[] = {"attach", "border", "suggestions", "facelock", "perf", "modules", "interface"};
 static_assert(std::size(ChannelNames) == static_cast<std::size_t>(DiagChannel::Count));
 
 // The secure-CRT deprecations make std::fopen a hard error under MSVC's

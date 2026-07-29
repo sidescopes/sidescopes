@@ -122,6 +122,13 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   an attached region leaves - a window closing out from under it, a lost
   face - now appear there with every other message instead of above the
   panes.
+- An `interface` diagnostic channel, carrying the errors the interface
+  toolkit reports about its own use. It normally says these in a window
+  over the application, which only whoever is sitting in front of the
+  build ever sees - one went unread long enough to ship - and on this
+  channel they land in the file a report can attach instead. The window
+  stays as well. The same error repeats on every frame it is raised, so
+  only a message the recording has not already been told is written.
 - A preset carries the order its panes sit in. Dragging a scope in the
   selector arranges that slot alone, so one can read exposure first and
   another balance first, and loading a slot restores how it was laid out
@@ -231,6 +238,13 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   window over the popup. The catch laid over the list to receive the drop
   moved the cursor without submitting anything afterwards, which that
   check exists to report; it is sized to need no such move now.
+- Dragging a scope in the selector keeps the move when that scope is not
+  currently shown. The order already covered every registered scope and
+  the file already carried them all, but the check that decides whether
+  the arrangement has to be written back ignored the order - and moving a
+  scope that IS shown also re-seats the panes, so only the unshown case
+  was ever dropped. It is the case the stable order exists for: a scope's
+  place does not depend on whether it is switched on.
 - A row's shortcut digit sits on the same line as the name beside it, in
   both toolbar lists. It was drawn a pixel low, against a rectangle that
   is deliberately larger than the one the name is laid out in.

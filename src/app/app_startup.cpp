@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "app/app.h"
+#include "app/interface_diagnostics.h"
 #include "app/interface_style.h"
 #include "app/scope_view.h"
 #include "app/ui_scaling.h"
@@ -19,6 +20,9 @@
 #include "core/scopes/histogram.h"
 #include "core/scopes/vectorscope.h"
 #include "core/scopes/waveform.h"
+// ErrorCallback is declared in the internal header; ImGui documents it as a
+// hook it may promote to the public API rather than as private state.
+#include "imgui_internal.h"
 #include "platform/desktop.h"
 
 namespace {
@@ -229,12 +233,26 @@ ImFont* loadInterfaceFont(GLFWwindow* window)
     return monospace;
 }
 
+// What the toolkit calls when it catches a misuse of itself. Installed rather
+// than left to the error window alone: that window is only ever seen by
+// whoever is in front of the build, and ImGui invokes this callback outside
+// the guard that compiles the window out - so the recording keeps its account
+// whatever the toolkit is built with.
+void onInterfaceError(ImGuiContext*, void*, const char* message)
+{
+    reportInterfaceError(message);
+}
+
 ImFont* startImGui(GLFWwindow* window)
 {
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
     ImGuiIO& io = ImGui::GetIO();
     io.IniFilename = nullptr;  // window layout is ours to persist
+    // The error window stays as well. It is what caught the one defect of this
+    // kind the project has had, and whoever is building wants it at once; the
+    // log is for the session nobody is watching.
+    ImGui::GetCurrentContext()->ErrorCallback = onInterfaceError;
     ImGui::StyleColorsDark();
     applyTheme();
 

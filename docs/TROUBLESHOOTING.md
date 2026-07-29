@@ -88,6 +88,15 @@ the named channels — for example `SIDESCOPES_DIAG=attach,border`, or `all`:
 | `facelock` | face-lock probe verdicts |
 | `perf` | frame, analysis-pass and capture-cadence timings |
 | `modules` | which scope modules loaded, and why one did not |
+| `interface` | errors the interface toolkit reports about its own use |
+
+The `interface` channel is worth including in a recording attached to a
+report even when the interface looked fine. The toolkit checks its own use
+as it draws and normally says so in a window over the application, which
+only whoever is sitting in front of the build ever sees; on that channel it
+becomes a line in the file. The same error repeats on every frame it is
+raised, so only a message the recording has not already been told is
+written.
 
 The previous run is kept beside the log as `sidescopes-diag.prev.log`.
 `SIDESCOPES_DIAG_FILE` places the log elsewhere, and

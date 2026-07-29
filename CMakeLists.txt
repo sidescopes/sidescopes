@@ -260,6 +260,7 @@ add_library(sidescopes_app STATIC
     src/app/face_lock.cpp
     src/app/face_lock_controller.cpp
     src/app/frame_pacing.cpp
+    src/app/interface_diagnostics.cpp
     src/app/layout_preset_store.cpp
     src/app/layout_presets.cpp
     src/app/overlay_style.cpp

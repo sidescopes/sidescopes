@@ -21,6 +21,7 @@ enum class DiagChannel
     FaceLock,     ///< Face-lock probe verdicts, for grading the gates.
     Perf,         ///< Frame, analysis-pass, and capture-cadence timings.
     Modules,      ///< Scope modules: what registered, what was refused, what they log.
+    Interface,    ///< Errors the interface toolkit reports about its own use.
     Count         ///< Sentinel; keep last.
 };
 
