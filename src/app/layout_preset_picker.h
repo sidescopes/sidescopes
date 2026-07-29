@@ -24,10 +24,11 @@ public:
     explicit LayoutPresetPicker(LayoutPresetController& presets);
 
     /// Draws the button and, while it is open, the slot list: one row a slot,
-    /// loading on click, saving on Shift+click, and renaming from the pen
-    /// standing at the end of each row - the one way in, so a click on a row
-    /// never has to mean two things. The loaded slot is the tinted row.
-    /// @p icons is the shared glyph cache the button and the pens draw from.
+    /// which a click loads. Renaming and saving are buttons leading the row,
+    /// shown on the row under the pointer - so a click on a row never has to
+    /// mean two things, and neither action is reachable only by knowing about
+    /// a modifier. The loaded slot is the tinted row. @p icons is the shared
+    /// glyph cache every one of those glyphs draws from.
     [[nodiscard]] LayoutPresetOutcome draw(IconTextures& icons);
 
 private:

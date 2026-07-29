@@ -19,15 +19,12 @@ namespace {
 // arriving and leaving never moves the row.
 constexpr const char* WidestPresetLabel = "9*";
 
-// The line under the list, which teaches the two gestures a row answers to.
-constexpr const char* PresetFooter = "click loads - Shift+click saves";
-
 // The controls that lead a preset row, and so where its name starts. This list
 // leads with buttons where the scope menu leads with a checkbox, so the two
 // share the gap that follows them rather than the x it works out to.
 float presetLeadingWidth()
 {
-    return menuRowIconWidth();
+    return 2.0f * menuRowIconWidth();
 }
 
 float presetNameX()
@@ -46,12 +43,7 @@ float presetRowWidth(const std::array<LayoutPreset, LayoutPresetSlots>& presets)
         maxName = std::max(maxName, ImGui::CalcTextSize(name.c_str()).x);
     }
     const float em = ImGui::GetFontSize();
-    const float named = presetNameX() + maxName + em * 2.0f + ImGui::CalcTextSize("9").x + menuRowKeyRightPad();
-
-    // Never narrower than the footer beneath it, so the rows are what set the
-    // popup's width and every key binds to the popup's own edge rather than to
-    // a row that stops short of it.
-    return std::max(named, ImGui::CalcTextSize(PresetFooter).x);
+    return presetNameX() + maxName + em * 2.0f + ImGui::CalcTextSize("9").x + menuRowKeyRightPad();
 }
 
 }  // namespace
@@ -122,7 +114,7 @@ void LayoutPresetPicker::drawSlotRow(int slot, float width, IconTextures& icons,
         // The pen's column is held open rather than reclaimed, and the field
         // takes exactly the name's own width, so the row keeps its shape and
         // nothing shifts while a name is typed.
-        ImGui::Dummy(ImVec2(menuRowIconWidth(), ImGui::GetFrameHeight()));
+        ImGui::Dummy(ImVec2(presetLeadingWidth(), ImGui::GetFrameHeight()));
         ImGui::SameLine(presetNameX());
         drawRenameField(nameWidth, outcome);
         ImGui::PopID();
@@ -130,19 +122,28 @@ void LayoutPresetPicker::drawSlotRow(int slot, float width, IconTextures& icons,
         return;
     }
     const std::string name = presetDisplayName(slot, m_presets.at(slot));
-    // The pen leads the row, in the column the scope menu gives its checkbox,
-    // so the two lists share a left edge as well as a right one. It shows only
-    // on the row under the pointer - nine of them standing at once is a column
-    // of noise beside nine names - and it holds its box either way, so no name
+    // Two controls lead the row - rename it, and save the live layout into it -
+    // in the column the scope menu gives its checkbox, so the two lists share a
+    // left edge as well as a right one. Both show only on the row under the
+    // pointer, since eighteen glyphs standing beside nine names is a wall
+    // rather than a list, and both hold their boxes either way, so no name
     // moves as the pointer runs down the list.
-    const std::string tooltip = "Rename " + name;
-    if (menuRowIconButton("##rename", icons.textureId(Icon::PenLine, iconPixelSize()), tooltip.c_str(), hovered)) {
+    const std::string renameTip = "Rename " + name;
+    if (menuRowIconButton("##rename", icons.textureId(Icon::PenLine, iconPixelSize()), renameTip.c_str(), hovered)) {
         beginRename(slot);
     }
+    ImGui::SameLine(0.0f, 0.0f);
+    const std::string saveTip = "Save the current layout into " + name;
+    if (menuRowIconButton("##save", icons.textureId(Icon::Save, iconPixelSize()), saveTip.c_str(), hovered)) {
+        outcome = m_presets.save(slot);
+    }
     ImGui::SameLine(presetNameX());
+    // The row itself only ever loads. Saving was a modifier on this same click
+    // and is a button of its own now: a gesture that means two things depending
+    // on a held key teaches nobody the second one.
     const ImVec2 rowSize(nameWidth, ImGui::GetFrameHeight());
     if (ImGui::Selectable(name.c_str(), false, ImGuiSelectableFlags_NoAutoClosePopups, rowSize)) {
-        outcome = ImGui::GetIO().KeyShift ? m_presets.save(slot) : m_presets.load(slot);
+        outcome = m_presets.load(slot);
     }
     drawMenuRowAccelerator(std::to_string(slot).c_str(), menuRowKeyRightPad());
     ImGui::PopID();
@@ -176,7 +177,6 @@ LayoutPresetOutcome LayoutPresetPicker::draw(IconTextures& icons)
         for (int slot = 1; slot <= LayoutPresetSlots; ++slot) {
             drawSlotRow(slot, width, icons, outcome);
         }
-        ImGui::TextDisabled("%s", PresetFooter);
         popMenuRowStyle();
         ImGui::EndPopup();
     } else {

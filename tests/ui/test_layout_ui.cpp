@@ -285,12 +285,12 @@ void theToolboxSeatsByTheWindowAlone(ImGuiTestContext*)
 struct ChosenProbe
 {
     ImU32 bandColor = 0;
-    ImVec2 paintedIconSize{-1.0f, -1.0f};
-    ImVec2 hiddenIconSize{-1.0f, -1.0f};
-    float paintedNameX = -1.0f;
-    float hiddenNameX = -1.0f;
-    int paintedIconVertices = -1;
-    int hiddenIconVertices = -1;
+    /// One entry per way the row's pair of leading icons can be painted:
+    /// both, one, neither.
+    static constexpr int Ways = 3;
+    ImVec2 leadingSize[Ways] = {};
+    float nameX[Ways] = {-1.0f, -1.0f, -1.0f};
+    int vertices[Ways] = {-1, -1, -1};
 };
 
 ChosenProbe& chosenProbe()
@@ -313,20 +313,30 @@ void chosenBandGui(ImGuiTestContext*)
     drawMenuRowChosen(ImGui::GetCursorScreenPos().y);
     probe.bandColor = draw->VtxBuffer.Size > before ? draw->VtxBuffer[before].col : 0;
 
-    // The same row-leading button drawn both ways, each followed by the name
-    // that stands after it, so the test can compare where that name landed.
-    const auto probeRow = [draw](const char* id, bool painted, ImVec2& size, float& nameX, int& vertices) {
+    // A row led by the same PAIR of icon buttons the preset list uses, drawn
+    // with both painted, one painted and neither, each followed by the name
+    // standing after it - so the test can compare where that name landed in
+    // every combination rather than only in the two extremes.
+    const float leading = 2.0f * menuRowIconWidth();
+    const auto probeRow = [draw, leading, &probe](int way, bool first, bool second) {
+        ImGui::PushID(way);
         const int mark = draw->VtxBuffer.Size;
-        const bool pressed = menuRowIconButton(id, ImTextureID{}, "Rename", painted);
-        IM_UNUSED(pressed);
-        size = ImGui::GetItemRectSize();
-        vertices = draw->VtxBuffer.Size - mark;
-        ImGui::SameLine(menuRowNameX(menuRowIconWidth()));
+        const bool renamed = menuRowIconButton("##rename", ImTextureID{}, "Rename", first);
+        const ImVec2 size = ImGui::GetItemRectSize();
+        ImGui::SameLine(0.0f, 0.0f);
+        const bool saved = menuRowIconButton("##save", ImTextureID{}, "Save", second);
+        IM_UNUSED(renamed);
+        IM_UNUSED(saved);
+        probe.leadingSize[way] = ImVec2(size.x + ImGui::GetItemRectSize().x, size.y);
+        probe.vertices[way] = draw->VtxBuffer.Size - mark;
+        ImGui::SameLine(menuRowNameX(leading));
         ImGui::TextUnformatted("Preset 1");
-        nameX = ImGui::GetItemRectMin().x;
+        probe.nameX[way] = ImGui::GetItemRectMin().x;
+        ImGui::PopID();
     };
-    probeRow("##painted", true, probe.paintedIconSize, probe.paintedNameX, probe.paintedIconVertices);
-    probeRow("##hidden", false, probe.hiddenIconSize, probe.hiddenNameX, probe.hiddenIconVertices);
+    probeRow(0, true, true);
+    probeRow(1, true, false);
+    probeRow(2, false, false);
     ImGui::End();
 }
 
@@ -370,24 +380,28 @@ void aHiddenRowIconStillHoldsItsSpace(ImGuiTestContext* ctx)
     ctx->Yield();
     const ChosenProbe& probe = chosenProbe();
 
-    // The box is real in both states...
-    IM_CHECK_GT(probe.paintedIconSize.x, 0.0f);
-    IM_CHECK_EQ(probe.paintedIconSize.x, probe.hiddenIconSize.x);
-    IM_CHECK_EQ(probe.paintedIconSize.y, probe.hiddenIconSize.y);
+    // The pair takes a real box, and the SAME box, whether both glyphs are
+    // painted, one is, or neither - so the name after them lands at one x in
+    // every combination. That is the thing the eye would catch.
+    IM_CHECK_GT(probe.leadingSize[0].x, 0.0f);
+    IM_CHECK_GT(probe.nameX[0], 0.0f);
+    for (int way = 1; way < ChosenProbe::Ways; ++way) {
+        IM_CHECK_EQ(probe.leadingSize[way].x, probe.leadingSize[0].x);
+        IM_CHECK_EQ(probe.leadingSize[way].y, probe.leadingSize[0].y);
+        IM_CHECK_EQ(probe.nameX[way], probe.nameX[0]);
+    }
 
-    // ...and so the name after it lands at the very same x either way, which
-    // is the thing the eye would catch.
-    IM_CHECK_GT(probe.paintedNameX, 0.0f);
-    IM_CHECK_EQ(probe.paintedNameX, probe.hiddenNameX);
+    // What DOES differ is the paint, and in proportion to how much of it there
+    // is, or the reveal would not be a reveal.
+    IM_CHECK_GT(probe.vertices[0], probe.vertices[1]);
+    IM_CHECK_GT(probe.vertices[1], probe.vertices[2]);
+    IM_CHECK_EQ(probe.vertices[2], 0);
 
-    // What DOES differ is the paint, or the reveal would not be a reveal.
-    IM_CHECK_GT(probe.paintedIconVertices, probe.hiddenIconVertices);
-    IM_CHECK_EQ(probe.hiddenIconVertices, 0);
-
-    // The name column clears the button that leads the row, so the two never
+    // The name column clears the controls that lead the row, so they never
     // overlap however either is measured.
-    IM_CHECK_GT(menuRowNameX(menuRowIconWidth()), menuRowIconWidth());
-    IM_CHECK_EQ(menuRowNameX(menuRowIconWidth()) - menuRowIconWidth(), menuRowLeadingGap());
+    const float leading = 2.0f * menuRowIconWidth();
+    IM_CHECK_GT(menuRowNameX(leading), leading);
+    IM_CHECK_EQ(menuRowNameX(leading) - leading, menuRowLeadingGap());
     IM_CHECK_GT(menuRowKeyRightPad(), 0.0f);
 }
 

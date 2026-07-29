@@ -56,7 +56,16 @@ public:
     ///         always on a preset.
     [[nodiscard]] int activeSlot() const;
 
-    /// Records the live layout in @p slot (1-based).
+    /// Records the live layout in @p slot (1-based) and makes that slot the
+    /// one being worked on.
+    ///
+    /// ONE RULE COVERS BOTH READINGS, and it is worth stating because the two
+    /// look like different actions: saving into the slot already loaded
+    /// updates it, and saving into any other puts the live layout there and
+    /// moves to it. Both are "this layout now lives in that slot, and that is
+    /// the slot I am on" - which is also the only reading that leaves nothing
+    /// drifted afterwards, since the star compares the live layout against the
+    /// ACTIVE slot.
     [[nodiscard]] LayoutPresetOutcome save(int slot);
 
     /// Puts @p slot's (1-based) layout on screen - the stack, the split, the

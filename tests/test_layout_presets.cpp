@@ -113,6 +113,33 @@ TEST_CASE("A saved slot loads what it holds rather than the defaults")
     CHECK_FALSE(fixture.presets.activeDirty());
 }
 
+TEST_CASE("Saving into another slot moves onto that slot")
+{
+    // The rule behind the row's save button, and the only part of it that is
+    // not self-evident: saving into the slot you are on updates it, and saving
+    // into any other takes the live layout there AND moves you to it. One rule
+    // covers both, and it is the only one that leaves nothing drifted, since
+    // the star measures the live layout against the ACTIVE slot.
+    Fixture fixture;
+    REQUIRE(fixture.presets.activeSlot() == 1);
+    arrangeSomethingElse(fixture);
+    REQUIRE(fixture.presets.activeDirty());
+
+    CHECK_FALSE(fixture.presets.save(5).status.empty());
+    CHECK(fixture.presets.activeSlot() == 5);
+    CHECK_FALSE(fixture.presets.activeDirty());
+    // The slot left behind was not written to on the way past.
+    CHECK(fixture.presets.at(1).stack.empty());
+    CHECK_FALSE(fixture.presets.at(5).stack.empty());
+
+    // Saving again, now into the slot already active, updates it in place.
+    fixture.view.stack().choose(ParadeScopeId, true);
+    REQUIRE(fixture.presets.activeDirty());
+    CHECK_FALSE(fixture.presets.save(5).status.empty());
+    CHECK(fixture.presets.activeSlot() == 5);
+    CHECK_FALSE(fixture.presets.activeDirty());
+}
+
 TEST_CASE("Changing the live layout stars the active slot")
 {
     Fixture fixture;
