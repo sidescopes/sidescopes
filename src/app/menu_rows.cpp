@@ -88,6 +88,16 @@ ImVec2 acceleratorOrigin(const ImVec2& keySize, float rightPad)
 
 }  // namespace
 
+float renameFieldX(float nameX)
+{
+    return nameX - ImGui::GetStyle().FramePadding.x;
+}
+
+float renameFieldWidth(float nameWidth)
+{
+    return nameWidth + ImGui::GetStyle().FramePadding.x;
+}
+
 float menuRowLeadingGap()
 {
     return ImGui::GetFontSize();

@@ -17,6 +17,18 @@ namespace sidescopes {
 ///         asks this, so a slot is never named two ways.
 [[nodiscard]] std::string presetDisplayName(int slot, const LayoutPreset& preset);
 
+/// @return @p slot's display name wrapped in quotes, for a name that appears
+///         INSIDE a sentence of ours.
+///
+/// A name is whatever the user typed, so dropped bare into prose it becomes
+/// part of our grammar: "Whatever loaded" parses as a sentence about something
+/// else entirely, and no wording of ours can prevent it because the subject is
+/// theirs. The quotes say the word is a name rather than a word, which is what
+/// makes a preset called "loaded", or "Preset 3 and 4", or a single letter,
+/// stop being ambiguous. A name standing ALONE - a row in a list - is not in a
+/// sentence and needs none of this.
+[[nodiscard]] std::string quotedPresetName(int slot, const LayoutPreset& preset);
+
 /// Owns the layout preset slots and which one is active. Capturing a preset
 /// from the live view and applying one back to it stay with the host (they are
 /// view I/O); this holds the stored slots and nothing else.

@@ -10,6 +10,11 @@ std::string presetDisplayName(int slot, const LayoutPreset& preset)
     return preset.name.empty() ? "Preset " + std::to_string(slot) : preset.name;
 }
 
+std::string quotedPresetName(int slot, const LayoutPreset& preset)
+{
+    return "\"" + presetDisplayName(slot, preset) + "\"";
+}
+
 const LayoutPreset& LayoutPresetStore::at(int slot) const
 {
     return m_presets[static_cast<std::size_t>(slot - 1)];

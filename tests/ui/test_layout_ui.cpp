@@ -692,6 +692,154 @@ void theDropCatchReachesPastTheLastRow(ImGuiTestContext* ctx)
     IM_CHECK_EQ(probe.catchBottom, probe.expected.y);
 }
 
+// Where a row's name ink starts as a label and inside the rename field, and
+// where the field lands both unshifted and shifted.
+struct RenameProbe
+{
+    float labelX = 0.0f;
+    float plainFieldX = 0.0f;
+    float placedFieldX = 0.0f;
+    /// Each measured from its OWN row's top: the two sit on different rows,
+    /// so their absolute y says nothing about whether they share a line.
+    float labelInkDrop = 0.0f;
+    float fieldInkDrop = 0.0f;
+    float rowHeight = 0.0f;
+    float fieldHeight = 0.0f;
+    float intendedRight = 0.0f;
+    float fieldRight = 0.0f;
+};
+
+RenameProbe& renameProbe()
+{
+    static RenameProbe instance;
+
+    return instance;
+}
+
+/// Lays a preset row as a label and as a rename field, the way the picker lays
+/// them, and records where the ink of each landed.
+///
+/// TEXT IS PICKED OUT BY ITS COLOUR. An input draws a filled frame behind its
+/// glyphs, so the leftmost vertex it emits belongs to that frame - measuring
+/// the whole vertex range compares a box edge against a glyph edge and reads
+/// as an offset that is not there. A label under this style draws no frame at
+/// all, which is exactly why the two cannot be measured the same way.
+void renameGui(ImGuiTestContext*)
+{
+    ImGui::SetNextWindowSize(ImVec2(460.0f, 240.0f), ImGuiCond_Always);
+    ImGui::Begin("Rename", nullptr, ImGuiWindowFlags_NoSavedSettings);
+    pushMenuRowStyle();
+    ImDrawList* draw = ImGui::GetWindowDrawList();
+    RenameProbe& probe = renameProbe();
+    const float leading = menuRowIconWidth();
+    const float nameX = menuRowNameX(leading);
+    const float rowWidth = 300.0f;
+    const ImU32 ink = ImGui::GetColorU32(ImGuiCol_Text);
+    static char plain[32] = "Preset 4";
+    static char placed[32] = "Preset 4";
+
+    const auto textLeft = [draw, ink](int mark) {
+        float left = FLT_MAX;
+        for (int index = mark; index < draw->VtxBuffer.Size; ++index) {
+            if (draw->VtxBuffer[index].col == ink) {
+                left = ImMin(left, draw->VtxBuffer[index].pos.x);
+            }
+        }
+
+        return left;
+    };
+    const auto textSpan = [draw, ink](int mark, float& top, float& bottom) {
+        top = FLT_MAX;
+        bottom = -FLT_MAX;
+        for (int index = mark; index < draw->VtxBuffer.Size; ++index) {
+            if (draw->VtxBuffer[index].col == ink) {
+                top = ImMin(top, draw->VtxBuffer[index].pos.y);
+                bottom = ImMax(bottom, draw->VtxBuffer[index].pos.y);
+            }
+        }
+    };
+    probe.rowHeight = ImGui::GetFrameHeight();
+
+    float labelRowTop = ImGui::GetCursorScreenPos().y;
+    ImGui::Dummy(ImVec2(leading, ImGui::GetFrameHeight()));
+    ImGui::SameLine(nameX);
+    int mark = draw->VtxBuffer.Size;
+    ImGui::Selectable("Preset 4", false, ImGuiSelectableFlags_NoAutoClosePopups,
+                      ImVec2(rowWidth - nameX, ImGui::GetFrameHeight()));
+    probe.labelX = textLeft(mark);
+    float inkTop = 0.0f;
+    float inkBottom = 0.0f;
+    textSpan(mark, inkTop, inkBottom);
+    probe.labelInkDrop = (inkTop + inkBottom) * 0.5f - labelRowTop;
+
+    // The field where a box-placed one would sit: at the name's own x.
+    ImGui::Dummy(ImVec2(leading, ImGui::GetFrameHeight()));
+    ImGui::SameLine(nameX);
+    ImGui::SetNextItemWidth(rowWidth - nameX);
+    mark = draw->VtxBuffer.Size;
+    ImGui::InputText("##plain", plain, sizeof plain);
+    probe.plainFieldX = textLeft(mark);
+
+    // ...and where the picker puts it, placed by its text.
+    const float fieldRowTop = ImGui::GetCursorScreenPos().y;
+    ImGui::Dummy(ImVec2(leading, ImGui::GetFrameHeight()));
+    ImGui::SameLine(nameX);
+    probe.intendedRight = ImGui::GetCursorScreenPos().x + (rowWidth - nameX);
+    ImGui::SameLine(renameFieldX(nameX));
+    ImGui::SetNextItemWidth(renameFieldWidth(rowWidth - nameX));
+    mark = draw->VtxBuffer.Size;
+    ImGui::InputText("##placed", placed, sizeof placed);
+    probe.placedFieldX = textLeft(mark);
+    textSpan(mark, inkTop, inkBottom);
+    probe.fieldInkDrop = (inkTop + inkBottom) * 0.5f - fieldRowTop;
+    probe.fieldHeight = ImGui::GetItemRectSize().y;
+    probe.fieldRight = ImGui::GetItemRectMax().x;
+
+    popMenuRowStyle();
+    ImGui::End();
+}
+
+/// SYMPTOM IF BROKEN: starting a rename shifts the name sideways, so the row
+/// jumps under the pointer at the moment the user begins typing in it.
+///
+/// A framed input insets its own text by the frame padding, where a label has
+/// none, so a field placed at the name's x puts its TEXT one padding right of
+/// where the name was. The box is in the right place and the glyphs are not,
+/// which is why it reads as an offset rather than as a wrong position. The
+/// field is therefore placed by its text: back by that padding, and widened by
+/// it so its right edge does not move either.
+void theRenameFieldOpensOnTheName(ImGuiTestContext* ctx)
+{
+    ctx->SetRef("Rename");
+    ctx->Yield();
+    const RenameProbe& probe = renameProbe();
+
+    IM_CHECK_LT(probe.labelX, FLT_MAX);
+    IM_CHECK_LT(probe.plainFieldX, FLT_MAX);
+    IM_CHECK_LT(probe.placedFieldX, FLT_MAX);
+
+    // The defect, stated as a measurement: a field placed by its BOX puts its
+    // text to the right of the name it replaces. If this ever stops being
+    // true the correction below is no longer needed and must go with it.
+    IM_CHECK_GT(probe.plainFieldX, probe.labelX);
+
+    // The field as the picker places it opens exactly on the name.
+    IM_CHECK_EQ(probe.placedFieldX, probe.labelX);
+
+    // The name also stays on its own line: the two are compared by their INK
+    // rather than by their boxes, since a Selectable's item rect is grown past
+    // the box it draws in and an input's is not - the same mismatch that made
+    // the horizontal reading wrong the first time it was taken.
+    IM_CHECK_EQ(probe.fieldInkDrop, probe.labelInkDrop);
+
+    // The field is exactly one row tall, so opening it cannot move the rows
+    // below - the ripple the leading icons hold their box against.
+    IM_CHECK_LE(ImFabs(probe.fieldHeight - probe.rowHeight), 0.5f);
+
+    // ...and it still ends where the name column does.
+    IM_CHECK_LE(ImFabs(probe.fieldRight - probe.intendedRight), 0.5f);
+}
+
 void registerLayoutTests(ImGuiTestEngine* engine)
 {
     ImGuiTest* wholePixels = IM_REGISTER_TEST(engine, "layout", "glyph_seats_on_whole_pixels");
@@ -723,6 +871,10 @@ void registerLayoutTests(ImGuiTestEngine* engine)
     chosen->GuiFunc = chosenBandGui;
     chosen->TestFunc = theChosenBandIsNotTheHoverBand;
 
+    ImGuiTest* rename = IM_REGISTER_TEST(engine, "layout", "rename_field_opens_on_the_name");
+    rename->GuiFunc = renameGui;
+    rename->TestFunc = theRenameFieldOpensOnTheName;
+
     ImGuiTest* reach = IM_REGISTER_TEST(engine, "layout", "drop_catch_reaches_past_last_row");
     reach->GuiFunc = dropCatchGui;
     reach->TestFunc = theDropCatchReachesPastTheLastRow;
@@ -750,5 +902,5 @@ int main()
 {
     using namespace sidescopes;
 
-    return uitest::runSuite("layout", registerLayoutTests, /*expectedTests=*/14);
+    return uitest::runSuite("layout", registerLayoutTests, /*expectedTests=*/15);
 }

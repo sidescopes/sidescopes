@@ -116,8 +116,10 @@ void LayoutPresetPicker::drawSlotRow(int slot, float width, IconTextures& icons,
         // takes exactly the name's own width, so the row keeps its shape and
         // nothing shifts while a name is typed.
         ImGui::Dummy(ImVec2(presetLeadingWidth(), ImGui::GetFrameHeight()));
-        ImGui::SameLine(presetNameX());
-        drawRenameField(nameWidth, outcome);
+        // Placed by the text inside it rather than by its box, so the name
+        // does not step sideways as the rename opens on it.
+        ImGui::SameLine(renameFieldX(presetNameX()));
+        drawRenameField(renameFieldWidth(nameWidth), outcome);
         ImGui::PopID();
 
         return;
@@ -132,7 +134,7 @@ void LayoutPresetPicker::drawSlotRow(int slot, float width, IconTextures& icons,
     // It comes up on the row under the pointer, and on the loaded row, which
     // is what tells that row apart from the rest by something other than the
     // hue of the band behind it.
-    const std::string renameTip = "Rename " + name;
+    const std::string renameTip = "Rename " + quotedPresetName(slot, m_presets.at(slot));
     if (menuRowIconButton("##rename", icons.textureId(Icon::PenLine, iconPixelSize()), renameTip.c_str(),
                           hovered || chosen)) {
         beginRename(slot);
@@ -157,9 +159,9 @@ void LayoutPresetPicker::drawSaveButton(IconTextures& icons, LayoutPresetOutcome
     // was cleared of.
     const int active = m_presets.activeSlot();
     const bool dirty = m_presets.activeDirty();
-    const std::string name = presetDisplayName(active, m_presets.at(active));
-    const std::string tooltip = dirty ? "Save the layout into " + name + " (" + saveChordLabel() + ")"
-                                      : name + " already holds what is on screen";
+    const std::string quoted = quotedPresetName(active, m_presets.at(active));
+    const std::string tooltip =
+        dirty ? "Save the layout into " + quoted + " (" + saveChordLabel() + ")" : quoted + " is up to date";
     if (iconButton("##save-preset", icons.textureId(Icon::Save, iconPixelSize()), tooltip.c_str(), !dirty) && dirty) {
         outcome = m_presets.saveInto(active);
     }
@@ -177,7 +179,7 @@ LayoutPresetOutcome LayoutPresetPicker::draw(IconTextures& icons)
     const int active = m_presets.activeSlot();
     char label[8] = "";
     std::snprintf(label, sizeof(label), "%d", active);
-    const std::string tooltip = presetDisplayName(active, m_presets.at(active)) + " - digits load";
+    const std::string tooltip = quotedPresetName(active, m_presets.at(active)) + " - digits load";
     const float labelWidth = ImGui::CalcTextSize(WidestPresetLabel).x;
     if (labelledIconButton("##preset-picker", icons.textureId(Icon::PanelsTopLeft, iconPixelSize()), label, labelWidth,
                            tooltip.c_str())) {

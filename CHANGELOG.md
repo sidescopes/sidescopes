@@ -253,6 +253,14 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   row - and the strip under that row had been taken back three days earlier
   to settle a complaint from the toolkit about the cursor. It was not slack;
   it was that position.
+- Preset status messages lead with the verb and quote the name: Loaded
+  "Whatever" rather than Whatever loaded. A name is whatever the user typed,
+  so bare in a sentence it becomes part of the grammar - a preset called
+  "loaded" read as nonsense either way round. The same quoting is used
+  wherever a preset is named inside a sentence.
+- The rename field opens on the name rather than a few pixels right of it.
+  A framed input insets its own text where a label does not, so the field's
+  box was in the right place and its text was not.
 - The clear-region button carries a struck-through square rather than a
   dashed one. The dashed square was drawn when the button made the region
   full-screen; it has cleared the region since that default was removed, and

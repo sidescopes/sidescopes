@@ -165,7 +165,7 @@ LayoutPresetOutcome LayoutPresetController::saveInto(int slot)
 
     // Read back after the write, which keeps the slot's name: a slot is
     // reported by what the user calls it, the way every list of them names it.
-    return LayoutPresetOutcome{presetDisplayName(slot, m_store.at(slot)) + " saved", false, true};
+    return LayoutPresetOutcome{"Saved " + quotedPresetName(slot, m_store.at(slot)), false, true};
 }
 
 bool LayoutPresetController::activeDirty() const
@@ -182,7 +182,6 @@ LayoutPresetOutcome LayoutPresetController::load(int slot)
     // application opens on, which is the only reading of a click on it that is
     // not an error message where an action was offered.
     const LayoutPreset preset = m_store.effective(slot, defaultLayout());
-    const std::string name = presetDisplayName(slot, preset);
     // The order first: the stack seats its scopes by it as it restores them.
     m_view.order().restore(preset.order);
     m_view.stack().restore(preset.stack);
@@ -192,7 +191,7 @@ LayoutPresetOutcome LayoutPresetController::load(int slot)
     m_store.markLoaded(slot);
     m_analysis.enabledScopes = m_view.stack().enabledScopeIds();
 
-    return LayoutPresetOutcome{name + " loaded", true, false};
+    return LayoutPresetOutcome{"Loaded " + quotedPresetName(slot, preset), true, false};
 }
 
 LayoutPresetOutcome LayoutPresetController::rename(int slot, std::string_view typed)

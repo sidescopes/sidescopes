@@ -14,6 +14,19 @@ namespace sidescopes {
 /// right-aligned and dimmed the way a menu shows an accelerator. Keeping the
 /// treatment here is what stops the two drifting apart.
 
+/// Where a rename field starts so that the NAME INSIDE IT lands on @p nameX.
+///
+/// A framed input insets its own text by the frame padding; a label has none.
+/// Placing the field at the name's own x therefore puts its text one padding
+/// to the right of where the name was - the box in the right place and the
+/// glyphs not, which reads as the row jumping sideways the moment a rename
+/// begins. The field is placed by its text instead.
+[[nodiscard]] float renameFieldX(float nameX);
+
+/// The width that field needs to end where a name column of @p nameWidth ends,
+/// given it starts a frame padding earlier.
+[[nodiscard]] float renameFieldWidth(float nameWidth);
+
 /// The space a row keeps between the controls leading it and its name.
 ///
 /// This, rather than the name's x, is what the two lists share. They lead with

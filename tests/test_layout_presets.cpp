@@ -150,7 +150,7 @@ TEST_CASE("A slot named before it is filled loads under its own name")
     REQUIRE(renamed.preferencesSaveDue);
 
     const LayoutPresetOutcome outcome = fixture.presets.load(3);
-    CHECK(outcome.status == "Skin tones loaded");
+    CHECK(outcome.status == "Loaded \"Skin tones\"");
 }
 
 TEST_CASE("The order the panes sit in belongs to the slot")
@@ -294,6 +294,31 @@ TEST_CASE("A save with nothing to save writes nothing")
     CHECK_FALSE(again.preferencesSaveDue);
 }
 
+TEST_CASE("A preset name in a message is quoted, never bare")
+{
+    // A name is whatever the user typed, so bare in prose it joins our
+    // grammar: "Whatever loaded" parses as a sentence about something else,
+    // and a preset called "loaded" would read as nonsense either way. The verb
+    // leads so the structure is fixed before their words arrive, and the
+    // quotes say which words are theirs.
+    Fixture fixture;
+    const LayoutPresetOutcome renamed = fixture.presets.rename(2, "loaded");
+    REQUIRE(renamed.preferencesSaveDue);
+    arrangeSomethingElse(fixture);
+
+    CHECK(fixture.presets.saveInto(2).status == "Saved \"loaded\"");
+    CHECK(fixture.presets.load(2).status == "Loaded \"loaded\"");
+
+    // A slot never renamed still reads as a name rather than as our own words.
+    CHECK(fixture.presets.load(8).status == "Loaded \"Preset 8\"");
+
+    // Clearing the field is not an empty name: the slot goes back to the one
+    // it is called by default, so no message is ever left quoting nothing.
+    const LayoutPresetOutcome cleared = fixture.presets.rename(2, "   ");
+    REQUIRE(cleared.preferencesSaveDue);
+    CHECK(fixture.presets.load(2).status == "Loaded \"Preset 2\"");
+}
+
 TEST_CASE("A save keeps the name of the slot it lands in")
 {
     // A name outlives the layout it was given to, so stamping a layout over a
@@ -304,7 +329,7 @@ TEST_CASE("A save keeps the name of the slot it lands in")
     arrangeSomethingElse(fixture);
 
     const LayoutPresetOutcome saved = fixture.presets.saveInto(5);
-    CHECK(saved.status == "Skin tones saved");
+    CHECK(saved.status == "Saved \"Skin tones\"");
     CHECK(presetDisplayName(5, fixture.presets.at(5)) == "Skin tones");
     CHECK_FALSE(fixture.presets.at(5).stack.empty());
 }
