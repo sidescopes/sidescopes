@@ -169,25 +169,4 @@ void drawMenuRowAccelerator(const char* key, float rightPad)
     ImGui::GetWindowDrawList()->AddText(at, ImGui::GetColorU32(ImGuiCol_TextDisabled, AcceleratorOpacity), key);
 }
 
-void drawMenuRowChosenKey(const char* key, float rightPad)
-{
-    if (key == nullptr || key[0] == '\0') {
-        return;
-    }
-    // The chosen row is marked in the cell its key already occupies rather
-    // than in a column of its own, which is what buys the space between the
-    // key and the button after it. A filled badge also differs from the plain
-    // hint in SHAPE and in contrast, not only in colour: a coloured marker
-    // alone says nothing to a reader who cannot tell it from the unmarked one.
-    const ImVec2 keySize = ImGui::CalcTextSize(key);
-    const ImVec2 at = acceleratorOrigin(keySize, rightPad);
-    const float padX = ImGui::GetFontSize() * 0.35f;
-    const float padY = ImGui::GetFontSize() * 0.15f;
-    const ImVec2 min(at.x - padX, at.y - padY);
-    const ImVec2 max(at.x + keySize.x + padX, at.y + keySize.y + padY);
-    ImDrawList* draw = ImGui::GetWindowDrawList();
-    draw->AddRectFilled(min, max, ImGui::GetColorU32(ImGuiCol_ButtonActive), (max.y - min.y) * 0.5f);
-    draw->AddText(at, ImGui::GetColorU32(ImGuiCol_Text), key);
-}
-
 }  // namespace sidescopes

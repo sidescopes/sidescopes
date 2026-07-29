@@ -285,8 +285,6 @@ void theToolboxSeatsByTheWindowAlone(ImGuiTestContext*)
 struct ChosenProbe
 {
     ImU32 bandColor = 0;
-    int plainKeyVertices = -1;
-    int chosenKeyVertices = -1;
     ImVec2 paintedIconSize{-1.0f, -1.0f};
     ImVec2 hiddenIconSize{-1.0f, -1.0f};
     float paintedNameX = -1.0f;
@@ -314,16 +312,6 @@ void chosenBandGui(ImGuiTestContext*)
     int before = draw->VtxBuffer.Size;
     drawMenuRowChosen(ImGui::GetCursorScreenPos().y);
     probe.bandColor = draw->VtxBuffer.Size > before ? draw->VtxBuffer[before].col : 0;
-
-    // Both keys are drawn over a laid-out item, which is what they align to.
-    ImGui::Selectable("row", false, ImGuiSelectableFlags_None, ImVec2(200.0f, ImGui::GetFrameHeight()));
-    before = draw->VtxBuffer.Size;
-    drawMenuRowAccelerator("4", ImGui::GetFontSize());
-    probe.plainKeyVertices = draw->VtxBuffer.Size - before;
-
-    before = draw->VtxBuffer.Size;
-    drawMenuRowChosenKey("4", ImGui::GetFontSize());
-    probe.chosenKeyVertices = draw->VtxBuffer.Size - before;
 
     // The same row-leading button drawn both ways, each followed by the name
     // that stands after it, so the test can compare where that name landed.
@@ -366,22 +354,6 @@ void theChosenBandIsNotTheHoverBand(ImGuiTestContext* ctx)
     const ImU32 alpha = probe.bandColor >> IM_COL32_A_SHIFT & 0xFFu;
     IM_CHECK_GT(alpha, 0u);
     IM_CHECK_LT(alpha, 255u);
-}
-
-/// SYMPTOM IF BROKEN: which preset is loaded is told only by a colour, so a
-/// reader who cannot separate that colour from the plain one has no cue at all.
-///
-/// The chosen row's key is a filled badge, not the same glyph in another
-/// colour. The badge is a SHAPE, so it must put more in the draw list than the
-/// bare text does - a recolour would emit exactly as much.
-void theChosenKeyIsAShapeAndNotAColour(ImGuiTestContext* ctx)
-{
-    ctx->SetRef("Bands");
-    ctx->Yield();
-    const ChosenProbe& probe = chosenProbe();
-
-    IM_CHECK_GT(probe.plainKeyVertices, 0);
-    IM_CHECK_GT(probe.chosenKeyVertices, probe.plainKeyVertices);
 }
 
 /// SYMPTOM IF BROKEN: every name in the preset list steps sideways as the
@@ -450,10 +422,6 @@ void registerLayoutTests(ImGuiTestEngine* engine)
     chosen->GuiFunc = chosenBandGui;
     chosen->TestFunc = theChosenBandIsNotTheHoverBand;
 
-    ImGuiTest* badge = IM_REGISTER_TEST(engine, "layout", "chosen_key_is_a_shape");
-    badge->GuiFunc = chosenBandGui;
-    badge->TestFunc = theChosenKeyIsAShapeAndNotAColour;
-
     ImGuiTest* reveal = IM_REGISTER_TEST(engine, "layout", "hidden_row_icon_holds_its_space");
     reveal->GuiFunc = chosenBandGui;
     reveal->TestFunc = aHiddenRowIconStillHoldsItsSpace;
@@ -466,5 +434,5 @@ int main()
 {
     using namespace sidescopes;
 
-    return uitest::runSuite("layout", registerLayoutTests, /*expectedTests=*/11);
+    return uitest::runSuite("layout", registerLayoutTests, /*expectedTests=*/10);
 }

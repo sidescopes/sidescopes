@@ -111,11 +111,8 @@ void LayoutPresetPicker::drawSlotRow(int slot, float width, IconTextures& icons,
     const float rowTop = ImGui::GetCursorScreenPos().y;
     const bool hovered = menuRowHovered(rowTop);
     drawMenuRowHover(rowTop);
-    // The loaded slot is marked twice over, and in neither case by a marker of
-    // its own: its shortcut digit becomes a filled badge, and the row behind
-    // it is tinted. The badge carries it - it is in a cell the row already
-    // spent, and it differs in shape rather than only in colour - and the tint
-    // is what makes the row findable in a list of nine.
+    // The loaded slot is the row that is tinted. Every row's key hint is drawn
+    // the same way, so nothing in the row itself marks it.
     if (chosen) {
         drawMenuRowChosen(rowTop);
     }
@@ -147,12 +144,7 @@ void LayoutPresetPicker::drawSlotRow(int slot, float width, IconTextures& icons,
     if (ImGui::Selectable(name.c_str(), false, ImGuiSelectableFlags_NoAutoClosePopups, rowSize)) {
         outcome = ImGui::GetIO().KeyShift ? m_presets.save(slot) : m_presets.load(slot);
     }
-    const std::string key = std::to_string(slot);
-    if (chosen) {
-        drawMenuRowChosenKey(key.c_str(), menuRowKeyRightPad());
-    } else {
-        drawMenuRowAccelerator(key.c_str(), menuRowKeyRightPad());
-    }
+    drawMenuRowAccelerator(std::to_string(slot).c_str(), menuRowKeyRightPad());
     ImGui::PopID();
 }
 

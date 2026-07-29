@@ -74,15 +74,6 @@ void drawMenuRowChosen(float rowTopY);
 /// sharing that edge. An empty @p key draws nothing.
 void drawMenuRowAccelerator(const char* key, float rightPad);
 
-/// The same key in the same place, drawn as a filled badge: how the chosen row
-/// of a list says so without spending a column on a marker beside it.
-///
-/// It differs from the plain hint in shape and in contrast as well as in
-/// colour, which a marker that is only a different colour does not - and a
-/// reader who cannot tell those two colours apart is then left with no cue at
-/// all. An empty @p key draws nothing.
-void drawMenuRowChosenKey(const char* key, float rightPad);
-
 /// An icon button that stands in a menu row: the toolbar's glyph and hover
 /// box, but only as tall as the row it shares, so a row carrying one is no
 /// taller than a row of plain checkboxes and the two menus keep one rhythm.
