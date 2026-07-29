@@ -1,99 +1,105 @@
 # SideScopes
 
-Real-time color scopes for any region of your screen. SideScopes shows a live
-vectorscope and waveform beside any editor — Lightroom, Capture One, darktable,
-Resolve, or anything else that draws pixels.
+Real-time color scopes for any region of your screen. SideScopes shows a
+live vectorscope, waveform and histogram in a small window beside whatever
+you are working in.
 
-Most editors ship a histogram and little else. Colorists have relied on
-vectorscopes and waveforms for decades because they answer questions a
-histogram cannot: is the white balance actually neutral, how far does the
-sky stretch toward cyan, do the highlights clip past the level you care
-about. SideScopes brings those instruments to any editor, reading the
-screen itself, so it works with all of them and needs no plugins.
+It reads the screen rather than your files, so it asks nothing of the
+application you are looking at — no plugin, no export step, no list of
+supported programs. That is why it works with all of them.
 
-## Features
+## What you see
 
-- Vectorscope (BT.709) with classic graticule and skin-tone line
-- Waveform with RGB, luma, and colored-luma styles, plus an RGB parade
-- Histogram with per-channel or combined bars
-- Color picker that holds the live color against pinned references, with
-  values you can copy at a click
-- Smart region selection: click a window or a detected face, or draw the region
-  yourself — the screenshot-tool idiom you already know
-- Live marker showing the color under your cursor on every scope, with
-  pinnable reference colors for matching tones across images
-- Compact, always-on-top window designed for small laptop screens
-- Native context menus and direct manipulation; scroll to adjust trace intensity
+A compact window that stays above the others, sized for the corner of a
+laptop screen. Across the top is a toolbar: a button that chooses which
+scopes are shown, a button for saved layouts, and the region tools — draw a
+region, attach to a window, attach to a face, clear the region. Under it
+are the scopes themselves, one pane each, splitting the window as you turn
+more of them on. Along the bottom sits the color under your pointer with
+its RGB percentages, and the tool that pins a color for later comparison.
 
-## Keyboard
+There are six scopes, and any combination of them can be on screen at once:
+a vectorscope, an RGB waveform, a luma waveform, an RGB parade, a
+per-channel histogram and a combined one. A color picker pane joins them,
+holding the live color against the ones you have pinned.
 
-| Key | Action |
-| --- | ------ |
-| V / W / R / H / C | show one scope alone: vectorscope, waveform, RGB parade, histogram, color picker |
-| Shift+V / W / R / H / C | stack or unstack a scope; panes follow the order they were turned on |
-| A | attach to a window |
-| F | attach to a face |
-| D | draw a region |
-| Esc | clear the region; the scopes go empty |
-| P | pin the color under the cursor |
+The region being measured carries a live border on the desktop, labeled
+with the window it belongs to. Drag the border to move the region, drag a
+handle to resize it, and the scopes follow as you go.
 
-The region border is live on the desktop: drag it to move the region,
-drag a corner handle to resize, and drag an edge's midpoint handle to
-resize that edge alone.
+Letters switch scopes — V for the vectorscope, W for the waveform — and
+holding Shift adds one alongside the others instead of replacing them.
+Scrolling over a trace adjusts how brightly it is drawn. Everything else is
+on the right-click menu; there is no menu bar to learn.
+
+## Who it is for
+
+If your editor already shows a vectorscope and a waveform, you do not need
+this. Video grading tools have had excellent ones for decades, built right
+into the application. SideScopes is for everyone else: people whose tool
+offers a histogram and little more, or nothing at all.
+
+That is most photo editors, Lightroom, Capture One and darktable among
+them. It is also design and layout tools, image viewers, and a browser
+showing a page whose colors you are checking. The scopes do not care which
+application drew the pixels.
+
+Photography is where SideScopes was built and where its defaults were
+calibrated, so that is the work it fits most closely.
+
+## What it answers
+
+- Is this white balance actually neutral? A neutral frame sits on the
+  center of the vectorscope. A cast pushes the whole cloud off center, and
+  the direction it goes names the cast.
+- Does this skin tone sit where skin tones sit? The vectorscope's skin-tone
+  line is the reference, and the marker following your pointer shows where
+  the tone you are hovering lands against it.
+- Are the highlights clipping, and which channel goes first? The top of the
+  waveform says whether, and the RGB parade separates the channels to say
+  which — red clipping in a sunset is visible there well before the image
+  looks wrong.
+- Is the exposure even across the frame? The luma waveform reads left to
+  right across the region, so a bright corner or a fall-off is a slope in
+  the trace.
+- How far does this sky stretch toward cyan? Distance from the center of
+  the vectorscope is saturation, and the graticule targets say how far is
+  far.
+- Do these two images match? Pin a color from the first and hover the
+  second: the color picker holds them side by side and gives the difference
+  as ΔE, split into lightness, chroma and hue.
+
+## Install
+
+Download the build for macOS or Windows from the
+[releases page](https://github.com/sidescopes/sidescopes/releases), unzip
+it, and run it. The Windows build is a single executable and needs no
+runtime installed.
+
+macOS asks for the Screen Recording permission the first time. SideScopes
+cannot read the screen without it, and it asks for nothing else.
+
+To build from source, see [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## Documentation
+
+- [The scopes](docs/SCOPES.md) — what each one measures, how to read it,
+  and the controls that shape a trace
+- [Choosing a region](docs/REGIONS.md) — the region tools, the border on
+  the desktop, and what attaching to a window does
+- [Keyboard and mouse](docs/SHORTCUTS.md) — the complete reference
+- [Troubleshooting](docs/TROUBLESHOOTING.md) — permissions, interrupted
+  capture, and diagnostic logs
+- [Design](DESIGN.md) — the architecture and the reasoning behind it
+- [Scope modules](docs/MODULES.md) — the C ABI every scope loads through
+- [Contributing](CONTRIBUTING.md) — toolchain setup, the checks CI runs,
+  and what a change is expected to ship with
 
 ## Status
 
-First public release. Native builds for macOS and Windows; Linux is planned.
-See the releases page for downloads.
-
-## Building
-
-```sh
-cmake -B build
-cmake --build build
-ctest --test-dir build
-```
-
-Requires CMake 3.24+ and a C++20 compiler. Dependencies are fetched during
-configuration. Toolchain setup for macOS (Homebrew) and Windows (winget) is
-covered in [CONTRIBUTING.md](CONTRIBUTING.md).
-
-## Troubleshooting
-
-**The permission loop.** macOS ties the Screen Recording permission to the
-app's code signature. If SideScopes keeps asking for permission although
-System Settings shows it granted - typical after replacing the app with a
-differently signed build - clear the stale grant and approve once more:
-
-```sh
-tccutil reset ScreenCapture org.sidescopes.app
-```
-
-Then relaunch SideScopes and grant the permission when prompted. Toggling
-the switch in System Settings only takes effect after the app restarts.
-
-**The Diagnostics menu.** Right-click and open Diagnostics when reporting
-a problem. "Record Diagnostic Log" streams timestamped state lines to
-`sidescopes-diag.log` in a `sidescopes` folder inside the system
-temporary directory while you reproduce the issue - "Show Diagnostic
-Log" opens that folder; attach the log to the report. It records window
-titles and application names, so glance over it before sharing. On
-Windows, "Show in Screen Captures" makes the SideScopes windows visible
-to screenshots, which they normally are not so the scopes never analyze
-themselves. "Reset to Defaults" returns everything to the standard state;
-so does a restart.
-
-For development use, `SIDESCOPES_DIAG=attach,border` (or `all`) starts
-recording from launch with only the named channels (`attach`:
-window-focus routing, `border`: region-border drawing, `suggestions`:
-the picker's window suggestions and pick mapping, `facelock`: face-lock
-probe verdicts, `perf`: frame, analysis-pass, and capture-cadence
-timings); the previous run is kept beside the log as
-`sidescopes-diag.prev.log`. `SIDESCOPES_DIAG_FILE` overrides the
-location. Writes reach the disk on a short interval by default;
-`SIDESCOPES_DIAG_FLUSH=1` flushes every line when chasing a crash, and
-`SIDESCOPES_DIAG_FLUSH=0` buffers until recording stops so logging does
-not distort performance measurement.
+Native builds for macOS and Windows; Linux is planned. Before 1.0 the
+preferences file may change shape without a migration, so an update can
+return settings to their defaults.
 
 ## License
 
