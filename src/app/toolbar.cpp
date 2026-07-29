@@ -139,9 +139,9 @@ Toolbar::Toolbar(const ScopeRegistry& registry, ScopeView& view, const ShortcutR
 
 PaneRenderOutcome Toolbar::drawScopeToggles(bool)
 {
-    // The scope selector, in place of the letter chips: an icon button whose
-    // popup checklists every scope. Same shape as the preset picker - the popup
-    // opens just below the button.
+    // The scope selector, leading the row: an icon button whose popup
+    // checklists every scope. Same shape as the preset picker standing after
+    // it - the popup opens just below the button.
     PaneRenderOutcome outcome;
     const int iconPx = iconPixelSize();
     if (iconButton("##scopes", m_icons.textureId(Icon::ChartColumn, iconPx), "Scopes - choose which to show")) {
@@ -154,7 +154,7 @@ PaneRenderOutcome Toolbar::drawScopeToggles(bool)
         appendScopeMenu(outcome);
         ImGui::EndPopup();
     }
-    ImGui::SameLine(0.0f, 8.0f);
+    ImGui::SameLine(0.0f, RowSeparation);
 
     return outcome;
 }

@@ -8,6 +8,7 @@
 
 #include "app/imgui_ui.h"
 #include "app/menu_rows.h"
+#include "app/row_layout.h"
 #include "imgui.h"
 
 namespace sidescopes {
@@ -117,11 +118,13 @@ void LayoutPresetPicker::drawSlotRow(int slot, float width, IconTextures& icons,
 
 LayoutPresetOutcome LayoutPresetPicker::draw(IconTextures& icons)
 {
-    // A sibling of the scope selector beside it: the same button, carrying the
-    // slot it is on rather than a bare digit, starred once the live layout
-    // drifts from that slot. Clicking opens the list - the mouse mirror of the
-    // digit keys - which is shaped like the scope selector's, because it is
-    // the same gesture.
+    // A sibling of the scope selector, standing after it: a preset IS a set of
+    // scopes, so the compound control follows the thing it is composed of, and
+    // scopes are switched constantly where a preset is loaded occasionally.
+    // The same button, carrying the slot it is on rather than a bare digit,
+    // starred once the live layout drifts from that slot. Clicking opens the
+    // list - the mouse mirror of the digit keys - which is shaped like the
+    // scope selector's, because it is the same gesture.
     const int active = m_presets.activeSlot();
     char label[8] = "";
     std::snprintf(label, sizeof(label), "%d%s", active, m_presets.activeDirty() ? "*" : "");
@@ -147,6 +150,9 @@ LayoutPresetOutcome LayoutPresetPicker::draw(IconTextures& icons)
     } else {
         m_renamingSlot = 0;
     }
+    // Each control on this row keeps the gap after itself, so the order they
+    // are drawn in is the only thing that decides the order they appear in.
+    ImGui::SameLine(0.0f, RowSeparation);
 
     return outcome;
 }

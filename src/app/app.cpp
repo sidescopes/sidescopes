@@ -681,9 +681,8 @@ void App::drawFrameUi()
     // one: a Shift key-up swallowed by a system overlay leaves the cache stuck
     // exactly when the user next switches a scope.
     const ModifierState modifiers = currentModifiers();
-    applyPresetOutcome(m_presetPicker.draw(m_panes->icons()));
-    ImGui::SameLine(0.0f, 8.0f);
     applyPaneRenderOutcome(m_panes->drawScopeToggles(modifiers.shift));
+    applyPresetOutcome(m_presetPicker.draw(m_panes->icons()));
     for (const ShortcutAction& action : m_shortcuts.resolvePressed(shortcutContext(), modifiers, shortcutPressed)) {
         applyShortcutAction(action);
     }

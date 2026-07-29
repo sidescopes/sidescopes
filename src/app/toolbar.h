@@ -14,7 +14,7 @@ namespace sidescopes {
 
 class RegionPicker;
 
-/// @brief The row above the panes: the scope chips and the region toolbox.
+/// @brief The row above the panes: the scope selector and the region toolbox.
 ///
 /// Nothing transient stands up here: every message the app has to give belongs
 /// to the status bar, which keeps the foot of the window. The row drives the
