@@ -159,15 +159,24 @@ float menuRowIconWidth()
     return ImGui::GetFrameHeight() + ImGui::GetFontSize() * 0.5f;
 }
 
-void layMenuRowDropCatch(const char* id, const ImVec2& listTop, float width)
+float layMenuRowDropCatch(const char* id, const ImVec2& listTop, float width)
 {
     const ImVec2 resume = ImGui::GetCursorScreenPos();
-    // The rows end one item spacing above where the cursor now stands, so an
-    // item of exactly that height, submitted from the top of the list, leaves
-    // the cursor back at the bottom of it with nothing left to undo.
-    const float height = std::max(0.0f, resume.y - listTop.y - ImGui::GetStyle().ItemSpacing.y);
+    const float spacing = ImGui::GetStyle().ItemSpacing.y;
+    // The whole list, INCLUDING the gap under the last row. Trimming that gap
+    // to make the cursor land by itself was tidy and wrong: it is where "after
+    // the last row" is aimed at, and nothing else can express that position.
+    const float bottom = std::max(listTop.y, resume.y);
     ImGui::SetCursorScreenPos(listTop);
-    ImGui::InvisibleButton(id, ImVec2(width, height));
+    ImGui::InvisibleButton(id, ImVec2(width, bottom - listTop.y));
+    // Submitting it left the cursor one spacing past the list. Step back by
+    // exactly that and submit an empty item: its own spacing carries the
+    // cursor to where the list ended, so the list closes where it would have
+    // without any of this, and ImGui is left with nothing pending.
+    ImGui::SetCursorScreenPos(ImVec2(resume.x, resume.y - spacing));
+    ImGui::Dummy(ImVec2(0.0f, 0.0f));
+
+    return bottom;
 }
 
 bool menuRowIconButton(const char* id, ImTextureID texture, const char* tooltip, bool emphasized)

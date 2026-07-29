@@ -187,6 +187,34 @@ TEST_CASE("An order round-trips through its tokens")
     CHECK(reloaded.ids() == order.ids());
 }
 
+TEST_CASE("A scope can be moved to the very end")
+{
+    // The last position is the one the interface could not reach: every other
+    // drop sits between two rows, so only this one has to be aimed at below
+    // the final row, and the catch that receives the drop had been trimmed to
+    // stop at that row's edge. The model always allowed it - gap == size() is
+    // in range - which is why nothing here failed while the drag did.
+    ScopeOrder order{registry()};
+    const std::size_t count = order.ids().size();
+    REQUIRE(count > 2);
+    const std::string first = order.ids().front();
+
+    CHECK(order.move(0, static_cast<int>(count)));
+    CHECK(order.ids().back() == first);
+    CHECK(order.ids().size() == count);
+
+    // And the row before the last can be moved past it, which is the smallest
+    // move that needs the end position at all.
+    const std::string secondToLast = order.ids()[count - 2];
+    CHECK(order.move(static_cast<int>(count) - 2, static_cast<int>(count)));
+    CHECK(order.ids().back() == secondToLast);
+
+    // One past the end is not a position, and neither is the gap it already
+    // occupies.
+    CHECK_FALSE(order.move(0, static_cast<int>(count) + 1));
+    CHECK_FALSE(order.move(static_cast<int>(count) - 1, static_cast<int>(count)));
+}
+
 TEST_CASE("A scope the order does not name ranks last")
 {
     ScopeOrder order{registry()};

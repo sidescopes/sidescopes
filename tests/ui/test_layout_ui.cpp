@@ -524,6 +524,9 @@ struct DropCatchProbe
 {
     ImVec2 restored{0.0f, 0.0f};
     ImVec2 expected{0.0f, 0.0f};
+    float listTopY = 0.0f;
+    float lastRowBottom = 0.0f;
+    float catchBottom = 0.0f;
     bool oldLeftPositionSet = false;
     bool newLeftPositionSet = true;
     float oldOverrunY = 0.0f;
@@ -577,8 +580,10 @@ void dropCatchGui(ImGuiTestContext*)
     // The shape that ships now: sized so submitting it does the restoring.
     {
         const ImVec2 listTop = layProbeRows();
+        probe.listTopY = listTop.y;
+        probe.lastRowBottom = ImGui::GetItemRectMax().y;
         probe.expected = ImGui::GetCursorScreenPos();
-        layMenuRowDropCatch("##new", listTop, 160.0f);
+        probe.catchBottom = layMenuRowDropCatch("##new", listTop, 160.0f);
         probe.restored = ImGui::GetCursorScreenPos();
         probe.newLeftPositionSet = window->DC.IsSetPos;
         probe.newOverrunY = window->DC.CursorPos.y - window->DC.CursorMaxPos.y;
@@ -611,12 +616,10 @@ void aDropCatchRestoresTheCursorByBeingSubmitted(ImGuiTestContext* ctx)
     IM_CHECK(probe.oldLeftPositionSet);
     IM_CHECK_GT(probe.oldOverrunY, 0.0f);
 
-    // The shape that ships leaves no move pending, so the check never runs.
-    // Its overrun is untouched and uninteresting: a cursor one item spacing
-    // below the last item is the ordinary state every list ends in, which is
-    // why the pending move is the half that matters.
+    // The shape that ships leaves no move pending, so the check never runs
+    // whatever the cursor overruns by - which is why the pending move is the
+    // half that matters and the overrun is not.
     IM_CHECK_EQ(probe.newLeftPositionSet, false);
-    IM_CHECK_GT(probe.newOverrunY, 0.0f);
 
     // ...and it still puts the cursor back, which is what the caller needs.
     IM_CHECK_EQ(probe.restored.x, probe.expected.x);
@@ -660,6 +663,35 @@ void theErrorHookIsInstalledInEveryBuild(ImGuiTestContext* ctx)
     ImGui::GetIO().ConfigErrorRecoveryEnableTooltip = savedTooltip;
 }
 
+/// SYMPTOM IF BROKEN: a scope cannot be dragged to the end of the list. Every
+/// other position takes the drop and the last one silently refuses.
+///
+/// Each drop position but the last sits BETWEEN two rows. The last - after
+/// everything - can only be aimed at below the final row, so the strip under
+/// it is that position, and a catch stopping at the last row's edge cannot
+/// express it however the drop is computed.
+///
+/// That strip was trimmed away to make the cursor land by itself after the
+/// catch was submitted, which fixed a real 0.1px overrun and quietly deleted a
+/// drop target nobody had written a test for. The cursor is put back another
+/// way now; this asserts the strip is still there.
+void theDropCatchReachesPastTheLastRow(ImGuiTestContext* ctx)
+{
+    ctx->SetRef("Catch");
+    ctx->Yield();
+    const DropCatchProbe& probe = dropCatchProbe();
+
+    // The rows really were laid out, and the catch really starts at the top.
+    IM_CHECK_GT(probe.lastRowBottom, probe.listTopY);
+    IM_CHECK_GT(probe.catchBottom, probe.listTopY);
+
+    // ...and it reaches PAST the last row, into the gap where the final drop
+    // position is aimed at, rather than stopping at the row's own edge.
+    IM_CHECK_GT(probe.catchBottom, probe.lastRowBottom);
+    // That gap is where the list ends, which is where the cursor was.
+    IM_CHECK_EQ(probe.catchBottom, probe.expected.y);
+}
+
 void registerLayoutTests(ImGuiTestEngine* engine)
 {
     ImGuiTest* wholePixels = IM_REGISTER_TEST(engine, "layout", "glyph_seats_on_whole_pixels");
@@ -691,6 +723,10 @@ void registerLayoutTests(ImGuiTestEngine* engine)
     chosen->GuiFunc = chosenBandGui;
     chosen->TestFunc = theChosenBandIsNotTheHoverBand;
 
+    ImGuiTest* reach = IM_REGISTER_TEST(engine, "layout", "drop_catch_reaches_past_last_row");
+    reach->GuiFunc = dropCatchGui;
+    reach->TestFunc = theDropCatchReachesPastTheLastRow;
+
     ImGuiTest* hook = IM_REGISTER_TEST(engine, "layout", "error_hook_installed_in_every_build");
     hook->TestFunc = theErrorHookIsInstalledInEveryBuild;
 
@@ -714,5 +750,5 @@ int main()
 {
     using namespace sidescopes;
 
-    return uitest::runSuite("layout", registerLayoutTests, /*expectedTests=*/13);
+    return uitest::runSuite("layout", registerLayoutTests, /*expectedTests=*/14);
 }

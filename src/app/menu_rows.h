@@ -79,13 +79,21 @@ void drawMenuRowAccelerator(const char* key, float rightPad);
 /// over the list lands on one target rather than on whichever row happened to
 /// be under it.
 ///
-/// Sized so that SUBMITTING it puts the cursor back where it was, which is the
-/// point. The obvious way to write this - move the cursor up, submit, move it
-/// back - ends on a bare cursor move with nothing after it, and ImGui reads
-/// that as being asked to grow the window around nothing. It says so in a red
-/// error window over the popup, in release builds as much as local ones, since
-/// the tooltip is only compiled out by IMGUI_DISABLE_DEBUG_TOOLS.
-void layMenuRowDropCatch(const char* id, const ImVec2& listTop, float width);
+/// IT COVERS THE GAP UNDER THE LAST ROW, and that is not slack. Every drop
+/// position but the last sits between two rows; the last one - after everything
+/// - can only be aimed at below the final row, so the strip under it IS that
+/// position and a catch stopping at the last row's edge cannot express it.
+///
+/// The cursor is put back by SUBMITTING something rather than by being moved.
+/// The obvious way to write this - move up, submit, move back - ends on a bare
+/// cursor move with nothing after it, and ImGui reads that as being asked to
+/// grow the window around nothing. It says so in a red error window over the
+/// popup, in release builds as much as local ones, since the tooltip is only
+/// compiled out by IMGUI_DISABLE_DEBUG_TOOLS.
+///
+/// @return How far down the catch reaches. The drop does not need it; it is
+///         what lets a test see that the last position is inside.
+float layMenuRowDropCatch(const char* id, const ImVec2& listTop, float width);
 
 /// An icon button that stands in a menu row: the toolbar's glyph and hover
 /// box, but only as tall as the row it shares, so a row carrying one is no
