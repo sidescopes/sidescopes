@@ -126,9 +126,11 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   toolkit reports about its own use. It normally says these in a window
   over the application, which only whoever is sitting in front of the
   build ever sees - one went unread long enough to ship - and on this
-  channel they land in the file a report can attach instead. The window
-  stays as well. The same error repeats on every frame it is raised, so
-  only a message the recording has not already been told is written.
+  channel they land in the file a report can attach instead. A release
+  build reports only into the log; the window stays in development
+  builds, where whoever is building wants it at once. The same error
+  repeats on every frame it is raised, so only a message the recording
+  has not already been told is written.
 - A preset carries the order its panes sit in. Dragging a scope in the
   selector arranges that slot alone, so one can read exposure first and
   another balance first, and loading a slot restores how it was laid out

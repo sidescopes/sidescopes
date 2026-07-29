@@ -19,6 +19,7 @@
 #include <vector>
 
 #define IMGUI_DEFINE_MATH_OPERATORS
+#include "app/imgui_ui.h"
 #include "app/interface_style.h"
 #include "app/menu_rows.h"
 #include "app/row_layout.h"
@@ -622,6 +623,43 @@ void aDropCatchRestoresTheCursorByBeingSubmitted(ImGuiTestContext* ctx)
     IM_CHECK_EQ(probe.restored.y, probe.expected.y);
 }
 
+/// SYMPTOM IF BROKEN: a user sends a diagnostic recording of the session that
+/// went wrong and the toolkit's own account of it is not in the file.
+///
+/// The error WINDOW is developer-only - a toolkit error is a developer's bug,
+/// and a user shown one has something alarming they cannot act on. The LOG is
+/// not: a recording from a machine nobody here can see is the only way one of
+/// these ever reaches us, and it is the path the one that shipped had no way
+/// to take.
+///
+/// So the easy mistake is to gate the whole hook on the build type rather than
+/// the window alone, which silently removes the logging that is the point. The
+/// hook assertion below sits OUTSIDE the build conditional deliberately - it
+/// has to hold in every build, and a conditional around it would make this
+/// test agree with the defect.
+void theErrorHookIsInstalledInEveryBuild(ImGuiTestContext* ctx)
+{
+    ctx->Yield();
+    const bool savedTooltip = ImGui::GetIO().ConfigErrorRecoveryEnableTooltip;
+
+    installInterfaceErrorReporting();
+    // Compared against the hook itself, not against null: the test engine
+    // installs a handler of its own around every test, so a null check here
+    // would pass whether or not the application installed anything.
+    IM_CHECK(interfaceErrorReportingInstalled());
+
+#ifdef NDEBUG
+    // A release build reports into the log and puts nothing on screen.
+    IM_CHECK_EQ(ImGui::GetIO().ConfigErrorRecoveryEnableTooltip, false);
+#else
+    // A development build does both: whoever is building wants it at once.
+    IM_CHECK(ImGui::GetIO().ConfigErrorRecoveryEnableTooltip);
+#endif
+
+    ImGui::GetCurrentContext()->ErrorCallback = nullptr;
+    ImGui::GetIO().ConfigErrorRecoveryEnableTooltip = savedTooltip;
+}
+
 void registerLayoutTests(ImGuiTestEngine* engine)
 {
     ImGuiTest* wholePixels = IM_REGISTER_TEST(engine, "layout", "glyph_seats_on_whole_pixels");
@@ -653,6 +691,9 @@ void registerLayoutTests(ImGuiTestEngine* engine)
     chosen->GuiFunc = chosenBandGui;
     chosen->TestFunc = theChosenBandIsNotTheHoverBand;
 
+    ImGuiTest* hook = IM_REGISTER_TEST(engine, "layout", "error_hook_installed_in_every_build");
+    hook->TestFunc = theErrorHookIsInstalledInEveryBuild;
+
     ImGuiTest* katch = IM_REGISTER_TEST(engine, "layout", "drop_catch_restores_the_cursor");
     katch->GuiFunc = dropCatchGui;
     katch->TestFunc = aDropCatchRestoresTheCursorByBeingSubmitted;
@@ -673,5 +714,5 @@ int main()
 {
     using namespace sidescopes;
 
-    return uitest::runSuite("layout", registerLayoutTests, /*expectedTests=*/12);
+    return uitest::runSuite("layout", registerLayoutTests, /*expectedTests=*/13);
 }

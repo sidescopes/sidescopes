@@ -2,8 +2,12 @@
 
 #include <algorithm>
 
+#include "app/interface_diagnostics.h"
 #include "app/row_layout.h"
 #include "imgui.h"
+// ErrorCallback is declared in the internal header; ImGui documents it as a
+// hook it may promote to the public API rather than as private state.
+#include "imgui_internal.h"
 
 namespace sidescopes {
 namespace {
@@ -11,7 +15,36 @@ namespace {
 // The widest a tooltip may run before wrapping, in 100%-scale points.
 constexpr float TooltipWrapWidth = 260.0f;
 
+// What the toolkit calls when it catches a misuse of itself.
+void onInterfaceError(ImGuiContext*, void*, const char* message)
+{
+    reportInterfaceError(message);
+}
+
 }  // namespace
+
+void installInterfaceErrorReporting()
+{
+    ImGuiContext* context = ImGui::GetCurrentContext();
+    if (context == nullptr) {
+        return;
+    }
+    context->ErrorCallback = onInterfaceError;
+    context->ErrorCallbackUserData = nullptr;
+#ifdef NDEBUG
+    // ONLY THE WINDOW IS BUILD-GATED, and only here. The callback above is set
+    // whatever this is built as, because a recording from a machine nobody
+    // here can see is the only way one of these ever reaches us.
+    ImGui::GetIO().ConfigErrorRecoveryEnableTooltip = false;
+#endif
+}
+
+bool interfaceErrorReportingInstalled()
+{
+    const ImGuiContext* context = ImGui::GetCurrentContext();
+
+    return context != nullptr && context->ErrorCallback == onInterfaceError;
+}
 
 void wrappedTooltip(const char* text)
 {

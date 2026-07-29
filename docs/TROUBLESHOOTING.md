@@ -92,9 +92,9 @@ the named channels — for example `SIDESCOPES_DIAG=attach,border`, or `all`:
 
 The `interface` channel is worth including in a recording attached to a
 report even when the interface looked fine. The toolkit checks its own use
-as it draws and normally says so in a window over the application, which
-only whoever is sitting in front of the build ever sees; on that channel it
-becomes a line in the file. The same error repeats on every frame it is
+as it draws, and a released build says nothing on screen about what it
+finds - these are our bugs rather than yours, and there is nothing you
+could do about one. On that channel it becomes a line in the file. The same error repeats on every frame it is
 raised, so only a message the recording has not already been told is
 written.
 
