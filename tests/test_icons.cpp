@@ -23,7 +23,7 @@ double alphaCoverage(const std::vector<uint8_t>& pixels)
 TEST_CASE("Every icon rasterizes with plausible stroke coverage")
 {
     for (const Icon icon : {Icon::Pin, Icon::PinOff, Icon::SquarePen, Icon::Pencil, Icon::User, Icon::Pipette,
-                            Icon::SquareDashed, Icon::ChartColumn, Icon::PenLine, Icon::PanelsTopLeft, Icon::Save}) {
+                            Icon::SquareOff, Icon::ChartColumn, Icon::PenLine, Icon::PanelsTopLeft, Icon::Save}) {
         for (const int size : {16, 24, 48}) {
             const auto pixels = rasterizeIcon(icon, size);
             REQUIRE(pixels.size() == static_cast<std::size_t>(size) * size * 4);

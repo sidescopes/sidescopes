@@ -248,6 +248,15 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   window over the popup. The catch laid over the list to receive the drop
   moved the cursor without submitting anything afterwards, which that
   check exists to report; it is sized to need no such move now.
+- A scope can be dragged to the end of the list. Every other position sits
+  between two rows, so only the last one has to be aimed at below the final
+  row - and the strip under that row had been taken back three days earlier
+  to settle a complaint from the toolkit about the cursor. It was not slack;
+  it was that position.
+- The clear-region button carries a struck-through square rather than a
+  dashed one. The dashed square was drawn when the button made the region
+  full-screen; it has cleared the region since that default was removed, and
+  a dashed square depicts a region being made rather than removed.
 - Dragging a scope in the selector keeps the move when that scope is not
   currently shown. The order already covered every registered scope and
   the file already carried them all, but the check that decides whether

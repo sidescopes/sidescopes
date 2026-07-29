@@ -276,7 +276,7 @@ PaneRenderOutcome Toolbar::drawRegionToolIcons(bool regionSelected)
     std::snprintf(tooltip, sizeof(tooltip), "Clear the region (%s)%s",
                   shortcutLabel(m_shortcuts.bindings().clearRegion).c_str(),
                   regionSelected ? "" : " - no region selected");
-    if (iconButton("##clear-region", m_icons.textureId(Icon::SquareDashed, iconPx), tooltip, !regionSelected) &&
+    if (iconButton("##clear-region", m_icons.textureId(Icon::SquareOff, iconPx), tooltip, !regionSelected) &&
         regionSelected) {
         outcome.clearRegion = true;
     }
