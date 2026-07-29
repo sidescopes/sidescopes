@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-20 -16 240 240" width="240" height="240" role="img" aria-labelledby="t d">
+  <title id="t">SideScopes</title>
+  <desc id="d">Standard mark, 48px and up: six vectorscope targets at their real stations (R top, Mg upper right, B lower right, Cy bottom, G lower left, Yl upper left), square aperture, I-line slot at 33° with the flesh-tone line through the origin. Top-light gradients and a layered shadow for light grounds; artwork spans 0–200 inside a 240 viewBox.</desc>
+<defs>
+  <linearGradient id="gr" gradientUnits="userSpaceOnUse" x1="100" y1="2" x2="100" y2="198">
+    <stop offset="0" stop-color="#f45b48"></stop>
+    <stop offset="0.42" stop-color="#f2452f"></stop>
+    <stop offset="1" stop-color="#9b2c1e"></stop>
+  </linearGradient>
+  <linearGradient id="gmg" gradientUnits="userSpaceOnUse" x1="100" y1="2" x2="100" y2="198">
+    <stop offset="0" stop-color="#e448b8"></stop>
+    <stop offset="0.42" stop-color="#e02fae"></stop>
+    <stop offset="1" stop-color="#8f1e6f"></stop>
+  </linearGradient>
+  <linearGradient id="gb" gradientUnits="userSpaceOnUse" x1="100" y1="2" x2="100" y2="198">
+    <stop offset="0" stop-color="#4864eb"></stop>
+    <stop offset="0.42" stop-color="#2f4fe8"></stop>
+    <stop offset="1" stop-color="#1e3394"></stop>
+  </linearGradient>
+  <linearGradient id="gcy" gradientUnits="userSpaceOnUse" x1="100" y1="2" x2="100" y2="198">
+    <stop offset="0" stop-color="#32c1d9"></stop>
+    <stop offset="0.42" stop-color="#16b8d4"></stop>
+    <stop offset="1" stop-color="#0e7688"></stop>
+  </linearGradient>
+  <linearGradient id="gg" gradientUnits="userSpaceOnUse" x1="100" y1="2" x2="100" y2="198">
+    <stop offset="0" stop-color="#33c160"></stop>
+    <stop offset="0.42" stop-color="#17b84a"></stop>
+    <stop offset="1" stop-color="#0f762f"></stop>
+  </linearGradient>
+  <linearGradient id="gyl" gradientUnits="userSpaceOnUse" x1="100" y1="2" x2="100" y2="198">
+    <stop offset="0" stop-color="#f2bd1f"></stop>
+    <stop offset="0.42" stop-color="#f0b400"></stop>
+    <stop offset="1" stop-color="#9a7300"></stop>
+  </linearGradient>
+  <linearGradient id="gskin" gradientUnits="userSpaceOnUse" x1="100" y1="2" x2="100" y2="112">
+    <stop offset="0" stop-color="#ebc4a2"></stop>
+    <stop offset="0.45" stop-color="#e6b78e"></stop>
+    <stop offset="1" stop-color="#a18063"></stop>
+  </linearGradient>
+  <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="1.5" stdDeviation="1.5" flood-color="#201e1d" flood-opacity="0.28"></feDropShadow><feDropShadow dx="0" dy="6" stdDeviation="7" flood-color="#201e1d" flood-opacity="0.13"></feDropShadow></filter>
+</defs>
+<g filter="url(#shadow)">
+  <path id="target-r" d="M60.69 23.9 L100 1.2 L139.32 23.9 L121.94 54 L80.23 54 Z" fill="url(#gr)"></path>
+  <path id="target-mg" d="M146.25 27.9 L185.56 50.6 L185.56 96 L146 96 L146 66 A12 12 0 0 0 134 54 L131.18 54 Z" fill="url(#gmg)"></path>
+  <path id="target-b" d="M185.56 104 L185.56 149.4 L146.25 172.1 L131.18 146 L134 146 A12 12 0 0 0 146 134 L146 104 Z" fill="url(#gb)"></path>
+  <path id="target-cy" d="M139.32 176.1 L100 198.8 L60.68 176.1 L78.06 146 L121.94 146 Z" fill="url(#gcy)"></path>
+  <path id="target-g" d="M53.75 172.1 L14.44 149.4 L14.44 104 L54 104 L54 134 A12 12 0 0 0 66 146 L68.82 146 Z" fill="url(#gg)"></path>
+  <path id="target-yl" d="M14.44 96 L14.44 50.6 L26 43.92 L54 87.05 L54 96 Z" fill="url(#gyl)"></path>
+  <path id="skin-line" d="M53.75 27.9 L70.69 54 L66 54 A12 12 0 0 0 54 66 L54 72.36 L32.93 39.92 Z" fill="url(#gskin)"></path>
+</g>
+</svg>

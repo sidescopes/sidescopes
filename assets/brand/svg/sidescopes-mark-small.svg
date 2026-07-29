@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200" role="img" aria-labelledby="t d">
+  <title id="t">SideScopes small cut</title>
+  <desc id="d">16–32px cut: 14-unit channels, slimmer slot, flat fills. Use at 32px and below.</desc>
+  <path id="target-r" d="M63.29 22.4 L100 1.2 L136.72 22.4 L118.48 54 L83.81 54 Z" fill="#f2452f"></path>
+  <path id="target-mg" d="M148.84 29.4 L185.56 50.6 L185.56 93 L146 93 L146 64.22 A10.22 10.22 0 0 0 135.78 54 L134.64 54 Z" fill="#e02fae"></path>
+  <path id="target-b" d="M185.56 107 L185.56 149.4 L148.84 170.6 L134.64 146 L135.78 146 A10.22 10.22 0 0 0 146 135.78 L146 107 Z" fill="#2f4fe8"></path>
+  <path id="target-cy" d="M136.72 177.6 L100 198.8 L63.28 177.6 L81.52 146 L118.48 146 Z" fill="#16b8d4"></path>
+  <path id="target-g" d="M51.16 170.6 L14.44 149.4 L14.44 107 L54 107 L54 135.78 A10.22 10.22 0 0 0 64.22 146 L65.36 146 Z" fill="#17b84a"></path>
+  <path id="target-yl" d="M14.44 93 L14.44 50.6 L23.4 45.43 L54.29 93 Z" fill="#f0b400"></path>
+  <path id="skin-line" d="M51.14 29.41 L67.11 54 L66 54 A12 12 0 0 0 54 66 L54 66.86 L35.53 38.42 Z" fill="#e6b78e"></path>
+</svg>

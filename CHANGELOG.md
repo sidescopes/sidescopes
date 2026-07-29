@@ -68,6 +68,12 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   accumulation scratch a scope borrows for the length of a pass instead
   of holding for its life, and the sample thinning the quality levels
   drive.
+- A new application icon: the SideScopes mark, six vectorscope target
+  hues ringing the square aperture of a selected region. macOS carries
+  the plated cut that sits evenly among other Dock icons and Windows the
+  free-form mark, and both go to a wider-channel drawing at the smallest
+  sizes so the shape still reads. The mark and the name are not covered
+  by the project's license; see `assets/brand`.
 
 ### Changed
 

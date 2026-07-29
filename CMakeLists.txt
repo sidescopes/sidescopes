@@ -404,9 +404,9 @@ if(APPLE OR WIN32)
         add_executable(SideScopes MACOSX_BUNDLE
             src/app/main.cpp
             src/platform/macos/graphics.mm
-            assets/icon/sidescopes.icns
+            assets/brand/icons/macos/sidescopes.icns
         )
-        set_source_files_properties(assets/icon/sidescopes.icns
+        set_source_files_properties(assets/brand/icons/macos/sidescopes.icns
             PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
         set_source_files_properties(src/platform/macos/graphics.mm
             PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
@@ -461,7 +461,7 @@ if(APPLE OR WIN32)
         # call. The version resource carries the icon and the metadata the
         # shell shows in Properties and Task Manager.
         enable_language(RC)  # Ninja does not enable resource compilation on its own
-        set(SIDESCOPES_ICON_PATH "${CMAKE_SOURCE_DIR}/assets/icon/sidescopes.ico")
+        set(SIDESCOPES_ICON_PATH "${CMAKE_SOURCE_DIR}/assets/brand/icons/windows/sidescopes.ico")
         configure_file(cmake/sidescopes.rc.in sidescopes.rc @ONLY)
         add_executable(SideScopes WIN32
             src/app/main.cpp

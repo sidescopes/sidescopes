@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200" role="img" aria-labelledby="t d">
+  <title id="t">SideScopes monochrome</title>
+  <desc id="d">Single-colour cut; inherits currentColor.</desc>
+  <path id="target-r" d="M60.69 23.9 L100 1.2 L139.32 23.9 L121.94 54 L80.23 54 Z" fill="currentColor"></path>
+  <path id="target-mg" d="M146.25 27.9 L185.56 50.6 L185.56 96 L146 96 L146 66 A12 12 0 0 0 134 54 L131.18 54 Z" fill="currentColor"></path>
+  <path id="target-b" d="M185.56 104 L185.56 149.4 L146.25 172.1 L131.18 146 L134 146 A12 12 0 0 0 146 134 L146 104 Z" fill="currentColor"></path>
+  <path id="target-cy" d="M139.32 176.1 L100 198.8 L60.68 176.1 L78.06 146 L121.94 146 Z" fill="currentColor"></path>
+  <path id="target-g" d="M53.75 172.1 L14.44 149.4 L14.44 104 L54 104 L54 134 A12 12 0 0 0 66 146 L68.82 146 Z" fill="currentColor"></path>
+  <path id="target-yl" d="M14.44 96 L14.44 50.6 L26 43.92 L54 87.05 L54 96 Z" fill="currentColor"></path>
+  <path id="skin-line" d="M53.75 27.9 L70.69 54 L66 54 A12 12 0 0 0 54 66 L54 72.36 L32.93 39.92 Z" fill="currentColor"></path>
+</svg>

@@ -104,7 +104,9 @@ return settings to their defaults.
 ## License
 
 SideScopes is free and open-source software, licensed under the
-[GNU GPL v3.0 or later](LICENSE).
+[GNU GPL v3.0 or later](LICENSE). The SideScopes name and mark are not
+covered by that license and may not be used to identify a modified
+version; see [assets/brand](assets/brand).
 
 Bundled components: Dear ImGui (MIT), GLFW (zlib), Catch2 (BSL-1.0),
 nlohmann/json (MIT), NanoSVG (zlib). Icons from [Lucide](https://lucide.dev)
