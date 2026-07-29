@@ -159,9 +159,7 @@ void LayoutPresetPicker::drawSaveButton(IconTextures& icons, LayoutPresetOutcome
     // was cleared of.
     const int active = m_presets.activeSlot();
     const bool dirty = m_presets.activeDirty();
-    const std::string quoted = quotedPresetName(active, m_presets.at(active));
-    const std::string tooltip =
-        dirty ? "Save the layout into " + quoted + " (" + saveChordLabel() + ")" : quoted + " is up to date";
+    const std::string tooltip = "Save the layout (" + saveChordLabel() + ")" + (dirty ? "" : " - nothing to save");
     if (iconButton("##save-preset", icons.textureId(Icon::Save, iconPixelSize()), tooltip.c_str(), !dirty) && dirty) {
         outcome = m_presets.saveInto(active);
     }
@@ -179,10 +177,14 @@ LayoutPresetOutcome LayoutPresetPicker::draw(IconTextures& icons)
     const int active = m_presets.activeSlot();
     char label[8] = "";
     std::snprintf(label, sizeof(label), "%d", active);
-    const std::string tooltip = quotedPresetName(active, m_presets.at(active)) + " - digits load";
+    // No preset name in it. The button already shows the slot, the list shows
+    // the name against its row, and the status line names it on load and on
+    // save; a fourth telling was redundant, and it made a constant string
+    // depend on what somebody typed.
+    const char* tooltip = "Load a layout preset (1-9)";
     const float labelWidth = ImGui::CalcTextSize(WidestPresetLabel).x;
     if (labelledIconButton("##preset-picker", icons.textureId(Icon::PanelsTopLeft, iconPixelSize()), label, labelWidth,
-                           tooltip.c_str())) {
+                           tooltip)) {
         ImGui::OpenPopup("##preset-popup");
     }
     const ImVec2 buttonMin = ImGui::GetItemRectMin();

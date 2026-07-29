@@ -159,7 +159,7 @@ void drawPickerHero(const PickerContext& ctx, const PickerHero& hero)
             ImGui::SetClipboardText(pinHex);
         }
         char pinnedTip[48];
-        std::snprintf(pinnedTip, sizeof(pinnedTip), "pinned  %s - click to copy", pinHex);
+        std::snprintf(pinnedTip, sizeof(pinnedTip), "pinned %s - click to copy", pinHex);
         wrappedTooltip(pinnedTip);
         if (!hero.tiny) {
             draw->AddText(ImVec2(hero.heroOrigin.x + 5, hero.heroOrigin.y + 3), pickerLabelInk(ctx.color), "LIVE");

@@ -22,7 +22,10 @@ namespace {
 // host scope (the colour picker, which has none) named explicitly.
 const char* scopeDisplayName(const HostScope& scope)
 {
-    return scope.descriptor != nullptr ? scope.descriptor->name : "Color picker";
+    // Title Case, like every name a module declares beside it - "Vectorscope",
+    // "Luma Waveform", "RGB Parade". The host scope is the only one the host
+    // names itself, and it was the only one in sentence case.
+    return scope.descriptor != nullptr ? scope.descriptor->name : "Color Picker";
 }
 
 // The drag-and-drop payload tag for a dragged scope row: its index in the menu
@@ -142,7 +145,7 @@ PaneRenderOutcome Toolbar::drawScopeToggles(bool)
     // it - the popup opens just below the button.
     PaneRenderOutcome outcome;
     const int iconPx = iconPixelSize();
-    if (iconButton("##scopes", m_icons.textureId(Icon::ChartColumn, iconPx), "Scopes - choose which to show")) {
+    if (iconButton("##scopes", m_icons.textureId(Icon::ChartColumn, iconPx), "Show or hide scopes")) {
         ImGui::OpenPopup("##scopes-popup");
     }
     const ImVec2 buttonMin = ImGui::GetItemRectMin();
@@ -254,8 +257,11 @@ PaneRenderOutcome Toolbar::drawRegionToolIcons(bool regionSelected)
         m_picker.request(RegionPickerMode::DrawGlobal);
     }
     ImGui::SameLine(0.0f, 2.0f);
-    std::snprintf(tooltip, sizeof(tooltip), "Attach to a window (%s) - click the window or draw inside it",
-                  m_shortcuts.bindings().attachWindow.c_str());
+    // "Attach" is the codebase's word for the mechanism; what the user is
+    // doing is choosing what the scopes read. How to pick, once the picker is
+    // up, is the picker's own business to say - a tooltip describes the
+    // control it hangs off and nothing that happens elsewhere.
+    std::snprintf(tooltip, sizeof(tooltip), "Select a window (%s)", m_shortcuts.bindings().attachWindow.c_str());
     if (iconButton("##attach-window", m_icons.textureId(Icon::SquarePen, iconPx), tooltip)) {
         m_picker.request(RegionPickerMode::AttachWindow);
     }
@@ -265,7 +271,7 @@ PaneRenderOutcome Toolbar::drawRegionToolIcons(bool regionSelected)
     // face is on screen is the picker overlay's answer to give, not the
     // toolbar's.
     if (supportsFaceDetection()) {
-        std::snprintf(tooltip, sizeof(tooltip), "Attach to a face (%s)", m_shortcuts.bindings().attachFace.c_str());
+        std::snprintf(tooltip, sizeof(tooltip), "Select a face (%s)", m_shortcuts.bindings().attachFace.c_str());
         if (iconButton("##attach-face", m_icons.textureId(Icon::User, iconPx), tooltip)) {
             m_picker.request(RegionPickerMode::AttachFace);
         }

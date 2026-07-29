@@ -93,6 +93,9 @@ or Command+Tab brings everything back, the region border included.
   mean.
 - Drag the divider between two panes to change their share of the window.
 - In the scope selector, drag a row to set the order the panes follow.
+- While the colour picker is up, Shift+click (or Shift+drag) pins a colour
+  and keeps the picker open, so several can be pinned in one pass. The
+  picker says so on screen while it is up.
 
 ## Rebinding
 

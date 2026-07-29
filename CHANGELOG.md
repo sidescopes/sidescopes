@@ -253,6 +253,18 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   row - and the strip under that row had been taken back three days earlier
   to settle a complaint from the toolkit about the cursor. It was not slack;
   it was that position.
+- Toolbar tooltips read as labels rather than explanations: a verb, its
+  object and the shortcut in brackets, the shape "Clear the region (Esc)"
+  already had. The em-dash clauses that explained a control are gone, and
+  so is the one on the pin tool that described Shift-clicking a colour -
+  a tooltip describes the control under the pointer, and that gesture
+  happens elsewhere, during a mode not yet entered. The picker already
+  says it on screen while it is up, and docs/SHORTCUTS.md now lists it.
+- The presets button's tooltip no longer repeats the preset's name. The
+  button shows the slot, the list shows the name and the status line names
+  it on load and save.
+- The colour picker is called "Color Picker" everywhere, in the Title Case
+  every scope name beside it uses.
 - Preset status messages lead with the verb and quote the name: Loaded
   "Whatever" rather than Whatever loaded. A name is whatever the user typed,
   so bare in a sentence it becomes part of the grammar - a preset called

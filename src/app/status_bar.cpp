@@ -114,8 +114,13 @@ void StatusBar::draw(bool pinsAvailable, const std::optional<FloatColor>& cursor
 void StatusBar::drawPinTool(bool pinsAvailable)
 {
     char tooltip[160];
+    // The clause left here describes THIS control - why it is greyed - which
+    // is what a tooltip on a disabled control is for. The one removed
+    // described a gesture on a different target during a mode not yet
+    // entered, and read as an instruction to Shift+click the icon itself.
+    // The picker says it where it happens, on its own banner.
     std::snprintf(tooltip, sizeof(tooltip), "Pin a color (%s)%s", m_shortcuts.bindings().pinColor.c_str(),
-                  pinsAvailable ? " - Shift+click a color to pin several" : " - needs a scope that takes pins");
+                  pinsAvailable ? "" : " - needs a scope that takes pins");
     if (iconButton("##pin-color", m_icons.textureId(Icon::Pipette, iconPixelSize()), tooltip, !pinsAvailable) &&
         pinsAvailable) {
         m_picker.request(RegionPickerMode::PinColor);
