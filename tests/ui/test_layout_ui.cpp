@@ -333,7 +333,7 @@ void chosenBandGui(ImGuiTestContext*)
         IM_UNUSED(pressed);
         size = ImGui::GetItemRectSize();
         vertices = draw->VtxBuffer.Size - mark;
-        ImGui::SameLine(menuRowNameX());
+        ImGui::SameLine(menuRowNameX(menuRowIconWidth()));
         ImGui::TextUnformatted("Preset 1");
         nameX = ImGui::GetItemRectMin().x;
     };
@@ -414,7 +414,8 @@ void aHiddenRowIconStillHoldsItsSpace(ImGuiTestContext* ctx)
 
     // The name column clears the button that leads the row, so the two never
     // overlap however either is measured.
-    IM_CHECK_GT(menuRowNameX(), menuRowIconWidth());
+    IM_CHECK_GT(menuRowNameX(menuRowIconWidth()), menuRowIconWidth());
+    IM_CHECK_EQ(menuRowNameX(menuRowIconWidth()) - menuRowIconWidth(), menuRowLeadingGap());
     IM_CHECK_GT(menuRowKeyRightPad(), 0.0f);
 }
 

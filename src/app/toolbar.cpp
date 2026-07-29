@@ -171,9 +171,11 @@ Toolbar::ScopeMenuColumns Toolbar::scopeColumns() const
     }
     const float em = ImGui::GetFontSize();
     ScopeMenuColumns cols;
-    // Both toolbar lists lay their rows on these, so the names start and the
-    // keys end at one x whichever list is open.
-    cols.nameX = menuRowNameX();
+    // The gap before the name and the margin after the key are the toolbar's,
+    // not this list's: one checkbox leads a row here where the preset list
+    // leads with buttons, and what the two share is the spacing around what
+    // they lead with rather than the measurements themselves.
+    cols.nameX = menuRowNameX(ImGui::GetFrameHeight());
     cols.rightPad = menuRowKeyRightPad();
     cols.width = cols.nameX + maxName + em * 2.0f + maxKey + cols.rightPad;
 

@@ -14,13 +14,17 @@ namespace sidescopes {
 /// right-aligned and dimmed the way a menu shows an accelerator. Keeping the
 /// treatment here is what stops the two drifting apart.
 
-/// Where a row's name starts: past the control that leads it - the scope
-/// menu's checkbox, the preset list's rename button - and then a full space.
+/// The space a row keeps between the controls leading it and its name.
 ///
-/// Both lists read it, which is the whole point: a name column measured
-/// separately in each drifts by a few pixels and the two stop looking like one
-/// treatment seen twice.
-[[nodiscard]] float menuRowNameX();
+/// This, rather than the name's x, is what the two lists share. They lead with
+/// different controls - the scope menu one checkbox, the preset list a pair of
+/// icon buttons - so one shared x gives whichever list has the wider controls a
+/// visibly tighter name, which is exactly what it did.
+[[nodiscard]] float menuRowLeadingGap();
+
+/// Where a row's name starts, given the total width @p leadingWidth of the
+/// controls standing before it: past them, then @ref menuRowLeadingGap.
+[[nodiscard]] float menuRowNameX(float leadingWidth);
 
 /// The margin a right-bound key hint keeps from the row's right edge. Shared
 /// for the same reason as @ref menuRowNameX: the two lists bind their keys to

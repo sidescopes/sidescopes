@@ -22,6 +22,19 @@ constexpr const char* WidestPresetLabel = "9*";
 // The line under the list, which teaches the two gestures a row answers to.
 constexpr const char* PresetFooter = "click loads - Shift+click saves";
 
+// The controls that lead a preset row, and so where its name starts. This list
+// leads with buttons where the scope menu leads with a checkbox, so the two
+// share the gap that follows them rather than the x it works out to.
+float presetLeadingWidth()
+{
+    return menuRowIconWidth();
+}
+
+float presetNameX()
+{
+    return menuRowNameX(presetLeadingWidth());
+}
+
 // The whole width of a row, measured the way the scope menu measures its own:
 // the name column, the widest name it will show, room to breathe, the key, and
 // the margin the key keeps from the edge.
@@ -33,7 +46,7 @@ float presetRowWidth(const std::array<LayoutPreset, LayoutPresetSlots>& presets)
         maxName = std::max(maxName, ImGui::CalcTextSize(name.c_str()).x);
     }
     const float em = ImGui::GetFontSize();
-    const float named = menuRowNameX() + maxName + em * 2.0f + ImGui::CalcTextSize("9").x + menuRowKeyRightPad();
+    const float named = presetNameX() + maxName + em * 2.0f + ImGui::CalcTextSize("9").x + menuRowKeyRightPad();
 
     // Never narrower than the footer beneath it, so the rows are what set the
     // popup's width and every key binds to the popup's own edge rather than to
@@ -107,13 +120,13 @@ void LayoutPresetPicker::drawSlotRow(int slot, float width, IconTextures& icons,
         drawMenuRowChosen(rowTop);
     }
     ImGui::PushID(slot);
-    const float nameWidth = width - menuRowNameX();
+    const float nameWidth = width - presetNameX();
     if (slot == m_renamingSlot) {
         // The pen's column is held open rather than reclaimed, and the field
         // takes exactly the name's own width, so the row keeps its shape and
         // nothing shifts while a name is typed.
         ImGui::Dummy(ImVec2(menuRowIconWidth(), ImGui::GetFrameHeight()));
-        ImGui::SameLine(menuRowNameX());
+        ImGui::SameLine(presetNameX());
         drawRenameField(nameWidth, outcome);
         ImGui::PopID();
 
@@ -129,7 +142,7 @@ void LayoutPresetPicker::drawSlotRow(int slot, float width, IconTextures& icons,
     if (menuRowIconButton("##rename", icons.textureId(Icon::PenLine, iconPixelSize()), tooltip.c_str(), hovered)) {
         beginRename(slot);
     }
-    ImGui::SameLine(menuRowNameX());
+    ImGui::SameLine(presetNameX());
     const ImVec2 rowSize(nameWidth, ImGui::GetFrameHeight());
     if (ImGui::Selectable(name.c_str(), false, ImGuiSelectableFlags_NoAutoClosePopups, rowSize)) {
         outcome = ImGui::GetIO().KeyShift ? m_presets.save(slot) : m_presets.load(slot);
