@@ -19,10 +19,21 @@ namespace {
 // arriving and leaving never moves the row.
 constexpr const char* WidestPresetLabel = "9*";
 
+// The line under the list, which teaches the two gestures a row answers to.
+constexpr const char* PresetFooter = "click loads - Shift+click saves";
+
+// What parts the shortcut digit from the rename button after it. The button's
+// box begins exactly where the row's own width ends, so this gap is the whole
+// distance between a hint and a control - and it was nothing to speak of when
+// the digit sat a fraction of a line in from that edge.
+float presetKeyRightPad()
+{
+    return ImGui::GetFontSize() * 1.75f;
+}
+
 // The width every row of the picker shares, from the widest name it will show,
 // so the names left-align and the digits right-align to one edge with room to
-// breathe between. Measured from the name column rightward, which is where the
-// row's Selectable starts.
+// breathe between.
 float presetRowWidth(const std::array<LayoutPreset, LayoutPresetSlots>& presets)
 {
     float maxName = 0.0f;
@@ -31,8 +42,12 @@ float presetRowWidth(const std::array<LayoutPreset, LayoutPresetSlots>& presets)
         maxName = std::max(maxName, ImGui::CalcTextSize(name.c_str()).x);
     }
     const float em = ImGui::GetFontSize();
+    const float named = maxName + em * 2.0f + ImGui::CalcTextSize("9").x + presetKeyRightPad();
 
-    return maxName + em * 2.0f + ImGui::CalcTextSize("9").x + em * 0.75f;
+    // Never narrower than the footer beneath it: the rows then reach the
+    // popup's own edge, and each rename button lands flush right rather than
+    // partway across with an empty strip beside it.
+    return std::max(named, ImGui::CalcTextSize(PresetFooter).x - menuRowIconWidth());
 }
 
 }  // namespace
@@ -85,8 +100,14 @@ void LayoutPresetPicker::drawRenameField(float width, LayoutPresetOutcome& outco
 
 void LayoutPresetPicker::drawSlotRow(int slot, float width, IconTextures& icons, LayoutPresetOutcome& outcome)
 {
-    const LayoutPreset& preset = m_presets.at(slot);
-    drawMenuRowHover(ImGui::GetCursorScreenPos().y);
+    const float rowTop = ImGui::GetCursorScreenPos().y;
+    drawMenuRowHover(rowTop);
+    // The loaded slot is the row that is tinted, not a marker in a column of
+    // its own: it says which one at a glance, needs nothing explaining it, and
+    // leaves the row's whole width to the name.
+    if (slot == m_presets.activeSlot()) {
+        drawMenuRowChosen(rowTop);
+    }
     ImGui::PushID(slot);
     if (slot == m_renamingSlot) {
         // The field spans the name column AND the button's, so the row keeps
@@ -96,18 +117,12 @@ void LayoutPresetPicker::drawSlotRow(int slot, float width, IconTextures& icons,
 
         return;
     }
-    // A radio in the checkbox's column: exactly one slot is loaded, where any
-    // number of scopes can be shown, and clicking it loads that slot.
-    if (ImGui::RadioButton("##active", slot == m_presets.activeSlot())) {
-        outcome = m_presets.load(slot);
-    }
-    ImGui::SameLine(ImGui::GetFrameHeight() + ImGui::GetFontSize());
-    const std::string name = presetDisplayName(slot, preset);
+    const std::string name = presetDisplayName(slot, m_presets.at(slot));
     const ImVec2 rowSize(width, ImGui::GetFrameHeight());
     if (ImGui::Selectable(name.c_str(), false, ImGuiSelectableFlags_NoAutoClosePopups, rowSize)) {
         outcome = ImGui::GetIO().KeyShift ? m_presets.save(slot) : m_presets.load(slot);
     }
-    drawMenuRowAccelerator(std::to_string(slot).c_str(), ImGui::GetFontSize() * 0.75f);
+    drawMenuRowAccelerator(std::to_string(slot).c_str(), presetKeyRightPad());
     ImGui::SameLine(0.0f, 0.0f);
     const std::string tooltip = "Rename " + name;
     if (menuRowIconButton("##rename", icons.textureId(Icon::PenLine, iconPixelSize()), tooltip.c_str())) {
@@ -144,7 +159,7 @@ LayoutPresetOutcome LayoutPresetPicker::draw(IconTextures& icons)
         for (int slot = 1; slot <= LayoutPresetSlots; ++slot) {
             drawSlotRow(slot, width, icons, outcome);
         }
-        ImGui::TextDisabled("click loads - Shift+click saves");
+        ImGui::TextDisabled("%s", PresetFooter);
         popMenuRowStyle();
         ImGui::EndPopup();
     } else {

@@ -33,9 +33,21 @@ void popMenuRowStyle();
 /// mid-drag, where the insertion bar is the cue.
 void drawMenuRowHover(float rowTopY);
 
+/// Draws the band that marks the row starting at @p rowTopY as the chosen one,
+/// for a list where exactly one is - which a whole tinted row says at a glance
+/// and a marker glyph in a column of its own says only to someone who knows
+/// what the glyph means.
+///
+/// Drawn AFTER @ref drawMenuRowHover and over the same band, and see-through,
+/// so the chosen row under the pointer reads as both rather than as either:
+/// chosen, hovered, and chosen-while-hovered are three different shades.
+void drawMenuRowChosen(float rowTopY);
+
 /// Draws @p key over the row just laid down, right-aligned @p rightPad in from
-/// the row's edge and dimmed, the way a menu shows an accelerator. An empty
-/// @p key draws nothing.
+/// the row's edge and dimmed, the way a menu shows an accelerator. It is a
+/// hint rather than a control, so it is drawn fainter than the row's text and
+/// the caller is expected to leave real distance between it and any control
+/// sharing that edge. An empty @p key draws nothing.
 void drawMenuRowAccelerator(const char* key, float rightPad);
 
 /// An icon button that stands in a menu row: the toolbar's glyph and hover

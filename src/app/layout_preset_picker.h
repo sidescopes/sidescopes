@@ -26,13 +26,14 @@ public:
     /// Draws the button and, while it is open, the slot list: one row a slot,
     /// loading on click, saving on Shift+click, and renaming from the pen
     /// standing at the end of each row - the one way in, so a click on a row
-    /// never has to mean two things. @p icons is the shared glyph cache the
-    /// button and the pens draw from.
+    /// never has to mean two things. The loaded slot is the tinted row.
+    /// @p icons is the shared glyph cache the button and the pens draw from.
     [[nodiscard]] LayoutPresetOutcome draw(IconTextures& icons);
 
 private:
-    /// Draws one slot's row - its name, its digit, and the button that renames
-    /// it - or, while that slot is being renamed, the field it is renamed in.
+    /// Draws one slot's row - its name, its key hint, and the button that
+    /// renames it - or, while that slot is being renamed, the field it is
+    /// renamed in.
     void drawSlotRow(int slot, float width, IconTextures& icons, LayoutPresetOutcome& outcome);
 
     /// Draws the field the name being renamed is edited in, committing on

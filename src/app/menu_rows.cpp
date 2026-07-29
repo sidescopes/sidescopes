@@ -12,6 +12,38 @@ namespace {
 constexpr int PushedVars = 3;
 constexpr int PushedColors = 4;
 
+// How much of the accent the chosen row's band carries. Enough that the row
+// reads as chosen at a glance, and see-through enough that a chosen row under
+// the pointer is brighter again - so the two states are told apart rather than
+// one hiding the other.
+constexpr float ChosenBandOpacity = 0.55f;
+
+// How strongly the key hint is drawn, on top of the theme's already-dim
+// disabled text. It states which key reaches a row; it is not a control, and
+// it shares the row's right edge with one that is.
+constexpr float AcceleratorOpacity = 0.75f;
+
+// A row's highlight band.
+struct RowBand
+{
+    ImVec2 min;
+    ImVec2 max;
+};
+
+// The band a whole row highlights across: a little above and below the row,
+// and nearly the popup's full width - just shy of the border, past the content
+// into the window padding - for a native-menu-style highlight edge to edge.
+RowBand rowBand(float rowTopY)
+{
+    const ImGuiStyle& style = ImGui::GetStyle();
+    const float pad = style.ItemSpacing.y * 0.3f;
+    const float inset = style.WindowPadding.x * 0.4f;
+    const ImVec2 windowPos = ImGui::GetWindowPos();
+
+    return RowBand{ImVec2(windowPos.x + inset, rowTopY - pad),
+                   ImVec2(windowPos.x + ImGui::GetWindowSize().x - inset, rowTopY + ImGui::GetFrameHeight() + pad)};
+}
+
 }  // namespace
 
 void pushMenuRowStyle()
@@ -45,17 +77,20 @@ void drawMenuRowHover(float rowTopY)
     if (ImGui::GetDragDropPayload() != nullptr) {
         return;
     }
-    const ImGuiStyle& style = ImGui::GetStyle();
-    const float pad = style.ItemSpacing.y * 0.3f;
-    const float inset = style.WindowPadding.x * 0.4f;
-    const ImVec2 windowPos = ImGui::GetWindowPos();
-    const ImVec2 barMin(windowPos.x + inset, rowTopY - pad);
-    const ImVec2 barMax(windowPos.x + ImGui::GetWindowSize().x - inset, rowTopY + ImGui::GetFrameHeight() + pad);
-    if (!ImGui::IsMouseHoveringRect(barMin, barMax)) {
+    const RowBand band = rowBand(rowTopY);
+    if (!ImGui::IsMouseHoveringRect(band.min, band.max)) {
         return;
     }
-    ImGui::GetWindowDrawList()->AddRectFilled(barMin, barMax, ImGui::GetColorU32(ImGuiCol_ButtonHovered),
-                                              style.FrameRounding);
+    ImGui::GetWindowDrawList()->AddRectFilled(band.min, band.max, ImGui::GetColorU32(ImGuiCol_ButtonHovered),
+                                              ImGui::GetStyle().FrameRounding);
+}
+
+void drawMenuRowChosen(float rowTopY)
+{
+    const RowBand band = rowBand(rowTopY);
+    ImGui::GetWindowDrawList()->AddRectFilled(band.min, band.max,
+                                              ImGui::GetColorU32(ImGuiCol_ButtonActive, ChosenBandOpacity),
+                                              ImGui::GetStyle().FrameRounding);
 }
 
 float menuRowIconWidth()
@@ -96,7 +131,7 @@ void drawMenuRowAccelerator(const char* key, float rightPad)
     const ImVec2 rowMin = ImGui::GetItemRectMin();
     const ImVec2 rowMax = ImGui::GetItemRectMax();
     const ImVec2 at(rowMax.x - rightPad - keySize.x, rowMin.y + (rowMax.y - rowMin.y - keySize.y) * 0.5f);
-    ImGui::GetWindowDrawList()->AddText(at, ImGui::GetColorU32(ImGuiCol_TextDisabled), key);
+    ImGui::GetWindowDrawList()->AddText(at, ImGui::GetColorU32(ImGuiCol_TextDisabled, AcceleratorOpacity), key);
 }
 
 }  // namespace sidescopes

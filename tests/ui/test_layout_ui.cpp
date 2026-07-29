@@ -19,6 +19,7 @@
 
 #define IMGUI_DEFINE_MATH_OPERATORS
 #include "app/interface_style.h"
+#include "app/menu_rows.h"
 #include "app/row_layout.h"
 #include "imgui.h"
 #include "imgui_internal.h"
@@ -278,6 +279,52 @@ void theToolboxSeatsByTheWindowAlone(ImGuiTestContext*)
     IM_CHECK(regionToolboxWraps(Scopes + Notice, Toolbox, exact));
 }
 
+// The colour the chosen-row band actually landed in the draw list, read back
+// from the vertices it appended.
+ImU32& chosenBandColor()
+{
+    static ImU32 instance = 0;
+
+    return instance;
+}
+
+/// Draws one chosen-row band into a window and records the colour it emitted.
+void chosenBandGui(ImGuiTestContext*)
+{
+    ImGui::SetNextWindowSize(ImVec2(300.0f, 120.0f), ImGuiCond_Always);
+    ImGui::Begin("Bands", nullptr, ImGuiWindowFlags_NoSavedSettings);
+    ImDrawList* draw = ImGui::GetWindowDrawList();
+    const int before = draw->VtxBuffer.Size;
+    drawMenuRowChosen(ImGui::GetCursorScreenPos().y);
+    chosenBandColor() = draw->VtxBuffer.Size > before ? draw->VtxBuffer[before].col : 0;
+    ImGui::End();
+}
+
+/// SYMPTOM IF BROKEN: in the preset list, the row the pointer is over looks
+/// exactly like the row that is loaded - so the list appears to have two
+/// selections, or the real one becomes invisible under the pointer.
+///
+/// Which row is loaded is carried by a band rather than by a marker glyph, and
+/// the hover is a band too. The two must be different shades, and the chosen
+/// band must be see-through enough that a chosen row under the pointer is
+/// different again from either.
+void theChosenBandIsNotTheHoverBand(ImGuiTestContext* ctx)
+{
+    ctx->SetRef("Bands");
+    ctx->Yield();
+
+    // It drew something at all.
+    IM_CHECK_NE(chosenBandColor(), 0u);
+    // ...and not the hover band's colour, which is what drawMenuRowHover puts
+    // down on the very same rectangle.
+    IM_CHECK_NE(chosenBandColor(), ImGui::GetColorU32(ImGuiCol_ButtonHovered));
+    // ...and it is see-through, so hovering the chosen row adds to it rather
+    // than replacing it.
+    const ImU32 alpha = chosenBandColor() >> IM_COL32_A_SHIFT & 0xFFu;
+    IM_CHECK_GT(alpha, 0u);
+    IM_CHECK_LT(alpha, 255u);
+}
+
 void registerLayoutTests(ImGuiTestEngine* engine)
 {
     ImGuiTest* wholePixels = IM_REGISTER_TEST(engine, "layout", "glyph_seats_on_whole_pixels");
@@ -304,6 +351,10 @@ void registerLayoutTests(ImGuiTestEngine* engine)
 
     ImGuiTest* toolbox = IM_REGISTER_TEST(engine, "layout", "toolbox_seats_by_the_window_alone");
     toolbox->TestFunc = theToolboxSeatsByTheWindowAlone;
+
+    ImGuiTest* chosen = IM_REGISTER_TEST(engine, "layout", "chosen_band_is_not_the_hover_band");
+    chosen->GuiFunc = chosenBandGui;
+    chosen->TestFunc = theChosenBandIsNotTheHoverBand;
 }
 
 }  // namespace
@@ -313,5 +364,5 @@ int main()
 {
     using namespace sidescopes;
 
-    return uitest::runSuite("layout", registerLayoutTests, /*expectedTests=*/8);
+    return uitest::runSuite("layout", registerLayoutTests, /*expectedTests=*/9);
 }
