@@ -32,6 +32,11 @@ public:
     [[nodiscard]] LayoutPresetOutcome draw(IconTextures& icons);
 
 private:
+    /// Draws the button that writes the live layout into the active slot: lit
+    /// while there is something to write and dark when the slot already holds
+    /// what is on screen, which is the only place the interface says so.
+    void drawSaveButton(IconTextures& icons, LayoutPresetOutcome& outcome);
+
     /// Draws one slot's row - its name, its key hint, and the button that
     /// renames it - or, while that slot is being renamed, the field it is
     /// renamed in.

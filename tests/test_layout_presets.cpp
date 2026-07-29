@@ -46,8 +46,8 @@ TEST_CASE("The application opens on the first preset")
     Fixture fixture;
 
     CHECK(fixture.presets.activeSlot() == 1);
-    // Nothing has been arranged, so the slot already holds what is on screen.
-    CHECK_FALSE(fixture.presets.syncActiveSlot());
+    // Nothing has been arranged, so there is nothing to save.
+    CHECK_FALSE(fixture.presets.activeDirty());
 }
 
 TEST_CASE("The default layout is what a capture of a fresh view produces")
@@ -65,49 +65,82 @@ TEST_CASE("The default layout is what a capture of a fresh view produces")
     CHECK(defaults.weights.at(VectorscopeScopeId) == DefaultPaneWeight);
 }
 
-TEST_CASE("Arranging the view writes into the slot it is on")
+TEST_CASE("Arranging the view leaves the slot alone until it is saved")
 {
-    // The whole model: there is no save, so a slot IS what is on screen while
-    // you are on it.
+    // THE PROPERTY THE WHOLE MODEL TURNS ON. A slot that followed the screen
+    // by itself was pleasant until a mistyped scope letter rewrote a saved
+    // arrangement. Nothing reaches a slot without being asked.
     Fixture fixture;
     arrangeSomethingElse(fixture);
 
-    CHECK(fixture.presets.syncActiveSlot());
+    CHECK(fixture.presets.activeDirty());
+    CHECK(fixture.presets.at(1).stack.empty());
+
+    CHECK_FALSE(fixture.presets.saveInto(fixture.presets.activeSlot()).status.empty());
     CHECK(fixture.presets.at(1).stack == fixture.view.stack().tokens());
-    // ...and having written it, there is nothing left to write until the next
-    // change, so the file is not rewritten every frame.
-    CHECK_FALSE(fixture.presets.syncActiveSlot());
+    CHECK_FALSE(fixture.presets.activeDirty());
 }
 
-TEST_CASE("Visiting a slot that holds nothing does not fill it")
+TEST_CASE("Being unsaved survives a restart with the layout intact")
 {
-    // A slot nothing has been saved into restores the default, and writing
-    // that default straight back would cost the list the one thing it knows:
-    // which slots are the user's own.
+    // THE OTHER HALF, and what an undo history could never offer: a history
+    // does not survive the process, so a wrong change followed by quitting
+    // loses the layout for good. The WORKING state persists beside the slots,
+    // so quitting while unsaved costs nothing and asks nothing.
+    Fixture before;
+    arrangeSomethingElse(before);
+    REQUIRE(before.presets.activeDirty());
+    const std::string arranged = before.view.stack().tokens();
+    const std::string arrangedOrder = before.view.order().tokens();
+    const std::array<LayoutPreset, LayoutPresetSlots> slots = before.presets.all();
+
+    // A second session restores the slots and, separately, the working layout.
+    Fixture after;
+    after.presets.restore(slots, before.presets.activeSlot());
+    after.view.order().restore(arrangedOrder);
+    after.view.stack().restore(arranged);
+    after.view.layout().setOrientation(before.view.layout().orientation());
+    after.view.layout().setWeights(before.view.layout().weightsSnapshot());
+
+    CHECK(after.view.stack().tokens() == arranged);
+    // ...and it is still unsaved, worked out by comparing the two rather than
+    // by any flag that was written down and could disagree with them.
+    CHECK(after.presets.activeDirty());
+}
+
+TEST_CASE("Visiting a slot that holds nothing leaves it empty")
+{
+    // A slot nothing has been saved into restores the default. Opening it is
+    // not a change, so nothing about it reads as needing saving, and the list
+    // keeps the one thing it knows: which slots are the user's own.
     Fixture fixture;
     arrangeSomethingElse(fixture);
-    REQUIRE(fixture.presets.syncActiveSlot());
+    REQUIRE_FALSE(fixture.presets.saveInto(fixture.presets.activeSlot()).status.empty());
 
     CHECK_FALSE(fixture.presets.load(6).status.empty());
     CHECK(fixture.presets.activeSlot() == 6);
-    CHECK_FALSE(fixture.presets.syncActiveSlot());
+    CHECK_FALSE(fixture.presets.activeDirty());
     CHECK(fixture.presets.at(6).stack.empty());
+
+    // Saving makes it real.
+    fixture.view.stack().choose(WaveformScopeId, true);
+    CHECK(fixture.presets.activeDirty());
+    CHECK_FALSE(fixture.presets.saveInto(fixture.presets.activeSlot()).status.empty());
+    CHECK_FALSE(fixture.presets.at(6).stack.empty());
 }
 
-TEST_CASE("Switching away keeps what was arranged behind you")
+TEST_CASE("Loading another slot discards an unsaved layout")
 {
-    // The reading of a load that auto-save makes true, and the reason nothing
-    // has to be confirmed on the way out.
+    // The user asked to go elsewhere, so they go elsewhere. Nothing prompts:
+    // what was unsaved was never in a slot to begin with, and a modal in the
+    // way of a keystroke is worse than the case it guards.
     Fixture fixture;
     arrangeSomethingElse(fixture);
-    REQUIRE(fixture.presets.syncActiveSlot());
-    const std::string arranged = fixture.view.stack().tokens();
+    REQUIRE(fixture.presets.activeDirty());
 
-    CHECK_FALSE(fixture.presets.load(4).status.empty());
+    CHECK_FALSE(fixture.presets.load(3).status.empty());
     CHECK(fixture.view.stack().ids() == std::vector<std::string>{VectorscopeScopeId});
-
-    CHECK_FALSE(fixture.presets.load(1).status.empty());
-    CHECK(fixture.view.stack().tokens() == arranged);
+    CHECK_FALSE(fixture.presets.activeDirty());
 }
 
 TEST_CASE("A slot named before it is filled loads under its own name")
@@ -128,7 +161,7 @@ TEST_CASE("The order the panes sit in belongs to the slot")
     fixture.view.stack().choose(WaveformScopeId, true);
     REQUIRE(fixture.view.reorderScopes(1, 0));
     const std::vector<std::string> arranged = fixture.view.order().ids();
-    REQUIRE(fixture.presets.syncActiveSlot());
+    REQUIRE_FALSE(fixture.presets.saveInto(fixture.presets.activeSlot()).status.empty());
 
     // Away to another slot, which takes the order the modules register in...
     CHECK_FALSE(fixture.presets.load(3).status.empty());
@@ -158,7 +191,7 @@ TEST_CASE("Moving a scope that is not shown is kept like any other")
     // Nothing about which scopes are on screen moved.
     REQUIRE(fixture.view.stack().tokens() == shownStack);
 
-    CHECK(fixture.presets.syncActiveSlot());
+    CHECK_FALSE(fixture.presets.saveInto(fixture.presets.activeSlot()).status.empty());
     CHECK(fixture.presets.at(1).order == fixture.view.order().tokens());
 }
 
@@ -171,7 +204,7 @@ TEST_CASE("Switching slots carries the whole order, shown or not")
     const std::size_t count = fixture.view.order().ids().size();
     REQUIRE(fixture.view.reorderScopes(static_cast<int>(count) - 1, 0));
     const std::vector<std::string> arranged = fixture.view.order().ids();
-    REQUIRE(fixture.presets.syncActiveSlot());
+    REQUIRE_FALSE(fixture.presets.saveInto(fixture.presets.activeSlot()).status.empty());
 
     CHECK_FALSE(fixture.presets.load(4).status.empty());
     REQUIRE(fixture.view.order().ids() != arranged);
@@ -201,43 +234,67 @@ TEST_CASE("The panes and the menu are seated by one order")
     CHECK(fixture.view.stack().ids().front() == HistogramScopeId);
 }
 
-TEST_CASE("A slot resumed from the file opens in its own order")
+TEST_CASE("Restoring slots does not disturb the working order")
 {
-    // The order is restored from the slot being resumed rather than from a
-    // global of its own, or the first frame would write the registry's order
-    // over what the user had dragged.
+    // The order the panes sit in is part of the working state as well as part
+    // of each slot, and the two are MEANT to differ - that is what being
+    // unsaved is. Restoring the slots must therefore not reach into the view:
+    // doing so would discard exactly what the working state exists to keep.
     Fixture fixture;
+    const std::size_t count = fixture.view.order().ids().size();
+    REQUIRE(fixture.view.reorderScopes(static_cast<int>(count) - 1, 0));
+    const std::vector<std::string> working = fixture.view.order().ids();
+
     std::array<LayoutPreset, LayoutPresetSlots> stored;
     stored[1].stack = fixture.presets.defaultLayout().stack;
     stored[1].order = formatStackTokens(fixture.registry, {std::string{WaveformScopeId}});
     fixture.presets.restore(stored, 2);
 
-    CHECK(fixture.view.order().ids().front() == WaveformScopeId);
+    CHECK(fixture.view.order().ids() == working);
+    // ...and the slot's own order is still what a load of it would bring.
+    CHECK(fixture.presets.at(2).order != fixture.view.order().tokens());
 }
 
-TEST_CASE("Copying into a slot leaves you where you are")
+TEST_CASE("Saving into another slot leaves you where you are, and unsaved")
 {
-    // Shift+digit, the one way to make something that holds still: every slot
-    // you are ON keeps changing under you, so a copy is only useful if it
-    // lands somewhere you are not and you stay put.
+    // Shift+digit and the save button are ONE call aimed at different slots.
+    // Aimed elsewhere it stamps a copy and touches nothing about where you
+    // are - including that your own slot still differs from the screen, which
+    // is what makes the stamp useful rather than a way of leaving.
     Fixture fixture;
     arrangeSomethingElse(fixture);
-    REQUIRE(fixture.presets.syncActiveSlot());
+    REQUIRE(fixture.presets.activeDirty());
     const std::string arranged = fixture.view.stack().tokens();
 
-    const LayoutPresetOutcome copied = fixture.presets.copyInto(7);
-    CHECK(copied.preferencesSaveDue);
+    CHECK_FALSE(fixture.presets.saveInto(7).status.empty());
     CHECK(fixture.presets.activeSlot() == 1);
     CHECK(fixture.presets.at(7).stack == arranged);
+    // Still unsaved: slot 1 is where you are, and it still holds nothing.
+    CHECK(fixture.presets.activeDirty());
 
-    // The copy is inert: arranging on where you still are does not follow it.
-    fixture.view.stack().choose(ParadeScopeId, true);
-    REQUIRE(fixture.presets.syncActiveSlot());
+    // ...and saving where you ARE settles it, by the same call.
+    CHECK_FALSE(fixture.presets.saveInto(fixture.presets.activeSlot()).status.empty());
+    CHECK_FALSE(fixture.presets.activeDirty());
     CHECK(fixture.presets.at(7).stack == arranged);
-    CHECK(fixture.presets.at(1).stack != arranged);
 }
 
-TEST_CASE("A copy keeps the name of the slot it lands in")
+TEST_CASE("A save with nothing to save writes nothing")
+{
+    // The dark button and a chord that does nothing are one state. A write
+    // producing the same bytes would still spend the preferences file's
+    // debounce, so the refusal is in the one place every entry point goes
+    // through rather than at each of them.
+    Fixture fixture;
+    arrangeSomethingElse(fixture);
+    REQUIRE_FALSE(fixture.presets.saveInto(fixture.presets.activeSlot()).status.empty());
+    REQUIRE_FALSE(fixture.presets.activeDirty());
+
+    const LayoutPresetOutcome again = fixture.presets.saveInto(fixture.presets.activeSlot());
+    CHECK(again.status.empty());
+    CHECK_FALSE(again.preferencesSaveDue);
+}
+
+TEST_CASE("A save keeps the name of the slot it lands in")
 {
     // A name outlives the layout it was given to, so stamping a layout over a
     // slot replaces what it holds and not what it is called.
@@ -246,8 +303,8 @@ TEST_CASE("A copy keeps the name of the slot it lands in")
     REQUIRE(renamed.preferencesSaveDue);
     arrangeSomethingElse(fixture);
 
-    const LayoutPresetOutcome copied = fixture.presets.copyInto(5);
-    CHECK(copied.status == "Copied to Skin tones");
+    const LayoutPresetOutcome saved = fixture.presets.saveInto(5);
+    CHECK(saved.status == "Skin tones saved");
     CHECK(presetDisplayName(5, fixture.presets.at(5)) == "Skin tones");
     CHECK_FALSE(fixture.presets.at(5).stack.empty());
 }

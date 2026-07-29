@@ -56,23 +56,39 @@ public:
     ///         always on a preset.
     [[nodiscard]] int activeSlot() const;
 
-    /// Writes the live layout into the active slot if it has moved since the
-    /// last look. Called once a frame: there is no explicit save, so a slot IS
-    /// whatever is on screen while you are on it.
-    /// @return Whether anything was written, so the host can schedule the
-    ///         preferences file's own debounced write.
-    [[nodiscard]] bool syncActiveSlot();
-
-    /// Copies the live layout into @p slot (1-based) and STAYS WHERE IT IS.
+    /// Writes the live layout into @p slot (1-based), LEAVING WHICH SLOT IS
+    /// ACTIVE ALONE. The one way anything reaches a slot: the toolbar's save
+    /// button and the save chord pass the active slot, and Shift+digit passes
+    /// another. They are one operation aimed at different slots rather than
+    /// three that happen to agree, so nothing about a save can drift apart
+    /// between them - not the name a slot keeps, not what counts as a change.
     ///
-    /// The keyboard's Shift+digit, and deliberately not in the interface. It
-    /// is the one way to make a stable reference point under auto-save: every
-    /// slot you are ON keeps changing under you, so stamping the current
-    /// arrangement into a slot you are NOT on is what leaves something that
-    /// holds still. Following the copy would defeat it - you would land on the
-    /// copy and immediately start editing it. The destination keeps its own
-    /// name; a name outlives the layout it was given to.
-    [[nodiscard]] LayoutPresetOutcome copyInto(int slot);
+    /// SAVING IS EXPLICIT, and the reason is not obvious enough to leave
+    /// unwritten. A slot that followed the screen by itself was pleasant until
+    /// a mistyped scope letter rewrote an arrangement. Undo does not answer
+    /// that: a history does not survive quitting, so a wrong change followed
+    /// by closing the application loses the layout for good. Explicit saving
+    /// prevents it outright - the change was never committed - and the WORKING
+    /// state persists separately, so quitting unsaved still costs nothing.
+    ///
+    /// Both readings of what it does to the save indicator fall out of the
+    /// comparison rather than being arranged: saving the slot you are ON makes
+    /// the working state and that slot agree, so there is nothing left to
+    /// save; saving into ANOTHER leaves your own slot differing from the
+    /// screen, so there still is. Neither is written down anywhere.
+    ///
+    /// @return Nothing at all when @p slot already restores what is on screen.
+    ///         A save with nothing to save writes nothing rather than writing
+    ///         the same bytes again, so it cannot spend the preferences file's
+    ///         debounce on a no-op.
+    [[nodiscard]] LayoutPresetOutcome saveInto(int slot);
+
+    /// Whether the live layout differs from what the active slot would
+    /// restore - what the toolbar's save button lights for, and the only
+    /// indicator that there is anything to save. The same comparison
+    /// @ref saveInto refuses on, so the button being dark and the save doing
+    /// nothing are one fact rather than two that must be kept in step.
+    [[nodiscard]] bool activeDirty() const;
 
     /// Puts @p slot's (1-based) layout on screen - the stack, the split, the
     /// weights, and the styles - and makes it the active slot. A slot holding

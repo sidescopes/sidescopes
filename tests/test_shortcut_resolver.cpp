@@ -445,12 +445,39 @@ TEST_CASE("A preset digit loads its slot and Shift saves into it")
 
     ModifierState modifiers;
     modifiers.shift = true;
-    // Shift+digit survives as a keyboard-only copy: it stamps the live layout
-    // into a slot you are not on, which is the one way to make something that
-    // holds still now that the slot you ARE on follows the screen.
+    // Shift+digit writes the live layout into a slot without going there. It
+    // is the same call the save button and the save chord make, aimed at
+    // another slot rather than at the one you are on.
     const ShortcutAction copy = sole(resolver.resolvePressed(context, modifiers, pressing("7")));
     REQUIRE(copy.kind == ShortcutAction::Kind::CopyPresetTo);
     CHECK(copy.presetSlot == 7);
+}
+
+TEST_CASE("Save is the platform's own command key and S")
+{
+    // Cmd+S where Command is the platform's command key, Ctrl+S where Control
+    // is - read from the seam the window chords already read, so the chord and
+    // the label the interface prints can never name different keys.
+    const ShortcutResolver resolver = defaultResolver();
+    ShortcutContext context = readyContext();
+
+    context.hidesWindowOnCommandW = true;  // macOS
+    ModifierState command;
+    command.command = true;
+    CHECK(sole(resolver.resolvePressed(context, command, pressing("S"))).kind ==
+          ShortcutAction::Kind::SaveActivePreset);
+    ModifierState control;
+    control.control = true;
+    CHECK(resolver.resolvePressed(context, control, pressing("S")).empty());
+
+    context.hidesWindowOnCommandW = false;  // Windows
+    CHECK(sole(resolver.resolvePressed(context, control, pressing("S"))).kind ==
+          ShortcutAction::Kind::SaveActivePreset);
+    CHECK(resolver.resolvePressed(context, command, pressing("S")).empty());
+
+    // A plain S is somebody else's key, and a chord never reaches the letters.
+    CHECK_FALSE(sole(resolver.resolvePressed(context, ModifierState{}, pressing("S"))).kind ==
+                ShortcutAction::Kind::SaveActivePreset);
 }
 
 TEST_CASE("The window chords follow the platform that owns them")

@@ -21,6 +21,12 @@ struct HostScope;
 ///         every key but Escape.
 [[nodiscard]] std::string shortcutLabel(const std::string& name);
 
+/// @return The save chord as this platform writes it - "Cmd+S" where Command
+///         is the platform's own command key and "Ctrl+S" where Control is.
+///         Read from the same seam the window chords are, so the label and the
+///         chord can never name different keys.
+[[nodiscard]] std::string saveChordLabel();
+
 /// What a shortcut asks the shell to carry out. The resolver decides which
 /// action a key means and fills the fields that action reads; the shell only
 /// executes it. @c Kind::None is the answer for a key that matched nothing.
@@ -43,6 +49,7 @@ struct ShortcutAction
         ClearRegion,
         LoadPreset,
         CopyPresetTo,
+        SaveActivePreset,
         HideApplication,
         MinimizeWindow,
         QuitWindow,

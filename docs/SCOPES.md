@@ -172,17 +172,26 @@ longer axis, so panes stack in a tall window and sit side by side in a wide
 one; Vertical (stacked) and Horizontal (side by side) force it either way.
 Dragging the divider between two panes changes their share.
 
-Nine preset slots hold layouts, and there is nothing to save: the slot you
-are on is whatever is on screen. Rearrange the scopes and that slot holds
-the new arrangement. A digit loads its slot; the picker in the toolbar
-opens the same nine as a list, where clicking a row loads it and the pen
-on each row renames it. Switching away keeps what you arranged behind you,
-so there is never anything to confirm on the way out.
+Nine preset slots hold layouts. A digit loads its slot; the picker in the
+toolbar opens the same nine as a list, where clicking a row loads it and
+the pen on each row renames it. A slot nothing has been saved into opens
+on the vectorscope alone, which is where the application starts.
 
-A slot nothing has been arranged on yet opens on the vectorscope alone,
-which is where the application starts. Visiting one does not claim it —
-only arranging something does — so the list goes on showing which slots
-are yours.
+Nothing reaches a slot until you say so. Rearrange the scopes and the save
+button beside the picker lights: the layout on screen now differs from the
+slot it came from. Click it, or press Cmd+S (Ctrl+S on Windows), and the
+slot takes it. That button is the only thing that says a layout is
+unsaved, and while it is dark there is nothing to save.
+
+What is on screen is kept for you regardless, saved or not. Quit while the
+button is lit and you come back exactly where you were: the same slot, the
+same arrangement, the same button still lit. The slots and the layout you
+are working on are two different things that persist separately, which is
+what lets a mistyped scope letter be an annoyance rather than the loss of
+a preset — the slot was never written to.
+
+Loading another slot replaces what is on screen and asks nothing. What was
+unsaved was never in a slot to begin with, and you asked to go elsewhere.
 
 A preset stores which scopes are shown, their order, the split, the pane
 weights and each scope's style — but not intensity, sampling, smoothing or

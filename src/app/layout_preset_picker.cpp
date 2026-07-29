@@ -9,6 +9,7 @@
 #include "app/imgui_ui.h"
 #include "app/menu_rows.h"
 #include "app/row_layout.h"
+#include "app/shortcut_resolver.h"
 #include "imgui.h"
 
 namespace sidescopes {
@@ -147,6 +148,24 @@ void LayoutPresetPicker::drawSlotRow(int slot, float width, IconTextures& icons,
     ImGui::PopID();
 }
 
+void LayoutPresetPicker::drawSaveButton(IconTextures& icons, LayoutPresetOutcome& outcome)
+{
+    // Dark and inert while the slot already holds what is on screen, the way
+    // the region toolbox stands its clear tool down with nothing to clear.
+    // This is also the ONLY drift indicator: the preset button carried a star
+    // for the same fact, and two marks for one thing is the clutter the list
+    // was cleared of.
+    const int active = m_presets.activeSlot();
+    const bool dirty = m_presets.activeDirty();
+    const std::string name = presetDisplayName(active, m_presets.at(active));
+    const std::string tooltip = dirty ? "Save the layout into " + name + " (" + saveChordLabel() + ")"
+                                      : name + " already holds what is on screen";
+    if (iconButton("##save-preset", icons.textureId(Icon::Save, iconPixelSize()), tooltip.c_str(), !dirty) && dirty) {
+        outcome = m_presets.saveInto(active);
+    }
+    ImGui::SameLine(0.0f, RowSeparation);
+}
+
 LayoutPresetOutcome LayoutPresetPicker::draw(IconTextures& icons)
 {
     // A sibling of the scope selector, standing after it: a preset IS a set of
@@ -182,6 +201,7 @@ LayoutPresetOutcome LayoutPresetPicker::draw(IconTextures& icons)
     // Each control on this row keeps the gap after itself, so the order they
     // are drawn in is the only thing that decides the order they appear in.
     ImGui::SameLine(0.0f, RowSeparation);
+    drawSaveButton(icons, outcome);
 
     return outcome;
 }

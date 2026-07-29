@@ -26,11 +26,6 @@ LayoutPresetController::LayoutPresetController(ScopeView& view, const ScopeRegis
 void LayoutPresetController::restore(const std::array<LayoutPreset, LayoutPresetSlots>& presets, int activeSlot)
 {
     m_store.restore(presets, activeSlot);
-    // The order the panes sit in belongs to the slot, so the view takes it
-    // from the slot being resumed rather than from a global of its own. The
-    // stack then seats itself by it.
-    m_view.order().restore(m_store.effective(m_store.activeSlot(), defaultLayout()).order);
-    m_view.stack().applyOrder();
 }
 
 const std::array<LayoutPreset, LayoutPresetSlots>& LayoutPresetController::all() const
@@ -160,29 +155,25 @@ LayoutPreset LayoutPresetController::defaultLayout() const
     return preset;
 }
 
-bool LayoutPresetController::syncActiveSlot()
+LayoutPresetOutcome LayoutPresetController::saveInto(int slot)
 {
-    // Compared against what the slot would RESTORE rather than against what it
-    // literally holds, so merely visiting a slot nothing has been saved into
-    // does not fill it with the default and cost the list the one thing it
-    // knows: which slots are the user's own.
-    const int slot = m_store.activeSlot();
     LayoutPreset live = capture();
     if (sameLayout(live, m_store.effective(slot, defaultLayout()))) {
-        return false;
+        return LayoutPresetOutcome{};
     }
     m_store.store(slot, std::move(live));
 
-    return true;
-}
-
-LayoutPresetOutcome LayoutPresetController::copyInto(int slot)
-{
-    m_store.store(slot, capture());
-
     // Read back after the write, which keeps the slot's name: a slot is
     // reported by what the user calls it, the way every list of them names it.
-    return LayoutPresetOutcome{"Copied to " + presetDisplayName(slot, m_store.at(slot)), false, true};
+    return LayoutPresetOutcome{presetDisplayName(slot, m_store.at(slot)) + " saved", false, true};
+}
+
+bool LayoutPresetController::activeDirty() const
+{
+    // Compared against what the slot would RESTORE rather than against what it
+    // literally holds, so a slot nothing has been saved into does not read as
+    // changed the moment it is opened on the arrangement it restores.
+    return !sameLayout(capture(), m_store.effective(m_store.activeSlot(), defaultLayout()));
 }
 
 LayoutPresetOutcome LayoutPresetController::load(int slot)

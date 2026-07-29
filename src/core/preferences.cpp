@@ -551,6 +551,9 @@ Preferences loadPreferences(const std::filesystem::path& file)
     if (const auto found = values.find("scope_stack"); found != values.end()) {
         preferences.scopeStack = cleanedScopeStack(found->second);
     }
+    if (const auto found = values.find("scope_order"); found != values.end()) {
+        preferences.scopeOrder = cleanedScopeStack(found->second);
+    }
 
     readFloat(values, "graticule_strength", preferences.graticuleStrength);
     readInt(values, "vectorscope_zoom", preferences.vectorscopeZoom);
@@ -604,6 +607,7 @@ bool savePreferences(const Preferences& preferences, const std::filesystem::path
         }
     }
     out << "scope_stack=" << preferences.scopeStack << '\n'
+        << "scope_order=" << preferences.scopeOrder << '\n'
         << "graticule_strength=" << preferences.graticuleStrength << '\n'
         << "vectorscope_zoom=" << preferences.vectorscopeZoom << '\n'
         << "ui_scale_factor=" << preferences.uiScaleFactor << '\n'

@@ -135,12 +135,20 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   selector arranges that slot alone, so one can read exposure first and
   another balance first, and loading a slot restores how it was laid out
   rather than only which scopes it showed.
-- Preset slots keep themselves. The slot you are on is whatever is on
-  screen: rearrange the scopes and that slot holds the new arrangement,
-  with no save to remember and nothing left unsaved. Switching away keeps
-  what you arranged behind you. A slot nothing has been arranged on yet
-  opens on the vectorscope alone, and visiting one does not claim it, so
-  the list goes on showing which slots are yours.
+- A save button in the toolbar, beside the scope and preset controls. It
+  lights when the layout on screen differs from the slot it came from and
+  is dark when there is nothing to save, which is the only place the
+  interface says so - the asterisk the preset button carried is gone.
+  Cmd+S, or Ctrl+S on Windows, does the same. Shift with a digit does the
+  same into a slot you are not on, and none of the three moves you: they
+  are one operation aimed at different slots.
+- What is on screen is kept whether or not it has been saved. Quit with
+  the save button lit and the next session opens on the same slot, the
+  same arrangement and the same lit button. The slots and the layout being
+  worked on persist separately, so a mistyped scope letter is an
+  annoyance rather than the loss of a preset - nothing reaches a slot
+  without being asked. A slot nothing has been saved into opens on the
+  vectorscope alone.
 - The preset control is a button like the scope selector beside it,
   carrying a panel glyph and the slot it is on, instead of a bare digit
   that looked like a label rather than something to click. It now stands

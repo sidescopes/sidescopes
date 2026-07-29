@@ -98,6 +98,13 @@ struct Preferences
     /// modules register in would silently re-point a token already written.
     /// Empty means none named, and the application opens on its own default.
     std::string scopeStack;
+    /// The order every registered scope sits in, in the same token format.
+    ///
+    /// This is the WORKING order - what is on screen now - beside each slot's
+    /// own. The two are meant to differ: that is what being unsaved is. Empty
+    /// means none named, and every scope falls back to the order the modules
+    /// register in.
+    std::string scopeOrder;
     /// The order the user keeps the scopes in - the sequence the menu lists
     /// them in and the panes follow - in the same token vocabulary as
     /// @ref scopeStack, and naming scopes whether or not they are on screen.

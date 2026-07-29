@@ -23,7 +23,7 @@ double alphaCoverage(const std::vector<uint8_t>& pixels)
 TEST_CASE("Every icon rasterizes with plausible stroke coverage")
 {
     for (const Icon icon : {Icon::Pin, Icon::PinOff, Icon::SquarePen, Icon::Pencil, Icon::User, Icon::Pipette,
-                            Icon::SquareDashed, Icon::ChartColumn, Icon::PenLine, Icon::PanelsTopLeft}) {
+                            Icon::SquareDashed, Icon::ChartColumn, Icon::PenLine, Icon::PanelsTopLeft, Icon::Save}) {
         for (const int size : {16, 24, 48}) {
             const auto pixels = rasterizeIcon(icon, size);
             REQUIRE(pixels.size() == static_cast<std::size_t>(size) * size * 4);
@@ -61,6 +61,12 @@ TEST_CASE("Icons are distinct images")
     const auto chartColumn = rasterizeIcon(Icon::ChartColumn, 24);
     CHECK(panels != chartColumn);
     CHECK(panels != squarePen);
+    // The save and the two picker buttons stand side by side on the toolbar,
+    // so the one thing that has to hold is that they are not the same picture.
+    const auto save = rasterizeIcon(Icon::Save, 24);
+    CHECK(save != panels);
+    CHECK(save != chartColumn);
+    CHECK(save != penLine);
 }
 
 TEST_CASE("The preset glyph is a frame divided into panes")

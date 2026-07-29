@@ -20,6 +20,11 @@ std::string shortcutLabel(const std::string& name)
     return name == "Escape" ? "Esc" : name;
 }
 
+std::string saveChordLabel()
+{
+    return platformHidesWindowOnCommandW() ? "Cmd+S" : "Ctrl+S";
+}
+
 namespace {
 
 // The preset digits, named the way the key probe names every other key.
@@ -69,6 +74,21 @@ ShortcutAction resolveWindowChord(const ShortcutContext& context, const Modifier
         if (context.quitsOnControlQ && pressed("Q")) {
             return ShortcutAction::plain(ShortcutAction::Kind::QuitWindow);
         }
+    }
+
+    return {};
+}
+
+// Save is the platform's own command key and S - Command on macOS, Control on
+// Windows. Which key that is, is the same question the window chords answer,
+// so it is read from the seam that already answers it rather than a new one.
+ShortcutAction resolveSaveChord(const ShortcutContext& context, const ModifierState& modifiers,
+                                const ShortcutKeyPressed& pressed)
+{
+    const bool commandKey = context.hidesWindowOnCommandW ? modifiers.command : modifiers.control;
+    const bool otherKey = context.hidesWindowOnCommandW ? modifiers.control : modifiers.command;
+    if (commandKey && !otherKey && !modifiers.option && pressed("S")) {
+        return ShortcutAction::plain(ShortcutAction::Kind::SaveActivePreset);
     }
 
     return {};
@@ -198,6 +218,10 @@ std::vector<ShortcutAction> ShortcutResolver::resolvePressed(const ShortcutConte
     ShortcutAction chord = resolveWindowChord(context, modifiers, pressed);
     if (chord.kind != ShortcutAction::Kind::None) {
         return {chord};
+    }
+    const ShortcutAction save = resolveSaveChord(context, modifiers, pressed);
+    if (save.kind != ShortcutAction::Kind::None) {
+        return {save};
     }
     // Command, Control, and Option chords belong to the system and the window,
     // so any of them silences the plain keys. Shift alone stays meaningful: it
