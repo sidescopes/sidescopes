@@ -1,8 +1,13 @@
 # Scope modules
 
 Every analysis scope loads through one C ABI - the built-ins included.
-The contract lives in `include/sidescopes/module.h`; the design record
-and its precedent research live outside the repository.
+The contract lives in `include/sidescopes/module.h`.
+
+A module declares one or more scopes. Each carries an id, a display name,
+a shortcut letter and its parameters, and the host builds the scope
+selector, the menus, the shortcuts and the preferences from those
+declarations rather than from a list of its own. What the scopes do with
+that is [SCOPES.md](SCOPES.md).
 
 ## Shape
 
@@ -17,44 +22,19 @@ and its precedent research live outside the repository.
   configured identically.
 - No allocation, exceptions, or toolkit types cross the boundary.
 
-## Phasing
+## Where it stands
 
-- P1 (in progress on this branch): the built-in engines wrap into
-  SsScopeInstance vtables and register statically through SsModuleEntry;
-  the analysis worker consumes instances. Behavior identical.
-- P2: the scope registry replaces the built-in enum; menus, sliders,
-  markers, and graticules become loops over descriptors and primitives.
-- P3: the dynamic loader (dev/CI first: -DSIDESCOPES_MODULES_DYNAMIC=ON);
-  release stays statically registered until operational evidence says
-  otherwise.
-- P4: the first out-of-tree module; ABI freezes at 1.0.
-
-## P1 continuation checklist
-
-- [x] include/sidescopes/module.h - the boundary contract
-- [x] src/modules/module_registry.{h,cpp} - static registration, host
-      struct, C++ RAII instance wrapper
-- [x] src/modules/vectorscope_module.cpp - the pattern-setter
-- [x] src/modules/waveform_module.cpp - registers the waveform AND the
-      parade (one module, two scopes)
-- [x] src/modules/histogram_module.cpp
-- [x] AnalysisWorker drives analysis through instances
-- [x] Adaptive image sizing via the "sidescopes.adaptive_image/1"
-      instance extension (worker side)
-- [x] Per-module CMake targets: sidescopes_module_vectorscope (its
-      module shim + vectorscope.cpp), _waveform (+ waveform.cpp),
-      _histogram (+ histogram.cpp); frame.cpp and graticule.cpp stay in
-      sidescopes_core (shared, or module targets would duplicate their
-      symbols at link). Core links the module targets PUBLIC; the app
-      and tests change nothing. This is the build-enforced hourglass in
-      its static form.
-- [x] Dev/CI dynamic mode behind -DSIDESCOPES_MODULES_DYNAMIC=ON:
-      each module target becomes a MODULE library with hidden
-      visibility exporting `extern "C" const SsModuleEntry
-      ss_module_entry` (a small #ifdef block at the bottom of each
-      module .cpp aliasing its kXModuleEntry); a loader
-      (src/modules/module_loader.{h,cpp}) dlopens/LoadLibrarys every
-      module file from a directory the build stamps in, ABI-gates on
-      major, and BuiltinModules() consumes the loader instead of the
-      static entries in that configuration. CI adds one job building
-      and testing with the flag ON.
+- The built-in engines are modules: each wraps into an `SsScopeInstance`
+  vtable and registers through `SsModuleEntry`, and the analysis worker
+  consumes instances rather than an enum of scopes.
+- The host is registry-driven throughout. The scope selector, the menus,
+  the sliders, the markers and the graticules are loops over descriptors
+  and declarative primitives, so a scope reaches the interface without the
+  host naming it.
+- Dynamic loading works on every supported platform behind
+  `-DSIDESCOPES_MODULES_DYNAMIC=ON`, where each module builds as a shared
+  object exporting `ss_module_entry` and a loader gates it on the ABI
+  major. A CI job builds and tests that configuration. Release builds stay
+  statically registered until there is operational reason to change.
+- The ABI is at 0.5 and carries no stability promise. It freezes at 1.0,
+  which is also when the first out-of-tree module is expected to matter.

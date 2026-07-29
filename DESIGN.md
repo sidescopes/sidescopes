@@ -30,33 +30,47 @@ src/app        UI shell (Dear ImGui), preferences, wiring
 tests          mirrors src, one test file per module
 ```
 
-Data flow: the capture backend delivers whole-display frames into a
-latest-frame slot (the producer never blocks, stale frames are dropped); an
-analysis thread crops to the region of interest, skips identical content via
-a sparse hash, runs the scope engines, and publishes double-buffered images;
-the UI thread uploads changed images to textures and draws.
+Data flow: the capture backend delivers frames into a latest-frame slot (the
+producer never blocks, stale frames are dropped); an analysis thread crops to
+the region of interest, skips identical content via a sparse hash, runs the
+scope engines, and publishes double-buffered images; the UI thread uploads
+changed images to textures and draws.
 
-Region cropping is always done app-side. Some capture APIs can crop at the
-source and may be used as an optimization, but correctness never depends on
-it — the least capable backend defines the contract.
+Region cropping is always correct app-side. A backend that can narrow its
+capture to the region does so, and every frame states which part of the
+display it covers so a pass that needs pixels outside it is refused rather
+than answered from the wrong rectangle; but correctness never depends on the
+narrowing — the least capable backend defines the contract.
 
 ## Scopes
 
-SideScopes ships five scopes; any subset can be shown at once, splitting the
-window in the order they were turned on.
+SideScopes ships six scopes and a color picker; any subset can be shown at
+once, splitting the window in a configured order the panes follow. What each
+one shows and how to read it is [docs/SCOPES.md](docs/SCOPES.md).
 
-- **Vectorscope** — a chroma density plot in BT.601 or BT.709, with the
-  classic graticule: primary and secondary targets at 75% and 100%, and a
-  skin-tone line. It magnifies 1×/2×/4× to inspect the neutral core.
-- **Waveform** — luma and per-channel levels across the image width. The RGB
-  overlay is the default, because separated colored traces make a color cast
-  readable at a glance; a plain luma style and a colored-luma style (the luma
-  trace carrying each column's average color) are also available.
+- **Vectorscope** — a chroma density plot in BT.709, with the classic
+  graticule: primary and secondary targets at 75% and 100%, and a skin-tone
+  line. It magnifies 1×/2×/4× to inspect the neutral core. BT.709 is the only
+  matrix offered, and that is a correctness decision rather than an omission:
+  sRGB's primaries are Rec. 709's, so a BT.601 plot would put its targets
+  where nothing on the display is.
+- **Waveform** — per-channel levels across the image width, the three traces
+  overlaid in their own colors, because separated colored traces make a color
+  cast readable at a glance.
+- **Luma waveform** — brightness alone, in a plain style or carrying each
+  column's average color. One reads exposure and the other balance, so it is
+  a scope of its own rather than a style on the waveform, and both stand on
+  screen at once.
 - **RGB parade** — the waveform engine with the three channels laid side by
   side.
-- **Histogram** — the classic distribution, per channel or combined.
+- **Histogram** — the classic distribution, the channels stacked in bands.
+- **Combined histogram** — the same measurement with the channels overlaid
+  at full height, where the overlap itself is what is read.
 - **Color picker** — not a plot but a comparison pane: the color under the
   cursor held against a pinned reference, with readouts you can copy.
+
+Two scopes sharing an engine share one accumulation pass over the region, so
+a family costs what one member costs.
 
 The density scopes accumulate samples into integer bins and build a display
 image per frame, normalized to the densest bin so sparse traces stay visible
@@ -87,10 +101,15 @@ asymptotic tail of the average decisively.
 The analyzed region is chosen the way a screenshot tool works. A toolbar — and
 keyboard shortcuts — opens a picker over the dimmed screen: click a window to
 scope it, draw an arbitrary region by hand, or, where the platform can
-detect faces, click a face to scope the skin around it. Escape falls back to
-the whole screen. Once confirmed, the region carries a live border on the
-desktop, drawn like a macOS screenshot selection, that moves and resizes in
-place without reopening the picker.
+detect faces, click a face to scope the skin around it. Once confirmed, the
+region carries a live border on the desktop, drawn like a macOS screenshot
+selection, that moves and resizes in place without reopening the picker.
+
+Escape clears the region rather than falling back to a default one. There is
+no full-screen default: with nothing selected the scopes are empty by design,
+keeping their graticules while the marker and the color readout go on
+following the pointer, and the application captures and analyzes nothing at
+all. An empty scope is a state, not a fault.
 
 The picker suggests only exact information — real window rectangles and
 detected faces — and leaves everything else to a manual draw, on the principle
@@ -142,9 +161,14 @@ intensity and follow different marker-smoothing rhythms.
   failure, and never presents stale data as live: cursor sampling is
   suspended while capture is down.
 - Screen-recording permission attaches to the bundle identity; a stable code
-  signature keeps a single grant valid across rebuilds. Requesting pixels in
-  sRGB makes the OS handle display color conversion; wide-gamut capture is a
-  future, deliberate step.
+  signature keeps a single grant valid across rebuilds. Pixels are requested
+  in sRGB, so the OS handles display color conversion, and at ten bits a
+  channel where the compositor offers them. Depth pays only where a scope
+  projects a code into a continuous position: the vectorscope resolves a
+  smooth gradient into distinct chroma sites instead of collapsing onto the
+  eight-bit lattice, while the waveform and histogram plot into 256 levels
+  and are unchanged. It carries no HDR range. Wide gamut remains a future,
+  deliberate step.
 - The window sits above document and panel windows (Quick Look previews
   float higher than ordinary floating windows) and joins all Spaces.
 
