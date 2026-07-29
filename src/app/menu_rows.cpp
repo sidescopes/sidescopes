@@ -1,5 +1,6 @@
 #include "app/menu_rows.h"
 
+#include <algorithm>
 #include <cmath>
 
 #include "app/imgui_ui.h"
@@ -134,6 +135,17 @@ void drawMenuRowChosen(float rowTopY)
 float menuRowIconWidth()
 {
     return ImGui::GetFrameHeight() + ImGui::GetFontSize() * 0.5f;
+}
+
+void layMenuRowDropCatch(const char* id, const ImVec2& listTop, float width)
+{
+    const ImVec2 resume = ImGui::GetCursorScreenPos();
+    // The rows end one item spacing above where the cursor now stands, so an
+    // item of exactly that height, submitted from the top of the list, leaves
+    // the cursor back at the bottom of it with nothing left to undo.
+    const float height = std::max(0.0f, resume.y - listTop.y - ImGui::GetStyle().ItemSpacing.y);
+    ImGui::SetCursorScreenPos(listTop);
+    ImGui::InvisibleButton(id, ImVec2(width, height));
 }
 
 bool menuRowIconButton(const char* id, ImTextureID texture, const char* tooltip, bool emphasized)

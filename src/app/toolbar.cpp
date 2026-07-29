@@ -85,8 +85,7 @@ std::optional<std::pair<int, int>> scopeDrop(ImVec2 listTop, float width, int co
     const float advance = (resume.y - listTop.y) / static_cast<float>(count);
     const int gap = insertionGap(listTop.y, count, advance, spacing);
     drawInsertionBar(insertionBarY(listTop.y, gap, advance, spacing));
-    ImGui::SetCursorScreenPos(listTop);
-    ImGui::InvisibleButton("##scope-drop", ImVec2(width, resume.y - listTop.y));
+    layMenuRowDropCatch("##scope-drop", listTop, width);
     int from = -1;
     if (ImGui::BeginDragDropTarget()) {
         const ImGuiPayload* payload =
@@ -96,7 +95,6 @@ std::optional<std::pair<int, int>> scopeDrop(ImVec2 listTop, float width, int co
         }
         ImGui::EndDragDropTarget();
     }
-    ImGui::SetCursorScreenPos(resume);
     if (from < 0) {
         return std::nullopt;
     }

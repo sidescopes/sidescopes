@@ -74,6 +74,19 @@ void drawMenuRowChosen(float rowTopY);
 /// sharing that edge. An empty @p key draws nothing.
 void drawMenuRowAccelerator(const char* key, float rightPad);
 
+/// Lays an invisible catch over the rows already drawn, from @p listTop down to
+/// where the cursor now stands and @p width across, so a drag released anywhere
+/// over the list lands on one target rather than on whichever row happened to
+/// be under it.
+///
+/// Sized so that SUBMITTING it puts the cursor back where it was, which is the
+/// point. The obvious way to write this - move the cursor up, submit, move it
+/// back - ends on a bare cursor move with nothing after it, and ImGui reads
+/// that as being asked to grow the window around nothing. It says so in a red
+/// error window over the popup, in release builds as much as local ones, since
+/// the tooltip is only compiled out by IMGUI_DISABLE_DEBUG_TOOLS.
+void layMenuRowDropCatch(const char* id, const ImVec2& listTop, float width);
+
 /// An icon button that stands in a menu row: the toolbar's glyph and hover
 /// box, but only as tall as the row it shares, so a row carrying one is no
 /// taller than a row of plain checkboxes and the two menus keep one rhythm.

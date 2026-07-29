@@ -418,6 +418,113 @@ void rowIconsHoldOneLayoutAtEveryStrength(ImGuiTestContext* ctx)
     IM_CHECK_GT(menuRowKeyRightPad(), 0.0f);
 }
 
+// What each way of overlaying a drop catch left behind: whether the cursor
+// came back to where it started, whether ImGui was left believing it had been
+// asked to grow the window, and by how much the cursor overran the extent of
+// everything actually submitted.
+struct DropCatchProbe
+{
+    ImVec2 restored{0.0f, 0.0f};
+    ImVec2 expected{0.0f, 0.0f};
+    bool oldLeftPositionSet = false;
+    bool newLeftPositionSet = true;
+    float oldOverrunY = 0.0f;
+    float newOverrunY = 0.0f;
+};
+
+DropCatchProbe& dropCatchProbe()
+{
+    static DropCatchProbe instance;
+
+    return instance;
+}
+
+// Three rows of the shape both toolbar lists draw, returning where they start.
+ImVec2 layProbeRows()
+{
+    const ImVec2 listTop = ImGui::GetCursorScreenPos();
+    for (int row = 0; row < 3; ++row) {
+        ImGui::PushID(row);
+        ImGui::Selectable("row", false, ImGuiSelectableFlags_NoAutoClosePopups,
+                          ImVec2(160.0f, ImGui::GetFrameHeight()));
+        ImGui::PopID();
+    }
+
+    return listTop;
+}
+
+/// Lays the catch both ways over identical lists and records what each left.
+void dropCatchGui(ImGuiTestContext*)
+{
+    ImGui::SetNextWindowSize(ImVec2(400.0f, 400.0f), ImGuiCond_Always);
+    ImGui::Begin("Catch", nullptr, ImGuiWindowFlags_NoSavedSettings);
+    pushMenuRowStyle();
+    DropCatchProbe& probe = dropCatchProbe();
+    ImGuiWindow* window = ImGui::GetCurrentWindow();
+
+    // The shape that shipped: move up, submit, move back. The move back is the
+    // last thing it does, and nothing follows it.
+    {
+        const ImVec2 listTop = layProbeRows();
+        const ImVec2 resume = ImGui::GetCursorScreenPos();
+        ImGui::SetCursorScreenPos(listTop);
+        ImGui::InvisibleButton("##old", ImVec2(160.0f, resume.y - listTop.y));
+        ImGui::SetCursorScreenPos(resume);
+        probe.oldLeftPositionSet = window->DC.IsSetPos;
+        probe.oldOverrunY = window->DC.CursorPos.y - window->DC.CursorMaxPos.y;
+        // Submit something so this probe does not itself trip End()'s check.
+        ImGui::Dummy(ImVec2(0.0f, 0.0f));
+    }
+
+    // The shape that ships now: sized so submitting it does the restoring.
+    {
+        const ImVec2 listTop = layProbeRows();
+        probe.expected = ImGui::GetCursorScreenPos();
+        layMenuRowDropCatch("##new", listTop, 160.0f);
+        probe.restored = ImGui::GetCursorScreenPos();
+        probe.newLeftPositionSet = window->DC.IsSetPos;
+        probe.newOverrunY = window->DC.CursorPos.y - window->DC.CursorMaxPos.y;
+    }
+
+    popMenuRowStyle();
+    ImGui::End();
+}
+
+/// SYMPTOM IF BROKEN: dragging a scope to reorder it raises Dear ImGui's own
+/// error window over the popup - "Code uses SetCursorPos()/SetCursorScreenPos()
+/// to extend window/parent boundaries" - and the popup mis-sizes underneath it.
+///
+/// Overlaying a drop catch on rows already drawn means moving the cursor back
+/// up the list. Moving it DOWN again afterwards is a bare cursor move with
+/// nothing submitted after it, which is exactly what ImGui refuses: it has been
+/// asked to grow the window and given nothing to grow around. Sizing the catch
+/// so that submitting it lands the cursor where it belongs removes the move
+/// entirely rather than silencing the complaint with a Dummy.
+void aDropCatchRestoresTheCursorByBeingSubmitted(ImGuiTestContext* ctx)
+{
+    ctx->SetRef("Catch");
+    ctx->Yield();
+    const DropCatchProbe& probe = dropCatchProbe();
+
+    // ImGui raises the error on TWO conditions together: a cursor move still
+    // pending, and a cursor standing past everything submitted. The shape that
+    // shipped met both - which is the reproduction, and the reason this is a
+    // real defect rather than a reading of the message.
+    IM_CHECK(probe.oldLeftPositionSet);
+    IM_CHECK_GT(probe.oldOverrunY, 0.0f);
+
+    // The shape that ships leaves no move pending, so the check never runs.
+    // Its overrun is untouched and uninteresting: a cursor one item spacing
+    // below the last item is the ordinary state every list ends in, which is
+    // why the pending move is the half that matters.
+    IM_CHECK_EQ(probe.newLeftPositionSet, false);
+    IM_CHECK_GT(probe.newOverrunY, 0.0f);
+
+    // ...and it still puts the cursor back, which is what the caller needs.
+    IM_CHECK_EQ(probe.restored.x, probe.expected.x);
+    IM_CHECK_EQ(probe.restored.y, probe.expected.y);
+}
+
 void registerLayoutTests(ImGuiTestEngine* engine)
 {
     ImGuiTest* wholePixels = IM_REGISTER_TEST(engine, "layout", "glyph_seats_on_whole_pixels");
@@ -449,6 +556,10 @@ void registerLayoutTests(ImGuiTestEngine* engine)
     chosen->GuiFunc = chosenBandGui;
     chosen->TestFunc = theChosenBandIsNotTheHoverBand;
 
+    ImGuiTest* katch = IM_REGISTER_TEST(engine, "layout", "drop_catch_restores_the_cursor");
+    katch->GuiFunc = dropCatchGui;
+    katch->TestFunc = aDropCatchRestoresTheCursorByBeingSubmitted;
+
     ImGuiTest* reveal = IM_REGISTER_TEST(engine, "layout", "row_icons_hold_one_layout");
     reveal->GuiFunc = chosenBandGui;
     reveal->TestFunc = rowIconsHoldOneLayoutAtEveryStrength;
@@ -461,5 +572,5 @@ int main()
 {
     using namespace sidescopes;
 
-    return uitest::runSuite("layout", registerLayoutTests, /*expectedTests=*/10);
+    return uitest::runSuite("layout", registerLayoutTests, /*expectedTests=*/11);
 }
