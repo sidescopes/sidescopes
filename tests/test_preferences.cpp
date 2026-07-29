@@ -4,6 +4,7 @@
 #include <string>
 
 #include "core/preferences.h"
+#include "support/scope_tokens.h"
 #include "temp_file.h"
 
 namespace sidescopes {
@@ -42,7 +43,7 @@ TEST_CASE("Preferences round-trip through a file")
     saved.scopeParams[VectorscopeId]["smoothing_ms"] = 60.0;
     saved.scopeParams[VectorscopeId]["gamma"] = 0.9;
     saved.vectorscopeZoom = 2;
-    saved.scopeStack = "HWV";  // stacking order is part of the setting
+    saved.scopeStack = testing::idTokens("HWV");  // stacking order is part of the setting
     saved.graticuleStrength = 0.5f;
     saved.windowX = 120;
     saved.windowWidth = 640;
@@ -58,7 +59,7 @@ TEST_CASE("Preferences round-trip through a file")
     CHECK(param(loaded, VectorscopeId, "smoothing_ms") == 60.0);
     CHECK(param(loaded, VectorscopeId, "gamma") == 0.9);
     CHECK(loaded.vectorscopeZoom == 2);
-    CHECK(loaded.scopeStack == "HWV");
+    CHECK(loaded.scopeStack == testing::idTokens("HWV"));
     CHECK(loaded.graticuleStrength == 0.5f);
     CHECK(loaded.windowX == 120);
     CHECK(loaded.windowWidth == 640);
@@ -119,39 +120,6 @@ TEST_CASE("Preferences keep a generic retired key without acting on it")
     CHECK(param(loaded, VectorscopeId, "gamma") == 0.65);
 }
 
-TEST_CASE("Preferences invert the legacy per-channel histogram flag")
-{
-    // The retired bool is stored 1 for per-channel and 0 for combined, and
-    // reads out as the scope each of those became: the two migrations compose,
-    // so a file two formats old still lands on the right letter.
-    const TempFile perChannel("legacy-hist-on.txt");
-    perChannel.write("scope_stack=VH\nhistogram_per_channel=1\n");
-    CHECK(loadPreferences(perChannel.path()).scopeStack == "VH");
-
-    const TempFile combined("legacy-hist-off.txt");
-    combined.write("scope_stack=VH\nhistogram_per_channel=0\n");
-    CHECK(loadPreferences(combined.path()).scopeStack == "VG");
-}
-
-TEST_CASE("Preferences map the legacy waveform mode to the scope it named")
-{
-    // The retired enum stored Luma as 0 and ColoredLuma as 4; every other
-    // value read as RGB. Both luma flavours are the luma waveform now, and the
-    // tint is that scope's own style, so two migrations compose onto one
-    // letter.
-    const TempFile luma("legacy-mode-luma.txt");
-    luma.write("scope_stack=VW\nwaveform_mode=0\n");
-    const Preferences plain = loadPreferences(luma.path());
-    CHECK(plain.scopeStack == "VL");
-    CHECK(param(plain, LumaWaveformId, "style") == 0.0);
-
-    const TempFile colored("legacy-mode-colored.txt");
-    colored.write("scope_stack=VW\nwaveform_mode=4\n");
-    const Preferences tinted = loadPreferences(colored.path());
-    CHECK(tinted.scopeStack == "VL");
-    CHECK(param(tinted, LumaWaveformId, "style") == 1.0);
-}
-
 TEST_CASE("Preferences seed the parade from the waveform")
 {
     // The parade persists nothing of its own; its gain and stride mirror the
@@ -190,114 +158,57 @@ TEST_CASE("Preferences never write the parade to file")
     CHECK(contents.find("org.sidescopes.parade") == std::string::npos);
 }
 
-TEST_CASE("Preferences migrate the legacy single view mode")
+TEST_CASE("Preferences deduplicate the scopes a stack names")
 {
-    const TempFile file("legacy-view-mode.txt");
-    file.write("view_mode=2\n");  // the old vectorscope-and-waveform pair
+    const TempFile file("dupe-stack.txt");
+    file.write("scope_stack=" + testing::idTokens("VVH") + "\n");
 
     const Preferences loaded = loadPreferences(file.path());
-    CHECK(loaded.scopeStack == "VW");
+    CHECK(loaded.scopeStack == testing::idTokens("VH"));
 }
 
-TEST_CASE("Preferences migrate the scope bit set and waveform style")
+TEST_CASE("A stack naming nothing readable loads empty")
 {
-    // The RGB+Luma composite reaches both scopes again: it is what stacking
-    // them is, and the letter it always translated to is a scope once more.
-    const TempFile file("legacy-bit-set.txt");
-    file.write("visible_scopes=6\nwaveform_mode=2\n");
+    // Core never judges WHICH scopes an id names - that is the registry's - so
+    // all it drops is what is not a token at all. A letter is not a token any
+    // more, and the application opens on its own default when nothing is named.
+    const TempFile file("junk-stack.txt");
+    file.write("scope_stack=VWH\n");
 
-    const Preferences loaded = loadPreferences(file.path());
-    CHECK(loaded.scopeStack == "WLH");
+    CHECK(loadPreferences(file.path()).scopeStack.empty());
+    CHECK(Preferences{}.scopeStack.empty());
 }
 
-TEST_CASE("Preferences carry the oldest luma letter straight through")
+TEST_CASE("A preset slot round-trips the order its panes sit in")
 {
-    // A stack saved with the separate luma waveform of the oldest builds. That
-    // scope exists again, so the letter reaches it directly rather than
-    // travelling through the style it was folded into for one release.
-    const TempFile file("legacy-luma-letter.txt");
-    file.write("scope_stack=LR\n");
-
-    CHECK(loadPreferences(file.path()).scopeStack == "LR");
-}
-
-TEST_CASE("Preferences never load an empty scope set")
-{
-    const TempFile file("empty-scopes.txt");
-    file.write("scope_stack=xyz\n");  // non-token characters drop out, leaving nothing
-
-    const Preferences loaded = loadPreferences(file.path());
-    CHECK(loaded.scopeStack == "V");
-}
-
-TEST_CASE("Preferences keep a scope letter core does not know")
-{
-    // Core no longer whitelists a fixed scope set: any uppercase letter
-    // survives cleaning for the registry to resolve, so a scope added after
-    // this code (here N) still round-trips through the file.
-    const TempFile file("new-scope-letter.txt");
-    file.write("scope_stack=N\n");
-
-    const Preferences loaded = loadPreferences(file.path());
-    CHECK(loaded.scopeStack == "N");
-}
-
-TEST_CASE("Preferences deduplicate scope letters")
-{
-    const TempFile file("dup-scopes.txt");
-    file.write("scope_stack=RWRxW\n");
-
-    const Preferences loaded = loadPreferences(file.path());
-    CHECK(loaded.scopeStack == "RW");
-}
-
-TEST_CASE("Preferences round-trip the scope order beside the stack")
-{
-    // The order names scopes whether or not they are on screen, so it is not a
-    // second spelling of the stack and has to survive on its own.
+    // The order the panes take belongs to the slot, not to the application:
+    // restoring which scopes a slot shows without restoring how they are laid
+    // out would be half a restore.
     Preferences saved;
-    saved.scopeStack = "WV";
-    saved.scopeOrder = "VWRHC";
+    saved.layoutPresets[2].stack = "WV";
+    saved.layoutPresets[2].order = "VWRHC";
 
-    const TempFile file("scope-order.txt");
+    const TempFile file("preset-order.txt");
     REQUIRE(savePreferences(saved, file.path()));
 
     const Preferences loaded = loadPreferences(file.path());
-    CHECK(loaded.scopeStack == "WV");
-    CHECK(loaded.scopeOrder == "VWRHC");
+    CHECK(loaded.layoutPresets[2].stack == "WV");
+    CHECK(loaded.layoutPresets[2].order == "VWRHC");
+    // A slot nothing was saved into carries no order either, and the
+    // application seeds it from what the modules register.
+    CHECK(loaded.layoutPresets[0].order.empty());
 }
 
-TEST_CASE("A file with no scope order takes the one its stack implies")
+TEST_CASE("Preferences carry every scope as a bracketed id")
 {
-    // Every file written before the order existed. Resetting to registration
-    // order would rearrange the panes of a user who had arranged them; the
-    // stack states the arrangement they had, so it seeds the order.
-    const TempFile file("no-scope-order.txt");
-    file.write("scope_stack=HWV\n");
+    // Core keeps an id it does not recognise: the registry is the only judge
+    // of which scopes are real, and a build that has lost a module must not
+    // rewrite the file that still names it.
+    const TempFile file("id-stack.txt");
+    file.write("scope_stack=[org.sidescopes.colorpicker][org.example.custom]\n");
 
     const Preferences loaded = loadPreferences(file.path());
-    CHECK(loaded.scopeOrder == "HWV");
-}
-
-TEST_CASE("Preferences keep the color picker in the stack")
-{
-    const TempFile file("picker-scope.txt");
-    file.write("scope_stack=CV\n");
-
-    const Preferences loaded = loadPreferences(file.path());
-    CHECK(loaded.scopeStack == "CV");
-}
-
-TEST_CASE("Preferences carry bracketed id tokens through the stack")
-{
-    // A letterless scope rides the stack as [id]; the file cleaner passes the
-    // token through untouched for the registry to resolve, deduplicating whole
-    // tokens and mixing freely with legacy letters.
-    const TempFile file("id-token-stack.txt");
-    file.write("scope_stack=V[org.sidescopes.test.custom]V[org.sidescopes.test.custom]H\n");
-
-    const Preferences loaded = loadPreferences(file.path());
-    CHECK(loaded.scopeStack == "V[org.sidescopes.test.custom]H");
+    CHECK(loaded.scopeStack == "[org.sidescopes.colorpicker][org.example.custom]");
 }
 
 TEST_CASE("Preferences tolerate unknown keys and malformed lines")
@@ -337,69 +248,6 @@ TEST_CASE("Preferences tell an unset interface size from a chosen 100%")
     const TempFile written("ui-scale-written.txt");
     REQUIRE(savePreferences(saved, written.path()));
     CHECK(loadPreferences(written.path()).uiScaleFactor == 1.25f);
-}
-
-TEST_CASE("Preferences load a whole legacy file to the same live state")
-{
-    // A realistic file written by the last typed build: legacy per-scope keys,
-    // a letter stack, the inverted per-channel flag, a per-name shortcut. Every
-    // value must land exactly where the new build reads it, or the owner loses
-    // settings silently on the first launch.
-    const TempFile file("legacy-whole.txt");
-    file.write(
-        "vectorscope_gain=5.0\n"
-        "vectorscope_stride=2\n"
-        "vectorscope_smoothing_ms=90\n"
-        "waveform_gain=0.08\n"
-        "waveform_stride=1\n"
-        "waveform_smoothing_ms=110\n"
-        "histogram_stride=3\n"
-        "matrix=0\n"
-        "trace_response=1\n"
-        "waveform_mode=4\n"
-        "histogram_per_channel=1\n"
-        "scope_stack=VWH\n"
-        "graticule_strength=0.75\n"
-        "vectorscope_zoom=2\n"
-        "window_x=100\n"
-        "window_width=500\n"
-        "shortcut_waveform=X\n");
-
-    const Preferences loaded = loadPreferences(file.path());
-
-    CHECK(param(loaded, VectorscopeId, "gain") == 5.0);
-    CHECK(param(loaded, VectorscopeId, "stride") == 2.0);
-    CHECK(param(loaded, VectorscopeId, "smoothing_ms") == 90.0);
-    // Both of the vectorscope's retired choices go unread; its live setting is
-    // the trace gamma, which no legacy key can name.
-    CHECK(param(loaded, VectorscopeId, "response") == -1.0);
-    CHECK(param(loaded, VectorscopeId, "gamma") == 0.65);
-    CHECK(param(loaded, WaveformId, "gain") == 0.08);
-    CHECK(param(loaded, WaveformId, "stride") == 1.0);
-    CHECK(param(loaded, WaveformId, "smoothing_ms") == 110.0);
-    // The retired mode named the coloured luma waveform, which is a scope with
-    // a style of its own now; the key itself is consumed by that reading.
-    CHECK(param(loaded, WaveformId, "mode") == -1.0);
-    CHECK(param(loaded, LumaWaveformId, "style") == 1.0);
-    CHECK(param(loaded, ParadeId, "gain") == 0.08);  // mirrors the waveform
-    CHECK(param(loaded, ParadeId, "stride") == 1.0);
-    CHECK(param(loaded, HistogramId, "stride") == 3.0);
-    // The retired per-channel flag reads as the scope it names rather than as
-    // a style: it survives in the stack's letter, and the key itself is gone,
-    // so a later load cannot read it a second time.
-    CHECK(param(loaded, HistogramId, "style") == -1.0);
-    // The stored mode named the coloured luma waveform, so W reads as L. The
-    // binding does not follow it: a key is bound to a scope, not to the style
-    // it was in.
-    CHECK(loaded.scopeStack == "VLH");
-    CHECK(loaded.graticuleStrength == 0.75f);
-    CHECK(loaded.vectorscopeZoom == 2);
-    CHECK(loaded.windowX == 100);
-    CHECK(loaded.windowWidth == 500);
-    CHECK(loaded.scopeShortcuts.count(LumaWaveformId) == 0);
-    const auto binding = loaded.scopeShortcuts.find(WaveformId);
-    REQUIRE(binding != loaded.scopeShortcuts.end());
-    CHECK(binding->second == "X");
 }
 
 TEST_CASE("Preferences reject a malformed action shortcut binding")

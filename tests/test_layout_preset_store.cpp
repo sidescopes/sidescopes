@@ -4,6 +4,7 @@
 
 #include "app/layout_preset_store.h"
 #include "core/preferences.h"
+#include "support/scope_tokens.h"
 
 namespace sidescopes {
 namespace {
@@ -90,7 +91,7 @@ TEST_CASE("Two presets differ if any captured field does")
     CHECK(sameLayout(saved, presetOf("VW", 2)));
 
     LayoutPreset stack = saved;
-    stack.stack = "VWH";
+    stack.stack = testing::idTokens("VWH");
     CHECK_FALSE(sameLayout(saved, stack));
 
     LayoutPreset orientation = saved;

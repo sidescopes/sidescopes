@@ -128,12 +128,13 @@ void scopeToggles(ImGuiTestContext* ctx)
     // Clicking H stacks the histogram in activation order after W.
     ctx->ItemClick("H");
     IM_CHECK(h.scopeView.stack().shows(HistogramScopeId));
-    IM_CHECK(h.scopeView.stack().tokens() == "VWH");
+    IM_CHECK(h.scopeView.stack().tokens() ==
+             "[org.sidescopes.vectorscope][org.sidescopes.waveform][org.sidescopes.histogram]");
 
     // Clicking W again toggles the waveform back off.
     ctx->ItemClick("W");
     IM_CHECK(!h.scopeView.stack().shows(WaveformScopeId));
-    IM_CHECK(h.scopeView.stack().tokens() == "VH");
+    IM_CHECK(h.scopeView.stack().tokens() == "[org.sidescopes.vectorscope][org.sidescopes.histogram]");
     IM_CHECK(!enables(WaveformScopeId));
 }
 

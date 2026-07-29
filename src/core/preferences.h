@@ -35,6 +35,12 @@ inline constexpr std::size_t MaximumPresetNameLength = 24;
 struct LayoutPreset
 {
     std::string stack;  ///< Stack tokens, the scopeStack format; empty = unused.
+    /// The order every registered scope sits in while this slot is loaded, in
+    /// the same token format. The order the panes take is part of the
+    /// arrangement a slot holds, not a setting beside it: restoring which
+    /// scopes are shown without restoring how they are laid out is half a
+    /// restore. Empty means the order the modules register in.
+    std::string order;
     /// What the user calls this slot. Empty means it has never been renamed,
     /// and the application shows the slot's default name; a name is kept even
     /// for a slot holding no layout, so a set of slots can be named before
@@ -86,23 +92,15 @@ struct Preferences
         {"org.sidescopes.waveform", {{"gain", 0.05}, {"stride", 1.0}, {"smoothing_ms", 100.0}}},
         {"org.sidescopes.histogram", {{"stride", 1.0}}},
     };
-    /// The scopes on screen in stacking order. New files store one token per
-    /// scope: a bracketed `[id]` for a letterless scope, otherwise the scope's
-    /// letter. Legacy files store bare letters (V vectorscope, W waveform, L
-    /// luma waveform, R RGB parade, H histogram, G combined histogram, C color
-    /// picker). A file written while a scope's plots were its STYLES carries
-    /// that choice under a retired key - the waveform's `mode`, the
-    /// histogram's `style` - and its W and H are rewritten by that reading.
-    /// Never empty.
-    std::string scopeStack = "V";
+    /// The scopes on screen in stacking order, one bracketed `[id]` per scope.
+    /// A scope is never named by its LETTER: the registry hands a letter out
+    /// only if it is still free, so a collision or a change in the order
+    /// modules register in would silently re-point a token already written.
+    /// Empty means none named, and the application opens on its own default.
+    std::string scopeStack;
     /// The order the user keeps the scopes in - the sequence the menu lists
     /// them in and the panes follow - in the same token vocabulary as
     /// @ref scopeStack, and naming scopes whether or not they are on screen.
-    /// Empty means no preference, and the application falls back to its
-    /// registration order; scopes the string leaves out follow the ones it
-    /// names. The application is the only judge of which tokens are real, so
-    /// the value is stored as read.
-    std::string scopeOrder;
     /// How strongly the graticule is drawn, a multiplier on its shipped ink and
     /// one of the discrete GraticuleStrengths. Bounded below rather than
     /// switchable off, so a stored value can quieten the graticule but never

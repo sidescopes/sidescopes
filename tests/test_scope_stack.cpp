@@ -8,6 +8,7 @@
 #include "app/scope_stack.h"
 #include "modules/module_registry.h"
 #include "sidescopes/module.h"
+#include "support/scope_tokens.h"
 
 namespace sidescopes {
 namespace {
@@ -136,14 +137,14 @@ TEST_CASE("The panes take the preferred order, not the order switched on")
     // rearranges the panes underneath.
     ScopeOrder order{registry()};
     ScopeStack stack{registry(), order};
-    order.restore("HWV");
-    stack.restore("V");
+    order.restore(testing::idTokens("HWV"));
+    stack.restore(testing::idTokens("V"));
 
     stack.toggle(WaveformScopeId);
     CHECK(stack.ids() == std::vector<std::string>{WaveformScopeId, VectorscopeScopeId});
     stack.toggle(HistogramScopeId);
     CHECK(stack.ids() == std::vector<std::string>{HistogramScopeId, WaveformScopeId, VectorscopeScopeId});
-    CHECK(stack.tokens() == "HWV");
+    CHECK(stack.tokens() == testing::idTokens("HWV"));
 
     // Off and on again lands in the same seat, not at the end.
     stack.toggle(WaveformScopeId);
@@ -157,8 +158,8 @@ TEST_CASE("Restoring a stack seats it in the preferred order")
     // which scopes, not where they sit: the order answers that.
     ScopeOrder order{registry()};
     ScopeStack stack{registry(), order};
-    order.restore("HWV");
-    stack.restore("VWH");
+    order.restore(testing::idTokens("HWV"));
+    stack.restore(testing::idTokens("VWH"));
     CHECK(stack.ids() == std::vector<std::string>{HistogramScopeId, WaveformScopeId, VectorscopeScopeId});
 }
 
@@ -166,7 +167,7 @@ TEST_CASE("A change to the preferred order re-seats the panes")
 {
     ScopeOrder order{registry()};
     ScopeStack stack{registry(), order};
-    stack.restore("VWH");
+    stack.restore(testing::idTokens("VWH"));
     const std::vector<std::string> original{VectorscopeScopeId, WaveformScopeId, HistogramScopeId};
     REQUIRE(stack.ids() == original);
 
@@ -174,17 +175,17 @@ TEST_CASE("A change to the preferred order re-seats the panes")
     REQUIRE(order.move(static_cast<int>(order.rank(HistogramScopeId)), 0));
     stack.applyOrder();
     CHECK(stack.ids() == std::vector<std::string>{HistogramScopeId, VectorscopeScopeId, WaveformScopeId});
-    CHECK(stack.tokens() == "HVW");
+    CHECK(stack.tokens() == testing::idTokens("HVW"));
 }
 
 TEST_CASE("The enabled ids cover the whole stack")
 {
     ScopeOrder order{registry()};
     ScopeStack stack{registry(), order};
-    stack.restore("V");
+    stack.restore(testing::idTokens("V"));
     CHECK(stack.enabledScopeIds() == std::vector<std::string>{VectorscopeScopeId});
 
-    stack.restore("VH");
+    stack.restore(testing::idTokens("VH"));
     CHECK(stack.enabledScopeIds() == std::vector<std::string>{VectorscopeScopeId, HistogramScopeId});
 }
 
@@ -194,32 +195,32 @@ TEST_CASE("The color picker asks nothing of the worker")
     // contributes no id to the enabled set.
     ScopeOrder order{registry()};
     ScopeStack stack{registry(), order};
-    stack.restore("C");
+    stack.restore(testing::idTokens("C"));
     CHECK(stack.enabledScopeIds().empty());
     // The scope is still on screen; only the worker is spared.
     CHECK(stack.shows(ColorPickerScopeId));
 }
 
-TEST_CASE("The stack round-trips through preference letters")
+TEST_CASE("The stack round-trips through its preference tokens")
 {
     ScopeOrder order{registry()};
     ScopeStack stack{registry(), order};
-    stack.restore("VWRHC");
-    CHECK(stack.tokens() == "VWRHC");
+    stack.restore(testing::idTokens("VWRHC"));
+    CHECK(stack.tokens() == testing::idTokens("VWRHC"));
     CHECK(stack.ids().size() == 5);
 
-    SECTION("unknown letters are ignored")
+    SECTION("unknown tokens are ignored")
     {
-        stack.restore("VxH");
-        CHECK(stack.tokens() == "VH");
+        stack.restore(testing::idTokens("V") + "[org.sidescopes.absent]" + testing::idTokens("H"));
+        CHECK(stack.tokens() == testing::idTokens("VH"));
     }
 
     SECTION("naming nothing valid falls back to the vectorscope")
     {
         stack.restore("zzz");
-        CHECK(stack.tokens() == "V");
-        stack.restore("");
-        CHECK(stack.tokens() == "V");
+        CHECK(stack.tokens() == testing::idTokens("V"));
+        stack.restore(testing::idTokens(""));
+        CHECK(stack.tokens() == testing::idTokens("V"));
     }
 }
 
@@ -231,11 +232,10 @@ TEST_CASE("The stack reads scopes by bracketed id token")
     // Which scopes is the token string's answer; where they sit is the
     // preferred order's, which here is still the registration order.
     CHECK(stack.ids() == std::vector<std::string>{WaveformScopeId, HistogramScopeId});
-    // These built-ins carry letters, so they persist back as bare letters.
-    CHECK(stack.tokens() == "WH");
+    CHECK(stack.tokens() == testing::idTokens("WH"));
 }
 
-TEST_CASE("A stack drops a letter the registry rejects but keeps a known id")
+TEST_CASE("A stack drops a token the registry rejects but keeps a known id")
 {
     // R11: letter validation runs through the registry, never a fixed string,
     // so an unknown letter falls out while a valid id token is kept.

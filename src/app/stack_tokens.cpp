@@ -10,19 +10,13 @@ namespace sidescopes {
 std::vector<std::string> parseScopeTokens(const ScopeRegistry& registry, const std::string& text)
 {
     std::vector<std::string> scopes;
-    for (std::size_t at = 0; at < text.size();) {
-        const HostScope* scope = nullptr;
-        if (text[at] == '[') {
-            const auto close = text.find(']', at);
-            if (close == std::string::npos) {
-                break;
-            }
-            scope = registry.byId(text.substr(at + 1, close - at - 1));
-            at = close + 1;
-        } else {
-            scope = registry.byLetter(text[at]);
-            ++at;
+    for (std::size_t at = text.find('['); at != std::string::npos; at = text.find('[', at)) {
+        const auto close = text.find(']', at);
+        if (close == std::string::npos) {
+            break;
         }
+        const HostScope* scope = registry.byId(text.substr(at + 1, close - at - 1));
+        at = close + 1;
         if (scope != nullptr && std::find(scopes.begin(), scopes.end(), scope->id) == scopes.end()) {
             scopes.push_back(scope->id);
         }
@@ -45,14 +39,12 @@ std::string formatStackTokens(const ScopeRegistry& registry, const std::vector<s
 {
     std::string tokens;
     for (const std::string& id : stack) {
-        const HostScope* scope = registry.byId(id);
-        if (scope != nullptr && scope->letter != 0) {
-            tokens += scope->letter;
-        } else {
-            tokens += '[';
-            tokens += id;
-            tokens += ']';
+        if (registry.byId(id) == nullptr) {
+            continue;
         }
+        tokens += '[';
+        tokens += id;
+        tokens += ']';
     }
 
     return tokens;

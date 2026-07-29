@@ -13,7 +13,6 @@
 
 #include "core/environment.h"
 #include "core/scopes/scope_types.h"
-#include "core/style_promotion.h"
 
 namespace sidescopes {
 namespace {
@@ -445,6 +444,9 @@ void readLayoutPresets(const std::map<std::string, std::string, std::less<>>& va
         if (const auto found = values.find(prefix + "stack"); found != values.end()) {
             preset.stack = found->second;
         }
+        if (const auto found = values.find(prefix + "order"); found != values.end()) {
+            preset.order = found->second;
+        }
         if (const auto found = values.find(prefix + "name"); found != values.end()) {
             preset.name = sanitizedPresetName(found->second);
         }
@@ -459,116 +461,26 @@ void readLayoutPresets(const std::map<std::string, std::string, std::less<>>& va
     }
 }
 
-// The oldest builds stored a single view_mode; the next generation stored a
-// visible_scopes bit set that supersedes it. Returns the resulting bit set,
-// defaulting to the vectorscope alone.
-int legacyVisibleScopes(const std::map<std::string, std::string, std::less<>>& values)
-{
-    int legacyViewMode = -1;
-    readInt(values, "view_mode", legacyViewMode);
-    int visibleScopes = 1;
-    if (legacyViewMode >= 0 && legacyViewMode <= 3) {
-        constexpr int LegacyScopes[4] = {1, 2, 3, 4};
-        visibleScopes = LegacyScopes[legacyViewMode];
-    }
-    readInt(values, "visible_scopes", visibleScopes);
-
-    return visibleScopes;
-}
-
-// Translates the legacy visible-scopes bit set into ordered stack letters,
-// mapping the waveform bit through its stored style.
-std::string legacyScopeLetters(int visibleScopes, int storedWaveformMode)
-{
-    std::string stack;
-    if (visibleScopes & 1) {
-        stack += 'V';
-    }
-    if (visibleScopes & 2) {
-        switch (static_cast<WaveformMode>(storedWaveformMode)) {
-        case WaveformMode::Luma:
-            stack += 'L';
-            break;
-        case WaveformMode::RgbAndLuma:
-            stack += "WL";
-            break;
-        case WaveformMode::RgbParade:
-            stack += 'R';
-            break;
-        case WaveformMode::Rgb:
-        default:
-            stack += 'W';
-            break;
-        }
-    }
-    if (visibleScopes & 4) {
-        stack += 'H';
-    }
-
-    return stack;
-}
-
-// Cleans a stack token string, each token once, in order, defaulting to the
-// vectorscope. Both a bracketed `[id]` token and a bare letter pass through
-// for the registry to resolve which scope they name - core does not know the
-// scope set, so it never judges which letters are valid, only the token FORMAT
-// (an uppercase letter or a bracketed id). L is one of those letters again:
-// the separate luma waveform it named is a scope once more, so the oldest
-// files reach it without passing through the style it was folded into.
+// A stack as the file may carry it: bracketed ids, duplicates dropped, and
+// anything else ignored. Core does not know the scope set, so it never judges
+// WHICH scopes the ids name - only the token format - and leaves the registry
+// to resolve them.
 std::string cleanedScopeStack(const std::string& stack)
 {
     std::string cleaned;
-    for (std::size_t at = 0; at < stack.size();) {
-        std::string token;
-        if (stack[at] == '[') {
-            const auto close = stack.find(']', at);
-            if (close == std::string::npos) {
-                break;
-            }
-            token = stack.substr(at, close - at + 1);
-            at = close + 1;
-        } else {
-            const char letter = stack[at];
-            ++at;
-            if (letter < 'A' || letter > 'Z') {
-                continue;  // not a scope-letter token; ids arrive bracketed
-            }
-            token = std::string(1, letter);
+    for (std::size_t at = stack.find('['); at != std::string::npos; at = stack.find('[', at)) {
+        const auto close = stack.find(']', at);
+        if (close == std::string::npos) {
+            break;
         }
+        const std::string token = stack.substr(at, close - at + 1);
+        at = close + 1;
         if (cleaned.find(token) == std::string::npos) {
             cleaned += token;
         }
     }
 
-    return cleaned.empty() ? "V" : cleaned;
-}
-
-// Folds two generations of legacy scope keys into scopeStack: the single
-// view_mode, then the visible_scopes bit set plus the stored waveform
-// style, with the scope_stack key superseding both when present.
-void migrateScopeStack(const std::map<std::string, std::string, std::less<>>& values, int storedWaveformMode,
-                       Preferences& preferences)
-{
-    const int visibleScopes = legacyVisibleScopes(values);
-    const std::string stack = legacyScopeLetters(visibleScopes, storedWaveformMode);
-    if (!stack.empty()) {
-        preferences.scopeStack = stack;
-    }
-    if (const auto found = values.find("scope_stack"); found != values.end()) {
-        preferences.scopeStack = found->second;
-    }
-
-    preferences.scopeStack = cleanedScopeStack(preferences.scopeStack);
-}
-
-// The menu order. A file written before the order existed states one
-// implicitly - the scopes it had on screen, in the sequence they were stacked -
-// so an upgrade keeps the arrangement the user had rather than resetting it to
-// the registration order.
-void migrateScopeOrder(const std::map<std::string, std::string, std::less<>>& values, Preferences& preferences)
-{
-    const auto found = values.find("scope_order");
-    preferences.scopeOrder = found != values.end() ? found->second : preferences.scopeStack;
+    return cleaned;
 }
 
 // Writes the live layout state and every preset slot worth a line. An unused
@@ -591,6 +503,7 @@ void writeLayout(std::ostream& out, const Preferences& preferences)
             continue;
         }
         out << prefix << "stack=" << preset.stack << '\n'
+            << prefix << "order=" << preset.order << '\n'
             << prefix << "orientation=" << preset.orientation << '\n'
             << prefix << "weights=" << encodeWeights(preset.weights) << '\n';
         if (!preset.styles.empty()) {
@@ -635,12 +548,9 @@ Preferences loadPreferences(const std::filesystem::path& file)
     readGenericScopeParams(values, preferences);
     seedParadeFromWaveform(preferences);
 
-    // The retired waveform_mode value also selects the legacy stack letters, so
-    // it is read once here and handed to the migration.
-    int storedWaveformMode = static_cast<int>(WaveformMode::Rgb);
-    readInt(values, "waveform_mode", storedWaveformMode);
-    migrateScopeStack(values, storedWaveformMode, preferences);
-    migrateScopeOrder(values, preferences);
+    if (const auto found = values.find("scope_stack"); found != values.end()) {
+        preferences.scopeStack = cleanedScopeStack(found->second);
+    }
 
     readFloat(values, "graticule_strength", preferences.graticuleStrength);
     readInt(values, "vectorscope_zoom", preferences.vectorscopeZoom);
@@ -668,7 +578,6 @@ Preferences loadPreferences(const std::filesystem::path& file)
     // Last, because it rewrites what every read above produced: the stack, the
     // order, each preset, the weights and the shortcut overrides all state
     // arrangements in the vocabulary it translates.
-    promoteScopeStyles(preferences);
 
     return preferences;
 }
@@ -695,7 +604,6 @@ bool savePreferences(const Preferences& preferences, const std::filesystem::path
         }
     }
     out << "scope_stack=" << preferences.scopeStack << '\n'
-        << "scope_order=" << preferences.scopeOrder << '\n'
         << "graticule_strength=" << preferences.graticuleStrength << '\n'
         << "vectorscope_zoom=" << preferences.vectorscopeZoom << '\n'
         << "ui_scale_factor=" << preferences.uiScaleFactor << '\n'

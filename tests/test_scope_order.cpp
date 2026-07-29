@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "app/scope_order.h"
@@ -100,6 +101,14 @@ std::vector<std::string> registered()
     return ids;
 }
 
+// One scope as the preferences file spells it. Ids, never letters: a letter is
+// handed out only if it is still free, so a collision would re-point a token
+// already written.
+std::string token(std::string_view id)
+{
+    return std::string("[") + std::string{id} + "]";
+}
+
 }  // namespace
 
 TEST_CASE("A fresh order lists every scope in registration order")
@@ -112,7 +121,7 @@ TEST_CASE("A fresh order lists every scope in registration order")
 TEST_CASE("A restored order leads with the scopes it names")
 {
     ScopeOrder order{registry()};
-    order.restore("BA");
+    order.restore(token(BetaId) + token(AlphaId));
     // Named first, in the string's own sequence; the rest follow in
     // registration order, so a scope the file predates is never lost.
     REQUIRE(order.ids().size() == 4);
@@ -153,24 +162,24 @@ TEST_CASE("An order names every scope even when its string names none")
 TEST_CASE("A restored order drops what the registry does not know")
 {
     ScopeOrder order{registry()};
-    order.restore("BzA[org.sidescopes.test.absent]");
+    order.restore(token(BetaId) + token(AlphaId) + token("org.sidescopes.test.absent"));
     CHECK(order.ids() == std::vector<std::string>{BetaId, AlphaId, LetterlessId, ColorPickerScopeId});
 }
 
 TEST_CASE("A repeated scope takes its first place only")
 {
     ScopeOrder order{registry()};
-    order.restore("BAB");
+    order.restore(token(BetaId) + token(AlphaId) + token(BetaId));
     CHECK(order.ids() == std::vector<std::string>{BetaId, AlphaId, LetterlessId, ColorPickerScopeId});
 }
 
 TEST_CASE("An order round-trips through its tokens")
 {
     ScopeOrder order{registry()};
-    order.restore("BA");
-    // The letterless scope can only ride as a bracketed id, and every scope is
-    // named, so the string states the whole order rather than a prefix of it.
-    const std::string tokens = std::string("BA[") + LetterlessId + "]C";
+    order.restore(token(BetaId) + token(AlphaId));
+    // Every scope is named, so the string states the whole order rather than a
+    // prefix of it.
+    const std::string tokens = token(BetaId) + token(AlphaId) + token(LetterlessId) + token(ColorPickerScopeId);
     CHECK(order.tokens() == tokens);
 
     ScopeOrder reloaded{registry()};
@@ -190,7 +199,7 @@ TEST_CASE("A scope the order does not name ranks last")
 TEST_CASE("Sorting seats known scopes and trails the rest")
 {
     ScopeOrder order{registry()};
-    order.restore("BA");
+    order.restore(token(BetaId) + token(AlphaId));
 
     CHECK(order.sorted({AlphaId, BetaId}) == std::vector<std::string>{BetaId, AlphaId});
 

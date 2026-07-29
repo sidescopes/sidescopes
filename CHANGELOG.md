@@ -122,6 +122,10 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   an attached region leaves - a window closing out from under it, a lost
   face - now appear there with every other message instead of above the
   panes.
+- A preset carries the order its panes sit in. Dragging a scope in the
+  selector arranges that slot alone, so one can read exposure first and
+  another balance first, and loading a slot restores how it was laid out
+  rather than only which scopes it showed.
 - Preset slots keep themselves. The slot you are on is whatever is on
   screen: rearrange the scopes and that slot holds the new arrangement,
   with no save to remember and nothing left unsaved. Switching away keeps
@@ -138,6 +142,15 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Removed
 
+- Scope letters from the preferences file. A stack and a preset's order
+  name each scope by its id - `[org.sidescopes.waveform]` - rather than by
+  the letter it answers to. A letter is a property of a scope and not its
+  identity: the registry hands one out only if it is still free, so a
+  collision or a change in the order modules register in would silently
+  re-point every token already written, and users can rebind keys besides.
+  The file is longer and says what it means. Older files fall back to the
+  default arrangement, and the readers for retired formats go with the
+  letters they spoke in.
 - Saving a preset, as an action. There is no save button, no Shift+click
   on a row, no Save Current To menu and no drift marker on the toolbar,
   because a slot is never out of date with the screen. Shift with a digit

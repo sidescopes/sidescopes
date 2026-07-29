@@ -15,6 +15,7 @@
 #include "app/ui_scaling.h"
 #include "core/preferences.h"
 #include "modules/module_registry.h"
+#include "support/scope_tokens.h"
 
 namespace sidescopes {
 namespace {
@@ -143,7 +144,7 @@ TEST_CASE("A reordered scopes submenu still toggles the scope it names")
 TEST_CASE("The preset menus name their slots rather than spell them out")
 {
     MenuUnderTest menu;
-    menu.presets[0].stack = "VWH";
+    menu.presets[0].stack = testing::idTokens("VWH");
     menu.presets[0].orientation = 1;
     menu.presets[2].name = "Skin tones";
     menu.build();

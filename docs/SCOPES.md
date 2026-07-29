@@ -163,8 +163,9 @@ body of the cloud up, higher leaves it nearer its own density. The range is
 ## Arranging the panes
 
 Scopes split the window in the order the scope selector lists them, and
-that order can be dragged. A scope switched off and back on returns to the
-place it was left.
+that order can be dragged. The order belongs to the preset you are on, so
+different slots can lay the same scopes out differently. A scope switched
+off and back on returns to the place it was left.
 
 The Layout menu chooses how the window is divided. Automatic splits the
 longer axis, so panes stack in a tall window and sit side by side in a wide

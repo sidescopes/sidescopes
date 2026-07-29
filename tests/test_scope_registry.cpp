@@ -13,6 +13,7 @@
 #include "core/diagnostics.h"
 #include "modules/module_registry.h"
 #include "sidescopes/module.h"
+#include "support/scope_tokens.h"
 #include "temp_file.h"
 
 namespace sidescopes {
@@ -249,11 +250,11 @@ TEST_CASE("A saved stack naming a scope this build dropped still loads")
     // stack naming one that is gone must lose that scope and keep the rest,
     // and one naming nothing left must fall back rather than load empty.
     const ScopeRegistry registry{builtinModules()};
-    REQUIRE(registry.byLetter('N') == nullptr);
+    REQUIRE(registry.byId("org.sidescopes.neutral") == nullptr);
 
-    CHECK(parseStackTokens(registry, "VNH") == std::vector<std::string>{VectorscopeScopeId, HistogramScopeId});
+    CHECK(parseStackTokens(registry, testing::idTokens("V") + "[org.sidescopes.neutral]" + testing::idTokens("H")) ==
+          std::vector<std::string>{VectorscopeScopeId, HistogramScopeId});
     CHECK(parseStackTokens(registry, "[org.sidescopes.neutral]") == std::vector<std::string>{VectorscopeScopeId});
-    CHECK(parseStackTokens(registry, "N") == std::vector<std::string>{VectorscopeScopeId});
 }
 
 TEST_CASE("Pins mark the scopes that declare themselves targets")

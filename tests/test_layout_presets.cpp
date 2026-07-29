@@ -1,3 +1,4 @@
+#include <array>
 #include <catch2/catch_test_macros.hpp>
 #include <string>
 #include <vector>
@@ -7,6 +8,7 @@
 #include "app/scope_layout.h"
 #include "app/scope_registry.h"
 #include "app/scope_view.h"
+#include "app/stack_tokens.h"
 #include "core/analysis_worker.h"
 #include "modules/module_registry.h"
 
@@ -116,6 +118,39 @@ TEST_CASE("A slot named before it is filled loads under its own name")
 
     const LayoutPresetOutcome outcome = fixture.presets.load(3);
     CHECK(outcome.status == "Skin tones loaded");
+}
+
+TEST_CASE("The order the panes sit in belongs to the slot")
+{
+    // It used to be one global setting, so loading a preset restored WHICH
+    // scopes were shown but not how they were laid out - half a restore.
+    Fixture fixture;
+    fixture.view.stack().choose(WaveformScopeId, true);
+    REQUIRE(fixture.view.reorderScopes(1, 0));
+    const std::vector<std::string> arranged = fixture.view.order().ids();
+    REQUIRE(fixture.presets.syncActiveSlot());
+
+    // Away to another slot, which takes the order the modules register in...
+    CHECK_FALSE(fixture.presets.load(3).status.empty());
+    CHECK(fixture.view.order().ids() != arranged);
+
+    // ...and back, which brings the arrangement with it.
+    CHECK_FALSE(fixture.presets.load(1).status.empty());
+    CHECK(fixture.view.order().ids() == arranged);
+}
+
+TEST_CASE("A slot resumed from the file opens in its own order")
+{
+    // The order is restored from the slot being resumed rather than from a
+    // global of its own, or the first frame would write the registry's order
+    // over what the user had dragged.
+    Fixture fixture;
+    std::array<LayoutPreset, LayoutPresetSlots> stored;
+    stored[1].stack = fixture.presets.defaultLayout().stack;
+    stored[1].order = formatStackTokens(fixture.registry, {std::string{WaveformScopeId}});
+    fixture.presets.restore(stored, 2);
+
+    CHECK(fixture.view.order().ids().front() == WaveformScopeId);
 }
 
 TEST_CASE("Copying into a slot leaves you where you are")

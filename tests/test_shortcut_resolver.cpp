@@ -14,6 +14,7 @@
 #include "modules/module_registry.h"
 #include "platform/desktop.h"
 #include "sidescopes/module.h"
+#include "support/scope_tokens.h"
 #include "temp_file.h"
 
 namespace sidescopes {
@@ -520,7 +521,7 @@ TEST_CASE("The resolution context is gathered from the view and the platform")
 
     const ScopeRegistry registry{builtinModules()};
     ScopeView view{registry};
-    view.stack().restore("W");
+    view.stack().restore(testing::idTokens("W"));
     view.setZoom(4);
 
     const ShortcutContext context = shortcutContextFor(view, registry, /*settingsOpen=*/true, /*wantsTextInput=*/false);
@@ -534,7 +535,7 @@ TEST_CASE("The resolution context is gathered from the view and the platform")
     // A waveform alone takes no pins, so the pin key stands down with the tool.
     CHECK_FALSE(context.pinsAvailable);
 
-    view.stack().restore("V");
+    view.stack().restore(testing::idTokens("V"));
     CHECK(shortcutContextFor(view, registry, false, false).pinsAvailable);
 }
 

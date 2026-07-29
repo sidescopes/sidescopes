@@ -52,8 +52,8 @@ void restorePreferences(const Preferences& saved, ScopeView& view, PinBoard& pin
     analysis.scopeParams[ParadeScopeId]["stride"] = analysis.scopeParams[WaveformScopeId]["stride"];
 
     pins.restore(saved.pins, saved.pinComparator);
-    // The order first: the stack seats its scopes by it as it restores them.
-    view.order().restore(saved.scopeOrder);
+    // The order is not restored here: it belongs to the preset slot being
+    // resumed, and the controller applies it as it restores the slots.
     view.stack().restore(saved.scopeStack);
     view.setGraticuleStrength(saved.graticuleStrength);
     view.setZoom(saved.vectorscopeZoom);
@@ -88,7 +88,6 @@ Preferences capturePreferences(const ScopeView& view, const PinBoard& pins, cons
     saved.scopeParams[WaveformScopeId]["smoothing_ms"] = view.traces().smoothing(WaveformScopeId);
     saved.scopeParams[LumaWaveformScopeId]["smoothing_ms"] = view.traces().smoothing(LumaWaveformScopeId);
     saved.scopeStack = view.stack().tokens();
-    saved.scopeOrder = view.order().tokens();
     saved.graticuleStrength = view.graticuleStrength();
     saved.vectorscopeZoom = view.zoom();
     saved.layoutOrientation = orientationToInt(view.layout().orientation());

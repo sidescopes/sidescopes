@@ -7,6 +7,7 @@
 #include "app/pane_layout.h"
 #include "app/param_menu.h"
 #include "app/scope_layout.h"
+#include "app/scope_order.h"
 #include "app/scope_registry.h"
 #include "app/scope_view.h"
 #include "app/stack_tokens.h"
@@ -25,6 +26,11 @@ LayoutPresetController::LayoutPresetController(ScopeView& view, const ScopeRegis
 void LayoutPresetController::restore(const std::array<LayoutPreset, LayoutPresetSlots>& presets, int activeSlot)
 {
     m_store.restore(presets, activeSlot);
+    // The order the panes sit in belongs to the slot, so the view takes it
+    // from the slot being resumed rather than from a global of its own. The
+    // stack then seats itself by it.
+    m_view.order().restore(m_store.effective(m_store.activeSlot(), defaultLayout()).order);
+    m_view.stack().applyOrder();
 }
 
 const std::array<LayoutPreset, LayoutPresetSlots>& LayoutPresetController::all() const
@@ -123,6 +129,7 @@ LayoutPreset LayoutPresetController::capture() const
 {
     LayoutPreset preset;
     preset.stack = m_view.stack().tokens();
+    preset.order = m_view.order().tokens();
     preset.orientation = orientationToInt(m_view.layout().orientation());
     preset.weights = currentStackWeights();
     preset.styles = currentStackStyles();
@@ -139,6 +146,10 @@ LayoutPreset LayoutPresetController::defaultLayout() const
     const std::string id{VectorscopeScopeId};
     LayoutPreset preset;
     preset.stack = formatStackTokens(m_registry, {id});
+    // Every registered scope once, as the modules register them - written out
+    // rather than left empty so that a slot restored from this reads back
+    // through capture() identical, and is not written to on the next frame.
+    preset.order = ScopeOrder{m_registry}.tokens();
     preset.orientation = orientationToInt(LayoutOrientation::Automatic);
     preset.weights[id] = DefaultPaneWeight;
     std::map<std::string, double> styles = declaredStyles(id);
@@ -181,6 +192,8 @@ LayoutPresetOutcome LayoutPresetController::load(int slot)
     // not an error message where an action was offered.
     const LayoutPreset preset = m_store.effective(slot, defaultLayout());
     const std::string name = presetDisplayName(slot, preset);
+    // The order first: the stack seats its scopes by it as it restores them.
+    m_view.order().restore(preset.order);
     m_view.stack().restore(preset.stack);
     m_view.layout().setOrientation(orientationFromInt(preset.orientation));
     m_view.layout().setWeights(preset.weights);

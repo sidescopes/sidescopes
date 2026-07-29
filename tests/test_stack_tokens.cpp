@@ -91,22 +91,29 @@ TEST_CASE("A bracketed token names its scope by id")
     CHECK(parseStackTokens(registry(), std::string("[") + BetaId + "]") == std::vector<std::string>{BetaId});
 }
 
-TEST_CASE("A bare letter resolves through the registry")
+TEST_CASE("A letter names nothing: identity is the id alone")
 {
-    CHECK(parseStackTokens(registry(), "VW") == std::vector<std::string>{AlphaId, BetaId});
+    // A letter is a property of a scope, not its identity. The registry hands
+    // one out only if it is still free, so a collision or a change in the
+    // order modules register in would silently re-point every token already
+    // written - an arrangement quietly becoming a different set of scopes.
+    REQUIRE(registry().byLetter('V') != nullptr);
+    CHECK(parseStackTokens(registry(), "VW") == std::vector<std::string>{VectorscopeScopeId});
 }
 
 TEST_CASE("A token the registry does not know is dropped")
 {
-    CHECK(parseStackTokens(registry(), "VxW") == std::vector<std::string>{AlphaId, BetaId});
-    CHECK(parseStackTokens(registry(), "V[org.sidescopes.test.absent]W") == std::vector<std::string>{AlphaId, BetaId});
+    const std::string alpha = std::string("[") + AlphaId + "]";
+    const std::string beta = std::string("[") + BetaId + "]";
+    CHECK(parseStackTokens(registry(), alpha + "[org.sidescopes.test.absent]" + beta) ==
+          std::vector<std::string>{AlphaId, BetaId});
 }
 
 TEST_CASE("Repeated tokens collapse to one scope")
 {
-    CHECK(parseStackTokens(registry(), "VWV") == std::vector<std::string>{AlphaId, BetaId});
-    // Both spellings of the same scope still leave one entry.
-    CHECK(parseStackTokens(registry(), std::string("V[") + AlphaId + "]") == std::vector<std::string>{AlphaId});
+    const std::string alpha = std::string("[") + AlphaId + "]";
+    const std::string beta = std::string("[") + BetaId + "]";
+    CHECK(parseStackTokens(registry(), alpha + beta + alpha) == std::vector<std::string>{AlphaId, BetaId});
 }
 
 TEST_CASE("A token string naming nothing valid falls back")
@@ -121,7 +128,8 @@ TEST_CASE("A token string naming nothing valid falls back")
 
 TEST_CASE("A letterless scope round-trips as an id token")
 {
-    // Its id is the only carrier it has: a bare letter would drop it on save.
+    // Nothing about a letterless scope is special any more: every scope is
+    // written the same way, by the id it registered under.
     const HostScope* scope = registry().byId(LetterlessId);
     REQUIRE(scope != nullptr);
     REQUIRE(scope->letter == 0);
@@ -133,7 +141,7 @@ TEST_CASE("A letterless scope round-trips as an id token")
 
 TEST_CASE("Formatting a parsed stack writes the same tokens")
 {
-    const std::string tokens = std::string("VW[") + LetterlessId + "]";
+    const std::string tokens = std::string("[") + AlphaId + "][" + BetaId + "][" + LetterlessId + "]";
     CHECK(formatStackTokens(registry(), parseStackTokens(registry(), tokens)) == tokens);
 }
 

@@ -28,7 +28,6 @@ add_executable(sidescopes_tests
     test_graticule.cpp
     test_histogram.cpp
     test_preferences.cpp
-    test_style_promotion.cpp
     test_preferences_binding.cpp
     test_region_suggestions.cpp
     test_scope_goldens.cpp
