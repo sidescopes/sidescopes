@@ -262,6 +262,7 @@ add_library(sidescopes_app STATIC
     src/app/face_lock_controller.cpp
     src/app/frame_pacing.cpp
     src/app/layout_preset_store.cpp
+    src/app/layout_presets.cpp
     src/app/overlay_style.cpp
     src/app/pane_layout.cpp
     src/app/param_menu.cpp
@@ -310,7 +311,7 @@ set(SIDESCOPES_APP_IMGUI_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/src/app/icon_textures.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/app/imgui_ui.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/app/interface_style.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/app/layout_presets.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/app/layout_preset_picker.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/app/menu_rows.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/app/overlay_render.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/app/pane_area.cpp

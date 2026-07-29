@@ -19,6 +19,7 @@
 #include "app/face_lock_controller.h"
 #include "app/frame_pacing.h"
 #include "app/frame_timer.h"
+#include "app/layout_preset_picker.h"
 #include "app/layout_presets.h"
 #include "app/param_menu.h"
 #include "app/pin_board.h"
@@ -335,6 +336,10 @@ private:
     /// Owns the layout preset slots and what a slot records of - and restores
     /// to - the live layout; the host applies the outcomes it returns.
     LayoutPresetController m_presets;
+
+    /// Draws the toolbar's preset control over those slots, and owns the one
+    /// thing the list has of its own: the name being typed into a row.
+    LayoutPresetPicker m_presetPicker;
 
     /// Owns the debounced choice of what resolution each scope's image is
     /// computed at; the host puts the resolutions it settles on in force.

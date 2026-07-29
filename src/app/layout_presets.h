@@ -5,7 +5,6 @@
 #include <string>
 #include <string_view>
 
-#include "app/icon_textures.h"
 #include "app/layout_preset_store.h"
 #include "core/analysis_worker.h"
 #include "core/preferences.h"
@@ -30,11 +29,11 @@ struct LayoutPresetOutcome
 };
 
 /// Owns the layout preset slots and the capture and apply over them: what a
-/// slot records of the live layout, whether the live layout has drifted from
-/// the active slot, and the toolbar chip that loads and saves. It reads and
-/// writes the view and the settings it is constructed with; the status line
-/// and the persistence clocks travel back as a LayoutPresetOutcome the host
-/// applies.
+/// slot records of the live layout, and whether the live layout has drifted
+/// from the active slot. It reads and writes the view and the settings it is
+/// constructed with; the status line and the persistence clocks travel back as
+/// a LayoutPresetOutcome the host applies. The picker that draws all this is a
+/// class of its own, so nothing here depends on the toolkit.
 class LayoutPresetController
 {
 public:
@@ -50,6 +49,9 @@ public:
     /// @return All slots, for the context menu to list and for persistence.
     [[nodiscard]] const std::array<LayoutPreset, LayoutPresetSlots>& all() const;
 
+    /// @return What @p slot (1-based) holds, empty stack and all.
+    [[nodiscard]] const LayoutPreset& at(int slot) const;
+
     /// @return The active slot (1-based), or 0 when none is active.
     [[nodiscard]] int activeSlot() const;
 
@@ -60,35 +62,17 @@ public:
     /// split, the weights, and the styles. An empty slot only says so.
     [[nodiscard]] LayoutPresetOutcome load(int slot);
 
-    /// The toolbar preset dropdown: the preview names the active slot
-    /// (starred when dirty); the popup lists every slot by name and loads on
-    /// click, saves on Shift+click, and renames from the pen button standing
-    /// at the end of each row - the one way in, so a click on a row never has
-    /// to mean two things. @p icons is the shared glyph cache that button
-    /// draws from.
-    [[nodiscard]] LayoutPresetOutcome drawPicker(IconTextures& icons);
+    /// Calls @p slot (1-based) @p typed, or puts it back on its default name
+    /// when that is what was typed.
+    [[nodiscard]] LayoutPresetOutcome rename(int slot, std::string_view typed);
+
+    /// Whether the live layout has drifted from the active slot - what the
+    /// toolbar's star marks; false when no slot is active.
+    [[nodiscard]] bool activeDirty() const;
 
 private:
-    /// Draws one slot's row - the active marker, its name, its digit, and the
-    /// button that renames it - or, while that slot is being renamed, the
-    /// field it is renamed in.
-    void drawSlotRow(int slot, float width, IconTextures& icons, LayoutPresetOutcome& outcome);
-
-    /// Draws the field the name being renamed is edited in, committing on
-    /// Enter or on the focus leaving it.
-    void drawRenameField(float width, LayoutPresetOutcome& outcome);
-
-    /// Puts @p slot into rename mode with its current name in the field.
-    void beginRename(int slot);
-
-    /// Takes the edited name and leaves rename mode.
-    LayoutPresetOutcome commitRename();
     /// The live layout as it would save into a preset slot.
     [[nodiscard]] LayoutPreset capture() const;
-
-    /// Whether the live layout has drifted from the active preset slot; false
-    /// when no preset is active.
-    [[nodiscard]] bool activeDirty() const;
 
     [[nodiscard]] std::map<std::string, double> currentStackWeights() const;
 
@@ -107,14 +91,6 @@ private:
     const ScopeRegistry& m_registry;
     AnalysisSettings& m_analysis;
     LayoutPresetStore m_store;
-    /// The slot being renamed (1-based), or 0 while none is. The name is
-    /// edited in a fixed buffer a byte longer than a name may be, so the field
-    /// stops taking input where the cleaning would have cut it.
-    int m_renamingSlot = 0;
-    /// Whether the field still has to be handed the keyboard, which is true
-    /// for the one frame after a rename opens.
-    bool m_renameFocusDue = false;
-    std::array<char, MaximumPresetNameLength + 1> m_renameBuffer{};
 };
 
 }  // namespace sidescopes
