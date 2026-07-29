@@ -96,6 +96,7 @@ void LayoutPresetPicker::drawSlotRow(int slot, float width, IconTextures& icons,
     // row being left and the badge on the row being taken, for one frame.
     const bool chosen = slot == m_presets.activeSlot();
     const float rowTop = ImGui::GetCursorScreenPos().y;
+    const bool hovered = menuRowHovered(rowTop);
     drawMenuRowHover(rowTop);
     // The loaded slot is marked twice over, and in neither case by a marker of
     // its own: its shortcut digit becomes a filled badge, and the row behind
@@ -120,9 +121,12 @@ void LayoutPresetPicker::drawSlotRow(int slot, float width, IconTextures& icons,
     }
     const std::string name = presetDisplayName(slot, m_presets.at(slot));
     // The pen leads the row, in the column the scope menu gives its checkbox,
-    // so the two lists share a left edge as well as a right one.
+    // so the two lists share a left edge as well as a right one. It shows only
+    // on the row under the pointer - nine of them standing at once is a column
+    // of noise beside nine names - and it holds its box either way, so no name
+    // moves as the pointer runs down the list.
     const std::string tooltip = "Rename " + name;
-    if (menuRowIconButton("##rename", icons.textureId(Icon::PenLine, iconPixelSize()), tooltip.c_str())) {
+    if (menuRowIconButton("##rename", icons.textureId(Icon::PenLine, iconPixelSize()), tooltip.c_str(), hovered)) {
         beginRename(slot);
     }
     ImGui::SameLine(menuRowNameX());

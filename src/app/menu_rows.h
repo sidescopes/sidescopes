@@ -39,6 +39,12 @@ void pushMenuRowStyle();
 /// can pop the wrong number.
 void popMenuRowStyle();
 
+/// Whether the pointer is over the band of the row starting at @p rowTopY -
+/// what a control that shows only under the pointer asks before painting
+/// itself. It is the WHOLE row that answers, not the control, so a pen the
+/// pointer has not reached yet still appears when its row is entered.
+[[nodiscard]] bool menuRowHovered(float rowTopY);
+
 /// Draws the hover band behind a whole row whose content starts at @p rowTopY,
 /// so hovering reads as one row rather than as a control and a label lighting
 /// up apart. The band reaches a little above and below the row and runs nearly
@@ -76,8 +82,13 @@ void drawMenuRowChosenKey(const char* key, float rightPad);
 /// An icon button that stands in a menu row: the toolbar's glyph and hover
 /// box, but only as tall as the row it shares, so a row carrying one is no
 /// taller than a row of plain checkboxes and the two menus keep one rhythm.
+///
+/// @p painted false draws nothing and STILL TAKES THE SAME BOX, which is what
+/// a control that appears only under the pointer needs: reserving the space
+/// only while it shows would step every name in the list sideways as the
+/// pointer moves down it. Pass @ref menuRowHovered for that row.
 /// @return Whether it was pressed.
-[[nodiscard]] bool menuRowIconButton(const char* id, ImTextureID texture, const char* tooltip);
+[[nodiscard]] bool menuRowIconButton(const char* id, ImTextureID texture, const char* tooltip, bool painted = true);
 
 /// The width @ref menuRowIconButton takes, for a caller measuring its columns
 /// before it draws them.

@@ -280,12 +280,19 @@ void theToolboxSeatsByTheWindowAlone(ImGuiTestContext*)
 }
 
 // What the chosen-row marks actually put in the draw list, read back from the
-// vertices they appended.
+// vertices they appended, and where a row-leading icon button leaves the
+// cursor with its glyph painted and with it hidden.
 struct ChosenProbe
 {
     ImU32 bandColor = 0;
     int plainKeyVertices = -1;
     int chosenKeyVertices = -1;
+    ImVec2 paintedIconSize{-1.0f, -1.0f};
+    ImVec2 hiddenIconSize{-1.0f, -1.0f};
+    float paintedNameX = -1.0f;
+    float hiddenNameX = -1.0f;
+    int paintedIconVertices = -1;
+    int hiddenIconVertices = -1;
 };
 
 ChosenProbe& chosenProbe()
@@ -317,6 +324,21 @@ void chosenBandGui(ImGuiTestContext*)
     before = draw->VtxBuffer.Size;
     drawMenuRowChosenKey("4", ImGui::GetFontSize());
     probe.chosenKeyVertices = draw->VtxBuffer.Size - before;
+
+    // The same row-leading button drawn both ways, each followed by the name
+    // that stands after it, so the test can compare where that name landed.
+    const auto probeRow = [draw](const char* id, bool painted, ImVec2& size, float& nameX, int& vertices) {
+        const int mark = draw->VtxBuffer.Size;
+        const bool pressed = menuRowIconButton(id, ImTextureID{}, "Rename", painted);
+        IM_UNUSED(pressed);
+        size = ImGui::GetItemRectSize();
+        vertices = draw->VtxBuffer.Size - mark;
+        ImGui::SameLine(menuRowNameX());
+        ImGui::TextUnformatted("Preset 1");
+        nameX = ImGui::GetItemRectMin().x;
+    };
+    probeRow("##painted", true, probe.paintedIconSize, probe.paintedNameX, probe.paintedIconVertices);
+    probeRow("##hidden", false, probe.hiddenIconSize, probe.hiddenNameX, probe.hiddenIconVertices);
     ImGui::End();
 }
 
@@ -362,6 +384,40 @@ void theChosenKeyIsAShapeAndNotAColour(ImGuiTestContext* ctx)
     IM_CHECK_GT(probe.chosenKeyVertices, probe.plainKeyVertices);
 }
 
+/// SYMPTOM IF BROKEN: every name in the preset list steps sideways as the
+/// pointer runs down it, and the whole menu ripples under the cursor.
+///
+/// The rename pen shows only on the row under the pointer. A hover-revealed
+/// control must still OCCUPY its space when it is not drawn - reserving the box
+/// only while it shows is the classic form of this bug, and one that looks
+/// perfectly right in a still picture and is unusable in motion. Only the paint
+/// may differ between the two states; the layout may not.
+void aHiddenRowIconStillHoldsItsSpace(ImGuiTestContext* ctx)
+{
+    ctx->SetRef("Bands");
+    ctx->Yield();
+    const ChosenProbe& probe = chosenProbe();
+
+    // The box is real in both states...
+    IM_CHECK_GT(probe.paintedIconSize.x, 0.0f);
+    IM_CHECK_EQ(probe.paintedIconSize.x, probe.hiddenIconSize.x);
+    IM_CHECK_EQ(probe.paintedIconSize.y, probe.hiddenIconSize.y);
+
+    // ...and so the name after it lands at the very same x either way, which
+    // is the thing the eye would catch.
+    IM_CHECK_GT(probe.paintedNameX, 0.0f);
+    IM_CHECK_EQ(probe.paintedNameX, probe.hiddenNameX);
+
+    // What DOES differ is the paint, or the reveal would not be a reveal.
+    IM_CHECK_GT(probe.paintedIconVertices, probe.hiddenIconVertices);
+    IM_CHECK_EQ(probe.hiddenIconVertices, 0);
+
+    // The name column clears the button that leads the row, so the two never
+    // overlap however either is measured.
+    IM_CHECK_GT(menuRowNameX(), menuRowIconWidth());
+    IM_CHECK_GT(menuRowKeyRightPad(), 0.0f);
+}
+
 void registerLayoutTests(ImGuiTestEngine* engine)
 {
     ImGuiTest* wholePixels = IM_REGISTER_TEST(engine, "layout", "glyph_seats_on_whole_pixels");
@@ -396,6 +452,10 @@ void registerLayoutTests(ImGuiTestEngine* engine)
     ImGuiTest* badge = IM_REGISTER_TEST(engine, "layout", "chosen_key_is_a_shape");
     badge->GuiFunc = chosenBandGui;
     badge->TestFunc = theChosenKeyIsAShapeAndNotAColour;
+
+    ImGuiTest* reveal = IM_REGISTER_TEST(engine, "layout", "hidden_row_icon_holds_its_space");
+    reveal->GuiFunc = chosenBandGui;
+    reveal->TestFunc = aHiddenRowIconStillHoldsItsSpace;
 }
 
 }  // namespace
@@ -405,5 +465,5 @@ int main()
 {
     using namespace sidescopes;
 
-    return uitest::runSuite("layout", registerLayoutTests, /*expectedTests=*/10);
+    return uitest::runSuite("layout", registerLayoutTests, /*expectedTests=*/11);
 }

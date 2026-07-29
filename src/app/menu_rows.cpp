@@ -92,15 +92,19 @@ void popMenuRowStyle()
     ImGui::PopStyleVar(PushedVars);
 }
 
+bool menuRowHovered(float rowTopY)
+{
+    const RowBand band = rowBand(rowTopY);
+
+    return ImGui::IsMouseHoveringRect(band.min, band.max);
+}
+
 void drawMenuRowHover(float rowTopY)
 {
-    if (ImGui::GetDragDropPayload() != nullptr) {
+    if (ImGui::GetDragDropPayload() != nullptr || !menuRowHovered(rowTopY)) {
         return;
     }
     const RowBand band = rowBand(rowTopY);
-    if (!ImGui::IsMouseHoveringRect(band.min, band.max)) {
-        return;
-    }
     ImGui::GetWindowDrawList()->AddRectFilled(band.min, band.max, ImGui::GetColorU32(ImGuiCol_ButtonHovered),
                                               ImGui::GetStyle().FrameRounding);
 }
@@ -118,14 +122,23 @@ float menuRowIconWidth()
     return ImGui::GetFrameHeight() + ImGui::GetFontSize() * 0.5f;
 }
 
-bool menuRowIconButton(const char* id, ImTextureID texture, const char* tooltip)
+bool menuRowIconButton(const char* id, ImTextureID texture, const char* tooltip, bool painted)
 {
     // Sized to the row rather than to the toolbar: iconButton's box is a fixed
     // amount taller than a line of text, which in a popup whose frame padding
     // is pulled right down would make the rows carrying one visibly taller
     // than the rest. The GLYPH keeps the toolbar's size, so it reads as the
     // same icon at the same weight.
+    //
+    // THE BOX IS TAKEN WHETHER OR NOT THE GLYPH IS PAINTED. A control that
+    // appears under the pointer must not also widen the row it appears in, or
+    // every name in the list steps sideways as the pointer moves down it - the
+    // classic form of this, and one that looks right in a still picture and is
+    // unusable in motion.
     const bool pressed = ImGui::InvisibleButton(id, ImVec2(menuRowIconWidth(), ImGui::GetFrameHeight()));
+    if (!painted) {
+        return pressed;
+    }
     ImDrawList* draw = ImGui::GetWindowDrawList();
     const ImVec2 min = ImGui::GetItemRectMin();
     const ImVec2 max = ImGui::GetItemRectMax();
