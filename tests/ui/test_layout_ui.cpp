@@ -279,24 +279,44 @@ void theToolboxSeatsByTheWindowAlone(ImGuiTestContext*)
     IM_CHECK(regionToolboxWraps(Scopes + Notice, Toolbox, exact));
 }
 
-// The colour the chosen-row band actually landed in the draw list, read back
-// from the vertices it appended.
-ImU32& chosenBandColor()
+// What the chosen-row marks actually put in the draw list, read back from the
+// vertices they appended.
+struct ChosenProbe
 {
-    static ImU32 instance = 0;
+    ImU32 bandColor = 0;
+    int plainKeyVertices = -1;
+    int chosenKeyVertices = -1;
+};
+
+ChosenProbe& chosenProbe()
+{
+    static ChosenProbe instance;
 
     return instance;
 }
 
-/// Draws one chosen-row band into a window and records the colour it emitted.
+/// Draws the chosen-row band and both readings of a row's key, recording what
+/// each emitted.
 void chosenBandGui(ImGuiTestContext*)
 {
     ImGui::SetNextWindowSize(ImVec2(300.0f, 120.0f), ImGuiCond_Always);
     ImGui::Begin("Bands", nullptr, ImGuiWindowFlags_NoSavedSettings);
     ImDrawList* draw = ImGui::GetWindowDrawList();
-    const int before = draw->VtxBuffer.Size;
+    ChosenProbe& probe = chosenProbe();
+
+    int before = draw->VtxBuffer.Size;
     drawMenuRowChosen(ImGui::GetCursorScreenPos().y);
-    chosenBandColor() = draw->VtxBuffer.Size > before ? draw->VtxBuffer[before].col : 0;
+    probe.bandColor = draw->VtxBuffer.Size > before ? draw->VtxBuffer[before].col : 0;
+
+    // Both keys are drawn over a laid-out item, which is what they align to.
+    ImGui::Selectable("row", false, ImGuiSelectableFlags_None, ImVec2(200.0f, ImGui::GetFrameHeight()));
+    before = draw->VtxBuffer.Size;
+    drawMenuRowAccelerator("4", ImGui::GetFontSize());
+    probe.plainKeyVertices = draw->VtxBuffer.Size - before;
+
+    before = draw->VtxBuffer.Size;
+    drawMenuRowChosenKey("4", ImGui::GetFontSize());
+    probe.chosenKeyVertices = draw->VtxBuffer.Size - before;
     ImGui::End();
 }
 
@@ -312,17 +332,34 @@ void theChosenBandIsNotTheHoverBand(ImGuiTestContext* ctx)
 {
     ctx->SetRef("Bands");
     ctx->Yield();
+    const ChosenProbe& probe = chosenProbe();
 
     // It drew something at all.
-    IM_CHECK_NE(chosenBandColor(), 0u);
+    IM_CHECK_NE(probe.bandColor, 0u);
     // ...and not the hover band's colour, which is what drawMenuRowHover puts
     // down on the very same rectangle.
-    IM_CHECK_NE(chosenBandColor(), ImGui::GetColorU32(ImGuiCol_ButtonHovered));
+    IM_CHECK_NE(probe.bandColor, ImGui::GetColorU32(ImGuiCol_ButtonHovered));
     // ...and it is see-through, so hovering the chosen row adds to it rather
     // than replacing it.
-    const ImU32 alpha = chosenBandColor() >> IM_COL32_A_SHIFT & 0xFFu;
+    const ImU32 alpha = probe.bandColor >> IM_COL32_A_SHIFT & 0xFFu;
     IM_CHECK_GT(alpha, 0u);
     IM_CHECK_LT(alpha, 255u);
+}
+
+/// SYMPTOM IF BROKEN: which preset is loaded is told only by a colour, so a
+/// reader who cannot separate that colour from the plain one has no cue at all.
+///
+/// The chosen row's key is a filled badge, not the same glyph in another
+/// colour. The badge is a SHAPE, so it must put more in the draw list than the
+/// bare text does - a recolour would emit exactly as much.
+void theChosenKeyIsAShapeAndNotAColour(ImGuiTestContext* ctx)
+{
+    ctx->SetRef("Bands");
+    ctx->Yield();
+    const ChosenProbe& probe = chosenProbe();
+
+    IM_CHECK_GT(probe.plainKeyVertices, 0);
+    IM_CHECK_GT(probe.chosenKeyVertices, probe.plainKeyVertices);
 }
 
 void registerLayoutTests(ImGuiTestEngine* engine)
@@ -355,6 +392,10 @@ void registerLayoutTests(ImGuiTestEngine* engine)
     ImGuiTest* chosen = IM_REGISTER_TEST(engine, "layout", "chosen_band_is_not_the_hover_band");
     chosen->GuiFunc = chosenBandGui;
     chosen->TestFunc = theChosenBandIsNotTheHoverBand;
+
+    ImGuiTest* badge = IM_REGISTER_TEST(engine, "layout", "chosen_key_is_a_shape");
+    badge->GuiFunc = chosenBandGui;
+    badge->TestFunc = theChosenKeyIsAShapeAndNotAColour;
 }
 
 }  // namespace
@@ -364,5 +405,5 @@ int main()
 {
     using namespace sidescopes;
 
-    return uitest::runSuite("layout", registerLayoutTests, /*expectedTests=*/9);
+    return uitest::runSuite("layout", registerLayoutTests, /*expectedTests=*/10);
 }

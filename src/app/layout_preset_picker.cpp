@@ -100,12 +100,18 @@ void LayoutPresetPicker::drawRenameField(float width, LayoutPresetOutcome& outco
 
 void LayoutPresetPicker::drawSlotRow(int slot, float width, IconTextures& icons, LayoutPresetOutcome& outcome)
 {
+    // Read once, before anything on this row can change it: a click lands
+    // mid-row and loads the slot, and asking twice would put the band on the
+    // row being left and the badge on the row being taken, for one frame.
+    const bool chosen = slot == m_presets.activeSlot();
     const float rowTop = ImGui::GetCursorScreenPos().y;
     drawMenuRowHover(rowTop);
-    // The loaded slot is the row that is tinted, not a marker in a column of
-    // its own: it says which one at a glance, needs nothing explaining it, and
-    // leaves the row's whole width to the name.
-    if (slot == m_presets.activeSlot()) {
+    // The loaded slot is marked twice over, and in neither case by a marker of
+    // its own: its shortcut digit becomes a filled badge, and the row behind
+    // it is tinted. The badge carries it - it is in a cell the row already
+    // spent, and it differs in shape rather than only in colour - and the tint
+    // is what makes the row findable in a list of nine.
+    if (chosen) {
         drawMenuRowChosen(rowTop);
     }
     ImGui::PushID(slot);
@@ -122,7 +128,12 @@ void LayoutPresetPicker::drawSlotRow(int slot, float width, IconTextures& icons,
     if (ImGui::Selectable(name.c_str(), false, ImGuiSelectableFlags_NoAutoClosePopups, rowSize)) {
         outcome = ImGui::GetIO().KeyShift ? m_presets.save(slot) : m_presets.load(slot);
     }
-    drawMenuRowAccelerator(std::to_string(slot).c_str(), presetKeyRightPad());
+    const std::string key = std::to_string(slot);
+    if (chosen) {
+        drawMenuRowChosenKey(key.c_str(), presetKeyRightPad());
+    } else {
+        drawMenuRowAccelerator(key.c_str(), presetKeyRightPad());
+    }
     ImGui::SameLine(0.0f, 0.0f);
     const std::string tooltip = "Rename " + name;
     if (menuRowIconButton("##rename", icons.textureId(Icon::PenLine, iconPixelSize()), tooltip.c_str())) {
