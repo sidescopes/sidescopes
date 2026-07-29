@@ -142,8 +142,12 @@ void LayoutPresetPicker::drawSlotRow(int slot, float width, IconTextures& icons,
     ImGui::SameLine(presetNameX());
     // A row does one thing: it loads. What is on screen is written into the
     // slot it belongs to as it is arranged, so there is nothing here to save.
+    // And loading ends the errand, so the default close-on-select stands. The
+    // keep-open flag this row used to carry belongs to the scope selector,
+    // whose rows are checkboxes a user toggles several of in one visit; here
+    // it left the list standing over the layout it had just changed.
     const ImVec2 rowSize(nameWidth, ImGui::GetFrameHeight());
-    if (ImGui::Selectable(name.c_str(), false, ImGuiSelectableFlags_NoAutoClosePopups, rowSize)) {
+    if (ImGui::Selectable(name.c_str(), false, ImGuiSelectableFlags_None, rowSize)) {
         outcome = m_presets.load(slot);
     }
     drawMenuRowAccelerator(std::to_string(slot).c_str(), menuRowKeyRightPad());

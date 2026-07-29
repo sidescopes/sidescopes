@@ -84,7 +84,7 @@ add_test(NAME sidescopes_ui_smoke COMMAND sidescopes_ui_tests)
 # tests/CMakeLists.txt), plus the hooked Dear ImGui and Test Engine. The
 # sidescopes_app units have no Dear ImGui dependency, so they mix freely with
 # the hooked build. ui_test_harness.cpp is the shared null-backend runner.
-foreach(suite IN ITEMS pipeline view)
+foreach(suite IN ITEMS pipeline view preset)
     add_executable(sidescopes_ui_${suite}_tests
         test_${suite}_ui.cpp
         ui_test_harness.cpp)
@@ -95,6 +95,14 @@ foreach(suite IN ITEMS pipeline view)
     sidescopes_target_defaults(sidescopes_ui_${suite}_tests)
     add_test(NAME sidescopes_ui_${suite} COMMAND sidescopes_ui_${suite}_tests)
 endforeach()
+
+# The preset suite drives the real picker, whose rows reach two seams the
+# other suites never pull from the static libraries: the shortcut context's
+# platform queries (stubbed the same way the unit tests stub them) and the
+# icon rasterizer (stubbed inside the suite - the null backend never renders,
+# so the pixels would be discarded unread).
+target_sources(sidescopes_ui_preset_tests PRIVATE
+    ${CMAKE_SOURCE_DIR}/tests/support/desktop_stubs.cpp)
 
 # The suites below compile Dear ImGui-dependent app translation units, which is
 # why those cannot live in sidescopes_app: linking the test engine gives them
@@ -155,7 +163,7 @@ add_test(NAME sidescopes_ui_scale COMMAND sidescopes_ui_scale_tests)
 # supply the symbols core's shared graticule references, and wait for the
 # bundles the worker loads at runtime.
 if(SIDESCOPES_MODULES_DYNAMIC)
-    foreach(suite IN ITEMS pipeline view)
+    foreach(suite IN ITEMS pipeline view preset)
         target_sources(sidescopes_ui_${suite}_tests PRIVATE
             ${CMAKE_SOURCE_DIR}/src/core/scopes/vectorscope.cpp
             ${CMAKE_SOURCE_DIR}/src/core/scopes/waveform.cpp
