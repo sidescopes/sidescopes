@@ -22,18 +22,9 @@ constexpr const char* WidestPresetLabel = "9*";
 // The line under the list, which teaches the two gestures a row answers to.
 constexpr const char* PresetFooter = "click loads - Shift+click saves";
 
-// What parts the shortcut digit from the rename button after it. The button's
-// box begins exactly where the row's own width ends, so this gap is the whole
-// distance between a hint and a control - and it was nothing to speak of when
-// the digit sat a fraction of a line in from that edge.
-float presetKeyRightPad()
-{
-    return ImGui::GetFontSize() * 1.75f;
-}
-
-// The width every row of the picker shares, from the widest name it will show,
-// so the names left-align and the digits right-align to one edge with room to
-// breathe between.
+// The whole width of a row, measured the way the scope menu measures its own:
+// the name column, the widest name it will show, room to breathe, the key, and
+// the margin the key keeps from the edge.
 float presetRowWidth(const std::array<LayoutPreset, LayoutPresetSlots>& presets)
 {
     float maxName = 0.0f;
@@ -42,12 +33,12 @@ float presetRowWidth(const std::array<LayoutPreset, LayoutPresetSlots>& presets)
         maxName = std::max(maxName, ImGui::CalcTextSize(name.c_str()).x);
     }
     const float em = ImGui::GetFontSize();
-    const float named = maxName + em * 2.0f + ImGui::CalcTextSize("9").x + presetKeyRightPad();
+    const float named = menuRowNameX() + maxName + em * 2.0f + ImGui::CalcTextSize("9").x + menuRowKeyRightPad();
 
-    // Never narrower than the footer beneath it: the rows then reach the
-    // popup's own edge, and each rename button lands flush right rather than
-    // partway across with an empty strip beside it.
-    return std::max(named, ImGui::CalcTextSize(PresetFooter).x - menuRowIconWidth());
+    // Never narrower than the footer beneath it, so the rows are what set the
+    // popup's width and every key binds to the popup's own edge rather than to
+    // a row that stops short of it.
+    return std::max(named, ImGui::CalcTextSize(PresetFooter).x);
 }
 
 }  // namespace
@@ -115,29 +106,35 @@ void LayoutPresetPicker::drawSlotRow(int slot, float width, IconTextures& icons,
         drawMenuRowChosen(rowTop);
     }
     ImGui::PushID(slot);
+    const float nameWidth = width - menuRowNameX();
     if (slot == m_renamingSlot) {
-        // The field spans the name column AND the button's, so the row keeps
-        // its width and nothing beside it shifts while a name is typed.
-        drawRenameField(width + menuRowIconWidth(), outcome);
+        // The pen's column is held open rather than reclaimed, and the field
+        // takes exactly the name's own width, so the row keeps its shape and
+        // nothing shifts while a name is typed.
+        ImGui::Dummy(ImVec2(menuRowIconWidth(), ImGui::GetFrameHeight()));
+        ImGui::SameLine(menuRowNameX());
+        drawRenameField(nameWidth, outcome);
         ImGui::PopID();
 
         return;
     }
     const std::string name = presetDisplayName(slot, m_presets.at(slot));
-    const ImVec2 rowSize(width, ImGui::GetFrameHeight());
+    // The pen leads the row, in the column the scope menu gives its checkbox,
+    // so the two lists share a left edge as well as a right one.
+    const std::string tooltip = "Rename " + name;
+    if (menuRowIconButton("##rename", icons.textureId(Icon::PenLine, iconPixelSize()), tooltip.c_str())) {
+        beginRename(slot);
+    }
+    ImGui::SameLine(menuRowNameX());
+    const ImVec2 rowSize(nameWidth, ImGui::GetFrameHeight());
     if (ImGui::Selectable(name.c_str(), false, ImGuiSelectableFlags_NoAutoClosePopups, rowSize)) {
         outcome = ImGui::GetIO().KeyShift ? m_presets.save(slot) : m_presets.load(slot);
     }
     const std::string key = std::to_string(slot);
     if (chosen) {
-        drawMenuRowChosenKey(key.c_str(), presetKeyRightPad());
+        drawMenuRowChosenKey(key.c_str(), menuRowKeyRightPad());
     } else {
-        drawMenuRowAccelerator(key.c_str(), presetKeyRightPad());
-    }
-    ImGui::SameLine(0.0f, 0.0f);
-    const std::string tooltip = "Rename " + name;
-    if (menuRowIconButton("##rename", icons.textureId(Icon::PenLine, iconPixelSize()), tooltip.c_str())) {
-        beginRename(slot);
+        drawMenuRowAccelerator(key.c_str(), menuRowKeyRightPad());
     }
     ImGui::PopID();
 }

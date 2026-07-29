@@ -56,6 +56,16 @@ ImVec2 acceleratorOrigin(const ImVec2& keySize, float rightPad)
 
 }  // namespace
 
+float menuRowNameX()
+{
+    return ImGui::GetFrameHeight() + ImGui::GetFontSize();
+}
+
+float menuRowKeyRightPad()
+{
+    return ImGui::GetFontSize() * 0.75f;
+}
+
 void pushMenuRowStyle()
 {
     const ImGuiStyle& style = ImGui::GetStyle();

@@ -14,6 +14,20 @@ namespace sidescopes {
 /// right-aligned and dimmed the way a menu shows an accelerator. Keeping the
 /// treatment here is what stops the two drifting apart.
 
+/// Where a row's name starts: past the control that leads it - the scope
+/// menu's checkbox, the preset list's rename button - and then a full space.
+///
+/// Both lists read it, which is the whole point: a name column measured
+/// separately in each drifts by a few pixels and the two stop looking like one
+/// treatment seen twice.
+[[nodiscard]] float menuRowNameX();
+
+/// The margin a right-bound key hint keeps from the row's right edge. Shared
+/// for the same reason as @ref menuRowNameX: the two lists bind their keys to
+/// one edge or they look subtly misaligned, which reads worse than being
+/// obviously different.
+[[nodiscard]] float menuRowKeyRightPad();
+
 /// Pushes the row styling for the popup being drawn: rows with room to
 /// breathe, a checkbox scaled to its label rather than dwarfing it, and every
 /// per-item highlight suppressed - including the theme's loud selection blue -

@@ -171,8 +171,10 @@ Toolbar::ScopeMenuColumns Toolbar::scopeColumns() const
     }
     const float em = ImGui::GetFontSize();
     ScopeMenuColumns cols;
-    cols.nameX = ImGui::GetFrameHeight() + em;  // checkbox, then a full space to the name
-    cols.rightPad = em * 0.75f;                 // the keys keep clear of the border
+    // Both toolbar lists lay their rows on these, so the names start and the
+    // keys end at one x whichever list is open.
+    cols.nameX = menuRowNameX();
+    cols.rightPad = menuRowKeyRightPad();
     cols.width = cols.nameX + maxName + em * 2.0f + maxKey + cols.rightPad;
 
     return cols;
