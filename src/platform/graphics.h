@@ -68,4 +68,11 @@ public:
 /// Creates the platform's graphics backend.
 [[nodiscard]] std::unique_ptr<GraphicsBackend> createGraphicsBackend();
 
+/// Init hints the platform needs in place before glfwInit - unlike
+/// setWindowHints, which runs per window once GLFW is up. Linux prefers the
+/// X11 backend while a display offers one (XWayland included): GLFW's native
+/// Wayland backend cannot read or place windows, which the saved-session
+/// placement depends on. A no-op elsewhere.
+void setPlatformInitHints();
+
 }  // namespace sidescopes

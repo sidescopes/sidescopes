@@ -151,6 +151,7 @@ App::App()
 bool App::init()
 {
     diagInit();
+    setPlatformInitHints();
     if (!glfwInit()) {
         return false;
     }

@@ -11,8 +11,8 @@ ctest --test-dir build
 ```
 
 CMake 3.24+, a C++20 compiler, and `clang-format` for the formatting check.
-The application builds on macOS and Windows; the core library and its tests
-build everywhere.
+The application builds on macOS, Windows, and Linux; the core library and
+its tests build everywhere.
 
 ### macOS
 
@@ -59,6 +59,22 @@ into `build-ide/` with both Debug and Release configurations. Pick
 `SideScopes.exe` as the startup item to run or debug. If the
 configuration dropdown ever comes up empty, Project > Delete Cache and
 Reconfigure clears the IDE's stale state.
+
+### Linux
+
+The distribution's compiler is fine. GLFW builds from source and needs the
+X11 and Wayland development headers; the platform layer needs XRandR. On
+Debian or Ubuntu:
+
+```sh
+sudo apt install cmake ninja-build clang-format \
+    libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev \
+    libxkbcommon-dev libwayland-dev libgl1-mesa-dev
+```
+
+The Linux port is young: the interface runs, and screen capture is still
+being built. The window prefers X11 (XWayland on a Wayland desktop), which
+every major desktop provides.
 
 ## Screen-recording permission for development builds (macOS)
 

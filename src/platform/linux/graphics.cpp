@@ -1,36 +1,17 @@
-// OpenGL rendering backend for the shared application shell. OpenGL is
-// healthy on Windows, GLFW owns the context, and the texture uploads only
-// need functions exported by opengl32.dll since OpenGL 1.1 - no loader.
+// OpenGL rendering backend for the shared application shell, as on Windows.
+// GLFW owns the context; the texture uploads only need OpenGL 1.1 entry
+// points, which the GLX/EGL libraries export directly - no loader.
 
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#endif
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
-#include <windows.h>
-
-// After windows.h: dwmapi.h leans on the base types it defines.
-#include <dwmapi.h>
-
-// After windows.h: gl.h leans on the calling-convention macros it defines.
 #include <GL/gl.h>
 
+#include <cstdlib>
+
 #define GLFW_INCLUDE_NONE
-#define GLFW_EXPOSE_NATIVE_WIN32
 #include <GLFW/glfw3.h>
-#include <GLFW/glfw3native.h>
 
 #include "imgui_impl_glfw.h"
 #include "imgui_impl_opengl3.h"
-#include "platform/desktop.h"
 #include "platform/graphics.h"
-#include "platform/windows/capture_visibility.h"
-
-// Windows 10 2004; absent from older SDKs.
-#ifndef WDA_EXCLUDEFROMCAPTURE
-#define WDA_EXCLUDEFROMCAPTURE 0x00000011
-#endif
 
 namespace sidescopes {
 namespace {
@@ -100,20 +81,11 @@ public:
     {
         m_window = window;
         glfwMakeContextCurrent(window);
-        // Frame pacing comes from DwmFlush in EndFrame, not the swap
-        // interval: measured on this pipeline (NVIDIA, DWM-composited
-        // window), SwapBuffers with interval 1 never blocks, the frame
-        // loop runs uncapped, and a whole core burns whenever anything
-        // animates. The compositor tick is the honest windowed-mode
-        // vblank, and waiting on it costs no CPU.
-        glfwSwapInterval(0);
-        // The scope window must never reach its own scopes: duplication
-        // has no application-level capture exclusion, so the window
-        // excludes itself unless the visibility toggle holds. Best
-        // effort: unsupported before Windows 10 2004, where the
-        // analysis-side masking still applies.
-        SetWindowDisplayAffinity(glfwGetWin32Window(window),
-                                 captureWindowsVisible() ? WDA_NONE : WDA_EXCLUDEFROMCAPTURE);
+        // Swap-interval pacing: unlike Windows, whose compositor tick is
+        // waited on explicitly, the GLX/EGL swap blocks honestly here, and
+        // the frame loop's own redraw cap keeps the rate bounded where a
+        // headless server never blocks.
+        glfwSwapInterval(1);
         if (!ImGui_ImplGlfw_InitForOpenGL(window, true)) {
             return false;
         }
@@ -151,15 +123,14 @@ public:
         glClear(GL_COLOR_BUFFER_BIT);
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
         glfwSwapBuffers(m_window);
-        // Composition-tick pacing; see Init. Failure means the compositor
-        // is gone (a remote session, say) - render unpaced rather than
-        // not at all.
-        DwmFlush();
     }
 
     void* nativeWindowHandle() const override
     {
-        return glfwGetWin32Window(m_window);
+        // No native handle crosses the seam here: the Linux desktop services
+        // never address the window by identity, so the GLFW handle itself is
+        // the most useful thing rememberApplicationWindow can keep.
+        return m_window;
     }
 
 private:
@@ -177,7 +148,14 @@ std::unique_ptr<GraphicsBackend> createGraphicsBackend()
 
 void setPlatformInitHints()
 {
-    // Nothing to choose before glfwInit on Windows.
+    // Prefer X11 (XWayland on a Wayland desktop) while a display offers one:
+    // GLFW's Wayland backend can neither read nor place windows, and the
+    // saved-session placement depends on both. Pure-Wayland sessions without
+    // XWayland fall through to the native backend, whose placement simply
+    // stays wherever the compositor put it.
+    if (std::getenv("DISPLAY") != nullptr) {
+        glfwInitHint(GLFW_PLATFORM, GLFW_PLATFORM_X11);
+    }
 }
 
 }  // namespace sidescopes

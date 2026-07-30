@@ -241,6 +241,33 @@ if(WIN32)
     sidescopes_target_defaults(sidescopes_platform)
 endif()
 
+if(UNIX AND NOT APPLE)
+    # The Linux platform layer: X11/XRandR serves display geometry and live
+    # keyboard state (XWayland included); capture is the ScreenCast portal
+    # backend. Services Wayland's isolation forbids report their honest empty
+    # answers - see each source.
+    find_package(X11 REQUIRED)
+    add_library(sidescopes_platform STATIC
+        src/platform/focus_resolution.cpp
+        src/platform/frame_pool.cpp
+        src/platform/icons.cpp
+        src/platform/region_geometry.cpp
+        src/platform/linux/desktop.cpp
+        src/platform/linux/face_detection.cpp
+        src/platform/linux/native_menu.cpp
+        src/platform/linux/region_selection.cpp
+        src/platform/linux/screen_capture.cpp
+    )
+    target_include_directories(sidescopes_platform PUBLIC src ${nanosvg_SOURCE_DIR}/src)
+    target_link_libraries(sidescopes_platform
+        PUBLIC
+        sidescopes_core
+        X11::X11
+        X11::Xrandr
+    )
+    sidescopes_target_defaults(sidescopes_platform)
+endif()
+
 # --- application logic ---
 # Every src/app unit belongs to a library, listed once. The app, the unit tests
 # and the UI-test suites link those libraries; none of them names a source.
@@ -356,7 +383,7 @@ function(sidescopes_add_app_imgui_library name imgui_target)
     sidescopes_target_defaults(${name})
 endfunction()
 
-if(APPLE OR WIN32)
+if(APPLE OR WIN32 OR (UNIX AND NOT APPLE))
     # --- application ---
     include(FetchContent)
     set(GLFW_BUILD_DOCS OFF CACHE BOOL "" FORCE)
@@ -456,7 +483,7 @@ if(APPLE OR WIN32)
             COMMAND codesign --force --sign "${SIDESCOPES_CODESIGN_IDENTITY}"
                     $<TARGET_BUNDLE_DIR:SideScopes>
         )
-    else()
+    elseif(WIN32)
         # WIN32_EXECUTABLE hides the console; main() stays the portable
         # entry point, so the linker is told where to find it. The manifest
         # declares per-monitor DPI awareness before the first window-system
@@ -481,6 +508,29 @@ if(APPLE OR WIN32)
             imgui
             glfw
             opengl32
+        )
+        sidescopes_target_defaults(SideScopes)
+    else()
+        find_package(OpenGL REQUIRED)
+        add_executable(SideScopes
+            src/app/main.cpp
+            src/platform/linux/graphics.cpp
+        )
+        # Dependency order, as in the branches above: graphics.cpp includes
+        # the GLFW and Dear ImGui backend headers itself. sidescopes_app is
+        # named ahead of the platform library even though sidescopes_app_imgui
+        # already carries it: GNU ld resolves archives in one left-to-right
+        # pass, and CMake appends transitive libraries after the direct list,
+        # which would place the app's units after the platform symbols they
+        # reference.
+        target_link_libraries(SideScopes PRIVATE
+            sidescopes_app_imgui
+            sidescopes_app
+            ${SIDESCOPES_MODULE_LINK_LIBS}
+            sidescopes_platform
+            imgui
+            glfw
+            OpenGL::GL
         )
         sidescopes_target_defaults(SideScopes)
     endif()
@@ -514,9 +564,6 @@ endif()
 # engine builds against the same Dear ImGui the app fetches, so it is only
 # available where that is built.
 if(SIDESCOPES_UI_TESTS)
-    if(NOT (APPLE OR WIN32))
-        message(FATAL_ERROR "SIDESCOPES_UI_TESTS requires the Dear ImGui build (APPLE or WIN32).")
-    endif()
     enable_testing()
     add_subdirectory(tests/ui)
 endif()

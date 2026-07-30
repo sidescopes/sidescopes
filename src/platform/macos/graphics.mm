@@ -200,4 +200,9 @@ std::unique_ptr<GraphicsBackend> createGraphicsBackend()
     return std::make_unique<MetalGraphics>();
 }
 
+void setPlatformInitHints()
+{
+    // Nothing to choose before glfwInit on macOS.
+}
+
 }  // namespace sidescopes

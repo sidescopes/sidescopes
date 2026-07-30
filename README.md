@@ -97,7 +97,8 @@ To build from source, see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Status
 
-Native builds for macOS and Windows; Linux is planned. Before 1.0 the
+Native builds for macOS and Windows; the Linux port is under way and
+builds from source. Before 1.0 the
 preferences file may change shape without a migration, so an update can
 return settings to their defaults.
 
