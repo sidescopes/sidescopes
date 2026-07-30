@@ -271,12 +271,14 @@ if(UNIX AND NOT APPLE)
         src/platform/linux/portal_screencast.cpp
         src/platform/linux/region_selection.cpp
         src/platform/linux/screen_capture.cpp
+        src/platform/linux/x11_overlay.cpp
     )
     target_include_directories(sidescopes_platform PUBLIC src ${nanosvg_SOURCE_DIR}/src)
     target_link_libraries(sidescopes_platform
         PUBLIC
         sidescopes_core
         X11::X11
+        X11::Xext
         X11::Xrandr
         PkgConfig::PIPEWIRE
         PkgConfig::DBUS
