@@ -35,8 +35,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - name: Install clang-tidy
-        run: sudo apt-get update && sudo apt-get install -y clang-tidy-18
+      - name: Install clang-tidy and the application's Linux dependencies
+        run: sudo apt-get update && sudo apt-get install -y clang-tidy-18 libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libxkbcommon-dev libwayland-dev libgl1-mesa-dev libdbus-1-dev libpipewire-0.3-dev
       - name: Configure
         run: cmake -B build
       - name: Analyze
@@ -46,7 +46,7 @@ jobs:
           # database, so clang-tidy cannot parse them here.
           # module_loader.cpp compiles only in the dynamic configuration, so it
           # is absent from this build's compile database.
-          files=$(git ls-files 'src/core/*.cpp' 'src/core/**/*.cpp' 'src/modules/*.cpp' 'tests/*.cpp' ':(exclude)tests/ui/*' ':(exclude)tests/test_windows_platform.cpp' ':(exclude)src/modules/module_loader.cpp')
+          files=$(git ls-files 'src/core/*.cpp' 'src/core/**/*.cpp' 'src/modules/*.cpp' 'src/platform/linux/*.cpp' 'tests/*.cpp' ':(exclude)tests/ui/*' ':(exclude)tests/test_windows_platform.cpp' ':(exclude)src/modules/module_loader.cpp')
           clang-tidy-18 -p build --quiet $files
 
   tidy-macos:
@@ -110,6 +110,9 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
+      - name: Install the application's Linux dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libxkbcommon-dev libwayland-dev libgl1-mesa-dev libdbus-1-dev libpipewire-0.3-dev
       # The benchmark and performance-harness targets are opt-in, so nothing
       # compiled them and a Windows-only break in either went unseen until
       # someone tried to measure. Two small translation units; the suites
@@ -140,11 +143,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-latest, windows-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
+      - name: Install the application's Linux dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libxkbcommon-dev libwayland-dev libgl1-mesa-dev libdbus-1-dev libpipewire-0.3-dev
       - name: Configure
         run: cmake -B build -DSIDESCOPES_WERROR=ON -DSIDESCOPES_UI_TESTS=ON
       - name: Build
@@ -161,6 +167,8 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
+      - name: Install the application's Linux dependencies
+        run: sudo apt-get update && sudo apt-get install -y libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libxkbcommon-dev libwayland-dev libgl1-mesa-dev libdbus-1-dev libpipewire-0.3-dev
       - name: Configure
         run: cmake -B build -DSIDESCOPES_WERROR=ON -DSIDESCOPES_MODULES_DYNAMIC=ON
       - name: Build
@@ -179,6 +187,8 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
+      - name: Install the application's Linux dependencies
+        run: sudo apt-get update && sudo apt-get install -y libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libxkbcommon-dev libwayland-dev libgl1-mesa-dev libdbus-1-dev libpipewire-0.3-dev
       - name: Configure
         run: >
           cmake -B build -DSIDESCOPES_WERROR=ON
