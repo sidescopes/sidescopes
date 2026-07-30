@@ -260,6 +260,7 @@ if(UNIX AND NOT APPLE)
         src/platform/linux/face_detection.cpp
         src/platform/linux/native_menu.cpp
         src/platform/linux/pipewire_stream.cpp
+        src/platform/linux/portal_request_path.cpp
         src/platform/linux/portal_screencast.cpp
         src/platform/linux/region_selection.cpp
         src/platform/linux/screen_capture.cpp

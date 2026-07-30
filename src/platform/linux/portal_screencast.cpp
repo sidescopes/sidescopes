@@ -10,6 +10,8 @@
 
 #include <cstdio>
 
+#include "platform/linux/portal_request_path.h"
+
 namespace sidescopes {
 namespace {
 
@@ -154,21 +156,11 @@ ResponseResults readResponse(DBusMessage* message)
     return results;
 }
 
-/// The sender part of a request object path: the bus name with the colon
-/// dropped and dots turned to underscores, per the portal convention.
-std::string senderPathToken(DBusConnection* connection)
+/// This connection's unique bus name, or empty before it has one.
+std::string uniqueBusName(DBusConnection* connection)
 {
     const char* unique = dbus_bus_get_unique_name(connection);
-    std::string token = unique != nullptr ? unique : "";
-    if (!token.empty() && token.front() == ':') {
-        token.erase(token.begin());
-    }
-    for (char& piece : token) {
-        if (piece == '.') {
-            piece = '_';
-        }
-    }
-    return token;
+    return unique != nullptr ? unique : "";
 }
 
 }  // namespace
@@ -260,7 +252,7 @@ std::optional<ResponseResults> waitForResponse(DBusConnection* connection, const
 struct Handshake
 {
     DBusConnection* connection = nullptr;
-    std::string senderToken;
+    std::string busName;
     std::string sessionHandle;
     uint32_t tokenCounter = 0;
 };
@@ -280,7 +272,7 @@ std::optional<ResponseResults> requestCall(Handshake& handshake, const char* met
                                            Fill fill)
 {
     const std::string token = nextToken(handshake);
-    const std::string requestPath = "/org/freedesktop/portal/desktop/request/" + handshake.senderToken + "/" + token;
+    const std::string requestPath = portalRequestPath(handshake.busName, token);
     DBusMessage* message = dbus_message_new_method_call(PortalService, PortalObject, ScreenCastInterface, method);
     DBusMessageIter arguments;
     DBusMessageIter options;
@@ -388,7 +380,7 @@ std::optional<PortalStream> PortalScreenCast::open(const std::string& restoreTok
 
     Handshake handshake;
     handshake.connection = m_connection;
-    handshake.senderToken = senderPathToken(m_connection);
+    handshake.busName = uniqueBusName(m_connection);
 
     const std::optional<ResponseResults> created = createSession(handshake, abort);
     if (!created || created->code != ResponseSuccess || created->sessionHandle.empty()) {

@@ -103,6 +103,16 @@ if(WIN32)
     target_sources(sidescopes_tests PRIVATE test_windows_platform.cpp)
 endif()
 
+# The Linux portal request-path logic is pure string manipulation whose
+# failure is silent and total (a listener on the wrong path waits forever), so
+# it is pinned on the Linux runner the same way the Windows string logic is on
+# its own. No D-Bus, no compositor: just the path builder and its test.
+if(UNIX AND NOT APPLE)
+    target_sources(sidescopes_tests PRIVATE
+        test_portal_request_path.cpp
+        ${CMAKE_SOURCE_DIR}/src/platform/linux/portal_request_path.cpp)
+endif()
+
 # The engine tests (test_vectorscope/waveform/histogram/graticule) are
 # white-box: they include the engine headers and link the engine directly,
 # which in the static build comes in through the module targets. In dynamic
