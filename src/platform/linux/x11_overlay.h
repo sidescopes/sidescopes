@@ -5,6 +5,9 @@
 
 #include <cstdint>
 #include <functional>
+#include <vector>
+
+#include "core/frame.h"  // IntRect
 
 namespace sidescopes {
 
@@ -45,6 +48,13 @@ public:
     /// whatever lies beneath - the border's dress. XWayland maps the shape
     /// to the surface's Wayland input region.
     void setClickThrough(bool clickThrough) const;
+
+    /// Restricts the window's input region to @p rects (window-local pixels):
+    /// clicks inside one of them reach the window, clicks anywhere else fall
+    /// through. The border uses it so only its band takes the pointer while
+    /// the region interior stays the editor's. An empty list is fully
+    /// click-through, the same as setClickThrough(true).
+    void setInputRegion(const std::vector<IntRect>& rects) const;
 
     /// Grabs the keyboard onto this window so overlay-wide keys (Esc, the
     /// mode letters) arrive while the pick is up. Released on destroy.

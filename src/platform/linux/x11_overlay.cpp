@@ -118,6 +118,23 @@ void OverlayWindow::setClickThrough(bool clickThrough) const
     XFlush(display);
 }
 
+void OverlayWindow::setInputRegion(const std::vector<IntRect>& rects) const
+{
+    Display* display = overlayDisplay();
+    if (m_window == 0 || display == nullptr) {
+        return;
+    }
+    std::vector<XRectangle> shape;
+    shape.reserve(rects.size());
+    for (const IntRect& rect : rects) {
+        shape.push_back(XRectangle{static_cast<short>(rect.x), static_cast<short>(rect.y),
+                                   static_cast<unsigned short>(rect.width), static_cast<unsigned short>(rect.height)});
+    }
+    XShapeCombineRectangles(display, m_window, ShapeInput, 0, 0, shape.data(), static_cast<int>(shape.size()), ShapeSet,
+                            Unsorted);
+    XFlush(display);
+}
+
 void OverlayWindow::grabKeyboard()
 {
     Display* display = overlayDisplay();

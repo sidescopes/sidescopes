@@ -14,6 +14,7 @@
 #include <optional>
 
 #include "platform/desktop.h"
+#include "platform/linux/region_border_x11.h"
 #include "platform/linux/region_picker_x11.h"
 #include "platform/region_geometry.h"
 
@@ -254,26 +255,71 @@ void setRegionPickChipColor(const std::optional<FloatColor>& color)
     g_pinChipColor = color;
 }
 
-void showRegionBorder(uint32_t, const RegionOfInterest&, const std::string&, bool)
+void showRegionBorder(uint32_t displayId, const RegionOfInterest& region, const std::string& label, bool attached)
 {
+    const std::optional<DisplayGeometry> geometry = geometryOfDisplay(displayId);
+    if (!geometry) {
+        return;
+    }
+    const LocalRect regionRoot{geometry->originX + region.leftPercent / 100.0 * geometry->widthPoints,
+                               geometry->originY + region.topPercent / 100.0 * geometry->heightPoints,
+                               (region.rightPercent - region.leftPercent) / 100.0 * geometry->widthPoints,
+                               (region.bottomPercent - region.topPercent) / 100.0 * geometry->heightPoints};
+    showBorder(displayId, *geometry, regionRoot, label, attached);
 }
 
 void hideRegionBorder()
 {
+    hideBorder();
 }
 
 RegionBorderEdit pollRegionBorderEdit()
 {
-    return {};
+    // The border's own window delivers its events through the shared pump; the
+    // picker's pump does not run while a border is up, so this drives it.
+    pumpOverlayEvents();
+
+    RegionBorderEdit edit;
+    BorderX11State& state = border();
+    if (!state.visible) {
+        return edit;
+    }
+    edit.editing = state.editing;
+    edit.dismissed = state.dismissed;
+    edit.attachToggled = state.attachToggled;
+    state.dismissed = false;
+    state.attachToggled = false;
+    if (state.edited) {
+        state.edited = false;
+        // Root pixels back to display percentages, against the border's own
+        // display - the same conversion the picker does at its poll boundary.
+        const double width = state.displayWidth;
+        const double height = state.displayHeight;
+        RegionOfInterest region;
+        region.leftPercent = (state.editedRegion.x - state.displayOriginX) / width * 100.0;
+        region.topPercent = (state.editedRegion.y - state.displayOriginY) / height * 100.0;
+        region.rightPercent = (state.editedRegion.x + state.editedRegion.width - state.displayOriginX) / width * 100.0;
+        region.bottomPercent =
+            (state.editedRegion.y + state.editedRegion.height - state.displayOriginY) / height * 100.0;
+        edit.region = region;
+    }
+
+    return edit;
 }
 
 std::vector<BorderKeyPress> drainBorderKeyPresses()
 {
+    // The border never takes the keyboard on Linux, as on Windows: it is
+    // click-through and override-redirect, so the application keeps focus and
+    // its own shortcuts throughout.
     return {};
 }
 
 void showAttachedEditDim(uint32_t, const RegionOfInterest&)
 {
+    // The attached-edit spotlight is a refinement of the border's own dress;
+    // the region is already clamped to the window at pick time, so the border
+    // ships without the extra veil until the owner asks for it.
 }
 
 void hideAttachedEditDim()
