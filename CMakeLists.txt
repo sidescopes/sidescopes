@@ -244,9 +244,13 @@ endif()
 if(UNIX AND NOT APPLE)
     # The Linux platform layer: X11/XRandR serves display geometry and live
     # keyboard state (XWayland included); capture is the ScreenCast portal
-    # backend. Services Wayland's isolation forbids report their honest empty
-    # answers - see each source.
+    # over plain libdbus feeding a PipeWire stream - the one route every
+    # desktop offers, GNOME included. Services Wayland's isolation forbids
+    # report their honest empty answers - see each source.
     find_package(X11 REQUIRED)
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(PIPEWIRE REQUIRED IMPORTED_TARGET libpipewire-0.3)
+    pkg_check_modules(DBUS REQUIRED IMPORTED_TARGET dbus-1)
     add_library(sidescopes_platform STATIC
         src/platform/focus_resolution.cpp
         src/platform/frame_pool.cpp
@@ -255,6 +259,8 @@ if(UNIX AND NOT APPLE)
         src/platform/linux/desktop.cpp
         src/platform/linux/face_detection.cpp
         src/platform/linux/native_menu.cpp
+        src/platform/linux/pipewire_stream.cpp
+        src/platform/linux/portal_screencast.cpp
         src/platform/linux/region_selection.cpp
         src/platform/linux/screen_capture.cpp
     )
@@ -264,6 +270,8 @@ if(UNIX AND NOT APPLE)
         sidescopes_core
         X11::X11
         X11::Xrandr
+        PkgConfig::PIPEWIRE
+        PkgConfig::DBUS
     )
     sidescopes_target_defaults(sidescopes_platform)
 endif()

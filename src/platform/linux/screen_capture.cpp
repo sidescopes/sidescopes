@@ -1,23 +1,89 @@
-// Screen capture on Linux. The targets are real - the connected outputs, so
-// the interface speaks true display names and geometry - but the stream
-// itself is not built yet: start() declines with a status naming that, and
-// the controller's retry loop keeps the page honest. The planned backend is
-// the ScreenCast portal feeding PipeWire, per the workbench design note.
+// Screen capture on Linux: the ScreenCast portal feeding a PipeWire stream.
+// The targets are the connected outputs, so the interface speaks true
+// display names; which output the stream actually carries is the portal
+// dialog's answer, made silent on later launches by a persisted restore
+// token. The whole bring-up runs on a capture thread - the consent dialog
+// can sit open for minutes and the frame loop must keep drawing behind it.
 
 #include "platform/screen_capture.h"
 
+#include <sys/stat.h>
+
+#include <atomic>
+#include <cstdio>
+#include <string>
+#include <thread>
+
+#include "platform/desktop.h"
+#include "platform/linux/pipewire_stream.h"
+#include "platform/linux/portal_screencast.h"
 #include "platform/linux/x11_displays.h"
 
 namespace sidescopes {
 namespace {
 
+/// The restore token lives beside the preferences: platform state owned by
+/// the capture backend, deliberately not a preference the application sees.
+std::string restoreTokenPath()
+{
+    const std::string preferences = preferencesFilePath();
+    const std::size_t slash = preferences.find_last_of('/');
+    if (slash == std::string::npos) {
+        return "portal-restore-token";
+    }
+    return preferences.substr(0, slash + 1) + "portal-restore-token";
+}
+
+std::string loadRestoreToken()
+{
+    std::string token;
+    std::FILE* file = std::fopen(restoreTokenPath().c_str(), "r");
+    if (file == nullptr) {
+        return token;
+    }
+    char buffer[512];
+    const std::size_t read = std::fread(buffer, 1, sizeof(buffer), file);
+    std::fclose(file);
+    token.assign(buffer, read);
+    while (!token.empty() && (token.back() == '\n' || token.back() == '\r')) {
+        token.pop_back();
+    }
+    return token;
+}
+
+/// Tokens are single-use: every Start hands back a fresh one, so failing to
+/// persist it here costs a consent dialog on the next launch.
+void saveRestoreToken(const std::string& token)
+{
+    const std::string path = restoreTokenPath();
+    if (token.empty()) {
+        std::remove(path.c_str());
+        return;
+    }
+    const std::size_t slash = path.find_last_of('/');
+    if (slash != std::string::npos) {
+        mkdir(path.substr(0, slash).c_str(), 0700);
+    }
+    std::FILE* file = std::fopen(path.c_str(), "w");
+    if (file == nullptr) {
+        return;
+    }
+    std::fwrite(token.data(), 1, token.size(), file);
+    std::fclose(file);
+}
+
 class LinuxScreenCapture final : public ScreenCaptureSource
 {
 public:
+    ~LinuxScreenCapture() override
+    {
+        stop();
+    }
+
     CapturePermission requestPermission() override
     {
-        // Consent on Linux is asked by the portal dialog at stream start,
-        // not granted ahead of it; there is nothing to request here.
+        // Consent is asked by the portal dialog at stream start, not granted
+        // ahead of it; there is nothing to request here.
         return CapturePermission::Granted;
     }
 
@@ -36,16 +102,27 @@ public:
         return targets;
     }
 
-    bool start(const CaptureTarget&, int, FrameMailbox&) override
+    bool start(const CaptureTarget&, int maxFramesPerSecond, FrameMailbox& mailbox) override
     {
-        if (m_status) {
-            m_status("screen capture is not built on Linux yet");
+        if (m_declined) {
+            report("screen sharing was declined - relaunch to be asked again");
+            return false;
         }
-        return false;
+        stop();
+        m_stopRequested.store(false);
+        m_worker = std::thread([this, maxFramesPerSecond, &mailbox] { captureSession(maxFramesPerSecond, mailbox); });
+        // Optimistic by design: the consent dialog may still be open. A
+        // failure past this point arrives through the status callback, the
+        // same way any stream death does.
+        return true;
     }
 
     void stop() override
     {
+        m_stopRequested.store(true);
+        if (m_worker.joinable()) {
+            m_worker.join();
+        }
     }
 
     void setStatusCallback(StatusCallback callback) override
@@ -54,6 +131,60 @@ public:
     }
 
 private:
+    void report(const std::string& message)
+    {
+        if (m_status) {
+            m_status(message);
+        }
+    }
+
+    /// The capture thread: handshake, stream, then a watch on the portal
+    /// session until asked to stop or the session dies under us.
+    void captureSession(int maxFramesPerSecond, FrameMailbox& mailbox)
+    {
+        PortalScreenCast portal;
+        PortalError error = PortalError::None;
+        const std::optional<PortalStream> opened = portal.open(loadRestoreToken(), m_stopRequested, error);
+        if (!opened) {
+            if (m_stopRequested.load()) {
+                return;
+            }
+            if (error == PortalError::Declined) {
+                m_declined = true;
+                saveRestoreToken("");
+                report("screen sharing was declined - relaunch to be asked again");
+            } else {
+                report("screen sharing is unavailable - the desktop portal did not answer");
+            }
+            return;
+        }
+        saveRestoreToken(opened->restoreToken);
+
+        PipeWireVideoStream stream;
+        std::atomic<bool> streamDied{false};
+        const bool started = stream.start(opened->pipewireFd, opened->nodeId, maxFramesPerSecond, mailbox,
+                                          [this, &streamDied](const std::string& message) {
+                                              streamDied.store(true);
+                                              report(message);
+                                          });
+        if (!started) {
+            report("capture stream could not start");
+            return;
+        }
+        while (!m_stopRequested.load() && !streamDied.load()) {
+            if (!portal.pump(200)) {
+                if (!m_stopRequested.load()) {
+                    report("capture session closed");
+                }
+                break;
+            }
+        }
+        stream.stop();
+    }
+
+    std::thread m_worker;
+    std::atomic<bool> m_stopRequested{false};
+    bool m_declined = false;
     StatusCallback m_status;
 };
 
