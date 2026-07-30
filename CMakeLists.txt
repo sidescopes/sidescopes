@@ -258,6 +258,44 @@ if(UNIX AND NOT APPLE)
     # fails without a display and the ImGui menu takes over - so the link does
     # not force a display to exist.
     pkg_check_modules(GTK3 REQUIRED IMPORTED_TARGET gtk+-3.0)
+
+    # libfacedetection (3-clause BSD): the face detector, on the one platform
+    # with none in the system - macOS has Vision and Windows has WinRT's. Its
+    # CNN weights are compiled-in source, so nothing is downloaded or loaded at
+    # runtime. Fetched inside this block, so no other platform's build sees it.
+    #
+    # Its own CMakeLists is deliberately not used: it declares
+    # cmake_minimum_required 2.8.12, turns AVX2 on by default - which would
+    # make the application refuse to start on a machine without it - and
+    # installs and exports targets this build has no use for. The three sources
+    # are compiled here instead, on the portable path. SOURCE_SUBDIR names a
+    # directory that does not exist, which is how FetchContent is told to
+    # download the content without adding it as a project.
+    FetchContent_Declare(
+        libfacedetection
+        GIT_REPOSITORY https://github.com/ShiqiYu/libfacedetection.git
+        GIT_TAG acf7b254121927e7dced30e233a2e03119f28ea2
+        SOURCE_SUBDIR do-not-configure
+    )
+    FetchContent_MakeAvailable(libfacedetection)
+    # Their header includes an export header their CMake generates. This build
+    # links the code into a static library, where the macro is empty.
+    file(GENERATE
+        OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/facedetection-export/facedetection_export.h
+        CONTENT "#pragma once\n#define FACEDETECTION_EXPORT\n")
+    add_library(facedetection STATIC
+        ${libfacedetection_SOURCE_DIR}/src/facedetectcnn.cpp
+        ${libfacedetection_SOURCE_DIR}/src/facedetectcnn-data.cpp
+        ${libfacedetection_SOURCE_DIR}/src/facedetectcnn-model.cpp
+    )
+    # SYSTEM, and without sidescopes_target_defaults: vendored sources are not
+    # this project's to keep clean, and the warning wall would stop the build
+    # on code no commit here will ever touch.
+    target_include_directories(facedetection SYSTEM PUBLIC
+        ${libfacedetection_SOURCE_DIR}/src
+        ${CMAKE_CURRENT_BINARY_DIR}/facedetection-export
+    )
+
     add_library(sidescopes_platform STATIC
         src/platform/focus_resolution.cpp
         src/platform/frame_pool.cpp
@@ -284,6 +322,10 @@ if(UNIX AND NOT APPLE)
         PkgConfig::PIPEWIRE
         PkgConfig::DBUS
         PkgConfig::GTK3
+        PRIVATE
+        # The face detector reaches no further than face_detection.cpp, so the
+        # archive is linked without handing its headers to anything else.
+        facedetection
     )
     sidescopes_target_defaults(sidescopes_platform)
 endif()
