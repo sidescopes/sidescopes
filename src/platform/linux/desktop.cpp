@@ -433,20 +433,7 @@ void observeEscapeWithoutKeyWindow(std::function<void()> callback)
     observers().escapeWithoutKeyWindow = std::move(callback);
 }
 
-void sampleScreenColorAsync(DesktopPoint, std::function<void(std::optional<FloatColor>)> callback)
-{
-    // No off-stream screen read exists under Wayland; the cursor readout
-    // works from the capture frame alone. The synchronous empty answer is the
-    // contract's way of saying so.
-    const std::function<void(std::optional<FloatColor>)> reader = std::move(callback);
-    if (reader) {
-        reader(std::nullopt);
-    }
-}
-
-std::optional<CapturedImage> captureDisplayImage(uint32_t)
-{
-    return std::nullopt;
-}
+// sampleScreenColorAsync and captureDisplayImage - the off-stream screen reads
+// - live in x11_screen_read.cpp beside their XGetImage machinery.
 
 }  // namespace sidescopes

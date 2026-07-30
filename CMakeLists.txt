@@ -313,6 +313,7 @@ if(UNIX AND NOT APPLE)
         src/platform/linux/screen_capture.cpp
         src/platform/linux/x11_windows.cpp
         src/platform/linux/x11_overlay.cpp
+        src/platform/linux/x11_screen_read.cpp
     )
     target_include_directories(sidescopes_platform PUBLIC src ${nanosvg_SOURCE_DIR}/src)
     target_link_libraries(sidescopes_platform
