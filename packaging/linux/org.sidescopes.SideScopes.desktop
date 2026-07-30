@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=SideScopes
+Comment=Real-time vectorscope and waveform of a screen region, used beside photo editors
+Exec=sidescopes
+Icon=sidescopes
+Terminal=false
+Categories=Graphics;Photography;
+StartupWMClass=SideScopes

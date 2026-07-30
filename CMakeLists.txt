@@ -633,3 +633,26 @@ if(SIDESCOPES_UI_TESTS)
     enable_testing()
     add_subdirectory(tests/ui)
 endif()
+
+# Linux install + desktop integration. Inert on macOS and Windows, which ship
+# as an .app bundle and a standalone .exe respectively. The binary installs as
+# `sidescopes` (the project's lowercase binary name); the .desktop launcher and
+# the hicolor icon set follow the freedesktop layout via GNUInstallDirs.
+if(UNIX AND NOT APPLE AND TARGET SideScopes)
+    include(GNUInstallDirs)
+
+    # Install the built binary as `sidescopes` while leaving the build-tree
+    # artifact named SideScopes (the release packaging step reads build/SideScopes).
+    install(PROGRAMS $<TARGET_FILE:SideScopes>
+        DESTINATION ${CMAKE_INSTALL_BINDIR}
+        RENAME sidescopes)
+
+    install(FILES packaging/linux/org.sidescopes.SideScopes.desktop
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)
+
+    foreach(size 16 24 32 48 64 128 256 512)
+        install(FILES assets/brand/icons/linux/sidescopes-${size}.png
+            DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/${size}x${size}/apps
+            RENAME sidescopes.png)
+    endforeach()
+endif()
