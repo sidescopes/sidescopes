@@ -1,5 +1,6 @@
 // Headless asserts on the drawn context menu - the fallback the application
-// shows where no native menu exists (Linux). It drives the real
+// shows where no native menu is available (a headless run, or a Wayland
+// session with no XWayland, where GTK cannot start). It drives the real
 // src/app/imgui_context_menu.cpp pair: openImGuiContextMenu with a built item
 // list, then drawImGuiContextMenu once per frame, and it clicks a top-level
 // action, a nested submenu action, and a dismissal - the three paths a menu

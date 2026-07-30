@@ -1,5 +1,8 @@
-// The drawn context menu, for platforms without a native one. The same
-// declarative items the native menus consume are rendered as an ImGui popup:
+// The drawn context menu: the fallback shown when no native menu is
+// available. macOS and Windows always have one; Linux draws a GTK menu where
+// a display is reachable and falls back here where GTK cannot start (a
+// headless run, or a Wayland session with no XWayland). The same declarative
+// items the native menus consume are rendered as an ImGui popup:
 // submenus nest through BeginMenu, checked actions wear a checkmark, and the
 // display-only shortcut column teaches the keys exactly as the native menus
 // do. Closing the popup without a choice is a dismissal, the same -1 the

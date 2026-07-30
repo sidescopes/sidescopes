@@ -69,12 +69,15 @@ Debian or Ubuntu:
 ```sh
 sudo apt install cmake ninja-build clang-format \
     libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev \
-    libxkbcommon-dev libwayland-dev libgl1-mesa-dev
+    libxkbcommon-dev libwayland-dev libgl1-mesa-dev \
+    libdbus-1-dev libpipewire-0.3-dev libgtk-3-dev
 ```
 
-The Linux port is young: the interface runs, and screen capture is still
-being built. The window prefers X11 (XWayland on a Wayland desktop), which
-every major desktop provides.
+Screen capture goes through the desktop's ScreenCast portal and PipeWire;
+the native context menu is drawn by GTK 3. The window prefers X11 (XWayland
+on a Wayland desktop), which every major desktop provides. Where GTK cannot
+start — a headless run, or a Wayland session without XWayland — the menu
+falls back to an in-window one drawn by the application itself.
 
 ## Screen-recording permission for development builds (macOS)
 

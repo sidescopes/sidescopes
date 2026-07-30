@@ -251,6 +251,13 @@ if(UNIX AND NOT APPLE)
     find_package(PkgConfig REQUIRED)
     pkg_check_modules(PIPEWIRE REQUIRED IMPORTED_TARGET libpipewire-0.3)
     pkg_check_modules(DBUS REQUIRED IMPORTED_TARGET dbus-1)
+    # GTK 3 draws the native context menu, the one surface with no cross-
+    # platform service behind it. Linked, not optional: it is the deliberate
+    # Linux dependency for a menu that overflows the small scope window and
+    # wears the desktop theme. It stays a runtime choice too - gtk_init_check
+    # fails without a display and the ImGui menu takes over - so the link does
+    # not force a display to exist.
+    pkg_check_modules(GTK3 REQUIRED IMPORTED_TARGET gtk+-3.0)
     add_library(sidescopes_platform STATIC
         src/platform/focus_resolution.cpp
         src/platform/frame_pool.cpp
@@ -273,6 +280,7 @@ if(UNIX AND NOT APPLE)
         X11::Xrandr
         PkgConfig::PIPEWIRE
         PkgConfig::DBUS
+        PkgConfig::GTK3
     )
     sidescopes_target_defaults(sidescopes_platform)
 endif()
