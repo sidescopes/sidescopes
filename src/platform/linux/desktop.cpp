@@ -1,10 +1,12 @@
-// Desktop services on Linux. Display geometry and live keyboard state come
-// from X11/XRandR whenever a display is reachable - the X11 path also serves
-// XWayland, so it covers every major desktop today. Where Wayland's isolation
-// forbids a service outright (foreign window enumeration, off-window cursor
-// reads, screen sampling), the seam reports the honest empty answer and the
-// application's fallbacks carry it: those services return optionals or empty
-// vectors by contract.
+// Desktop services on Linux. Display geometry, live keyboard state, the
+// pointer and the window services all come from X11/XRandR/EWMH whenever a
+// display is reachable - the X11 path also serves XWayland, so it covers
+// every major desktop today. What that path can SEE under XWayland is X11
+// clients: a native Wayland toplevel is invisible to window enumeration and
+// stops the pointer being reported while it sits under it. Where the
+// isolation forbids a service outright (screen sampling), the seam reports
+// the honest empty answer and the application's fallbacks carry it: those
+// services return optionals or empty vectors by contract.
 
 #include "platform/desktop.h"
 
@@ -16,13 +18,17 @@
 #include <cstdlib>
 
 #include "core/preferences.h"
+#include "platform/focus_resolution.h"
 #include "platform/linux/x11_displays.h"
+#include "platform/linux/x11_windows.h"
 
 namespace sidescopes {
 namespace {
 
 /// One X11 connection for the process, opened at first use. Null on a
 /// pure-Wayland session without XWayland; every caller degrades on null.
+/// Main thread only - Xlib serialises nothing between threads, so the motion
+/// watcher opens a connection of its own rather than sharing this one.
 Display* x11Display()
 {
     static Display* display = XOpenDisplay(nullptr);
@@ -45,6 +51,35 @@ bool contains(const DisplayGeometry& geometry, DesktopPoint point)
 {
     return point.x >= geometry.originX && point.x < geometry.originX + geometry.widthPoints &&
            point.y >= geometry.originY && point.y < geometry.originY + geometry.heightPoints;
+}
+
+/// The pointer in root coordinates plus the modifier mask, in one round
+/// trip. False only when the pointer is on another X screen entirely.
+struct PointerSample
+{
+    DesktopPoint position;
+    unsigned int modifiers = 0;
+};
+
+std::optional<PointerSample> queryPointer()
+{
+    Display* display = x11Display();
+    if (display == nullptr) {
+        return std::nullopt;
+    }
+    ::Window root = 0;
+    ::Window child = 0;
+    int rootX = 0;
+    int rootY = 0;
+    int childX = 0;
+    int childY = 0;
+    unsigned int mask = 0;
+    if (XQueryPointer(display, DefaultRootWindow(display), &root, &child, &rootX, &rootY, &childX, &childY, &mask) !=
+        True) {
+        return std::nullopt;
+    }
+
+    return PointerSample{DesktopPoint{static_cast<double>(rootX), static_cast<double>(rootY)}, mask};
 }
 
 /// The installed observers, owned here the way every real platform layer owns
@@ -114,26 +149,33 @@ std::vector<LinuxDisplay> connectedDisplays()
     return displays;
 }
 
-std::vector<DesktopWindow> onScreenWindows(uint32_t)
+std::vector<DesktopWindow> onScreenWindows(uint32_t displayId)
 {
-    // Wayland gives applications no view of other applications' windows, so
-    // window attach has no general Linux form; the portal's window source is
-    // the planned replacement, with the compositor doing the choosing.
-    return {};
+    // The X11 lane sees X11 clients: under XWayland that is every application
+    // the compositor runs through Xwayland, and no native Wayland toplevel -
+    // those are the portal's window source to fetch, not this list's.
+    return x11OnScreenWindows(x11Display(), connectedDisplays(), displayId, getpid());
 }
 
-std::optional<WindowGeometry> windowGeometry(uint64_t)
+std::optional<WindowGeometry> windowGeometry(uint64_t identity)
 {
-    return std::nullopt;
+    return x11WindowGeometry(x11Display(), identity);
 }
 
 std::optional<DesktopPoint> globalCursorPosition()
 {
-    // XQueryPointer only tracks the cursor over X surfaces: exact on an X11
-    // session, stale under XWayland while the cursor visits Wayland windows.
-    // The capture stream's cursor metadata will replace this for the probes;
-    // until then a stale read is worse than none.
-    return std::nullopt;
+    // Root coordinates are the global desktop space directly. The caveat is
+    // XWayland's: while the pointer sits over a native Wayland surface the X
+    // server is no longer told where it went, so this reads the last place
+    // it saw. The capture stream's cursor metadata is what replaces it
+    // there; until it lands, a real position on the X surfaces the user
+    // picks and probes over beats no position at all.
+    const std::optional<PointerSample> pointer = queryPointer();
+    if (!pointer) {
+        return std::nullopt;
+    }
+
+    return pointer->position;
 }
 
 std::optional<DisplayGeometry> geometryOfDisplay(uint32_t displayId)
@@ -158,7 +200,12 @@ std::optional<uint32_t> displayAtPoint(DesktopPoint point)
 
 std::optional<uint32_t> displayUnderCursor()
 {
-    return std::nullopt;
+    const std::optional<DesktopPoint> cursor = globalCursorPosition();
+    if (!cursor) {
+        return std::nullopt;
+    }
+
+    return displayAtPoint(*cursor);
 }
 
 std::string preferencesFilePath()
@@ -203,24 +250,14 @@ void openUrl(const char* url)
 ModifierState currentModifiers()
 {
     ModifierState state;
-    Display* display = x11Display();
-    if (display == nullptr) {
-        return state;
+    const std::optional<PointerSample> pointer = queryPointer();
+    if (pointer) {
+        state.shift = (pointer->modifiers & ShiftMask) != 0;
+        state.control = (pointer->modifiers & ControlMask) != 0;
+        state.option = (pointer->modifiers & Mod1Mask) != 0;
+        state.command = (pointer->modifiers & Mod4Mask) != 0;
     }
-    Window root = 0;
-    Window child = 0;
-    int rootX = 0;
-    int rootY = 0;
-    int childX = 0;
-    int childY = 0;
-    unsigned int mask = 0;
-    if (XQueryPointer(display, DefaultRootWindow(display), &root, &child, &rootX, &rootY, &childX, &childY, &mask) ==
-        True) {
-        state.shift = (mask & ShiftMask) != 0;
-        state.control = (mask & ControlMask) != 0;
-        state.option = (mask & Mod1Mask) != 0;
-        state.command = (mask & Mod4Mask) != 0;
-    }
+
     return state;
 }
 
@@ -255,16 +292,20 @@ void observeSystemSleep(std::function<void()> callback)
     observers().systemSleep = std::move(callback);
 }
 
-void watchWindowMotion(uint64_t, int64_t, std::function<void(WindowMotionSignal)> callback)
+void watchWindowMotion(uint64_t identity, int64_t, std::function<void(WindowMotionSignal)> callback)
 {
-    // Foreign window motion is unobservable on Wayland; the moved-from
-    // callback is simply dropped, and the border - which does not exist here
-    // yet either - would live on polled geometry instead.
-    const std::function<void(WindowMotionSignal)> dropped = std::move(callback);
+    // ONLY Moved is ever delivered here. The grip pair states whether a
+    // human's button is down on a FOREIGN window, which X11 reports to nobody
+    // but that window's own client short of a pointer grab - and grabbing the
+    // pointer away from the application the user is dragging is not a price
+    // this instrument pays. So the border hides on the first geometry change
+    // rather than at the grip, and comes back on the settle timer.
+    x11WatchWindowMotion(x11Display(), identity, std::move(callback));
 }
 
 void unwatchWindowMotion()
 {
+    x11UnwatchWindowMotion(x11Display());
 }
 
 void observeForegroundChanges(std::function<void()> callback)
@@ -279,6 +320,9 @@ void unobserveForegroundChanges()
 
 std::vector<DesktopWindow> attachCandidateWindows(uint32_t displayId)
 {
+    // No level shifts here: a panel that floats above the ordinary layer is
+    // an ordinary managed window to the stacking list, so the same list is
+    // the answer - as it is on Windows.
     return onScreenWindows(displayId);
 }
 
@@ -292,13 +336,16 @@ std::string displayName(uint32_t displayId)
     return "Display";
 }
 
-std::optional<uint64_t> focusedAttachedWindow(int64_t, const std::vector<uint64_t>&)
+std::optional<uint64_t> focusedAttachedWindow(int64_t applicationPid, const std::vector<uint64_t>& attached)
 {
-    return std::nullopt;
+    // The shared rule decides; this layer only harvests the stacking order it
+    // reasons over, the same division the Windows layer keeps.
+    return resolveAttachedFocus(x11OrderedWindows(x11Display()), applicationPid, attached);
 }
 
-void raiseWindow(uint64_t, int64_t)
+void raiseWindow(uint64_t identity, int64_t)
 {
+    x11ActivateWindow(x11Display(), identity);
 }
 
 void rememberApplicationWindow(void*)
@@ -313,7 +360,7 @@ int64_t ownApplicationPid()
 
 int64_t foregroundApplicationPid()
 {
-    return 0;
+    return x11ForegroundApplicationPid(x11Display());
 }
 
 std::vector<std::string> interfaceFontFiles()
