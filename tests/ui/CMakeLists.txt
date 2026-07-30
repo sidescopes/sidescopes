@@ -146,6 +146,17 @@ target_link_libraries(sidescopes_ui_graticule_tests PRIVATE
 sidescopes_target_defaults(sidescopes_ui_graticule_tests)
 add_test(NAME sidescopes_ui_graticule COMMAND sidescopes_ui_graticule_tests)
 
+# The context-menu suite drives the drawn menu fallback (the Linux path) end
+# to end - open, nested submenu, dismissal - against the hooked Dear ImGui.
+add_executable(sidescopes_ui_context_menu_tests
+    test_context_menu_ui.cpp
+    ui_test_harness.cpp)
+target_include_directories(sidescopes_ui_context_menu_tests PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(sidescopes_ui_context_menu_tests PRIVATE
+    sidescopes_imgui_test_engine sidescopes_app_imgui_te)
+sidescopes_target_defaults(sidescopes_ui_context_menu_tests)
+add_test(NAME sidescopes_ui_context_menu COMMAND sidescopes_ui_context_menu_tests)
+
 # The interface-scale suite asserts applyInterfaceScale never compounds the
 # style across repeated scale changes - the ImGui-only unit behind the UI
 # Scaling menu, driven headlessly against the hooked build.

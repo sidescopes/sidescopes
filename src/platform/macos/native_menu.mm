@@ -96,4 +96,9 @@ int showNativeContextMenu(const std::vector<NativeMenuItem>& items)
     return target.picked;
 }
 
+bool nativeContextMenuAvailable()
+{
+    return true;
+}
+
 }  // namespace sidescopes

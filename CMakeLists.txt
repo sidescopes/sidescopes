@@ -346,6 +346,7 @@ set(SIDESCOPES_APP_IMGUI_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/src/app/frame_timer.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/app/hex_font.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/app/icon_textures.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/app/imgui_context_menu.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/app/imgui_ui.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/app/interface_style.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/app/layout_preset_picker.cpp

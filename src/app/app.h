@@ -328,6 +328,9 @@ private:
     /// Owns whether the About window is on screen and everything it shows.
     AboutWindow m_about;
     PinBoard m_pins;
+    /// Dispatch data for a drawn fallback menu (no native menu on this
+    /// platform), held between the right-click and the async choice.
+    std::vector<ParamMenuAction> m_fallbackMenuParams;
 
     /// Owns the color under the pointer - the cross-display sample and the
     /// per-trace smoothing; the host hands what it returns to its drawing.

@@ -32,6 +32,7 @@
 #include "app/context_menu.h"
 #include "app/frame_pacing.h"
 #include "app/frame_timer.h"
+#include "app/imgui_context_menu.h"
 #include "app/interface_style.h"
 #include "app/overlay_render.h"
 #include "app/param_menu.h"
@@ -696,6 +697,10 @@ void App::drawFrameUi()
     applyPaneRenderOutcome(m_panes->drawScopePanes(input));
     m_panes->drawStatusBar(input);
     handleContextMenu();
+    const ImGuiContextMenuFrame fallbackMenu = drawImGuiContextMenu();
+    if (fallbackMenu.chosen >= 0) {
+        dispatchMenuChoice(fallbackMenu.chosen, m_fallbackMenuParams);
+    }
 
     ImGui::End();
     ImGui::PopStyleVar();
@@ -843,8 +848,13 @@ void App::handleContextMenu()
                                  m_quality,
                                  m_analysis.region.has_value()};
     buildContextMenu(model, clickedPane, menu, paramActions);
-    const int chosen = showNativeContextMenu(menu);
-    dispatchMenuChoice(chosen, paramActions);
+    if (nativeContextMenuAvailable()) {
+        dispatchMenuChoice(showNativeContextMenu(menu), paramActions);
+
+        return;
+    }
+    m_fallbackMenuParams = std::move(paramActions);
+    openImGuiContextMenu(std::move(menu));
 }
 
 // Carries out a menu choice. What each id MEANS is the menu's own to say - it
