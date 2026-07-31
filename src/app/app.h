@@ -147,6 +147,15 @@ private:
     void onWindowMotion(WindowMotionSignal signal);
     void idleWaitWatchingAttachedWindow();
     void detachActiveWindow();
+    /// Scopes a whole window the compositor's picker chooses - the Linux
+    /// native-Wayland fallback offered only where the backend supports it and
+    /// a foreign window's screen rectangle cannot be tracked. The stream
+    /// becomes that window, the region is the whole of it, and no on-desktop
+    /// border is drawn; endWindowScopeIfEnded clears it when the stream stops.
+    void scopeWindow();
+    /// Clears a window scope once its stream has ended (the window closed or
+    /// the pick was cancelled), returning the scopes to the empty state.
+    void endWindowScopeIfEnded();
     /// Attaches or draws a region the picker confirmed: a window click, an
     /// in-attach-mode draw, a face suggestion, or a freehand global draw. Fed
     /// from a RegionPickOutcome by applyRegionPickOutcome.
@@ -279,6 +288,12 @@ private:
     AnalysisWorker m_worker;
     std::unique_ptr<ScreenCaptureSource> m_capture;
     CaptureController m_captureController;
+    // Whether a compositor-picked window is being scoped (the Linux
+    // native-Wayland fallback). While it holds, the region is the whole window
+    // and no on-desktop border is drawn; when the window stream ends, the
+    // frame loop clears the region and drops this. False on every other
+    // platform, where window attach tracks a screen rectangle instead.
+    bool m_windowScopeActive = false;
 
     AnalysisSettings m_analysis;
     bool m_analysisDirty = true;

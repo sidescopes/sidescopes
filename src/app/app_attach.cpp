@@ -329,6 +329,36 @@ void App::detachActiveWindow()
     }
 }
 
+// The native-Wayland fallback: where a foreign window's screen rectangle
+// cannot be tracked, the compositor's own picker chooses the window and the
+// capture stream becomes it. A window has no display coordinates, so the
+// region is the whole window and the coordinator suppresses the on-desktop
+// border of its own accord (the captured display is 0 while a window is
+// scoped). Any prior selection - a drawn region, an attached window - is let
+// go first: window scope and a screen region are exclusive.
+void App::scopeWindow()
+{
+    if (!m_captureController.captureWindow()) {
+        return;
+    }
+    applyRegionOutcome(m_regions.clearRegion());
+    applyRegionOutcome(m_regions.useRegion(RegionOfInterest{}));
+    m_windowScopeActive = true;
+}
+
+// A window stream ends when the window closes or the pick is cancelled; the
+// controller drops window mode and this returns the scopes to the empty
+// state. Read off the controller's own fact rather than a remembered one, so
+// no path can strand a window-scoped region after its stream is gone.
+void App::endWindowScopeIfEnded()
+{
+    if (!m_windowScopeActive || m_captureController.capturingWindow()) {
+        return;
+    }
+    m_windowScopeActive = false;
+    applyRegionOutcome(m_regions.clearRegion());
+}
+
 /// The quick start a window click hands back: the window rectangle pulled
 /// in by a fixed margin - generous enough that the border chrome and label
 /// strip clear the title bar and its buttons. Toolbars are the user's

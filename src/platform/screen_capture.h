@@ -54,6 +54,31 @@ public:
     /// Starts delivering @p target's frames into the mailbox; false on failure.
     [[nodiscard]] virtual bool start(const CaptureTarget& target, int maxFramesPerSecond, FrameMailbox& mailbox) = 0;
 
+    /// Whether this backend can capture a single window the user chooses
+    /// interactively, distinct from a display. Only the Linux portal offers
+    /// it: macOS and Windows attach to a window by tracking its screen
+    /// rectangle (the desktop window services), which Wayland forbids, so
+    /// there the compositor's own picker chooses the window and the stream
+    /// becomes it. False everywhere else, so nothing about the display path
+    /// changes.
+    [[nodiscard]] virtual bool supportsWindowCapture() const
+    {
+        return false;
+    }
+
+    /// Starts capturing a window the compositor's picker chooses: the stream
+    /// IS that window and follows it through moves and resizes, so a region
+    /// over it is a fraction of the window and needs no geometry tracking.
+    /// false on failure or where unsupported. Frames report the whole window
+    /// (no display coordinates), so a window-scoped region has no on-desktop
+    /// border - the window's screen position is unknowable on Wayland.
+    [[nodiscard]] virtual bool startWindowCapture(int maxFramesPerSecond, FrameMailbox& mailbox)
+    {
+        (void)maxFramesPerSecond;
+        (void)mailbox;
+        return false;
+    }
+
     virtual void stop() = 0;
 
     virtual void setStatusCallback(StatusCallback callback) = 0;

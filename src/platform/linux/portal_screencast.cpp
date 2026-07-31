@@ -23,6 +23,7 @@ constexpr const char* SessionInterface = "org.freedesktop.portal.Session";
 
 // SelectSources option values, from the portal's ScreenCast interface.
 constexpr uint32_t SourceTypeMonitor = 1;
+constexpr uint32_t SourceTypeWindow = 2;
 constexpr uint32_t CursorModeHidden = 1;
 constexpr uint32_t PersistUntilRevoked = 2;
 
@@ -299,8 +300,8 @@ std::optional<ResponseResults> createSession(Handshake& handshake, const std::at
     });
 }
 
-std::optional<ResponseResults> selectSources(Handshake& handshake, const std::string& restoreToken,
-                                             const std::atomic<bool>& abort)
+std::optional<ResponseResults> selectSources(Handshake& handshake, PortalSourceKind kind,
+                                             const std::string& restoreToken, const std::atomic<bool>& abort)
 {
     return requestCall(handshake, "SelectSources", abort, [&](DBusMessageIter* arguments, DBusMessageIter* options) {
         if (arguments != nullptr) {
@@ -308,7 +309,7 @@ std::optional<ResponseResults> selectSources(Handshake& handshake, const std::st
             appendStringValue(arguments, DBUS_TYPE_OBJECT_PATH, &session);
         }
         if (options != nullptr) {
-            appendVardictUint32(options, "types", SourceTypeMonitor);
+            appendVardictUint32(options, "types", portalSourceTypeMask(kind));
             appendVardictBool(options, "multiple", false);
             // Hidden: a cursor composited into the pixels would enter the
             // scopes' analysis; position metadata comes later for the probes.
@@ -360,8 +361,13 @@ int openPipeWireRemote(Handshake& handshake)
 
 }  // namespace
 
-std::optional<PortalStream> PortalScreenCast::open(const std::string& restoreToken, const std::atomic<bool>& abort,
-                                                   PortalError& error)
+uint32_t portalSourceTypeMask(PortalSourceKind kind)
+{
+    return kind == PortalSourceKind::Window ? SourceTypeWindow : SourceTypeMonitor;
+}
+
+std::optional<PortalStream> PortalScreenCast::open(PortalSourceKind kind, const std::string& restoreToken,
+                                                   const std::atomic<bool>& abort, PortalError& error)
 {
     error = PortalError::Unavailable;
     DBusError busError;
@@ -389,7 +395,7 @@ std::optional<PortalStream> PortalScreenCast::open(const std::string& restoreTok
     handshake.sessionHandle = created->sessionHandle;
     m_sessionHandle = created->sessionHandle;
 
-    const std::optional<ResponseResults> selected = selectSources(handshake, restoreToken, abort);
+    const std::optional<ResponseResults> selected = selectSources(handshake, kind, restoreToken, abort);
     if (!selected || selected->code != ResponseSuccess) {
         return std::nullopt;
     }

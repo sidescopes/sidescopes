@@ -104,17 +104,20 @@ public:
 
     bool start(const CaptureTarget&, int maxFramesPerSecond, FrameMailbox& mailbox) override
     {
-        if (m_declined) {
-            report("screen sharing was declined - relaunch to be asked again");
-            return false;
-        }
-        stop();
-        m_stopRequested.store(false);
-        m_worker = std::thread([this, maxFramesPerSecond, &mailbox] { captureSession(maxFramesPerSecond, mailbox); });
-        // Optimistic by design: the consent dialog may still be open. A
-        // failure past this point arrives through the status callback, the
-        // same way any stream death does.
+        return startKind(PortalSourceKind::Monitor, maxFramesPerSecond, mailbox);
+    }
+
+    bool supportsWindowCapture() const override
+    {
         return true;
+    }
+
+    bool startWindowCapture(int maxFramesPerSecond, FrameMailbox& mailbox) override
+    {
+        // A window pick is always the compositor's own dialog - the restore
+        // token, which pins a monitor, would silently reopen the last monitor
+        // instead of letting the user choose a window - so it is not carried.
+        return startKind(PortalSourceKind::Window, maxFramesPerSecond, mailbox);
     }
 
     void stop() override
@@ -138,27 +141,57 @@ private:
         }
     }
 
+    /// Spawns the capture thread for a monitor or a window source. Shared by
+    /// both entry points; the kind only changes which source the handshake
+    /// asks for and whether a restore token is offered.
+    bool startKind(PortalSourceKind kind, int maxFramesPerSecond, FrameMailbox& mailbox)
+    {
+        if (m_declined) {
+            report("screen sharing was declined - relaunch to be asked again");
+            return false;
+        }
+        stop();
+        m_stopRequested.store(false);
+        m_worker = std::thread(
+            [this, kind, maxFramesPerSecond, &mailbox] { captureSession(kind, maxFramesPerSecond, mailbox); });
+        // Optimistic by design: the consent dialog may still be open. A
+        // failure past this point arrives through the status callback, the
+        // same way any stream death does.
+        return true;
+    }
+
     /// The capture thread: handshake, stream, then a watch on the portal
     /// session until asked to stop or the session dies under us.
-    void captureSession(int maxFramesPerSecond, FrameMailbox& mailbox)
+    void captureSession(PortalSourceKind kind, int maxFramesPerSecond, FrameMailbox& mailbox)
     {
         PortalScreenCast portal;
         PortalError error = PortalError::None;
-        const std::optional<PortalStream> opened = portal.open(loadRestoreToken(), m_stopRequested, error);
+        // A window source never carries the monitor restore token.
+        const std::string restoreToken = kind == PortalSourceKind::Monitor ? loadRestoreToken() : std::string();
+        const std::optional<PortalStream> opened = portal.open(kind, restoreToken, m_stopRequested, error);
         if (!opened) {
             if (m_stopRequested.load()) {
                 return;
             }
             if (error == PortalError::Declined) {
-                m_declined = true;
-                saveRestoreToken("");
+                // A declined window pick is not a standing refusal - the user
+                // may pick one next time - so only a declined MONITOR share
+                // latches m_declined and clears the token.
+                if (kind == PortalSourceKind::Monitor) {
+                    m_declined = true;
+                    saveRestoreToken("");
+                }
                 report("screen sharing was declined - relaunch to be asked again");
             } else {
                 report("screen sharing is unavailable - the desktop portal did not answer");
             }
             return;
         }
-        saveRestoreToken(opened->restoreToken);
+        // Only a monitor share persists a restore token; a window is always the
+        // compositor's fresh pick.
+        if (kind == PortalSourceKind::Monitor) {
+            saveRestoreToken(opened->restoreToken);
+        }
 
         PipeWireVideoStream stream;
         std::atomic<bool> streamDied{false};

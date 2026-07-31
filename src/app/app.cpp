@@ -403,6 +403,7 @@ void App::runFrame()
     // it is our job.
     serviceCapture(nothingToDrawInto, glfwGetTime());
     m_captureController.service(glfwGetTime());
+    endWindowScopeIfEnded();
     // Attached regions: observe the attached windows and route the analysis by
     // the focused window. The border reconciles here every frame in both
     // regimes, so no missed edge can strand it on screen.
@@ -846,7 +847,8 @@ void App::handleContextMenu()
                                  m_presets.activeSlot(),
                                  m_uiScale.userFactor(),
                                  m_quality,
-                                 m_analysis.region.has_value()};
+                                 m_analysis.region.has_value(),
+                                 m_captureController.windowCaptureSupported()};
     buildContextMenu(model, clickedPane, menu, paramActions);
     if (nativeContextMenuAvailable()) {
         dispatchMenuChoice(showNativeContextMenu(menu), paramActions);
@@ -900,6 +902,9 @@ void App::dispatchShellMenu(int chosen)
         return;
     }
     switch (chosen) {
+    case MenuScopeWindow:
+        scopeWindow();
+        break;
     case MenuDetachWindow:
         detachActiveWindow();
         break;

@@ -5,6 +5,7 @@
 #include <mutex>
 #include <optional>
 #include <string>
+#include <vector>
 
 #include "core/frame_mailbox.h"
 #include "platform/screen_capture.h"
@@ -58,7 +59,27 @@ public:
     /// @return Whether a stream is running.
     bool start();
 
-    /// @return The display a stream is capturing, or 0 when none is.
+    /// Starts capturing a window the compositor's picker chooses, on backends
+    /// that support it (the Linux portal): the stream becomes that window and
+    /// follows it. Stops any running stream first. Unlike a display stream, a
+    /// window stream is NOT auto-retried when it ends - the window closing or
+    /// the pick being cancelled ends window scope rather than re-popping the
+    /// picker - so service() drops window mode instead of rebuilding.
+    /// @return Whether the window capture was started (the pick may still be
+    /// open); false where unsupported or without permission.
+    bool captureWindow();
+
+    /// @return Whether a window (not a display) is being scoped. A window has
+    /// no screen coordinates, so the caller suppresses the on-desktop border
+    /// and treats the region as the whole window.
+    [[nodiscard]] bool capturingWindow() const;
+
+    /// @return Whether the backend can scope an interactively-chosen window at
+    /// all, so the interface offers the action only where it works.
+    [[nodiscard]] bool windowCaptureSupported() const;
+
+    /// @return The display a stream is capturing, or 0 when none is (including
+    /// while a window is being scoped).
     [[nodiscard]] uint32_t capturedDisplay() const;
 
     /// @return The display the user chose to scope, held across restarts;
@@ -131,6 +152,11 @@ public:
 private:
     void setStatus(const std::string& message);
 
+    /// The display a start should stream, out of what the backend offers:
+    /// the requested one, or the first where none was asked for. Null when
+    /// none can serve it, the status already naming which reason applies.
+    const CaptureTarget* chooseTarget(const std::vector<CaptureTarget>& targets);
+
     ScreenCaptureSource& m_source;
     FrameMailbox& m_mailbox;
 
@@ -152,6 +178,11 @@ private:
     // Whether a stream is running, so start() stops the old one first only
     // when there is one; the first start has nothing to stop.
     bool m_running = false;
+    // Whether the running stream is a window the compositor picked rather than
+    // a display. Set only by captureWindow(); every display path clears it, so
+    // the monitor logic is untouched whenever it is false - which it always is
+    // on the platforms without window capture.
+    bool m_windowMode = false;
     // Whether the stream is stopped on purpose, which service() must not
     // mistake for a stream to revive, and the line that says why - restored
     // when a stopped stream's own report of stopping lands after the pause.

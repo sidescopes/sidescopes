@@ -55,12 +55,18 @@ struct MenuUnderTest
     std::array<LayoutPreset, LayoutPresetSlots> presets;
     std::vector<NativeMenuItem> items;
     std::vector<ParamMenuAction> paramActions;
+    bool regionSelected = false;
+    bool windowScopeSupported = false;
 
     // Builds the background menu (no pane clicked), which carries every list.
     void build()
     {
-        const ContextMenuModel model{
-            view, registry(), shortcuts, scopeParams, attach, presets, true, 0, 1.0f, QualityLevel::Standard, false};
+        const ContextMenuModel model{view,           registry(),
+                                     shortcuts,      scopeParams,
+                                     attach,         presets,
+                                     true,           0,
+                                     1.0f,           QualityLevel::Standard,
+                                     regionSelected, windowScopeSupported};
         items.clear();
         paramActions.clear();
         buildContextMenu(model, -1, items, paramActions);
@@ -325,6 +331,41 @@ TEST_CASE("A scope parameter resolves through the table its open built")
     // than reading off the end of it.
     CHECK(menuScopeParam(ParamMenuActionBase + 2, actions) == nullptr);
     CHECK(menuScopeParam(ParamMenuActionBase - 1, actions) == nullptr);
+}
+
+// Whether any action anywhere in the built menu wears @p label.
+bool hasAction(const MenuUnderTest& menu, const std::string& label)
+{
+    for (const NativeMenuItem& item : menu.items) {
+        if (item.kind == NativeMenuItem::Kind::Action && item.label == label) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+TEST_CASE("The window-scope entry appears only where the backend supports it")
+{
+    // The native-Wayland fallback: offered on backends that can scope a
+    // compositor-picked window (the Linux portal), absent everywhere else so no
+    // platform shows an action it cannot carry out.
+    MenuUnderTest menu;
+    menu.windowScopeSupported = false;
+    menu.build();
+    CHECK_FALSE(hasAction(menu, "Scope a Window..."));
+
+    menu.windowScopeSupported = true;
+    menu.build();
+    CHECK(hasAction(menu, "Scope a Window..."));
+}
+
+TEST_CASE("The window-scope id belongs to no shared decoder")
+{
+    // MenuScopeWindow is a shell action dispatched on its own; it must not be
+    // read as a shortcut, a scope toggle, a stepped range, or a parameter.
+    CHECK(claimsOf(MenuScopeWindow) == 0);
+    CHECK(applyDiagnosticsMenu(MenuScopeWindow) == false);
 }
 
 }  // namespace sidescopes

@@ -39,6 +39,9 @@ enum MenuAction
     MenuToggleDiagRecording,
     MenuShowDiagLog,
     MenuResetDiagnostics,
+    // Scope a whole window the compositor picks - the Linux native-Wayland
+    // attach, offered only where the backend supports it.
+    MenuScopeWindow = 47,
     MenuOpenSettings = 50,
     MenuAbout,
     MenuQuit,
@@ -84,6 +87,9 @@ struct ContextMenuModel
     /// Whether a region has been selected at all; without one there is nothing
     /// for Clear Region to clear.
     bool regionSelected;
+    /// Whether the backend can scope an interactively-chosen window (the Linux
+    /// native-Wayland attach); the entry appears only where it works.
+    bool windowScopeSupported;
 };
 
 /// A preset slot's menu label: what the slot is called, marked "(empty)" while

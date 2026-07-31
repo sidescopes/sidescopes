@@ -72,8 +72,79 @@ bool CaptureController::permissionGranted() const
     return m_permissionGranted;
 }
 
+bool CaptureController::captureWindow()
+{
+    if (!m_permissionGranted || m_suspended || !m_source.supportsWindowCapture()) {
+        return false;
+    }
+    if (m_running) {
+        m_source.stop();
+        m_running = false;
+        m_streamAlive.store(false);
+    }
+    m_windowMode = true;
+    m_capturedDisplay = 0;
+    m_desiredDisplay = 0;
+    if (!m_source.startWindowCapture(m_frameRate, m_mailbox)) {
+        m_windowMode = false;
+
+        return false;
+    }
+    // Optimistic like start(): the compositor's pick may still be open. A
+    // decline or a failure arrives through the status callback, which drops
+    // m_streamAlive, and service() then ends window mode.
+    m_streamAlive.store(true);
+    m_running = true;
+    setStatus("choose a window to scope");
+
+    return true;
+}
+
+bool CaptureController::capturingWindow() const
+{
+    return m_windowMode;
+}
+
+bool CaptureController::windowCaptureSupported() const
+{
+    return m_source.supportsWindowCapture();
+}
+
+const CaptureTarget* CaptureController::chooseTarget(const std::vector<CaptureTarget>& targets)
+{
+    if (targets.empty()) {
+        // No display at all, which is what a session on its way to sleep and a
+        // sole monitor unplugged both look like from here. Naming it keeps the
+        // status line from standing on whatever was true before.
+        setStatus("no display available - scopes resume when one returns");
+
+        return nullptr;
+    }
+    if (m_desiredDisplay == 0) {
+        return &targets.front();
+    }
+    const auto wanted = std::find_if(targets.begin(), targets.end(), [&](const CaptureTarget& candidate) {
+        return candidate.displayId == m_desiredDisplay;
+    });
+    if (wanted == targets.end()) {
+        // The chosen display is disconnected. The scopes pause on the banner
+        // rather than silently jumping to another screen; the retry loop
+        // resumes the same region the moment it returns.
+        setStatus("display disconnected - scopes resume when it returns");
+
+        return nullptr;
+    }
+
+    return &*wanted;
+}
+
 bool CaptureController::start()
 {
+    // Any display start leaves window mode: the two are exclusive, and this is
+    // the single place the monitor path reclaims the controller, so nothing
+    // else has to remember to clear it.
+    m_windowMode = false;
+
     // A suspended pipeline is stopped because nothing on screen is asking for
     // frames. Starting one here would defeat the pause and leave a live stream
     // behind a controller that services nothing - and that stream's eventual
@@ -92,29 +163,9 @@ bool CaptureController::start()
     }
 
     const auto targets = m_source.listTargets();
-    if (targets.empty()) {
-        // No display at all, which is what a session on its way to sleep and a
-        // sole monitor unplugged both look like from here. Naming it keeps the
-        // status line from standing on whatever was true before.
-        setStatus("no display available - scopes resume when one returns");
-
+    const CaptureTarget* target = chooseTarget(targets);
+    if (target == nullptr) {
         return false;
-    }
-
-    const CaptureTarget* target = &targets.front();
-    if (m_desiredDisplay != 0) {
-        const auto wanted = std::find_if(targets.begin(), targets.end(), [&](const CaptureTarget& candidate) {
-            return candidate.displayId == m_desiredDisplay;
-        });
-        if (wanted == targets.end()) {
-            // The chosen display is disconnected. The scopes pause on the
-            // banner rather than silently jumping to another screen; the
-            // retry loop resumes the same region the moment it returns.
-            setStatus("display disconnected - scopes resume when it returns");
-
-            return false;
-        }
-        target = &*wanted;
     }
 
     if (!m_source.start(*target, m_frameRate, m_mailbox)) {
@@ -142,6 +193,9 @@ uint32_t CaptureController::desiredDisplay() const
 
 void CaptureController::requestDisplay(uint32_t displayId)
 {
+    // Choosing a display leaves window scope: the next start() captures the
+    // monitor, not the window.
+    m_windowMode = false;
     m_desiredDisplay = displayId;
 }
 
@@ -236,6 +290,21 @@ void CaptureController::service(double now)
     // resume(), whose start is the restart it asks for.
     if (m_suspended) {
         setStatus(m_pauseReason);
+
+        return;
+    }
+    if (m_windowMode) {
+        // A window stream that ends means the window closed or the pick was
+        // cancelled. The compositor's picker must not re-pop on a retry, so
+        // window scope ENDS rather than rebuilding: the application sees
+        // capture stop and clears the window-scoped region. This branch keeps
+        // window mode entirely off the monitor retry path below - which is
+        // therefore unchanged whenever a window is not being scoped.
+        if (!(m_running && m_streamAlive.load())) {
+            m_windowMode = false;
+            m_running = false;
+            setStatus("window scope ended");
+        }
 
         return;
     }

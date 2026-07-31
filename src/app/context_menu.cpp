@@ -244,6 +244,12 @@ void appendRegionAndAppSection(const ContextMenuModel& model, std::vector<Native
     menuAction(menu, "Select Window...", MenuAttachWindow, false,
                shortcutLabel(model.shortcuts.bindings().attachWindow));
     menuAction(menu, "Draw Region...", MenuDrawRegion, false, shortcutLabel(model.shortcuts.bindings().drawRegion));
+    if (model.windowScopeSupported) {
+        // The compositor picks the window and the stream becomes it - the
+        // native-Wayland attach, where a window has no screen rectangle to
+        // draw a region over.
+        menuAction(menu, "Scope a Window...", MenuScopeWindow, false);
+    }
     if (supportsFaceDetection()) {
         menuAction(menu, "Select Face...", MenuAttachFace, false, shortcutLabel(model.shortcuts.bindings().attachFace));
     }
