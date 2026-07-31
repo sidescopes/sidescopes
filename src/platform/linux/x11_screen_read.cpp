@@ -20,6 +20,7 @@
 #include "platform/desktop.h"
 #include "platform/linux/x11_displays.h"
 #include "platform/linux/x11_error_guard.h"
+#include "platform/linux/x11_pixels.h"
 
 namespace sidescopes {
 namespace {
@@ -46,32 +47,6 @@ Display* readDisplay()
 /// it describes the server rather than a caller, atomic because the face-scan
 /// threads read the screen too.
 std::atomic<bool> g_rootUnreadable{false};
-
-/// One pixel out of an XImage as BGRA bytes. XGetImage on a truecolor visual
-/// packs the channels by the visual's masks; shifting by each mask's low bit
-/// recovers them without assuming a byte order.
-void unpackPixel(const XImage* image, unsigned long pixel, uint8_t& blue, uint8_t& green, uint8_t& red)
-{
-    const auto channel = [pixel](unsigned long mask) -> uint8_t {
-        if (mask == 0) {
-            return 0;
-        }
-        unsigned long value = pixel & mask;
-        while ((mask & 1) == 0) {
-            mask >>= 1;
-            value >>= 1;
-        }
-        // Scale whatever bit width the channel has up to eight.
-        while (mask < 0xFF) {
-            mask = (mask << 1) | 1;
-            value = (value << 1) | (value & 1);
-        }
-        return static_cast<uint8_t>(value & 0xFF);
-    };
-    red = channel(image->red_mask);
-    green = channel(image->green_mask);
-    blue = channel(image->blue_mask);
-}
 
 }  // namespace
 
@@ -106,7 +81,7 @@ void sampleScreenColorAsync(DesktopPoint point, std::function<void(std::optional
             uint8_t b = 0;
             uint8_t g = 0;
             uint8_t r = 0;
-            unpackPixel(image, XGetPixel(image, px, py), b, g, r);
+            unpackPixelBgra(image, XGetPixel(image, px, py), b, g, r);
             sumR += r;
             sumG += g;
             sumB += b;
@@ -148,7 +123,7 @@ std::optional<CapturedImage> captureDisplayImage(uint32_t displayId)
         uint8_t* row = captured.bgra.data() + static_cast<std::size_t>(py) * width * 4;
         for (int px = 0; px < width; ++px) {
             uint8_t* out = row + static_cast<std::size_t>(px) * 4;
-            unpackPixel(image, XGetPixel(image, px, py), out[0], out[1], out[2]);
+            unpackPixelBgra(image, XGetPixel(image, px, py), out[0], out[1], out[2]);
             out[3] = 255;
         }
     }

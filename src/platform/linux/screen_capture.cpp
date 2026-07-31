@@ -15,9 +15,11 @@
 #include <thread>
 
 #include "platform/desktop.h"
+#include "platform/linux/linux_session.h"
 #include "platform/linux/pipewire_stream.h"
 #include "platform/linux/portal_screencast.h"
 #include "platform/linux/x11_displays.h"
+#include "platform/linux/x11_shm_capture.h"
 
 namespace sidescopes {
 namespace {
@@ -225,6 +227,14 @@ private:
 
 std::unique_ptr<ScreenCaptureSource> createScreenCaptureSource()
 {
+    // A pure X11 session reads the real screen with XShm directly - no portal,
+    // no PipeWire, no consent dialog, the same shape as macOS and Windows. A
+    // Wayland session cannot: XShm under XWayland sees only X clients, so the
+    // ScreenCast portal is the only route to native Wayland pixels, and it is
+    // also where the window-picker attach fallback lives.
+    if (runningOnX11Session()) {
+        return createX11ShmScreenCaptureSource();
+    }
     return std::make_unique<LinuxScreenCapture>();
 }
 

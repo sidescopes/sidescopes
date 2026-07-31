@@ -303,6 +303,7 @@ if(UNIX AND NOT APPLE)
         src/platform/region_geometry.cpp
         src/platform/linux/desktop.cpp
         src/platform/linux/face_detection.cpp
+        src/platform/linux/linux_session.cpp
         src/platform/linux/native_menu.cpp
         src/platform/linux/pipewire_stream.cpp
         src/platform/linux/portal_request_path.cpp
@@ -311,6 +312,7 @@ if(UNIX AND NOT APPLE)
         src/platform/linux/region_picker_x11.cpp
         src/platform/linux/region_selection.cpp
         src/platform/linux/screen_capture.cpp
+        src/platform/linux/x11_shm_capture.cpp
         src/platform/linux/x11_windows.cpp
         src/platform/linux/x11_overlay.cpp
         src/platform/linux/x11_screen_read.cpp

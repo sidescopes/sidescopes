@@ -108,9 +108,19 @@ endif()
 # it is pinned on the Linux runner the same way the Windows string logic is on
 # its own. No D-Bus, no compositor: just the path builder and its test.
 if(UNIX AND NOT APPLE)
+    find_package(X11 REQUIRED)
     target_sources(sidescopes_tests PRIVATE
         test_portal_request_path.cpp
-        ${CMAKE_SOURCE_DIR}/src/platform/linux/portal_request_path.cpp)
+        ${CMAKE_SOURCE_DIR}/src/platform/linux/portal_request_path.cpp
+        # Session detection and the XShm crop/stamp geometry are pure and drive
+        # the whole Linux capture path, so they are pinned here the same way the
+        # portal path is. test_x11_pixels needs the Xlib XImage type (a public
+        # struct); it is read, never sent, so the header suffices with no server.
+        test_linux_session.cpp
+        ${CMAKE_SOURCE_DIR}/src/platform/linux/linux_session.cpp
+        test_x11_shm_geometry.cpp
+        test_x11_pixels.cpp)
+    target_link_libraries(sidescopes_tests PRIVATE X11::X11)
 endif()
 
 # The engine tests (test_vectorscope/waveform/histogram/graticule) are
