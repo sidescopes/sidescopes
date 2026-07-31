@@ -91,7 +91,8 @@ target_sources(sidescopes_tests PRIVATE ${CMAKE_SOURCE_DIR}/src/platform/focus_r
 # platform, so the names are pinned here instead.
 target_sources(sidescopes_tests PRIVATE ${CMAKE_SOURCE_DIR}/src/platform/shell_windows.cpp)
 set_source_files_properties(${CMAKE_SOURCE_DIR}/src/platform/icons.cpp
-    PROPERTIES COMPILE_OPTIONS "$<$<CXX_COMPILER_ID:MSVC>:/wd4702>")
+    PROPERTIES COMPILE_OPTIONS
+    "$<$<CXX_COMPILER_ID:MSVC>:/wd4702>;$<$<CXX_COMPILER_ID:GNU>:-Wno-maybe-uninitialized>")
 target_include_directories(sidescopes_tests PRIVATE ${nanosvg_SOURCE_DIR}/src)
 
 # The rest of the Windows platform layer's pure logic - UTF-8/UTF-16

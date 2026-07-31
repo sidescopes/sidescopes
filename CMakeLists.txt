@@ -81,10 +81,12 @@ FetchContent_Declare(
     GIT_TAG 239e102ec2c691f2902e20ace2ed36ee4a35cfe6
 )
 FetchContent_MakeAvailable(nanosvg)
-# C4702 fires inside the vendored NanoSVG implementation and, being an
-# optimizer-stage warning, ignores in-source pragmas under /WX.
+# C4702 (MSVC) and maybe-uninitialized (GCC 15) fire inside the vendored
+# NanoSVG implementation and, being optimizer-stage warnings, ignore
+# in-source pragmas under a warnings-as-errors wall.
 set_source_files_properties(src/platform/icons.cpp
-    PROPERTIES COMPILE_OPTIONS "$<$<CXX_COMPILER_ID:MSVC>:/wd4702>")
+    PROPERTIES COMPILE_OPTIONS
+    "$<$<CXX_COMPILER_ID:MSVC>:/wd4702>;$<$<CXX_COMPILER_ID:GNU>:-Wno-maybe-uninitialized>")
 sidescopes_target_defaults(sidescopes_core)
 
 # --- scope modules ---
