@@ -643,18 +643,63 @@ endif()
 if(UNIX AND NOT APPLE AND TARGET SideScopes)
     include(GNUInstallDirs)
 
+    # Every rule carries the `sidescopes` component so a release package can
+    # install just the application - `cmake --install --component sidescopes` -
+    # without the headers, static libraries and CMake config the fetched
+    # dependencies (GLFW, NanoSVG) install into the same prefix by default.
+
     # Install the built binary as `sidescopes` while leaving the build-tree
     # artifact named SideScopes (the release packaging step reads build/SideScopes).
     install(PROGRAMS $<TARGET_FILE:SideScopes>
         DESTINATION ${CMAKE_INSTALL_BINDIR}
-        RENAME sidescopes)
+        RENAME sidescopes
+        COMPONENT sidescopes)
 
     install(FILES packaging/linux/org.sidescopes.SideScopes.desktop
-        DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/applications
+        COMPONENT sidescopes)
 
     foreach(size 16 24 32 48 64 128 256 512)
         install(FILES assets/brand/icons/linux/sidescopes-${size}.png
             DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/${size}x${size}/apps
-            RENAME sidescopes.png)
+            RENAME sidescopes.png
+            COMPONENT sidescopes)
     endforeach()
+
+    # Release packages via CPack: a .deb and an .rpm built from the sidescopes
+    # component alone, so the fetched build dependencies never reach a package.
+    # The AppImage is assembled in the release workflow from the same install
+    # tree. The version defaults to the project's and the release overrides it
+    # with the tag (cpack -D CPACK_PACKAGE_VERSION=...).
+    set(CPACK_PACKAGE_NAME "sidescopes")
+    set(CPACK_PACKAGE_VENDOR "SideScopes")
+    set(CPACK_PACKAGE_CONTACT "Jakub Stefanski <js@jakubstefanski.com>")
+    set(CPACK_PACKAGE_DESCRIPTION_SUMMARY
+        "Real-time vectorscope and waveform of a selected screen region")
+    set(CPACK_PACKAGE_HOMEPAGE_URL "https://github.com/sidescopes/sidescopes")
+    set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}")
+    set(CPACK_STRIP_FILES ON)
+    # Package the application component alone, grouped into one package. Without
+    # component packaging CPack installs every component - including the headers
+    # and archives the fetched build dependencies register - and CPACK_COMPONENTS_ALL
+    # is ignored in that monolithic mode.
+    set(CPACK_DEB_COMPONENT_INSTALL ON)
+    set(CPACK_RPM_COMPONENT_INSTALL ON)
+    set(CPACK_COMPONENTS_ALL sidescopes)
+    set(CPACK_COMPONENTS_GROUPING ALL_COMPONENTS_IN_ONE)
+
+    # Debian/Ubuntu: dpkg-shlibdeps reads the linked libraries and fills the
+    # package's Depends, so an install pulls in X11, GTK, D-Bus and PipeWire.
+    set(CPACK_DEBIAN_PACKAGE_SECTION "graphics")
+    set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
+    set(CPACK_DEBIAN_FILE_NAME "DEB-DEFAULT")
+
+    # Fedora/openSUSE: autoreq discovers the same runtime libraries.
+    set(CPACK_RPM_PACKAGE_LICENSE "GPLv3+")
+    set(CPACK_RPM_PACKAGE_GROUP "Applications/Multimedia")
+    set(CPACK_RPM_PACKAGE_URL "https://github.com/sidescopes/sidescopes")
+    set(CPACK_RPM_FILE_NAME "RPM-DEFAULT")
+
+    set(CPACK_GENERATOR "DEB;RPM")
+    include(CPack)
 endif()

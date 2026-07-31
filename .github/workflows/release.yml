@@ -154,12 +154,18 @@ jobs:
 
   linux:
     needs: create-release
-    runs-on: ubuntu-latest
+    # Built on the oldest supported LTS, not ubuntu-latest: the .deb/.rpm then
+    # express their glibc floor as an older dependency and the AppImage runs on
+    # that glibc and newer, so the packages install on mainstream distros rather
+    # than only the very latest.
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v7
 
-      - name: Install build dependencies
-        run: sudo apt-get update && sudo apt-get install -y libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libxkbcommon-dev libwayland-dev libgl1-mesa-dev libdbus-1-dev libpipewire-0.3-dev libgtk-3-dev
+      - name: Install build and packaging dependencies
+        # rpm provides rpmbuild for the CPack RPM generator; file is what
+        # dpkg-shlibdeps and appimagetool probe binaries with.
+        run: sudo apt-get update && sudo apt-get install -y libx11-dev libxext-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libxkbcommon-dev libwayland-dev libgl1-mesa-dev libdbus-1-dev libpipewire-0.3-dev libgtk-3-dev rpm file
 
       - name: Configure
         run: cmake -B build -DCMAKE_BUILD_TYPE=Release
@@ -170,18 +176,46 @@ jobs:
       - name: Test
         run: ctest --test-dir build -C Release --output-on-failure
 
-      - name: Package
+      - name: Build .deb, .rpm and a relocatable tarball
+        # CPack builds the .deb and .rpm from the sidescopes component, versioned
+        # by the tag, with their runtime dependencies discovered from the linked
+        # libraries. The tarball is the same install tree for distros without a
+        # package manager to hand: run bin/sidescopes directly.
         run: |
-          tar="SideScopes-${GITHUB_REF_NAME}-linux-x86_64.tar.gz"
-          tar -czf "$tar" -C build SideScopes
-          sha256sum "$tar" > "$tar.sha256"
+          version="${GITHUB_REF_NAME#v}"
+          ( cd build && cpack -G "DEB;RPM" -D CPACK_PACKAGE_VERSION="$version" )
+          dir="SideScopes-${GITHUB_REF_NAME}-linux-x86_64"
+          cmake --install build --prefix "$PWD/stage/$dir" --component sidescopes
+          tar -czf "$dir.tar.gz" -C stage "$dir"
 
-      - name: Upload Linux assets
+      - name: Build the AppImage
+        # A self-contained, chmod +x-and-run file. The AppDir is the install
+        # tree plus the top-level .desktop, icon and AppRun that appimagetool
+        # requires; the desktop's GTK/X11/PipeWire come from the host, which any
+        # target desktop has.
+        run: |
+          cmake --install build --prefix AppDir/usr --component sidescopes
+          cp AppDir/usr/share/applications/org.sidescopes.SideScopes.desktop AppDir/
+          cp AppDir/usr/share/icons/hicolor/256x256/apps/sidescopes.png AppDir/
+          printf '#!/bin/sh\nHERE="$(dirname "$(readlink -f "$0")")"\nexec "$HERE/usr/bin/sidescopes" "$@"\n' > AppDir/AppRun
+          chmod +x AppDir/AppRun
+          wget -q https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
+          chmod +x appimagetool-x86_64.AppImage
+          ARCH=x86_64 ./appimagetool-x86_64.AppImage --appimage-extract-and-run \
+            AppDir "SideScopes-${GITHUB_REF_NAME}-x86_64.AppImage"
+
+      - name: Checksum and upload Linux assets
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          tar="SideScopes-${GITHUB_REF_NAME}-linux-x86_64.tar.gz"
-          gh release upload "$GITHUB_REF_NAME" "$tar" "$tar.sha256" --clobber
+          shopt -s nullglob
+          assets=(build/*.deb build/*.rpm \
+                  "SideScopes-${GITHUB_REF_NAME}-linux-x86_64.tar.gz" \
+                  "SideScopes-${GITHUB_REF_NAME}-x86_64.AppImage")
+          for asset in "${assets[@]}"; do
+            sha256sum "$asset" > "$asset.sha256"
+          done
+          gh release upload "$GITHUB_REF_NAME" "${assets[@]}" "${assets[@]/%/.sha256}" --clobber
 
   # Flip the draft to published only after both platform jobs succeed. Because
   # this depends on both, GitHub's "Re-run failed jobs" re-runs it (a skipped
