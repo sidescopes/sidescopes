@@ -6,7 +6,7 @@
 #   scripts/app-scenarios.sh --list
 #   scripts/app-scenarios.sh                                   # every scenario
 #   scripts/app-scenarios.sh --scenarios idle-region,region-scan --stacks WVR
-#   scripts/app-scenarios.sh --app /path/to/other/SideScopes.app --out old.json
+#   scripts/app-scenarios.sh --app <another build> --out old.json
 #
 # Then compare two result files:
 #
@@ -17,10 +17,17 @@
 # application is launched, driven through the pointer and the keyboard, and
 # measured as the machine feels it.
 #
-# macOS only for now. It needs the ACCESSIBILITY permission for whichever
-# application runs it - System Settings > Privacy & Security > Accessibility -
-# because it synthesises pointer and keyboard events. A Windows port would
-# replace scripts/scenarios/quartz.py and content_window.m and nothing else.
+# It synthesises pointer and keyboard events, which each system has its own
+# conditions for: macOS needs the ACCESSIBILITY permission for whichever
+# application runs this - System Settings > Privacy & Security > Accessibility -
+# and Linux needs an X session, because a Wayland compositor discards
+# synthesised events without saying so. The harness probes before it starts and
+# says which it is.
+#
+# Everything system-specific is in a platform module and a content window:
+# scripts/scenarios/quartz.py with content_window.m on macOS, x11.py with
+# content_window.c on Linux, chosen by desktop.py. A Windows port adds a third
+# pair and changes nothing else.
 set -eu
 
 repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)

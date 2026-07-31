@@ -5,10 +5,10 @@ layout a run must discover instead of assume, the pointer and keyboard events
 that drive the application, and the per-process counters a measurement reports.
 
 They are bound with ctypes rather than a compiled helper so that the harness
-needs no build step of its own. A Windows harness would replace this module
-wholesale - EnumDisplayMonitors, SendInput, GetProcessTimes and
-GetProcessMemoryInfo cover the same ground - and nothing outside it is
-platform-specific.
+needs no build step of its own. This module is replaced wholesale for another
+system and nothing outside it is platform-specific: x11.py is the Linux one, and
+a Windows one would cover the same ground with EnumDisplayMonitors, SendInput,
+GetProcessTimes and GetProcessMemoryInfo. desktop.py picks between them.
 
 Posting events requires the ACCESSIBILITY permission for whichever application
 runs this script (System Settings > Privacy & Security > Accessibility). Without
@@ -259,6 +259,12 @@ def press_key(name, command=False, shift=False):
         _cg.CGEventPost(_HID_EVENT_TAP, event)
         _cf.CFRelease(event)
         time.sleep(0.05)
+
+
+# What to do when pointer_works() says no. Kept beside the reason it fails, so
+# that the caller which reports it stays free of any one system's vocabulary.
+POINTER_HELP = ("Grant Accessibility to the application running this script in System Settings > Privacy & "
+                "Security > Accessibility.")
 
 
 def pointer_works():

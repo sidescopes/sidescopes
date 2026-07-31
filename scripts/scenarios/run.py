@@ -1,6 +1,6 @@
 """Runs the scenario harness over a built application and writes its results.
 
-    scripts/app-scenarios.sh --app build/SideScopes.app --out results.json
+    scripts/app-scenarios.sh --out results.json
 
 The output is one JSON document per run: the conditions it was taken under, the
 measurements, and - the point of the exercise - an explicit list of the
@@ -8,14 +8,16 @@ scenarios this build could NOT be asked, with the reason. Compare two of them
 with scripts/bench-compare.py, which refuses to put a number on anything the
 two runs did not do identically.
 
-Requires the Accessibility permission for whichever application runs this
-script, since it drives the pointer and the keyboard: System Settings > Privacy
-& Security > Accessibility. Without it, nothing moves and the harness stops
-rather than measuring an application nobody touched.
+It drives the pointer and the keyboard, and both systems can refuse that: macOS
+wants the Accessibility permission for whatever runs this script, and a Wayland
+session gives no way to ask at all. Either way nothing moves, silently, so the
+harness probes first and stops rather than measuring an application nobody
+touched.
 """
 
 import argparse
 import json
+import os
 import pathlib
 import shutil
 import sys
@@ -24,21 +26,44 @@ import time
 from . import catalog
 from . import conditions
 from . import content as content_module
-from . import quartz
+from . import desktop
 from . import session
 
 REPOSITORY = pathlib.Path(__file__).resolve().parents[2]
-PREFERENCES = pathlib.Path.home() / "Library" / "Application Support" / "SideScopes" / "preferences.txt"
+
+# What a build leaves behind to be measured: a bundle on macOS, the binary
+# itself on Linux.
+BUILT_APPLICATION = "SideScopes.app" if sys.platform == "darwin" else "SideScopes"
 
 # The shortcuts the harness presses. They are the application's defaults, and
 # the preferences the harness writes never rebind them.
 BINDINGS = {"draw": "d", "attach": "a"}
 
 
+def _preferences_path():
+    """The file the application keeps its preferences in.
+
+    The harness copies this aside before the first launch and puts it back
+    afterwards, so it has to be the same path the application writes: on Linux
+    that is `preferencesFilePath()` in src/platform/linux/desktop.cpp,
+    XDG_CONFIG_HOME and all. A path that disagreed would back up nothing and
+    leave the harness's own window placement in the user's settings.
+    """
+    if sys.platform == "darwin":
+        return pathlib.Path.home() / "Library" / "Application Support" / "SideScopes" / "preferences.txt"
+    configured = os.environ.get("XDG_CONFIG_HOME", "")
+    base = pathlib.Path(configured) if configured else pathlib.Path.home() / ".config"
+
+    return base / "sidescopes" / "preferences.txt"
+
+
+PREFERENCES = _preferences_path()
+
+
 def _parse_arguments(argv):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--app", type=pathlib.Path, default=REPOSITORY / "build" / "SideScopes.app",
-                        help="the application bundle to measure")
+    parser.add_argument("--app", type=pathlib.Path, default=REPOSITORY / "build" / BUILT_APPLICATION,
+                        help="the built application to measure: the bundle on macOS, the executable on Linux")
     parser.add_argument("--out", type=pathlib.Path, help="where to write the results (default under bench-results/)")
     parser.add_argument("--scenarios", default="", help="comma list of scenario names; default every one")
     parser.add_argument("--stacks", default=",".join(catalog.DEFAULT_STACKS),
@@ -74,7 +99,7 @@ def _list_catalogue():
 
 
 def _target_display(wanted):
-    found = quartz.displays()
+    found = desktop.displays()
     if not found:
         raise RuntimeError("no active display")
     if wanted is not None:
@@ -129,12 +154,12 @@ def _environment(guard, diagnostics_path):
     return environment
 
 
-def _run_one(scenario, stack, bundle, plan, guard, helper, content_set, diagnostics_path, seconds):
+def _run_one(scenario, stack, application, plan, guard, helper, content_set, diagnostics_path, seconds):
     """Drive one scenario once and return its result."""
     warnings = []
     guard.write(session.preferences_text(stack, plan.application_rect))
     window = None
-    application = None
+    pid = None
     tail = session.DiagnosticTail(diagnostics_path) if diagnostics_path else None
     try:
         if scenario.content is not None:
@@ -144,23 +169,23 @@ def _run_one(scenario, stack, bundle, plan, guard, helper, content_set, diagnost
         region = plan.region_in(window.rect if window else plan.content_rect)
         # Park the pointer clear of both windows, so that a scenario which does
         # not move it starts from the same place every time.
-        quartz.move_pointer((plan.content_rect[0] - 40.0, plan.content_rect[1] - 60.0))
-        application = session.launch(bundle, _environment(guard, diagnostics_path))
+        desktop.move_pointer((plan.content_rect[0] - 40.0, plan.content_rect[1] - 60.0))
+        pid = session.launch(application, _environment(guard, diagnostics_path))
         content_rect = window.rect if window else plan.content_rect
         if not scenario.from_launch:
-            if not session.await_window(application, plan.application_rect[2:]):
+            if not session.await_window(pid, plan.application_rect[2:]):
                 warnings.append("the application window never appeared at its expected size")
             time.sleep(session.SETTLE_SECONDS)
-            if not session.establish_region(application, scenario.region, region, content_rect, BINDINGS, bundle):
+            if not session.establish_region(pid, scenario.region, region, content_rect, BINDINGS, application):
                 warnings.append(f"no region border appeared, so this measures an application with no "
                                 f"{scenario.region} region rather than the scenario asked for")
-        target = session.Target(application, bundle, BINDINGS)
+        target = session.Target(pid, application, BINDINGS)
         action = session.action_for(scenario.action, region, content_rect, target)
         action.start()
         try:
             if not scenario.from_launch:
                 time.sleep(1.0)
-            measurement = session.measure(application, window.pid if window else None, seconds, tail, action=action)
+            measurement = session.measure(pid, window.pid if window else None, seconds, tail, action=action)
         finally:
             action.stop()
         if scenario.expects_analysis and tail is not None and measurement.passes_per_second == 0.0:
@@ -173,7 +198,7 @@ def _run_one(scenario, stack, bundle, plan, guard, helper, content_set, diagnost
         # Each teardown step guards its own failure: an exception raised in a
         # finally block abandons the rest of it, and the step left undone was
         # the one that takes the content window off the user's screen.
-        for teardown in (lambda: session.quit_application(application) if application else None,
+        for teardown in (lambda: session.quit_application(pid) if pid else None,
                          lambda: window.stop() if window else None):
             try:
                 teardown()
@@ -259,7 +284,7 @@ def _tracking_readings(tracking):
     )
 
 
-def _complaint_about(bundle, executable):
+def _complaint_about(application, executable):
     """Why this run must not start, or an empty string if it may.
 
     All of it is about not measuring the wrong thing: an application somebody
@@ -267,14 +292,13 @@ def _complaint_about(bundle, executable):
     harness cannot identify.
     """
     if not executable.exists():
-        return f"{bundle} is not a built application bundle"
+        return f"{application} is not a built application ({executable} does not exist)"
     running = session.find_any_running()
     if running:
         return ("SideScopes is already running; quit it first so that the harness measures only the launches it "
                 f"made itself (pids {running})")
-    if not quartz.pointer_works():
-        return ("synthesised pointer events are being dropped. Grant Accessibility to the application running "
-                "this script in System Settings > Privacy & Security > Accessibility.")
+    if not desktop.pointer_works():
+        return f"synthesised pointer events are being dropped. {desktop.POINTER_HELP}"
     if catalog.detect_profile(executable) is None:
         return "cannot tell what this build does; it matches no known behaviour profile"
 
@@ -306,7 +330,7 @@ def _measure_all(scenarios, stacks, setup):
                 continue
             seconds = setup["seconds"] or scenario.seconds
             print(f"[{done}/{total}] {scenario.id}/{stack}: measuring {seconds:.0f} s", flush=True)
-            result = _run_one(scenario, stack, setup["bundle"], setup["plan"], setup["guard"], setup["helper"],
+            result = _run_one(scenario, stack, setup["application"], setup["plan"], setup["guard"], setup["helper"],
                               setup["content"], setup["diagnostics"], seconds)
             results.extend(_rows(result, setup["build"]))
             for warning in result.warnings:
@@ -339,9 +363,9 @@ def main(argv=None):
 
         return 0
 
-    bundle = arguments.app.resolve()
-    executable = bundle / "Contents" / "MacOS" / "SideScopes"
-    complaint = _complaint_about(bundle, executable)
+    application = arguments.app.resolve()
+    executable = session.executable_in(application)
+    complaint = _complaint_about(application, executable)
     if complaint:
         print(f"app-scenarios: {complaint}", file=sys.stderr)
 
@@ -359,14 +383,14 @@ def main(argv=None):
     content_set = content_module.prepare(cache / "images", arguments.photographs)
     display = _target_display(arguments.display)
     plan = catalog.Layout(display, tuple(int(part) for part in arguments.region_pixels.lower().split("x")))
-    facts = conditions.collect(bundle, display, content_set.describe())
+    facts = conditions.collect(application, executable, display, content_set.describe())
     diagnostics_path = None if arguments.no_diagnostics else scratch / "diagnostics.log"
     if diagnostics_path is not None:
         diagnostics_path.unlink(missing_ok=True)
 
     profile = catalog.detect_profile(executable)
     setup = {
-        "bundle": bundle,
+        "application": application,
         "plan": plan,
         "profile": profile,
         "scopes": catalog.detect_scopes(executable),

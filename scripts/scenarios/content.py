@@ -28,7 +28,8 @@ import urllib.error
 import urllib.request
 
 MANIFEST = pathlib.Path(__file__).with_name("photos.json")
-HELPER_SOURCE = pathlib.Path(__file__).with_name("content_window.m")
+HELPER_SOURCE = pathlib.Path(__file__).with_name("content_window.m" if sys.platform == "darwin"
+                                                 else "content_window.c")
 
 # The patterns a run uses when nothing else is asked for. Ordered so that a
 # switching scenario alternates between the cheap and the expensive end.
@@ -118,10 +119,26 @@ def photographs(cache_dir):
     return [_fetch(entry, cache_dir) for entry in entries]
 
 
+def reads_image_files():
+    """Whether the content window on this system can show a photograph.
+
+    The macOS window decodes through NSImage. The X11 one is plain Xlib with no
+    decoder behind it, and adding one would mean adding a dependency to a
+    harness whose whole virtue is that it needs no build of its own - so a run
+    asked for photographs there degrades to generated content, which content.py
+    already treats as a first-class result rather than a failure.
+    """
+    return sys.platform == "darwin"
+
+
 def prepare(cache_dir, want_photographs, patterns=DEFAULT_PATTERNS):
     """Decide what a run will show, degrading to synthetic rather than failing."""
     if not want_photographs:
         return ContentSet("synthetic", patterns=patterns)
+    if not reads_image_files():
+        return ContentSet("synthetic", patterns=patterns, degraded=True,
+                          reason="the content window reads no image files on this system; measured against "
+                                 "generated content instead")
     try:
         fetched = photographs(cache_dir)
     except (OSError, ValueError, urllib.error.URLError, json.JSONDecodeError) as failure:
@@ -129,6 +146,15 @@ def prepare(cache_dir, want_photographs, patterns=DEFAULT_PATTERNS):
                           reason=f"photographs unavailable ({failure}); measured against generated content instead")
 
     return ContentSet("photographs", files=[path for path, _ in fetched], digests=[digest for _, digest in fetched])
+
+
+def _compile_command(compiler, binary):
+    """How the content window is built, which is all that differs by system."""
+    if sys.platform == "darwin":
+        return [compiler, "-fobjc-arc", "-O2", "-Wall", "-Wextra", "-framework", "Cocoa", "-framework", "QuartzCore",
+                "-o", str(binary), str(HELPER_SOURCE)]
+
+    return [compiler, "-O2", "-Wall", "-Wextra", "-o", str(binary), str(HELPER_SOURCE), "-lX11", "-lm"]
 
 
 def build_helper(cache_dir):
@@ -144,11 +170,8 @@ def build_helper(cache_dir):
         return binary
     compiler = shutil.which("cc")
     if compiler is None:
-        raise RuntimeError("no C compiler found; install the Xcode command line tools")
-    finished = subprocess.run(
-        [compiler, "-fobjc-arc", "-O2", "-Wall", "-Wextra", "-framework", "Cocoa", "-framework", "QuartzCore",
-         "-o", str(binary), str(HELPER_SOURCE)],
-        capture_output=True, text=True, check=False)
+        raise RuntimeError("no C compiler found; install the command line developer tools")
+    finished = subprocess.run(_compile_command(compiler, binary), capture_output=True, text=True, check=False)
     if finished.returncode != 0:
         raise RuntimeError(f"cannot build the content window:\n{finished.stderr}")
 

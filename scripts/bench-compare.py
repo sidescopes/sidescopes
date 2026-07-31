@@ -32,6 +32,22 @@ def load(path):
     return ({row["metric"]: row for row in loaded.get("results", [])}, loaded)
 
 
+def _session_suffix(session):
+    """The graphics session, where a run recorded one.
+
+    Part of the OS line rather than a line of its own so that it joins the
+    conditions that are CHECKED for a difference: one machine can run the
+    application on an X session, capturing the screen itself, or on a Wayland
+    one, capturing through the portal, and comparing one against the other is
+    comparing two pipelines. A run from a system with one window server records
+    nothing here and reads exactly as it always did.
+    """
+    if not session:
+        return ""
+
+    return f", {session.get('capture', '?')} capture on {session.get('session_type', '?')}"
+
+
 def _summary(document):
     if document is None:
         return None
@@ -44,7 +60,7 @@ def _summary(document):
 
     return {
         "machine": f"{machine.get('name', '?')} - {machine.get('cpu', '?')}, {machine.get('logical_cores', '?')} cores",
-        "os": machine.get("os", "?"),
+        "os": machine.get("os", "?") + _session_suffix(machine.get("session")),
         "power": f"{power.get('source', '?')}, battery {power.get('battery_percent', '?')}%",
         "displays": ", ".join(f"{int(one['points'][0])}x{int(one['points'][1])} at {one['scale']}x"
                               for one in displays),
