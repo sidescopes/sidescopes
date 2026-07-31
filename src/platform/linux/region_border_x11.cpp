@@ -444,8 +444,13 @@ void showBorder(uint32_t displayId, const DisplayGeometry& geometry, const Local
     } else {
         state.window.place(state.windowX, state.windowY, windowWidth, windowHeight);
     }
-    // Only the band takes the pointer; the region interior is the editor's.
-    state.window.setInputRegion(bandStrips(state));
+    // The window IS the band: the interior is shaped away rather than merely
+    // transparent, so the measured pixels show through and reach the capture
+    // on a session with no compositing manager too. The input region follows
+    // the same strips, so only the band takes the pointer.
+    const std::vector<IntRect> strips = bandStrips(state);
+    state.window.setBoundingShape(strips);
+    state.window.setInputRegion(strips);
     state.visible = true;
     paintBorder(state);
 }

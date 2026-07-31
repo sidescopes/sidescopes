@@ -56,6 +56,19 @@ public:
     /// click-through, the same as setClickThrough(true).
     void setInputRegion(const std::vector<IntRect>& rects) const;
 
+    /// Restricts the window ITSELF to @p rects, not merely its input: pixels
+    /// outside them are no longer part of the window and whatever lies
+    /// beneath shows through, on every server.
+    ///
+    /// The border needs this rather than a transparent interior, because
+    /// transparency needs a compositing manager and an X11 session may have
+    /// none (a bare openbox or a tiling desktop). Without one an alpha-zero
+    /// interior draws BLACK - which both hides the region and, since the
+    /// capture reads the composited screen, feeds that black to the scopes.
+    /// A bounding shape holds on the composited desktops too, where it looks
+    /// exactly as the transparent interior did.
+    void setBoundingShape(const std::vector<IntRect>& rects) const;
+
     /// Grabs the keyboard onto this window so overlay-wide keys (Esc, the
     /// mode letters) arrive while the pick is up. Released on destroy.
     void grabKeyboard();

@@ -126,20 +126,44 @@ void OverlayWindow::setClickThrough(bool clickThrough) const
     XFlush(display);
 }
 
-void OverlayWindow::setInputRegion(const std::vector<IntRect>& rects) const
+namespace {
+
+/// The rectangles as the shape extension takes them, window-local.
+std::vector<XRectangle> shapeRectangles(const std::vector<IntRect>& rects)
 {
-    Display* display = overlayDisplay();
-    if (m_window == 0 || display == nullptr) {
-        return;
-    }
     std::vector<XRectangle> shape;
     shape.reserve(rects.size());
     for (const IntRect& rect : rects) {
         shape.push_back(XRectangle{static_cast<short>(rect.x), static_cast<short>(rect.y),
                                    static_cast<unsigned short>(rect.width), static_cast<unsigned short>(rect.height)});
     }
+
+    return shape;
+}
+
+}  // namespace
+
+void OverlayWindow::setInputRegion(const std::vector<IntRect>& rects) const
+{
+    Display* display = overlayDisplay();
+    if (m_window == 0 || display == nullptr) {
+        return;
+    }
+    std::vector<XRectangle> shape = shapeRectangles(rects);
     XShapeCombineRectangles(display, m_window, ShapeInput, 0, 0, shape.data(), static_cast<int>(shape.size()), ShapeSet,
                             Unsorted);
+    XFlush(display);
+}
+
+void OverlayWindow::setBoundingShape(const std::vector<IntRect>& rects) const
+{
+    Display* display = overlayDisplay();
+    if (m_window == 0 || display == nullptr) {
+        return;
+    }
+    std::vector<XRectangle> shape = shapeRectangles(rects);
+    XShapeCombineRectangles(display, m_window, ShapeBounding, 0, 0, shape.data(), static_cast<int>(shape.size()),
+                            ShapeSet, Unsorted);
     XFlush(display);
 }
 
