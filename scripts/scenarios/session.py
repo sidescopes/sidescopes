@@ -30,10 +30,12 @@ import re
 import signal
 import statistics
 import subprocess
+import sys
 import threading
 import time
 
-from . import quartz
+from . import catalog
+from . import desktop
 
 _DIAG_LINE = re.compile(r"^t=([0-9.]+) perf (frame|pass) ")
 
@@ -93,6 +95,18 @@ HARNESS_MARKER = "scenario_harness=1"
 QUALITY_VARIABLE = "SIDESCOPES_SCENARIO_QUALITY"
 
 
+def scope_stack_setting(stack):
+    """The stack letters as the preferences file spells a stack.
+
+    The application keeps only BRACKETED ids from this key (cleanedScopeStack
+    in core/preferences.cpp) and ignores everything else, so the bare letters
+    a scenario names parse to nothing and the run silently measures whichever
+    stack the application defaults to. Writing the ids is what makes the
+    --stacks argument mean anything.
+    """
+    return "".join(f"[{catalog.SCOPE_LETTERS[letter]}]" for letter in stack if letter in catalog.SCOPE_LETTERS)
+
+
 def preferences_text(stack, window_rect):
     """The whole preferences file a measured launch starts from.
 
@@ -105,7 +119,7 @@ def preferences_text(stack, window_rect):
     quality_line = f"quality={quality}\n" if quality else ""
 
     return (f"{HARNESS_MARKER}\n"
-            f"scope_stack={stack}\n"
+            f"scope_stack={scope_stack_setting(stack)}\n"
             f"{quality_line}"
             f"window_x={x}\n"
             f"window_y={y}\n"
@@ -116,8 +130,27 @@ def preferences_text(stack, window_rect):
 # --- The application process ------------------------------------------------
 
 
-def _executable(bundle):
-    return bundle / "Contents" / "MacOS" / "SideScopes"
+# The two spellings a built application answers to: the binary in a build tree
+# is SideScopes, an installed one is sidescopes, and the repository's naming rule
+# is what makes those the only two.
+_EXECUTABLE_NAMES = ("SideScopes", "sidescopes")
+
+
+def executable_in(application_path):
+    """The binary inside a built application, however this system packages one.
+
+    macOS hands out a bundle with the executable inside it. Linux hands out the
+    executable itself from a build tree, or an installed tree with it under
+    bin/ - and a path that already IS the binary is taken as given, which is
+    what a run against `build/SideScopes` passes.
+    """
+    if sys.platform == "darwin":
+        return application_path / "Contents" / "MacOS" / "SideScopes"
+    if not application_path.is_dir():
+        return application_path
+    installed = application_path / "bin" / "sidescopes"
+
+    return installed if installed.exists() else application_path / "SideScopes"
 
 
 def _pgrep(pattern):
@@ -126,22 +159,65 @@ def _pgrep(pattern):
     return [int(line) for line in finished.stdout.split() if line.isdigit()]
 
 
-def find_running(bundle):
-    """Every process running this bundle's executable."""
-    return _pgrep(str(_executable(bundle)))
+def _executed_file(pid):
+    """The file a process is running, or an empty string where it cannot be read.
+
+    /proc/<pid>/exe rather than the command line: it is the kernel's own link to
+    what was executed, so a process cannot argue with it by rewriting its
+    arguments and a launch through a wrapper still names the binary. A build
+    REPLACED since it was launched - a rebuild during a session - reads with a
+    " (deleted)" suffix, which is stripped, because a running old build is
+    still an instance the harness must not measure around.
+    """
+    try:
+        path = os.readlink(f"/proc/{pid}/exe")
+    except OSError:
+        return ""
+
+    return path.removesuffix(" (deleted)")
+
+
+def _processes():
+    """Every process this user can see, as (pid, the file it is running)."""
+    for entry in os.listdir("/proc"):
+        if not entry.isdigit():
+            continue
+        running = _executed_file(int(entry))
+        if running:
+            yield (int(entry), running)
+
+
+def find_running(application_path):
+    """Every process running this build's executable."""
+    if sys.platform == "darwin":
+        return _pgrep(str(executable_in(application_path)))
+    wanted = str(executable_in(application_path).resolve())
+
+    return [pid for pid, running in _processes() if running == wanted]
 
 
 def find_any_running():
-    """Every SideScopes process, from whichever bundle.
+    """Every SideScopes process, from whichever build.
 
     The harness must never measure, and never kill, an instance somebody else
     started - including one launched from a different copy of the application.
     """
-    return _pgrep("SideScopes.app/Contents/MacOS/SideScopes")
+    if sys.platform == "darwin":
+        return _pgrep("SideScopes.app/Contents/MacOS/SideScopes")
+
+    return [pid for pid, running in _processes() if os.path.basename(running) in _EXECUTABLE_NAMES]
 
 
-def launch(bundle, environment):
-    """Start the application and return its process id.
+def launch(application_path, environment):
+    """Start the application and return its process id."""
+    if sys.platform == "darwin":
+        return _launch_bundle(application_path, environment)
+
+    return _launch_executable(executable_in(application_path), environment)
+
+
+def _launch_bundle(bundle, environment):
+    """Start a macOS bundle.
 
     Always through `open`, never the executable inside the bundle: launching
     the inner binary re-signs nothing but is enough to lose the screen
@@ -163,6 +239,40 @@ def launch(bundle, environment):
     raise RuntimeError(f"{bundle} did not start")
 
 
+def _launch_executable(executable, environment):
+    """Run the binary itself, which is all Linux offers - there is no service
+    that starts an application by name and hands it an environment.
+
+    The environment is the harness's own with the run's keys added, exactly as
+    `open --env` adds them, and then put through the platform layer, which
+    settles which display system the application will take. In a session of its
+    own so that a signal to the harness's process group does not take the
+    measured application with it; its stderr is left where the operator can see
+    it, because an application refusing to start says so there.
+    """
+    prepared = desktop.application_environment(dict(os.environ, **environment))
+    started = subprocess.Popen([str(executable)], env=prepared, start_new_session=True, stdout=subprocess.DEVNULL)
+    deadline = time.monotonic() + _LAUNCH_TIMEOUT_SECONDS
+    while time.monotonic() < deadline:
+        if started.poll() is not None:
+            raise RuntimeError(f"{executable} exited at once with status {started.returncode}")
+        if desktop.process_sample(started.pid) is not None:
+            return started.pid
+        time.sleep(0.05)
+    raise RuntimeError(f"{executable} did not start")
+
+
+def _reap(pid):
+    """Collect a launch the harness made itself, so that a killed scenario
+    leaves no zombie for the next one's "is something already running" probe to
+    reason about. On macOS the application is `open`'s child rather than the
+    harness's and there is nothing here to take."""
+    try:
+        os.waitpid(pid, 0)
+    except OSError:
+        pass
+
+
 def quit_application(pid):
     """Stop a measured launch.
 
@@ -175,13 +285,16 @@ def quit_application(pid):
         return
     deadline = time.monotonic() + _QUIT_TIMEOUT_SECONDS
     while time.monotonic() < deadline:
-        if quartz.process_sample(pid) is None:
+        if desktop.process_sample(pid) is None:
+            _reap(pid)
+
             return
         time.sleep(0.2)
     try:
         os.kill(pid, signal.SIGKILL)
     except ProcessLookupError:
         pass
+    _reap(pid)
 
 
 # --- The diagnostic stream --------------------------------------------------
@@ -256,9 +369,9 @@ class Action:
 class Target:
     """What an action needs to know about the application it is driving."""
 
-    def __init__(self, pid=None, bundle=None, bindings=None):
+    def __init__(self, pid=None, application=None, bindings=None):
         self.pid = pid
-        self.bundle = bundle
+        self.application = application
         self.bindings = bindings or {"draw": "d", "attach": "a"}
 
 
@@ -291,8 +404,8 @@ class PointerSweep(Action):
         step = 0
         while not self._stop.is_set():
             phase = step * 0.05
-            quartz.move_pointer((centre[0] + (amplitude[0] * math.cos(phase)),
-                                 centre[1] + (amplitude[1] * math.sin(phase * 1.37))))
+            desktop.move_pointer((centre[0] + (amplitude[0] * math.cos(phase)),
+                                  centre[1] + (amplitude[1] * math.sin(phase * 1.37))))
             step += 1
             time.sleep(self._interval)
 
@@ -317,7 +430,7 @@ class BorderDrag(Action):
         while not self._stop.is_set():
             offset = self._distance if forward else -self._distance
             target = (grab[0] + offset, grab[1])
-            quartz.drag(tuple(grab), target, steps=40, step_seconds=0.02)
+            desktop.drag(tuple(grab), target, steps=40, step_seconds=0.02)
             grab = [target[0], target[1]]
             forward = not forward
 
@@ -357,7 +470,7 @@ def border_window(pid, region_size):
     """The region border's frame, recognised by its size around the region."""
     want = (region_size[0] + 2 * BORDER_PAD, region_size[1] + 2 * BORDER_PAD + BORDER_LABEL_BAND)
     best = None
-    for x, y, width, height in quartz.windows_owned_by(pid):
+    for x, y, width, height in desktop.windows_owned_by(pid):
         error = abs(width - want[0]) + abs(height - want[1])
         if error < 90.0 and (best is None or error < best[0]):
             best = (error, (x, y, width, height))
@@ -415,22 +528,22 @@ class BorderFlick(Action):
         # corner zones and the edge midpoint, so the grab moves rather than
         # resizes.
         grab = (frame[0] + BORDER_PAD + (self._size[0] * 0.25), frame[1] + BORDER_LABEL_BAND + BORDER_PAD - 6.0)
-        quartz.move_pointer(grab)
+        desktop.move_pointer(grab)
         time.sleep(0.08)
-        quartz.press_mouse(grab)
+        desktop.press_mouse(grab)
         time.sleep(0.08)
         origin = border_window(self._pid, self._size)
         if origin is None:
-            quartz.release_mouse(grab)
+            desktop.release_mouse(grab)
             self._missed += 1
 
             return
         started = time.monotonic()
         for step in range(1, self._steps + 1):
             due = started + (self._seconds * step / self._steps)
-            quartz.drag_mouse((grab[0] + (distance * step / self._steps), grab[1]))
+            desktop.drag_mouse((grab[0] + (distance * step / self._steps), grab[1]))
             self._sample(origin, grab, distance / self._seconds, due)
-        quartz.release_mouse((grab[0] + distance, grab[1]))
+        desktop.release_mouse((grab[0] + distance, grab[1]))
         self._settles.append(self._settle(origin, grab, distance))
 
     def _sample(self, origin, grab, velocity, until):
@@ -438,7 +551,7 @@ class BorderFlick(Action):
         while time.monotonic() < until:
             frame = border_window(self._pid, self._size)
             if frame is not None:
-                behind = (quartz.pointer_position()[0] - grab[0]) - (frame[0] - origin[0])
+                behind = (desktop.pointer_position()[0] - grab[0]) - (frame[0] - origin[0])
                 self._lags.append(behind / velocity * 1000.0)
             time.sleep(TRACK_SAMPLE_SECONDS)
 
@@ -487,15 +600,15 @@ class RegionRedraw(Action):
             # letter pressed while something else holds it is simply lost - so
             # the application is brought forward for each cycle, exactly as the
             # region setup does.
-            activate(self._target.bundle)
+            activate(self._target.application, self._target.pid)
             self._attempts += 1
-            quartz.press_key(self._target.bindings["draw"])
+            desktop.press_key(self._target.bindings["draw"])
             self._stop.wait(0.35)
-            quartz.drag(corners[0], corners[1], steps=12, step_seconds=0.016, settle=0.08)
+            desktop.drag(corners[0], corners[1], steps=12, step_seconds=0.016, settle=0.08)
             self._stop.wait(self._rest)
             if border_window(self._target.pid, (width, height)) is not None:
                 self._drawn += 1
-            quartz.press_key("escape")
+            desktop.press_key("escape")
             self._stop.wait(self._rest)
 
 
@@ -517,7 +630,7 @@ class WindowDrag(Action):
         while not self._stop.is_set():
             offset = self._distance if forward else -self._distance
             target = (self._point[0] + offset, self._point[1])
-            quartz.drag(tuple(self._point), target, steps=40, step_seconds=0.02)
+            desktop.drag(tuple(self._point), target, steps=40, step_seconds=0.02)
             self._point = [target[0], target[1]]
             forward = not forward
 
@@ -547,30 +660,38 @@ def _centre_of(rect):
     return (rect[0] + (rect[2] / 2.0), rect[1] + (rect[3] / 2.0))
 
 
-def activate(bundle):
+def activate(application_path, pid=None):
     """Bring the measured application forward, so a shortcut reaches it.
 
     Without this the harness lost roughly one shortcut in eight: a plain letter
     goes to whatever holds the keyboard, and the previous scenario's application
-    closing hands focus to something else. `open` without -n activates the
-    instance already running rather than starting another.
+    closing hands focus to something else.
+
+    Named by whichever each system can be asked about. macOS is asked about the
+    application: `open` without -n activates the instance already running rather
+    than starting another. X knows only windows, so it is asked about the
+    process's own window instead - the platform layer decides how, since a
+    window manager owns the answer where one is running.
     """
-    subprocess.run(["open", str(bundle)], capture_output=True, check=False)
+    if sys.platform == "darwin":
+        subprocess.run(["open", str(application_path)], capture_output=True, check=False)
+    elif pid is not None:
+        desktop.activate_window(pid)
     time.sleep(0.4)
 
 
-def _perform_region(kind, region, content_rect, bindings, bundle=None):
-    if bundle is not None:
-        activate(bundle)
+def _perform_region(kind, region, content_rect, bindings, application_path=None, pid=None):
+    if application_path is not None:
+        activate(application_path, pid)
     if kind == "draw":
-        quartz.press_key(bindings["draw"])
+        desktop.press_key(bindings["draw"])
         time.sleep(0.6)
-        quartz.drag((region[0], region[1]), (region[0] + region[2], region[1] + region[3]), steps=25)
+        desktop.drag((region[0], region[1]), (region[0] + region[2], region[1] + region[3]), steps=25)
         time.sleep(0.8)
     elif kind == "attach":
-        quartz.press_key(bindings["attach"])
+        desktop.press_key(bindings["attach"])
         time.sleep(0.8)
-        quartz.click(_centre_of(content_rect))
+        desktop.click(_centre_of(content_rect))
         time.sleep(1.2)
 
 
@@ -583,7 +704,7 @@ def await_window(pid, expected_size, timeout_seconds=20.0):
     """
     deadline = time.monotonic() + timeout_seconds
     while time.monotonic() < deadline:
-        for _, _, width, height in quartz.windows_owned_by(pid):
+        for _, _, width, height in desktop.windows_owned_by(pid):
             if abs(width - expected_size[0]) <= 40.0 and abs(height - expected_size[1]) <= 80.0:
                 return True
         time.sleep(0.3)
@@ -603,7 +724,7 @@ def region_border_visible(pid, expected):
     indistinguishable from having no region.
     """
     slack = (max(80.0, expected[2] * 0.1), max(80.0, expected[3] * 0.1))
-    for _, _, width, height in quartz.windows_owned_by(pid):
+    for _, _, width, height in desktop.windows_owned_by(pid):
         if abs(width - expected[2]) <= slack[0] and abs(height - expected[3]) <= slack[1]:
             return True
 
@@ -620,7 +741,7 @@ def _await_border(pid, expected):
     return False
 
 
-def establish_region(pid, kind, region, content_rect, bindings, bundle=None, attempts=3):
+def establish_region(pid, kind, region, content_rect, bindings, application_path=None, attempts=3):
     """Put the application on a region, through its own interface.
 
     The region is not persisted, so it cannot be written into a preferences
@@ -637,7 +758,7 @@ def establish_region(pid, kind, region, content_rect, bindings, bundle=None, att
         return True
     expected = region if kind == "draw" else content_rect
     for attempt in range(attempts):
-        _perform_region(kind, region, content_rect, bindings, bundle)
+        _perform_region(kind, region, content_rect, bindings, application_path, pid)
         if _await_border(pid, expected):
             return True
         time.sleep(1.0 + attempt)
@@ -653,26 +774,26 @@ def measure(pid, content_pid, seconds, tail=None, sample_seconds=0.5, action=Non
     if tail is not None:
         tail.mark()
     started = time.monotonic()
-    first = quartz.process_sample(pid)
-    content_first = quartz.process_sample(content_pid) if content_pid else None
+    first = desktop.process_sample(pid)
+    content_first = desktop.process_sample(content_pid) if content_pid else None
     peak_footprint = first.footprint_bytes if first else 0
     peak_resident = first.resident_bytes if first else 0
     while time.monotonic() - started < seconds:
         time.sleep(sample_seconds)
-        sample = quartz.process_sample(pid)
+        sample = desktop.process_sample(pid)
         if sample is None:
             raise RuntimeError("the application exited during the measurement")
         peak_footprint = max(peak_footprint, sample.footprint_bytes)
         peak_resident = max(peak_resident, sample.resident_bytes)
     elapsed = time.monotonic() - started
-    last = quartz.process_sample(pid)
+    last = desktop.process_sample(pid)
     if first is None or last is None:
         raise RuntimeError("the application could not be sampled")
     time.sleep(_FLUSH_SECONDS)
     frames, passes = tail.rates() if tail is not None else (0.0, 0.0)
     content_cores = 0.0
     if content_first is not None:
-        content_last = quartz.process_sample(content_pid)
+        content_last = desktop.process_sample(content_pid)
         if content_last is not None:
             content_cores = (content_last.cpu_nanoseconds - content_first.cpu_nanoseconds) / (elapsed * 1e9)
 
