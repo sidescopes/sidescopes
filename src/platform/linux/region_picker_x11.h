@@ -1,7 +1,10 @@
 #pragma once
 
+#include <cairo/cairo.h>
+
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -19,6 +22,11 @@ namespace sidescopes {
 struct PickerX11State
 {
     OverlayWindow window;
+    /// A snapshot of what this sheet covers, taken before it was mapped and
+    /// painted as its backdrop where no compositing manager can blend the
+    /// sheet's own transparency. Null on a composited desktop, where the
+    /// real screen shows through and stays live.
+    cairo_surface_t* backdrop = nullptr;
     uint32_t displayId = 0;
     int originX = 0;  ///< The covered display, root coordinates.
     int originY = 0;
@@ -63,11 +71,30 @@ struct PickerX11State
     bool picked = false;
     bool finished = false;
     LocalRect confirmedRect{};
+
+    PickerX11State() = default;
+    PickerX11State(const PickerX11State&) = delete;
+    PickerX11State& operator=(const PickerX11State&) = delete;
+
+    /// The sheets are cleared wholesale when a pick ends, so the snapshot a
+    /// sheet took is released with it.
+    ~PickerX11State()
+    {
+        if (backdrop != nullptr) {
+            cairo_surface_destroy(backdrop);
+        }
+    }
 };
 
 /// The open pickers, one per display; empty when no pick is active. Owned by
 /// region_selection.cpp, read by the view.
 [[nodiscard]] std::vector<std::unique_ptr<PickerX11State>>& openPickers();
+
+/// Holds the colour under the pointer for the pin cursor's swatch, and puts
+/// the rebuilt cursor on every open pin sheet. The application pushes this
+/// each frame while a pin is live; the cursor itself is rebuilt only when the
+/// rounded colour changes.
+void setPickerChipColor(const std::optional<FloatColor>& color);
 
 /// Builds one display's sheet: creates its overlay window, seeds the
 /// suggestion lists, grabs the keyboard on the first sheet. Null on failure

@@ -121,6 +121,12 @@ private:
 
 /// Dispatches every pending X event to the overlay windows' handlers.
 /// Called once per frame from the seam polls, on the main thread.
+/// Whether a compositing manager owns this screen's selection, which is
+/// what makes a window's alpha channel mean anything. Without one an
+/// alpha-zero pixel is drawn BLACK, so an overlay that relies on
+/// transparency has to supply its own backdrop instead.
+[[nodiscard]] bool compositingManagerPresent();
+
 void pumpOverlayEvents();
 
 }  // namespace sidescopes

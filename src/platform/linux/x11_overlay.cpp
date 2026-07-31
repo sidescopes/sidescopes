@@ -4,6 +4,7 @@
 #include <X11/extensions/shape.h>
 #include <cairo/cairo-xlib.h>
 
+#include <string>
 #include <unordered_map>
 
 namespace sidescopes {
@@ -219,6 +220,21 @@ void OverlayWindow::place(int x, int y, int width, int height)
         cairo_xlib_surface_set_size(m_surface, width, height);
     }
     XFlush(display);
+}
+
+bool compositingManagerPresent()
+{
+    Display* display = overlayDisplay();
+    if (display == nullptr) {
+        return false;
+    }
+    // The name is per screen: _NET_WM_CM_S0 for screen 0, and an owner of it
+    // is the compositing manager by the EWMH convention every compositor
+    // follows.
+    const std::string name = "_NET_WM_CM_S" + std::to_string(DefaultScreen(display));
+    const Atom selection = XInternAtom(display, name.c_str(), False);
+
+    return XGetSelectionOwner(display, selection) != None;
 }
 
 void pumpOverlayEvents()

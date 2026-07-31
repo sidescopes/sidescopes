@@ -6,10 +6,14 @@
 
 #include "platform/linux/region_picker_x11.h"
 
+#include <X11/Xutil.h>
 #include <X11/keysym.h>
 
 #include <algorithm>
 #include <cmath>
+
+#include "platform/linux/pin_cursor.h"
+#include "platform/linux/x11_pixels.h"
 
 namespace sidescopes {
 namespace {
@@ -111,17 +115,65 @@ std::vector<std::unique_ptr<PickerX11State>>& openPickers()
     return pickers;
 }
 
+/// What the sheet will cover, read before it is mapped. Only wanted where
+/// no compositing manager can blend the sheet's transparency; there the
+/// snapshot stands in for the live screen, which cannot show through.
+cairo_surface_t* grabBackdrop(int originX, int originY, int width, int height)
+{
+    Display* display = overlayDisplay();
+    if (display == nullptr) {
+        return nullptr;
+    }
+    XImage* image = XGetImage(display, DefaultRootWindow(display), originX, originY, static_cast<unsigned int>(width),
+                              static_cast<unsigned int>(height), AllPlanes, ZPixmap);
+    if (image == nullptr) {
+        return nullptr;
+    }
+    cairo_surface_t* surface = cairo_image_surface_create(CAIRO_FORMAT_RGB24, width, height);
+    if (cairo_surface_status(surface) != CAIRO_STATUS_SUCCESS) {
+        XDestroyImage(image);
+
+        return nullptr;
+    }
+    unsigned char* out = cairo_image_surface_get_data(surface);
+    const int stride = cairo_image_surface_get_stride(surface);
+    for (int y = 0; y < height; ++y) {
+        for (int x = 0; x < width; ++x) {
+            uint8_t* pixel = out + static_cast<std::size_t>(y) * stride + static_cast<std::size_t>(x) * 4;
+            unpackPixelBgra(image, XGetPixel(image, x, y), pixel[0], pixel[1], pixel[2]);
+            pixel[3] = 255;
+        }
+    }
+    cairo_surface_mark_dirty(surface);
+    XDestroyImage(image);
+
+    return surface;
+}
+
+/// What every sheet starts from: a clear frame, and where the sheet cannot
+/// be transparent, the snapshot standing in for the screen behind it.
+void paintSheetBase(cairo_t* canvas, const PickerX11State& picker)
+{
+    // Start from clear so the wash's alpha is exact, not accumulated.
+    cairo_set_operator(canvas, CAIRO_OPERATOR_SOURCE);
+    cairo_set_source_rgba(canvas, 0.0, 0.0, 0.0, 0.0);
+    cairo_paint(canvas);
+    cairo_set_operator(canvas, CAIRO_OPERATOR_OVER);
+    if (picker.backdrop != nullptr) {
+        // Stands where the real screen would show through, so every wash
+        // below lands on the content rather than on black.
+        cairo_set_source_surface(canvas, picker.backdrop, 0.0, 0.0);
+        cairo_paint(canvas);
+    }
+}
+
 void paintPicker(PickerX11State& picker)
 {
     cairo_t* canvas = picker.window.beginFrame();
     if (canvas == nullptr) {
         return;
     }
-    // Start from clear so the wash's alpha is exact, not accumulated.
-    cairo_set_operator(canvas, CAIRO_OPERATOR_SOURCE);
-    cairo_set_source_rgba(canvas, 0.0, 0.0, 0.0, 0.0);
-    cairo_paint(canvas);
-    cairo_set_operator(canvas, CAIRO_OPERATOR_OVER);
+    paintSheetBase(canvas, picker);
 
     const bool dragActive = picker.dragging;
     const LocalRect selection =
@@ -324,6 +376,38 @@ void handleEvent(PickerX11State& picker, const XEvent& event)
     }
 }
 
+/// The colour the pin swatch wears, pushed by the application each frame.
+std::optional<FloatColor>& chipColorSlot()
+{
+    static std::optional<FloatColor> color;
+    return color;
+}
+
+const std::optional<FloatColor>& chipColor()
+{
+    return chipColorSlot();
+}
+
+/// The sheet's cursor for its live mode: the pin crosshair while pinning,
+/// the plain arrow otherwise. Pin mode carries no dim, so the crosshair is
+/// most of what tells the user the sheet is there at all.
+void applyPickerCursor(const PickerX11State& picker)
+{
+    Display* display = overlayDisplay();
+    if (display == nullptr || picker.window.handle() == 0) {
+        return;
+    }
+    if (!picker.pinMode) {
+        XUndefineCursor(display, picker.window.handle());
+
+        return;
+    }
+    const ::Cursor cursor = pinCursor(chipColor());
+    if (cursor != None) {
+        XDefineCursor(display, picker.window.handle(), cursor);
+    }
+}
+
 }  // namespace
 
 std::unique_ptr<PickerX11State> createPickerSheet(uint32_t displayId, int originX, int originY, int width, int height,
@@ -339,11 +423,16 @@ std::unique_ptr<PickerX11State> createPickerSheet(uint32_t displayId, int origin
     picker->facesMode = faces;
     picker->pinMode = pin;
     PickerX11State* raw = picker.get();
+    if (!compositingManagerPresent()) {
+        picker->backdrop = grabBackdrop(originX, originY, width, height);
+    }
     const bool created = picker->window.create(originX, originY, width, height,
                                                [raw](const XEvent& event) { handleEvent(*raw, event); });
     if (!created) {
         return nullptr;
     }
+    applyPickerCursor(*picker);
+
     return picker;
 }
 
@@ -353,6 +442,7 @@ void switchPickerMode(int mode)
         picker->drawMode = mode == 1;
         picker->facesMode = mode == 2;
         picker->pinMode = mode == 3;
+        applyPickerCursor(*picker);
         picker->constrained = false;
         picker->pickDragging = false;
         picker->dragging = false;
@@ -370,6 +460,16 @@ void cancelAllPickerSheets()
     if (!openPickers().empty()) {
         openPickers().front()->picked = false;
         openPickers().front()->finished = true;
+    }
+}
+
+void setPickerChipColor(const std::optional<FloatColor>& color)
+{
+    chipColorSlot() = color;
+    for (auto& picker : openPickers()) {
+        if (picker->pinMode) {
+            applyPickerCursor(*picker);
+        }
     }
 }
 

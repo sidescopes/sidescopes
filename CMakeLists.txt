@@ -305,6 +305,7 @@ if(UNIX AND NOT APPLE)
         src/platform/linux/face_detection.cpp
         src/platform/linux/linux_session.cpp
         src/platform/linux/native_menu.cpp
+        src/platform/linux/pin_cursor.cpp
         src/platform/linux/pipewire_stream.cpp
         src/platform/linux/portal_request_path.cpp
         src/platform/linux/portal_screencast.cpp
@@ -322,6 +323,7 @@ if(UNIX AND NOT APPLE)
         PUBLIC
         sidescopes_core
         X11::X11
+        X11::Xcursor
         X11::Xext
         X11::Xrandr
         PkgConfig::PIPEWIRE

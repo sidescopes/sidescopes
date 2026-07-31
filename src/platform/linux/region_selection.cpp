@@ -21,11 +21,6 @@
 namespace sidescopes {
 namespace {
 
-/// The chip color for the pin cursor, pushed each frame by the application.
-/// The X11 picker has no hardware-cursor swatch yet; the value is kept so
-/// the seam's contract holds when it grows one.
-std::optional<FloatColor> g_pinChipColor;
-
 /// Local pixels to display percentages for one sheet.
 RegionOfInterest regionFromSheet(const PickerX11State& picker, const LocalRect& rect)
 {
@@ -252,7 +247,7 @@ void updatePickerFaces(uint32_t displayId, const std::vector<SuggestedRegion>& f
 
 void setRegionPickChipColor(const std::optional<FloatColor>& color)
 {
-    g_pinChipColor = color;
+    setPickerChipColor(color);
 }
 
 void showRegionBorder(uint32_t displayId, const RegionOfInterest& region, const std::string& label, bool attached)
