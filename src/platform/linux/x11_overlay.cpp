@@ -57,8 +57,10 @@ bool OverlayWindow::create(int x, int y, int width, int height, EventHandler han
     int depth = CopyFromParent;
     if (argb) {
         // A 32-bit window needs its own colormap; the default one belongs to
-        // the default visual and a mismatch is a BadMatch at create.
-        attributes.colormap = XCreateColormap(display, DefaultRootWindow(display), visual.visual, AllocNone);
+        // the default visual and a mismatch is a BadMatch at create. Kept in
+        // m_colormap so destroy() frees it rather than leaking one per cycle.
+        m_colormap = XCreateColormap(display, DefaultRootWindow(display), visual.visual, AllocNone);
+        attributes.colormap = m_colormap;
         valueMask |= CWColormap;
         chosenVisual = visual.visual;
         depth = visual.depth;
@@ -100,6 +102,12 @@ void OverlayWindow::destroy()
     }
     handlers().erase(m_window);
     XDestroyWindow(display, m_window);
+    // Freed after the window that referenced it, and only when create() made
+    // one (the ARGB path); the default-visual window carries none.
+    if (m_colormap != 0) {
+        XFreeColormap(display, m_colormap);
+        m_colormap = 0;
+    }
     XFlush(display);
     m_window = 0;
 }

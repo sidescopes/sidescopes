@@ -326,6 +326,12 @@ std::string applicationDataDirectory()
 
 }  // namespace
 
+void prepareNativeThreading()
+{
+    // Nothing to prepare: the Win32 GDI/DXGI calls the off-stream reads use are
+    // safe from any thread. Present only to satisfy the shared seam.
+}
+
 std::string preferencesFilePath()
 {
     std::string elsewhere = preferencesFileFromEnvironment();

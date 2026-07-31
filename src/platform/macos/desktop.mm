@@ -251,6 +251,12 @@ std::optional<uint32_t> displayUnderCursor()
 // sampleScreenColorAsync (declared in desktop.h) samples the screen color at
 // a point; it lives in screen_capture.mm because it uses ScreenCaptureKit.
 
+void prepareNativeThreading()
+{
+    // Nothing to prepare: the off-stream reads run on their own queues and the
+    // native APIs are thread-safe. Present only to satisfy the shared seam.
+}
+
 std::string preferencesFilePath()
 {
     // NSHomeDirectory ignores HOME under the sandbox, so an override cannot be

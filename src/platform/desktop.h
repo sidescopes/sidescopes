@@ -102,6 +102,13 @@ struct WindowGeometry
 /// near the editor, so this is where region picking should open.
 [[nodiscard]] std::optional<uint32_t> displayUnderCursor();
 
+/// Prepares the platform for the application's threaded use of its native
+/// display APIs, once, before any windowing is set up. On X11 this is
+/// XInitThreads, which the face-scan threads and the cursor sampler rely on to
+/// share Xlib connections with the main thread safely; it MUST run before the
+/// first Xlib call, so main() calls it first. A no-op on macOS and Windows.
+void prepareNativeThreading();
+
 /// Preferences file location in the platform's convention.
 std::string preferencesFilePath();
 

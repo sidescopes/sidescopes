@@ -4,9 +4,13 @@
 // platform.
 
 #include "app/app.h"
+#include "platform/desktop.h"
 
 int main()
 {
+    // Before any windowing: on X11 this is XInitThreads, which the screen-scan
+    // threads need to share Xlib with the main thread. A no-op elsewhere.
+    sidescopes::prepareNativeThreading();
     sidescopes::App app;
     if (!app.init()) {
         return 1;

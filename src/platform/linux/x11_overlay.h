@@ -90,6 +90,9 @@ public:
 
 private:
     ::Window m_window = 0;
+    // The private colormap an ARGB visual needs, 0 for the default visual. Owned
+    // with the window so it is freed in destroy() rather than leaked per cycle.
+    Colormap m_colormap = 0;
     cairo_surface_t* m_surface = nullptr;
     cairo_t* m_context = nullptr;
     int m_width = 0;

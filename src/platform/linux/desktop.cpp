@@ -208,6 +208,15 @@ std::optional<uint32_t> displayUnderCursor()
     return displayAtPoint(*cursor);
 }
 
+void prepareNativeThreading()
+{
+    // The face-scan threads read the screen through Xlib while the main thread
+    // drives its own connections; XInitThreads makes that concurrent use safe.
+    // Its own contract requires it to precede every other Xlib call, which is
+    // why main() calls this before any windowing is created.
+    XInitThreads();
+}
+
 std::string preferencesFilePath()
 {
     std::string elsewhere = preferencesFileFromEnvironment();

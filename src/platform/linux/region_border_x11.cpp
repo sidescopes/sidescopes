@@ -13,6 +13,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <map>
 
 namespace sidescopes {
 namespace {
@@ -209,27 +210,48 @@ void paintBorder(BorderX11State& state)
 
 namespace {
 
-/// The X cursor for a grab zone, from the cursor font, cached per shape.
-::Cursor zoneCursor(unsigned zone)
+/// The cursor-font shape a grab zone wears.
+unsigned int zoneCursorShape(unsigned zone)
 {
-    unsigned int shape = XC_left_ptr;
     const bool left = (zone & ZoneLeft) != 0;
     const bool right = (zone & ZoneRight) != 0;
     const bool top = (zone & ZoneTop) != 0;
     const bool bottom = (zone & ZoneBottom) != 0;
     if ((left && top) || (right && bottom)) {
-        shape = XC_top_left_corner;
-    } else if ((right && top) || (left && bottom)) {
-        shape = XC_top_right_corner;
-    } else if (left || right) {
-        shape = XC_sb_h_double_arrow;
-    } else if (top || bottom) {
-        shape = XC_sb_v_double_arrow;
-    } else if ((zone & ZoneMove) != 0) {
-        shape = XC_fleur;
+        return XC_top_left_corner;
+    }
+    if ((right && top) || (left && bottom)) {
+        return XC_top_right_corner;
+    }
+    if (left || right) {
+        return XC_sb_h_double_arrow;
+    }
+    if (top || bottom) {
+        return XC_sb_v_double_arrow;
+    }
+    if ((zone & ZoneMove) != 0) {
+        return XC_fleur;
     }
 
-    return XCreateFontCursor(overlayDisplay(), shape);
+    return XC_left_ptr;
+}
+
+/// The X cursor for a grab zone, genuinely cached per shape: the cursor font
+/// has a handful of shapes and a border drag crosses zones constantly, so a
+/// fresh XCreateFontCursor per crossing leaked one server-side cursor each
+/// time. The cache holds one per shape for the process, created on first use.
+::Cursor zoneCursor(unsigned zone)
+{
+    static std::map<unsigned int, ::Cursor> cache;
+    const unsigned int shape = zoneCursorShape(zone);
+    const auto found = cache.find(shape);
+    if (found != cache.end()) {
+        return found->second;
+    }
+    const ::Cursor cursor = XCreateFontCursor(overlayDisplay(), shape);
+    cache.emplace(shape, cursor);
+
+    return cursor;
 }
 
 /// The grab zone under a root point: a corner first, then an edge or the move
