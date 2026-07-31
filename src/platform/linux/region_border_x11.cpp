@@ -75,19 +75,51 @@ bool closeBadgeVisible(const BorderX11State& state)
     return state.region.width >= MinimumWidthForClose && state.hoverZone != ZoneNone;
 }
 
-void drawRegionRing(cairo_t* canvas, double x, double y, double width, double height, bool attached)
+/// The whole grab band is muted hazard tape, its own light-dark alternation
+/// visible on any content - the same dress the macOS and Windows borders
+/// wear. The interior is never painted and stays click-through.
+void drawHazardBand(cairo_t* canvas, double x, double y, double width, double height)
 {
-    // The measured-edge ring: a warm tint for an attached region, plain
-    // otherwise - the tell the region belongs to a window.
-    if (attached) {
-        cairo_set_source_rgba(canvas, 0.95, 0.72, 0.38, 0.95);
-    } else {
-        cairo_set_source_rgba(canvas, 0.9, 0.9, 0.92, 0.9);
+    const double bandX = x - BorderPad;
+    const double bandY = y - BorderPad;
+    const double bandW = width + 2 * BorderPad;
+    const double bandH = height + 2 * BorderPad;
+    cairo_save(canvas);
+    // The stripes stop short of the measured-edge ring: crossing it would
+    // read as the band bleeding into the measured region.
+    cairo_rectangle(canvas, bandX, bandY, bandW, bandH);
+    cairo_rectangle(canvas, x - EdgeRing, y - EdgeRing, width + 2 * EdgeRing, height + 2 * EdgeRing);
+    cairo_set_fill_rule(canvas, CAIRO_FILL_RULE_EVEN_ODD);
+    cairo_clip(canvas);
+    cairo_set_source_rgba(canvas, 0.1, 0.1, 0.1, 0.45);
+    cairo_paint(canvas);
+    cairo_set_source_rgba(canvas, 0.9, 0.9, 0.9, 0.45);
+    cairo_set_line_width(canvas, 4.0);
+    // Strokes of constant x+y, a period apart, overdrawn past the clip so
+    // the diagonal reads unbroken along every edge.
+    const double start = bandX - bandH;
+    for (int step = 0; start + step * 10.0 < bandX + bandW; ++step) {
+        const double sx = start + step * 10.0;
+        cairo_move_to(canvas, sx, bandY + bandH);
+        cairo_line_to(canvas, sx + bandH, bandY);
     }
-    cairo_set_line_width(canvas, 1.5);
+    cairo_stroke(canvas);
+    cairo_restore(canvas);
+}
+
+void drawRegionRing(cairo_t* canvas, double x, double y, double width, double height)
+{
+    // Neutral greys only, both region kinds: any hue this close to the
+    // sampled pixels would skew the eye's read of the photograph, so the tab
+    // glyph is what tells an attached region apart. White dashes ride a dark
+    // base, so one of the two tones survives any background.
+    cairo_set_line_width(canvas, EdgeRing);
+    cairo_rectangle(canvas, x - EdgeRing / 2, y - EdgeRing / 2, width + EdgeRing, height + EdgeRing);
+    cairo_set_source_rgba(canvas, 0.1, 0.1, 0.1, 0.85);
+    cairo_stroke_preserve(canvas);
     const double dashes[] = {DashLength, DashLength};
     cairo_set_dash(canvas, dashes, 2, 0.0);
-    cairo_rectangle(canvas, x, y, width, height);
+    cairo_set_source_rgba(canvas, 0.97, 0.97, 0.97, 0.95);
     cairo_stroke(canvas);
     cairo_set_dash(canvas, nullptr, 0, 0.0);
 }
@@ -201,7 +233,8 @@ void paintBorder(BorderX11State& state)
     double interiorX = 0.0;
     double interiorY = 0.0;
     interiorOrigin(state, interiorX, interiorY);
-    drawRegionRing(canvas, interiorX, interiorY, state.region.width, state.region.height, state.attachedRegion);
+    drawHazardBand(canvas, interiorX, interiorY, state.region.width, state.region.height);
+    drawRegionRing(canvas, interiorX, interiorY, state.region.width, state.region.height);
     drawHandles(canvas, interiorX, interiorY, state.region.width, state.region.height);
     drawLabelTab(canvas, state, interiorX, interiorY);
     drawCloseBadge(canvas, state);
@@ -379,6 +412,15 @@ void showBorder(uint32_t displayId, const DisplayGeometry& geometry, const Local
                 const std::string& label, bool attached)
 {
     BorderX11State& state = border();
+    // The frame loop calls this every frame; repainting an unchanged border
+    // is X traffic for nothing and reads as churn on a live desktop.
+    const bool unchanged = state.visible && state.window.created() && state.displayId == displayId &&
+                           state.region.x == regionRoot.x && state.region.y == regionRoot.y &&
+                           state.region.width == regionRoot.width && state.region.height == regionRoot.height &&
+                           state.label == label && state.attachedRegion == attached;
+    if (unchanged) {
+        return;
+    }
     state.displayId = displayId;
     state.displayOriginX = geometry.originX;
     state.displayOriginY = geometry.originY;

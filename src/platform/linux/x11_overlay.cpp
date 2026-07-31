@@ -161,15 +161,25 @@ cairo_t* OverlayWindow::beginFrame()
     if (m_context == nullptr) {
         m_context = cairo_create(m_surface);
     }
+    // Paint into an offscreen group, not the window: a repaint that clears
+    // and redraws directly on the window hands the compositor blank
+    // intermediate states, which a live desktop shows as flicker.
+    cairo_push_group_with_content(m_context, CAIRO_CONTENT_COLOR_ALPHA);
     return m_context;
 }
 
 void OverlayWindow::endFrame()
 {
-    if (m_surface != nullptr) {
-        cairo_surface_flush(m_surface);
-        XFlush(overlayDisplay());
+    if (m_surface == nullptr || m_context == nullptr) {
+        return;
     }
+    // The finished frame lands on the window as ONE replace operation.
+    cairo_pop_group_to_source(m_context);
+    cairo_set_operator(m_context, CAIRO_OPERATOR_SOURCE);
+    cairo_paint(m_context);
+    cairo_set_operator(m_context, CAIRO_OPERATOR_OVER);
+    cairo_surface_flush(m_surface);
+    XFlush(overlayDisplay());
 }
 
 void OverlayWindow::place(int x, int y, int width, int height)

@@ -13,6 +13,7 @@ namespace sidescopes {
 // The matching constants on the other platforms; kept identical so the region
 // feels the same to grab everywhere.
 inline constexpr double BorderPad = 12.0;
+inline constexpr double EdgeRing = 1.0;
 inline constexpr double HandleRadius = 3.5;
 inline constexpr double HandleMargin = HandleRadius + 2.0;
 inline constexpr double WindowPad = BorderPad + HandleMargin;
