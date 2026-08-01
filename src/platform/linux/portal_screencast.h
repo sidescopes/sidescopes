@@ -5,6 +5,8 @@
 #include <optional>
 #include <string>
 
+#include "platform/linux/portal_options.h"
+
 struct DBusConnection;
 
 namespace sidescopes {
@@ -17,6 +19,16 @@ struct PortalStream
     int pipewireFd = -1;
     uint32_t nodeId = 0;
     std::string restoreToken;
+    /// Where the chosen source sits on the desktop and what it covers, as the
+    /// stream's own properties state it. Both are optional in the portal spec:
+    /// zero means the portal did not say, and the frame then speaks for its own
+    /// space - right for every unscaled single-output session. Carried because
+    /// the cursor position the stream reports is stated in FRAME pixels and has
+    /// to become a desktop point.
+    double originX = 0.0;
+    double originY = 0.0;
+    double widthPoints = 0.0;
+    double heightPoints = 0.0;
 };
 
 /// Why open() came back empty. Declined is the user's answer and must not be
@@ -27,21 +39,6 @@ enum class PortalError
     Declined,
     Unavailable
 };
-
-/// What the session captures: a whole monitor, or a single window the
-/// compositor's own picker chooses. A window stream IS that window and follows
-/// it, which is how a native Wayland window - one with no queryable screen
-/// rectangle - is attached to.
-enum class PortalSourceKind
-{
-    Monitor,
-    Window
-};
-
-/// The portal's `types` bitmask for a source kind: MONITOR (1) or WINDOW (2),
-/// from the ScreenCast interface. Pure so the mapping is pinned by a test - a
-/// wrong value asks the compositor for the wrong thing silently.
-[[nodiscard]] uint32_t portalSourceTypeMask(PortalSourceKind kind);
 
 /// One org.freedesktop.portal.ScreenCast session over its own D-Bus
 /// connection: CreateSession, SelectSources, Start (the consent dialog,

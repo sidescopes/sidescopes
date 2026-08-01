@@ -197,11 +197,11 @@ private:
 
         PipeWireVideoStream stream;
         std::atomic<bool> streamDied{false};
-        const bool started = stream.start(opened->pipewireFd, opened->nodeId, maxFramesPerSecond, mailbox,
-                                          [this, &streamDied](const std::string& message) {
-                                              streamDied.store(true);
-                                              report(message);
-                                          });
+        const bool started =
+            stream.start(*opened, maxFramesPerSecond, mailbox, [this, &streamDied](const std::string& message) {
+                streamDied.store(true);
+                report(message);
+            });
         if (!started) {
             report("capture stream could not start");
             return;

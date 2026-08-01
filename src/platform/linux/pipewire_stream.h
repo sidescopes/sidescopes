@@ -5,6 +5,7 @@
 #include <string>
 
 #include "core/frame_mailbox.h"
+#include "platform/linux/portal_screencast.h"
 
 namespace sidescopes {
 
@@ -26,9 +27,13 @@ public:
     PipeWireVideoStream(const PipeWireVideoStream&) = delete;
     PipeWireVideoStream& operator=(const PipeWireVideoStream&) = delete;
 
-    /// Takes ownership of @p pipewireFd. False when the connection or stream
-    /// cannot be built; later stream death arrives through @p onError.
-    [[nodiscard]] bool start(int pipewireFd, uint32_t nodeId, int maxFramesPerSecond, FrameMailbox& mailbox,
+    /// Takes ownership of @p source's descriptor. The whole portal stream is
+    /// taken rather than its node alone because the frames are not the only
+    /// thing it carries: where the source sits on the desktop is what turns a
+    /// cursor position stated in frame pixels into a desktop point. False when
+    /// the connection or stream cannot be built; later stream death arrives
+    /// through @p onError.
+    [[nodiscard]] bool start(const PortalStream& source, int maxFramesPerSecond, FrameMailbox& mailbox,
                              ErrorCallback onError);
 
     void stop();

@@ -119,7 +119,14 @@ if(UNIX AND NOT APPLE)
         test_linux_session.cpp
         ${CMAKE_SOURCE_DIR}/src/platform/linux/linux_session.cpp
         test_x11_shm_geometry.cpp
-        test_x11_pixels.cpp)
+        test_x11_pixels.cpp
+        # The portal's option values and the cursor position a Wayland stream
+        # reports: both pure, both silent when wrong. The option values decide
+        # what the compositor is asked for; the mapping decides where the live
+        # probe reads.
+        test_stream_pointer.cpp
+        ${CMAKE_SOURCE_DIR}/src/platform/linux/portal_options.cpp
+        ${CMAKE_SOURCE_DIR}/src/platform/linux/stream_pointer.cpp)
     target_link_libraries(sidescopes_tests PRIVATE X11::X11)
 endif()
 

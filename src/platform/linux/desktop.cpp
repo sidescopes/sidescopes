@@ -19,6 +19,7 @@
 
 #include "core/preferences.h"
 #include "platform/focus_resolution.h"
+#include "platform/linux/stream_pointer.h"
 #include "platform/linux/x11_displays.h"
 #include "platform/linux/x11_windows.h"
 
@@ -164,12 +165,18 @@ std::optional<WindowGeometry> windowGeometry(uint64_t identity)
 
 std::optional<DesktopPoint> globalCursorPosition()
 {
-    // Root coordinates are the global desktop space directly. The caveat is
-    // XWayland's: while the pointer sits over a native Wayland surface the X
-    // server is no longer told where it went, so this reads the last place
-    // it saw. The capture stream's cursor metadata is what replaces it
-    // there; until it lands, a real position on the X surfaces the user
-    // picks and probes over beats no position at all.
+    // The capture stream's cursor metadata first, because on a Wayland session
+    // it is the only true answer. X is told where the pointer is ONLY while it
+    // sits over an X surface, so the moment it crosses onto a native Wayland
+    // window XQueryPointer freezes at the last place it saw - MEASURED, 450
+    // samples over 45 seconds of real movement at one unchanging coordinate.
+    // A live probe reading that position shows a colour that never changes.
+    //
+    // A pure X11 session publishes none of this and falls through to the root
+    // coordinates, which are the global desktop space directly.
+    if (const std::optional<DesktopPoint> streamed = streamPointer()) {
+        return streamed;
+    }
     const std::optional<PointerSample> pointer = queryPointer();
     if (!pointer) {
         return std::nullopt;

@@ -307,12 +307,14 @@ if(UNIX AND NOT APPLE)
         src/platform/linux/native_menu.cpp
         src/platform/linux/pin_cursor.cpp
         src/platform/linux/pipewire_stream.cpp
+        src/platform/linux/portal_options.cpp
         src/platform/linux/portal_request_path.cpp
         src/platform/linux/portal_screencast.cpp
         src/platform/linux/region_border_x11.cpp
         src/platform/linux/region_picker_x11.cpp
         src/platform/linux/region_selection.cpp
         src/platform/linux/screen_capture.cpp
+        src/platform/linux/stream_pointer.cpp
         src/platform/linux/x11_shm_capture.cpp
         src/platform/linux/x11_windows.cpp
         src/platform/linux/x11_overlay.cpp

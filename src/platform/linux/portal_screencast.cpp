@@ -10,6 +10,7 @@
 
 #include <cstdio>
 
+#include "core/diagnostics.h"
 #include "platform/linux/portal_request_path.h"
 
 namespace sidescopes {
@@ -21,10 +22,8 @@ constexpr const char* ScreenCastInterface = "org.freedesktop.portal.ScreenCast";
 constexpr const char* RequestInterface = "org.freedesktop.portal.Request";
 constexpr const char* SessionInterface = "org.freedesktop.portal.Session";
 
-// SelectSources option values, from the portal's ScreenCast interface.
-constexpr uint32_t SourceTypeMonitor = 1;
-constexpr uint32_t SourceTypeWindow = 2;
-constexpr uint32_t CursorModeHidden = 1;
+// A SelectSources option value; the source type and cursor mode are decided by
+// portal_options.h, which is pure so both are held to by a test.
 constexpr uint32_t PersistUntilRevoked = 2;
 
 // Response codes carried by org.freedesktop.portal.Request.Response.
@@ -95,9 +94,71 @@ struct ResponseResults
     std::string restoreToken;
     uint32_t nodeId = 0;
     bool sawStream = false;
+    /// Where the chosen source sits and what it covers. Both optional in the
+    /// portal spec, so zero means "not stated" rather than "at the origin".
+    double originX = 0.0;
+    double originY = 0.0;
+    double widthPoints = 0.0;
+    double heightPoints = 0.0;
 };
 
-/// Reads the first stream's node id out of the streams field, a(ua{sv}).
+/// A stream's `position` or `size` property: an array of exactly two ints.
+/// False leaves both outputs untouched, so a malformed pair reads as absent.
+bool readIntPair(DBusMessageIter* variant, double& first, double& second)
+{
+    if (dbus_message_iter_get_arg_type(variant) != DBUS_TYPE_ARRAY) {
+        return false;
+    }
+    DBusMessageIter values;
+    dbus_message_iter_recurse(variant, &values);
+    int32_t pair[2] = {0, 0};
+    int count = 0;
+    while (count < 2 && dbus_message_iter_get_arg_type(&values) == DBUS_TYPE_INT32) {
+        dbus_message_iter_get_basic(&values, &pair[count]);
+        dbus_message_iter_next(&values);
+        ++count;
+    }
+    if (count < 2) {
+        return false;
+    }
+    first = pair[0];
+    second = pair[1];
+
+    return true;
+}
+
+void readStreamProperty(DBusMessageIter* entry, ResponseResults& results)
+{
+    const char* key = readStringValue(entry);
+    dbus_message_iter_next(entry);
+    DBusMessageIter variant;
+    dbus_message_iter_recurse(entry, &variant);
+    const std::string name = key != nullptr ? key : "";
+    if (name == "position") {
+        (void)readIntPair(&variant, results.originX, results.originY);
+    } else if (name == "size") {
+        (void)readIntPair(&variant, results.widthPoints, results.heightPoints);
+    }
+}
+
+/// The a{sv} that follows a stream's node id.
+void readStreamProperties(DBusMessageIter* fields, ResponseResults& results)
+{
+    if (dbus_message_iter_get_arg_type(fields) != DBUS_TYPE_ARRAY) {
+        return;
+    }
+    DBusMessageIter properties;
+    dbus_message_iter_recurse(fields, &properties);
+    while (dbus_message_iter_get_arg_type(&properties) == DBUS_TYPE_DICT_ENTRY) {
+        DBusMessageIter entry;
+        dbus_message_iter_recurse(&properties, &entry);
+        readStreamProperty(&entry, results);
+        dbus_message_iter_next(&properties);
+    }
+}
+
+/// Reads the first stream's node id and placement out of the streams field,
+/// a(ua{sv}).
 void readStreams(DBusMessageIter* variant, ResponseResults& results)
 {
     DBusMessageIter streams;
@@ -107,10 +168,13 @@ void readStreams(DBusMessageIter* variant, ResponseResults& results)
     }
     DBusMessageIter fields;
     dbus_message_iter_recurse(&streams, &fields);
-    if (dbus_message_iter_get_arg_type(&fields) == DBUS_TYPE_UINT32) {
-        dbus_message_iter_get_basic(&fields, &results.nodeId);
-        results.sawStream = true;
+    if (dbus_message_iter_get_arg_type(&fields) != DBUS_TYPE_UINT32) {
+        return;
     }
+    dbus_message_iter_get_basic(&fields, &results.nodeId);
+    results.sawStream = true;
+    dbus_message_iter_next(&fields);
+    readStreamProperties(&fields, results);
 }
 
 void readResultEntry(DBusMessageIter* entry, ResponseResults& results)
@@ -300,9 +364,50 @@ std::optional<ResponseResults> createSession(Handshake& handshake, const std::at
     });
 }
 
+/// The AvailableCursorModes bitmask this portal advertises; zero when the
+/// property cannot be read, which asks for nothing beyond the guaranteed mode.
+uint32_t availableCursorModes(DBusConnection* connection)
+{
+    DBusMessage* message =
+        dbus_message_new_method_call(PortalService, PortalObject, "org.freedesktop.DBus.Properties", "Get");
+    if (message == nullptr) {
+        return 0;
+    }
+    const char* interface = ScreenCastInterface;
+    const char* property = "AvailableCursorModes";
+    DBusMessageIter arguments;
+    dbus_message_iter_init_append(message, &arguments);
+    appendStringValue(&arguments, DBUS_TYPE_STRING, &interface);
+    appendStringValue(&arguments, DBUS_TYPE_STRING, &property);
+    DBusMessage* reply = callWithReply(connection, message);
+    if (reply == nullptr) {
+        return 0;
+    }
+    uint32_t modes = 0;
+    DBusMessageIter result;
+    if (dbus_message_iter_init(reply, &result) != FALSE &&
+        dbus_message_iter_get_arg_type(&result) == DBUS_TYPE_VARIANT) {
+        DBusMessageIter variant;
+        dbus_message_iter_recurse(&result, &variant);
+        if (dbus_message_iter_get_arg_type(&variant) == DBUS_TYPE_UINT32) {
+            dbus_message_iter_get_basic(&variant, &modes);
+        }
+    }
+    dbus_message_unref(reply);
+
+    return modes;
+}
+
 std::optional<ResponseResults> selectSources(Handshake& handshake, PortalSourceKind kind,
                                              const std::string& restoreToken, const std::atomic<bool>& abort)
 {
+    const uint32_t availableModes = availableCursorModes(handshake.connection);
+    const uint32_t cursorMode = portalCursorMode(availableModes);
+    // What was asked for, beside what was on offer: "no cursor metadata
+    // arrived" has two completely different causes and only this separates
+    // them.
+    SS_DIAG(Perf, "portal cursor modes available=%u asked=%u", availableModes, cursorMode);
+
     return requestCall(handshake, "SelectSources", abort, [&](DBusMessageIter* arguments, DBusMessageIter* options) {
         if (arguments != nullptr) {
             const char* session = handshake.sessionHandle.c_str();
@@ -311,9 +416,7 @@ std::optional<ResponseResults> selectSources(Handshake& handshake, PortalSourceK
         if (options != nullptr) {
             appendVardictUint32(options, "types", portalSourceTypeMask(kind));
             appendVardictBool(options, "multiple", false);
-            // Hidden: a cursor composited into the pixels would enter the
-            // scopes' analysis; position metadata comes later for the probes.
-            appendVardictUint32(options, "cursor_mode", CursorModeHidden);
+            appendVardictUint32(options, "cursor_mode", cursorMode);
             appendVardictUint32(options, "persist_mode", PersistUntilRevoked);
             if (!restoreToken.empty()) {
                 appendVardictString(options, "restore_token", restoreToken.c_str());
@@ -360,11 +463,6 @@ int openPipeWireRemote(Handshake& handshake)
 }
 
 }  // namespace
-
-uint32_t portalSourceTypeMask(PortalSourceKind kind)
-{
-    return kind == PortalSourceKind::Window ? SourceTypeWindow : SourceTypeMonitor;
-}
 
 std::optional<PortalStream> PortalScreenCast::open(PortalSourceKind kind, const std::string& restoreToken,
                                                    const std::atomic<bool>& abort, PortalError& error)
@@ -418,6 +516,10 @@ std::optional<PortalStream> PortalScreenCast::open(PortalSourceKind kind, const 
     stream.pipewireFd = fd;
     stream.nodeId = started->nodeId;
     stream.restoreToken = started->restoreToken;
+    stream.originX = started->originX;
+    stream.originY = started->originY;
+    stream.widthPoints = started->widthPoints;
+    stream.heightPoints = started->heightPoints;
     return stream;
 }
 
