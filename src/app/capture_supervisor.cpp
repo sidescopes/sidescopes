@@ -15,7 +15,14 @@ CaptureDecision CaptureSupervisor::update(const CaptureConditions& conditions, d
     decision.pipeline = m_visibility.update(sight, conditions.suspended, now);
     switch (decision.pipeline) {
     case PipelineAction::Suspend:
-        SS_DIAG(Perf, "pipeline suspended - %s", outOfSight ? "out of sight" : "no region");
+        // Named input by input, not merely "out of sight". Which one stopped
+        // the pipeline is the whole question when a reading goes stale, and a
+        // recording that answers it with a category cannot be argued with.
+        SS_DIAG(Perf, "pipeline suspended - asleep=%d hidden=%d iconified=%d invisible=%d nofb=%d noregion=%d probe=%d",
+                static_cast<int>(sight.sessionAsleep), static_cast<int>(sight.applicationHidden),
+                static_cast<int>(sight.iconified), static_cast<int>(!sight.windowVisible),
+                static_cast<int>(sight.framebufferEmpty), static_cast<int>(sight.nothingSelected),
+                static_cast<int>(sight.probeNeedsFrames));
         decision.pauseReason = outOfSight ? "paused - the window is out of sight" : "paused - no region selected";
         break;
     case PipelineAction::Resume:

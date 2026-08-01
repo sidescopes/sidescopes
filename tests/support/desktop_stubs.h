@@ -65,6 +65,11 @@ public:
     /// caller owns the pacing, so the count is the throttle made visible.
     std::optional<FloatColor> screenSample;
     int screenSampleRequests = 0;
+    /// Whether this scripted desktop can sample the screen off-stream. Both
+    /// readings are real platforms - false is a Wayland session - and the
+    /// frame loop suspends differently under each, so it is scripted rather
+    /// than assumed.
+    bool offStreamColorSample = true;
 
     /// Puts every answer back to its empty default and forgets what the
     /// detector was handed.

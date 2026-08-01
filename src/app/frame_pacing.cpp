@@ -63,9 +63,16 @@ bool nothingNeedsFrames(const VisibilityInputs& inputs)
     if (inputs.needsFrames) {
         return false;
     }
+    // The probe only counts while the application is actually on screen: a
+    // hidden window's readout is being read by nobody, and a pointer moving
+    // over a desktop whose scopes are put away is not a reason to capture it.
+    const bool outOfSight = inputs.sessionAsleep || inputs.applicationHidden || inputs.iconified ||
+                            !inputs.windowVisible || inputs.framebufferEmpty;
+    if (inputs.probeNeedsFrames && !outOfSight) {
+        return false;
+    }
 
-    return inputs.sessionAsleep || inputs.applicationHidden || inputs.iconified || !inputs.windowVisible ||
-           inputs.framebufferEmpty || inputs.nothingSelected;
+    return outOfSight || inputs.nothingSelected;
 }
 
 PipelineAction VisibilityGate::update(const VisibilityInputs& inputs, bool suspended, double now)

@@ -365,6 +365,46 @@ TEST_CASE("A selected region holds the stream open on a visible window")
     CHECK_FALSE(nothingNeedsFrames(picking));
 }
 
+TEST_CASE("The live probe holds the stream open where it has nothing else to read")
+{
+    // With no region the pipeline suspends because the colour under the
+    // pointer is supposed to fall back to an off-stream sample. On a session
+    // that has none - a Wayland one, where every read of the X root is
+    // refused - the probe IS the last reader, and suspending freezes the
+    // readout on its final colour: stale, and indistinguishable from live.
+    VisibilityInputs probing = InSight;
+    probing.nothingSelected = true;
+    probing.probeNeedsFrames = true;
+    CHECK_FALSE(nothingNeedsFrames(probing));
+
+    // And a platform that CAN sample off-stream keeps the old behaviour
+    // exactly: the probe reads the screen directly, so an empty selection
+    // suspends the pipeline as it always did.
+    VisibilityInputs covered = probing;
+    covered.probeNeedsFrames = false;
+    CHECK(nothingNeedsFrames(covered));
+}
+
+TEST_CASE("A probe on a window nobody can see asks for no frames")
+{
+    // Unlike the picker and the face probe, which read frames whatever the
+    // window is doing, the live probe is only worth a stream while it is on
+    // screen to be read. A pointer moving over a desktop whose scopes are put
+    // away is not a reason to capture that desktop.
+    for (const auto& set : {&VisibilityInputs::sessionAsleep, &VisibilityInputs::applicationHidden,
+                            &VisibilityInputs::iconified, &VisibilityInputs::framebufferEmpty}) {
+        VisibilityInputs inputs;
+        inputs.probeNeedsFrames = true;
+        inputs.*set = true;
+        CHECK(nothingNeedsFrames(inputs));
+    }
+
+    VisibilityInputs invisible;
+    invisible.probeNeedsFrames = true;
+    invisible.windowVisible = false;
+    CHECK(nothingNeedsFrames(invisible));
+}
+
 TEST_CASE("A reader of frames holds the stream open however hidden the window")
 {
     // The picker paints its own full-screen overlay and the face probe reads

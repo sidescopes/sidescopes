@@ -492,7 +492,8 @@ void App::serviceCapture(bool framebufferEmpty, double now)
                          glfwGetWindowAttrib(m_window, GLFW_VISIBLE) != 0,
                          framebufferEmpty,
                          !m_analysis.region.has_value(),
-                         m_regionPicker.active() || m_regionPicker.scansRunning() || m_faceLock.probeRunning()};
+                         m_regionPicker.active() || m_regionPicker.scansRunning() || m_faceLock.probeRunning(),
+                         !offStreamColorSampleAvailable()};
     conditions.suspended = m_captureController.suspended();
     conditions.frameSize = m_frameSize;
     conditions.region = m_analysis.region;

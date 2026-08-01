@@ -18,6 +18,7 @@
 #include <cstdint>
 
 #include "platform/desktop.h"
+#include "platform/linux/linux_session.h"
 #include "platform/linux/x11_displays.h"
 #include "platform/linux/x11_error_guard.h"
 #include "platform/linux/x11_pixels.h"
@@ -49,6 +50,16 @@ Display* readDisplay()
 std::atomic<bool> g_rootUnreadable{false};
 
 }  // namespace
+
+bool offStreamColorSampleAvailable()
+{
+    // A rootless X server backs the root window with no readable storage and
+    // refuses every read of it, so on a Wayland session there is no off-stream
+    // sample at all - not a degraded one, none. The session decides rather
+    // than the latch below, because the answer is needed before the first read
+    // is attempted and must not change under the frame loop afterwards.
+    return runningOnX11Session();
+}
 
 void sampleScreenColorAsync(DesktopPoint point, std::function<void(std::optional<FloatColor>)> callback)
 {

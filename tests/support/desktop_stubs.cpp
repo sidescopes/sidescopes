@@ -64,6 +64,11 @@ std::optional<CapturedImage> captureDisplayImage(uint32_t)
     return g_stubs.displayImage;
 }
 
+bool offStreamColorSampleAvailable()
+{
+    return g_stubs.offStreamColorSample;
+}
+
 void sampleScreenColorAsync(DesktopPoint, std::function<void(std::optional<FloatColor>)> callback)
 {
     // The seam takes the callback by value because a real implementation hands

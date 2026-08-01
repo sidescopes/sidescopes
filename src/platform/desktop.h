@@ -338,6 +338,19 @@ void observeEscapeWithoutKeyWindow(std::function<void()> callback);
 /// point cannot be read. Callers own the pacing.
 void sampleScreenColorAsync(DesktopPoint point, std::function<void(std::optional<FloatColor>)> callback);
 
+/// Whether sampleScreenColorAsync can actually answer on this session.
+///
+/// It is not a detail of that call but a constraint on the FRAME LOOP, which
+/// is why it is asked separately. The pipeline suspends whenever nothing is
+/// reading frames, and the live probe is allowed not to count because it has
+/// this off-stream sample to fall back on. Where the fallback cannot exist the
+/// probe is the last reader, and suspending starves it: the readout then holds
+/// its final colour, which is stale and indistinguishable from live.
+///
+/// False on a Wayland session, where the only screen-wide read available is
+/// XGetImage on the X root and a rootless XWayland refuses every one of them.
+[[nodiscard]] bool offStreamColorSampleAvailable();
+
 /// Grabs a single frame of @p displayId's current contents, off the live
 /// capture stream, for a one-shot analysis - the region picker scans the
 /// non-streamed displays for faces this way, since only one display feeds

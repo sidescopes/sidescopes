@@ -688,6 +688,12 @@ void observeEscapeWithoutKeyWindow(std::function<void()>)
 }
 
 // NOLINTNEXTLINE(performance-unnecessary-value-param): by-value matches the sink interface
+bool offStreamColorSampleAvailable()
+{
+    // A GDI read of the screen DC always answers.
+    return true;
+}
+
 void sampleScreenColorAsync(DesktopPoint point, std::function<void(std::optional<FloatColor>)> callback)
 {
     // GDI reads any monitor of the virtual screen synchronously.
@@ -698,9 +704,12 @@ void sampleScreenColorAsync(DesktopPoint point, std::function<void(std::optional
     const int left = static_cast<int>(point.x) - Side / 2;
     const int top = static_cast<int>(point.y) - Side / 2;
 
+    // Taken by value at the seam because a real implementation hands it to
+    // whatever reads the screen; owned here so the copy is not made twice.
+    const std::function<void(std::optional<FloatColor>)> reader = std::move(callback);
     HDC screen = GetDC(nullptr);
     if (!screen) {
-        callback(std::nullopt);
+        reader(std::nullopt);
         return;
     }
     std::optional<FloatColor> color;
@@ -737,7 +746,7 @@ void sampleScreenColorAsync(DesktopPoint point, std::function<void(std::optional
         DeleteDC(memory);
     }
     ReleaseDC(nullptr, screen);
-    callback(color);
+    reader(color);
 }
 
 std::optional<CapturedImage> captureDisplayImage(uint32_t displayId)

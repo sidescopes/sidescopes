@@ -520,6 +520,12 @@ SCDisplay* samplerDisplay(CGDirectDisplayID displayId)
 // of a tiny rectangle around the point, excluding this application the
 // way the main stream does, requested in sRGB for the same honest
 // values.
+bool offStreamColorSampleAvailable()
+{
+    // ScreenCaptureKit takes a one-shot capture of any display on demand.
+    return true;
+}
+
 void sampleScreenColorAsync(DesktopPoint point, std::function<void(std::optional<FloatColor>)> callback)
 {
     CGDirectDisplayID displayId = 0;

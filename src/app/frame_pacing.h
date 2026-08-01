@@ -300,6 +300,21 @@ struct VisibilityInputs
     /// The picker or a face probe is reading frames on its own, so the stream
     /// must not be pulled out from under it.
     bool needsFrames = false;
+    /// The live probe is the last thing reading frames and has no off-stream
+    /// sample to fall back on - see offStreamColorSampleAvailable. Without
+    /// this the readout holds its final colour once the stream stops, which is
+    /// stale and reads exactly like a live one.
+    ///
+    /// It does NOT follow the pointer, and the first attempt that made it do
+    /// so was wrong twice over. Pausing to READ the number is ordinary use, so
+    /// any motion window expires exactly while the user is looking at it; and
+    /// coming back costs a stream restart, which on a portal session is a
+    /// fresh handshake, so the reading returns late as well as stale.
+    ///
+    /// Standing true is affordable because the stream is damage-driven: a
+    /// screen that is not changing delivers no frames, so an idle desktop
+    /// costs what an idle desktop always cost.
+    bool probeNeedsFrames = false;
 };
 
 /// Whether nothing is asking the capture for frames.
