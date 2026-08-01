@@ -697,6 +697,17 @@ if(UNIX AND NOT APPLE AND TARGET SideScopes)
     set(CPACK_DEBIAN_PACKAGE_SECTION "graphics")
     set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
     set(CPACK_DEBIAN_FILE_NAME "DEB-DEFAULT")
+    # ...but only where dpkg-shlibdeps exists. Without it CPack does not fail:
+    # it builds a package whose Depends field is EMPTY, which installs happily
+    # on the machine that built it and is missing every library everywhere
+    # else. Say so at configure time, since nothing later will.
+    find_program(SIDESCOPES_DPKG_SHLIBDEPS dpkg-shlibdeps)
+    if(NOT SIDESCOPES_DPKG_SHLIBDEPS)
+        message(WARNING
+            "dpkg-shlibdeps not found (install dpkg-dev): a .deb built here will "
+            "declare NO dependencies and is unfit to ship. Release builds install "
+            "it and CI asserts the Depends field.")
+    endif()
 
     # Fedora/openSUSE: autoreq discovers the same runtime libraries.
     set(CPACK_RPM_PACKAGE_LICENSE "GPLv3+")
