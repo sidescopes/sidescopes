@@ -19,6 +19,7 @@
 
 #include "core/preferences.h"
 #include "platform/focus_resolution.h"
+#include "platform/linux/linux_session.h"
 #include "platform/linux/stream_pointer.h"
 #include "platform/linux/x11_displays.h"
 #include "platform/linux/x11_windows.h"
@@ -148,6 +149,14 @@ std::vector<LinuxDisplay> connectedDisplays()
     XRRFreeScreenResources(resources);
 
     return displays;
+}
+
+bool foreignWindowsEnumerable()
+{
+    // The X11 lane enumerates the whole desktop. Under XWayland it
+    // enumerates X clients only, and a Wayland compositor tells a client
+    // nothing at all about its neighbours.
+    return runningOnX11Session();
 }
 
 std::vector<DesktopWindow> onScreenWindows(uint32_t displayId)

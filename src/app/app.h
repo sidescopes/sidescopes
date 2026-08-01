@@ -152,6 +152,7 @@ private:
     /// a foreign window's screen rectangle cannot be tracked. The stream
     /// becomes that window, the region is the whole of it, and no on-desktop
     /// border is drawn; endWindowScopeIfEnded clears it when the stream stops.
+    void divertWindowPickIfNeeded();
     void scopeWindow();
     /// Clears a window scope once its stream has ended (the window closed or
     /// the pick was cancelled), returning the scopes to the empty state.

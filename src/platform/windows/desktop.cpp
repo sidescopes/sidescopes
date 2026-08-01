@@ -189,6 +189,12 @@ HWND windowFromIdentity(uint64_t identity)
 
 }  // namespace
 
+bool foreignWindowsEnumerable()
+{
+    // EnumWindows reports every top-level window.
+    return true;
+}
+
 std::vector<DesktopWindow> onScreenWindows(uint32_t displayId)
 {
     std::vector<DesktopWindow> windows;

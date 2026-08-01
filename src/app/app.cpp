@@ -437,6 +437,7 @@ void App::runFrame()
     // analysis keep flowing underneath. These run whether or not a frame was
     // drawn: a region border grabbed while the loop is quiet reaches the
     // application through this poll and no other way.
+    divertWindowPickIfNeeded();
     applyRegionPickOutcome(m_regionPicker.openIfRequested(m_analysis.region.has_value()));
     applyBorderEditOutcome(m_regions.pollBorderEdit(m_activeWindowIdentity));
     applyRegionPickOutcome(m_regionPicker.poll(m_frameSize, m_cursor.screenSampleColor()));
@@ -897,6 +898,31 @@ void App::dispatchMenuChoice(int chosen, const std::vector<ParamMenuAction>& par
 
 // The entries that reach no other unit: the diagnostics recorder, the attached
 // window, the pin ring, and the About window.
+// Sends a waiting window pick to the compositor's picker where this session
+// cannot enumerate its own windows.
+//
+// It sits at the POLL rather than at each request, because a pick is asked for
+// from three places - the letter shortcuts, the toolbar icon and the menu -
+// and every one of them ends up waiting here. Routing at the request instead
+// covered the shortcut and quietly missed the toolbar, which is the button a
+// user actually presses.
+void App::divertWindowPickIfNeeded()
+{
+    if (m_regionPicker.pendingRequest() != RegionPickerMode::AttachWindow) {
+        return;
+    }
+    if (windowPickRoute(foreignWindowsEnumerable(), m_captureController.windowCaptureSupported()) !=
+        WindowPickRoute::CompositorPicker) {
+        return;
+    }
+    // The suggestion sheet would show the X clients and nothing else,
+    // presenting a near-empty desktop as the whole desktop. The compositor's
+    // picker knows every window; what it hands back is a stream of the chosen
+    // one.
+    m_regionPicker.clearRequest();
+    scopeWindow();
+}
+
 void App::dispatchShellMenu(int chosen)
 {
     if (applyDiagnosticsMenu(chosen)) {

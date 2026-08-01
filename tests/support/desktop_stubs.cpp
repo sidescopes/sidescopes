@@ -69,6 +69,11 @@ bool offStreamColorSampleAvailable()
     return g_stubs.offStreamColorSample;
 }
 
+bool foreignWindowsEnumerable()
+{
+    return g_stubs.foreignWindowsEnumerable;
+}
+
 void sampleScreenColorAsync(DesktopPoint, std::function<void(std::optional<FloatColor>)> callback)
 {
     // The seam takes the callback by value because a real implementation hands
@@ -155,6 +160,8 @@ void DesktopStubs::reset()
     displayName = "Test display";
     screenSample.reset();
     screenSampleRequests = 0;
+    offStreamColorSample = true;
+    foreignWindowsEnumerable = true;
     const std::lock_guard lock(m_mutex);
     m_detected = DetectorCall{};
 }

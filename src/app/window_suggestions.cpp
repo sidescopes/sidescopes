@@ -95,6 +95,15 @@ std::vector<SuggestedRegion> buildWindowSuggestions(const std::vector<DesktopWin
     return buildRegionSuggestions(windowRegions);
 }
 
+WindowPickRoute windowPickRoute(bool windowsEnumerable, bool compositorPickerAvailable)
+{
+    if (windowsEnumerable || !compositorPickerAvailable) {
+        return WindowPickRoute::Suggestions;
+    }
+
+    return WindowPickRoute::CompositorPicker;
+}
+
 RegionOfInterest displayPercentRect(const WindowGeometry& windowGeom, const DisplayGeometry& display)
 {
     RegionOfInterest region;

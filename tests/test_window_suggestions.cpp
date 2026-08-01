@@ -186,4 +186,24 @@ TEST_CASE("A window rectangle is measured from its own display's origin")
     CHECK(overhang.bottomPercent == Approx(100.0));
 }
 
+TEST_CASE("a window pick goes to the compositor where windows cannot be listed")
+{
+    // On a Wayland session the enumeration underneath answers about X clients
+    // alone, so the suggestion sheet would present a near-empty desktop as the
+    // whole desktop - a handful of XWayland windows and nothing of the browser
+    // or the terminal beside them. The compositor's own picker knows them all.
+    CHECK(windowPickRoute(false, true) == WindowPickRoute::CompositorPicker);
+
+    // Where the desktop CAN be listed the sheet is better than the compositor's
+    // dialog: it suggests, it attaches, and a rectangle can be drawn inside the
+    // chosen window rather than scoping the whole of it.
+    CHECK(windowPickRoute(true, true) == WindowPickRoute::Suggestions);
+    CHECK(windowPickRoute(true, false) == WindowPickRoute::Suggestions);
+
+    // Neither available - a bare Wayland compositor with no ScreenCast portal.
+    // The sheet still opens: an honest handful beats a shortcut that silently
+    // does nothing, which reads as the application being broken.
+    CHECK(windowPickRoute(false, false) == WindowPickRoute::Suggestions);
+}
+
 }  // namespace sidescopes

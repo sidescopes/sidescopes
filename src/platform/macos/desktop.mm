@@ -73,6 +73,12 @@ std::vector<DesktopWindow> onScreenWindowsUpToLayer(uint32_t displayId, int maxL
 
 }  // namespace
 
+bool foreignWindowsEnumerable()
+{
+    // CGWindowListCopyWindowInfo reports every on-screen window.
+    return true;
+}
+
 std::vector<DesktopWindow> onScreenWindows(uint32_t displayId)
 {
     return onScreenWindowsUpToLayer(displayId, 0);

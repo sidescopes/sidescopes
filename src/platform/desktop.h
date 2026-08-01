@@ -351,6 +351,20 @@ void sampleScreenColorAsync(DesktopPoint point, std::function<void(std::optional
 /// XGetImage on the X root and a rootless XWayland refuses every one of them.
 [[nodiscard]] bool offStreamColorSampleAvailable();
 
+/// Whether onScreenWindows can see EVERY window on the desktop, or only some
+/// of them.
+///
+/// False on a Wayland session, and it is not a shortfall to work around: a
+/// Wayland client is never told what other windows exist, by design. The X11
+/// enumeration underneath still answers, but it answers about X clients alone,
+/// so on a GNOME desktop it reports a handful of XWayland windows and nothing
+/// of the browser, the file manager or the terminal beside them.
+///
+/// A window picker built on that list is not merely incomplete, it MISLEADS -
+/// it presents a near-empty desktop as the whole desktop. Where this is false
+/// the choice of window belongs to the compositor's own picker instead.
+[[nodiscard]] bool foreignWindowsEnumerable();
+
 /// Grabs a single frame of @p displayId's current contents, off the live
 /// capture stream, for a one-shot analysis - the region picker scans the
 /// non-streamed displays for faces this way, since only one display feeds

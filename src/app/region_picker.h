@@ -100,6 +100,15 @@ public:
     /// @return activity when a picker opened.
     [[nodiscard]] RegionPickOutcome openIfRequested(bool regionSelected);
 
+    /// The pick waiting to open, if any. The host reads it before
+    /// openIfRequested so a session that cannot offer a tool can divert it -
+    /// every route to a pick passes through here, so one check covers the
+    /// letters, the toolbar and the menu alike.
+    [[nodiscard]] std::optional<RegionPickerMode> pendingRequest() const
+    {
+        return m_want;
+    }
+
     /// One poll of an open picker: reads the platform poll and processes it, or
     /// returns an empty outcome when no pick is active. @p frameSize is the
     /// streamed frame's size and @p screenSampleColor the throttled

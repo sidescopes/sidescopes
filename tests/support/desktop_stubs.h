@@ -70,6 +70,9 @@ public:
     /// frame loop suspends differently under each, so it is scripted rather
     /// than assumed.
     bool offStreamColorSample = true;
+    /// Whether this scripted desktop can enumerate foreign windows. False is a
+    /// Wayland session, where a window pick has to go to the compositor.
+    bool foreignWindowsEnumerable = true;
 
     /// Puts every answer back to its empty default and forgets what the
     /// detector was handed.
