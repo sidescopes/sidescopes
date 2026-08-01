@@ -260,4 +260,24 @@ struct FrameView
     }
 };
 
+/// Whether a capture plane holding @p availableBytes can supply @p rows rows
+/// of @p rowBytes, laid @p stride bytes apart.
+///
+/// A producer may hand over a chunk shorter than the negotiated frame - a
+/// partial frame, or a buffer it has not finished filling - and copying the
+/// whole frame out of one reads past the mapping. The LAST row decides it:
+/// every row before it is covered by the strides in front of it, so the need
+/// is (rows - 1) strides plus one row, not rows whole strides. Using the
+/// latter refuses honest buffers whose final row is not padded.
+[[nodiscard]] constexpr bool planeCoversRows(std::size_t availableBytes, int stride, int rowBytes, int rows)
+{
+    if (stride <= 0 || rowBytes <= 0 || rows <= 0 || rowBytes > stride) {
+        return false;
+    }
+    const std::size_t needed =
+        static_cast<std::size_t>(rows - 1) * static_cast<std::size_t>(stride) + static_cast<std::size_t>(rowBytes);
+
+    return availableBytes >= needed;
+}
+
 }  // namespace sidescopes

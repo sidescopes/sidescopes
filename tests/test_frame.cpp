@@ -175,4 +175,29 @@ TEST_CASE("A frame says whether it carries a rectangle of its display")
     CHECK(whole.carries(IntRect{10, 10, 20, 20}));
 }
 
+TEST_CASE("a capture plane is refused unless it covers the frame")
+{
+    // The last row is what decides it: the rows before it are covered by the
+    // strides in front of them, so a frame needs (rows - 1) strides plus one
+    // row. Demanding rows whole strides would refuse an honest buffer whose
+    // final row carries no padding, which is most of them.
+    constexpr std::size_t Stride = 1024;
+    CHECK(planeCoversRows(3 * Stride + 800, 1024, 800, 4));
+    CHECK(planeCoversRows(4 * Stride, 1024, 800, 4));
+    CHECK_FALSE(planeCoversRows(3 * Stride + 799, 1024, 800, 4));
+
+    // A short chunk is a real delivery, not a fault: a compositor may hand
+    // over a partial frame, and copying the negotiated size out of it reads
+    // past the mapping.
+    CHECK_FALSE(planeCoversRows(Stride, 1024, 800, 4));
+    CHECK_FALSE(planeCoversRows(0, 1024, 800, 4));
+
+    // Nothing malformed is ever accepted, because each of these would make the
+    // arithmetic above meaningless rather than merely wrong.
+    CHECK_FALSE(planeCoversRows(1 << 20, 0, 800, 4));
+    CHECK_FALSE(planeCoversRows(1 << 20, 1024, 0, 4));
+    CHECK_FALSE(planeCoversRows(1 << 20, 1024, 800, 0));
+    CHECK_FALSE(planeCoversRows(1 << 20, 800, 1024, 4));
+}
+
 }  // namespace sidescopes

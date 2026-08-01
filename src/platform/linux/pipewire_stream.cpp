@@ -15,6 +15,7 @@
 #include <pipewire/pipewire.h>
 #include <spa/buffer/meta.h>
 #include <spa/param/video/format-utils.h>
+#include <unistd.h>
 
 #include <cstring>
 
@@ -45,6 +46,9 @@ struct PipeWireStreamState
     /// Whether the buffers carry a usable cursor position, stated once and
     /// restated on change rather than per buffer.
     DiagOnChange<int> cursorMetaState{DiagChannel::Perf};
+    /// Whether the delivered planes cover the negotiated frame. A refused
+    /// frame is otherwise invisible: the scopes simply stop advancing.
+    DiagOnChange<int> shortPlaneState{DiagChannel::Perf};
     PipeWireVideoStream::ErrorCallback onError;
 };
 
@@ -154,7 +158,17 @@ void onStreamProcess(void* data)
     const int width = static_cast<int>(state->format.size.width);
     const int height = static_cast<int>(state->format.size.height);
     const int sourceStride = plane.chunk->stride != 0 ? plane.chunk->stride : width * 4;
-    if (source != nullptr && width > 0 && height > 0) {
+    // What the producer says it actually filled, falling back to the mapping's
+    // own size where it says nothing. Copying the negotiated frame out of a
+    // chunk shorter than that reads past the mapping - a partial frame is a
+    // buffer the compositor has every right to hand over.
+    const std::size_t available = plane.chunk->size != 0 ? plane.chunk->size : plane.maxsize;
+    const bool covered = planeCoversRows(available, sourceStride, width * 4, height);
+    if (state->shortPlaneState.shouldLog(covered ? 0 : 1)) {
+        SS_DIAG(Perf, "stream plane %s (%zu bytes for %dx%d at stride %d)", covered ? "covers the frame" : "TOO SHORT",
+                available, width, height, sourceStride);
+    }
+    if (source != nullptr && width > 0 && height > 0 && covered) {
         const int stride = width * 4;
         state->buffer.sizeTo(static_cast<std::size_t>(stride) * height);
         for (int row = 0; row < height; ++row) {
@@ -225,6 +239,20 @@ const spa_pod* buildFormatParam(spa_pod_builder* builder, int maxFramesPerSecond
     return static_cast<const spa_pod*>(spa_pod_builder_pop(builder, &frame));
 }
 
+/// Offers the formats and connects the stream to @p nodeId. Called with the
+/// thread loop already held, like everything else that touches the stream.
+int connectStream(PipeWireStreamState* state, uint32_t nodeId, int maxFramesPerSecond)
+{
+    uint8_t podStorage[1024];
+    spa_pod_builder builder = SPA_POD_BUILDER_INIT(podStorage, sizeof(podStorage));
+    const spa_pod* params[1];
+    params[0] = buildFormatParam(&builder, maxFramesPerSecond);
+
+    return pw_stream_connect(state->stream, PW_DIRECTION_INPUT, nodeId,
+                             static_cast<pw_stream_flags>(PW_STREAM_FLAG_AUTOCONNECT | PW_STREAM_FLAG_MAP_BUFFERS),
+                             params, 1);
+}
+
 }  // namespace
 
 PipeWireVideoStream::PipeWireVideoStream() = default;
@@ -247,16 +275,25 @@ bool PipeWireVideoStream::start(const PortalStream& source, int maxFramesPerSeco
     state->placement.heightPoints = source.heightPoints;
     m_state = state;
 
+    // pw_context_connect_fd adopts the descriptor - on failure as well as on
+    // success - so every exit BEFORE it has to close it itself. The seam
+    // promises the caller that start() takes ownership either way.
     state->loop = pw_thread_loop_new("sidescopes-capture", nullptr);
     if (state->loop == nullptr || pw_thread_loop_start(state->loop) != 0) {
+        ::close(source.pipewireFd);
         stop();
         return false;
     }
 
     pw_thread_loop_lock(state->loop);
     state->context = pw_context_new(pw_thread_loop_get_loop(state->loop), nullptr, 0);
-    state->core =
-        state->context != nullptr ? pw_context_connect_fd(state->context, source.pipewireFd, nullptr, 0) : nullptr;
+    if (state->context == nullptr) {
+        ::close(source.pipewireFd);
+        pw_thread_loop_unlock(state->loop);
+        stop();
+        return false;
+    }
+    state->core = pw_context_connect_fd(state->context, source.pipewireFd, nullptr, 0);
     if (state->core == nullptr) {
         pw_thread_loop_unlock(state->loop);
         stop();
@@ -273,13 +310,7 @@ bool PipeWireVideoStream::start(const PortalStream& source, int maxFramesPerSeco
     }
     pw_stream_add_listener(state->stream, &state->streamListener, &StreamEvents, state);
 
-    uint8_t podStorage[1024];
-    spa_pod_builder builder = SPA_POD_BUILDER_INIT(podStorage, sizeof(podStorage));
-    const spa_pod* params[1];
-    params[0] = buildFormatParam(&builder, maxFramesPerSecond);
-    const int connected = pw_stream_connect(
-        state->stream, PW_DIRECTION_INPUT, source.nodeId,
-        static_cast<pw_stream_flags>(PW_STREAM_FLAG_AUTOCONNECT | PW_STREAM_FLAG_MAP_BUFFERS), params, 1);
+    const int connected = connectStream(state, source.nodeId, maxFramesPerSecond);
     pw_thread_loop_unlock(state->loop);
     if (connected != 0) {
         stop();
