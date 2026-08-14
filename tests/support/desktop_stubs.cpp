@@ -32,6 +32,11 @@ test::DesktopStubs g_stubs;
 
 }  // namespace
 
+bool supportsWindowAttach()
+{
+    return true;
+}
+
 std::vector<DesktopWindow> onScreenWindows(uint32_t)
 {
     return g_stubs.onScreenWindows;

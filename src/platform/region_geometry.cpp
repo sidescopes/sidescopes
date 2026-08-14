@@ -151,6 +151,31 @@ unsigned edgeOrMoveZoneAt(const LocalRect& region, double x, double y, double sc
     return ZoneMove;
 }
 
+unsigned zoneAtPoint(const LocalRect& region, double x, double y, double band, double scale)
+{
+    if (x > region.x && x < region.x + region.width && y > region.y && y < region.y + region.height) {
+        return ZoneNone;
+    }
+    if (x < region.x - band || x > region.x + region.width + band || y < region.y - band ||
+        y > region.y + region.height + band) {
+        return ZoneNone;
+    }
+    const unsigned corner = cornerZoneAt(region, x, y, scale);
+
+    return corner != ZoneNone ? corner : edgeOrMoveZoneAt(region, x, y, scale);
+}
+
+LocalRect rectClampedWithin(const LocalRect& rect, double width, double height)
+{
+    LocalRect fitted = rect;
+    fitted.width = std::min(fitted.width, width);
+    fitted.height = std::min(fitted.height, height);
+    fitted.x = std::max(0.0, std::min(fitted.x, width - fitted.width));
+    fitted.y = std::max(0.0, std::min(fitted.y, height - fitted.height));
+
+    return fitted;
+}
+
 LocalRect draggedRegionRect(unsigned dragZone, const LocalRect& start, double dx, double dy, double minimum)
 {
     const double startLeft = start.x;

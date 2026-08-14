@@ -1,5 +1,6 @@
 #pragma once
 
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -39,7 +40,21 @@ public:
     /// (@p regionSelected).
     [[nodiscard]] PaneRenderOutcome drawRegionToolIcons(bool regionSelected);
 
+    /// Where the region tools were last drawn, in screen coordinates, or
+    /// nothing before the first draw.
+    ///
+    /// Recorded rather than recomputed because the row is RIGHT-ALIGNED: a
+    /// caller wrapping the call in a group gets the leading gap too, which is
+    /// most of the toolbar, and a walk-through pointing at that would frame
+    /// half the window to indicate two buttons.
+    [[nodiscard]] std::optional<ImVec4> regionToolBounds() const
+    {
+        return m_regionToolBounds;
+    }
+
 private:
+    std::optional<ImVec4> m_regionToolBounds;
+
     /// The column geometry the scope menu lays its rows on: where the name
     /// starts, the total row width, and the margin the keys keep from the right
     /// edge - so names left-align and the keys right-align clear of the border.

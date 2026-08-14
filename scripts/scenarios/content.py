@@ -241,3 +241,37 @@ def cache_directory():
         return base / "sidescopes" / "scenarios"
 
     return pathlib.Path.home() / ".cache" / "sidescopes" / "scenarios"
+
+
+def _fetch_named(names, cache_dir):
+    """Fetches the named manifest entries into the cache. Prints one line per
+    photograph so a build log says what it got and what it did not."""
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    entries = {entry["name"]: entry for entry in json.loads(MANIFEST.read_text()).get("images", [])}
+    missing = [name for name in names if name not in entries]
+    for name in missing:
+        print(f"content: {name} is not in the manifest", file=sys.stderr)
+    got = 0
+    for name in names:
+        entry = entries.get(name)
+        if entry is None:
+            continue
+        try:
+            path, _ = _fetch(entry, cache_dir)
+        except (OSError, ValueError, urllib.error.URLError) as failure:
+            # Degrading is the contract the whole manifest is written around:
+            # the caller falls back and says so, rather than measuring or
+            # showing something it cannot name.
+            print(f"content: {name} unavailable - {failure}", file=sys.stderr)
+            continue
+        print(f"content: {path}")
+        got += 1
+
+    return 0 if got == len(names) and not missing else 1
+
+
+if __name__ == "__main__":
+    # `python3 content.py <cache-dir> <name>...` - the demo build's way of
+    # getting the photographs it shows without depending on anyone having run
+    # the scenario harness first.
+    raise SystemExit(_fetch_named(sys.argv[2:], pathlib.Path(sys.argv[1])))

@@ -70,4 +70,9 @@ int showNativeContextMenu(const std::vector<NativeMenuItem>& items)
     return command == 0 ? -1 : command - 1;
 }
 
+bool nativeContextMenuAvailable()
+{
+    return true;
+}
+
 }  // namespace sidescopes

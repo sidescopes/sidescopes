@@ -1,6 +1,7 @@
 #pragma once
 
 #include <map>
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -87,6 +88,20 @@ public:
     /// The reserved strip under the panes: the pin tool in the left corner,
     /// the live swatch in the right, messages and the readout between them.
     void drawStatusBar(const PaneRenderInput& input);
+
+    /// Where the two region tools were last drawn. They sit at opposite ends
+    /// of the application - the draw tool at the toolbar's right, the pin at
+    /// the status bar's left - so anything pointing at them has to ask for
+    /// them separately.
+    [[nodiscard]] std::optional<ImVec4> regionToolBounds() const
+    {
+        return m_toolbar.regionToolBounds();
+    }
+
+    [[nodiscard]] std::optional<ImVec4> pinToolBounds() const
+    {
+        return m_statusBar.pinToolBounds();
+    }
 
     /// Reconfigures every projection instance from the current settings,
     /// through the same parameter assembly the worker uses, so an overlay can

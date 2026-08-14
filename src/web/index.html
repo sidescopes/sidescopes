@@ -1,0 +1,309 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Browser demo · SideScopes</title>
+<!-- The same mark the website wears, copied out of this repository's brand
+     assets by the build. A demo page that arrived wearing the browser's blank
+     document icon reads as somebody's scratch file, which is the opposite of
+     what it is here to say. -->
+<link rel="icon" href="favicon-32.png" type="image/png" sizes="32x32">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<style>
+  :root { color-scheme: dark }
+
+  /* The page is exactly the viewport and never scrolls. It cannot be
+     allowed to: the application takes the wheel for trace intensity, so a
+     page that scrolled would ignore the wheel over the one part of it
+     anybody points at, and the strip would hide below the fold with no
+     obvious way back. Everything above the canvas is a fixed height and the
+     canvas takes what is left. */
+  html, body { height:100%; overflow:hidden }
+  body { background:#141312; color:#f2eeec; font-family:system-ui; margin:0; padding:1rem;
+         display:flex; flex-direction:column; gap:.75rem; box-sizing:border-box }
+
+  /* min-height:0 is what lets a flex child actually shrink to the space
+     left; without it the canvas keeps its content height and pushes the
+     page into the overflow this layout exists to avoid. */
+  #stage { flex:1 1 auto; min-height:0; border-radius:12px; overflow:hidden; background:#000 }
+  #canvas { display:block; width:100%; height:100%; touch-action:none }
+  /* The canvas is focusable so it receives keys; its focus ring is clipped
+     by the stage's rounded corners and reads as a broken border, so it is
+     taken off and the frame is left to the application's own drawing. */
+  #canvas:focus, #canvas:focus-visible { outline:none }
+
+  /* The filmstrip, in the shape a photographer already knows - and at the
+     top, where it stays in view. */
+  /* The padding is what the walk-through's ring stands in. overflow-x makes
+     the vertical axis clip too, so without room here the ring is cut off top
+     and bottom - and it has to be permanent, since padding that appeared only
+     while the tour ran would shift the whole page under it. */
+  .strip { flex:0 0 auto; display:flex; gap:.5rem; align-items:stretch; overflow-x:auto;
+           padding:.4rem; scrollbar-width:thin }
+  .strip button { all:unset; cursor:pointer; border-radius:6px; overflow:hidden;
+                  border:1px solid #35312f; flex:0 0 auto; line-height:0;
+                  transition:border-color .12s ease }
+  .strip button:hover { border-color:#6f6a67 }
+  .strip button[aria-current="true"] { border-color:#8ea2ff; box-shadow:0 0 0 1px #8ea2ff }
+  .strip button:focus-visible { border-color:#8ea2ff }
+  .strip img { display:block; width:92px; height:62px; object-fit:cover }
+  .add { display:flex; align-items:center; justify-content:center; width:92px; height:62px;
+         color:#8a827e; font-size:1.5rem; background:#1c1a19 }
+  .strip button:hover .add { color:#8ea2ff }
+  /* The walk-through's spotlight, for the one control it names that lives in
+     the document rather than in the application. The overlay is drawn inside
+     the canvas and cannot reach up here, so the page lights this itself while
+     that stop is showing.
+     Built to match what the overlay draws around an icon, since a visitor
+     sees the two a moment apart: the page's own dark for the standoff, then
+     the warm ring transient indicators wear here, then a soft edge outside it
+     standing in for the veil. The button's own border is left ALONE, exactly
+     as the overlay leaves the controls it points at. */
+  .strip button.spotlight {
+    box-shadow:0 0 0 3px #141312, 0 0 0 4.5px rgba(255,214,140,.95), 0 0 0 6px rgba(20,18,17,.6);
+  }
+
+  /* A FIXED height, and no wrapping. A credit line of a different length
+     would otherwise reflow this row, change its height, and resize the
+     canvas - so switching pictures would move the application window,
+     which is the one thing that must never happen when only the picture
+     changed. */
+  /* A FIXED height, because the stage takes what is left and anything that
+     reflows this row would resize the canvas - and with it the application
+     window - the moment a longer credit line arrived. Tall enough for the
+     button, which is what it was not: at 1.25rem the button was simply cut
+     off by the overflow. */
+  .note { flex:0 0 auto; display:flex; gap:1.25rem; align-items:center; margin:0;
+          height:2rem; overflow:hidden; white-space:nowrap; color:#8a827e; font-size:.8125rem }
+  /* The credit takes the left, under the filmstrip it belongs to, and gives
+     way first when the row is narrow. */
+  .note .credit { min-width:0; flex:0 1 auto; overflow:hidden; text-overflow:ellipsis }
+  /* The walk-through is the instructions now, so this only reopens it. It
+     sits right, over the application it talks about, and never shrinks. */
+  .note button {
+    flex:0 0 auto; margin-left:auto; font:inherit; color:#cfc9c5; background:#221f1d;
+    border:1px solid #3a3532; border-radius:6px; padding:5px 12px; cursor:pointer;
+  }
+  .note button:hover { background:#2b2725; color:#efe9e5 }
+  /* Shown only when this copy is opened from disk, where it cannot run. */
+  .offline { max-width:36rem; margin:4rem auto; padding:0 1rem; line-height:1.5 }
+  .offline h1 { font-size:1.25rem; margin:0 0 1rem }
+  .offline p { color:#b0a9a5; margin:0 0 .75rem }
+  .offline code { background:#221f1d; border-radius:4px; padding:.1rem .35rem; font-size:.9em }
+</style>
+
+<div class="strip" id="strip"></div>
+
+<p class="note">
+  <span class="credit" id="credit"></span>
+  <button type="button" id="tour">Take the tour</button>
+</p>
+
+<div id="stage"><canvas id="canvas" tabindex="-1"></canvas></div>
+
+<input type="file" accept="image/*" id="file" hidden>
+
+<!-- The engine, as a classic script defining a global factory. The build
+     replaces this line with the script INLINED for the standalone file, which
+     is what lets that one be opened straight from disk. -->
+<script src="sidescopes-demo.js"></script>
+
+<script type="module">
+
+// The loader fetches its .wasm by a bare relative name, so busting only the
+// module leaves a browser running a NEW loader against an OLD binary - which
+// looks exactly like a change that did nothing. locateFile carries the
+// build's digest onto the .wasm too; served from R2 the directory is already
+// hashed and this is simply harmless.
+// The application draws its own context menu, so the browser's must not
+// appear over it. Suppressing it also fixes the menu opening only once:
+// the native menu takes the pointer and the button-up never arrives, so
+// the interface is left believing the right button is still down and
+// ignores every press after the first.
+//
+// The canvas only. Everywhere else on the page the browser's menu is the
+// right one and is left alone.
+document.getElementById('canvas').addEventListener('contextmenu', (event) => event.preventDefault());
+
+// Opened from disk, this copy cannot work and should say so rather than
+// filling the console with CORS failures. A file:// page is its own opaque
+// origin, so the engine may not fetch the .wasm sitting beside it - which is
+// exactly why the standalone build exists, and this points at it. The check
+// is here rather than nowhere because index.html is what anybody
+// double-clicks, and a wall of red text is a poor way to learn that.
+//
+// The standalone file is built from this very page, so it would trip this
+// guard and refuse to run - which is why it announces itself. Without that
+// flag the one build meant to be opened from disk would be the one telling
+// you to open it from somewhere else.
+if (location.protocol === 'file:' && !window.__STANDALONE) {
+  document.body.innerHTML =
+    '<div class="offline">' +
+    '<h1>This copy needs a web server</h1>' +
+    '<p>A page opened straight from disk may not load the WebAssembly beside it: the browser treats ' +
+    'every local file as its own origin and refuses the request.</p>' +
+    '<p><b>Open <code>sidescopes-demo.html</code> instead</b> — the same demo in a single self-contained ' +
+    'file, built to be opened exactly this way.</p>' +
+    '<p>Or serve this directory over HTTP: <code>python3 -m http.server</code>.</p>' +
+    '</div>';
+  throw new Error('file:// - open sidescopes-demo.html instead');
+}
+
+const build = new URL(import.meta.url).searchParams.get('b') || '';
+const mod = await SideScopesDemo({
+  canvas: document.getElementById('canvas'),
+  locateFile: (path) => (build ? `${path}?b=${build}` : path),
+});
+
+// The walk-through's way back in. It lives in the APPLICATION rather than the
+// page, so this only asks it to open: the stops, the bubbles and what counts
+// as having settled it are all C++, and a desktop build could show the same
+// tour without any of this file. Focus goes back to the canvas because the
+// tour is drawn there and its buttons are its own, not the page's.
+// The GLFW port mirrors the window's title into the document's, so the tab
+// ends up saying "SideScopes" - the name drawn in the application's own title
+// bar, which is right there and does not need repeating. Put back afterwards,
+// because the tab is the page's to name.
+document.title = 'Browser demo \u00b7 SideScopes';
+
+const tourButton = document.getElementById('tour');
+tourButton.addEventListener('click', () => {
+  mod.ccall('demoStartTour', null, [], []);
+  document.getElementById('canvas').focus();
+});
+
+// Public domain, works of the US federal government (17 U.S.C. 105). The
+// portrait in the same set is deliberately absent: a face on a demo page
+// invites the reading that the person endorses this, which a trace does not.
+const SAMPLES = [
+  ['skin-and-colour', 'Skin tones beside strong colour', 'Library of Congress / Alfred T. Palmer, 1942'],
+  ['neutral-detail', 'Near-neutral, fine detail', 'National Park Service'],
+  ['wide-tonal-range', 'Deep shadow beside clipped highlight', 'NASA / Bill Ingalls'],
+  ['flat-field', 'A mostly uniform field', 'National Park Service'],
+];
+
+const work = document.createElement('canvas');
+const wctx = work.getContext('2d', { willReadFrequently: true });
+const credit = document.getElementById('credit');
+const strip = document.getElementById('strip');
+
+function push(bitmap, limit = 1400) {
+  const scale = Math.min(1, limit / Math.max(bitmap.width, bitmap.height));
+  const width = Math.round(bitmap.width * scale);
+  const height = Math.round(bitmap.height * scale);
+  work.width = width; work.height = height;
+  wctx.drawImage(bitmap, 0, 0, width, height);
+  const image = wctx.getImageData(0, 0, width, height);
+  const ptr = mod.ccall('demoFrameBuffer', 'number', ['number', 'number'], [width, height]);
+  if (!ptr) { return; }
+  mod.HEAPU8.set(image.data, ptr);
+  mod.ccall('demoFrameReady', null, [], []);
+}
+
+// Any click in the strip takes focus off the canvas, and the application
+// stops hearing the keyboard - which reads as "the shortcuts do not work"
+// the moment anybody chooses a picture. Focus goes straight back.
+function returnFocus() {
+  document.getElementById('canvas').focus();
+}
+
+function markCurrent(button) {
+  strip.querySelectorAll('button').forEach((b) => b.removeAttribute('aria-current'));
+  if (button) { button.setAttribute('aria-current', 'true'); }
+}
+
+async function useSample(name, line, button) {
+  // A data: URI in the standalone file, a sibling JPEG when served. fetch
+  // reads a data: URI from a file:// page quite happily; it will not read a
+  // sibling file, which is why the standalone one carries its pictures
+  // inside it.
+  const bitmap = await createImageBitmap(await (await fetch(sampleSource(name))).blob());
+  push(bitmap);
+  credit.textContent = line ? `Photograph: ${line}. Public domain.` : '';
+  markCurrent(button);
+  returnFocus();
+}
+
+// Where a photograph comes from: a data: URI in the standalone file, a
+// sibling JPEG when served. ONE answer, because the thumbnail and the
+// picture asked separately and the standalone build quietly kept fetching
+// four siblings it could not have from disk.
+//
+// fetch reads a data: URI from a file:// page quite happily; it will not read
+// a sibling file, which is why the standalone one carries its pictures.
+function sampleSource(name) {
+  return (window.__SAMPLES && window.__SAMPLES[name]) || `samples/${name}.jpg`;
+}
+
+const tiles = [];
+for (const [name, title, line] of SAMPLES) {
+  const button = document.createElement('button');
+  button.title = title;
+  const img = document.createElement('img');
+  img.src = sampleSource(name);
+  img.alt = title;
+  img.addEventListener('error', () => button.remove());
+  button.appendChild(img);
+  button.addEventListener('click', () => useSample(name, line, button));
+  strip.appendChild(button);
+  tiles.push(button);
+}
+
+const addButton = document.createElement('button');
+addButton.title = 'Add your own photograph';
+addButton.innerHTML = '<span class="add">+</span>';
+addButton.addEventListener('click', () => document.getElementById('file').click());
+// The file dialog steals focus too; take it back when it closes either way.
+window.addEventListener('focus', returnFocus);
+strip.appendChild(addButton);
+
+// The filmstrip belongs to the document, not to the application, so the two
+// have to meet in the middle for the walk-through's last stop: the page says
+// where the + button is, in points relative to the canvas, and the
+// application says when it is talking about it. Its top is NEGATIVE - the
+// strip sits above the canvas - which is what puts the bubble at the top of
+// the application, pointing the right way.
+const canvasElement = document.getElementById('canvas');
+function syncStripAnchor() {
+  const strip = addButton.getBoundingClientRect();
+  const canvas = canvasElement.getBoundingClientRect();
+  mod.ccall('demoSetStripAnchor', null, ['number', 'number', 'number', 'number'],
+            [strip.left - canvas.left, strip.top - canvas.top,
+             strip.right - canvas.left, strip.bottom - canvas.top]);
+  addButton.classList.toggle('spotlight', mod.ccall('demoTourAtStrip', 'number', [], []) === 1);
+  requestAnimationFrame(syncStripAnchor);
+}
+requestAnimationFrame(syncStripAnchor);
+
+document.getElementById('file').addEventListener('change', async (event) => {
+  const file = event.target.files && event.target.files[0];
+  if (!file) { return; }
+  const bitmap = await createImageBitmap(file);
+
+  // Your photograph joins the strip, before the add tile, so it can be
+  // returned to like any other. The thumbnail is drawn from the bitmap
+  // already in memory; the file itself never leaves this page.
+  const thumb = document.createElement('canvas');
+  thumb.width = 208; thumb.height = 140;
+  thumb.getContext('2d').drawImage(bitmap, 0, 0, 208, 140);
+  const button = document.createElement('button');
+  button.title = file.name;
+  const img = document.createElement('img');
+  img.src = thumb.toDataURL('image/jpeg', 0.8);
+  img.alt = file.name;
+  button.appendChild(img);
+  const show = () => {
+    push(bitmap);
+    credit.textContent = 'Your photograph. It never left this browser.';
+    markCurrent(button);
+    returnFocus();
+  };
+  button.addEventListener('click', show);
+  strip.insertBefore(button, addButton);
+  show();
+  event.target.value = '';
+});
+
+// Something to look at immediately: a picture and a region already on it,
+// rather than an empty scope and an instruction to draw one.
+await useSample(SAMPLES[0][0], SAMPLES[0][2], tiles[0]);
+</script>

@@ -79,6 +79,13 @@ struct WindowGeometry
 
 /// Windows currently visible on the given display, frontmost first. Window
 /// geometry comes from the window server and needs no capture permission.
+/// Whether this platform can attach a region to a window at all. Where it
+/// cannot - a browser, which can no more enumerate another program's windows
+/// than read them - the tool is not offered, the same way the face tool is
+/// not offered where faces cannot be detected. Offering a control that
+/// cannot work is worse than not offering it.
+[[nodiscard]] bool supportsWindowAttach();
+
 [[nodiscard]] std::vector<DesktopWindow> onScreenWindows(uint32_t displayId);
 
 /// The current geometry of the window with @p identity (a DesktopWindow's

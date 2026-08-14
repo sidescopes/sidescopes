@@ -73,6 +73,11 @@ std::vector<DesktopWindow> onScreenWindowsUpToLayer(uint32_t displayId, int maxL
 
 }  // namespace
 
+bool supportsWindowAttach()
+{
+    return true;
+}
+
 std::vector<DesktopWindow> onScreenWindows(uint32_t displayId)
 {
     return onScreenWindowsUpToLayer(displayId, 0);

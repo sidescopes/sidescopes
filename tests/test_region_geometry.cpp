@@ -374,4 +374,89 @@ TEST_CASE("A screen sample of nothing at all reports nothing")
     CHECK_FALSE(averagePremultiplied(empty.data(), Pixels).has_value());
 }
 
+// zoneAtPoint composes the two zone tests with the interior and band checks.
+// It exists because three surfaces were composing them by hand - both desktop
+// borders and the browser demo's editor - and the browser one had drifted:
+// it hit-tested fixed boxes around the handle dots, which on a small region
+// leaves no move band at all.
+TEST_CASE("The region's interior is not a target")
+{
+    const LocalRect region{100.0, 100.0, 200.0, 150.0};
+
+    // It is the content being measured. The desktop's border window has a
+    // hole here and clicks fall through it.
+    CHECK(zoneAtPoint(region, 200.0, 175.0, 12.0) == ZoneNone);
+}
+
+TEST_CASE("Beyond the band nothing is a target")
+{
+    const LocalRect region{100.0, 100.0, 200.0, 150.0};
+
+    CHECK(zoneAtPoint(region, 100.0 - 13.0, 175.0, 12.0) == ZoneNone);
+    CHECK(zoneAtPoint(region, 300.0 + 13.0, 175.0, 12.0) == ZoneNone);
+    CHECK(zoneAtPoint(region, 200.0, 100.0 - 13.0, 12.0) == ZoneNone);
+    CHECK(zoneAtPoint(region, 200.0, 250.0 + 13.0, 12.0) == ZoneNone);
+}
+
+TEST_CASE("A corner outranks an edge, and an edge the move band")
+{
+    const LocalRect region{100.0, 100.0, 200.0, 150.0};
+
+    CHECK(zoneAtPoint(region, 100.0 - 4.0, 100.0 - 4.0, 12.0) == (ZoneLeft | ZoneTop));
+    CHECK(zoneAtPoint(region, 300.0 + 4.0, 250.0 + 4.0, 12.0) == (ZoneRight | ZoneBottom));
+    // An edge midpoint takes one axis.
+    CHECK(zoneAtPoint(region, 200.0, 100.0 - 4.0, 12.0) == ZoneTop);
+    // Between a corner and a midpoint, the band moves the whole region.
+    CHECK(zoneAtPoint(region, 150.0, 100.0 - 4.0, 12.0) == ZoneMove);
+}
+
+TEST_CASE("A small region keeps a move band")
+{
+    // THE case the browser demo got wrong by hit-testing fixed boxes around
+    // the handle dots. At 30 points a side the dots sit at 100, 115 and 130;
+    // boxes of 7.5 around each TILE the edge end to end, leaving nowhere to
+    // press that moves the region rather than resizing it.
+    //
+    // The shared rule scales instead: a corner reaches at most a sixth of the
+    // side (here 5) and a midpoint a twelfth (2.5), so the edge keeps real
+    // move band on either side of its midpoint.
+    const LocalRect region{100.0, 100.0, 30.0, 30.0};
+    const double aboveEdge = 100.0 - 4.0;
+
+    CHECK(zoneAtPoint(region, 109.0, aboveEdge, 12.0) == ZoneMove);
+    CHECK(zoneAtPoint(region, 121.0, aboveEdge, 12.0) == ZoneMove);
+    // The midpoint itself still resizes, and the corner still takes two axes.
+    CHECK(zoneAtPoint(region, 115.0, aboveEdge, 12.0) == ZoneTop);
+    CHECK(zoneAtPoint(region, 102.0, aboveEdge, 12.0) == (ZoneLeft | ZoneTop));
+}
+
+TEST_CASE("A clamped rectangle moves rather than shrinks")
+{
+    const LocalRect off{-20.0, -30.0, 100.0, 80.0};
+    const LocalRect fitted = rectClampedWithin(off, 640.0, 480.0);
+
+    CHECK(fitted.x == Catch::Approx(0.0));
+    CHECK(fitted.y == Catch::Approx(0.0));
+    // The size is what a drag settled on and is not taken away by the clamp.
+    CHECK(fitted.width == Catch::Approx(100.0));
+    CHECK(fitted.height == Catch::Approx(80.0));
+
+    const LocalRect past{600.0, 450.0, 100.0, 80.0};
+    const LocalRect back = rectClampedWithin(past, 640.0, 480.0);
+    CHECK(back.x == Catch::Approx(540.0));
+    CHECK(back.y == Catch::Approx(400.0));
+}
+
+TEST_CASE("A rectangle larger than the area is reduced to it")
+{
+    // No position would fit it, so the size has to give.
+    const LocalRect huge{0.0, 0.0, 900.0, 700.0};
+    const LocalRect fitted = rectClampedWithin(huge, 640.0, 480.0);
+
+    CHECK(fitted.x == Catch::Approx(0.0));
+    CHECK(fitted.y == Catch::Approx(0.0));
+    CHECK(fitted.width == Catch::Approx(640.0));
+    CHECK(fitted.height == Catch::Approx(480.0));
+}
+
 }  // namespace sidescopes

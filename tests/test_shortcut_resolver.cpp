@@ -138,6 +138,7 @@ ShortcutContext readyContext()
 {
     ShortcutContext context;
     context.faceDetectionSupported = true;
+    context.windowAttachSupported = true;
     context.pinsAvailable = true;
     context.hidesWindowOnCommandW = true;
     context.minimizesWindowOnControlW = true;
@@ -404,6 +405,18 @@ TEST_CASE("The face key stands down where faces cannot be detected")
     context.faceDetectionSupported = false;
 
     CHECK(sole(resolver.resolvePressed(context, ModifierState{}, pressing("F"))).kind == ShortcutAction::Kind::None);
+    // The rest of the tools are unaffected.
+    CHECK(sole(resolver.resolvePressed(context, ModifierState{}, pressing("D"))).kind ==
+          ShortcutAction::Kind::RequestPick);
+}
+
+TEST_CASE("The window key stands down where a region cannot attach")
+{
+    const ShortcutResolver resolver = defaultResolver();
+    ShortcutContext context = readyContext();
+    context.windowAttachSupported = false;
+
+    CHECK(sole(resolver.resolvePressed(context, ModifierState{}, pressing("A"))).kind == ShortcutAction::Kind::None);
     // The rest of the tools are unaffected.
     CHECK(sole(resolver.resolvePressed(context, ModifierState{}, pressing("D"))).kind ==
           ShortcutAction::Kind::RequestPick);

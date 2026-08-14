@@ -26,6 +26,7 @@ option(SIDESCOPES_BENCH "Build the opt-in benchmark suite" OFF)
 option(SIDESCOPES_WERROR "Treat compiler warnings as errors" OFF)
 option(SIDESCOPES_MODULES_DYNAMIC "Load built-in scope modules dynamically" OFF)
 option(SIDESCOPES_UI_TESTS "Build the Dear ImGui Test Engine UI-test target" OFF)
+option(SIDESCOPES_WEB_SINGLE_FILE "Emit the browser demo as one self-contained file" OFF)
 set(SIDESCOPES_SANITIZE "" CACHE STRING
     "Comma-separated sanitizers to build and link with (e.g. address,undefined or thread)")
 
@@ -239,6 +240,29 @@ if(WIN32)
     sidescopes_target_defaults(sidescopes_platform)
 endif()
 
+if(EMSCRIPTEN)
+    # The browser is a platform like the others: the same seams, answered by
+    # what a page can honestly do. Several answer "no" - a page reads no other
+    # program's window, so window attach, face detection and the native menu
+    # are unsupported rather than stubbed - and the application asks before it
+    # offers any of them, so an unsupported seam removes a control instead of
+    # producing a dead one.
+    add_library(sidescopes_platform STATIC
+        src/platform/focus_resolution.cpp
+        src/platform/frame_pool.cpp
+        src/platform/icons.cpp
+        src/platform/region_geometry.cpp
+        src/platform/web/desktop.cpp
+        src/platform/web/face_detection.cpp
+        src/platform/web/native_menu.cpp
+        src/platform/web/region_selection.cpp
+        src/platform/web/screen_capture.cpp
+    )
+    target_include_directories(sidescopes_platform PUBLIC src ${nanosvg_SOURCE_DIR}/src)
+    target_link_libraries(sidescopes_platform PUBLIC sidescopes_core)
+    sidescopes_target_defaults(sidescopes_platform)
+endif()
+
 # --- application logic ---
 # Every src/app unit belongs to a library, listed once. The app, the unit tests
 # and the UI-test suites link those libraries; none of them names a source.
@@ -310,6 +334,7 @@ set(SIDESCOPES_APP_IMGUI_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/src/app/frame_timer.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/app/hex_font.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/app/icon_textures.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/app/imgui_context_menu.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/app/imgui_ui.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/app/interface_style.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/app/layout_preset_picker.cpp
@@ -356,25 +381,44 @@ function(sidescopes_add_app_imgui_library name imgui_target)
     sidescopes_target_defaults(${name})
 endfunction()
 
-if(APPLE OR WIN32)
+if(APPLE OR WIN32 OR EMSCRIPTEN)
     # --- application ---
     include(FetchContent)
-    set(GLFW_BUILD_DOCS OFF CACHE BOOL "" FORCE)
-    set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
-    set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
-    FetchContent_Declare(
-        glfw
-        GIT_REPOSITORY https://github.com/glfw/glfw.git
-        GIT_TAG 3.4
-        GIT_SHALLOW TRUE
-    )
+    if(EMSCRIPTEN)
+        # GLFW comes from Emscripten's own contrib.glfw3 port rather than from
+        # source: the port IS the browser implementation, mapping the same API
+        # onto canvas events. Upstream Dear ImGui moved its web example to it
+        # for better high-DPI support, which this project cares about more
+        # than most - notes/windows-dpi-investigation.md.
+        #
+        # An INTERFACE target so everything downstream links "glfw" exactly as
+        # the desktop builds do, and the port flag - needed when compiling and
+        # again when linking - travels with it.
+        add_library(glfw INTERFACE)
+        target_compile_options(glfw INTERFACE --use-port=contrib.glfw3)
+        target_link_options(glfw INTERFACE --use-port=contrib.glfw3)
+    else()
+        set(GLFW_BUILD_DOCS OFF CACHE BOOL "" FORCE)
+        set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+        set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+        FetchContent_Declare(
+            glfw
+            GIT_REPOSITORY https://github.com/glfw/glfw.git
+            GIT_TAG 3.4
+            GIT_SHALLOW TRUE
+        )
+    endif()
     FetchContent_Declare(
         imgui
         GIT_REPOSITORY https://github.com/ocornut/imgui.git
         GIT_TAG v1.92.8
         GIT_SHALLOW TRUE
     )
-    FetchContent_MakeAvailable(glfw imgui)
+    if(EMSCRIPTEN)
+        FetchContent_MakeAvailable(imgui)
+    else()
+        FetchContent_MakeAvailable(glfw imgui)
+    endif()
 
     add_library(imgui STATIC
         ${imgui_SOURCE_DIR}/imgui.cpp
@@ -402,7 +446,60 @@ if(APPLE OR WIN32)
     # The graphics backends live with the platform code but compile into
     # the application: they own the ImGui render backends, and only the
     # application links ImGui.
-    if(APPLE)
+    if(EMSCRIPTEN)
+        # The browser demo. It links the SAME libraries the desktop
+        # executables link, in the same order, and names no source of its own
+        # beyond its entry point and the units with no desktop counterpart -
+        # which is the whole point of moving this out of a shell script. A new
+        # file in sidescopes_app now reaches the web build for free, and a
+        # file that fails to compile for the web fails here rather than
+        # silently going missing.
+        add_executable(sidescopes_demo
+            src/web/demo_main.cpp
+            src/web/demo_shell.cpp
+            src/web/demo_storage.cpp
+            src/web/region_editor.cpp
+            src/platform/web/graphics.cpp
+        )
+        target_link_libraries(sidescopes_demo PRIVATE
+            sidescopes_app_imgui
+            ${SIDESCOPES_MODULE_LINK_LIBS}
+            sidescopes_platform
+            imgui
+            glfw
+        )
+        target_include_directories(sidescopes_demo PRIVATE ${CMAKE_BINARY_DIR}/generated)
+        add_dependencies(sidescopes_demo sidescopes_version)
+        # -O2 and SIMD on the sources; the analysis is the same code the
+        # desktop runs and wants the same treatment.
+        target_compile_options(sidescopes_demo PRIVATE -msimd128)
+        # A CLASSIC script defining a global factory, not an ES module. A
+        # module can only be imported over http(s) - from a file:// page the
+        # import is refused as a cross-origin request - and the demo is meant
+        # to survive being downloaded and opened by double-clicking it.
+        set_target_properties(sidescopes_demo PROPERTIES
+            OUTPUT_NAME sidescopes-demo
+            SUFFIX ".js")
+        # SHELL: keeps each flag with its value. Without it CMake sees the
+        # repeated --embed-file as a duplicate and drops the second one, so
+        # the flag and the path it belongs to come apart.
+        target_link_options(sidescopes_demo PRIVATE
+            "SHELL:--embed-file ${CMAKE_SOURCE_DIR}/src/web/fonts/ui.ttf@/fonts/ui.ttf"
+            "SHELL:--embed-file ${CMAKE_SOURCE_DIR}/src/web/fonts/mono.ttf@/fonts/mono.ttf"
+            -sMAX_WEBGL_VERSION=2
+            -sMIN_WEBGL_VERSION=2
+            -sALLOW_MEMORY_GROWTH=1
+            "-sEXPORTED_FUNCTIONS=[_main,_demoFrameBuffer,_demoFrameReady,_demoShowScope,_demoAddScope,_demoStartTour,_demoSetStripAnchor,_demoTourAtStrip,_malloc,_free]"
+            "-sEXPORTED_RUNTIME_METHODS=[ccall,cwrap,HEAPU8]"
+            -sMODULARIZE=1
+            -sEXPORT_NAME=SideScopesDemo
+            -sENVIRONMENT=web
+            # One file, with the WebAssembly inside it as base64, for the
+            # standalone build: a page opened from disk cannot fetch a
+            # sibling .wasm any more than it can import a module.
+            "$<$<BOOL:${SIDESCOPES_WEB_SINGLE_FILE}>:-sSINGLE_FILE=1>")
+        sidescopes_target_defaults(sidescopes_demo)
+    elseif(APPLE)
         add_executable(SideScopes MACOSX_BUNDLE
             src/app/main.cpp
             src/platform/macos/graphics.mm
@@ -497,7 +594,11 @@ if(APPLE OR WIN32)
     endif()
 endif()
 
-if(SIDESCOPES_BUILD_TESTS)
+if(SIDESCOPES_BUILD_TESTS AND NOT EMSCRIPTEN)
+    # The suite runs a native binary under ctest. A WebAssembly one needs a
+    # host to run it in, so the web configuration builds the demo only; the
+    # portable code it shares is covered by the native suites on three
+    # runners.
     enable_testing()
     add_subdirectory(tests)
 endif()

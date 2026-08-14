@@ -107,6 +107,11 @@ void RegionPicker::clearRequest()
     m_want.reset();
 }
 
+std::optional<RegionPickerMode> RegionPicker::pendingRequest() const
+{
+    return m_want;
+}
+
 RegionPickOutcome RegionPicker::openIfRequested(bool regionSelected)
 {
     RegionPickOutcome outcome;

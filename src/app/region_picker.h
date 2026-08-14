@@ -93,6 +93,12 @@ public:
     /// frame, so a request lives only within the frame that raised it.
     void clearRequest();
 
+    /// The pending request, if one was raised this frame. The desktop host
+    /// answers it through openIfRequested; a host with no desktop to open a
+    /// picker over - the browser demo - reads it here and answers in its
+    /// own terms.
+    [[nodiscard]] std::optional<RegionPickerMode> pendingRequest() const;
+
     /// Opens the picker for a pending request, switches an open picker's mode,
     /// or closes it across the pin-versus-region tool boundary.
     /// @p regionSelected says whether the scopes are reading a region at all,

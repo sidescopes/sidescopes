@@ -168,6 +168,37 @@ jobs:
       - name: Test
         run: ctest --test-dir build -C Release --output-on-failure --timeout 120
 
+  # The web is a platform, so it meets a compiler on every push like the
+  # others. It builds the same libraries from the same CMake source lists,
+  # which is the point: a new src/app unit that does not compile for
+  # WebAssembly fails here rather than the next time somebody runs the build
+  # script by hand.
+  #
+  # Build only, no ctest: the suite is a native binary and the web
+  # configuration deliberately does not build it. What this guards is that
+  # the fourth platform still compiles and links.
+  web:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: 4.0.7
+      - name: Configure
+        run: emcmake cmake -B build-web -DSIDESCOPES_WERROR=ON -DCMAKE_BUILD_TYPE=Release
+      - name: Build
+        run: cmake --build build-web
+      - name: The demo is present and non-trivial
+        # A link that emits nothing still exits 0. Naming the artefacts and
+        # asserting a floor turns "the step passed" into "the demo exists".
+        run: |
+          test -f build-web/sidescopes-demo.js
+          test -f build-web/sidescopes-demo.wasm
+          size=$(wc -c < build-web/sidescopes-demo.wasm)
+          echo "sidescopes-demo.wasm: $size bytes"
+          test "$size" -gt 500000
+
   # Address+UB and thread sanitizers exercise the test suite; the analysis
   # worker's cross-thread frame handoff is exactly what TSan exists to audit.
   sanitize:

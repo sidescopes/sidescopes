@@ -34,6 +34,15 @@ public:
     /// takes pins (@p pinsAvailable), and the readout for @p cursorColor.
     void draw(bool pinsAvailable, const std::optional<FloatColor>& cursorColor);
 
+    /// Where the pin tool was last drawn, or nothing before the first draw.
+    /// It sits at the far LEFT of the status bar while the region tools sit
+    /// at the far right of the toolbar, which is why a walk-through has to
+    /// name the two separately.
+    [[nodiscard]] std::optional<ImVec4> pinToolBounds() const
+    {
+        return m_pinToolBounds;
+    }
+
     /// Shows @p message in the status strip for the next couple of seconds.
     void setStatus(std::string message);
 
@@ -42,6 +51,8 @@ public:
     [[nodiscard]] double redrawDueSeconds() const;
 
 private:
+    std::optional<ImVec4> m_pinToolBounds;
+
     /// The bar's colour sampler, anchored to the strip's left corner.
     void drawPinTool(bool pinsAvailable);
 

@@ -56,6 +56,23 @@ unsigned edgeOrMoveZoneAt(const LocalRect& region, double x, double y, double sc
 /// edge or corner zone moves only those sides.
 LocalRect draggedRegionRect(unsigned dragZone, const LocalRect& start, double dx, double dy, double minimum);
 
+/// The whole zone question for a point, in one call: the interior is not a
+/// target (it is the content being measured, and the desktop's border window
+/// has a hole there), nor is anything further than @p band outside the
+/// region; between the two, corners win over edge midpoints, which win over
+/// the move band.
+///
+/// The two-step form above stays public because a border that draws its own
+/// buttons must test those first, between the interior check and the zones.
+/// Callers with nothing in between should ask this instead of composing it
+/// and risking a different order.
+[[nodiscard]] unsigned zoneAtPoint(const LocalRect& region, double x, double y, double band, double scale = 1.0);
+
+/// @p rect moved - never resized - to lie inside a @p width by @p height
+/// area anchored at the origin. A rectangle larger than the area is reduced
+/// to it, since there is no position that would fit.
+[[nodiscard]] LocalRect rectClampedWithin(const LocalRect& rect, double width, double height);
+
 /// The least share of itself a window must still show to be suggested as a
 /// pick. At 0.15 a window peeking out from behind the editor still counts,
 /// while one hidden down to a sliver drops out: low enough not to lose a

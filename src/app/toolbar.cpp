@@ -41,7 +41,7 @@ constexpr const char* ScopeRowPayload = "ss_scope_row";
 // height for a second row; wide strips keep one row.
 void placeRegionToolbox()
 {
-    const int iconCount = 3 + (supportsFaceDetection() ? 1 : 0);
+    const int iconCount = 2 + (supportsWindowAttach() ? 1 : 0) + (supportsFaceDetection() ? 1 : 0);
     const float chip = ImGui::GetTextLineHeight() + 12.0f;
     const float width = static_cast<float>(iconCount) * chip + static_cast<float>(iconCount - 1) * 2.0f;
     const float right = ImGui::GetWindowContentRegionMax().x;
@@ -175,6 +175,8 @@ PaneRenderOutcome Toolbar::drawRegionToolIcons(bool regionSelected)
     std::snprintf(tooltip, sizeof(tooltip), "Draw a region (%s)", m_shortcuts.bindings().drawRegion.c_str());
     const int iconPx = iconPixelSize();
     placeRegionToolbox();
+    // Grouped so the row can say where it is - see regionToolBounds.
+    ImGui::BeginGroup();
     if (iconButton("##draw-region", m_icons.textureId(Icon::Pencil, iconPx), tooltip)) {
         m_picker.request(RegionPickerMode::DrawGlobal);
     }
@@ -183,11 +185,13 @@ PaneRenderOutcome Toolbar::drawRegionToolIcons(bool regionSelected)
     // doing is choosing what the scopes read. How to pick, once the picker is
     // up, is the picker's own business to say - a tooltip describes the
     // control it hangs off and nothing that happens elsewhere.
-    std::snprintf(tooltip, sizeof(tooltip), "Select a window (%s)", m_shortcuts.bindings().attachWindow.c_str());
-    if (iconButton("##attach-window", m_icons.textureId(Icon::SquarePen, iconPx), tooltip)) {
-        m_picker.request(RegionPickerMode::AttachWindow);
+    if (supportsWindowAttach()) {
+        std::snprintf(tooltip, sizeof(tooltip), "Select a window (%s)", m_shortcuts.bindings().attachWindow.c_str());
+        if (iconButton("##attach-window", m_icons.textureId(Icon::SquarePen, iconPx), tooltip)) {
+            m_picker.request(RegionPickerMode::AttachWindow);
+        }
+        ImGui::SameLine(0.0f, 2.0f);
     }
-    ImGui::SameLine(0.0f, 2.0f);
     // The face tool sits last among the region tools, before the reset. It
     // is always available where the platform detects faces: whether any
     // face is on screen is the picker overlay's answer to give, not the
@@ -208,6 +212,9 @@ PaneRenderOutcome Toolbar::drawRegionToolIcons(bool regionSelected)
         regionSelected) {
         outcome.clearRegion = true;
     }
+    ImGui::EndGroup();
+    m_regionToolBounds = ImVec4{ImGui::GetItemRectMin().x, ImGui::GetItemRectMin().y, ImGui::GetItemRectMax().x,
+                                ImGui::GetItemRectMax().y};
     ImGui::SameLine(0.0f, 2.0f);
     ImGui::NewLine();
 

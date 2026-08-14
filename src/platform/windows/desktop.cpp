@@ -189,6 +189,11 @@ HWND windowFromIdentity(uint64_t identity)
 
 }  // namespace
 
+bool supportsWindowAttach()
+{
+    return true;
+}
+
 std::vector<DesktopWindow> onScreenWindows(uint32_t displayId)
 {
     std::vector<DesktopWindow> windows;

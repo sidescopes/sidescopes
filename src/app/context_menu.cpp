@@ -241,8 +241,10 @@ void appendPresetsSubmenu(const ContextMenuModel& model, std::vector<NativeMenuI
 void appendRegionAndAppSection(const ContextMenuModel& model, std::vector<NativeMenuItem>& menu)
 {
     menuSeparator(menu);
-    menuAction(menu, "Select Window...", MenuAttachWindow, false,
-               shortcutLabel(model.shortcuts.bindings().attachWindow));
+    if (supportsWindowAttach()) {
+        menuAction(menu, "Select Window...", MenuAttachWindow, false,
+                   shortcutLabel(model.shortcuts.bindings().attachWindow));
+    }
     menuAction(menu, "Draw Region...", MenuDrawRegion, false, shortcutLabel(model.shortcuts.bindings().drawRegion));
     if (supportsFaceDetection()) {
         menuAction(menu, "Select Face...", MenuAttachFace, false, shortcutLabel(model.shortcuts.bindings().attachFace));

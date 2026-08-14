@@ -1,5 +1,7 @@
 #include "core/heap.h"
 
+#include <cstdio>
+#include <cstdlib>
 #include <new>
 #include <string>
 
@@ -41,6 +43,10 @@ void releaseFreeHeap()
     malloc_zone_pressure_relief(nullptr, 0);
 #elif defined(_WIN32)
     (void)_heapmin();
+#elif defined(__EMSCRIPTEN__)
+    // Emscripten's allocator has no trim, and there is no operating system
+    // underneath to hand pages back to: the heap is one linear memory that
+    // only ever grows. Releasing is a no-op rather than an omission.
 #else
     (void)malloc_trim(0);
 #endif
@@ -73,12 +79,59 @@ void freePages(void* memory, std::size_t bytes) noexcept
 #endif
 }
 
-MappedFile mapFileReadOnly(const char* path)
+#if defined(__EMSCRIPTEN__)
+
+namespace {
+
+// The browser build's files live in the bundled in-memory filesystem, where
+// mmap has nothing real to map. Reading the whole file is the same thing
+// here: the heap is one linear memory that only grows, so the pages were
+// never going back to an operating system anyway.
+MappedFile readWholeFile(const char* path)
 {
-    if (path == nullptr) {
+    std::FILE* file = std::fopen(path, "rb");
+    if (file == nullptr) {
         return MappedFile{};
     }
+    long length = 0;
+    if (std::fseek(file, 0, SEEK_END) == 0) {
+        length = std::ftell(file);
+        std::rewind(file);
+    }
+    if (length <= 0) {
+        (void)std::fclose(file);
+
+        return MappedFile{};
+    }
+    auto* bytes = static_cast<unsigned char*>(std::malloc(static_cast<std::size_t>(length)));
+    if (bytes == nullptr) {
+        (void)std::fclose(file);
+
+        return MappedFile{};
+    }
+    const std::size_t read = std::fread(bytes, 1, static_cast<std::size_t>(length), file);
+    (void)std::fclose(file);
+    if (read != static_cast<std::size_t>(length)) {
+        std::free(bytes);
+
+        return MappedFile{};
+    }
+
+    return MappedFile{bytes, static_cast<std::size_t>(length)};
+}
+
+}  // namespace
+
+#endif
+
 #if defined(_WIN32)
+
+namespace {
+
+/// A read-only view of the whole file, through a file mapping. The view
+/// keeps the pages alive on its own, so neither handle outlives this call.
+MappedFile mapWholeFile(const char* path)
+{
     const int wide = MultiByteToWideChar(CP_UTF8, 0, path, -1, nullptr, 0);
     if (wide <= 0) {
         return MappedFile{};
@@ -110,7 +163,18 @@ MappedFile mapFileReadOnly(const char* path)
     }
 
     return MappedFile{static_cast<const unsigned char*>(view), static_cast<std::size_t>(size.QuadPart)};
-#else
+}
+
+}  // namespace
+
+#elif !defined(__EMSCRIPTEN__)
+
+namespace {
+
+/// A read-only mapping of the whole file. The mapping holds its own
+/// reference, so the descriptor is closed straight away.
+MappedFile mapWholeFile(const char* path)
+{
     const int file = ::open(path, O_RDONLY | O_CLOEXEC);
     if (file < 0) {
         return MappedFile{};
@@ -130,6 +194,21 @@ MappedFile mapFileReadOnly(const char* path)
     }
 
     return MappedFile{static_cast<const unsigned char*>(view), size};
+}
+
+}  // namespace
+
+#endif
+
+MappedFile mapFileReadOnly(const char* path)
+{
+    if (path == nullptr) {
+        return MappedFile{};
+    }
+#if defined(__EMSCRIPTEN__)
+    return readWholeFile(path);
+#else
+    return mapWholeFile(path);
 #endif
 }
 

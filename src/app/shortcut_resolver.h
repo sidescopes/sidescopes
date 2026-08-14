@@ -85,6 +85,9 @@ struct ShortcutContext
     /// Without face detection the face tool has nothing to offer, and its key
     /// stays silent; likewise the pin key without a scope that takes pins.
     bool faceDetectionSupported = false;
+    /// Whether a region can be attached to a window at all; without it the
+    /// window key stays silent, as the face key does.
+    bool windowAttachSupported = false;
     bool pinsAvailable = false;
     /// The settings window is up, so the clear-region key closes that first.
     bool settingsOpen = false;

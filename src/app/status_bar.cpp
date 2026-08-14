@@ -121,8 +121,11 @@ void StatusBar::drawPinTool(bool pinsAvailable)
     // The picker says it where it happens, on its own banner.
     std::snprintf(tooltip, sizeof(tooltip), "Pin a color (%s)%s", m_shortcuts.bindings().pinColor.c_str(),
                   pinsAvailable ? "" : " - needs a scope that takes pins");
-    if (iconButton("##pin-color", m_icons.textureId(Icon::Pipette, iconPixelSize()), tooltip, !pinsAvailable) &&
-        pinsAvailable) {
+    const bool pinPressed =
+        iconButton("##pin-color", m_icons.textureId(Icon::Pipette, iconPixelSize()), tooltip, !pinsAvailable);
+    m_pinToolBounds = ImVec4{ImGui::GetItemRectMin().x, ImGui::GetItemRectMin().y, ImGui::GetItemRectMax().x,
+                             ImGui::GetItemRectMax().y};
+    if (pinPressed && pinsAvailable) {
         m_picker.request(RegionPickerMode::PinColor);
     }
 }

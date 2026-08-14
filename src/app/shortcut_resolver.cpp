@@ -241,7 +241,7 @@ ShortcutAction ShortcutResolver::resolveNamed(const std::string& key, bool shift
             return chooseScopeAction(scope.id, shift);
         }
     }
-    if (key == m_bindings.attachWindow) {
+    if (key == m_bindings.attachWindow && context.windowAttachSupported) {
         return ShortcutAction::pick(RegionPickerMode::AttachWindow);
     }
     if (key == m_bindings.drawRegion) {
@@ -311,6 +311,7 @@ ShortcutContext shortcutContextFor(const ScopeView& view, const ScopeRegistry& r
     ShortcutContext context;
     context.wantsTextInput = wantsTextInput;
     context.faceDetectionSupported = supportsFaceDetection();
+    context.windowAttachSupported = supportsWindowAttach();
     context.pinsAvailable = anyPinTarget(registry, view.stack().ids());
     context.settingsOpen = settingsOpen;
     context.vectorscopeZoom = view.zoom();
