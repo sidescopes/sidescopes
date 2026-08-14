@@ -4,6 +4,38 @@ All notable changes to this project are documented in this file. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-08-14
+
+### Added
+
+- SideScopes runs in a browser. The same scope engines and the same panes
+  the desktop application draws, compiled to WebAssembly, over a
+  photograph that stands in for the screen. Scopes, region, colour picker,
+  presets, keyboard shortcuts and the right-click menu all work as they
+  do on a desktop; window attach and face detection do not, because no
+  page can read another program's window, so those controls are absent
+  rather than present and broken.
+- A guided tour of the interface, one control at a time, with a way on
+  and a way out. It opens on a first visit and remembers having been seen
+  through or waved away, and a button reopens it. The stops name the
+  keyboard bindings in force rather than the shipped defaults.
+- The browser build also emits one self-contained file that opens from
+  disk with no server, for trying the application without installing it.
+
+### Changed
+
+- The analysis worker can run its passes on the caller's thread instead
+  of its own, for a host with no threads to give. The passes are
+  identical either way; every desktop build still gives it a thread.
+- The region border's grab zones come from the shared geometry both
+  desktop borders already use. A small region keeps a band that moves it
+  rather than only zones that resize it.
+
+### Fixed
+
+- A shortcut action that no host handles is now a compile error rather
+  than a silence.
+
 ## [0.5.0] - 2026-07-30
 
 ### Added
