@@ -458,6 +458,7 @@ if(APPLE OR WIN32 OR EMSCRIPTEN)
             src/web/demo_main.cpp
             src/web/demo_shell.cpp
             src/web/demo_storage.cpp
+            src/web/image_adjust.cpp
             src/web/region_editor.cpp
             src/platform/web/graphics.cpp
         )
@@ -489,7 +490,7 @@ if(APPLE OR WIN32 OR EMSCRIPTEN)
             -sMAX_WEBGL_VERSION=2
             -sMIN_WEBGL_VERSION=2
             -sALLOW_MEMORY_GROWTH=1
-            "-sEXPORTED_FUNCTIONS=[_main,_demoFrameBuffer,_demoFrameReady,_demoShowScope,_demoAddScope,_demoStartTour,_demoSetStripAnchor,_demoTourAtStrip,_malloc,_free]"
+            "-sEXPORTED_FUNCTIONS=[_main,_demoFrameBuffer,_demoFrameReady,_demoShowScope,_demoAddScope,_demoStartTour,_demoSetStripAnchor,_demoTourAtStrip,_demoSetAdjustments,_malloc,_free]"
             "-sEXPORTED_RUNTIME_METHODS=[ccall,cwrap,HEAPU8]"
             -sMODULARIZE=1
             -sEXPORT_NAME=SideScopesDemo

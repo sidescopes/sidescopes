@@ -64,6 +64,13 @@ add_executable(sidescopes_tests
     test_quality.cpp
     test_shortcut_resolver.cpp
     test_guided_tour.cpp
+    test_image_adjust.cpp
+    # The unit under test is the browser demo's, and it is the only src/web
+    # file named by a target other than the demo itself. It can be: it touches
+    # neither Dear ImGui nor Emscripten, so it compiles anywhere, and the
+    # alternative is arithmetic that decides what every scope in the demo
+    # shows going untested because of where its file lives.
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/web/image_adjust.cpp
     test_region_geometry.cpp
     test_icons.cpp
     test_focus_resolution.cpp

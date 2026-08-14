@@ -84,6 +84,23 @@
     border:1px solid #3a3532; border-radius:6px; padding:5px 12px; cursor:pointer;
   }
   .note button:hover { background:#2b2725; color:#efe9e5 }
+
+  /* The adjustments. These stand for the EDITOR a photographer has open
+     beside SideScopes, so they are the page's and not the application's -
+     drawn inside its window they would say that SideScopes edits photographs,
+     which is the one thing this demo must not teach. Styled plainly for the
+     same reason: nothing here should read as part of the instrument. */
+  .edit { flex:0 0 auto; display:grid; gap:.35rem .9rem; margin:0 0 .5rem;
+          grid-template-columns:repeat(auto-fit, minmax(150px, 1fr)) }
+  .edit label { display:flex; align-items:center; gap:.5rem; font-size:.75rem; color:#8a827e }
+  .edit label span { flex:0 0 5.2rem }
+  .edit input[type=range] { flex:1 1 auto; min-width:0; accent-color:#8ea2ff; height:1.1rem }
+  .edit .reset { grid-column:1/-1; justify-self:start }
+  .edit button {
+    font:inherit; font-size:.75rem; color:#cfc9c5; background:#221f1d;
+    border:1px solid #3a3532; border-radius:6px; padding:3px 10px; cursor:pointer;
+  }
+  .edit button:hover { background:#2b2725; color:#efe9e5 }
   /* Shown only when this copy is opened from disk, where it cannot run. */
   .offline { max-width:36rem; margin:4rem auto; padding:0 1rem; line-height:1.5 }
   .offline h1 { font-size:1.25rem; margin:0 0 1rem }
@@ -97,6 +114,21 @@
   <span class="credit" id="credit"></span>
   <button type="button" id="tour">Take the tour</button>
 </p>
+
+<!-- Seven controls, each one owning a scope: exposure and contrast move the
+     waveform and the histogram, highlights and shadows move their two ends
+     apart, temperature and tint carry the vectorscope's cloud off centre, and
+     saturation moves it along the radius. -->
+<div class="edit" id="edit">
+  <label><span>Exposure</span><input type="range" id="a-exposure" min="-2" max="2" step="0.05" value="0"></label>
+  <label><span>Contrast</span><input type="range" id="a-contrast" min="-1" max="1" step="0.02" value="0"></label>
+  <label><span>Highlights</span><input type="range" id="a-highlights" min="-1" max="1" step="0.02" value="0"></label>
+  <label><span>Shadows</span><input type="range" id="a-shadows" min="-1" max="1" step="0.02" value="0"></label>
+  <label><span>Temperature</span><input type="range" id="a-temperature" min="-1" max="1" step="0.02" value="0"></label>
+  <label><span>Tint</span><input type="range" id="a-tint" min="-1" max="1" step="0.02" value="0"></label>
+  <label><span>Saturation</span><input type="range" id="a-saturation" min="-1" max="1" step="0.02" value="0"></label>
+  <span class="reset"><button type="button" id="a-reset">Reset adjustments</button></span>
+</div>
 
 <div id="stage"><canvas id="canvas" tabindex="-1"></canvas></div>
 
@@ -164,6 +196,29 @@ const mod = await SideScopesDemo({
 // bar, which is right there and does not need repeating. Put back afterwards,
 // because the tab is the page's to name.
 document.title = 'Browser demo \u00b7 SideScopes';
+
+// The adjustments reach the application as one call carrying all seven, so
+// there is no state where some have arrived and others have not. The
+// application applies them once per frame rather than once per event, so
+// dragging costs one pass per redraw.
+const ADJUSTMENTS = ['exposure', 'contrast', 'highlights', 'shadows', 'temperature', 'tint', 'saturation'];
+const sliders = ADJUSTMENTS.map((name) => document.getElementById(`a-${name}`));
+
+function sendAdjustments() {
+  mod.ccall('demoSetAdjustments', null, ADJUSTMENTS.map(() => 'number'),
+            sliders.map((slider) => parseFloat(slider.value)));
+}
+
+sliders.forEach((slider) => slider.addEventListener('input', sendAdjustments));
+
+document.getElementById('a-reset').addEventListener('click', () => {
+  sliders.forEach((slider) => { slider.value = '0'; });
+  sendAdjustments();
+  // Focus goes back for the same reason every strip interaction returns it:
+  // the application stops hearing the keyboard the moment something else
+  // holds focus, which reads as "the shortcuts stopped working".
+  document.getElementById('canvas').focus();
+});
 
 const tourButton = document.getElementById('tour');
 tourButton.addEventListener('click', () => {

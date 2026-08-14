@@ -62,6 +62,7 @@
 #include "platform/web/screen_capture_source.h"
 #include "web/demo_shell.h"
 #include "web/demo_storage.h"
+#include "web/image_adjust.h"
 #include "web/region_editor.h"
 
 namespace sidescopes {
@@ -109,7 +110,13 @@ struct Demo
 
     std::unique_ptr<ScopePaneRenderer> panes;
 
-    /// The picture, BGRA, as the capture source publishes it.
+    /// The picture as it was decoded, BGRA, never written to again. Every
+    /// adjustment is computed FROM this, so dragging a control back and forth
+    /// cannot degrade the photograph and leave the scopes reporting the
+    /// damage as though it were the picture's own.
+    std::vector<uint8_t> original;
+    /// The picture the scopes read and the canvas shows: the same bytes, so
+    /// the two can never disagree about what is being measured.
     std::vector<uint8_t> frame;
     int frameWidth = 0;
     int frameHeight = 0;
@@ -135,6 +142,12 @@ struct Demo
     /// The parameter entries the open menu was built with; menuScopeParam
     /// resolves a chosen id against them, so they outlive the build.
     std::vector<ParamMenuAction> menuParams;
+
+    /// What the visitor has done to the picture, and whether it still needs
+    /// applying. Applied once a frame rather than once an event, so dragging a
+    /// slider costs one pass per redraw instead of one per pointer move.
+    ImageAdjustments adjustments;
+    bool adjustDirty = false;
 
     /// The walk-through, and where each control it names landed this frame.
     std::unique_ptr<GuidedTour> tour;
@@ -172,6 +185,39 @@ struct Demo
 
 Demo g_demo;
 
+/// Uploads g_demo.display to its texture; defined with the other graphics
+/// work further down, needed by the adjustment pass just below.
+void refreshDisplayTexture();
+
+/// Runs the visitor's adjustments over the pristine decode, into the buffer
+/// the scopes read AND the buffer the canvas draws.
+///
+/// One pass, one result, two consumers. If the picture on screen and the
+/// pixels reaching the engines could ever differ, the demo would teach
+/// something false about what a scope is measuring - and it would look
+/// entirely correct while doing it.
+void refreshAdjustedPicture()
+{
+    if (g_demo.original.empty()) {
+        return;
+    }
+    const std::size_t pixels = g_demo.original.size() / 4u;
+    g_demo.frame.resize(g_demo.original.size());
+    applyAdjustments(g_demo.original.data(), g_demo.frame.data(), pixels, g_demo.adjustments);
+
+    // The same bytes, in the order the canvas wants them.
+    g_demo.display.rgba.resize(g_demo.frame.size());
+    for (std::size_t at = 0; at + 3 < g_demo.frame.size(); at += 4) {
+        g_demo.display.rgba[at] = g_demo.frame[at + 2];
+        g_demo.display.rgba[at + 1] = g_demo.frame[at + 1];
+        g_demo.display.rgba[at + 2] = g_demo.frame[at];
+        g_demo.display.rgba[at + 3] = g_demo.frame[at + 3];
+    }
+    g_demo.display.sequence += 1u;
+    refreshDisplayTexture();
+    g_demo.pictureDirty = true;
+}
+
 /// The region the scopes read, as the worker wants it: a share of the frame
 /// rather than a rectangle of pixels. Nothing at all when there is no region,
 /// which is a STATE and not a failure - the worker then publishes nothing and
@@ -200,6 +246,10 @@ std::optional<RegionOfInterest> regionOfPicture()
 /// copy is free to drift from the one that ships.
 void analyse()
 {
+    if (g_demo.adjustDirty) {
+        refreshAdjustedPicture();
+        g_demo.adjustDirty = false;
+    }
     if (g_demo.pictureDirty && !g_demo.frame.empty()) {
         submitCapturedPicture(g_demo.frame.data(), g_demo.frameWidth, g_demo.frameHeight);
         g_demo.pictureDirty = false;
@@ -969,6 +1019,13 @@ EMSCRIPTEN_KEEPALIVE void demoFrameReady()
         g_demo.frame[at] = g_demo.frame[at + 2];
         g_demo.frame[at + 2] = red;
     }
+    // The decode is kept as it arrived, and the picture on screen is derived
+    // from it. A new photograph inherits whatever the controls are set to,
+    // which is what a visitor comparing two pictures under one adjustment
+    // expects - and it means there is no state where the canvas and the
+    // scopes are looking at different pixels.
+    g_demo.original = g_demo.frame;
+    g_demo.adjustDirty = true;
     // The region STAYS WHERE IT IS. It is a rectangle on what stands in for a
     // display, and changing the photograph beneath it is no more reason to
     // move it than changing the photograph in an editor is on a desktop.
@@ -983,6 +1040,32 @@ EMSCRIPTEN_KEEPALIVE void demoFrameReady()
     }
     g_demo.pictureDirty = true;
     g_demo.frameDirty = true;
+}
+
+/// The seven controls, from the page. Values are the ImageAdjustments ranges:
+/// exposure in stops, the rest from -1 to 1, all zero at rest.
+///
+/// The controls belong to the PAGE rather than to the application's window,
+/// and deliberately: they stand for the editor a photographer has open beside
+/// SideScopes. Drawn inside the application they would teach that SideScopes
+/// edits photographs, which is the one thing this demo must not say.
+EMSCRIPTEN_KEEPALIVE void demoSetAdjustments(float exposure, float contrast, float highlights, float shadows,
+                                             float temperature, float tint, float saturation)
+{
+    using namespace sidescopes;
+    ImageAdjustments wanted;
+    wanted.exposure = exposure;
+    wanted.contrast = contrast;
+    wanted.highlights = highlights;
+    wanted.shadows = shadows;
+    wanted.temperature = temperature;
+    wanted.tint = tint;
+    wanted.saturation = saturation;
+    if (wanted == g_demo.adjustments) {
+        return;
+    }
+    g_demo.adjustments = wanted;
+    g_demo.adjustDirty = true;
 }
 
 /// Opens the walk-through from the first stop, however settled it is. The
