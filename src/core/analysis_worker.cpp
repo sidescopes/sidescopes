@@ -360,9 +360,9 @@ void writeOutput(AnalysisWorker::Output& output, std::vector<WorkerScope>& scope
 
 }  // namespace
 
-bool AnalysisWorker::takeLatestFrame()
+bool AnalysisWorker::takeLatestFrame(std::chrono::milliseconds wait)
 {
-    auto frame = m_mailbox.takeLatest(std::chrono::milliseconds(100));
+    auto frame = m_mailbox.takeLatest(wait);
     if (m_releaseFrame.exchange(false, std::memory_order_relaxed)) {
         // Capture has stopped, so anything that arrived alongside the request
         // is the last frame in flight and is let go with the rest. The content
@@ -462,63 +462,98 @@ bool AnalysisWorker::hasWork(bool newFrame, bool settingsChanged) const
     return m_hasFrame && (newFrame || settingsChanged);
 }
 
-void AnalysisWorker::run()
+// The state one pass hands to the next. Its owner is whichever thread runs
+// the passes, and no other touches it.
+struct AnalysisWorker::Pass
 {
-    // Instances are created on this thread, which therefore owns them.
-    std::vector<WorkerScope> scopes = makeWorkerScopes();
+    std::vector<WorkerScope> scopes;
     std::set<std::string> enabledScopes;
     AnalysisSettings settings;
     uint64_t seenSettingsVersion = 0;
     uint64_t lastContentHash = 0;
     uint64_t framesProcessed = 0;
+};
+
+void AnalysisWorker::run()
+{
+    // Instances are created on this thread, which therefore owns them.
+    Pass pass{makeWorkerScopes(), {}, {}, 0, 0, 0};
 
     while (!m_stopRequested.load(std::memory_order_relaxed)) {
-        const bool newFrame = takeLatestFrame();
-        const bool settingsChanged = syncSettings(settings, seenSettingsVersion);
-        // A settings change is applied the moment it is seen, before the work
-        // gate below. Consumed on a frameless pass it would otherwise advance
-        // the settings version without reconfiguring the scopes, so the first
-        // frame after it would run the default - on startup, empty - scope set
-        // and publish an output with no images.
-        if (settingsChanged) {
-            applySettings(scopes, settings, enabledScopes);
-        }
-        if (!settings.region || !hasWork(newFrame, settingsChanged)) {
-            continue;
-        }
+        runPass(pass, std::chrono::milliseconds(100));
+    }
+}
 
-        // Reading the frame without the lock is safe: this thread is the
-        // only writer, and readers on other threads take the mutex only for
-        // the brief sampling reads that tolerate the previous frame.
-        const FrameView view = m_latestFrame.view();
-        // The last images stand while the frame cannot answer for the region.
-        const std::optional<IntRect> region = regionInFrame(view, *settings.region);
-        if (!region) {
-            continue;
-        }
+void AnalysisWorker::startInline()
+{
+    if (m_thread.joinable() || m_inlinePass) {
+        return;
+    }
+    m_stopRequested.store(false);
+    m_inlinePass = std::make_unique<Pass>(Pass{makeWorkerScopes(), {}, {}, 0, 0, 0});
+}
 
-        // The hash is computed on every pass — including settings-only ones —
-        // so it always corresponds to the current region and mask. Skipping
-        // it on any path leaves a stale value that defeats the next
-        // unchanged-content comparison.
-        const uint64_t contentHash = hashRegion(view, *region, view.fromDisplay(settings.maskedWindow));
-        if (!settingsChanged && contentHash == lastContentHash) {
-            continue;
-        }
-        lastContentHash = contentHash;
+void AnalysisWorker::pump()
+{
+    if (!m_inlinePass) {
+        return;
+    }
+    // Zero wait: the caller is a frame loop and must not be blocked. A pass
+    // with no frame to take simply does nothing and the next frame calls
+    // again.
+    runPass(*m_inlinePass, std::chrono::milliseconds(0));
+}
 
-        const SsFrameView boundaryFrame = toBoundaryFrame(view);
-        const SsRect boundaryRegion{region->x, region->y, region->width, region->height};
-        const double elapsedMs = accumulateScopes(scopes, boundaryFrame, boundaryRegion, enabledScopes);
-        if (newFrame) {
-            ++framesProcessed;
-        }
+void AnalysisWorker::runPass(Pass& pass, std::chrono::milliseconds wait)
+{
+    std::vector<WorkerScope>& scopes = pass.scopes;
+    std::set<std::string>& enabledScopes = pass.enabledScopes;
+    AnalysisSettings& settings = pass.settings;
+    const bool newFrame = takeLatestFrame(wait);
+    const bool settingsChanged = syncSettings(settings, pass.seenSettingsVersion);
+    // A settings change is applied the moment it is seen, before the work
+    // gate below. Consumed on a frameless pass it would otherwise advance
+    // the settings version without reconfiguring the scopes, so the first
+    // frame after it would run the default - on startup, empty - scope set
+    // and publish an output with no images.
+    if (settingsChanged) {
+        applySettings(scopes, settings, enabledScopes);
+    }
+    if (!settings.region || !hasWork(newFrame, settingsChanged)) {
+        return;
+    }
 
-        std::lock_guard lock(m_outputMutex);
-        writeOutput(m_output, scopes, enabledScopes, elapsedMs, framesProcessed);
-        if (m_outputCallback) {
-            m_outputCallback();
-        }
+    // Reading the frame without the lock is safe: this thread is the
+    // only writer, and readers on other threads take the mutex only for
+    // the brief sampling reads that tolerate the previous frame.
+    const FrameView view = m_latestFrame.view();
+    // The last images stand while the frame cannot answer for the region.
+    const std::optional<IntRect> region = regionInFrame(view, *settings.region);
+    if (!region) {
+        return;
+    }
+
+    // The hash is computed on every pass — including settings-only ones —
+    // so it always corresponds to the current region and mask. Skipping
+    // it on any path leaves a stale value that defeats the next
+    // unchanged-content comparison.
+    const uint64_t contentHash = hashRegion(view, *region, view.fromDisplay(settings.maskedWindow));
+    if (!settingsChanged && contentHash == pass.lastContentHash) {
+        return;
+    }
+    pass.lastContentHash = contentHash;
+
+    const SsFrameView boundaryFrame = toBoundaryFrame(view);
+    const SsRect boundaryRegion{region->x, region->y, region->width, region->height};
+    const double elapsedMs = accumulateScopes(scopes, boundaryFrame, boundaryRegion, enabledScopes);
+    if (newFrame) {
+        ++pass.framesProcessed;
+    }
+
+    std::lock_guard lock(m_outputMutex);
+    writeOutput(m_output, scopes, enabledScopes, elapsedMs, pass.framesProcessed);
+    if (m_outputCallback) {
+        m_outputCallback();
     }
 }
 

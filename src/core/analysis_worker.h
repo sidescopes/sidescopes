@@ -1,9 +1,11 @@
 #pragma once
 
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <functional>
 #include <map>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -81,16 +83,22 @@ struct AnalysisSettings
 [[nodiscard]] double scopeParam(const AnalysisSettings& settings, std::string_view id, std::string_view key,
                                 double fallback);
 
-/// Runs the scope engines on a dedicated thread: takes the newest frame from
-/// the mailbox, skips frames whose scoped content is unchanged, and publishes
-/// double-buffered scope images. The UI thread pulls output when the version
-/// advances and samples cursor colors from the most recent frame.
+/// Runs the scope engines: takes the newest frame from the mailbox, skips
+/// frames whose scoped content is unchanged, and publishes double-buffered
+/// scope images. The UI thread pulls output when the version advances and
+/// samples cursor colors from the most recent frame.
 ///
-/// Threading: start, stop, updateSettings, hold, held, fetchOutput,
-/// sampleDisplayColor, latestFrameSize, withLatestFrame, and
-/// consumedFrameSequence make up the caller-thread surface and are safe to call
-/// while the worker runs. run() exclusively owns the worker thread and is never
-/// called directly.
+/// Two ways to run, and a host picks exactly one. start() gives the passes a
+/// dedicated thread, which is what every desktop does. startInline() runs
+/// them on the caller's thread, one per pump(), for a host with no threads to
+/// give. The passes themselves are identical either way.
+///
+/// Threading: start, startInline, stop, updateSettings, hold, held,
+/// fetchOutput, sampleDisplayColor, latestFrameSize, withLatestFrame, and
+/// consumedFrameSequence make up the caller-thread surface and are safe to
+/// call while the worker runs. run() exclusively owns the worker thread and is
+/// never called directly; pump() must be called from one thread only, and in
+/// inline mode that thread is the one the passes belong to.
 class AnalysisWorker
 {
 public:
@@ -119,6 +127,25 @@ public:
 
     void start();
     void stop();
+
+    /// Runs the analysis on the CALLER's thread instead of its own: one pass
+    /// per pump(), never blocking. For a host that has no threads to give -
+    /// a page, where threads would mean SharedArrayBuffer, which would mean
+    /// cross-origin isolation, which changes what the whole document may
+    /// embed.
+    ///
+    /// The passes are the same passes. Analysis here is bit-exact regardless
+    /// of how many chunks run, proven on every push across runners with
+    /// different core counts, so one chunk on the caller's thread is a tested
+    /// configuration rather than a degraded one.
+    ///
+    /// start() and startInline() are alternatives; calling both is a
+    /// programming error and the second is ignored.
+    void startInline();
+
+    /// One inline pass. Does nothing unless startInline() opened one, so a
+    /// host may call it unconditionally.
+    void pump();
 
     void updateSettings(const AnalysisSettings& settings);
 
@@ -200,11 +227,23 @@ public:
     [[nodiscard]] uint64_t consumedFrameSequence() const;
 
 private:
+    /// What one pass carries into the next. Held by whichever thread runs the
+    /// passes - its own in start(), the caller's in startInline() - and never
+    /// touched by any other, which is what lets the pass body stay free of
+    /// locks except where it publishes.
+    struct Pass;
+
     void run();
 
+    /// One pass: take a frame, apply pending settings, and analyse when there
+    /// is anything to analyse. @p wait is how long to block for a frame -
+    /// a timeout on the worker thread, zero when pumped inline.
+    void runPass(Pass& pass, std::chrono::milliseconds wait);
+
     /// Takes the newest frame from the mailbox into m_latestFrame, returning
-    /// whether a frame arrived this pass. Runs only on the worker thread.
-    [[nodiscard]] bool takeLatestFrame();
+    /// whether a frame arrived this pass. Runs only on the thread running the
+    /// passes.
+    [[nodiscard]] bool takeLatestFrame(std::chrono::milliseconds wait);
 
     /// Frees the held frame. Runs only on the worker thread, which owns it.
     void dropFrame();
@@ -219,6 +258,8 @@ private:
 
     FrameMailbox& m_mailbox;
     std::thread m_thread;
+    /// Open only in inline mode, where the caller's thread runs the passes.
+    std::unique_ptr<Pass> m_inlinePass;
     std::atomic<bool> m_stopRequested{false};
 
     mutable std::mutex m_settingsMutex;
