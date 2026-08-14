@@ -260,6 +260,7 @@ add_library(sidescopes_app STATIC
     src/app/face_lock.cpp
     src/app/face_lock_controller.cpp
     src/app/frame_pacing.cpp
+    src/app/guided_tour.cpp
     src/app/interface_diagnostics.cpp
     src/app/layout_preset_store.cpp
     src/app/layout_presets.cpp
@@ -320,6 +321,7 @@ set(SIDESCOPES_APP_IMGUI_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/src/app/settings_window.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/app/status_bar.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/app/toolbar.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/app/tour_overlay.cpp
 )
 
 # Build-time version stamp, included by app.cpp. The custom target regenerates

@@ -43,6 +43,7 @@ TEST_CASE("Preferences round-trip through a file")
     saved.scopeParams[VectorscopeId]["smoothing_ms"] = 60.0;
     saved.scopeParams[VectorscopeId]["gamma"] = 0.9;
     saved.vectorscopeZoom = 2;
+    saved.tourSettled = 1;
     saved.scopeStack = testing::idTokens("HWV");  // stacking order is part of the setting
     saved.graticuleStrength = 0.5f;
     saved.windowX = 120;
@@ -59,6 +60,10 @@ TEST_CASE("Preferences round-trip through a file")
     CHECK(param(loaded, VectorscopeId, "smoothing_ms") == 60.0);
     CHECK(param(loaded, VectorscopeId, "gamma") == 0.9);
     CHECK(loaded.vectorscopeZoom == 2);
+    // Writing what you read is the feature. Without this the walk-through
+    // would greet a returning visitor all over again, which is the failure
+    // the flag exists to prevent.
+    CHECK(loaded.tourSettled == 1);
     CHECK(loaded.scopeStack == testing::idTokens("HWV"));
     CHECK(loaded.graticuleStrength == 0.5f);
     CHECK(loaded.windowX == 120);

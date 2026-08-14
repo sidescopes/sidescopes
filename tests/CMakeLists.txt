@@ -63,6 +63,7 @@ add_executable(sidescopes_tests
     test_region_motion.cpp
     test_quality.cpp
     test_shortcut_resolver.cpp
+    test_guided_tour.cpp
     test_region_geometry.cpp
     test_icons.cpp
     test_focus_resolution.cpp

@@ -557,6 +557,7 @@ Preferences loadPreferences(const std::filesystem::path& file)
 
     readFloat(values, "graticule_strength", preferences.graticuleStrength);
     readInt(values, "vectorscope_zoom", preferences.vectorscopeZoom);
+    readInt(values, "tour_settled", preferences.tourSettled);
     if (preferences.vectorscopeZoom != 2 && preferences.vectorscopeZoom != 4) {
         preferences.vectorscopeZoom = 1;
     }
@@ -610,6 +611,7 @@ bool savePreferences(const Preferences& preferences, const std::filesystem::path
         << "scope_order=" << preferences.scopeOrder << '\n'
         << "graticule_strength=" << preferences.graticuleStrength << '\n'
         << "vectorscope_zoom=" << preferences.vectorscopeZoom << '\n'
+        << "tour_settled=" << preferences.tourSettled << '\n'
         << "ui_scale_factor=" << preferences.uiScaleFactor << '\n'
         << "quality=" << preferences.quality << '\n'
         << "window_x=" << preferences.windowX << '\n'

@@ -115,6 +115,10 @@ struct Preferences
     float graticuleStrength = 1.0f;
     /// Magnify-view factor for the vectorscope: 1, 2, or 4.
     int vectorscopeZoom = 1;
+    /// Whether the walk-through has been seen through or waved away. Not
+    /// WHICH step was reached: resuming a tour half way through is more
+    /// confusing than starting it again, so only the settling is kept.
+    int tourSettled = 0;
     /// Live layout split orientation: 0 automatic (the historical longer-axis
     /// split), 1 vertical (stacked), 2 horizontal (side by side).
     int layoutOrientation = 0;
