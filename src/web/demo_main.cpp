@@ -61,6 +61,7 @@
 #include "platform/screen_capture.h"
 #include "platform/web/screen_capture_source.h"
 #include "web/demo_layout.h"
+#include "web/demo_picture.h"
 #include "web/demo_shell.h"
 #include "web/demo_storage.h"
 #include "web/demo_tour_steps.h"
@@ -100,25 +101,18 @@ struct Demo
 
     std::unique_ptr<ScopePaneRenderer> panes;
 
-    /// The picture as it was decoded, BGRA, never written to again. Every
-    /// adjustment is computed FROM this, so dragging a control back and forth
-    /// cannot degrade the photograph and leave the scopes reporting the
-    /// damage as though it were the picture's own.
-    std::vector<uint8_t> original;
-    /// The picture the scopes read and the canvas shows: the same bytes, so
-    /// the two can never disagree about what is being measured.
-    std::vector<uint8_t> frame;
-    int frameWidth = 0;
-    int frameHeight = 0;
-    bool frameDirty = false;
-    /// New PIXELS, as against new settings. Kept apart so that dragging a
-    /// region - which changes the settings every frame - does not also copy
-    /// the whole picture into the capture source every frame.
-    bool pictureDirty = false;
-
-    /// The same picture RGBA, for showing it, and its texture.
-    ScopeImage display;
+    /// The photograph, in the three forms it has to exist in: what the page
+    /// decoded, what the engines read, and what the canvas draws.
+    DemoPicture picture;
+    /// The texture the display copy is uploaded to. The picture holds no
+    /// texture and knows no backend, which is what keeps it testable; owning
+    /// the graphics is this shell's job.
     std::unique_ptr<ScopeTexture> displayTexture;
+
+    /// The ANALYSIS SETTINGS need sending again - a region moved, a scope
+    /// appeared. Nothing to do with the picture's pixels, which the picture
+    /// tracks itself.
+    bool settingsDirty = false;
 
     /// The context menu's model wants both; neither does anything here -
     /// nothing can be attached in a page, and presets are not wired yet -
@@ -132,12 +126,6 @@ struct Demo
     /// The parameter entries the open menu was built with; menuScopeParam
     /// resolves a chosen id against them, so they outlive the build.
     std::vector<ParamMenuAction> menuParams;
-
-    /// What the visitor has done to the picture, and whether it still needs
-    /// applying. Applied once a frame rather than once an event, so dragging a
-    /// slider costs one pass per redraw instead of one per pointer move.
-    ImageAdjustments adjustments;
-    bool adjustDirty = false;
 
     /// The walk-through, and where each control it names landed this frame.
     std::unique_ptr<GuidedTour> tour;
@@ -175,38 +163,9 @@ struct Demo
 
 Demo g_demo;
 
-/// Uploads g_demo.display to its texture; defined with the other graphics
+/// Uploads the picture's display copy to its texture; defined with the graphics
 /// work further down, needed by the adjustment pass just below.
 void refreshDisplayTexture();
-
-/// Runs the visitor's adjustments over the pristine decode, into the buffer
-/// the scopes read AND the buffer the canvas draws.
-///
-/// One pass, one result, two consumers. If the picture on screen and the
-/// pixels reaching the engines could ever differ, the demo would teach
-/// something false about what a scope is measuring - and it would look
-/// entirely correct while doing it.
-void refreshAdjustedPicture()
-{
-    if (g_demo.original.empty()) {
-        return;
-    }
-    const std::size_t pixels = g_demo.original.size() / 4u;
-    g_demo.frame.resize(g_demo.original.size());
-    applyAdjustments(g_demo.original.data(), g_demo.frame.data(), pixels, g_demo.adjustments);
-
-    // The same bytes, in the order the canvas wants them.
-    g_demo.display.rgba.resize(g_demo.frame.size());
-    for (std::size_t at = 0; at + 3 < g_demo.frame.size(); at += 4) {
-        g_demo.display.rgba[at] = g_demo.frame[at + 2];
-        g_demo.display.rgba[at + 1] = g_demo.frame[at + 1];
-        g_demo.display.rgba[at + 2] = g_demo.frame[at];
-        g_demo.display.rgba[at + 3] = g_demo.frame[at + 3];
-    }
-    g_demo.display.sequence += 1u;
-    refreshDisplayTexture();
-    g_demo.pictureDirty = true;
-}
 
 /// The region the scopes read, as the worker wants it: a share of the frame
 /// rather than a rectangle of pixels. Nothing at all when there is no region,
@@ -214,7 +173,7 @@ void refreshAdjustedPicture()
 /// every scope is empty, exactly as the desktop is after Escape.
 std::optional<RegionOfInterest> regionOfPicture()
 {
-    if (!g_demo.region.hasRegion() || g_demo.frameWidth <= 0 || g_demo.frameHeight <= 0) {
+    if (!g_demo.region.hasRegion() || g_demo.picture.width() <= 0 || g_demo.picture.height() <= 0) {
         return std::nullopt;
     }
     // platform/region_geometry's own conversion, which every platform's
@@ -224,7 +183,7 @@ std::optional<RegionOfInterest> regionOfPicture()
     const LocalRect local{static_cast<double>(rect.x), static_cast<double>(rect.y), static_cast<double>(rect.width),
                           static_cast<double>(rect.height)};
 
-    return regionFromLocalRect(local, g_demo.frameWidth, g_demo.frameHeight);
+    return regionFromLocalRect(local, g_demo.picture.width(), g_demo.picture.height());
 }
 
 /// One turn of the analysis, through the REAL pipeline.
@@ -236,22 +195,21 @@ std::optional<RegionOfInterest> regionOfPicture()
 /// copy is free to drift from the one that ships.
 void analyse()
 {
-    if (g_demo.adjustDirty) {
-        refreshAdjustedPicture();
-        g_demo.adjustDirty = false;
+    if (g_demo.picture.refresh()) {
+        refreshDisplayTexture();
     }
-    if (g_demo.pictureDirty && !g_demo.frame.empty()) {
-        submitCapturedPicture(g_demo.frame.data(), g_demo.frameWidth, g_demo.frameHeight);
-        g_demo.pictureDirty = false;
+    if (g_demo.picture.hasFreshPixels()) {
+        submitCapturedPicture(g_demo.picture.analysed().data(), g_demo.picture.width(), g_demo.picture.height());
+        g_demo.picture.pixelsTaken();
     }
-    if (g_demo.frameDirty) {
+    if (g_demo.settingsDirty) {
         // The region the editor holds is in PICTURE pixels; the worker reads
         // percentages of the frame, so a selection survives the frame being
         // a different size - which is the same reason the desktop stores it
         // that way.
         g_demo.analysis.region = regionOfPicture();
         g_demo.worker->updateSettings(g_demo.analysis);
-        g_demo.frameDirty = false;
+        g_demo.settingsDirty = false;
     }
     // The worker has no thread of its own here, so its pass runs on this one.
     g_demo.worker->pump();
@@ -263,11 +221,11 @@ void analyse()
 /// there.
 [[nodiscard]] RegionEditor::Placement placePicture(const ImVec2& cursor, const ImVec2& area)
 {
-    const float wide = area.x / static_cast<float>(std::max(1, g_demo.display.width));
-    const float tall = area.y / static_cast<float>(std::max(1, g_demo.display.height));
+    const float wide = area.x / static_cast<float>(std::max(1, g_demo.picture.display().width));
+    const float tall = area.y / static_cast<float>(std::max(1, g_demo.picture.display().height));
     const float scale = std::min({wide, tall, 1.0f});
-    const float width = static_cast<float>(g_demo.display.width) * scale;
-    const float height = static_cast<float>(g_demo.display.height) * scale;
+    const float width = static_cast<float>(g_demo.picture.display().width) * scale;
+    const float height = static_cast<float>(g_demo.picture.display().height) * scale;
 
     return RegionEditor::Placement{ImVec2{cursor.x + (area.x - width) * 0.5f, cursor.y + (area.y - height) * 0.5f},
                                    scale};
@@ -307,8 +265,8 @@ void analyse()
                       static_cast<int>((from.y - placement.origin.y) / scale),
                       std::max(1, static_cast<int>((to.x - from.x) / scale)),
                       std::max(1, static_cast<int>((to.y - from.y) / scale))};
-    const std::optional<FloatColor> colour =
-        shell::averageOver(area, g_demo.display.rgba, g_demo.display.width, g_demo.display.height);
+    const std::optional<FloatColor> colour = shell::averageOver(
+        area, g_demo.picture.display().rgba, g_demo.picture.display().width, g_demo.picture.display().height);
     if (colour.has_value()) {
         g_demo.pins->pin(*colour);
         g_demo.saveDue = true;
@@ -335,20 +293,22 @@ void analyse()
     ImGui::Begin("##screen", nullptr,
                  ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings |
                      ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoScrollbar);
-    if (g_demo.displayTexture != nullptr && g_demo.display.width > 0) {
+    if (g_demo.displayTexture != nullptr && g_demo.picture.display().width > 0) {
         g_demo.placement = placePicture(ImGui::GetCursorScreenPos(), area);
-        const ImVec2 size{static_cast<float>(g_demo.display.width) * g_demo.placement.scale,
-                          static_cast<float>(g_demo.display.height) * g_demo.placement.scale};
+        const ImVec2 size{static_cast<float>(g_demo.picture.display().width) * g_demo.placement.scale,
+                          static_cast<float>(g_demo.picture.display().height) * g_demo.placement.scale};
         ImGui::GetWindowDrawList()->AddImage(
             g_demo.displayTexture->textureId(), g_demo.placement.origin,
             ImVec2{g_demo.placement.origin.x + size.x, g_demo.placement.origin.y + size.y});
         if (!runPinTool(g_demo.placement)) {
-            moved = g_demo.region.update(g_demo.placement, g_demo.display.width, g_demo.display.height);
+            moved =
+                g_demo.region.update(g_demo.placement, g_demo.picture.display().width, g_demo.picture.display().height);
         }
         // The desktop samples the screen under the pointer; the only picture
         // here is this one, so it is sampled the same way.
-        const std::optional<FloatColor> live = shell::sampleAt(
-            ImGui::GetMousePos(), g_demo.placement, g_demo.display.rgba, g_demo.display.width, g_demo.display.height);
+        const std::optional<FloatColor> live =
+            shell::sampleAt(ImGui::GetMousePos(), g_demo.placement, g_demo.picture.display().rgba,
+                            g_demo.picture.display().width, g_demo.picture.display().height);
         if (live.has_value()) {
             g_demo.readoutColour = live;
         }
@@ -381,7 +341,7 @@ void applyOutcome(const PaneRenderOutcome& outcome)
         const ScopeChoice& choice = *outcome.chosenScope;
         (void)g_demo.view->stack().choose(choice.id, choice.stack);
         g_demo.analysis.enabledScopes = g_demo.view->stack().ids();
-        g_demo.frameDirty = true;
+        g_demo.settingsDirty = true;
     }
     if (outcome.clearRegion) {
         // The desktop's own answer: the region goes, and the scopes read
@@ -390,11 +350,11 @@ void applyOutcome(const PaneRenderOutcome& outcome)
         // teaching something the application does not do.
         g_demo.region.clear();
         g_demo.panes->releaseTraces();
-        g_demo.frameDirty = true;
+        g_demo.settingsDirty = true;
     }
     if (outcome.analysisDirty) {
         g_demo.panes->configureProjections();
-        g_demo.frameDirty = true;
+        g_demo.settingsDirty = true;
     }
     if (outcome.chosenScope.has_value() || outcome.analysisDirty || outcome.preferencesSaveDue) {
         g_demo.saveDue = true;
@@ -413,7 +373,7 @@ void applyPreset(const LayoutPresetOutcome& outcome)
     if (outcome.analysisDirty) {
         g_demo.analysis.enabledScopes = g_demo.view->stack().ids();
         g_demo.panes->configureProjections();
-        g_demo.frameDirty = true;
+        g_demo.settingsDirty = true;
     }
     g_demo.saveDue = true;
 }
@@ -428,7 +388,7 @@ void applyShortcut(const ShortcutAction& action)
         break;
     case ShortcutAction::Kind::SetZoom:
         g_demo.view->setZoom(action.zoomLevel);
-        g_demo.frameDirty = true;
+        g_demo.settingsDirty = true;
         break;
     case ShortcutAction::Kind::ClearRegion:
         outcome.clearRegion = true;
@@ -517,7 +477,7 @@ void drawContextMenu(int clickedPane, bool overApplication)
     } else if (const ParamMenuAction* param = menuScopeParam(menu.chosen, g_demo.menuParams)) {
         g_demo.analysis.scopeParams[param->scopeId][param->paramKey] = param->value;
         g_demo.panes->configureProjections();
-        g_demo.frameDirty = true;
+        g_demo.settingsDirty = true;
     } else if (const std::optional<float> strength = menuGraticuleStrength(menu.chosen)) {
         g_demo.view->setGraticuleStrength(*strength);
     } else if (const std::optional<ShortcutAction> action = menuShortcutAction(menu.chosen)) {
@@ -678,8 +638,8 @@ void notePictureAnchors()
 {
     const RegionEditor::Placement& at = g_demo.placement;
     g_demo.anchors.note("picture", at.origin,
-                        ImVec2{at.origin.x + static_cast<float>(g_demo.display.width) * at.scale,
-                               at.origin.y + static_cast<float>(g_demo.display.height) * at.scale});
+                        ImVec2{at.origin.x + static_cast<float>(g_demo.picture.display().width) * at.scale,
+                               at.origin.y + static_cast<float>(g_demo.picture.display().height) * at.scale});
     if (!g_demo.region.hasRegion()) {
         return;
     }
@@ -735,7 +695,7 @@ void drawShell()
     g_demo.anchors.clear();
 
     if (drawPicture(ImVec2{layout.screenPos.x, layout.screenPos.y}, ImVec2{layout.screenSize.x, layout.screenSize.y})) {
-        g_demo.frameDirty = true;
+        g_demo.settingsDirty = true;
     }
     notePictureAnchors();
     // The border's own close badge dismisses the region, and it means the
@@ -885,11 +845,12 @@ void buildScopes()
 /// Builds the picture's own texture, remade whenever its size changes.
 void refreshDisplayTexture()
 {
-    if (g_demo.displayTexture == nullptr || g_demo.displayTexture->width() != g_demo.display.width ||
-        g_demo.displayTexture->height() != g_demo.display.height) {
-        g_demo.displayTexture = g_demo.graphics->createScopeTexture(g_demo.display.width, g_demo.display.height);
+    if (g_demo.displayTexture == nullptr || g_demo.displayTexture->width() != g_demo.picture.display().width ||
+        g_demo.displayTexture->height() != g_demo.picture.display().height) {
+        g_demo.displayTexture =
+            g_demo.graphics->createScopeTexture(g_demo.picture.display().width, g_demo.picture.display().height);
     }
-    g_demo.displayTexture->upload(g_demo.display);
+    g_demo.displayTexture->upload(g_demo.picture.display());
 }
 
 }  // namespace
@@ -905,36 +866,22 @@ EMSCRIPTEN_KEEPALIVE uint8_t* demoFrameBuffer(int width, int height)
     if (width <= 0 || height <= 0) {
         return nullptr;
     }
-    g_demo.frameWidth = width;
-    g_demo.frameHeight = height;
-    g_demo.frame.assign(static_cast<std::size_t>(width) * static_cast<std::size_t>(height) * 4u, 0u);
-
-    return g_demo.frame.data();
+    return g_demo.picture.decodeInto(width, height);
 }
 
-/// Takes the picture the page just wrote: kept RGBA for showing, swizzled to
-/// BGRA for the engines, and given a region to start from.
+/// Takes the picture the page just wrote, and gives it a region to start from
+/// if this is the first one. The three forms it has to exist in, and keeping
+/// them agreed, are the picture's own business.
 EMSCRIPTEN_KEEPALIVE void demoFrameReady()
 {
     using namespace sidescopes;
-    g_demo.display.width = g_demo.frameWidth;
-    g_demo.display.height = g_demo.frameHeight;
-    g_demo.display.sequence += 1u;
-    g_demo.display.rgba = g_demo.frame;
-    refreshDisplayTexture();
-
-    for (std::size_t at = 0; at + 3 < g_demo.frame.size(); at += 4) {
-        const uint8_t red = g_demo.frame[at];
-        g_demo.frame[at] = g_demo.frame[at + 2];
-        g_demo.frame[at + 2] = red;
-    }
-    // The decode is kept as it arrived, and the picture on screen is derived
+    // The decode is kept as it arrived and everything on screen is derived
     // from it. A new photograph inherits whatever the controls are set to,
     // which is what a visitor comparing two pictures under one adjustment
-    // expects - and it means there is no state where the canvas and the
-    // scopes are looking at different pixels.
-    g_demo.original = g_demo.frame;
-    g_demo.adjustDirty = true;
+    // expects - and there is no state where the canvas and the scopes are
+    // looking at different pixels.
+    g_demo.picture.adoptDecoded();
+    refreshDisplayTexture();
     // The region STAYS WHERE IT IS. It is a rectangle on what stands in for a
     // display, and changing the photograph beneath it is no more reason to
     // move it than changing the photograph in an editor is on a desktop.
@@ -945,10 +892,9 @@ EMSCRIPTEN_KEEPALIVE void demoFrameReady()
     if (g_demo.region.hasRegion()) {
         g_demo.region.holdOnScreen(g_demo.placement);
     } else {
-        g_demo.region.reset(g_demo.frameWidth, g_demo.frameHeight);
+        g_demo.region.reset(g_demo.picture.width(), g_demo.picture.height());
     }
-    g_demo.pictureDirty = true;
-    g_demo.frameDirty = true;
+    g_demo.settingsDirty = true;
 }
 
 /// The seven controls, from the page. Values are the ImageAdjustments ranges:
@@ -970,11 +916,7 @@ EMSCRIPTEN_KEEPALIVE void demoSetAdjustments(float exposure, float contrast, flo
     wanted.temperature = temperature;
     wanted.tint = tint;
     wanted.saturation = saturation;
-    if (wanted == g_demo.adjustments) {
-        return;
-    }
-    g_demo.adjustments = wanted;
-    g_demo.adjustDirty = true;
+    (void)g_demo.picture.setAdjustments(wanted);
 }
 
 /// Opens the walk-through from the first stop, however settled it is. The

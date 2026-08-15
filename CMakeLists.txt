@@ -462,6 +462,7 @@ if(APPLE OR WIN32 OR EMSCRIPTEN)
         src/web/band_geometry.cpp
         src/web/demo_tour_steps.cpp
         src/web/demo_layout.cpp
+        src/web/demo_picture.cpp
             src/web/region_editor.cpp
             src/platform/web/graphics.cpp
         )
