@@ -11,9 +11,9 @@
 // The maths is chosen to be RECOGNISABLE rather than to match any particular
 // editor: a stop is a doubling in linear light, contrast pivots on mid grey,
 // and warming raises red while lowering blue. A visitor who moves a control
-// here and then moves the same-named control in Lightroom should see the
-// scopes do the same KIND of thing, which is the whole purpose. Matching
-// Lightroom's actual curves is neither possible nor the point.
+// here and then moves the same-named control in their own editor should see
+// the scopes do the same KIND of thing, which is the whole purpose. Matching
+// any particular editor's actual curves is neither possible nor the point.
 
 #include "web/image_adjust.h"
 

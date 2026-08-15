@@ -61,10 +61,11 @@
   .spotlight {
     box-shadow:0 0 0 3px #141312, 0 0 0 4.5px rgba(255,214,140,.95), 0 0 0 6px rgba(20,18,17,.6);
   }
-  /* The adjustment block is a grid of rows rather than one button, so its
-     ring needs room to stand off the sliders it encloses without the outermost
-     one clipping against the credit line above. */
-  .edit.spotlight { border-radius:6px; padding:.4rem .5rem; margin:-.4rem -.5rem .1rem }
+  /* The adjustment panel already carries its own padding and corner, so the
+     ring only has to agree with them. It must NOT restate either: a spotlight
+     that changed the panel's box would resize it as the tour reached it, and
+     everything below - the picture and the scopes - would jump. */
+  .edit.spotlight { border-radius:8px }
 
   /* A FIXED height, and no wrapping. A credit line of a different length
      would otherwise reflow this row, change its height, and resize the
@@ -92,19 +93,151 @@
   /* The adjustments. These stand for the EDITOR a photographer has open
      beside SideScopes, so they are the page's and not the application's -
      drawn inside its window they would say that SideScopes edits photographs,
-     which is the one thing this demo must not teach. Styled plainly for the
-     same reason: nothing here should read as part of the instrument. */
-  .edit { flex:0 0 auto; display:grid; gap:.35rem .9rem; margin:0 0 .5rem;
-          grid-template-columns:repeat(auto-fit, minmax(150px, 1fr)) }
-  .edit label { display:flex; align-items:center; gap:.5rem; font-size:.75rem; color:#8a827e }
-  .edit label span { flex:0 0 5.2rem }
-  .edit input[type=range] { flex:1 1 auto; min-width:0; accent-color:#8ea2ff; height:1.1rem }
-  .edit .reset { grid-column:1/-1; justify-self:start }
-  .edit button {
-    font:inherit; font-size:.75rem; color:#cfc9c5; background:#221f1d;
-    border:1px solid #3a3532; border-radius:6px; padding:3px 10px; cursor:pointer;
+     which is the one thing this demo must not teach. Shaped like an editor's
+     tool panel rather than like a form, because that is what they stand in
+     for and because a photographer reads that shape without being told. */
+
+  /* The work area: tools beside the workspace, which is the arrangement a
+     photographer already works in and, more to the point, the only one that
+     costs the picture NO HEIGHT. This page is exactly the viewport, so a row
+     of controls above the canvas comes straight out of the picture and the
+     scopes. A column spends the plentiful axis instead.
+
+     The conventions below - the name to the left of its track, the reading to
+     the right, the neutral point at the centre, tinted tracks where the
+     control is a colour and ticks where it is a quantity - are the ones every
+     raw editor has used for twenty years. They are here because a visitor's
+     hand already knows them, not out of any association with a particular
+     product. */
+  .work { flex:1 1 auto; min-height:0; display:flex; gap:.75rem }
+  .work #stage { flex:1 1 auto; min-width:0 }
+
+  /* The width follows the window between two bounds, because the TRACK is
+     what is left after a name and a reading - and a track is the control. At
+     a fixed 14rem it was about a hundred pixels, or two points of a
+     two-hundred-point range per pixel, which is not a control anybody can
+     place a value with. */
+  .edit { flex:0 0 clamp(14.5rem, 19%, 18rem); min-width:0; overflow-y:auto; overscroll-behavior:contain;
+          padding:.55rem .65rem; margin:0; border:1px solid #2b2725; border-radius:8px;
+          background:#191716 }
+
+  /* Two groups, because seven controls split into a colour half and a tone
+     half and nothing is gained by splitting them further. */
+  .edit .group { margin:0 0 .7rem; padding:0 0 .7rem; border-bottom:1px solid #232120 }
+  .edit .group:last-child { margin-bottom:0; padding-bottom:0; border-bottom:0 }
+  /* Centred over the TRACKS, not over the panel: the rows spend their left on
+     a name column and their right on a reading, so a heading centred in the
+     panel sits visibly left of the sliders it titles. The insets are the two
+     side columns and their gaps, so the heading stays centred as the panel
+     width changes. */
+  .edit .group > h2 { margin:.25rem 0 .4rem; font-size:.75rem; font-weight:400;
+                      padding-left:calc(4.2rem + .45rem); padding-right:calc(2.2rem + .45rem);
+                      text-align:center; color:#8a827e }
+
+  /* Name, track, reading - the reading in a FIXED column so the tracks line
+     up down the panel however many digits arrive. */
+  .edit label { --track:#3a3532; touch-action:manipulation;
+                display:grid; grid-template-columns:4.2rem 1fr 2.2rem; align-items:center;
+                gap:.45rem; font-size:.75rem; color:#8a827e; padding:.22rem 0 }
+  .edit label > span { text-align:right; overflow:hidden; text-overflow:ellipsis;
+                       white-space:nowrap }
+  .edit label:hover { color:#b0a9a5 }
+  /* Tabular figures, so a value changing under a drag does not jiggle the
+     column, and right-aligned so digits line up rather than signs. */
+  .edit output { font-variant-numeric:tabular-nums; font-size:.6875rem; text-align:right;
+                 color:#6f6a67 }
+  /* A value that is no longer zero is the one thing worth colouring: it says
+     which controls have been moved without reading seven numbers. */
+  .edit label[data-moved="1"] { color:#cfc9c5 }
+  .edit label[data-moved="1"] output { color:#8ea2ff }
+
+  /* The track is drawn rather than left to the platform: the native control
+     is a different height and weight on each OS, and this panel has to keep
+     one rhythm down the column. */
+  /* The HEIGHT here is the hit area, not the look: the track stays 4px and
+     everything above it is room for the pointer to land. 13px was a mouse-only
+     number. */
+  .edit input[type=range] { -webkit-appearance:none; appearance:none; width:100%; min-width:0;
+                            height:22px; background:transparent; cursor:ew-resize; margin:0 }
+  .edit input[type=range]::-webkit-slider-runnable-track {
+    height:4px; border-radius:2px; background:var(--track);
   }
-  .edit button:hover { background:#2b2725; color:#efe9e5 }
+  .edit input[type=range]::-moz-range-track { height:4px; border-radius:2px; background:var(--track) }
+  .edit input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance:none; appearance:none; width:12px; height:12px; margin-top:-4px;
+    border-radius:50%; background:#d6d0cc; border:1px solid #0f0e0d;
+  }
+  .edit input[type=range]::-moz-range-thumb {
+    width:12px; height:12px; border-radius:50%; background:#d6d0cc; border:1px solid #0f0e0d;
+  }
+  .edit label[data-moved="1"] input[type=range]::-webkit-slider-thumb { background:#8ea2ff }
+  .edit label[data-moved="1"] input[type=range]::-moz-range-thumb { background:#8ea2ff }
+  .edit input[type=range]:focus-visible::-webkit-slider-thumb { box-shadow:0 0 0 3px rgba(142,162,255,.35) }
+
+  /* A colour control gets the axis it moves along, which says what it DOES
+     before it is touched - the warm end, the green end. A quantity gets a
+     plain track.
+     It used to get evenly spaced ticks, and they were REMOVED rather than
+     corrected: a range thumb's travel is inset by half its width at each end,
+     so a tick at a percentage of the TRACK never lands on the value at that
+     percentage of the RANGE. -1.00 of a four-stop exposure sat visibly off
+     its mark. The inset can be computed, but it changes with the thumb and
+     with every width this panel takes, and a gauge that is close but wrong is
+     worse than no gauge - it invites reading a value off it. */
+  .edit label[data-track="temp"] { --track:linear-gradient(90deg,#3f6fd8,#8a8f96 50%,#e8c04a) }
+  .edit label[data-track="tint"] { --track:linear-gradient(90deg,#4bb45f,#8a8f96 50%,#c862c0) }
+  .edit label[data-track="sat"]  { --track:linear-gradient(90deg,#6a6663,#8a8f96 50%,#d4574f) }
+
+  /* The header: what these are, and the way back. Reset appears only when
+     there is something to undo, the rule the application's own region tools
+     follow. Its height is FIXED, because a header that grew to fit the button
+     would shorten the canvas and move the application window under the hand
+     dragging a slider. */
+  .edit .edit-head { display:flex; align-items:center; gap:.6rem;
+                     height:1.35rem; margin:0 0 .4rem; padding-bottom:.3rem;
+                     border-bottom:1px solid #262322; font-size:.625rem; letter-spacing:.09em;
+                     text-transform:uppercase; color:#5f5a57 }
+  .edit .edit-head .spacer { flex:1 1 auto }
+  .edit button {
+    font:inherit; font-size:.6875rem; letter-spacing:0; text-transform:none;
+    color:#8a827e; background:transparent; border:1px solid #3a3532; border-radius:5px;
+    padding:1px 9px; cursor:pointer;
+  }
+  .edit button:hover { background:#221f1d; color:#efe9e5; border-color:#4a4441 }
+  .edit button[hidden] { display:none }
+
+  /* A FINGER is a different instrument from a pointer, and the difference is
+     not the screen's width - a touch laptop is wide and still touched. So the
+     targets grow on POINTER COARSE, which is the thing actually being asked
+     about, and the layout changes on width separately. */
+  @media (pointer: coarse) {
+    .edit input[type=range] { height:34px }
+    .edit input[type=range]::-webkit-slider-thumb { width:18px; height:18px; margin-top:-7px }
+    .edit input[type=range]::-moz-range-thumb { width:18px; height:18px }
+    .edit label { padding:.3rem 0 }
+  }
+
+  /* A PHONE, and nothing wider. The column survives to here because its rows
+     are only a name, a track and a reading; below it the picture would be left
+     nothing worth looking at, so the tools lie down over the top in two
+     columns - and the row folds, putting the track on its own line where it
+     gets the whole column instead of the third of it left over after a name
+     and a number. A track too short to place a value on is not a control. */
+  @media (max-width: 30rem) {
+    .work { flex-direction:column }
+    .edit { flex:0 0 auto; max-height:44vh;
+            display:grid; grid-template-columns:1fr 1fr; column-gap:1rem; align-content:start }
+    .edit .edit-head { grid-column:1/-1 }
+    .edit .group { border-bottom:0; padding-bottom:0; margin-bottom:.4rem }
+    /* The folded row has no side columns to allow for. */
+    .edit .group > h2 { padding-left:0; padding-right:0 }
+    .edit label { grid-template-columns:1fr auto; grid-template-areas:"name value" "track track";
+                  gap:0 .5rem; padding:.15rem 0 .35rem }
+    .edit label > span { grid-area:name; text-align:left }
+    .edit output { grid-area:value }
+    .edit input[type=range] { grid-area:track }
+  }
+
   /* Shown only when this copy is opened from disk, where it cannot run. */
   .offline { max-width:36rem; margin:4rem auto; padding:0 1rem; line-height:1.5 }
   .offline h1 { font-size:1.25rem; margin:0 0 1rem }
@@ -123,18 +256,65 @@
      waveform and the histogram, highlights and shadows move their two ends
      apart, temperature and tint carry the vectorscope's cloud off centre, and
      saturation moves it along the radius. -->
+<div class="work">
 <div class="edit" id="edit">
-  <label><span>Exposure</span><input type="range" id="a-exposure" min="-2" max="2" step="0.05" value="0"></label>
-  <label><span>Contrast</span><input type="range" id="a-contrast" min="-1" max="1" step="0.02" value="0"></label>
-  <label><span>Highlights</span><input type="range" id="a-highlights" min="-1" max="1" step="0.02" value="0"></label>
-  <label><span>Shadows</span><input type="range" id="a-shadows" min="-1" max="1" step="0.02" value="0"></label>
-  <label><span>Temperature</span><input type="range" id="a-temperature" min="-1" max="1" step="0.02" value="0"></label>
-  <label><span>Tint</span><input type="range" id="a-tint" min="-1" max="1" step="0.02" value="0"></label>
-  <label><span>Saturation</span><input type="range" id="a-saturation" min="-1" max="1" step="0.02" value="0"></label>
-  <span class="reset"><button type="button" id="a-reset">Reset adjustments</button></span>
+  <div class="edit-head">
+    <span>Adjust</span>
+    <span class="spacer"></span>
+    <button type="button" id="a-reset" hidden>Reset</button>
+  </div>
+  <div class="group">
+    <h2>Color</h2>
+    <label data-adjust="temperature" data-track="temp">
+      <span>Temp</span>
+      <input type="range" id="a-temperature" min="-1" max="1" step="0.02" value="0"
+        aria-label="Temp" aria-describedby="v-temperature">
+      <output id="v-temperature" for="a-temperature">0</output>
+    </label>
+    <label data-adjust="tint" data-track="tint">
+      <span>Tint</span>
+      <input type="range" id="a-tint" min="-1" max="1" step="0.02" value="0"
+        aria-label="Tint" aria-describedby="v-tint">
+      <output id="v-tint" for="a-tint">0</output>
+    </label>
+    <label data-adjust="saturation" data-track="sat">
+      <span>Saturation</span>
+      <input type="range" id="a-saturation" min="-1" max="1" step="0.02" value="0"
+        aria-label="Saturation" aria-describedby="v-saturation">
+      <output id="v-saturation" for="a-saturation">0</output>
+    </label>
+  </div>
+  <div class="group">
+    <h2>Tone</h2>
+    <label data-adjust="exposure">
+      <span>Exposure</span>
+      <input type="range" id="a-exposure" min="-2" max="2" step="0.05" value="0"
+        aria-label="Exposure" aria-describedby="v-exposure">
+      <output id="v-exposure" for="a-exposure">0.00</output>
+    </label>
+    <label data-adjust="contrast">
+      <span>Contrast</span>
+      <input type="range" id="a-contrast" min="-1" max="1" step="0.02" value="0"
+        aria-label="Contrast" aria-describedby="v-contrast">
+      <output id="v-contrast" for="a-contrast">0</output>
+    </label>
+    <label data-adjust="highlights">
+      <span>Highlights</span>
+      <input type="range" id="a-highlights" min="-1" max="1" step="0.02" value="0"
+        aria-label="Highlights" aria-describedby="v-highlights">
+      <output id="v-highlights" for="a-highlights">0</output>
+    </label>
+    <label data-adjust="shadows">
+      <span>Shadows</span>
+      <input type="range" id="a-shadows" min="-1" max="1" step="0.02" value="0"
+        aria-label="Shadows" aria-describedby="v-shadows">
+      <output id="v-shadows" for="a-shadows">0</output>
+    </label>
+  </div>
 </div>
 
 <div id="stage"><canvas id="canvas" tabindex="-1"></canvas></div>
+</div>
 
 <input type="file" accept="image/*" id="file" hidden>
 
@@ -207,15 +387,85 @@ document.title = 'Browser demo \u00b7 SideScopes';
 // dragging costs one pass per redraw.
 const ADJUSTMENTS = ['exposure', 'contrast', 'highlights', 'shadows', 'temperature', 'tint', 'saturation'];
 const sliders = ADJUSTMENTS.map((name) => document.getElementById(`a-${name}`));
+const readouts = ADJUSTMENTS.map((name) => document.getElementById(`v-${name}`));
+const resetButton = document.getElementById('a-reset');
+
+// Exposure is read in STOPS and everything else on the hundred-point scale
+// every editor a photographer already has open uses. Showing 0.55 for
+// showing 0.55 where a photographer's own editor reads +55 would be a
+// needless second vocabulary on a page whose whole job is to connect this
+// instrument to the editor beside it.
+function shownValue(name, value) {
+  return name === 'exposure' ? value.toFixed(2) : String(Math.round(value * 100));
+}
+
+function refreshReadouts() {
+  sliders.forEach((slider, at) => {
+    const value = parseFloat(slider.value);
+    const moved = value !== 0;
+    readouts[at].textContent = (moved && value > 0 ? '+' : '') + shownValue(ADJUSTMENTS[at], value);
+    slider.closest('label').dataset.moved = moved ? '1' : '0';
+  });
+  // Only when there is something to undo, the same rule the application's own
+  // region-clearing controls follow.
+  resetButton.hidden = sliders.every((slider) => parseFloat(slider.value) === 0);
+}
 
 function sendAdjustments() {
   mod.ccall('demoSetAdjustments', null, ADJUSTMENTS.map(() => 'number'),
             sliders.map((slider) => parseFloat(slider.value)));
+  refreshReadouts();
 }
 
-sliders.forEach((slider) => slider.addEventListener('input', sendAdjustments));
+// Two taps return ONE control to neutral, which is what the editors these
+// stand in for do, and the fastest way to ask "what was that one doing?"
+// without losing the rest of the setting.
+//
+// Detected from POINTER events rather than taken from `dblclick`, because a
+// finger on a range input never produces one: the touch handling consumes the
+// pair. Pointer events are the same for both instruments, so the gesture is
+// one implementation rather than a mouse path and a touch path that drift.
+//
+// 420ms sits between the two platform conventions this has to feel right
+// against - a touch double-tap is judged at about 300ms and a desktop
+// double-click at about 500 - and is still far short of two taps meant as
+// two.
+const DoubleTapMs = 420;
+// Far enough to be a drag, and a drag is never a tap. Without this, finishing
+// a slow drag near where a previous one ended reads as a double tap and
+// throws the value away.
+const TapSlopPx = 8;
 
-document.getElementById('a-reset').addEventListener('click', () => {
+sliders.forEach((slider) => {
+  slider.addEventListener('input', sendAdjustments);
+
+  const row = slider.closest('label');
+  let lastTapAt = 0;
+  let downX = 0;
+  let downY = 0;
+
+  row.addEventListener('pointerdown', (event) => {
+    downX = event.clientX;
+    downY = event.clientY;
+  });
+  row.addEventListener('pointerup', (event) => {
+    if (Math.hypot(event.clientX - downX, event.clientY - downY) > TapSlopPx) {
+      lastTapAt = 0;
+
+      return;
+    }
+    if (event.timeStamp - lastTapAt <= DoubleTapMs) {
+      slider.value = '0';
+      sendAdjustments();
+      lastTapAt = 0;
+
+      return;
+    }
+    lastTapAt = event.timeStamp;
+  });
+});
+
+resetButton.addEventListener('click', () => {
   sliders.forEach((slider) => { slider.value = '0'; });
   sendAdjustments();
   // Focus goes back for the same reason every strip interaction returns it:
@@ -223,6 +473,8 @@ document.getElementById('a-reset').addEventListener('click', () => {
   // holds focus, which reads as "the shortcuts stopped working".
   document.getElementById('canvas').focus();
 });
+
+refreshReadouts();
 
 const tourButton = document.getElementById('tour');
 tourButton.addEventListener('click', () => {
