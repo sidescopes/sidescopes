@@ -60,26 +60,16 @@
 #include "platform/graphics.h"
 #include "platform/screen_capture.h"
 #include "platform/web/screen_capture_source.h"
+#include "web/demo_layout.h"
 #include "web/demo_shell.h"
 #include "web/demo_storage.h"
+#include "web/demo_tour_steps.h"
 #include "web/image_adjust.h"
 #include "web/region_editor.h"
 
 namespace sidescopes {
 namespace {
 
-/// The application's window keeps a fixed share; the picture - which stands
-/// in for the screen it would be reading - takes the rest. Side by side on a
-/// wide viewport, stacked on a tall one, and never inside the application's
-/// own window: on a desktop the two are separate windows, and a demo that
-/// nests one in the other teaches the wrong shape.
-constexpr float AppWidthPoints = 400.0f;
-constexpr float AppHeightShare = 0.52f;
-constexpr float WideEnough = 1.05f;
-/// The application floats above the workspace rather than sitting in it, so
-/// it is drawn inset with an edge and a shadow. Without those it reads as a
-/// frame the picture is embedded in, which is the opposite of what it is.
-constexpr float AppMargin = 14.0f;
 constexpr float TitleBarHeight = 26.0f;
 
 /// Everything the demo owns, in one place so the animation-frame callback
@@ -561,33 +551,6 @@ void frame()
     g_demo.graphics->endFrame();
 }
 
-/// Where the picture goes and where the application's window goes: beside
-/// each other on a wide viewport, stacked on a tall one. Two rectangles,
-/// never nested.
-struct ShellLayout
-{
-    ImVec2 screenPos;
-    ImVec2 screenSize;
-    ImVec2 appPos;
-    ImVec2 appSize;
-};
-
-[[nodiscard]] ShellLayout layoutFor(const ImVec2& origin, const ImVec2& size)
-{
-    if (size.x >= size.y * WideEnough) {
-        const float appWidth = std::min(AppWidthPoints, size.x * 0.5f);
-
-        return ShellLayout{origin, ImVec2{size.x - appWidth, size.y},
-                           ImVec2{origin.x + size.x - appWidth + AppMargin, origin.y + AppMargin},
-                           ImVec2{appWidth - AppMargin * 2.0f, size.y - AppMargin * 2.0f}};
-    }
-    const float appHeight = size.y * AppHeightShare;
-
-    return ShellLayout{origin, ImVec2{size.x, size.y - appHeight},
-                       ImVec2{origin.x + AppMargin, origin.y + size.y - appHeight + AppMargin},
-                       ImVec2{size.x - AppMargin * 2.0f, appHeight - AppMargin * 2.0f}};
-}
-
 /// The window's own chrome: a title bar, an edge, and a shadow under it.
 /// The desktop gets all three from the operating system; a page gets none
 /// of them, and without them the application reads as a frame around the
@@ -622,15 +585,15 @@ void drawWindowChrome(const ImVec2& position, const ImVec2& size)
 /// desktop that is exactly what it is.
 void drawAppWindow(const ShellLayout& layout, const PaneRenderInput& input)
 {
-    ImGui::SetNextWindowPos(layout.appPos);
-    ImGui::SetNextWindowSize(layout.appSize);
+    ImGui::SetNextWindowPos(ImVec2{layout.appPos.x, layout.appPos.y});
+    ImGui::SetNextWindowSize(ImVec2{layout.appSize.x, layout.appSize.y});
     ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
     ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
     ImGui::Begin("##app", nullptr,
                  ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings |
                      ImGuiWindowFlags_NoBringToFrontOnFocus);
 
-    drawWindowChrome(layout.appPos, layout.appSize);
+    drawWindowChrome(ImVec2{layout.appPos.x, layout.appPos.y}, ImVec2{layout.appSize.x, layout.appSize.y});
     ImGui::Dummy(ImVec2{0.0f, TitleBarHeight});
 
     applyShortcuts();
@@ -751,7 +714,8 @@ void runTour(const ImVec2& shellPos, const ImVec2& shellSize)
 void drawShell()
 {
     const ImGuiViewport* viewport = ImGui::GetMainViewport();
-    const ShellLayout layout = layoutFor(viewport->WorkPos, viewport->WorkSize);
+    const ShellLayout layout = layoutFor(LayoutPoint{viewport->WorkPos.x, viewport->WorkPos.y},
+                                         LayoutPoint{viewport->WorkSize.x, viewport->WorkSize.y});
 
     // The pointer colour is last frame's: it is computed while the picture
     // draws, and the toolbar's own tools want an input too. One frame of lag
@@ -770,7 +734,7 @@ void drawShell()
     // pointed at rather than leaving the tour aimed at where it used to be.
     g_demo.anchors.clear();
 
-    if (drawPicture(layout.screenPos, layout.screenSize)) {
+    if (drawPicture(ImVec2{layout.screenPos.x, layout.screenPos.y}, ImVec2{layout.screenSize.x, layout.screenSize.y})) {
         g_demo.frameDirty = true;
     }
     notePictureAnchors();
@@ -864,69 +828,6 @@ void restorePreferencesNow()
 /// Everything downstream of the window: the registry, the view, the capture
 /// seams and the pane renderer. Split out of main so that neither runs past
 /// what one screen holds.
-/// The stops, in the order a first visit wants them: what the thing IS, then
-/// the one gesture that matters, then what it produced, then how to change it.
-///
-/// Nothing here counts anything. An earlier draft said "these four
-/// photographs" and "six scopes to choose from", and both are facts about
-/// today's build rather than about the application: the samples are a list in
-/// the page, and the scopes are whatever the registry carries. Text that
-/// counts things goes stale the first time somebody adds one, silently, in a
-/// place nobody thinks to look. Nor does it name the scopes ON SCREEN, which
-/// are whatever the visitor last left there.
-///
-/// The keys come from the BINDINGS rather than from the prose, for the same
-/// reason: they are preferences, and a tour that insisted on D after somebody
-/// rebound it would be teaching a control that no longer exists.
-[[nodiscard]] std::vector<TourStep> demoTourSteps(const ShortcutResolver& shortcuts)
-{
-    const std::string drawKey = shortcutLabel(shortcuts.bindings().drawRegion);
-    const std::string pinKey = shortcutLabel(shortcuts.bindings().pinColor);
-
-    return {
-        TourStep{"picture", "SideScopes reads your screen",
-                 "On a desktop it sits above your editor and watches part of the screen while you work. "
-                 "Here, this picture is the screen.",
-                 /*halo=*/0.0f},
-        TourStep{"region", "You choose what it measures",
-                 "Only the pixels inside the region reach the scopes. Drag the striped band to move it, or a dot "
-                 "on its edge to resize. The x in the corner clears it.",
-                 // Clear of what the region already wears outside itself: a
-                 // twelve-point band, and a close badge beyond that again.
-                 /*halo=*/26.0f},
-        TourStep{"scopes", "The scopes follow the region",
-                 "Each one shows those same pixels a different way, and they all redraw as you move it. These are "
-                 "the engines the desktop application runs, not a simpler stand-in.",
-                 // Snug: the toolbar sits directly above the panes and the
-                 // status bar directly below, and a standoff crosses both.
-                 /*halo=*/3.0f},
-        TourStep{"chooser", "Choose which scopes to show",
-                 "Vectorscopes, waveforms, parades and histograms, in any combination. Each has a letter key of "
-                 "its own, and holding Shift adds one alongside the others instead of replacing them.",
-                 /*halo=*/4.0f},
-        TourStep{"tools", "Draw a region of your own",
-                 "The pencil starts a new one: drag across the picture to place it, or press " + drawKey +
-                     ". The icon beside it clears the region.",
-                 /*halo=*/4.0f},
-        TourStep{"pin", "Pin a colour to compare against",
-                 "The dropper keeps the colour under the pointer, so you can hold it against another part of the "
-                 "picture. Press " +
-                     pinKey + ", and hold Shift while clicking to pin several.",
-                 /*halo=*/4.0f},
-        TourStep{"adjust", "Watch a scope answer",
-                 "Move any of these and the scopes redraw as you go. Exposure and contrast walk the waveform up and "
-                 "down, warmth carries the vectorscope's cloud off centre, and saturation pushes it outward. This is "
-                 "what the instruments are for.",
-                 // Above the canvas entirely, like the strip below.
-                 /*halo=*/0.0f},
-        TourStep{"strip", "Try it on your own pictures",
-                 "The strip above swaps between the samples, and the + takes a picture from your computer. It "
-                 "never leaves the browser: there is no code here that could send it anywhere.",
-                 // Above the canvas entirely, so nothing here is left bright;
-                 // the page lights the button itself.
-                 /*halo=*/0.0f},
-    };
-}
 
 void buildScopes()
 {
@@ -1110,30 +1011,6 @@ EMSCRIPTEN_KEEPALIVE int demoTourAtAnchor(const char* id)
     const TourStep* step = g_demo.tour->current();
 
     return step != nullptr && id != nullptr && step->anchor == id ? 1 : 0;
-}
-
-/// Shows one scope, replacing whatever is on screen. Ids are module ids —
-/// "org.sidescopes.vectorscope" and friends.
-EMSCRIPTEN_KEEPALIVE void demoShowScope(const char* id)
-{
-    using namespace sidescopes;
-    g_demo.view->stack().restore(std::string("[") + id + "]");
-    g_demo.analysis.enabledScopes = g_demo.view->stack().ids();
-    g_demo.frameDirty = true;
-}
-
-/// Adds a scope beside the ones already shown, as Shift and a letter does.
-EMSCRIPTEN_KEEPALIVE void demoAddScope(const char* id)
-{
-    using namespace sidescopes;
-    std::string tokens;
-    for (const std::string& shown : g_demo.view->stack().ids()) {
-        tokens += "[" + shown + "]";
-    }
-    tokens += std::string("[") + id + "]";
-    g_demo.view->stack().restore(tokens);
-    g_demo.analysis.enabledScopes = g_demo.view->stack().ids();
-    g_demo.frameDirty = true;
 }
 
 }  // extern "C"
