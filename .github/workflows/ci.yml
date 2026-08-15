@@ -30,6 +30,12 @@ jobs:
         # lines; -w exits non-zero on any function that exceeds either. tests/
         # is excluded because the Catch2 macros inflate the numbers.
         run: lizard src -C 15 -L 60 -w
+      - name: Check CMake source lists
+        # A source spliced into a target at the wrong indent builds perfectly
+        # and reads as a mistake forever. Only source-file lines are judged,
+        # because a CMake list legitimately indents a keyword's operands under
+        # it - see the script for why a formatter was measured and rejected.
+        run: scripts/cmake-indent.py $(git ls-files 'CMakeLists.txt' '*/CMakeLists.txt')
 
   tidy:
     runs-on: ubuntu-latest

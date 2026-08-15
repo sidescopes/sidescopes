@@ -455,14 +455,14 @@ if(APPLE OR WIN32 OR EMSCRIPTEN)
         # file that fails to compile for the web fails here rather than
         # silently going missing.
         add_executable(sidescopes_demo
+            src/web/band_geometry.cpp
+            src/web/demo_layout.cpp
             src/web/demo_main.cpp
+            src/web/demo_picture.cpp
             src/web/demo_shell.cpp
             src/web/demo_storage.cpp
+            src/web/demo_tour_steps.cpp
             src/web/image_adjust.cpp
-        src/web/band_geometry.cpp
-        src/web/demo_tour_steps.cpp
-        src/web/demo_layout.cpp
-        src/web/demo_picture.cpp
             src/web/region_editor.cpp
             src/platform/web/graphics.cpp
         )
