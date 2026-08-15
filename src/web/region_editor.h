@@ -1,6 +1,7 @@
 #pragma once
 
 #include <optional>
+#include <utility>
 
 #include "imgui.h"
 #include "platform/region_geometry.h"
@@ -116,6 +117,19 @@ private:
     void drawBorder(const Placement& placement, int imageWidth, int imageHeight) const;
     /// The hover-revealed close badge's centre, on the band's outer top
     /// corner at forty-five degrees off the corner handle.
+    /// The region's rectangle on screen, SNAPPED to whole points.
+    ///
+    /// Everything the border draws is built from this - the measured ring, the
+    /// dashes, the band's inner edge and its clip - and the clip has to be on
+    /// whole pixels or its quarters seam. Snapping only the clip left the band
+    /// standing up to half a point clear of the ring, which showed as a
+    /// hairline of picture between the dashes and the stripes. Snapping HERE
+    /// puts all of them on the same number.
+    ///
+    /// The hit tests read it too, so what is pointed at is what is drawn. What
+    /// the region MEASURES is untouched: that is m_rect, in image pixels.
+    [[nodiscard]] std::pair<ImVec2, ImVec2> screenRect(const Placement& placement) const;
+
     [[nodiscard]] static ImVec2 closeCentre(const ImVec2& topLeft, const ImVec2& bottomRight);
     /// @return Whether the badge is offered at all: a region too narrow
     ///         yields the corner to its resize zones instead.

@@ -1,6 +1,7 @@
 #include "web/region_editor.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 
 namespace sidescopes {
@@ -21,6 +22,12 @@ constexpr float CloseRadius = 6.5f;
 constexpr float CloseHitRadius = 11.0f;
 constexpr float CloseCornerInset = 2.0f;
 constexpr float MinimumWidthForClose = 48.0f;
+// Dear ImGui picks a circle's segment count from its radius in ITS units and
+// knows nothing of the device scale, so a 6.5-point disc is tessellated for
+// 6.5 pixels and drawn into thirteen - a visible polygon where AppKit strokes
+// a true oval. Pinned high enough that neither the badge nor a handle shows a
+// facet at any scale a browser hands us; it costs a few vertices.
+constexpr int CircleSegments = 48;
 
 // The border's palette, as the desktop mixes it: neutral greys only, both
 // region kinds. Any hue this close to the sampled pixels would skew the
@@ -125,10 +132,7 @@ RegionEditor::Handles RegionEditor::handlesFor(const ImVec2& topLeft, const ImVe
 
 unsigned RegionEditor::grabAt(const ImVec2& point, const Placement& placement) const
 {
-    const ImVec2 topLeft{placement.origin.x + static_cast<float>(m_rect.x) * placement.scale,
-                         placement.origin.y + static_cast<float>(m_rect.y) * placement.scale};
-    const ImVec2 bottomRight{topLeft.x + static_cast<float>(m_rect.width) * placement.scale,
-                             topLeft.y + static_cast<float>(m_rect.height) * placement.scale};
+    const auto [topLeft, bottomRight] = screenRect(placement);
 
     // platform/region_geometry's answer, which is what both desktop borders
     // resolve through. Reimplementing it here with fixed-size boxes around
@@ -159,6 +163,75 @@ void RegionEditor::applyDrag(const ImVec2& delta, int imageWidth, int imageHeigh
 
 namespace {
 
+/// Holds Dear ImGui's anti-aliasing fringe to ONE DEVICE PIXEL for as long as
+/// it is alive, and puts it back after.
+///
+/// The fringe is measured in Dear ImGui's own units, so on a 2x canvas a
+/// one-point stroke is spread across two device pixels and lands washed out -
+/// which is why the handle rims and the close badge's ring read fainter here
+/// than on the desktop, where AppKit strokes one point into two crisp pixels
+/// at full strength.
+///
+/// Scoped to the region border ON PURPOSE rather than set once for the whole
+/// interface: every other pixel of this demo is drawn by the same Dear ImGui
+/// code the desktop application draws with and matches it already. The border
+/// is the one part the desktop draws with AppKit instead, so it is the one
+/// part with a native rendering to be held against.
+class DeviceFringe
+{
+public:
+    explicit DeviceFringe(ImDrawList* draw)
+        : m_draw(draw),
+          m_previous(draw->_FringeScale)
+    {
+        const float scale = ImGui::GetIO().DisplayFramebufferScale.x;
+        if (scale > 0.0f) {
+            m_draw->_FringeScale = 1.0f / scale;
+        }
+    }
+
+    DeviceFringe(const DeviceFringe&) = delete;
+    DeviceFringe& operator=(const DeviceFringe&) = delete;
+
+    ~DeviceFringe()
+    {
+        m_draw->_FringeScale = m_previous;
+    }
+
+private:
+    ImDrawList* m_draw;
+    float m_previous;
+};
+
+/// The band's four quarters, as CLIP rectangles, with their shared edges
+/// rounded to whole points.
+///
+/// That rounding is not cosmetic. A clip becomes a scissor box, which is
+/// integers, and the backend truncates when it converts - so a boundary on a
+/// fractional coordinate can land INSIDE both of the quarters that share it,
+/// and that row then takes the stripe ink twice. Stripes are light, so it
+/// read as a light line ruled across the band exactly at the region's top
+/// edge, which is where the top quarter meets the two sides.
+///
+/// Rounded first, both quarters are handed the same whole number and the
+/// scissors abut instead of overlapping. Only the CLIP is rounded: the band
+/// and its stripes keep their true geometry, so nothing moves.
+std::array<ImVec4, 4> bandQuarters(const ImVec2& outerTopLeft, const ImVec2& outer, const ImVec2& holeTopLeft,
+                                   const ImVec2& holeBottomRight)
+{
+    const float clipTop = std::round(outerTopLeft.y);
+    const float clipBottom = std::round(outer.y);
+    const float clipLeft = std::round(outerTopLeft.x);
+    const float clipRight = std::round(outer.x);
+    const float holeTop = std::round(holeTopLeft.y);
+    const float holeBottom = std::round(holeBottomRight.y);
+    const float holeLeft = std::round(holeTopLeft.x);
+    const float holeRight = std::round(holeBottomRight.x);
+
+    return {ImVec4{clipLeft, clipTop, clipRight, holeTop}, ImVec4{clipLeft, holeBottom, clipRight, clipBottom},
+            ImVec4{clipLeft, holeTop, holeLeft, holeBottom}, ImVec4{holeRight, holeTop, clipRight, holeBottom}};
+}
+
 /// The band outside the region, with the hazard stripes ruled across it.
 /// Four clipped rectangles, because a ring is not a clip shape.
 void drawBand(ImDrawList* draw, const ImVec2& topLeft, const ImVec2& bottomRight)
@@ -169,25 +242,47 @@ void drawBand(ImDrawList* draw, const ImVec2& topLeft, const ImVec2& bottomRight
     // read as the band bleeding into the measured region.
     const ImVec2 holeTopLeft{topLeft.x - EdgeRing, topLeft.y - EdgeRing};
     const ImVec2 holeBottomRight{bottomRight.x + EdgeRing, bottomRight.y + EdgeRing};
-    const ImVec4 bands[4] = {
-        {outerTopLeft.x, outerTopLeft.y, outer.x, holeTopLeft.y},
-        {outerTopLeft.x, holeBottomRight.y, outer.x, outer.y},
-        {outerTopLeft.x, holeTopLeft.y, holeTopLeft.x, holeBottomRight.y},
-        {holeBottomRight.x, holeTopLeft.y, outer.x, holeBottomRight.y},
-    };
+    const std::array<ImVec4, 4> bands = bandQuarters(outerTopLeft, outer, holeTopLeft, holeBottomRight);
     const float height = outer.y - outerTopLeft.y;
     for (const ImVec4& band : bands) {
         if (band.z <= band.x || band.w <= band.y) {
             continue;
         }
         draw->PushClipRect(ImVec2{band.x, band.y}, ImVec2{band.z, band.w}, true);
-        draw->AddRectFilled(ImVec2{band.x, band.y}, ImVec2{band.z, band.w}, grey(0.1f, 0.45f));
+        // The WHOLE band, every time, and the scissor decides what survives.
+        //
+        // Filling each quarter with its own rectangle put a seam across the
+        // band at the region's top and bottom edges. These are TRANSLUCENT
+        // fills and the canvas is multisampled, so where two of them met on a
+        // fractional pixel row both covered it partly and it was blended
+        // twice - a horizontal line, exactly where two quarters abut.
+        //
+        // A scissor is a hard cut with no coverage to share, so four
+        // identical full-band rectangles tile perfectly where four abutting
+        // ones could not. It is also what the desktop does: one fill, through
+        // one ring-shaped clip.
+        draw->AddRectFilled(outerTopLeft, outer, grey(0.1f, 0.45f));
         // An integer step keeps the diagonal spacing exact, as the desktop's
         // own loop does; a float counter accumulates rounding across a band.
         const float start = outerTopLeft.x - height;
+        // Each stripe runs past both ends of the band, and that overshoot is
+        // the whole fix for the rounded ends: Dear ImGui feathers a thick
+        // line's ends through its anti-aliasing texture, and the ruling
+        // starts a band-height to the left, so the far end of the first
+        // stripes and the near end of the last used to land INSIDE the
+        // visible band. Pushed outside, the scissor cuts a long edge square
+        // and the cap is never drawn where it can be seen.
+        //
+        // The stripe stays a LINE. Drawn as a filled quad instead - which is
+        // what a butt-capped stroke is - it comes out visibly thinner, because
+        // Dear ImGui anti-aliases a fill by insetting the shape and adding a
+        // fringe, so four points of quad render as about two of solid ink,
+        // where the line's textured path lays down all four.
+        constexpr float Overshoot = 8.0f;
         for (int step = 0; start + static_cast<float>(step) * 10.0f < outer.x; ++step) {
             const float x = start + static_cast<float>(step) * 10.0f;
-            draw->AddLine(ImVec2{x, outer.y}, ImVec2{x + height, outerTopLeft.y}, grey(0.9f, 0.45f), 4.0f);
+            draw->AddLine(ImVec2{x - Overshoot, outer.y + Overshoot},
+                          ImVec2{x + height + Overshoot, outerTopLeft.y - Overshoot}, grey(0.9f, 0.45f), 4.0f);
         }
         draw->PopClipRect();
     }
@@ -198,19 +293,40 @@ void drawBand(ImDrawList* draw, const ImVec2& topLeft, const ImVec2& bottomRight
 /// screenshot tools' marching ants, standing still.
 void drawMeasuredEdge(ImDrawList* draw, const ImVec2& topLeft, const ImVec2& bottomRight)
 {
-    draw->AddRect(ImVec2{topLeft.x - EdgeRing, topLeft.y - EdgeRing},
-                  ImVec2{bottomRight.x + EdgeRing, bottomRight.y + EdgeRing}, grey(0.1f, 0.85f), 0.0f, 0,
-                  EdgeRing * 2.0f);
+    // A FILLED ring, exactly as the desktop fills one: the band from the
+    // region out to EdgeRing, with no stroke geometry of its own to disagree
+    // with it.
+    //
+    // It was a stroked AddRect before, and that is not the same shape. A
+    // stroke is centred on its path AND Dear ImGui insets the path half a
+    // pixel, so a two-wide stroke around the ring's outer edge reached a pixel
+    // beyond the ring on the top and left and fell short on the bottom and
+    // right - the doubled dark line, on two sides only, that gave it away.
+    const ImU32 ringInk = grey(0.1f, 0.85f);
+    const ImVec2 outerTopLeft{topLeft.x - EdgeRing, topLeft.y - EdgeRing};
+    const ImVec2 outerBottomRight{bottomRight.x + EdgeRing, bottomRight.y + EdgeRing};
+    draw->AddRectFilled(outerTopLeft, ImVec2{outerBottomRight.x, topLeft.y}, ringInk);
+    draw->AddRectFilled(ImVec2{outerTopLeft.x, bottomRight.y}, outerBottomRight, ringInk);
+    draw->AddRectFilled(ImVec2{outerTopLeft.x, topLeft.y}, ImVec2{topLeft.x, bottomRight.y}, ringInk);
+    draw->AddRectFilled(ImVec2{bottomRight.x, topLeft.y}, ImVec2{outerBottomRight.x, bottomRight.y}, ringInk);
+
+    // The dashes ride the MIDDLE of that ring, which is where the desktop puts
+    // them: it strokes a rectangle inset by half the ring with a pen exactly
+    // the ring wide. Filled rectangles rather than lines, because AddLine
+    // shifts both endpoints half a pixel to land a hairline on a pixel centre
+    // - the same offset already corrected in the close badge's cross - and
+    // half a pixel is half this ring.
     constexpr float Dash = 4.0f;
+    const ImU32 dashInk = grey(0.97f, 0.95f);
     for (float x = topLeft.x; x < bottomRight.x; x += Dash * 2.0f) {
         const float to = std::min(x + Dash, bottomRight.x);
-        draw->AddLine(ImVec2{x, topLeft.y}, ImVec2{to, topLeft.y}, grey(0.97f, 0.95f), EdgeRing);
-        draw->AddLine(ImVec2{x, bottomRight.y}, ImVec2{to, bottomRight.y}, grey(0.97f, 0.95f), EdgeRing);
+        draw->AddRectFilled(ImVec2{x, outerTopLeft.y}, ImVec2{to, topLeft.y}, dashInk);
+        draw->AddRectFilled(ImVec2{x, bottomRight.y}, ImVec2{to, outerBottomRight.y}, dashInk);
     }
     for (float y = topLeft.y; y < bottomRight.y; y += Dash * 2.0f) {
         const float to = std::min(y + Dash, bottomRight.y);
-        draw->AddLine(ImVec2{topLeft.x, y}, ImVec2{topLeft.x, to}, grey(0.97f, 0.95f), EdgeRing);
-        draw->AddLine(ImVec2{bottomRight.x, y}, ImVec2{bottomRight.x, to}, grey(0.97f, 0.95f), EdgeRing);
+        draw->AddRectFilled(ImVec2{outerTopLeft.x, y}, ImVec2{topLeft.x, to}, dashInk);
+        draw->AddRectFilled(ImVec2{bottomRight.x, y}, ImVec2{outerBottomRight.x, to}, dashInk);
     }
 }
 
@@ -224,12 +340,27 @@ bool RegionEditor::takeDismissed()
     return dismissed;
 }
 
+std::pair<ImVec2, ImVec2> RegionEditor::screenRect(const Placement& placement) const
+{
+    const ImVec2 topLeft{std::round(placement.origin.x + static_cast<float>(m_rect.x) * placement.scale),
+                         std::round(placement.origin.y + static_cast<float>(m_rect.y) * placement.scale)};
+
+    return {topLeft, ImVec2{std::round(topLeft.x + static_cast<float>(m_rect.width) * placement.scale),
+                            std::round(topLeft.y + static_cast<float>(m_rect.height) * placement.scale)}};
+}
+
 ImVec2 RegionEditor::closeCentre(const ImVec2& topLeft, const ImVec2& bottomRight)
 {
     // The band's outer top corner, pulled in a touch so the disc mostly
     // rides the band - the desktop's own placement, mirrored for a
     // downward y.
-    return ImVec2{bottomRight.x + BorderPad - CloseCornerInset, topLeft.y - BorderPad + CloseCornerInset + EdgeRing};
+    // Mirrored for a downward y, and EdgeRing mirrors WITH it: on the desktop
+    // the badge sits BorderPad - CloseCornerInset + EdgeRing above the
+    // region's top, and adding EdgeRing here instead of subtracting it put the
+    // badge two points low - which on a thirteen-point disc against a
+    // twelve-point band is the difference between riding the band and sitting
+    // off its corner.
+    return ImVec2{bottomRight.x + BorderPad - CloseCornerInset, topLeft.y - BorderPad + CloseCornerInset - EdgeRing};
 }
 
 bool RegionEditor::closeOffered(const Placement& placement) const
@@ -254,8 +385,8 @@ void RegionEditor::drawCloseBadge(const ImVec2& centre) const
     // A DARK disc where the handles are light, so it reads as an action
     // rather than a grip, with the same bright ring and an x.
     ImDrawList* draw = ImGui::GetWindowDrawList();
-    draw->AddCircleFilled(centre, CloseRadius, grey(0.1f, 0.85f));
-    draw->AddCircle(centre, CloseRadius, grey(0.97f, 0.95f), 0, 1.0f);
+    draw->AddCircleFilled(centre, CloseRadius, grey(0.1f, 0.85f), CircleSegments);
+    draw->AddCircle(centre, CloseRadius, grey(0.97f, 0.95f), CircleSegments, 1.0f);
 
     // The cross goes through the PATH api rather than AddLine, which offsets
     // both its endpoints by half a pixel to make axis-aligned hairlines land
@@ -283,17 +414,15 @@ void RegionEditor::drawCloseBadge(const ImVec2& centre) const
     // stop in square corners, which at this size read as burrs and make the
     // arms look unequal.
     for (const ImVec2& end : tip) {
-        draw->AddCircleFilled(end, CrossThickness * 0.5f, ink);
+        draw->AddCircleFilled(end, CrossThickness * 0.5f, ink, CircleSegments);
     }
 }
 
 void RegionEditor::drawBorder(const Placement& placement, int imageWidth, int imageHeight) const
 {
     ImDrawList* draw = ImGui::GetWindowDrawList();
-    const ImVec2 topLeft{placement.origin.x + static_cast<float>(m_rect.x) * placement.scale,
-                         placement.origin.y + static_cast<float>(m_rect.y) * placement.scale};
-    const ImVec2 bottomRight{topLeft.x + static_cast<float>(m_rect.width) * placement.scale,
-                             topLeft.y + static_cast<float>(m_rect.height) * placement.scale};
+    const DeviceFringe crispWhileDrawing{draw};
+    const auto [topLeft, bottomRight] = screenRect(placement);
 
     // Bounded by the PICTURE, which is what stands in for a display here, so
     // a region pushed into a corner is cut the same way on both axes.
@@ -319,9 +448,9 @@ void RegionEditor::drawBorder(const Placement& placement, int imageWidth, int im
     // reads on a bright sky and on a dark shadow alike.
     const Handles handles = handlesFor(topLeft, bottomRight);
     for (const ImVec2& point : handles.point) {
-        draw->AddCircleFilled(point, HandleRadius, grey(0.78f, 1.0f));
-        draw->AddCircle(point, HandleRadius, grey(0.1f, 0.7f), 0, 2.0f);
-        draw->AddCircle(point, HandleRadius, grey(0.97f, 0.95f), 0, 1.0f);
+        draw->AddCircleFilled(point, HandleRadius, grey(0.78f, 1.0f), CircleSegments);
+        draw->AddCircle(point, HandleRadius, grey(0.1f, 0.7f), CircleSegments, 2.0f);
+        draw->AddCircle(point, HandleRadius, grey(0.97f, 0.95f), CircleSegments, 1.0f);
     }
 
     // Last, as the desktop draws it last: the badge sits ON the band and a
@@ -494,10 +623,7 @@ bool RegionEditor::updateClose(const Placement& placement)
     if (!closeVisible(placement)) {
         return false;
     }
-    const ImVec2 topLeft{placement.origin.x + static_cast<float>(m_rect.x) * placement.scale,
-                         placement.origin.y + static_cast<float>(m_rect.y) * placement.scale};
-    const ImVec2 bottomRight{topLeft.x + static_cast<float>(m_rect.width) * placement.scale,
-                             topLeft.y + static_cast<float>(m_rect.height) * placement.scale};
+    const auto [topLeft, bottomRight] = screenRect(placement);
     const ImVec2 centre = closeCentre(topLeft, bottomRight);
     const ImVec2 mouse = ImGui::GetMousePos();
 
