@@ -152,9 +152,9 @@ struct Demo
     /// The walk-through, and where each control it names landed this frame.
     std::unique_ptr<GuidedTour> tour;
     TourAnchors anchors;
-    /// The one anchor the page owns, because the filmstrip is the document's
-    /// rather than the application's.
-    std::optional<ImVec4> stripAnchor;
+    /// The anchors the PAGE owns, by tour id, because the filmstrip and the
+    /// adjustment controls are the document's rather than the application's.
+    std::map<std::string, ImVec4> pageAnchors;
     /// What the preferences remembered, until the tour exists to be told.
     bool tourSettled = false;
 
@@ -659,7 +659,9 @@ void drawAppWindow(const ShellLayout& layout, const PaneRenderInput& input)
     // either call would frame most of the window instead of two buttons.
     noteControlAnchor("tools", g_demo.panes->regionToolBounds());
     noteControlAnchor("pin", g_demo.panes->pinToolBounds());
-    noteControlAnchor("strip", g_demo.stripAnchor);
+    for (const auto& [id, bounds] : g_demo.pageAnchors) {
+        g_demo.anchors.note(id, ImVec2{bounds.x, bounds.y}, ImVec2{bounds.z, bounds.w});
+    }
     // Only over the application. Right-clicking the picture is the
     // workspace's business on a desktop - there it would raise the editor's
     // menu, not this one - so it raises nothing here.
@@ -911,6 +913,12 @@ void restorePreferencesNow()
                  "picture. Press " +
                      pinKey + ", and hold Shift while clicking to pin several.",
                  /*halo=*/4.0f},
+        TourStep{"adjust", "Watch a scope answer",
+                 "Move any of these and the scopes redraw as you go. Exposure and contrast walk the waveform up and "
+                 "down, warmth carries the vectorscope's cloud off centre, and saturation pushes it outward. This is "
+                 "what the instruments are for.",
+                 // Above the canvas entirely, like the strip below.
+                 /*halo=*/0.0f},
         TourStep{"strip", "Try it on your own pictures",
                  "The strip above swaps between the samples, and the + takes a picture from your computer. It "
                  "never leaves the browser: there is no code here that could send it anywhere.",
@@ -1077,28 +1085,31 @@ EMSCRIPTEN_KEEPALIVE void demoStartTour()
     g_demo.tour->start();
 }
 
-/// Where the filmstrip's "add a picture" button sits, in points relative to
-/// the canvas's top-left. The page has to tell us: the strip is part of the
-/// document rather than of the application, so it is the one control the
-/// walk-through names that this side cannot measure.
+/// Where a control that belongs to the PAGE sits, in points relative to the
+/// canvas's top-left. The document has to tell us, because the filmstrip and
+/// the adjustment controls are part of it rather than of the application, and
+/// they are the stops the walk-through names that this side cannot measure.
 ///
-/// Its y is NEGATIVE - the strip is above the canvas - which is exactly what
+/// Their y is NEGATIVE - both sit above the canvas - which is exactly what
 /// puts the bubble at the top of the application, pointing the right way. The
-/// page highlights the button itself, since nothing drawn here can reach it.
-EMSCRIPTEN_KEEPALIVE void demoSetStripAnchor(float left, float top, float right, float bottom)
+/// page highlights the control itself, since nothing drawn here can reach it.
+EMSCRIPTEN_KEEPALIVE void demoSetPageAnchor(const char* id, float left, float top, float right, float bottom)
 {
     using namespace sidescopes;
-    g_demo.stripAnchor = ImVec4{left, top, right, bottom};
+    if (id == nullptr) {
+        return;
+    }
+    g_demo.pageAnchors[id] = ImVec4{left, top, right, bottom};
 }
 
-/// Whether the walk-through is on the stop that names the filmstrip, so the
-/// page can light up the button while it is.
-EMSCRIPTEN_KEEPALIVE int demoTourAtStrip()
+/// Whether the walk-through is on the stop that names @p id, so the page can
+/// light up its own control while it is.
+EMSCRIPTEN_KEEPALIVE int demoTourAtAnchor(const char* id)
 {
     using namespace sidescopes;
     const TourStep* step = g_demo.tour->current();
 
-    return step != nullptr && step->anchor == "strip" ? 1 : 0;
+    return step != nullptr && id != nullptr && step->anchor == id ? 1 : 0;
 }
 
 /// Shows one scope, replacing whatever is on screen. Ids are module ids —

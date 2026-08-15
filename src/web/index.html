@@ -49,18 +49,22 @@
   .add { display:flex; align-items:center; justify-content:center; width:92px; height:62px;
          color:#8a827e; font-size:1.5rem; background:#1c1a19 }
   .strip button:hover .add { color:#8ea2ff }
-  /* The walk-through's spotlight, for the one control it names that lives in
+  /* The walk-through's spotlight, for the two controls it names that live in
      the document rather than in the application. The overlay is drawn inside
-     the canvas and cannot reach up here, so the page lights this itself while
-     that stop is showing.
+     the canvas and cannot reach up here, so the page lights these itself while
+     their stop is showing.
      Built to match what the overlay draws around an icon, since a visitor
      sees the two a moment apart: the page's own dark for the standoff, then
      the warm ring transient indicators wear here, then a soft edge outside it
-     standing in for the veil. The button's own border is left ALONE, exactly
+     standing in for the veil. The element's own border is left ALONE, exactly
      as the overlay leaves the controls it points at. */
-  .strip button.spotlight {
+  .spotlight {
     box-shadow:0 0 0 3px #141312, 0 0 0 4.5px rgba(255,214,140,.95), 0 0 0 6px rgba(20,18,17,.6);
   }
+  /* The adjustment block is a grid of rows rather than one button, so its
+     ring needs room to stand off the sliders it encloses without the outermost
+     one clipping against the credit line above. */
+  .edit.spotlight { border-radius:6px; padding:.4rem .5rem; margin:-.4rem -.5rem .1rem }
 
   /* A FIXED height, and no wrapping. A credit line of a different length
      would otherwise reflow this row, change its height, and resize the
@@ -311,23 +315,27 @@ addButton.addEventListener('click', () => document.getElementById('file').click(
 window.addEventListener('focus', returnFocus);
 strip.appendChild(addButton);
 
-// The filmstrip belongs to the document, not to the application, so the two
-// have to meet in the middle for the walk-through's last stop: the page says
-// where the + button is, in points relative to the canvas, and the
-// application says when it is talking about it. Its top is NEGATIVE - the
-// strip sits above the canvas - which is what puts the bubble at the top of
-// the application, pointing the right way.
+// The filmstrip and the adjustment controls belong to the document, not to
+// the application, so the two sides have to meet in the middle for the two
+// stops of the walk-through that name them: the page says where its control
+// is, in points relative to the canvas, and the application says when it is
+// talking about it. Their tops are NEGATIVE - both sit above the canvas -
+// which is what puts the bubble at the top of the application, pointing the
+// right way.
 const canvasElement = document.getElementById('canvas');
-function syncStripAnchor() {
-  const strip = addButton.getBoundingClientRect();
+const pageAnchors = [['strip', addButton], ['adjust', document.getElementById('edit')]];
+function syncPageAnchors() {
   const canvas = canvasElement.getBoundingClientRect();
-  mod.ccall('demoSetStripAnchor', null, ['number', 'number', 'number', 'number'],
-            [strip.left - canvas.left, strip.top - canvas.top,
-             strip.right - canvas.left, strip.bottom - canvas.top]);
-  addButton.classList.toggle('spotlight', mod.ccall('demoTourAtStrip', 'number', [], []) === 1);
-  requestAnimationFrame(syncStripAnchor);
+  for (const [id, element] of pageAnchors) {
+    const box = element.getBoundingClientRect();
+    mod.ccall('demoSetPageAnchor', null, ['string', 'number', 'number', 'number', 'number'],
+              [id, box.left - canvas.left, box.top - canvas.top,
+               box.right - canvas.left, box.bottom - canvas.top]);
+    element.classList.toggle('spotlight', mod.ccall('demoTourAtAnchor', 'number', ['string'], [id]) === 1);
+  }
+  requestAnimationFrame(syncPageAnchors);
 }
-requestAnimationFrame(syncStripAnchor);
+requestAnimationFrame(syncPageAnchors);
 
 document.getElementById('file').addEventListener('change', async (event) => {
   const file = event.target.files && event.target.files[0];

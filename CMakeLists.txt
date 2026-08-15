@@ -490,7 +490,7 @@ if(APPLE OR WIN32 OR EMSCRIPTEN)
             -sMAX_WEBGL_VERSION=2
             -sMIN_WEBGL_VERSION=2
             -sALLOW_MEMORY_GROWTH=1
-            "-sEXPORTED_FUNCTIONS=[_main,_demoFrameBuffer,_demoFrameReady,_demoShowScope,_demoAddScope,_demoStartTour,_demoSetStripAnchor,_demoTourAtStrip,_demoSetAdjustments,_malloc,_free]"
+            "-sEXPORTED_FUNCTIONS=[_main,_demoFrameBuffer,_demoFrameReady,_demoShowScope,_demoAddScope,_demoStartTour,_demoSetPageAnchor,_demoTourAtAnchor,_demoSetAdjustments,_malloc,_free]"
             "-sEXPORTED_RUNTIME_METHODS=[ccall,cwrap,HEAPU8]"
             -sMODULARIZE=1
             -sEXPORT_NAME=SideScopesDemo
