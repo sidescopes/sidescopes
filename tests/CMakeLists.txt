@@ -65,12 +65,15 @@ add_executable(sidescopes_tests
     test_shortcut_resolver.cpp
     test_guided_tour.cpp
     test_image_adjust.cpp
-    # The unit under test is the browser demo's, and it is the only src/web
-    # file named by a target other than the demo itself. It can be: it touches
-    # neither Dear ImGui nor Emscripten, so it compiles anywhere, and the
+    test_band_geometry.cpp
+    # The units under test are the browser demo's, and the only src/web files
+    # named by a target other than the demo itself. They can be: they touch
+    # neither Dear ImGui nor Emscripten, so they compile anywhere, and the
     # alternative is arithmetic that decides what every scope in the demo
-    # shows going untested because of where its file lives.
+    # shows - and whether its region border draws without seams - going
+    # untested because of where the file lives.
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/web/image_adjust.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/web/band_geometry.cpp
     test_region_geometry.cpp
     test_icons.cpp
     test_focus_resolution.cpp

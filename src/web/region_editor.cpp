@@ -4,6 +4,8 @@
 #include <array>
 #include <cmath>
 
+#include "web/band_geometry.h"
+
 namespace sidescopes {
 namespace {
 
@@ -203,35 +205,6 @@ private:
     float m_previous;
 };
 
-/// The band's four quarters, as CLIP rectangles, with their shared edges
-/// rounded to whole points.
-///
-/// That rounding is not cosmetic. A clip becomes a scissor box, which is
-/// integers, and the backend truncates when it converts - so a boundary on a
-/// fractional coordinate can land INSIDE both of the quarters that share it,
-/// and that row then takes the stripe ink twice. Stripes are light, so it
-/// read as a light line ruled across the band exactly at the region's top
-/// edge, which is where the top quarter meets the two sides.
-///
-/// Rounded first, both quarters are handed the same whole number and the
-/// scissors abut instead of overlapping. Only the CLIP is rounded: the band
-/// and its stripes keep their true geometry, so nothing moves.
-std::array<ImVec4, 4> bandQuarters(const ImVec2& outerTopLeft, const ImVec2& outer, const ImVec2& holeTopLeft,
-                                   const ImVec2& holeBottomRight)
-{
-    const float clipTop = std::round(outerTopLeft.y);
-    const float clipBottom = std::round(outer.y);
-    const float clipLeft = std::round(outerTopLeft.x);
-    const float clipRight = std::round(outer.x);
-    const float holeTop = std::round(holeTopLeft.y);
-    const float holeBottom = std::round(holeBottomRight.y);
-    const float holeLeft = std::round(holeTopLeft.x);
-    const float holeRight = std::round(holeBottomRight.x);
-
-    return {ImVec4{clipLeft, clipTop, clipRight, holeTop}, ImVec4{clipLeft, holeBottom, clipRight, clipBottom},
-            ImVec4{clipLeft, holeTop, holeLeft, holeBottom}, ImVec4{holeRight, holeTop, clipRight, holeBottom}};
-}
-
 /// The band outside the region, with the hazard stripes ruled across it.
 /// Four clipped rectangles, because a ring is not a clip shape.
 void drawBand(ImDrawList* draw, const ImVec2& topLeft, const ImVec2& bottomRight)
@@ -242,13 +215,18 @@ void drawBand(ImDrawList* draw, const ImVec2& topLeft, const ImVec2& bottomRight
     // read as the band bleeding into the measured region.
     const ImVec2 holeTopLeft{topLeft.x - EdgeRing, topLeft.y - EdgeRing};
     const ImVec2 holeBottomRight{bottomRight.x + EdgeRing, bottomRight.y + EdgeRing};
-    const std::array<ImVec4, 4> bands = bandQuarters(outerTopLeft, outer, holeTopLeft, holeBottomRight);
+    // The quarters, and their whole-point edges, come from a unit that is
+    // tested: adjacent quarters sharing an edge, no overlap, and covering the
+    // ring exactly are properties this border has broken twice.
+    const std::array<BandRect, 4> bands =
+        bandQuarters(BandRect{outerTopLeft.x, outerTopLeft.y, outer.x, outer.y},
+                     BandRect{holeTopLeft.x, holeTopLeft.y, holeBottomRight.x, holeBottomRight.y});
     const float height = outer.y - outerTopLeft.y;
-    for (const ImVec4& band : bands) {
-        if (band.z <= band.x || band.w <= band.y) {
+    for (const BandRect& band : bands) {
+        if (band.empty()) {
             continue;
         }
-        draw->PushClipRect(ImVec2{band.x, band.y}, ImVec2{band.z, band.w}, true);
+        draw->PushClipRect(ImVec2{band.left, band.top}, ImVec2{band.right, band.bottom}, true);
         // The WHOLE band, every time, and the scissor decides what survives.
         //
         // Filling each quarter with its own rectangle put a seam across the

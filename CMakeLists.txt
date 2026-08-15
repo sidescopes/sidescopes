@@ -459,6 +459,7 @@ if(APPLE OR WIN32 OR EMSCRIPTEN)
             src/web/demo_shell.cpp
             src/web/demo_storage.cpp
             src/web/image_adjust.cpp
+        src/web/band_geometry.cpp
             src/web/region_editor.cpp
             src/platform/web/graphics.cpp
         )
