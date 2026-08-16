@@ -49,6 +49,7 @@ Preferences savedSession()
     saved.scopeStack = testing::idTokens("WH");
     saved.graticuleStrength = 0.5f;
     saved.vectorscopeZoom = 2;
+    saved.showCursorMarkers = false;
     saved.layoutOrientation = 2;
     saved.layoutWeights["org.sidescopes.waveform"] = 2.0;
     saved.shortcuts.drawRegion = "G";
@@ -75,6 +76,7 @@ TEST_CASE("A saved session round-trips through the live objects")
     CHECK(written.scopeStack == saved.scopeStack);
     CHECK(written.graticuleStrength == saved.graticuleStrength);
     CHECK(written.vectorscopeZoom == saved.vectorscopeZoom);
+    CHECK(written.showCursorMarkers == saved.showCursorMarkers);
     CHECK(written.layoutOrientation == saved.layoutOrientation);
     CHECK(written.layoutWeights == saved.layoutWeights);
     CHECK(written.shortcuts.drawRegion == saved.shortcuts.drawRegion);

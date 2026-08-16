@@ -43,6 +43,7 @@ TEST_CASE("Preferences round-trip through a file")
     saved.scopeParams[VectorscopeId]["smoothing_ms"] = 60.0;
     saved.scopeParams[VectorscopeId]["gamma"] = 0.9;
     saved.vectorscopeZoom = 2;
+    saved.showCursorMarkers = false;
     saved.tourSettled = 1;
     saved.scopeStack = testing::idTokens("HWV");  // stacking order is part of the setting
     saved.graticuleStrength = 0.5f;
@@ -60,6 +61,7 @@ TEST_CASE("Preferences round-trip through a file")
     CHECK(param(loaded, VectorscopeId, "smoothing_ms") == 60.0);
     CHECK(param(loaded, VectorscopeId, "gamma") == 0.9);
     CHECK(loaded.vectorscopeZoom == 2);
+    CHECK_FALSE(loaded.showCursorMarkers);
     // Writing what you read is the feature. Without this the walk-through
     // would greet a returning visitor all over again, which is the failure
     // the flag exists to prevent.
@@ -78,9 +80,25 @@ TEST_CASE("Preferences default when the file is missing")
     CHECK(param(loaded, VectorscopeId, "gain") == 3.0);
     CHECK(param(loaded, WaveformId, "gain") == 0.05);
     CHECK(loaded.graticuleStrength == 1.0f);
+    CHECK(loaded.showCursorMarkers);
     CHECK(loaded.quality == "standard");
     CHECK(loaded.windowWidth == 340);
     CHECK(loaded.windowHeight == 500);
+}
+
+TEST_CASE("Pointer marker visibility accepts only explicit boolean values")
+{
+    const TempFile hidden("markers-hidden.conf");
+    hidden.write("show_cursor_markers=0\n");
+    CHECK_FALSE(loadPreferences(hidden.path()).showCursorMarkers);
+
+    const TempFile visible("markers-visible.conf");
+    visible.write("show_cursor_markers=1\n");
+    CHECK(loadPreferences(visible.path()).showCursorMarkers);
+
+    const TempFile invalid("markers-invalid.conf");
+    invalid.write("show_cursor_markers=false\n");
+    CHECK(loadPreferences(invalid.path()).showCursorMarkers);
 }
 
 TEST_CASE("Preferences read a legacy per-scope gain")

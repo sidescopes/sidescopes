@@ -77,6 +77,11 @@ public:
     [[nodiscard]] int zoom() const;
     void setZoom(int level);
 
+    /// Whether the live color under the pointer is marked on compatible
+    /// scopes. The numeric readout and pinned references are independent.
+    [[nodiscard]] bool cursorMarkersVisible() const;
+    void setCursorMarkersVisible(bool visible);
+
 private:
     // Before the stack, which reads it as it seats a scope.
     ScopeOrder m_order;
@@ -85,6 +90,7 @@ private:
     TraceParams m_traces;
     float m_graticuleStrength = DefaultGraticuleStrength;
     int m_zoom = 1;
+    bool m_cursorMarkersVisible = true;
 };
 
 }  // namespace sidescopes

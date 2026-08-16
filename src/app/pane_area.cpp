@@ -435,7 +435,9 @@ void PaneArea::drawScopeById(std::string_view id, Pass& pass)
         const ScopeInstance* instance = projectionFor(id);
         if (instance != nullptr) {
             drawHistogram(textureForId(id), pass.input.regionSelected, outlineFor(id), *instance, histogramStyle(),
-                          graticuleStyle(DefaultLineWidth), pass.input.vectorscopeColor, m_histogramScratch);
+                          graticuleStyle(DefaultLineWidth),
+                          m_view.cursorMarkersVisible() ? pass.input.vectorscopeColor : std::nullopt,
+                          m_histogramScratch);
         }
     } else if (id == ColorPickerScopeId) {
         drawColorPicker(pass.input.readoutColor, m_pins, pass.input.monospaceFont);
@@ -470,7 +472,7 @@ void PaneArea::drawVectorscopePane(Pass& pass)
         for (const FloatColor& pinned : m_pins.colors()) {
             drawMarkers(scope, instance->markers(toSsColor(pinned)), PinnedPointColor);
         }
-        if (pass.input.vectorscopeColor) {
+        if (m_view.cursorMarkersVisible() && pass.input.vectorscopeColor) {
             drawMarkers(scope, instance->markers(toSsColor(*pass.input.vectorscopeColor)));
         }
     }
@@ -503,7 +505,7 @@ void PaneArea::drawWaveformPane(std::string_view id, Pass& pass)
     const ScopeInstance* instance = projectionFor(id);
     if (instance != nullptr) {
         drawGraticule(scope, instance->graticule(), graticuleStyle(DefaultLineWidth));
-        if (pass.input.waveformColor) {
+        if (m_view.cursorMarkersVisible() && pass.input.waveformColor) {
             drawMarkers(scope, instance->markers(toSsColor(*pass.input.waveformColor)));
         }
     }

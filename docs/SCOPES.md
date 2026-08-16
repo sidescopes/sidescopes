@@ -177,8 +177,14 @@ chroma position in Vectorscope, channel or luma level in Waveform, Luma
 Waveform, and RGB Parade, and bin in Histogram. Markers work with or without
 an analysis region.
 
+![The same live pointer sample marked on Vectorscope and Waveform.](https://media.sidescopes.org/shots/markers-live.png)
+
 Pinned colors appear in Vectorscope and Color Picker. Pins persist
 between sessions and can be selected as comparison references.
+
+To hide the live pointer markers, quit SideScopes and set
+`show_cursor_markers=0` in `preferences.conf`. The default is `1`. This does
+not hide the status-bar RGB readout or pinned markers.
 
 ## Trace controls
 

@@ -60,6 +60,7 @@ void restorePreferences(const Preferences& saved, ScopeView& view, PinBoard& pin
     view.stack().restore(saved.scopeStack);
     view.setGraticuleStrength(saved.graticuleStrength);
     view.setZoom(saved.vectorscopeZoom);
+    view.setCursorMarkersVisible(saved.showCursorMarkers);
     view.layout().setOrientation(orientationFromInt(saved.layoutOrientation));
     view.layout().setWeights(saved.layoutWeights);
     // The intensity control is derived from each trace's saved gain, which is
@@ -94,6 +95,7 @@ Preferences capturePreferences(const ScopeView& view, const PinBoard& pins, cons
     saved.scopeOrder = view.order().tokens();
     saved.graticuleStrength = view.graticuleStrength();
     saved.vectorscopeZoom = view.zoom();
+    saved.showCursorMarkers = view.cursorMarkersVisible();
     saved.layoutOrientation = orientationToInt(view.layout().orientation());
     saved.layoutWeights = view.layout().weightsSnapshot();
     saved.shortcuts = shortcuts.bindings();

@@ -3,6 +3,7 @@
 #define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
 
+#include <algorithm>
 #include <cstdio>
 #include <optional>
 #include <string>
@@ -37,34 +38,32 @@ void drawReadoutChannels(const FloatColor& color, float start, const ReadoutColu
     }
 }
 
-// Draws the swatch inwards from the right corner, preceded by the channel
-// readout when the room left by taken - the row's used width so far - allows
-// it.
+// Draws one reading in its natural order: the sampled color, then its three
+// channel values. The whole group keeps the same trailing inset as the rest of
+// the interface rather than using the window edge as the swatch's frame.
 void drawCursorReadout(float taken, const std::optional<FloatColor>& color)
 {
-    // The colour under the cursor, laid out inwards from its corner: the
-    // swatch first, then a named percentage per channel in fixed columns, so
-    // no digit coming or going moves anything. The swatch outranks the numbers
-    // when the strip runs short, and both give way to whatever already stands
-    // on the row.
+    // A square as tall as the type's visible line box looked taller than the
+    // text because the button paints its own border. Pulling it in one pixel
+    // per side and centering it inside that line box makes the swatch and RGB
+    // values read as one row at every UI scale.
     if (!color) {
         return;
     }
     const FloatColor& live = *color;
-    const float swatch = ImGui::GetTextLineHeight();
-    const float swatchStart = ImGui::GetWindowContentRegionMax().x - swatch;
-    if (swatchStart < taken + 8.0f) {
+    const ReadoutColumns columns = measureReadoutColumns();
+    const float lineHeight = ImGui::GetTextLineHeight();
+    const float swatch = std::max(1.0f, lineHeight - 2.0f);
+    const float channelsStart = ImGui::GetWindowContentRegionMax().x - RowSeparation - columns.width;
+    const float swatchStart = channelsStart - RowSeparation - swatch;
+    if (swatchStart < taken + RowSeparation) {
         return;
     }
-    const ReadoutColumns columns = measureReadoutColumns();
-    const float channelsStart = swatchStart - 6.0f - columns.width;
-    if (channelsStart >= taken + 8.0f) {
-        drawReadoutChannels(live, channelsStart, columns);
-    }
     ImGui::SameLine(swatchStart);
-    ImGui::SetCursorPosY(ImGui::GetCursorPosY() + rowTextDrop());
+    ImGui::SetCursorPosY(ImGui::GetCursorPosY() + rowTextDrop() + (lineHeight - swatch) / 2.0f);
     ImGui::ColorButton("##cursor-color", ImVec4(live.r / 255.0f, live.g / 255.0f, live.b / 255.0f, 1.0f),
                        ImGuiColorEditFlags_NoTooltip | ImGuiColorEditFlags_NoDragDrop, ImVec2(swatch, swatch));
+    drawReadoutChannels(live, channelsStart, columns);
 }
 
 }  // namespace

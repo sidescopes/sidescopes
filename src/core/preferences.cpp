@@ -53,6 +53,17 @@ void readFloat(const std::map<std::string, std::string, std::less<>>& values, co
     }
 }
 
+void readBool(const std::map<std::string, std::string, std::less<>>& values, const char* key, bool& out)
+{
+    if (const auto found = values.find(key); found != values.end()) {
+        if (found->second == "0") {
+            out = false;
+        } else if (found->second == "1") {
+            out = true;
+        }
+    }
+}
+
 // Reads a legacy numeric key straight into a scope parameter slot, leaving the
 // slot's default when the key is absent.
 void readLegacyDouble(const std::map<std::string, std::string, std::less<>>& values, const char* key,
@@ -557,6 +568,7 @@ Preferences loadPreferences(const std::filesystem::path& file)
 
     readFloat(values, "graticule_strength", preferences.graticuleStrength);
     readInt(values, "vectorscope_zoom", preferences.vectorscopeZoom);
+    readBool(values, "show_cursor_markers", preferences.showCursorMarkers);
     readInt(values, "tour_settled", preferences.tourSettled);
     if (preferences.vectorscopeZoom != 2 && preferences.vectorscopeZoom != 4) {
         preferences.vectorscopeZoom = 1;
@@ -611,6 +623,7 @@ bool savePreferences(const Preferences& preferences, const std::filesystem::path
         << "scope_order=" << preferences.scopeOrder << '\n'
         << "graticule_strength=" << preferences.graticuleStrength << '\n'
         << "vectorscope_zoom=" << preferences.vectorscopeZoom << '\n'
+        << "show_cursor_markers=" << (preferences.showCursorMarkers ? 1 : 0) << '\n'
         << "tour_settled=" << preferences.tourSettled << '\n'
         << "ui_scale_factor=" << preferences.uiScaleFactor << '\n'
         << "quality=" << preferences.quality << '\n'

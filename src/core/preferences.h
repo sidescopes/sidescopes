@@ -115,6 +115,9 @@ struct Preferences
     float graticuleStrength = 1.0f;
     /// Magnify-view factor for the vectorscope: 1, 2, or 4.
     int vectorscopeZoom = 1;
+    /// Whether compatible scopes mark the live color under the pointer. The
+    /// status-bar readout and pinned markers remain visible when this is off.
+    bool showCursorMarkers = true;
     /// Whether the walk-through has been seen through or waved away. Not
     /// WHICH step was reached: resuming a tour half way through is more
     /// confusing than starting it again, so only the settling is kept.

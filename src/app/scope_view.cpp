@@ -94,4 +94,14 @@ void ScopeView::setZoom(int level)
     m_zoom = level;
 }
 
+bool ScopeView::cursorMarkersVisible() const
+{
+    return m_cursorMarkersVisible;
+}
+
+void ScopeView::setCursorMarkersVisible(bool visible)
+{
+    m_cursorMarkersVisible = visible;
+}
+
 }  // namespace sidescopes
