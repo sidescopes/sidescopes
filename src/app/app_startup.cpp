@@ -16,6 +16,7 @@
 #include "app/interface_style.h"
 #include "app/scope_view.h"
 #include "app/ui_scaling.h"
+#include "app/window_place.h"
 #include "core/environment.h"
 #include "core/page_allocator.h"
 #include "core/scopes/histogram.h"
@@ -104,12 +105,22 @@ MonitorWorkArea workAreaOf(GLFWmonitor* monitor)
 
 void restoreWindowPlacement(GLFWwindow* window, const Preferences& startup)
 {
+    GLFWmonitor* display = nullptr;
     if (startup.windowX >= 0) {
         glfwSetWindowPos(window, startup.windowX, startup.windowY);
         glfwSetWindowSize(window, startup.windowWidth, startup.windowHeight);
+        display = monitorUnderWindow(window);
+    } else {
+        display = glfwGetPrimaryMonitor();
+        if (display != nullptr) {
+            const MonitorWorkArea work = workAreaOf(display);
+            const WindowPlacement initial = starterWindowPlacement(
+                WindowPlacement{work.x, work.y, work.width, work.height}, startup.windowWidth, startup.windowHeight);
+            glfwSetWindowSize(window, initial.width, initial.height);
+            glfwSetWindowPos(window, initial.x, initial.y);
+        }
     }
 
-    GLFWmonitor* display = monitorUnderWindow(window);
     if (display == nullptr) {
         return;
     }

@@ -8,6 +8,8 @@
 namespace sidescopes {
 namespace {
 
+constexpr double StarterSquareHeightPercent = 34.0;
+
 // A 2560x1440 display whose top-left sits 100 points right and 50 down of the
 // desktop origin, delivered at its own pixel extents.
 DisplayGeometry secondDisplay()
@@ -23,9 +25,30 @@ DisplayGeometry secondDisplay()
 
 }  // namespace
 
+TEST_CASE("The first-run application window is compact and left-aligned")
+{
+    const WindowPlacement placement = starterWindowPlacement(WindowPlacement{100, -50, 1600, 900}, 340, 500);
+
+    CHECK(placement.x == 132);
+    CHECK(placement.y == 150);
+    CHECK(placement.width == 340);
+    CHECK(placement.height == 500);
+}
+
+TEST_CASE("The first-run application window fits a smaller work area")
+{
+    const WindowPlacement placement = starterWindowPlacement(WindowPlacement{-800, 0, 300, 420}, 340, 500);
+
+    CHECK(placement.x == -800);
+    CHECK(placement.y == 0);
+    CHECK(placement.width == 300);
+    CHECK(placement.height == 420);
+}
+
 TEST_CASE("The starter region uses the open side of the application window")
 {
     const DisplayGeometry display = secondDisplay();
+    const double squareWidthPercent = StarterSquareHeightPercent * display.heightPoints / display.widthPoints;
 
     SECTION("the application is near the right edge")
     {
@@ -34,8 +57,12 @@ TEST_CASE("The starter region uses the open side of the application window")
         const double appLeft = (window.x - display.originX) / display.widthPoints * 100.0;
 
         CHECK(region.rightPercent <= appLeft - 3.0 + 0.001);
-        CHECK(region.rightPercent - region.leftPercent == Catch::Approx(36.0));
+        CHECK(region.leftPercent == Catch::Approx(50.0 - squareWidthPercent * 0.5));
+        CHECK(region.topPercent == Catch::Approx(33.0));
+        CHECK(region.rightPercent - region.leftPercent == Catch::Approx(squareWidthPercent));
         CHECK(region.bottomPercent - region.topPercent == Catch::Approx(34.0));
+        CHECK((region.rightPercent - region.leftPercent) * display.widthPoints / 100.0 ==
+              Catch::Approx((region.bottomPercent - region.topPercent) * display.heightPoints / 100.0));
     }
 
     SECTION("the application is near the left edge")
@@ -45,8 +72,12 @@ TEST_CASE("The starter region uses the open side of the application window")
         const double appRight = (window.x + window.width - display.originX) / display.widthPoints * 100.0;
 
         CHECK(region.leftPercent >= appRight + 3.0 - 0.001);
-        CHECK(region.rightPercent - region.leftPercent == Catch::Approx(36.0));
+        CHECK(region.leftPercent == Catch::Approx(50.0 - squareWidthPercent * 0.5));
+        CHECK(region.topPercent == Catch::Approx(33.0));
+        CHECK(region.rightPercent - region.leftPercent == Catch::Approx(squareWidthPercent));
         CHECK(region.bottomPercent - region.topPercent == Catch::Approx(34.0));
+        CHECK((region.rightPercent - region.leftPercent) * display.widthPoints / 100.0 ==
+              Catch::Approx((region.bottomPercent - region.topPercent) * display.heightPoints / 100.0));
     }
 }
 
@@ -54,10 +85,43 @@ TEST_CASE("The starter region remains valid without display geometry")
 {
     const RegionOfInterest region = starterGlobalRegion(WindowPlacement{}, DisplayGeometry{});
 
-    CHECK(region.leftPercent == 12.0);
-    CHECK(region.topPercent == 12.0);
-    CHECK(region.rightPercent == 48.0);
-    CHECK(region.bottomPercent == 46.0);
+    CHECK(region.leftPercent == 33.0);
+    CHECK(region.topPercent == 33.0);
+    CHECK(region.rightPercent == 67.0);
+    CHECK(region.bottomPercent == 67.0);
+}
+
+TEST_CASE("The starter region moves away from a saved window in the centre")
+{
+    const DisplayGeometry display = secondDisplay();
+    const WindowPlacement window{1050, 400, 500, 600};
+    const RegionOfInterest region = starterGlobalRegion(window, display);
+    const double windowLeft = (window.x - display.originX) / display.widthPoints * 100.0;
+    const double windowTop = (window.y - display.originY) / display.heightPoints * 100.0;
+    const double windowRight = (window.x + window.width - display.originX) / display.widthPoints * 100.0;
+    const double windowBottom = (window.y + window.height - display.originY) / display.heightPoints * 100.0;
+    const bool separated = region.rightPercent + 3.0 <= windowLeft || region.leftPercent >= windowRight + 3.0 ||
+                           region.bottomPercent + 3.0 <= windowTop || region.topPercent >= windowBottom + 3.0;
+    const double regionWidth = (region.rightPercent - region.leftPercent) * display.widthPoints / 100.0;
+    const double regionHeight = (region.bottomPercent - region.topPercent) * display.heightPoints / 100.0;
+
+    CHECK(separated);
+    CHECK(regionWidth == Catch::Approx(regionHeight));
+    const double centeredLeft = 50.0 - StarterSquareHeightPercent * display.heightPoints / display.widthPoints * 0.5;
+    CHECK(region.leftPercent != Catch::Approx(centeredLeft));
+}
+
+TEST_CASE("The starter region remains square on a portrait display")
+{
+    DisplayGeometry display = secondDisplay();
+    display.widthPoints = 900.0;
+    display.heightPoints = 1600.0;
+    const RegionOfInterest region = starterGlobalRegion(WindowPlacement{120, 300, 200, 500}, display);
+    const double width = (region.rightPercent - region.leftPercent) * display.widthPoints / 100.0;
+    const double height = (region.bottomPercent - region.topPercent) * display.heightPoints / 100.0;
+
+    CHECK(width == Catch::Approx(height));
+    CHECK(width == Catch::Approx(display.widthPoints * 0.36));
 }
 
 TEST_CASE("A window belongs to the display under its centre")

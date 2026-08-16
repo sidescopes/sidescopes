@@ -1,9 +1,12 @@
 # Choosing a region
 
-SideScopes analyzes one rectangular region at a time. At launch, it places a
-moderate global region beside the application window on the same display. This
-is an ordinary region: drag or resize its border, replace it with another
-selection, attach it to a window, or clear it.
+SideScopes analyzes one rectangular region at a time. At launch, a moderate
+square global region appears on the display containing the application. With no
+saved window placement, the compact application window opens at the left of the
+primary display and the region is centered there. The square provides a neutral
+starting area for landscape and portrait content. This is an ordinary region:
+drag or resize its border, replace it with another selection, attach it to a
+window, or clear it.
 
 Opening a region tool dims the desktop and previews the candidate region on the
 scopes before you confirm it.
@@ -19,9 +22,10 @@ Drag a rectangle anywhere on the current display. A global region remains at
 that screen position when windows move beneath it. Use this mode for any fixed
 area of the desktop, including part of an application window.
 
-The launch region is a global region and behaves exactly like one drawn with
-D. It appears on the display containing the SideScopes window and is positioned
-near, rather than over, that window when the available space permits.
+The launch region is a global region and behaves exactly like one drawn with D.
+It is centered on the display containing the SideScopes window when that space
+is clear. If a saved application-window position occupies the center, the
+region moves into nearby open space instead.
 
 ## Select a window (A)
 

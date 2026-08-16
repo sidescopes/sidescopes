@@ -141,10 +141,10 @@ struct Preferences
     /// "standard" or "high". The app resolves it; anything else reads as the
     /// default.
     std::string quality = "standard";
-    int windowX = -1;  ///< Negative lets the system place the window.
+    int windowX = -1;  ///< Negative selects the compact first-run placement.
     int windowY = -1;
-    int windowWidth = 440;
-    int windowHeight = 640;
+    int windowWidth = 340;
+    int windowHeight = 500;
     ShortcutBindings shortcuts;
     /// The pinned reference colors, oldest first, at most @ref MaximumPins.
     /// They serialize as hex, so a color reloads at the 8 bits the picker

@@ -79,8 +79,8 @@ TEST_CASE("Preferences default when the file is missing")
     CHECK(param(loaded, WaveformId, "gain") == 0.05);
     CHECK(loaded.graticuleStrength == 1.0f);
     CHECK(loaded.quality == "standard");
-    CHECK(loaded.windowWidth == 440);
-    CHECK(loaded.windowHeight == 640);
+    CHECK(loaded.windowWidth == 340);
+    CHECK(loaded.windowHeight == 500);
 }
 
 TEST_CASE("Preferences read a legacy per-scope gain")

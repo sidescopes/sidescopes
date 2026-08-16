@@ -20,13 +20,22 @@ struct WindowPlacement
     int height = 0;
 };
 
+/// @return A compact first-run application window at the left of @p workArea,
+///         vertically centred and clamped to the available rectangle. A saved
+///         placement bypasses this; it is only the system-independent policy
+///         used before the user has positioned the window.
+[[nodiscard]] WindowPlacement starterWindowPlacement(const WindowPlacement& workArea, int windowWidth,
+                                                     int windowHeight);
+
 /// @return The display @p window sits on, decided by its centre so a window
 ///         straddling two belongs to whichever shows more of it.
 [[nodiscard]] std::optional<uint32_t> displayUnderWindow(const WindowPlacement& window);
 
-/// A moderate global region placed beside @p window on @p display. The region
-/// is expressed in display percentages, never overlaps the application when a
-/// side has enough room, and stays on this display even when its global desktop
+/// A moderate square global region centred on @p display when that does not
+/// overlap @p window, otherwise moved into nearby open space. Its side is the
+/// shorter physical dimension of the starter rectangle, so it remains square
+/// on landscape and portrait displays even though the region is expressed in
+/// display percentages. It stays on this display when its global desktop
 /// origin is not zero. This is the selection a fresh desktop session starts
 /// with so the scopes have a live subject before any region tool is discovered.
 [[nodiscard]] RegionOfInterest starterGlobalRegion(const WindowPlacement& window, const DisplayGeometry& display);
