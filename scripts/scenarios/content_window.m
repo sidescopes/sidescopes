@@ -603,7 +603,12 @@ static NSWindow* newBackdropWindow(NSWindow* contentWindow, double margin)
                                                      styleMask:NSWindowStyleMaskBorderless
                                                        backing:NSBackingStoreBuffered
                                                          defer:NO];
-    backdrop.backgroundColor = [NSColor colorWithSRGBRed:0.055 green:0.055 blue:0.055 alpha:1.0];
+    // Keep the pixels surrounding multi-window captures indistinguishable from
+    // the website canvas (`--bg: #141312`).
+    backdrop.backgroundColor = [NSColor colorWithSRGBRed:20.0 / 255.0
+                                                       green:19.0 / 255.0
+                                                        blue:18.0 / 255.0
+                                                       alpha:1.0];
     backdrop.opaque = YES;
     backdrop.hasShadow = NO;
     backdrop.ignoresMouseEvents = YES;
