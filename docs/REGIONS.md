@@ -59,7 +59,7 @@ evaluate skin color, or change how the scopes analyze the enclosed pixels.
 A confirmed region has a desktop border labeled with its attached window when
 applicable. The border is interactive:
 
-- drag inside it to move the region;
+- drag the striped band to move the region;
 - drag a corner handle to resize both axes;
 - drag the midpoint of an edge to move that edge;
 - use the close control to clear the region;

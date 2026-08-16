@@ -36,8 +36,8 @@ Escape closes the Settings window first when that window is open; otherwise it
 clears every attached and unattached region. It does not restore a previous
 selection.
 
-On the desktop border, drag inside to move the region, drag a corner to resize
-it, or drag an edge midpoint to move one edge.
+On the desktop border, drag the striped band to move the region, drag a corner
+to resize it, or drag an edge midpoint to move one edge.
 
 ## Color pins
 
