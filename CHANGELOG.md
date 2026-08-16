@@ -4,6 +4,54 @@ All notable changes to this project are documented in this file. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] - 2026-08-17
+
+### Added
+
+- SideScopes Lab can adjust the supplied or locally loaded image while the
+  scopes update. Temperature, tint, saturation, exposure, contrast,
+  highlights, and shadows are applied to one shared image buffer, so the
+  picture on screen and the pixels measured by the scopes stay identical.
+  The controls are an observation aid rather than an emulation of a
+  particular editor.
+- A fresh desktop installation starts with Vectorscope and Waveform, a
+  compact application window at the left of the primary display, and a
+  moderate square global region in the open display area. The region is
+  immediately movable and resizable and is recreated rather than persisted
+  between launches.
+- Live pointer markers on the scopes can be disabled with
+  `show_cursor_markers=0` in `preferences.conf`, independently of the RGB
+  readout and pinned markers.
+
+### Changed
+
+- The browser experience is named SideScopes Lab throughout the source,
+  generated files, documentation, and interface. Its layout now adapts from
+  a side-by-side desktop workspace to a vertical mobile workspace without
+  reducing the image and scope panes to an unusable scale.
+- Face-tracked regions have their own face binding icon and retain the
+  window title as their label. Clicking the face icon stops tracking while
+  preserving the current rectangle as a window-attached region; clicking the
+  resulting pin makes it global.
+- The application and scope documentation now begins with the default global
+  region, separates macOS and Windows application shortcuts, uses the
+  instrument names shown by the application, and explains default shortcuts
+  beside each scope rather than appending unexplained letters to headings.
+
+### Fixed
+
+- The Lab region border now follows the same filled ring, hazard band,
+  handles, and device-pixel stroke geometry as the native border, without
+  doubled seams or asymmetric edges.
+- The region close control remains attached to the border while the region is
+  moved or resized on macOS, Windows, and in the Lab.
+- Face detection on macOS now reads ten-bit screen captures correctly instead
+  of interpreting their packed pixels as eight-bit input.
+- The compact first-run placement survives the transition from a hidden GLFW
+  window to the visible macOS window.
+- The status-bar color swatch is optically centered with the RGB readout and
+  keeps balanced spacing at one-, two-, and three-digit values.
+
 ## [0.6.0] - 2026-08-14
 
 ### Added
