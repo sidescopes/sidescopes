@@ -1,6 +1,6 @@
 # Scopes
 
-SideScopes provides five scopes and a color picker. Any combination can share
+SideScopes provides five scopes, plus Color Picker. Any combination can share
 the window, one pane per instrument. Use the scope selector to choose and order
 them, or use the keyboard shortcuts.
 
@@ -17,12 +17,12 @@ color-managed or signal-compliance decisions.
 ## Vectorscope
 
 <aside class="shortcut-note">
-<strong>Default shortcut:</strong> <kbd>V</kbd> shows the vectorscope by itself.
+<strong>Default shortcut:</strong> <kbd>V</kbd> shows Vectorscope by itself.
 <kbd>Shift+V</kbd> adds it to the current layout, or removes it when another
 instrument remains.
 </aside>
 
-The vectorscope converts each captured RGB sample to two chroma coordinates.
+Vectorscope converts each captured RGB sample to two chroma coordinates.
 Angle around the center corresponds to hue; radial distance corresponds to
 chroma magnitude in this projection. Equal-channel neutrals lie at the center.
 Level and image position are discarded, so light and dark samples with the
@@ -45,17 +45,17 @@ the underlying coordinates.
 
 SideScopes uses one fixed, full-range Rec.709-style RGB-to-Cb/Cr matrix. This
 is most directly interpretable for SDR, sRGB/Rec.709-like rendered output. It
-does not make the vectorscope a color-managed gamut test.
+does not make Vectorscope a color-managed gamut test.
 
-## RGB waveform
+## Waveform
 
 <aside class="shortcut-note">
-<strong>Default shortcut:</strong> <kbd>W</kbd> shows the RGB waveform by itself.
+<strong>Default shortcut:</strong> <kbd>W</kbd> shows Waveform by itself.
 <kbd>Shift+W</kbd> adds it to the current layout, or removes it when another
 instrument remains.
 </aside>
 
-The RGB waveform overlays red, green, and blue channel levels. Its horizontal
+Waveform overlays red, green, and blue channel levels. Its horizontal
 axis follows the selected region from left to right; its vertical axis is
 captured channel code value, normalized from 0 at the bottom to 100 at the top.
 This is a full-range display-code scale, not a legal-range video scale.
@@ -68,22 +68,22 @@ Channel separation is meaningful in context. Over a verified neutral, it can
 show a rendered color bias and the tonal range in which that bias occurs. Over
 a colored subject, the same separation may simply describe the subject.
 
-![RGB waveform showing the red, green, and blue channels overlaid.](https://media.sidescopes.org/shots/waveform-rgb.png)
+![Waveform showing the red, green, and blue channels overlaid.](https://media.sidescopes.org/shots/waveform-rgb.png)
 
 A strong accumulation at 0 or 100 means captured output pixels reached that
 endpoint. It may be consistent with clipping or crushing in the rendered
 output, but does not identify the limiting stage or prove that a RAW file,
 timeline, or source signal has no recoverable detail.
 
-## Luma waveform
+## Luma Waveform
 
 <aside class="shortcut-note">
-<strong>Default shortcut:</strong> <kbd>L</kbd> shows the luma waveform by itself.
+<strong>Default shortcut:</strong> <kbd>L</kbd> shows Luma Waveform by itself.
 <kbd>Shift+L</kbd> adds it to the current layout, or removes it when another
 instrument remains.
 </aside>
 
-The luma waveform retains the waveform's horizontal image position and plots a
+Luma Waveform retains the waveform's horizontal image position and plots a
 single weighted level:
 
 `Y′ ≈ 0.2126 R′ + 0.7152 G′ + 0.0722 B′`
@@ -92,39 +92,39 @@ The calculation uses the encoded captured channel values. Y′ is not physical
 luminance, scene brightness, or a direct exposure measurement. It is useful
 for locating and comparing level distributions in the rendered output.
 
-![Luma waveform showing the tonal structure of a snow-covered forest.](https://media.sidescopes.org/shots/waveform-luma.png)
+![Luma Waveform showing the tonal structure of a snow-covered forest.](https://media.sidescopes.org/shots/waveform-luma.png)
 
 **Plain** draws a neutral trace. **Colored** tints the trace from the captured
 RGB contributions while keeping the same luma coordinate.
 
-## RGB parade
+## RGB Parade
 
 <aside class="shortcut-note">
-<strong>Default shortcut:</strong> <kbd>R</kbd> shows the RGB parade by itself.
+<strong>Default shortcut:</strong> <kbd>R</kbd> shows RGB Parade by itself.
 <kbd>Shift+R</kbd> adds it to the current layout, or removes it when another
 instrument remains.
 </aside>
 
-The RGB parade places the three channel waveforms side by side: red, green,
+RGB Parade places the three channel waveforms side by side: red, green,
 then blue. Each panel maps the full width of the selected region. The image is
 not divided into thirds.
 
-![RGB parade showing the red, green, and blue channel waveforms side by side.](https://media.sidescopes.org/shots/parade-clipping.png)
+![RGB Parade showing the red, green, and blue channel waveforms side by side.](https://media.sidescopes.org/shots/parade-clipping.png)
 
 The separate panels prevent overlapping traces from hiding one another. This
 makes channel shape, level, and endpoint behavior easier to compare. As with
-the overlay waveform, alignment indicates neutrality only for a subject that
+Waveform, alignment indicates neutrality only for a subject that
 is independently expected to be neutral.
 
 ## Histogram
 
 <aside class="shortcut-note">
-<strong>Default shortcut:</strong> <kbd>H</kbd> shows the histogram by itself.
+<strong>Default shortcut:</strong> <kbd>H</kbd> shows Histogram by itself.
 <kbd>Shift+H</kbd> adds it to the current layout, or removes it when another
 instrument remains.
 </aside>
 
-The histogram counts how many sampled red, green, and blue values fall into
+Histogram counts how many sampled red, green, and blue values fall into
 each of 256 bins. Minimum channel values are at the left and maximum values at
 the right. It discards image position.
 
@@ -140,15 +140,15 @@ or no sampled values in an interval. Neither proves a particular processing
 fault: gaps do not by themselves establish visible posterization, and endpoint
 peaks do not identify where limiting occurred.
 
-## Color picker
+## Color Picker
 
 <aside class="shortcut-note">
-<strong>Default shortcut:</strong> <kbd>C</kbd> shows the color picker by itself.
+<strong>Default shortcut:</strong> <kbd>C</kbd> shows Color Picker by itself.
 <kbd>Shift+C</kbd> adds it to the current layout, or removes it when another
 instrument remains.
 </aside>
 
-The color picker places the live sample beside pinned references. It reports
+Color Picker places the live sample beside pinned references. It reports
 captured RGB values and, when a reference is selected, an assumed-sRGB color
 difference.
 
@@ -156,7 +156,7 @@ Click to pin the pixel under the pointer. Drag to pin the average of a
 rectangle, which is generally more repeatable for textured or noisy material.
 Hold Shift to keep the pin tool active for additional samples.
 
-![Color picker showing a live RGB sample and its comparison fields.](https://media.sidescopes.org/shots/color-picker.png)
+![Color Picker showing a live RGB sample and its comparison fields.](https://media.sidescopes.org/shots/color-picker.png)
 
 SideScopes converts the reference and live samples from assumed sRGB to CIELAB
 under D65. It reports CIEDE2000 **ΔE00** and three signed diagnostics:
@@ -173,10 +173,11 @@ colors, sample area, viewing conditions, and task.
 ## Markers and pins
 
 The color under the pointer is marked on every visible compatible scope: its
-chroma position on the vectorscope, channel or luma level on waveforms, and
-bin on the histogram. Markers work with or without an analysis region.
+chroma position in Vectorscope, channel or luma level in Waveform, Luma
+Waveform, and RGB Parade, and bin in Histogram. Markers work with or without
+an analysis region.
 
-Pinned colors appear on the vectorscope and in the color picker. Pins persist
+Pinned colors appear in Vectorscope and Color Picker. Pins persist
 between sessions and can be selected as comparison references.
 
 ## Trace controls
@@ -187,22 +188,22 @@ Right-click elsewhere to open the complete menu.
 **Graticule strength** changes the opacity of grid lines, rings, target boxes,
 and labels. The choices are Faint, Soft, Normal, and Bold.
 
-**Zoom** changes vectorscope magnification between 1x, 2x, and 4x.
+**Zoom** changes Vectorscope magnification between 1x, 2x, and 4x.
 
-**Style** selects Plain or Colored for the luma waveform, and Per Channel or
-Combined for the histogram.
+**Style** selects Plain or Colored for Luma Waveform, and Per Channel or
+Combined for Histogram.
 
 **Quality** sets capture cadence and analysis detail. Standard, the default,
 targets 15 captures per second. High targets 20, retains full detail while a
-region is dragged, and uses finer analysis for vectorscope and histogram panes
+region is dragged, and uses finer analysis for Vectorscope and Histogram panes
 where their size benefits from it. High uses more processing time.
 
 The Settings window opens from the right-click menu, or with Command+comma on
-macOS. The waveform and parade share one set of trace settings because they
+macOS. Waveform and RGB Parade share one set of trace settings because they
 render the same channel measurement in different arrangements.
 
 **Intensity** controls how much each sample contributes before the rendered
-trace saturates. Scroll over a vectorscope or waveform to change it;
+trace saturates. Scroll over Vectorscope or Waveform to change it;
 double-click to restore the default. It changes visibility, not coordinates.
 
 **Sampling stride** samples every Nth pixel, from 1 through 8. A stride of 1
@@ -213,7 +214,7 @@ or highly regular content less exact.
 sample changes, from 0 to 500 milliseconds. It affects the marker, not the
 scope trace.
 
-**Trace gamma**, available for the vectorscope, changes the density response
+**Trace gamma**, available for Vectorscope, changes the density response
 used to display the trace. Lower values reveal sparse populations more
 strongly; higher values preserve greater contrast against the densest areas.
 The range is 0.40 to 1.40.

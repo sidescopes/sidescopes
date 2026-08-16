@@ -9,13 +9,13 @@ actions.
 
 | Key | Action |
 | --- | --- |
-| V | Show the vectorscope |
-| W | Show the RGB waveform |
-| L | Show the luma waveform |
-| R | Show the RGB parade |
-| H | Show the histogram |
-| C | Show the color picker |
-| Z | Cycle vectorscope zoom: 1x, 2x, 4x |
+| V | Show Vectorscope |
+| W | Show Waveform |
+| L | Show Luma Waveform |
+| R | Show RGB Parade |
+| H | Show Histogram |
+| C | Show Color Picker |
+| Z | Cycle Vectorscope zoom: 1x, 2x, 4x |
 
 A scope key shows that instrument by itself. Hold Shift to add it to the
 current layout, or to remove it if already visible. At least one scope remains
@@ -95,7 +95,7 @@ remain available from the platform selector.
 
 ## Mouse
 
-- Scroll over a vectorscope or waveform to change trace intensity;
+- Scroll over Vectorscope or Waveform to change trace intensity;
   double-click to restore its default.
 - Right-click a scope pane for that instrument's options. Right-click elsewhere
   for the complete menu.
