@@ -1,3 +1,4 @@
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <cstdint>
 
@@ -21,6 +22,43 @@ DisplayGeometry secondDisplay()
 }
 
 }  // namespace
+
+TEST_CASE("The starter region uses the open side of the application window")
+{
+    const DisplayGeometry display = secondDisplay();
+
+    SECTION("the application is near the right edge")
+    {
+        const WindowPlacement window{2100, 300, 440, 640};
+        const RegionOfInterest region = starterGlobalRegion(window, display);
+        const double appLeft = (window.x - display.originX) / display.widthPoints * 100.0;
+
+        CHECK(region.rightPercent <= appLeft - 3.0 + 0.001);
+        CHECK(region.rightPercent - region.leftPercent == Catch::Approx(36.0));
+        CHECK(region.bottomPercent - region.topPercent == Catch::Approx(34.0));
+    }
+
+    SECTION("the application is near the left edge")
+    {
+        const WindowPlacement window{150, 300, 440, 640};
+        const RegionOfInterest region = starterGlobalRegion(window, display);
+        const double appRight = (window.x + window.width - display.originX) / display.widthPoints * 100.0;
+
+        CHECK(region.leftPercent >= appRight + 3.0 - 0.001);
+        CHECK(region.rightPercent - region.leftPercent == Catch::Approx(36.0));
+        CHECK(region.bottomPercent - region.topPercent == Catch::Approx(34.0));
+    }
+}
+
+TEST_CASE("The starter region remains valid without display geometry")
+{
+    const RegionOfInterest region = starterGlobalRegion(WindowPlacement{}, DisplayGeometry{});
+
+    CHECK(region.leftPercent == 12.0);
+    CHECK(region.topPercent == 12.0);
+    CHECK(region.rightPercent == 48.0);
+    CHECK(region.bottomPercent == 46.0);
+}
 
 TEST_CASE("A window belongs to the display under its centre")
 {

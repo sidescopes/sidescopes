@@ -30,7 +30,6 @@ struct Fixture
 // split, an uneven divider.
 void arrangeSomethingElse(Fixture& fixture)
 {
-    fixture.view.stack().choose(WaveformScopeId, true);
     fixture.view.stack().choose(HistogramScopeId, true);
     fixture.view.layout().setOrientation(LayoutOrientation::Horizontal);
     fixture.view.layout().setWeight(WaveformScopeId, 2.5f);
@@ -61,8 +60,9 @@ TEST_CASE("The default layout is what a capture of a fresh view produces")
 
     CHECK(defaults.stack == fixture.view.stack().tokens());
     CHECK(defaults.orientation == orientationToInt(LayoutOrientation::Automatic));
-    CHECK(defaults.weights.size() == 1);
+    CHECK(defaults.weights.size() == 2);
     CHECK(defaults.weights.at(VectorscopeScopeId) == DefaultPaneWeight);
+    CHECK(defaults.weights.at(WaveformScopeId) == DefaultPaneWeight);
 }
 
 TEST_CASE("Arranging the view leaves the slot alone until it is saved")
@@ -123,7 +123,7 @@ TEST_CASE("Visiting a slot that holds nothing leaves it empty")
     CHECK(fixture.presets.at(6).stack.empty());
 
     // Saving makes it real.
-    fixture.view.stack().choose(WaveformScopeId, true);
+    fixture.view.stack().choose(HistogramScopeId, true);
     CHECK(fixture.presets.activeDirty());
     CHECK_FALSE(fixture.presets.saveInto(fixture.presets.activeSlot()).status.empty());
     CHECK_FALSE(fixture.presets.at(6).stack.empty());
@@ -139,7 +139,7 @@ TEST_CASE("Loading another slot discards an unsaved layout")
     REQUIRE(fixture.presets.activeDirty());
 
     CHECK_FALSE(fixture.presets.load(3).status.empty());
-    CHECK(fixture.view.stack().ids() == std::vector<std::string>{VectorscopeScopeId});
+    CHECK(fixture.view.stack().ids() == std::vector<std::string>{VectorscopeScopeId, WaveformScopeId});
     CHECK_FALSE(fixture.presets.activeDirty());
 }
 
@@ -158,7 +158,6 @@ TEST_CASE("The order the panes sit in belongs to the slot")
     // It used to be one global setting, so loading a preset restored WHICH
     // scopes were shown but not how they were laid out - half a restore.
     Fixture fixture;
-    fixture.view.stack().choose(WaveformScopeId, true);
     REQUIRE(fixture.view.reorderScopes(1, 0));
     const std::vector<std::string> arranged = fixture.view.order().ids();
     REQUIRE_FALSE(fixture.presets.saveInto(fixture.presets.activeSlot()).status.empty());
@@ -220,7 +219,6 @@ TEST_CASE("The panes and the menu are seated by one order")
     // place it was left, which only holds if the panes read the same order the
     // menu lists.
     Fixture fixture;
-    fixture.view.stack().choose(WaveformScopeId, true);
     fixture.view.stack().choose(HistogramScopeId, true);
     REQUIRE(fixture.view.stack().ids().size() == 3);
 

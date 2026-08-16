@@ -267,7 +267,7 @@ void appendRegionAndAppSection(const ContextMenuModel& model, std::vector<Native
     menuSeparator(menu);
     // Support tooling in one clearly named place; every checkbox reads the live
     // truth, so a session started by the environment shows as switched on and
-    // can be switched off here. Reset restores the standard state however
+    // can be switched off here. Disable restores the standard state however
     // recording or visibility were enabled.
     menuSubmenu(menu, "Diagnostics");
     if (captureVisibilityToggleSupported()) {
@@ -276,7 +276,7 @@ void appendRegionAndAppSection(const ContextMenuModel& model, std::vector<Native
     menuAction(menu, "Record Diagnostic Log", MenuToggleDiagRecording, diagRecording());
     menuAction(menu, "Show Diagnostic Log", MenuShowDiagLog, false);
     menuSeparator(menu);
-    menuAction(menu, "Reset to Defaults", MenuResetDiagnostics, false);
+    menuAction(menu, "Disable", MenuDisableDiagnostics, false);
     menuEndSubmenu(menu);
     appendQualitySubmenu(model, menu);
     appendUiScaleSubmenu(model, menu);
@@ -469,7 +469,7 @@ bool applyDiagnosticsMenu(int chosen)
         openDiagLogFolder();
 
         return true;
-    case MenuResetDiagnostics:
+    case MenuDisableDiagnostics:
         setCaptureVisibility(false);
         if (diagRecording()) {
             diagConfigure(DiagConfig{});

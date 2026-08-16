@@ -38,7 +38,7 @@ enum MenuAction
     MenuToggleCaptureVisibility,
     MenuToggleDiagRecording,
     MenuShowDiagLog,
-    MenuResetDiagnostics,
+    MenuDisableDiagnostics,
     MenuOpenSettings = 50,
     MenuAbout,
     MenuQuit,

@@ -187,7 +187,7 @@ TEST_CASE("No menu id means two things at once")
 TEST_CASE("The diagnostics entries belong to no other decoder")
 {
     for (const int chosen :
-         {MenuToggleCaptureVisibility, MenuToggleDiagRecording, MenuShowDiagLog, MenuResetDiagnostics}) {
+         {MenuToggleCaptureVisibility, MenuToggleDiagRecording, MenuShowDiagLog, MenuDisableDiagnostics}) {
         INFO("menu id " << chosen);
         CHECK(claimsOf(chosen) == 0);
     }

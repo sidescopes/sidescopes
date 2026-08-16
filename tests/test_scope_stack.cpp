@@ -70,13 +70,14 @@ ScopeRegistry letterlessRegistry()
 
 }  // namespace
 
-TEST_CASE("A stack starts on the vectorscope")
+TEST_CASE("A stack starts on the vectorscope and RGB waveform")
 {
     ScopeOrder order{registry()};
     ScopeStack stack{registry(), order};
     CHECK(stack.shows(VectorscopeScopeId));
+    CHECK(stack.shows(WaveformScopeId));
     CHECK_FALSE(stack.shows(HistogramScopeId));
-    CHECK(stack.ids().size() == 1);
+    CHECK(stack.ids().size() == 2);
 }
 
 TEST_CASE("Toggling adds a scope and reports it newly visible")
@@ -85,7 +86,7 @@ TEST_CASE("Toggling adds a scope and reports it newly visible")
     ScopeStack stack{registry(), order};
     CHECK(stack.toggle(HistogramScopeId));
     CHECK(stack.shows(HistogramScopeId));
-    CHECK(stack.ids().size() == 2);
+    CHECK(stack.ids().size() == 3);
     // Toggling it back off is not an activation.
     CHECK_FALSE(stack.toggle(HistogramScopeId));
     CHECK_FALSE(stack.shows(HistogramScopeId));
@@ -95,6 +96,7 @@ TEST_CASE("The last scope cannot be toggled away")
 {
     ScopeOrder order{registry()};
     ScopeStack stack{registry(), order};
+    stack.restore(testing::idTokens("V"));
     REQUIRE(stack.ids().size() == 1);
     CHECK_FALSE(stack.toggle(VectorscopeScopeId));
     CHECK(stack.ids().size() == 1);
@@ -105,6 +107,7 @@ TEST_CASE("Choosing solos a scope unless stacking")
 {
     ScopeOrder order{registry()};
     ScopeStack stack{registry(), order};
+    stack.restore(testing::idTokens("V"));
     stack.toggle(WaveformScopeId);
     REQUIRE(stack.ids().size() == 2);
 
@@ -215,12 +218,12 @@ TEST_CASE("The stack round-trips through its preference tokens")
         CHECK(stack.tokens() == testing::idTokens("VH"));
     }
 
-    SECTION("naming nothing valid falls back to the vectorscope")
+    SECTION("naming nothing valid falls back to the default pair")
     {
         stack.restore("zzz");
-        CHECK(stack.tokens() == testing::idTokens("V"));
+        CHECK(stack.tokens() == testing::idTokens("VW"));
         stack.restore(testing::idTokens(""));
-        CHECK(stack.tokens() == testing::idTokens("V"));
+        CHECK(stack.tokens() == testing::idTokens("VW"));
     }
 }
 

@@ -58,7 +58,7 @@ public:
 private:
     const ScopeRegistry& m_registry;
     const ScopeOrder& m_order;
-    std::vector<std::string> m_ids{VectorscopeScopeId};
+    std::vector<std::string> m_ids;
 };
 
 }  // namespace sidescopes

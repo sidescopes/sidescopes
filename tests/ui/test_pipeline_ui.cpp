@@ -257,8 +257,10 @@ try {
     Pipeline& h = pipeline();
     h.source.targets = {test::makeTarget(7, "primary")};
 
-    // Start on the vectorscope alone, so the waveform is provably off until the
-    // UI turns it on. The worker consumes frames on its own thread from here.
+    // This test covers the waveform's off-to-on pipeline transition, so it
+    // explicitly replaces the product's Vectorscope + RGB Waveform default
+    // with a vectorscope-only starting stack.
+    h.scopeView.stack().restore("[org.sidescopes.vectorscope]");
     h.settings.enabledScopes = h.scopeView.stack().enabledScopeIds();
     h.worker.updateSettings(h.settings);
     h.worker.start();

@@ -29,7 +29,9 @@ std::vector<std::string> parseStackTokens(const ScopeRegistry& registry, const s
 {
     std::vector<std::string> stack = parseScopeTokens(registry, text);
     if (stack.empty()) {
-        stack.emplace_back(VectorscopeScopeId);
+        for (const std::string_view id : DefaultScopeStack) {
+            stack.emplace_back(id);
+        }
     }
 
     return stack;

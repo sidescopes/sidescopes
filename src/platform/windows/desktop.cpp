@@ -337,7 +337,7 @@ std::string preferencesFilePath()
     if (!elsewhere.empty()) {
         return elsewhere;
     }
-    return applicationDataDirectory() + "\\SideScopes\\preferences.txt";
+    return applicationDataDirectory() + "\\SideScopes\\preferences.conf";
 }
 
 ModifierState currentModifiers()

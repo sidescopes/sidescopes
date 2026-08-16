@@ -125,6 +125,9 @@ private:
     /// Where the window sits, as the toolkit reports it.
     [[nodiscard]] WindowPlacement windowPlacement() const;
     [[nodiscard]] std::optional<uint32_t> displayOfWindow() const;
+    /// Creates the regular global region a new session begins with, on the
+    /// application window's display and beside the window where space allows.
+    void initializeStarterRegion();
     void refreshActivatedScope(std::string_view id);
     void toggleScope(std::string_view id);
     void chooseScope(std::string_view id, bool stack);

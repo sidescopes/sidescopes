@@ -51,8 +51,8 @@ TEST_CASE("the preferences file follows its environment override", "[environment
     clearVariable(sidescopes::PreferencesFileVariable);
     CHECK(sidescopes::preferencesFileFromEnvironment().empty());
 
-    setVariable(sidescopes::PreferencesFileVariable, "/tmp/sidescopes-scratch/preferences.txt");
-    CHECK(sidescopes::preferencesFileFromEnvironment() == "/tmp/sidescopes-scratch/preferences.txt");
+    setVariable(sidescopes::PreferencesFileVariable, "/tmp/sidescopes-scratch/preferences.conf");
+    CHECK(sidescopes::preferencesFileFromEnvironment() == "/tmp/sidescopes-scratch/preferences.conf");
 
     clearVariable(sidescopes::PreferencesFileVariable);
     CHECK(sidescopes::preferencesFileFromEnvironment().empty());

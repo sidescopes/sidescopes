@@ -27,7 +27,7 @@ the shortcuts were pressed.
 | Key | Action |
 | --- | --- |
 | A | Select or draw a window-attached region |
-| D | Draw an unattached region |
+| D | Draw or replace the global region |
 | F | Select a detected face |
 | Escape | Clear the region |
 
@@ -63,17 +63,35 @@ active preset.
 
 ## Application window
 
-| Key | Action |
-| --- | --- |
-| Command+W or the red window button (macOS) | Hide SideScopes |
-| Command+comma (macOS) | Open Settings |
-| Command+Q (macOS) | Quit |
-| Control+W (Windows) | Minimize |
-| Control+Q (Windows) | Quit |
-| Alt+F4 or the close button (Windows) | Quit |
+<div class="platform-shortcuts" data-platform-shortcuts>
+<section data-platform="windows">
+<h3>Windows</h3>
+<table>
+<thead><tr><th>Key</th><th>Action</th></tr></thead>
+<tbody>
+<tr><td>Control+W</td><td>Minimize</td></tr>
+<tr><td>Control+Q</td><td>Quit</td></tr>
+<tr><td>Alt+F4 or the close button</td><td>Quit</td></tr>
+</tbody>
+</table>
+</section>
+<section data-platform="macos">
+<h3>macOS</h3>
+<table>
+<thead><tr><th>Key</th><th>Action</th></tr></thead>
+<tbody>
+<tr><td>Command+W or the red window button</td><td>Hide SideScopes</td></tr>
+<tr><td>Command+comma</td><td>Open Settings</td></tr>
+<tr><td>Command+Q</td><td>Quit</td></tr>
+</tbody>
+</table>
 
-On macOS, the Dock icon or Command+Tab restores the application and its region
-border after Command+W hides it.
+<p>The Dock icon or Command+Tab restores the application and its region border after Command+W hides it.</p>
+</section>
+</div>
+
+The website initially shows the table for the detected platform. Both tables
+remain available from the platform selector.
 
 ## Mouse
 
@@ -88,9 +106,9 @@ border after Command+W hides it.
 
 ## Rebinding
 
-The letter bindings are stored in the plain-text preferences file. Each value
-is one letter A–Z, or `Escape`; invalid values are ignored and the default is
-used. The keys are:
+The letter bindings are stored in the application preferences. Each value is
+one letter A–Z, or `Escape`; invalid values are ignored and the default is used.
+The keys are:
 
 - `shortcut_attach_window`
 - `shortcut_draw_region`
@@ -102,5 +120,8 @@ used. The keys are:
 
 The preferences file is located at:
 
-- macOS: `~/Library/Application Support/SideScopes/preferences.txt`
-- Windows: `%APPDATA%\SideScopes\preferences.txt`
+- macOS: `~/Library/Application Support/SideScopes/preferences.conf`
+- Windows: `%APPDATA%\SideScopes\preferences.conf`
+
+This is a strict `key=value` configuration file, not a prose document. Quit
+SideScopes before editing it and change only documented keys.

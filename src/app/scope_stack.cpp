@@ -11,6 +11,9 @@ ScopeStack::ScopeStack(const ScopeRegistry& registry, const ScopeOrder& order)
     : m_registry(registry),
       m_order(order)
 {
+    for (const std::string_view id : DefaultScopeStack) {
+        m_ids.emplace_back(id);
+    }
 }
 
 bool ScopeStack::shows(std::string_view id) const

@@ -28,7 +28,7 @@ from . import quartz
 from . import session
 
 REPOSITORY = pathlib.Path(__file__).resolve().parents[2]
-PREFERENCES = pathlib.Path.home() / "Library" / "Application Support" / "SideScopes" / "preferences.txt"
+PREFERENCES = pathlib.Path.home() / "Library" / "Application Support" / "SideScopes" / "preferences.conf"
 
 # The shortcuts the harness presses. They are the application's defaults, and
 # the preferences the harness writes never rebind them.
@@ -96,8 +96,8 @@ class PreferencesGuard:
     """
 
     def __init__(self, scratch):
-        self.override = scratch / "preferences.txt"
-        self._backup = scratch / "preferences.user.txt"
+        self.override = scratch / "preferences.conf"
+        self._backup = scratch / "preferences.user.conf"
         self._existed = PREFERENCES.exists()
         if self._existed and session.HARNESS_MARKER in PREFERENCES.read_text(errors="replace"):
             # A previous run was killed before it could put the file back. The

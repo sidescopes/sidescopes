@@ -110,7 +110,7 @@ void viewGui(ImGuiTestContext*)
 void scopeToggles(ImGuiTestContext* ctx)
 {
     View& h = view();
-    h.scopeView.stack().restore("V");  // known starting stack
+    h.scopeView.stack().restore("[org.sidescopes.vectorscope]");  // known starting stack
     ctx->SetRef("View");
 
     const auto enables = [&](std::string_view id) {

@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <string>
+#include <vector>
 
 #include "app/pane_layout.h"
 #include "app/param_menu.h"
@@ -138,18 +139,23 @@ LayoutPreset LayoutPresetController::defaultLayout() const
     // the tokens through the registry that writes them, the weight the layout
     // hands out unasked, and the styles the descriptor declares. Anything less
     // exact and a slot loaded from this would be written back to at once.
-    const std::string id{VectorscopeScopeId};
     LayoutPreset preset;
-    preset.stack = formatStackTokens(m_registry, {id});
+    std::vector<std::string> defaultIds;
+    for (const std::string_view id : DefaultScopeStack) {
+        defaultIds.emplace_back(id);
+    }
+    preset.stack = formatStackTokens(m_registry, defaultIds);
     // Every registered scope once, as the modules register them - written out
     // rather than left empty so that a slot restored from this reads back
     // through capture() identical, and is not written to on the next frame.
     preset.order = ScopeOrder{m_registry}.tokens();
     preset.orientation = orientationToInt(LayoutOrientation::Automatic);
-    preset.weights[id] = DefaultPaneWeight;
-    std::map<std::string, double> styles = declaredStyles(id);
-    if (!styles.empty()) {
-        preset.styles[id] = std::move(styles);
+    for (const std::string& id : defaultIds) {
+        preset.weights[id] = DefaultPaneWeight;
+        std::map<std::string, double> styles = declaredStyles(id);
+        if (!styles.empty()) {
+            preset.styles[id] = std::move(styles);
+        }
     }
 
     return preset;

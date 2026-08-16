@@ -184,7 +184,7 @@ std::string preferencesFilePath()
     //
     // Through this seam rather than a web-only accessor, so the application
     // asks one question on every platform.
-    return "/prefs/preferences.txt";
+    return "/prefs/preferences.conf";
 }
 
 // --- window and application state -------------------------------------

@@ -144,7 +144,7 @@ struct Preferences
     int windowX = -1;  ///< Negative lets the system place the window.
     int windowY = -1;
     int windowWidth = 440;
-    int windowHeight = 500;
+    int windowHeight = 640;
     ShortcutBindings shortcuts;
     /// The pinned reference colors, oldest first, at most @ref MaximumPins.
     /// They serialize as hex, so a color reloads at the 8 bits the picker

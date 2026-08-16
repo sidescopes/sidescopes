@@ -20,6 +20,11 @@ inline constexpr char LumaWaveformScopeId[] = "org.sidescopes.waveform.luma";
 inline constexpr char ParadeScopeId[] = "org.sidescopes.parade";
 inline constexpr char HistogramScopeId[] = "org.sidescopes.histogram";
 
+/// What a fresh window shows, and what an empty or invalid saved stack falls
+/// back to. The pair exposes both chroma distribution and spatial channel
+/// levels without making the first view crowded.
+inline constexpr std::string_view DefaultScopeStack[] = {VectorscopeScopeId, WaveformScopeId};
+
 /// The waveform family: one module over one engine, and one set of bins,
 /// because the host gives every member the same image size. A member given a
 /// size of its own still DRAWS correctly - each pass re-lays the bins for

@@ -96,7 +96,6 @@ TEST_CASE("The display density decides which threshold a pane clears")
 TEST_CASE("Each scope's resolution follows its own pane")
 {
     DetailFixture fixture;
-    fixture.view.stack().choose(WaveformScopeId, true);
     fixture.view.stack().choose(HistogramScopeId, true);
 
     // The family's own pane - the largest any of its scopes drew at, which the
@@ -221,6 +220,7 @@ TEST_CASE("A small scope image is left alone while the region is dragged")
 TEST_CASE("A scope off screen keeps the resolution in force")
 {
     DetailFixture fixture;
+    fixture.view.stack().choose(VectorscopeScopeId, false);
     fixture.analysis.imageSizes[VectorscopeScopeId] = {256, 256};
     fixture.analysis.imageSizes[WaveformScopeId] = {1024, 512};
 
@@ -239,9 +239,8 @@ TEST_CASE("A high level asks for more where the pane can use it")
     // real data the region can still populate.
     constexpr ScopePaneSizes ClimbablePanes{{1100.0f, 400.0f}, {1100.0f, 400.0f}, {400.0f, 400.0f}};
     DetailFixture fixture;
-    // The vectorscope is the stack a fresh view starts on; the rest stack onto
-    // it.
-    fixture.view.stack().choose(WaveformScopeId, true);
+    // The fresh view already contains both waveform and vectorscope; add the
+    // histogram to exercise all three detail families.
     fixture.view.stack().choose(HistogramScopeId, true);
 
     const std::pair<int, int> standardWaveform = fixture.detail.desiredWaveformSize(ClimbablePanes, 0);

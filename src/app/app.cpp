@@ -179,6 +179,7 @@ bool App::init()
     setupCapture();
     seedImageSizes(m_analysis);
     restorePreferences(startup, m_view, m_pins, m_shortcuts, m_analysis);
+    initializeStarterRegion();
     m_presets.restore(startup.layoutPresets, startup.layoutActiveSlot);
     // The stored factor - or, for a file that names none, the one this display's
     // density recommends - is cleaned to an offered step here, at the app
@@ -203,6 +204,24 @@ bool App::init()
     m_regions.syncBorder(borderState());
 
     return true;
+}
+
+void App::initializeStarterRegion()
+{
+    // This is the same region model as a selection drawn with D, so its border
+    // can immediately be moved, resized, attached, or cleared without a
+    // separate first-run mode.
+    const std::optional<uint32_t> displayId = displayOfWindow();
+    if (!displayId) {
+        return;
+    }
+    const std::optional<DisplayGeometry> display = geometryOfDisplay(*displayId);
+    if (!display) {
+        return;
+    }
+    const RegionOfInterest starter = starterGlobalRegion(windowPlacement(), *display);
+    m_regions.setGlobalRegion(starter);
+    m_analysis.region = starter;
 }
 
 void App::observeSystemEvents()

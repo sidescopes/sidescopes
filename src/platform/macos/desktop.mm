@@ -266,7 +266,7 @@ std::string preferencesFilePath()
     }
     NSString* home = NSHomeDirectory();
     const std::string base = home.length > 0 ? home.UTF8String : ".";
-    return base + "/Library/Application Support/SideScopes/preferences.txt";
+    return base + "/Library/Application Support/SideScopes/preferences.conf";
 }
 
 ModifierState currentModifiers()

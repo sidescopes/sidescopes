@@ -73,12 +73,14 @@ TEST_CASE("Preferences round-trip through a file")
 
 TEST_CASE("Preferences default when the file is missing")
 {
-    const TempFile file("does-not-exist.txt");
+    const TempFile file("does-not-exist.conf");
     const Preferences loaded = loadPreferences(file.path());
     CHECK(param(loaded, VectorscopeId, "gain") == 3.0);
     CHECK(param(loaded, WaveformId, "gain") == 0.05);
     CHECK(loaded.graticuleStrength == 1.0f);
     CHECK(loaded.quality == "standard");
+    CHECK(loaded.windowWidth == 440);
+    CHECK(loaded.windowHeight == 640);
 }
 
 TEST_CASE("Preferences read a legacy per-scope gain")

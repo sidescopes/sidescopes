@@ -251,7 +251,8 @@ TEST_CASE("A saved stack naming a scope this build dropped still loads")
 
     CHECK(parseStackTokens(registry, testing::idTokens("V") + "[org.sidescopes.neutral]" + testing::idTokens("H")) ==
           std::vector<std::string>{VectorscopeScopeId, HistogramScopeId});
-    CHECK(parseStackTokens(registry, "[org.sidescopes.neutral]") == std::vector<std::string>{VectorscopeScopeId});
+    CHECK(parseStackTokens(registry, "[org.sidescopes.neutral]") ==
+          std::vector<std::string>{VectorscopeScopeId, WaveformScopeId});
 }
 
 TEST_CASE("Pins mark the scopes that declare themselves targets")

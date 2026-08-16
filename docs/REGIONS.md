@@ -1,13 +1,27 @@
 # Choosing a region
 
-SideScopes analyzes one rectangular region at a time. Opening a region tool
-dims the desktop and previews the candidate region on the scopes before you
-confirm it.
+SideScopes analyzes one rectangular region at a time. At launch, it places a
+moderate global region beside the application window on the same display. This
+is an ordinary region: drag or resize its border, replace it with another
+selection, attach it to a window, or clear it.
+
+Opening a region tool dims the desktop and previews the candidate region on the
+scopes before you confirm it.
 
 The toolbar and keyboard provide three selection modes. You can switch among
 them while the picker is open. Window and face suggestions are offered only
 when the platform reports or detects them; otherwise you can draw the region
 directly.
+
+## Global region (D)
+
+Drag a rectangle anywhere on the current display. A global region remains at
+that screen position when windows move beneath it. Use this mode for any fixed
+area of the desktop, including part of an application window.
+
+The launch region is a global region and behaves exactly like one drawn with
+D. It appears on the display containing the SideScopes window and is positioned
+near, rather than over, that window when the available space permits.
 
 ## Select a window (A)
 
@@ -25,11 +39,6 @@ or window edge moves.
 You can attach regions to several windows. SideScopes measures the region for
 the focused attached window. If focus moves elsewhere, it uses the unattached
 region when one exists. A closed attached window is removed.
-
-## Draw a region (D)
-
-Drag a rectangle anywhere on the current display. An unattached region remains
-at that screen position when windows move beneath it.
 
 ## Select a face (F)
 
@@ -65,14 +74,15 @@ screen.
 
 With no region selected, SideScopes suspends continuous region capture and
 analysis. Clearing a region does not restore an earlier selection or default to
-the entire screen.
+the entire screen. The next launch creates a new starter region.
 
 ## Multiple displays
 
-The picker opens on the display under the pointer. Confirming a region there
-moves capture to that display. An unattached region belongs to one display and
-is cleared if that display's configuration changes. An attached region follows
-its window across displays.
+The starter region appears on the display containing the SideScopes window. A
+picker opens on the display under the pointer, and confirming a region there
+moves capture to that display. A global region belongs to one display and is
+cleared if that display's configuration changes. An attached region follows its
+window across displays.
 
 If the captured display disconnects or becomes unavailable, SideScopes pauses
 the scopes and reports the interruption. Capture resumes when the display

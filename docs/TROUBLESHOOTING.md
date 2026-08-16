@@ -46,24 +46,29 @@ Choose **UI Scaling** from the right-click menu. Values from 50% to 200% multipl
 the scale reported by the operating system. At the default setting, SideScopes
 follows the display density as its window moves between displays.
 
-## Resetting preferences
+## Resetting application preferences
 
-Choose **Diagnostics → Reset to Defaults**, or quit SideScopes and remove its
-preferences file:
+Quit SideScopes and remove its preferences file:
 
-- macOS: `~/Library/Application Support/SideScopes/preferences.txt`
-- Windows: `%APPDATA%\SideScopes\preferences.txt`
+- macOS: `~/Library/Application Support/SideScopes/preferences.conf`
+- Windows: `%APPDATA%\SideScopes\preferences.conf`
 
-The file is plain text with one `key=value` pair per line. Unknown keys are
-ignored. Before version 1.0, an update may reset settings when the file format
-changes.
+SideScopes writes a new file with defaults when it next saves preferences. The
+file uses a strict `key=value` configuration format. Unknown keys are ignored,
+but manual edits should be limited to documented keys. Before version 1.0, an
+update may reset settings when the format changes.
+
+**Diagnostics → Disable** is unrelated to application preferences. It stops
+diagnostic recording and restores the normal screen-capture visibility setting.
 
 ## Recording a diagnostic log
 
 Choose **Diagnostics → Record Diagnostic Log** before reproducing a problem.
 SideScopes writes timestamped state and event lines to
 `sidescopes/sidescopes-diag.log` inside the system temporary directory. Choose
-**Show Diagnostic Log** to open the folder.
+**Show Diagnostic Log** to open the folder. Choose **Diagnostics → Disable**
+after reproducing the problem to stop recording and restore the standard
+diagnostic state.
 
 The log records window titles and application names. Review it before sharing.
 The previous recording is retained beside it as `sidescopes-diag.prev.log`.
