@@ -58,9 +58,9 @@ struct CoordinatorFixture
 
     // A border sync with everything quiet, so each test turns on only the one
     // condition it is about.
-    void sync(const std::string& attachedLabel = "", uint64_t activeIdentity = 0)
+    void sync(const std::string& windowLabel = "", uint64_t activeIdentity = 0)
     {
-        coordinator.syncBorder(RegionBorderState{attachedLabel, activeIdentity, false, false, 0.0});
+        coordinator.syncBorder(RegionBorderState{windowLabel, activeIdentity, false, false, 0.0});
     }
 
     // Runs a pan under the face lock's content watch: two frames far enough
@@ -89,6 +89,14 @@ TEST_CASE("The region kind follows which window the scopes are routed to")
 {
     CHECK(regionKind(0) == RegionKind::Global);
     CHECK(regionKind(42) == RegionKind::Attached);
+}
+
+TEST_CASE("The border distinguishes face tracking inside an attached window")
+{
+    CHECK(regionBinding(0, false) == RegionBinding::Global);
+    CHECK(regionBinding(0, true) == RegionBinding::Global);
+    CHECK(regionBinding(42, false) == RegionBinding::Window);
+    CHECK(regionBinding(42, true) == RegionBinding::Face);
 }
 
 TEST_CASE("Reading a region the scopes already read asks for nothing")
@@ -192,7 +200,7 @@ TEST_CASE("The border outlines the global region under the display's name")
     REQUIRE(regionOverlayStubs().border.has_value());
     CHECK(regionOverlayStubs().border->displayId == StreamedDisplay);
     CHECK(regionOverlayStubs().border->label == "Studio Monitor");
-    CHECK_FALSE(regionOverlayStubs().border->attached);
+    CHECK(regionOverlayStubs().border->binding == RegionBinding::Global);
     CHECK_THAT(regionOverlayStubs().border->region.leftPercent, WithinAbs(10.0, 1e-9));
 
     // The display's name is read once and kept: it is re-read only when the
@@ -210,8 +218,21 @@ TEST_CASE("An attached region's border wears the window's own label")
     fix.sync("DSC_0042.NEF", 42);
 
     REQUIRE(regionOverlayStubs().border.has_value());
-    CHECK(regionOverlayStubs().border->attached);
+    CHECK(regionOverlayStubs().border->binding == RegionBinding::Window);
     CHECK(regionOverlayStubs().border->label == "DSC_0042.NEF");
+}
+
+TEST_CASE("A face-tracked border keeps the window title and changes only its binding state")
+{
+    CoordinatorFixture fix;
+    fix.region = PartialRegion;
+    fix.faceLock.addLock(42, FaceLockState{}, 0.0);
+
+    fix.sync("Portrait, 1860", 42);
+
+    REQUIRE(regionOverlayStubs().border.has_value());
+    CHECK(regionOverlayStubs().border->binding == RegionBinding::Face);
+    CHECK(regionOverlayStubs().border->label == "Portrait, 1860");
 }
 
 TEST_CASE("The border stays off screen while anything says it must")
@@ -343,7 +364,7 @@ TEST_CASE("The border's own affordances travel back to the host")
     CHECK(fix.coordinator.pollBorderEdit(0).dismissed);
 
     regionOverlayStubs().borderEdit = RegionBorderEdit{false, false, true, std::nullopt};
-    CHECK(fix.coordinator.pollBorderEdit(0).attachToggled);
+    CHECK(fix.coordinator.pollBorderEdit(0).bindingToggled);
 }
 
 TEST_CASE("The border is not read while a pick is in flight")
@@ -359,7 +380,7 @@ TEST_CASE("The border is not read while a pick is in flight")
     const RegionBorderEditOutcome outcome = fix.coordinator.pollBorderEdit(42);
 
     CHECK_FALSE(outcome.dismissed);
-    CHECK_FALSE(outcome.attachToggled);
+    CHECK_FALSE(outcome.bindingToggled);
     CHECK_FALSE(outcome.edited.has_value());
     CHECK_FALSE(fix.coordinator.borderEditing());
 }

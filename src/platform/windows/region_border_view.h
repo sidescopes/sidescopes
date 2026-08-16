@@ -18,6 +18,7 @@ using std::min;
 #include <memory>
 #include <string>
 
+#include "core/region_kind.h"
 #include "platform/region_geometry.h"
 #include "platform/windows/region_overlay_surface.h"
 
@@ -56,7 +57,7 @@ constexpr UINT_PTR BorderAppearTimer = 1;
 constexpr double CloseRadius = 6.5;
 constexpr double CloseHitRadius = 11.0;
 constexpr double CloseCornerInset = 2.0;
-constexpr double TabAttachZone = 18.0;
+constexpr double TabBindingZone = 18.0;
 
 struct BorderState
 {
@@ -72,9 +73,9 @@ struct BorderState
     POINT dragStartMouse{};
     RECT dragStartRegion{};
     bool closePressed = false;
-    bool attachPressed = false;
-    // Whether the outlined region is attached: picks the toggle's glyph.
-    bool attachedRegion = false;
+    bool bindingPressed = false;
+    // How the outlined region is bound: picks the face, pin, or pin-off glyph.
+    RegionBinding binding = RegionBinding::Global;
     // The cached backing store and the geometry it was painted for. The
     // band's look depends on the window's size and scale, never on its
     // position, so a move needs no repaint at all - the common case when
@@ -86,8 +87,9 @@ struct BorderState
     // Non-empty for a window-attached region: the attached application's
     // name, worn above the band - the tell that this region belongs to a
     // window.
-    std::wstring attachedLabel;
+    std::wstring borderLabel;
     std::wstring paintedLabel;
+    RegionBinding paintedBinding = RegionBinding::Global;
     // The entrance animation: the rect the border is heading to (region
     // lags it mid-flight), the start tick, and the whole-surface alpha.
     RECT appearTarget{};
@@ -101,7 +103,7 @@ extern BorderState g_border;
 extern bool g_borderEditing;
 extern bool g_borderEditChanged;
 extern bool g_borderDismissed;
-extern bool g_borderAttachToggled;
+extern bool g_borderBindingToggled;
 extern RegionOfInterest g_borderEditRegion;
 
 void paintBorder();

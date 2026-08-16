@@ -24,7 +24,7 @@ struct ShownBorder
     uint32_t displayId = 0;
     RegionOfInterest region;
     std::string label;
-    bool attached = false;
+    RegionBinding binding = RegionBinding::Global;
 };
 
 /// The scripted overlays. One instance serves the whole test binary, so every

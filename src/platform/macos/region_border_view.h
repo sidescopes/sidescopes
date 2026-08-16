@@ -35,14 +35,14 @@ constexpr double LabelBand = 20.0;
 constexpr double CloseRadius = 6.5;
 constexpr double CloseHitRadius = 11.0;
 constexpr double CloseCornerInset = 2.0;
-constexpr double TabAttachZone = 18.0;
+constexpr double TabBindingZone = 18.0;
 
 // Shared edit state the application polls once per frame.
 extern std::vector<BorderKeyPress> g_borderKeyPresses;
 extern bool g_borderEditing;
 extern bool g_borderEditChanged;
 extern bool g_borderDismissed;
-extern bool g_borderAttachToggled;
+extern bool g_borderBindingToggled;
 extern RegionOfInterest g_borderEditRegion;
 
 }  // namespace sidescopes
@@ -65,13 +65,12 @@ extern RegionOfInterest g_borderEditRegion;
 @property(nonatomic, assign) NSPoint dragStartMouse;  // global screen coords
 @property(nonatomic, assign) NSRect dragStartRegion;  // global screen coords
 @property(nonatomic, assign) BOOL closePressed;
-@property(nonatomic, assign) BOOL attachPressed;
-// Whether the outlined region is attached: picks the toggle's glyph.
-@property(nonatomic, assign) BOOL attachedRegion;
-// Non-empty for a window-attached region: the attached application's name,
-// worn as a small tab above the band, with the measurement dashes taking a
-// label being the tell that this region belongs to a window.
-@property(nonatomic, copy) NSString* attachedLabel;
+@property(nonatomic, assign) BOOL bindingPressed;
+// How the outlined region is bound: picks the control's face, pin, or pin-off
+// glyph without putting mode text into the title.
+@property(nonatomic, assign) sidescopes::RegionBinding regionBinding;
+// The active window or display name, worn as a small tab above the band.
+@property(nonatomic, copy) NSString* borderLabel;
 // Extra top strip carrying the attached label, zero when unattached; the
 // region math below subtracts it so every zone stays anchored to the band.
 @property(nonatomic, assign) CGFloat labelBand;

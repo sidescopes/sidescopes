@@ -153,18 +153,15 @@ void App::onWindowMotion(WindowMotionSignal signal)
     }
 }
 
-// The label prefers the window's live title - the filename in most editors
-// - and follows it when the window's content changes; a face-locked window
-// says so.
+// The label prefers the window's live title - the filename in most editors -
+// and follows it when the window's content changes. Binding state belongs to
+// the adjacent icon, never in a prefix that could be mistaken for the title.
 void App::refreshAttachedLabel(const AttachDecision& decision)
 {
     if (decision.activeIdentity == 0) {
         return;
     }
     m_attachActiveLabel = borderLabelFrom(decision.activeTitle, m_attach.activeApplicationName());
-    if (m_faceLock.contains(decision.activeIdentity)) {
-        m_attachActiveLabel = "face - " + m_attachActiveLabel;
-    }
 }
 
 // The focused window drives everything: the foreground application's

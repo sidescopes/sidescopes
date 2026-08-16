@@ -50,10 +50,11 @@ void updatePickerFaces(uint32_t displayId, const std::vector<SuggestedRegion>& f
     g_overlays.deliveredFaces[displayId] = faces;
 }
 
-void showRegionBorder(uint32_t displayId, const RegionOfInterest& region, const std::string& label, bool attached)
+void showRegionBorder(uint32_t displayId, const RegionOfInterest& region, const std::string& label,
+                      RegionBinding binding)
 {
     ++g_overlays.borderShows;
-    g_overlays.border = test::ShownBorder{displayId, region, label, attached};
+    g_overlays.border = test::ShownBorder{displayId, region, label, binding};
 }
 
 void hideRegionBorder()

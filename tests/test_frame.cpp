@@ -94,14 +94,12 @@ TEST_CASE("FrameView copies either capture depth to tightly packed BGRA8")
     SECTION("a ten-bit frame is rounded onto the display scale with opaque alpha")
     {
         const auto packed = [](uint16_t r, uint16_t g, uint16_t b) {
-            const uint32_t word = (3u << 30) | (static_cast<uint32_t>(r) << 20) |
-                                  (static_cast<uint32_t>(g) << 10) | b;
+            const uint32_t word = (3u << 30) | (static_cast<uint32_t>(r) << 20) | (static_cast<uint32_t>(g) << 10) | b;
             return std::array<uint8_t, 4>{static_cast<uint8_t>(word), static_cast<uint8_t>(word >> 8),
                                           static_cast<uint8_t>(word >> 16), static_cast<uint8_t>(word >> 24)};
         };
         const std::array<uint8_t, 4> pixels = packed(1023, 512, 0);
-        const FrameView view{pixels.data(), 4, 1, 1, ColorSpaceHint::Srgb, 1, 0, 0, 0, 0,
-                             PixelFormat::Argb2101010};
+        const FrameView view{pixels.data(), 4, 1, 1, ColorSpaceHint::Srgb, 1, 0, 0, 0, 0, PixelFormat::Argb2101010};
 
         CHECK(copyAsBgra8(view) == std::vector<uint8_t>{0, 128, 255, 255});
     }

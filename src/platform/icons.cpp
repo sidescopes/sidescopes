@@ -124,4 +124,18 @@ std::vector<uint8_t> rasterizeIcon(Icon icon, int sizePixels)
     return pixels;
 }
 
+Icon iconForRegionBinding(RegionBinding binding)
+{
+    switch (binding) {
+    case RegionBinding::Global:
+        return Icon::PinOff;
+    case RegionBinding::Window:
+        return Icon::Pin;
+    case RegionBinding::Face:
+        return Icon::User;
+    }
+
+    return Icon::PinOff;
+}
+
 }  // namespace sidescopes

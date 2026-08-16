@@ -14,4 +14,18 @@ enum class RegionKind
     Attached
 };
 
+/// How the active region is bound to what it measures. A face-tracked region
+/// remains structurally attached to a window, but the finer state matters to
+/// the border: it has its own icon, and releasing it first freezes the current
+/// rectangle in that window before a second release makes it global.
+enum class RegionBinding
+{
+    /// Fixed to a display and independent of any window.
+    Global,
+    /// Fixed inside a window and carried when that window moves.
+    Window,
+    /// Attached to a window and following a detected face within it.
+    Face
+};
+
 }  // namespace sidescopes

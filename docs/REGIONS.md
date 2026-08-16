@@ -51,6 +51,12 @@ suggestions. Selecting one creates a region that follows the face within its
 window. If no face is detected, the picker reports that result instead of
 creating an estimated region.
 
+A face-tracked border uses the same face icon as the selection tool. Its label
+remains the window title; tracking state is not added to the title text. Click
+the face icon to stop following the face while keeping the current rectangle
+attached to its window. The region does not return to the face's original
+position. Click the resulting pin icon to make the region global.
+
 Face selection is a geometric convenience. It does not classify complexion,
 evaluate skin color, or change how the scopes analyze the enclosed pixels.
 
@@ -63,7 +69,14 @@ applicable. The border is interactive:
 - drag a corner handle to resize both axes;
 - drag the midpoint of an edge to move that edge;
 - use the close control to clear the region;
-- use the attachment control to attach or detach the region in place.
+- use the binding control to change what the region follows.
+
+The binding control shows the current state. The face icon identifies a
+face-tracked region, the pin identifies a region fixed inside a window, and the
+struck-through pin identifies a global region fixed to the display. Clicking
+the face icon stops face tracking and leaves the current rectangle attached to
+its window; clicking the resulting pin makes the region global. On a global
+region, the control attaches to the frontmost window under the region's center.
 
 The scopes update while the border is edited. The border hides while a picker
 is open, while SideScopes is hidden or minimized, while an attached window is

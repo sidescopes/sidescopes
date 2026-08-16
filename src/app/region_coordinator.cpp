@@ -19,6 +19,15 @@ RegionKind regionKind(uint64_t activeWindowIdentity)
     return activeWindowIdentity != 0 ? RegionKind::Attached : RegionKind::Global;
 }
 
+RegionBinding regionBinding(uint64_t activeWindowIdentity, bool faceLocked)
+{
+    if (activeWindowIdentity == 0) {
+        return RegionBinding::Global;
+    }
+
+    return faceLocked ? RegionBinding::Face : RegionBinding::Window;
+}
+
 RegionCoordinator::RegionCoordinator(AttachController& attach, const CaptureController& capture,
                                      const RegionPicker& picker, const FaceLockController& faceLock,
                                      const std::optional<RegionOfInterest>& region)
@@ -89,13 +98,14 @@ void RegionCoordinator::syncBorder(const RegionBorderState& state)
         m_faceLock.contentUnsettled(state.now) || state.windowMinimized) {
         hideRegionBorder();
     } else {
-        const bool attached = regionKind(state.activeWindowIdentity) == RegionKind::Attached;
-        if (!attached && m_capture.capturedDisplay() != m_displayLabelId) {
+        const RegionBinding binding =
+            regionBinding(state.activeWindowIdentity, m_faceLock.contains(state.activeWindowIdentity));
+        if (binding == RegionBinding::Global && m_capture.capturedDisplay() != m_displayLabelId) {
             m_displayLabelId = m_capture.capturedDisplay();
             m_displayLabel = borderLabelFrom(displayName(m_displayLabelId), "Display");
         }
-        showRegionBorder(m_capture.capturedDisplay(), *m_region, attached ? state.attachedLabel : m_displayLabel,
-                         attached);
+        showRegionBorder(m_capture.capturedDisplay(), *m_region,
+                         binding == RegionBinding::Global ? m_displayLabel : state.windowLabel, binding);
     }
 }
 
@@ -128,7 +138,7 @@ RegionBorderEditOutcome RegionCoordinator::pollBorderEdit(uint64_t activeWindowI
     }
     m_borderEditing = edit.editing;
 
-    return RegionBorderEditOutcome{edit.dismissed, edit.attachToggled, edit.region};
+    return RegionBorderEditOutcome{edit.dismissed, edit.bindingToggled, edit.region};
 }
 
 bool RegionCoordinator::borderEditing() const

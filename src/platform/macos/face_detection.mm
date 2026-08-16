@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <optional>
 
 #include "platform/face_detection.h"
 
@@ -17,6 +18,29 @@ constexpr double MinimumFacePoints = 72.0;
 bool readableByVision(const FrameView& frame)
 {
     return frame.pixels != nullptr && frame.width > 0 && frame.height > 0 && frame.strideBytes >= frame.width * 4;
+}
+
+// Vision reports normalized rectangles from the bottom left. Convert one to
+// the frame's top-left pixel convention, rejecting thumbnail-sized results.
+std::optional<IntRect> faceRect(const CGRect box, const FrameView& frame, double minimumSize)
+{
+    const double width = box.size.width * frame.width;
+    const double height = box.size.height * frame.height;
+    if (width < minimumSize || height < minimumSize) {
+        return std::nullopt;
+    }
+
+    const double left = box.origin.x * frame.width;
+    const double top = (1.0 - box.origin.y - box.size.height) * frame.height;
+    IntRect rect;
+    rect.x = static_cast<int>(std::lround(std::max(0.0, left)));
+    rect.y = static_cast<int>(std::lround(std::max(0.0, top)));
+    rect.width = static_cast<int>(std::lround(std::min(width, static_cast<double>(frame.width) - rect.x)));
+    rect.height = static_cast<int>(std::lround(std::min(height, static_cast<double>(frame.height) - rect.y)));
+    if (rect.width <= 0 || rect.height <= 0) {
+        return std::nullopt;
+    }
+    return rect;
 }
 
 }  // namespace
@@ -75,23 +99,8 @@ std::vector<IntRect> detectFaces(const FrameView& frame, float pixelsPerPoint)
     if (performed && !error) {
         const double minimumSize = MinimumFacePoints * pixelsPerPoint;
         for (VNFaceObservation* observation in request.results) {
-            // Normalized, bottom-left origin; the frame convention is
-            // top-left pixels.
-            const CGRect box = observation.boundingBox;
-            const double width = box.size.width * frame.width;
-            const double height = box.size.height * frame.height;
-            if (width < minimumSize || height < minimumSize) {
-                continue;
-            }
-            const double left = box.origin.x * frame.width;
-            const double top = (1.0 - box.origin.y - box.size.height) * frame.height;
-            IntRect rect;
-            rect.x = static_cast<int>(std::lround(std::max(0.0, left)));
-            rect.y = static_cast<int>(std::lround(std::max(0.0, top)));
-            rect.width = static_cast<int>(std::lround(std::min(width, static_cast<double>(frame.width) - rect.x)));
-            rect.height = static_cast<int>(std::lround(std::min(height, static_cast<double>(frame.height) - rect.y)));
-            if (rect.width > 0 && rect.height > 0) {
-                faces.push_back(rect);
+            if (const std::optional<IntRect> rect = faceRect(observation.boundingBox, frame, minimumSize)) {
+                faces.push_back(*rect);
             }
         }
     }

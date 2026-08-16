@@ -52,20 +52,38 @@ void App::applyBorderEditOutcome(const RegionBorderEditOutcome& outcome)
 {
     if (outcome.dismissed) {
         dismissEditedBorder();
-    } else if (outcome.attachToggled) {
-        toggleRegionAttach();
+    } else if (outcome.bindingToggled) {
+        toggleRegionBinding();
     } else if (outcome.edited) {
         applyBorderEdit(*outcome.edited);
     }
 }
 
-// The border's attach toggle. An attached region lets go of its window and
-// becomes the global region in place; a global one attaches to the
-// frontmost window under it. Explicit conversions only - the structural
-// no-conversion rule is about drags and focus races, never this button.
-void App::toggleRegionAttach()
+// The border's binding control progressively loosens what the region follows.
+// A face-tracked region first freezes at its CURRENT rectangle inside the
+// window; a second click lets go of the window and makes it global. A global
+// region attaches to the frontmost window under it. Explicit conversions only
+// - the structural no-conversion rule is about drags and focus races, never
+// this button.
+void App::toggleRegionBinding()
 {
-    if (regionKind(m_activeWindowIdentity) == RegionKind::Attached) {
+    const RegionBinding binding = regionBinding(m_activeWindowIdentity, m_faceLock.contains(m_activeWindowIdentity));
+    if (binding == RegionBinding::Face) {
+        const auto geometry = geometryOfDisplay(m_captureController.capturedDisplay());
+        const auto windowGeom = windowGeometry(m_activeWindowIdentity);
+        if (m_analysis.region && geometry && windowGeom) {
+            // The attach controller still holds the rectangle from the face's
+            // original pick. Re-anchor it to the face's current position
+            // before dropping the lock, or the next follow step would snap
+            // back to that original rectangle.
+            const RegionOfInterest frozen = m_attach.editRegion(
+                *m_analysis.region,
+                AttachWindowRect{windowGeom->x, windowGeom->y, windowGeom->width, windowGeom->height},
+                AttachDisplayRect{geometry->originX, geometry->originY, geometry->widthPoints, geometry->heightPoints});
+            m_faceLock.removeLock(m_activeWindowIdentity);
+            applyRegionOutcome(m_regions.useRegion(frozen));
+        }
+    } else if (binding == RegionBinding::Window) {
         const std::optional<RegionOfInterest> region = m_analysis.region;
         m_attach.detachAll();
         m_faceLock.clear();

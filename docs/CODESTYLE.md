@@ -51,9 +51,9 @@ other. `Attach to Window...` is `AttachWindow`, `shortcut_attach_window`.
 - **Suggestion** — what the picker overlay draws for one-click confirmation.
   **Candidate** — what the application keeps so a confirmed pick resolves back
   to the window or face it came from.
-- **Pin** belongs to the color-reference feature alone. Locking a region onto
-  a face is `face_lock`; the region border's toggle speaks attach. (The
-  `Icon::Pin` glyph keeps its name — icons are named for what they depict.)
+- **Pin** as an action belongs to the color-reference feature alone. Locking a
+  region onto a face is `face_lock`; the region border changes its binding.
+  (`Icon::Pin` keeps its name — icons are named for what they depict.)
 - **Display** for a monitor, and **captured display** for the one the scopes
   read; `monitor` and `screen` appear only where a platform API brings them.
 

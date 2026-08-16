@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "core/analysis_worker.h"
+#include "core/region_kind.h"
 #include "core/region_suggestions.h"
 
 namespace sidescopes {
@@ -135,18 +136,16 @@ void setRegionPickChipColor(const std::optional<FloatColor>& color);
 /// editor underneath keeps working. The border itself is live: edges and
 /// corners resize the region, the tab above the top edge moves it, and the
 /// application polls the edit each frame so the scopes follow.
-/// @p attachedLabel distinguishes the two region kinds: empty is the global
-/// region in its plain dress; non-empty is a window-attached region, whose
-/// measurement dashes take a warm tint and whose band wears the label (the
-/// attached window's application) above the top edge. Idempotent AND cheap to
-/// repeat: an unchanged rectangle, label, and visibility is a no-op, so the
-/// host may reconcile every frame instead of chasing edges.
 /// @p label is always worn on the strip row above the band - the attached
 /// window's title for an attached region, the display's name for the
 /// global one - with the attach toggle at the label's fixed left end.
-/// @p attached picks the toggle's glyph, which shows the STATE: the pin
-/// on an attached region, the struck-through pin on the global one.
-void showRegionBorder(uint32_t displayId, const RegionOfInterest& region, const std::string& label, bool attached);
+/// @p binding picks the control's glyph: the face used by the face-selection
+/// tool while tracking, the pin while fixed in a window, and the struck-through
+/// pin while global. Idempotent and cheap to repeat: an unchanged rectangle,
+/// label, binding, and visibility is a no-op, so the host may reconcile every
+/// frame instead of chasing edges.
+void showRegionBorder(uint32_t displayId, const RegionOfInterest& region, const std::string& label,
+                      RegionBinding binding);
 void hideRegionBorder();
 
 /// The border's in-progress or just-finished adjustment, if any.
@@ -157,10 +156,10 @@ struct RegionBorderEdit
 {
     bool editing = false;
     bool dismissed = false;
-    /// The border's attach toggle was clicked: an attached region lets go of
-    /// its window and becomes the global region in place; a global one
-    /// attaches to the frontmost window under it.
-    bool attachToggled = false;
+    /// The border's binding control was clicked: a face-tracked region becomes
+    /// window-attached at its current rectangle; a window-attached region
+    /// becomes global; a global one attaches to the frontmost window under it.
+    bool bindingToggled = false;
     std::optional<RegionOfInterest> region;
 };
 

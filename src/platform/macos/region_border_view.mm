@@ -16,7 +16,7 @@ std::vector<BorderKeyPress> g_borderKeyPresses;
 bool g_borderEditing = false;
 bool g_borderEditChanged = false;
 bool g_borderDismissed = false;
-bool g_borderAttachToggled = false;
+bool g_borderBindingToggled = false;
 RegionOfInterest g_borderEditRegion;
 
 }  // namespace sidescopes
@@ -105,10 +105,10 @@ void drawHandleDot(CGFloat x, CGFloat y)
 
 // The attach toggle lives at the label tab's fixed left end: the same
 // spot whatever the label says, clear of every handle.
-- (NSPoint)attachButtonCenter
+- (NSPoint)bindingButtonCenter
 {
     const NSRect region = [self regionRect];
-    return NSMakePoint(NSMinX(region) - sidescopes::BorderPad + sidescopes::TabAttachZone / 2,
+    return NSMakePoint(NSMinX(region) - sidescopes::BorderPad + sidescopes::TabBindingZone / 2,
                        NSMaxY(region) + sidescopes::WindowPad + self.labelBand / 2);
 }
 
@@ -168,13 +168,11 @@ void drawHandleDot(CGFloat x, CGFloat y)
     [dashes stroke];
 }
 
-// The attached window's name rides a tab above the band: the attached region
-// carries its own identification instead of the main window's toolbar doing
-// it at a distance. The label strip the window grew makes room for it clear
-// of the handles.
-- (void)drawAttachedLabel:(NSRect)region
+// The active window or display name rides a tab above the band. The label strip
+// the window grew makes room for it clear of the handles.
+- (void)drawBorderLabel:(NSRect)region
 {
-    if (self.attachedLabel.length == 0) {
+    if (self.borderLabel.length == 0) {
         return;
     }
     // The tab hugs the text but never leaves the window: a title wider than
@@ -189,7 +187,7 @@ void drawHandleDot(CGFloat x, CGFloat y)
     };
     const CGFloat padX = 6.0;
     const CGFloat padY = 2.0;
-    const NSSize textSize = [self.attachedLabel sizeWithAttributes:attributes];
+    const NSSize textSize = [self.borderLabel sizeWithAttributes:attributes];
     // Flush with the band's outer left edge: the tab and the border read
     // as one left-aligned block.
     const CGFloat tabX = NSMinX([self regionRect]) - sidescopes::BorderPad;
@@ -199,7 +197,7 @@ void drawHandleDot(CGFloat x, CGFloat y)
     // The trim budget ends at the band's outer right edge, so a truncated
     // tab stays flush with the border block on both sides.
     const sidescopes::TabLayout layout = sidescopes::borderTabLayout(
-        NSMaxX(region) + sidescopes::BorderPad - tabX, sidescopes::TabAttachZone, padX, textSize.width, 16.0);
+        NSMaxX(region) + sidescopes::BorderPad - tabX, sidescopes::TabBindingZone, padX, textSize.width, 16.0);
     if (!layout.visible) {
         return;
     }
@@ -214,8 +212,8 @@ void drawHandleDot(CGFloat x, CGFloat y)
     plate.lineWidth = 1.0;
     [plate stroke];
     const NSRect text =
-        NSMakeRect(tab.origin.x + sidescopes::TabAttachZone + padX, tab.origin.y + padY, textWidth, textSize.height);
-    [self.attachedLabel drawInRect:text withAttributes:attributes];
+        NSMakeRect(tab.origin.x + sidescopes::TabBindingZone + padX, tab.origin.y + padY, textWidth, textSize.height);
+    [self.borderLabel drawInRect:text withAttributes:attributes];
 }
 
 // Eight handle dots - corners and edge midpoints - centered on the measurement
@@ -259,18 +257,17 @@ void drawHandleDot(CGFloat x, CGFloat y)
     [cross stroke];
 }
 
-// The icon set's pushpin at the tab's fixed left end, showing the
-// STATE: the pin while the region is attached, the struck-through pin
-// while it is global. Rasterized once from the embedded vector sources,
-// so every platform draws the identical icons.
-- (void)drawAttachButton
+// The binding state at the tab's fixed left end: face tracking, window pin,
+// or global pin-off. Rasterized once from the shared vector sources, so every
+// native platform draws the identical icons.
+- (void)drawBindingButton
 {
-    static NSImage* icons[2] = {nil, nil};
-    const int which = self.attachedRegion ? 1 : 0;
+    static NSImage* icons[3] = {nil, nil, nil};
+    const int which = static_cast<int>(self.regionBinding);
     if (!icons[which]) {
         const int pixels = 22;  // 11 points at the retina scale
         const std::vector<uint8_t> rgba =
-            sidescopes::rasterizeIcon(self.attachedRegion ? sidescopes::Icon::Pin : sidescopes::Icon::PinOff, pixels);
+            sidescopes::rasterizeIcon(sidescopes::iconForRegionBinding(self.regionBinding), pixels);
         NSBitmapImageRep* rep = [[NSBitmapImageRep alloc] initWithBitmapDataPlanes:nullptr
                                                                         pixelsWide:pixels
                                                                         pixelsHigh:pixels
@@ -286,7 +283,7 @@ void drawHandleDot(CGFloat x, CGFloat y)
         icons[which] = [[NSImage alloc] initWithSize:NSMakeSize(11, 11)];
         [icons[which] addRepresentation:rep];
     }
-    const NSPoint center = [self attachButtonCenter];
+    const NSPoint center = [self bindingButtonCenter];
     [icons[which] drawInRect:NSMakeRect(center.x - 5.5, center.y - 5.5, 11, 11)
                     fromRect:NSZeroRect
                    operation:NSCompositingOperationSourceOver
@@ -299,12 +296,12 @@ void drawHandleDot(CGFloat x, CGFloat y)
     const NSRect region = [self regionRect];
     [self drawHazardBand:region];
     [self drawMeasuredEdge:region];
-    [self drawAttachedLabel:region];
+    [self drawBorderLabel:region];
     [self drawHandles:region];
     if ([self closeVisible]) {
         [self drawCloseButton];
     }
-    [self drawAttachButton];
+    [self drawBindingButton];
 }
 
 // Eight handles, no modifier: the corners resize both axes, the edge
@@ -325,11 +322,11 @@ void drawHandleDot(CGFloat x, CGFloat y)
         }
     }
     {
-        const NSPoint center = [self attachButtonCenter];
+        const NSPoint center = [self bindingButtonCenter];
         const CGFloat dx = point.x - center.x;
         const CGFloat dy = point.y - center.y;
         if (dx * dx + dy * dy <= sidescopes::CloseHitRadius * sidescopes::CloseHitRadius) {
-            return sidescopes::ZoneAttach;
+            return sidescopes::ZoneBinding;
         }
     }
     // View space is bottom-left origin; the shared zone tests are top-left.
@@ -369,7 +366,7 @@ void drawHandleDot(CGFloat x, CGFloat y)
         [NSCursor.arrowCursor set];
         return;
     }
-    if (zone & (sidescopes::ZoneClose | sidescopes::ZoneAttach)) {
+    if (zone & (sidescopes::ZoneClose | sidescopes::ZoneBinding)) {
         [NSCursor.pointingHandCursor set];
         return;
     }
@@ -435,8 +432,8 @@ void drawHandleDot(CGFloat x, CGFloat y)
         self.closePressed = YES;
         return;
     }
-    if (zone & sidescopes::ZoneAttach) {
-        self.attachPressed = YES;
+    if (zone & sidescopes::ZoneBinding) {
+        self.bindingPressed = YES;
         return;
     }
     self.dragZone = zone;
@@ -497,10 +494,10 @@ void drawHandleDot(CGFloat x, CGFloat y)
             return;
         }
     }
-    if (self.attachPressed) {
-        self.attachPressed = NO;
-        if ([self zoneAtPoint:local] & sidescopes::ZoneAttach) {
-            sidescopes::g_borderAttachToggled = true;
+    if (self.bindingPressed) {
+        self.bindingPressed = NO;
+        if ([self zoneAtPoint:local] & sidescopes::ZoneBinding) {
+            sidescopes::g_borderBindingToggled = true;
             return;
         }
     }

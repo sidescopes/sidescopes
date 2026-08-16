@@ -498,7 +498,8 @@ void presentBorderWindow(double scale, const std::wstring& label)
     // The push carries position and size, so the placement below only
     // settles z-order and visibility.
     const bool repaint = width != g_border.paintedWidth || height != g_border.paintedHeight ||
-                         scale != g_border.paintedScale || label != g_border.paintedLabel || g_border.alpha != 255;
+                         scale != g_border.paintedScale || label != g_border.paintedLabel ||
+                         g_border.binding != g_border.paintedBinding || g_border.alpha != 255;
     SS_DIAG(Border, "present pos=%ld,%ld size=%dx%d repaint=%d alpha=%d", g_border.region.left - pad,
             g_border.region.top - pad - strip, width, height, repaint ? 1 : 0, static_cast<int>(g_border.alpha));
     if (repaint) {
@@ -508,14 +509,14 @@ void presentBorderWindow(double scale, const std::wstring& label)
                  height, SWP_NOACTIVATE | SWP_SHOWWINDOW);
 }
 
-void showRegionBorder(uint32_t displayId, const RegionOfInterest& region, const std::string& attachedLabel,
-                      bool attached)
+void showRegionBorder(uint32_t displayId, const RegionOfInterest& region, const std::string& borderLabel,
+                      RegionBinding binding)
 {
     const auto geometry = geometryOfDisplay(displayId);
     if (!geometry) {
         return;
     }
-    const std::wstring label = wideFromUtf8(attachedLabel.c_str());
+    const std::wstring label = wideFromUtf8(borderLabel.c_str());
 
     if (!g_border.window) {
         g_border.window = createOverlayWindow(L"SidescopesRegionBorder", borderProc,
@@ -534,8 +535,8 @@ void showRegionBorder(uint32_t displayId, const RegionOfInterest& region, const 
     // z-order claim below and nothing else. Mid-entrance the live rect
     // lags the target, so the comparison is against the target.
     const bool visible = IsWindowVisible(g_border.window) != FALSE;
-    if (visible && EqualRect(&wanted, &g_border.appearTarget) && label == g_border.attachedLabel &&
-        attached == g_border.attachedRegion) {
+    if (visible && EqualRect(&wanted, &g_border.appearTarget) && label == g_border.borderLabel &&
+        binding == g_border.binding) {
         // Nothing to move or repaint, but the place in the z-order still
         // has to be claimed: it is the only thing another window can take
         // while the region itself stands still.
@@ -552,8 +553,8 @@ void showRegionBorder(uint32_t displayId, const RegionOfInterest& region, const 
     g_border.displayHeight = geometry->heightPoints;
     g_border.region = wanted;
     g_border.appearTarget = wanted;
-    g_border.attachedLabel = label;
-    g_border.attachedRegion = attached;
+    g_border.borderLabel = label;
+    g_border.binding = binding;
 
     const double scale = uiScale(g_border.window);
     if (!visible) {
@@ -672,8 +673,8 @@ RegionBorderEdit pollRegionBorderEdit()
     edit.editing = g_borderEditing;
     edit.dismissed = g_borderDismissed;
     g_borderDismissed = false;
-    edit.attachToggled = g_borderAttachToggled;
-    g_borderAttachToggled = false;
+    edit.bindingToggled = g_borderBindingToggled;
+    g_borderBindingToggled = false;
     if (g_borderEditChanged) {
         edit.region = g_borderEditRegion;
         g_borderEditChanged = false;

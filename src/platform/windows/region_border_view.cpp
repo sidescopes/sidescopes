@@ -23,7 +23,7 @@ BorderState g_border;
 bool g_borderEditing = false;
 bool g_borderEditChanged = false;
 bool g_borderDismissed = false;
-bool g_borderAttachToggled = false;
+bool g_borderBindingToggled = false;
 RegionOfInterest g_borderEditRegion;
 
 namespace {
@@ -106,10 +106,10 @@ Gdiplus::PointF closeCenter(double scale)
 
 // The attach toggle lives at the label tab's fixed left end: the same
 // spot whatever the label says, clear of every handle.
-Gdiplus::PointF attachButtonCenter(double scale)
+Gdiplus::PointF bindingButtonCenter(double scale)
 {
     const Gdiplus::RectF region = borderRegionLocal(scale);
-    return {static_cast<Gdiplus::REAL>(region.X + (TabAttachZone / 2 - BorderPad) * scale),
+    return {static_cast<Gdiplus::REAL>(region.X + (TabBindingZone / 2 - BorderPad) * scale),
             static_cast<Gdiplus::REAL>(region.Y - (WindowPad + LabelBand / 2) * scale)};
 }
 
@@ -129,12 +129,12 @@ unsigned borderZoneAtPoint(double x, double y, double scale)
         }
     }
     {
-        const Gdiplus::PointF center = attachButtonCenter(scale);
+        const Gdiplus::PointF center = bindingButtonCenter(scale);
         const double dx = x - center.X;
         const double dy = y - center.Y;
         const double hit = CloseHitRadius * scale;
         if (dx * dx + dy * dy <= hit * hit) {
-            return ZoneAttach;
+            return ZoneBinding;
         }
     }
     const LocalRect local = toLocalRect(region);
@@ -151,7 +151,7 @@ void applyBorderCursor(unsigned zone)
         SetCursor(LoadCursorW(nullptr, IDC_ARROW));
         return;
     }
-    if ((zone & (ZoneClose | ZoneAttach)) != 0) {
+    if ((zone & (ZoneClose | ZoneBinding)) != 0) {
         SetCursor(LoadCursorW(nullptr, IDC_HAND));
         return;
     }
@@ -255,7 +255,7 @@ void paintBorderHandles(Gdiplus::Graphics& canvas, const Gdiplus::RectF& region,
 // doing it at a distance.
 void paintBorderLabel(Gdiplus::Graphics& canvas, const Gdiplus::RectF& region, double scale)
 {
-    if (g_border.attachedLabel.empty()) {
+    if (g_border.borderLabel.empty()) {
         return;
     }
     // The tab hugs the text but never leaves the window: a title wider than
@@ -265,10 +265,10 @@ void paintBorderLabel(Gdiplus::Graphics& canvas, const Gdiplus::RectF& region, d
     const Gdiplus::Font font(&family, static_cast<Gdiplus::REAL>(10.0 * scale), Gdiplus::FontStyleRegular,
                              Gdiplus::UnitPixel);
     Gdiplus::RectF measured;
-    canvas.MeasureString(g_border.attachedLabel.c_str(), -1, &font, Gdiplus::PointF(0, 0), &measured);
+    canvas.MeasureString(g_border.borderLabel.c_str(), -1, &font, Gdiplus::PointF(0, 0), &measured);
     const auto padX = static_cast<Gdiplus::REAL>(6.0 * scale);
     const auto padY = static_cast<Gdiplus::REAL>(2.0 * scale);
-    const auto triangleZone = static_cast<Gdiplus::REAL>(TabAttachZone * scale);
+    const auto triangleZone = static_cast<Gdiplus::REAL>(TabBindingZone * scale);
     // The tab holds the attach toggle at its fixed left end, then the
     // text; left-aligned with the region's own corner. The shared layout
     // keeps both platforms' degradation on small regions identical.
@@ -296,7 +296,7 @@ void paintBorderLabel(Gdiplus::Graphics& canvas, const Gdiplus::RectF& region, d
     format.SetTrimming(Gdiplus::StringTrimmingEllipsisCharacter);
     Gdiplus::SolidBrush ink(Gdiplus::Color(242, 247, 247, 247));
     const Gdiplus::RectF textRect(tab.X + triangleZone + padX, tab.Y + padY, textWidth, measured.Height);
-    canvas.DrawString(g_border.attachedLabel.c_str(), -1, &font, textRect, &format, &ink);
+    canvas.DrawString(g_border.borderLabel.c_str(), -1, &font, textRect, &format, &ink);
 }
 
 void paintBorderCloseButton(Gdiplus::Graphics& canvas, double scale)
@@ -319,24 +319,24 @@ void paintBorderCloseButton(Gdiplus::Graphics& canvas, double scale)
     canvas.DrawLine(&cross, center.X - arm, center.Y + arm, center.X + arm, center.Y - arm);
 }
 
-// The icon set's pushpin at the tab's fixed left end, showing the
-// STATE: the pin while the region is attached, the struck-through pin
-// while it is global. Rasterized once from the embedded vector sources,
-// so every platform draws the identical icons.
-void paintBorderAttachButton(Gdiplus::Graphics& canvas, double scale)
+// The binding state at the tab's fixed left end: face tracking, window pin,
+// or global pin-off. Rasterized once from the shared vector sources, so every
+// native platform draws the identical icons.
+void paintBorderBindingButton(Gdiplus::Graphics& canvas, double scale)
 {
-    const Gdiplus::PointF center = attachButtonCenter(scale);
-    static std::unique_ptr<Gdiplus::Bitmap> icons[2];
+    const Gdiplus::PointF center = bindingButtonCenter(scale);
+    static std::unique_ptr<Gdiplus::Bitmap> icons[3];
     static int iconSize = 0;
-    const int which = g_border.attachedRegion ? 1 : 0;
+    const int which = static_cast<int>(g_border.binding);
     const int pixels = std::max(8, static_cast<int>(std::lround(11.0 * scale)));
     if (!icons[which] || iconSize != pixels) {
         if (iconSize != pixels) {
             icons[0].reset();
             icons[1].reset();
+            icons[2].reset();
         }
         // GDI+'s 32bppARGB is BGRA in memory: swap channels on the copy.
-        const std::vector<uint8_t> rgba = rasterizeIcon(which == 1 ? Icon::Pin : Icon::PinOff, pixels);
+        const std::vector<uint8_t> rgba = rasterizeIcon(iconForRegionBinding(g_border.binding), pixels);
         auto bitmap = std::make_unique<Gdiplus::Bitmap>(pixels, pixels, PixelFormat32bppARGB);
         Gdiplus::BitmapData data{};
         const Gdiplus::Rect lock(0, 0, pixels, pixels);
@@ -398,8 +398,9 @@ void paintBorder()
     paintBorderHandles(canvas, region, scale);
     paintBorderLabel(canvas, region, scale);
     paintBorderCloseButton(canvas, scale);
-    paintBorderAttachButton(canvas, scale);
-    g_border.paintedLabel = g_border.attachedLabel;
+    paintBorderBindingButton(canvas, scale);
+    g_border.paintedLabel = g_border.borderLabel;
+    g_border.paintedBinding = g_border.binding;
 
     surface.push(g_border.window, g_border.region.left - static_cast<int>(WindowPad * scale),
                  g_border.region.top - static_cast<int>(WindowPad * scale) - strip, g_border.alpha);
@@ -502,8 +503,8 @@ LRESULT borderOnLButtonDown(HWND window, LPARAM lParam)
         g_border.closePressed = true;
         return 0;
     }
-    if ((zone & ZoneAttach) != 0) {
-        g_border.attachPressed = true;
+    if ((zone & ZoneBinding) != 0) {
+        g_border.bindingPressed = true;
         return 0;
     }
     g_border.dragZone = zone;
@@ -554,13 +555,13 @@ LRESULT borderOnLButtonUp(HWND window, LPARAM lParam)
         }
         return 0;
     }
-    if (g_border.attachPressed) {
-        g_border.attachPressed = false;
+    if (g_border.bindingPressed) {
+        g_border.bindingPressed = false;
         const double scale = uiScale(window);
         const double x = static_cast<short>(LOWORD(lParam));
         const double y = static_cast<short>(HIWORD(lParam));
-        if ((borderZoneAtPoint(x, y, scale) & ZoneAttach) != 0) {
-            g_borderAttachToggled = true;
+        if ((borderZoneAtPoint(x, y, scale) & ZoneBinding) != 0) {
+            g_borderBindingToggled = true;
         }
         return 0;
     }

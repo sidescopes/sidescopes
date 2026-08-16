@@ -619,7 +619,8 @@ NSWindow* makeBorderWindow(NSRect rect)
     return window;
 }
 
-void showRegionBorder(uint32_t displayId, const RegionOfInterest& region, const std::string& label, bool attached)
+void showRegionBorder(uint32_t displayId, const RegionOfInterest& region, const std::string& label,
+                      RegionBinding binding)
 {
     NSScreen* screen = screenForDisplay(displayId);
     const NSRect frame = screen.frame;
@@ -642,12 +643,12 @@ void showRegionBorder(uint32_t displayId, const RegionOfInterest& region, const 
     // comparison is against the target.
     if (g_borderWindow && g_borderWindow.visible && NSEqualRects(g_borderTarget, labelled)) {
         SidescopesBorderView* view = (SidescopesBorderView*)g_borderWindow.contentView;
-        NSString* current = view.attachedLabel ? view.attachedLabel : @"";
-        if ([current isEqualToString:borderLabel] && view.attachedRegion == attached) {
+        NSString* current = view.borderLabel ? view.borderLabel : @"";
+        if ([current isEqualToString:borderLabel] && view.regionBinding == binding) {
             return;
         }
-        view.attachedLabel = borderLabel;
-        view.attachedRegion = attached;
+        view.borderLabel = borderLabel;
+        view.regionBinding = binding;
         view.needsDisplay = YES;
 
         return;
@@ -662,13 +663,13 @@ void showRegionBorder(uint32_t displayId, const RegionOfInterest& region, const 
         g_borderWindow = makeBorderWindow(rect);
     }
     SidescopesBorderView* view = (SidescopesBorderView*)g_borderWindow.contentView;
-    NSString* current = view.attachedLabel ? view.attachedLabel : @"";
+    NSString* current = view.borderLabel ? view.borderLabel : @"";
     if (![current isEqualToString:borderLabel]) {
-        view.attachedLabel = borderLabel;
+        view.borderLabel = borderLabel;
         view.needsDisplay = YES;
     }
     view.labelBand = LabelBand;
-    view.attachedRegion = attached;
+    view.regionBinding = binding;
     if (g_borderWindow.visible) {
         // Already shown at another place: snap, never tween position.
         snapBorderFrame(labelled);
@@ -759,8 +760,8 @@ RegionBorderEdit pollRegionBorderEdit()
     edit.editing = g_borderEditing;
     edit.dismissed = g_borderDismissed;
     g_borderDismissed = false;
-    edit.attachToggled = g_borderAttachToggled;
-    g_borderAttachToggled = false;
+    edit.bindingToggled = g_borderBindingToggled;
+    g_borderBindingToggled = false;
     if (g_borderEditChanged) {
         edit.region = g_borderEditRegion;
         g_borderEditChanged = false;

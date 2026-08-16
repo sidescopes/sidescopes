@@ -21,6 +21,11 @@ class RegionPicker;
 ///         not focused leaves the global kind in effect.
 [[nodiscard]] RegionKind regionKind(uint64_t activeWindowIdentity);
 
+/// @return The binding state the active border should communicate. A face
+///         lock refines an attached region; with no active attached window,
+///         the global state wins even if another window retains a lock.
+[[nodiscard]] RegionBinding regionBinding(uint64_t activeWindowIdentity, bool faceLocked);
+
 /// What a region decision asks of the host. The coordinator owns the global
 /// region, but neither the analysis settings the worker reads nor the clock
 /// the shell measures idleness against, so those changes travel back instead
@@ -42,12 +47,12 @@ struct RegionOutcome
 };
 
 /// What the region border's live edit asks of the host - at most one of them,
-/// applied in this order: the border's close affordances, its attach toggle,
+/// applied in this order: the border's close affordances, its binding control,
 /// then a drag that moved or resized the region it outlines.
 struct RegionBorderEditOutcome
 {
     bool dismissed = false;
-    bool attachToggled = false;
+    bool bindingToggled = false;
     std::optional<RegionOfInterest> edited;
 };
 
@@ -58,7 +63,7 @@ struct RegionBorderEditOutcome
 /// against.
 struct RegionBorderState
 {
-    const std::string& attachedLabel;
+    const std::string& windowLabel;
     uint64_t activeWindowIdentity;
     bool windowMoving;
     bool windowMinimized;

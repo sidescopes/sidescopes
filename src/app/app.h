@@ -156,7 +156,7 @@ private:
     void confirmPickedRegion(const ConfirmedPick& pick);
     void adoptAttachedPick(uint64_t identity, int64_t ownerPid, const RegionOfInterest& region);
     void dismissEditedBorder();
-    void toggleRegionAttach();
+    void toggleRegionBinding();
     void attachGlobalRegionToWindow();
     void applyBorderEdit(const RegionOfInterest& edited);
 

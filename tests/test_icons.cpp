@@ -38,9 +38,9 @@ TEST_CASE("Every icon rasterizes with plausible stroke coverage")
 
 TEST_CASE("Icons are distinct images")
 {
-    // Named by glyph, like the enumerators: Pin and PinOff dress the
-    // border's attach toggle, SquarePen the toolbar's attach button, and
-    // Pencil the toolbar's draw button.
+    // Named by glyph, like the enumerators: Pin and PinOff dress the border's
+    // binding control, SquarePen the toolbar's attach button, and Pencil the
+    // toolbar's draw button.
     const auto pin = rasterizeIcon(Icon::Pin, 24);
     const auto pinOff = rasterizeIcon(Icon::PinOff, 24);
     const auto squarePen = rasterizeIcon(Icon::SquarePen, 24);
@@ -67,6 +67,22 @@ TEST_CASE("Icons are distinct images")
     CHECK(save != panels);
     CHECK(save != chartColumn);
     CHECK(save != penLine);
+}
+
+TEST_CASE("Each region binding has the icon that communicates its state")
+{
+    CHECK(iconForRegionBinding(RegionBinding::Global) == Icon::PinOff);
+    CHECK(iconForRegionBinding(RegionBinding::Window) == Icon::Pin);
+    CHECK(iconForRegionBinding(RegionBinding::Face) == Icon::User);
+
+    // The border draws these at 11 points (22 Retina pixels on macOS). They
+    // must remain distinct at the actual chrome size, not only as source SVGs.
+    const auto global = rasterizeIcon(iconForRegionBinding(RegionBinding::Global), 22);
+    const auto window = rasterizeIcon(iconForRegionBinding(RegionBinding::Window), 22);
+    const auto face = rasterizeIcon(iconForRegionBinding(RegionBinding::Face), 22);
+    CHECK(global != window);
+    CHECK(global != face);
+    CHECK(window != face);
 }
 
 TEST_CASE("The preset glyph is a frame divided into panes")
