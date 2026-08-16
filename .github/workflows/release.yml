@@ -142,7 +142,7 @@ jobs:
           $zip = "SideScopes-$env:GITHUB_REF_NAME-windows.zip"
           Compress-Archive -Path build/Release/SideScopes.exe -DestinationPath $zip
           $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()
-          "$hash  $zip" | Out-File -Encoding ascii "$zip.sha256"
+          [IO.File]::WriteAllText("$zip.sha256", "$hash  $zip`n", [Text.Encoding]::ASCII)
 
       - name: Upload Windows assets
         env:
