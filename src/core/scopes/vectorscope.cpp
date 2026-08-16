@@ -19,12 +19,12 @@ constexpr int AccumulateRowsPerChunk = 64;
 // Fixed-point (x256) full-range RGB -> Cb/Cr coefficients from the BT.709
 // specification. Chroma lands in [0, 255] with neutral at 128.
 //
-// BT.709 is the only matrix this scope offers, and that is a correctness
-// decision rather than a simplification: sRGB's primaries are colorimetrically
-// identical to Rec.709's, and these coefficients derive from exactly those
-// primaries. BT.601's are tied to 1953 NTSC phosphors, so against the screen
-// content this tool measures they are not another convention - they are the
-// wrong matrix, and offering them would be a way to read bad numbers quietly.
+// BT.709 is the one projection this display-referred scope defines. sRGB and
+// Rec.709 share primary chromaticities, which makes it a useful convention for
+// the SDR, sRGB/Rec.709-like screen output SideScopes expects. Other matrices
+// serve other signal standards; choosing one would require signal metadata the
+// screen capture does not supply, so this scope keeps its assumption explicit
+// instead of presenting an unsupported selector.
 struct ChromaCoefficients
 {
     int cbFromR, cbFromG, cbFromB;

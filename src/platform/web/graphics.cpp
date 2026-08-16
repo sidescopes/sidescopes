@@ -1,4 +1,4 @@
-// WebGL rendering backend for the browser demo.
+// WebGL rendering backend for the browser lab.
 //
 // Emscripten's GLFW port owns the WebGL2 context, and Dear ImGui's own
 // GLFW and OpenGL3 backends drive it — the same two backends the Windows
@@ -143,7 +143,7 @@ public:
     void* nativeWindowHandle() const override
     {
         // There is no native window to attach a region to, and nothing in
-        // the demo asks for one.
+        // the lab asks for one.
         return nullptr;
     }
 

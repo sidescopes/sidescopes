@@ -95,7 +95,7 @@ public:
 
     /// The pending request, if one was raised this frame. The desktop host
     /// answers it through openIfRequested; a host with no desktop to open a
-    /// picker over - the browser demo - reads it here and answers in its
+    /// picker over - the browser lab - reads it here and answers in its
     /// own terms.
     [[nodiscard]] std::optional<RegionPickerMode> pendingRequest() const;
 

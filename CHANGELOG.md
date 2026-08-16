@@ -10,7 +10,7 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - SideScopes runs in a browser. The same scope engines and the same panes
   the desktop application draws, compiled to WebAssembly, over a
-  photograph that stands in for the screen. Scopes, region, colour picker,
+  photograph that stands in for the screen. Scopes, region, color picker,
   presets, keyboard shortcuts and the right-click menu all work as they
   do on a desktop; window attach and face detection do not, because no
   page can read another program's window, so those controls are absent
@@ -41,8 +41,8 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Added
 
 - The luma waveform is a scope of its own, on L, beside the RGB waveform
-  on W. One reads exposure and the other reads balance, and both can
-  stand on screen at once instead of one replacing the other. Plain or
+  on W. One plots encoded Y' and the other plots the three captured channel
+  levels, and both can stand on screen at once instead of one replacing the other. Plain or
   Colored is its own style choice; the waveform no longer carries one.
 - A scope selector in place of the letter chips: a toolbar button whose
   popup lists every registered scope with a checkbox, and a row can be
@@ -72,7 +72,7 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   to whatever it does send. Windows is unchanged.
 - A Trace gamma slider for the vectorscope, in Settings beside its
   intensity and sampling. It sets how hard the middle of the trace is
-  lifted towards the densest chroma in the frame: lower brings the
+  lifted toward the densest chroma in the frame: lower brings the
   sparse body of the cloud up, higher leaves it nearer its own density.
   The range is 0.40 to 1.40 and it ships at 0.65, which draws exactly
   what every earlier build drew, so an untouched install sees no change.
@@ -193,10 +193,10 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   sweeps; a single frame on a screen renders it close to black. Boosted
   is what the scope has always been read on, and the waveform has never
   offered anything else. Its curve is now the Trace gamma slider above.
-- The vectorscope's Matrix choice. It measures with BT.709 always. sRGB
-  shares Rec.709's primaries and BT.709's coefficients come from those
-  primaries, while BT.601's come from 1953 NTSC phosphors, so for screen
-  content BT.601 was not an alternative but a wrong reading.
+- The vectorscope's Matrix choice. It now uses one explicit, full-range
+  Rec.709-style projection for the SDR, sRGB/Rec.709-like display output the
+  application expects. Screen capture supplies no source-signal metadata from
+  which to select a different matrix reliably.
 - The waveform's Style choice. Its two luma styles are the luma waveform
   above, which stands beside the waveform rather than in its place.
 - The Save Current To menu, and saving from a preset row by Shift+click.
@@ -360,7 +360,7 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
-- Border colors settled: neutral grey chrome beside the photo, with one
+- Border colors settled: neutral gray chrome beside the photo, with one
   warm tone reserved for transient cues (window hover, draw spotlight,
   edit veil), and the drag outline wears the same dashes as the settled
   border.

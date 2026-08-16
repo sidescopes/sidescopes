@@ -8,12 +8,12 @@
 
 namespace sidescopes {
 
-/// The photograph the demo shows, in the three forms it has to exist in, and
+/// The photograph the lab shows, in the three forms it has to exist in, and
 /// the one rule that keeps them honest.
 ///
 /// A page decodes a picture into this; the scopes measure it; the canvas draws
 /// it. Those last two must never be different pixels. If the picture on screen
-/// and the pixels reaching the engines could drift apart, the demo would teach
+/// and the pixels reaching the engines could drift apart, the lab would teach
 /// something false about what a scope is measuring - and would look entirely
 /// correct while doing it. So there is ONE adjustment pass and both consumers
 /// read its result.
@@ -32,7 +32,7 @@ namespace sidescopes {
 /// Deliberately holds no texture and knows no graphics backend: uploading is
 /// the shell's business, and keeping this free of it is what lets the rule
 /// above be tested rather than only looked at.
-class DemoPicture
+class LabPicture
 {
 public:
     /// Room for a decode of this size, for the page to write RGBA into.

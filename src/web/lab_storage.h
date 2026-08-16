@@ -5,7 +5,7 @@
 namespace sidescopes {
 namespace storage {
 
-/// @brief The demo's preferences, kept between visits.
+/// @brief The lab's preferences, kept between visits.
 ///
 /// The desktop writes a small key=value file and finds it again next time.
 /// A page has nowhere to put a file that survives a reload, so the same text
@@ -22,14 +22,14 @@ namespace storage {
 /// grow a completion.
 ///
 /// Nothing here leaves the browser. It is the same promise the rest of the
-/// demo makes about the pictures.
+/// lab makes about the pictures.
 
 /// The saved text, or empty when this browser has none yet.
 [[nodiscard]] std::string readSaved();
 
 /// Keeps @p text for next time. Silently does nothing where local storage is
 /// unavailable - a private window with storage disabled, say - because a
-/// demo that refused to run without somewhere to save would be worse than
+/// lab that refused to run without somewhere to save would be worse than
 /// one that simply forgets.
 void writeSaved(const std::string& text);
 

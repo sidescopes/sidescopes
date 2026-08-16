@@ -1,4 +1,4 @@
-// The demo's adjustments, as a per-channel tone curve plus one per-pixel step.
+// The lab's adjustments, as a per-channel tone curve plus one per-pixel step.
 //
 // Everything that is a function of a single channel's value - the white
 // balance gain, exposure, the highlight and shadow rolls, and contrast -
@@ -8,12 +8,13 @@
 // blend per pixel, which holds a slider's drag on a photograph of a million
 // pixels without dropping the frame loop.
 //
-// The maths is chosen to be RECOGNISABLE rather than to match any particular
-// editor: a stop is a doubling in linear light, contrast pivots on mid grey,
-// and warming raises red while lowering blue. A visitor who moves a control
-// here and then moves the same-named control in their own editor should see
-// the scopes do the same KIND of thing, which is the whole purpose. Matching
-// any particular editor's actual curves is neither possible nor the point.
+// This pipeline is intentionally small and defined rather than an imitation
+// of a particular editor. Exposure is a linear-light multiplier, the balance
+// controls are simple linear RGB gains, the tonal curves operate on the
+// encoded result, and saturation is an encoded-RGB displacement from Y'. The
+// same-named controls in another application can use different spaces,
+// pivots, tone curves, or appearance models and need not produce the same
+// values.
 
 #include "web/image_adjust.h"
 
@@ -24,8 +25,8 @@
 namespace sidescopes {
 namespace {
 
-/// The sRGB transfer function and its inverse. Exposure and white balance are
-/// light, so they happen between these two.
+/// The sRGB transfer function and its inverse. Exposure and the Lab's simple
+/// channel-balance gains are applied to linearized values between these two.
 [[nodiscard]] float toLinear(float value)
 {
     return value <= 0.04045f ? value / 12.92f : std::pow((value + 0.055f) / 1.055f, 2.4f);
@@ -36,9 +37,7 @@ namespace {
     return value <= 0.0031308f ? value * 12.92f : 1.055f * std::pow(value, 1.0f / 2.4f) - 0.055f;
 }
 
-/// Rec. 709 luma, the same weighting the luma waveform uses, so a visitor
-/// pulling saturation to nothing sees the vectorscope collapse onto a point
-/// that agrees with the scope beside it.
+/// Rec.709-style encoded Y', using the same coefficients as the luma waveform.
 [[nodiscard]] float luma(float red, float green, float blue)
 {
     return 0.2126f * red + 0.7152f * green + 0.0722f * blue;
@@ -57,11 +56,9 @@ namespace {
     return std::clamp((0.5f - value) * 2.0f, 0.0f, 1.0f);
 }
 
-/// The channel gains a temperature and tint pair asks for, in linear light.
-/// Warm raises red and lowers blue; magenta raises red and blue together
-/// while lowering green. Kept small - a quarter either way at the extremes -
-/// because the lesson is that a cast MOVES THE WHOLE CLOUD, and a violent one
-/// just clips.
+/// The channel gains used by the directional Temperature and Tint controls.
+/// These are not a correlated-color-temperature model or a chromatic
+/// adaptation transform.
 struct ChannelGain
 {
     float red = 1.0f;
@@ -93,15 +90,12 @@ using Curve = std::array<uint8_t, 256>;
         // Light first: a stop is a doubling, and a cast is a gain on light.
         float value = toGamma(std::max(0.0f, toLinear(encoded) * scale));
 
-        // Then the two ends, each acting where the other does not. BOTH add:
-        // positive lifts, negative recovers, which is the direction every
-        // editor a photographer already uses gives these two. Having shadows
-        // subtract would be defensible arithmetic and the wrong control.
+        // The two fixed encoded-value rolls meet at the pivot. Positive values
+        // raise their part of the range and negative values lower it.
         value += adjustments.highlights * 0.35f * highlightWeight(value);
         value += adjustments.shadows * 0.35f * shadowWeight(value);
 
-        // Contrast last, pivoting on mid grey so it opens and closes the
-        // range around the middle rather than dragging it up or down.
+        // Contrast is a linear encoded-value slope around code value 0.5.
         value = 0.5f + (value - 0.5f) * (1.0f + adjustments.contrast);
 
         curve[static_cast<std::size_t>(step)] =
@@ -124,10 +118,8 @@ void applyAdjustments(const uint8_t* source, uint8_t* out, std::size_t pixels, c
         return;
     }
     if (adjustments.neutral()) {
-        // Byte for byte, and not merely very close: a visitor who returns
-        // every control to zero is entitled to the photograph they started
-        // with, and a scope that did not settle back exactly would be
-        // reporting on the arithmetic rather than on the picture.
+        // Preserve the decoded input byte for byte when every control is at
+        // zero, rather than round-tripping it through the transfer functions.
         std::copy_n(source, pixels * 4u, out);
 
         return;

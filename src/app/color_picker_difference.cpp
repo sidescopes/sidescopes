@@ -24,7 +24,7 @@ struct DiffColumns
 DiffColumns measureDiffColumns(const PickerContext& ctx)
 {
     DiffColumns columns{};
-    columns.label = ImGui::CalcTextSize("ΔL").x;
+    columns.label = ImGui::CalcTextSize("ΔL*").x;
     const float value = ImGui::CalcTextSize("-199").x;
     const float group = columns.label + ctx.columnGap + value;
     columns.stride = group + 3.0f * ctx.columnGap;
@@ -38,7 +38,7 @@ DiffColumns measureDiffColumns(const PickerContext& ctx)
 void drawPickerDiffTriplet(const PickerContext& ctx, float valuesStart, const float diffValues[3],
                            const DiffColumns& columns)
 {
-    const char* diffLabels[3] = {"ΔL", "ΔC", "ΔH"};
+    const char* diffLabels[3] = {"ΔL*", "ΔC*", "ΔH*"};
     for (int component = 0; component < 3; ++component) {
         const float columnStart = valuesStart + static_cast<float>(component) * columns.stride;
         if (component == 0) {
@@ -64,7 +64,7 @@ void drawPickerDifferenceRow(const PickerContext& ctx, const ImVec2& area, float
     char deltaEValue[8];
     formatDeltaE(difference.deltaE, deltaEValue);
     const float deltaEValueX = area.x - hexFontWidth(ctx.monospaceFont, deltaEValue);
-    const float deltaELabelX = deltaEValueX - ctx.columnGap - ImGui::CalcTextSize("ΔE").x;
+    const float deltaELabelX = deltaEValueX - ctx.columnGap - ImGui::CalcTextSize("ΔE00").x;
     const float diffValues[3] = {difference.lightness, difference.chroma, difference.hue};
     const DiffColumns columns = measureDiffColumns(ctx);
     const bool tripletShares = valuesStart + columns.width + ctx.columnGap <= deltaELabelX;
@@ -79,10 +79,10 @@ void drawPickerDifferenceRow(const PickerContext& ctx, const ImVec2& area, float
         ImGui::SameLine(labelX);
     } else {
         labelX = valuesStart;
-        valueX = labelX + ImGui::CalcTextSize("ΔE").x + ctx.columnGap;
+        valueX = labelX + ImGui::CalcTextSize("ΔE00").x + ctx.columnGap;
         ImGui::SetCursorPosX(labelX);
     }
-    ImGui::TextUnformatted("ΔE");
+    ImGui::TextUnformatted("ΔE00");
     wrappedTooltip(PickerDeltaETip);
     ImGui::SameLine(valueX);
     hexFontText(ctx.monospaceFont, deltaEValue);

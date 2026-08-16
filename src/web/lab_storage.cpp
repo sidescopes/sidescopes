@@ -1,4 +1,4 @@
-#include "web/demo_storage.h"
+#include "web/lab_storage.h"
 
 #include <emscripten/emscripten.h>
 
@@ -13,13 +13,13 @@ namespace {
 // versioned because the preferences format is explicitly allowed to change
 // shape before 1.0 without a migration, and a stale value should be
 // discarded rather than half-read.
-constexpr const char* StorageKey = "sidescopes.demo.preferences.v1";
+constexpr const char* StorageKey = "sidescopes.lab.preferences.v1";
 
 // EM_JS rather than EM_ASM: the calls are declared once with their types,
 // so a mismatched argument is a compile error rather than a surprise at
 // runtime. Both guard on localStorage being reachable at all - a private
 // window can refuse it, and throwing out of C++ here would take the whole
-// demo down over a preference.
+// lab down over a preference.
 // clang-format off
 // The bodies below are JAVASCRIPT. clang-format reads them as C++ and
 // will happily turn `===` into `== =`, which fails at link time in

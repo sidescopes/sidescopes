@@ -1,6 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 
-#include "web/demo_layout.h"
+#include "web/lab_layout.h"
 
 namespace sidescopes {
 namespace {
@@ -37,7 +37,7 @@ TEST_CASE("On a tall viewport the application sits below the picture")
 TEST_CASE("The application is never a frame around the picture")
 {
     // The one thing this layout would teach falsely if it were wrong. On a
-    // desktop the two are separate windows; a demo that nested one inside the
+    // desktop the two are separate windows; a lab that nested one inside the
     // other would be showing an arrangement that does not exist.
     for (const LayoutPoint size :
          {LayoutPoint{1600.0f, 900.0f}, LayoutPoint{1000.0f, 1000.0f}, LayoutPoint{420.0f, 900.0f},

@@ -17,7 +17,7 @@ class ScopeRegistry;
 
 /// @brief The keyboard, and the colour under the pointer.
 ///
-/// The two pieces of the application shell that the demo has to supply
+/// The two pieces of the application shell that the lab has to supply
 /// itself, because the desktop takes both from the operating system: keys
 /// arrive through GLFW callbacks the shell installs, and the colour comes
 /// from a screen sample. Neither exists here in that form — the keys come
@@ -25,7 +25,7 @@ class ScopeRegistry;
 ///
 /// The MAPPING is not rebuilt. ShortcutResolver owns which key means what,
 /// and this only answers "is that key down" and applies what it returns, so
-/// the demo's keyboard cannot drift from the application's.
+/// the lab's keyboard cannot drift from the application's.
 namespace shell {
 
 /// Whether the named binding went down this frame. Names are what a binding
@@ -36,7 +36,7 @@ namespace shell {
 [[nodiscard]] ModifierState modifiers();
 
 /// The colour of the picture under @p point, or nothing when the pointer is
-/// outside it. The desktop samples the screen here; the demo samples the
+/// outside it. The desktop samples the screen here; the lab samples the
 /// only picture it has.
 [[nodiscard]] std::optional<FloatColor> sampleAt(const ImVec2& point, const RegionEditor::Placement& placement,
                                                  const std::vector<uint8_t>& rgba, int width, int height);

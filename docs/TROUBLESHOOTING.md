@@ -1,109 +1,108 @@
 # Troubleshooting
 
-## SideScopes cannot see the screen
+## SideScopes cannot capture the screen on macOS
 
-On macOS, reading the screen needs a permission, and without it the
-application says so on its own front page instead of showing empty scopes.
-The setting is System Settings → Privacy & Security → Screen Recording,
-and the application has to be quit and reopened after the switch is turned
-on, because macOS only hands the permission over at launch. Windows needs
-no permission for this.
+Screen capture requires permission in **System Settings → Privacy & Security →
+Screen Recording**. Enable SideScopes, quit it completely, and reopen it. The
+application reports a missing permission rather than presenting empty traces.
 
-**The permission loop.** macOS ties the grant to the application's code
-signature rather than to its name, so replacing SideScopes with a
-differently signed build leaves a stale grant behind: the switch reads as
-on while the application still cannot see anything. Clear the stale grant
-and approve once more:
+If the setting is enabled but capture remains unavailable, macOS may hold a
+stale permission entry after the application was replaced with a differently
+signed build. Reset the entry in Terminal, then reopen SideScopes and grant the
+permission again:
 
 ```sh
 tccutil reset ScreenCapture org.sidescopes.app
 ```
 
-Then relaunch and grant the permission when prompted.
+Remove duplicate copies of SideScopes when diagnosing this problem. Copies
+share the same application identifier, and macOS may open a different one than
+the copy you changed.
 
-If several copies of SideScopes are on the disk, keep only one. They share
-an identifier, and the system may open a copy other than the one you meant.
+Windows does not require a separate screen-capture permission.
 
-## macOS refuses to open the download
+## macOS blocks the download
 
-If macOS reports that SideScopes cannot be opened because it comes from an
-unidentified developer, right-click the application and choose Open. That
-dialog offers to open it anyway, and the answer is remembered. Only a build
-signed by an identified developer opens on a double-click.
+Current releases are not signed or notarized. If you have verified the download
+and choose to run it, first try to open SideScopes, then open **System Settings
+→ Privacy & Security**, scroll to Security, and select **Open Anyway**. macOS
+will ask you to confirm the exception.
+
+Do not override a warning that says the application will damage your computer
+or appears damaged. Those messages are distinct from the unidentified-developer
+warning. Download the release again from the official releases page and report
+the result if its published SHA-256 does not match.
 
 ## Screen capture was interrupted
 
-The capture stream ends when the display configuration changes — a display
-sleeping, the screen locking, a monitor unplugged. SideScopes says so on
-the panes and reconnects by itself when the display returns. It never
-presents a stale reading as a live one.
+Display sleep, screen locking, disconnection, or a display-configuration change
+can end the capture stream. SideScopes clears the live trace, reports the
+interruption, and attempts to reconnect when the display becomes available. It
+does not retain a stale frame as a current reading.
 
-## The interface is too small, or too large
+## The interface is too small or too large
 
-The right-click menu has a UI Scaling submenu, from 50% to 200%. It
-multiplies the scale the operating system already applies rather than
-replacing it, so a window keeps the setting as it crosses between displays
-of different densities. Until you choose a size, the default is the one the
-display's own density suggests.
+Choose **UI Scaling** from the right-click menu. Values from 50% to 200% multiply
+the scale reported by the operating system. At the default setting, SideScopes
+follows the display density as its window moves between displays.
 
-## Starting over
+## Resetting preferences
 
-"Reset to Defaults", in the Diagnostics submenu of the right-click menu,
-returns every setting to its shipped value. So does deleting the
-preferences file, which is `preferences.txt` under `Application
-Support/SideScopes` on macOS and `%APPDATA%\SideScopes` on Windows. It is
-plain text, one `key=value` per line, and unknown keys are ignored.
+Choose **Diagnostics → Reset to Defaults**, or quit SideScopes and remove its
+preferences file:
 
-Before 1.0 the file is allowed to change shape without a migration, so an
-update may return settings to their defaults.
+- macOS: `~/Library/Application Support/SideScopes/preferences.txt`
+- Windows: `%APPDATA%\SideScopes\preferences.txt`
+
+The file is plain text with one `key=value` pair per line. Unknown keys are
+ignored. Before version 1.0, an update may reset settings when the file format
+changes.
+
+## Recording a diagnostic log
+
+Choose **Diagnostics → Record Diagnostic Log** before reproducing a problem.
+SideScopes writes timestamped state and event lines to
+`sidescopes/sidescopes-diag.log` inside the system temporary directory. Choose
+**Show Diagnostic Log** to open the folder.
+
+The log records window titles and application names. Review it before sharing.
+The previous recording is retained beside it as `sidescopes-diag.prev.log`.
+
+On Windows, **Show in Screen Captures** temporarily makes SideScopes visible to
+capture and screenshot tools. Its windows are normally excluded so the scopes
+do not analyze themselves.
+
+## Development diagnostics
+
+`SIDESCOPES_DIAG` starts logging at launch for a comma-separated list of
+channels, or for `all`:
+
+| Channel | Records |
+| --- | --- |
+| `attach` | Window-focus routing |
+| `border` | Region-border drawing |
+| `suggestions` | Window suggestions and picker mapping |
+| `facelock` | Face-tracking decisions |
+| `perf` | Frame, analysis, and capture-cadence timing |
+| `modules` | Scope-module discovery and loading |
+| `interface` | Interface-toolkit validation errors |
+
+For example:
+
+```sh
+SIDESCOPES_DIAG=attach,border ./SideScopes
+```
+
+`SIDESCOPES_DIAG_FILE` sets a different log path and
+`SIDESCOPES_PREFS_FILE` sets a different preferences path. Use the latter for a
+test instance that must not change regular settings.
+
+Logs flush on a short interval by default. `SIDESCOPES_DIAG_FLUSH=1` flushes
+every line when investigating a crash. `SIDESCOPES_DIAG_FLUSH=0` buffers until
+recording stops to reduce measurement overhead.
 
 ## Reporting a problem
 
-The Diagnostics submenu of the right-click menu records what the
-application is doing. "Record Diagnostic Log" streams timestamped state
-lines to `sidescopes-diag.log`, in a `sidescopes` folder inside the system
-temporary directory, while you reproduce the issue; "Show Diagnostic Log"
-opens that folder. The recording opens by stating what is already true —
-the capture format, its crop and cadence, the scopes on offer and the
-letters they hold — so it is worth starting one before reproducing rather
-than after.
-
-The log records window titles and application names. Glance over it before
-sharing.
-
-On Windows, "Show in Screen Captures" makes the SideScopes windows visible
-to screenshot tools, which they normally are not, so that the scopes never
-end up analyzing themselves.
-
-## Diagnostics from the environment
-
-For development, `SIDESCOPES_DIAG` starts a recording at launch with only
-the named channels — for example `SIDESCOPES_DIAG=attach,border`, or `all`:
-
-| Channel | Records |
-| ------- | ------- |
-| `attach` | window-focus routing |
-| `border` | region-border drawing |
-| `suggestions` | the picker's window suggestions and pick mapping |
-| `facelock` | face-lock probe verdicts |
-| `perf` | frame, analysis-pass and capture-cadence timings |
-| `modules` | which scope modules loaded, and why one did not |
-| `interface` | errors the interface toolkit reports about its own use |
-
-The `interface` channel is worth including in a recording attached to a
-report even when the interface looked fine. The toolkit checks its own use
-as it draws, and a released build says nothing on screen about what it
-finds - these are our bugs rather than yours, and there is nothing you
-could do about one. On that channel it becomes a line in the file. The same error repeats on every frame it is
-raised, so only a message the recording has not already been told is
-written.
-
-The previous run is kept beside the log as `sidescopes-diag.prev.log`.
-`SIDESCOPES_DIAG_FILE` places the log elsewhere, and
-`SIDESCOPES_PREFS_FILE` places the preferences file, so a throwaway
-instance can take its own settings without disturbing the real ones.
-
-Writes reach the disk on a short interval by default.
-`SIDESCOPES_DIAG_FLUSH=1` flushes every line when chasing a crash, and
-`SIDESCOPES_DIAG_FLUSH=0` buffers until recording stops, so logging does
-not distort a performance measurement.
+Open an issue at <https://github.com/sidescopes/sidescopes/issues> with the
+platform and SideScopes version, the steps that reproduce the problem, and a
+reviewed diagnostic log when it is relevant.

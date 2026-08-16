@@ -26,7 +26,7 @@ option(SIDESCOPES_BENCH "Build the opt-in benchmark suite" OFF)
 option(SIDESCOPES_WERROR "Treat compiler warnings as errors" OFF)
 option(SIDESCOPES_MODULES_DYNAMIC "Load built-in scope modules dynamically" OFF)
 option(SIDESCOPES_UI_TESTS "Build the Dear ImGui Test Engine UI-test target" OFF)
-option(SIDESCOPES_WEB_SINGLE_FILE "Emit the browser demo as one self-contained file" OFF)
+option(SIDESCOPES_WEB_SINGLE_FILE "Emit the browser lab as one self-contained file" OFF)
 set(SIDESCOPES_SANITIZE "" CACHE STRING
     "Comma-separated sanitizers to build and link with (e.g. address,undefined or thread)")
 
@@ -447,63 +447,63 @@ if(APPLE OR WIN32 OR EMSCRIPTEN)
     # the application: they own the ImGui render backends, and only the
     # application links ImGui.
     if(EMSCRIPTEN)
-        # The browser demo. It links the SAME libraries the desktop
+        # The browser lab. It links the SAME libraries the desktop
         # executables link, in the same order, and names no source of its own
         # beyond its entry point and the units with no desktop counterpart -
         # which is the whole point of moving this out of a shell script. A new
         # file in sidescopes_app now reaches the web build for free, and a
         # file that fails to compile for the web fails here rather than
         # silently going missing.
-        add_executable(sidescopes_demo
+        add_executable(sidescopes_lab
             src/web/band_geometry.cpp
-            src/web/demo_layout.cpp
-            src/web/demo_main.cpp
-            src/web/demo_picture.cpp
-            src/web/demo_shell.cpp
-            src/web/demo_storage.cpp
-            src/web/demo_tour_steps.cpp
+            src/web/lab_layout.cpp
+            src/web/lab_main.cpp
+            src/web/lab_picture.cpp
+            src/web/lab_shell.cpp
+            src/web/lab_storage.cpp
+            src/web/lab_tour_steps.cpp
             src/web/image_adjust.cpp
             src/web/region_editor.cpp
             src/platform/web/graphics.cpp
         )
-        target_link_libraries(sidescopes_demo PRIVATE
+        target_link_libraries(sidescopes_lab PRIVATE
             sidescopes_app_imgui
             ${SIDESCOPES_MODULE_LINK_LIBS}
             sidescopes_platform
             imgui
             glfw
         )
-        target_include_directories(sidescopes_demo PRIVATE ${CMAKE_BINARY_DIR}/generated)
-        add_dependencies(sidescopes_demo sidescopes_version)
+        target_include_directories(sidescopes_lab PRIVATE ${CMAKE_BINARY_DIR}/generated)
+        add_dependencies(sidescopes_lab sidescopes_version)
         # -O2 and SIMD on the sources; the analysis is the same code the
         # desktop runs and wants the same treatment.
-        target_compile_options(sidescopes_demo PRIVATE -msimd128)
+        target_compile_options(sidescopes_lab PRIVATE -msimd128)
         # A CLASSIC script defining a global factory, not an ES module. A
         # module can only be imported over http(s) - from a file:// page the
-        # import is refused as a cross-origin request - and the demo is meant
+        # import is refused as a cross-origin request - and the lab is meant
         # to survive being downloaded and opened by double-clicking it.
-        set_target_properties(sidescopes_demo PROPERTIES
-            OUTPUT_NAME sidescopes-demo
+        set_target_properties(sidescopes_lab PROPERTIES
+            OUTPUT_NAME sidescopes-lab
             SUFFIX ".js")
         # SHELL: keeps each flag with its value. Without it CMake sees the
         # repeated --embed-file as a duplicate and drops the second one, so
         # the flag and the path it belongs to come apart.
-        target_link_options(sidescopes_demo PRIVATE
+        target_link_options(sidescopes_lab PRIVATE
             "SHELL:--embed-file ${CMAKE_SOURCE_DIR}/src/web/fonts/ui.ttf@/fonts/ui.ttf"
             "SHELL:--embed-file ${CMAKE_SOURCE_DIR}/src/web/fonts/mono.ttf@/fonts/mono.ttf"
             -sMAX_WEBGL_VERSION=2
             -sMIN_WEBGL_VERSION=2
             -sALLOW_MEMORY_GROWTH=1
-            "-sEXPORTED_FUNCTIONS=[_main,_demoFrameBuffer,_demoFrameReady,_demoStartTour,_demoSetPageAnchor,_demoTourAtAnchor,_demoSetAdjustments,_malloc,_free]"
+            "-sEXPORTED_FUNCTIONS=[_main,_labFrameBuffer,_labFrameReady,_labStartTour,_labSetPageAnchor,_labTourAtAnchor,_labSetAdjustments,_malloc,_free]"
             "-sEXPORTED_RUNTIME_METHODS=[ccall,cwrap,HEAPU8]"
             -sMODULARIZE=1
-            -sEXPORT_NAME=SideScopesDemo
+            -sEXPORT_NAME=SideScopesLab
             -sENVIRONMENT=web
             # One file, with the WebAssembly inside it as base64, for the
             # standalone build: a page opened from disk cannot fetch a
             # sibling .wasm any more than it can import a module.
             "$<$<BOOL:${SIDESCOPES_WEB_SINGLE_FILE}>:-sSINGLE_FILE=1>")
-        sidescopes_target_defaults(sidescopes_demo)
+        sidescopes_target_defaults(sidescopes_lab)
     elseif(APPLE)
         add_executable(SideScopes MACOSX_BUNDLE
             src/app/main.cpp
@@ -601,7 +601,7 @@ endif()
 
 if(SIDESCOPES_BUILD_TESTS AND NOT EMSCRIPTEN)
     # The suite runs a native binary under ctest. A WebAssembly one needs a
-    # host to run it in, so the web configuration builds the demo only; the
+    # host to run it in, so the web configuration builds the lab only; the
     # portable code it shares is covered by the native suites on three
     # runners.
     enable_testing()

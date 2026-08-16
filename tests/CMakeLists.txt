@@ -66,19 +66,19 @@ add_executable(sidescopes_tests
     test_guided_tour.cpp
     test_image_adjust.cpp
     test_band_geometry.cpp
-    test_demo_layout.cpp
-    test_demo_picture.cpp
-    # The units under test are the browser demo's, and the only src/web files
-    # named by a target other than the demo itself. They can be: they touch
+    test_lab_layout.cpp
+    test_lab_picture.cpp
+    # The units under test are the browser lab's, and the only src/web files
+    # named by a target other than the lab itself. They can be: they touch
     # neither Dear ImGui nor Emscripten, so they compile anywhere, and the
-    # alternative is arithmetic that decides what every scope in the demo
+    # alternative is arithmetic that decides what every scope in the lab
     # shows - and whether its region border draws without seams - going
     # untested because of where the file lives.
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/web/image_adjust.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/web/band_geometry.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/../src/web/demo_tour_steps.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/../src/web/demo_layout.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/../src/web/demo_picture.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/web/lab_tour_steps.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/web/lab_layout.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/web/lab_picture.cpp
     test_region_geometry.cpp
     test_icons.cpp
     test_focus_resolution.cpp

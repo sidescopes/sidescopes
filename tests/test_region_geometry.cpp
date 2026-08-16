@@ -376,7 +376,7 @@ TEST_CASE("A screen sample of nothing at all reports nothing")
 
 // zoneAtPoint composes the two zone tests with the interior and band checks.
 // It exists because three surfaces were composing them by hand - both desktop
-// borders and the browser demo's editor - and the browser one had drifted:
+// borders and the browser lab's editor - and the browser one had drifted:
 // it hit-tested fixed boxes around the handle dots, which on a small region
 // leaves no move band at all.
 TEST_CASE("The region's interior is not a target")
@@ -412,7 +412,7 @@ TEST_CASE("A corner outranks an edge, and an edge the move band")
 
 TEST_CASE("A small region keeps a move band")
 {
-    // THE case the browser demo got wrong by hit-testing fixed boxes around
+    // THE case the browser lab got wrong by hit-testing fixed boxes around
     // the handle dots. At 30 points a side the dots sit at 100, 115 and 130;
     // boxes of 7.5 around each TILE the edge end to end, leaving nowhere to
     // press that moves the region rather than resizing it.

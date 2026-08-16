@@ -1,4 +1,4 @@
-#include "web/demo_picture.h"
+#include "web/lab_picture.h"
 
 #include <cstddef>
 
@@ -23,7 +23,7 @@ void swapRedAndBlue(const std::vector<uint8_t>& from, std::vector<uint8_t>& into
 
 }  // namespace
 
-uint8_t* DemoPicture::decodeInto(int width, int height)
+uint8_t* LabPicture::decodeInto(int width, int height)
 {
     if (width <= 0 || height <= 0) {
         return nullptr;
@@ -35,14 +35,14 @@ uint8_t* DemoPicture::decodeInto(int width, int height)
     return m_decoded.data();
 }
 
-void DemoPicture::adoptDecoded()
+void LabPicture::adoptDecoded()
 {
     swapRedAndBlue(m_decoded, m_original);
     m_adjustDue = true;
     rebuild();
 }
 
-bool DemoPicture::setAdjustments(const ImageAdjustments& wanted)
+bool LabPicture::setAdjustments(const ImageAdjustments& wanted)
 {
     if (wanted == m_adjustments) {
         return false;
@@ -53,7 +53,7 @@ bool DemoPicture::setAdjustments(const ImageAdjustments& wanted)
     return true;
 }
 
-bool DemoPicture::refresh()
+bool LabPicture::refresh()
 {
     if (!m_adjustDue) {
         return false;
@@ -63,7 +63,7 @@ bool DemoPicture::refresh()
     return true;
 }
 
-void DemoPicture::rebuild()
+void LabPicture::rebuild()
 {
     m_adjustDue = false;
     if (m_original.empty()) {
@@ -81,37 +81,37 @@ void DemoPicture::rebuild()
     m_pixelsFresh = true;
 }
 
-bool DemoPicture::hasFreshPixels() const
+bool LabPicture::hasFreshPixels() const
 {
     return m_pixelsFresh && !m_analysed.empty();
 }
 
-void DemoPicture::pixelsTaken()
+void LabPicture::pixelsTaken()
 {
     m_pixelsFresh = false;
 }
 
-bool DemoPicture::empty() const
+bool LabPicture::empty() const
 {
     return m_analysed.empty();
 }
 
-int DemoPicture::width() const
+int LabPicture::width() const
 {
     return m_width;
 }
 
-int DemoPicture::height() const
+int LabPicture::height() const
 {
     return m_height;
 }
 
-const std::vector<uint8_t>& DemoPicture::analysed() const
+const std::vector<uint8_t>& LabPicture::analysed() const
 {
     return m_analysed;
 }
 
-const ScopeImage& DemoPicture::display() const
+const ScopeImage& LabPicture::display() const
 {
     return m_display;
 }

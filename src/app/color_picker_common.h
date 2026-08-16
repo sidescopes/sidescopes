@@ -14,16 +14,16 @@ namespace sidescopes {
 // convention every colorimetric tool follows; hue has none, because it runs
 // around a circle rather than along an axis.
 inline constexpr const char* PickerDeltaETip =
-    "CIEDE2000 difference from the live color, lower is closer (sRGB assumed)";
+    "CIEDE2000 color difference between the reference and live sample (sRGB/D65 assumed); lower is closer";
 inline constexpr const char* PickerLchTips[3] = {
-    "how much lighter (+) or darker (-) the live color is",
-    "how much more colorful (+) or duller (-) the live color is",
-    "how far the live color's hue has drifted - counts for less when the color is dull",
+    "CIELAB lightness difference, live minus reference; positive is lighter",
+    "CIELAB chroma difference, live minus reference; positive is higher chroma",
+    "chroma-weighted CIELAB hue-difference term, live relative to reference",
 };
 inline constexpr const char* PickerRgbTips[3] = {
-    "how much more (+) or less (-) red the live color is",
-    "how much more (+) or less (-) green the live color is",
-    "how much more (+) or less (-) blue the live color is",
+    "captured red-code difference, live minus reference",
+    "captured green-code difference, live minus reference",
+    "captured blue-code difference, live minus reference",
 };
 
 // The live color, its formatted values, and the shared column metrics every

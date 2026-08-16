@@ -5,7 +5,7 @@
 // around on the desktop, and no browser API is ever going to let it: that
 // is the security model working, not a gap in this file.
 //
-// So the demo is the INSTRUMENT rather than the application. Every seam
+// So the lab is the INSTRUMENT rather than the application. Every seam
 // here reports "nothing", which is what the callers are already written to
 // handle — the region tools stand down on their own when the platform
 // offers them nothing, exactly as they do on a desktop with no displays
@@ -37,7 +37,7 @@ constexpr int OptionBit = 4;
 constexpr int CommandBit = 8;
 
 // clang-format off
-// JAVASCRIPT, not C++ - see the note in web/demo_storage.cpp. clang-format
+// JAVASCRIPT, not C++ - see the note in web/lab_storage.cpp. clang-format
 // reads these bodies as C++ and will rewrite operators inside them.
 //
 // PLAIN addEventListener, deliberately, and NOT the html5.h
@@ -103,7 +103,7 @@ std::optional<WindowGeometry> windowGeometry(uint64_t)
 
 std::optional<DesktopPoint> globalCursorPosition()
 {
-    // The pointer is known inside the canvas and nowhere else; the demo
+    // The pointer is known inside the canvas and nowhere else; the lab
     // reads it through Dear ImGui rather than through this seam.
     return std::nullopt;
 }
@@ -179,7 +179,7 @@ std::string preferencesFilePath()
     // A real path, in the bundled in-memory filesystem. The application
     // saves and loads through its own preferences code against this, exactly
     // as it does on a desktop; what differs is only that the file does not
-    // survive the page, so web/demo_storage.cpp carries its contents in and
+    // survive the page, so web/lab_storage.cpp carries its contents in and
     // out of the browser's local storage around those two calls.
     //
     // Through this seam rather than a web-only accessor, so the application
@@ -303,7 +303,7 @@ ModifierState currentModifiers()
 
 void openUrl(const char*)
 {
-    // Deliberately inert. The demo has no link to open, and a page that
+    // Deliberately inert. The lab has no link to open, and a page that
     // could navigate itself from C++ would be a surprise.
 }
 
@@ -316,7 +316,7 @@ void openScreenRecordingSettings()
 // --- fonts -------------------------------------------------------------
 //
 // A page has no font files to enumerate, and reaching for one over the
-// network would be a request the demo does not otherwise make. Both lists
+// network would be a request the lab does not otherwise make. Both lists
 // come back empty, which the startup path already handles: Dear ImGui's
 // own bundled font stands in, and the picker aligns hex codes with the
 // interface font rather than a monospace companion.

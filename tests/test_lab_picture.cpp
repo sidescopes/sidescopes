@@ -2,7 +2,7 @@
 #include <cstdint>
 #include <vector>
 
-#include "web/demo_picture.h"
+#include "web/lab_picture.h"
 
 namespace sidescopes {
 namespace {
@@ -10,7 +10,7 @@ namespace {
 /// Writes a recognisable RGBA picture into the decode buffer, as the page
 /// would: every pixel a different colour, so a byte order that got exchanged
 /// twice cannot pass for one that was never exchanged at all.
-void decodeInto(DemoPicture& picture, int width, int height)
+void decodeInto(LabPicture& picture, int width, int height)
 {
     uint8_t* into = picture.decodeInto(width, height);
     REQUIRE(into != nullptr);
@@ -29,9 +29,9 @@ void decodeInto(DemoPicture& picture, int width, int height)
 TEST_CASE("The canvas and the engines are given the same pixels")
 {
     // THE rule this type exists for. If the picture on screen and the pixels
-    // reaching the engines could differ, the demo would teach something false
+    // reaching the engines could differ, the lab would teach something false
     // about what a scope measures - and would look right while doing it.
-    DemoPicture picture;
+    LabPicture picture;
     decodeInto(picture, 4, 3);
 
     ImageAdjustments warm;
@@ -58,7 +58,7 @@ TEST_CASE("Adjustments are computed from the decode, never from the last result"
     // Applying over the previous output would degrade the photograph as a
     // control is dragged back and forth, and the scopes would report that
     // damage as belonging to the picture.
-    DemoPicture picture;
+    LabPicture picture;
     decodeInto(picture, 8, 8);
     const std::vector<uint8_t> pristine = picture.analysed();
 
@@ -90,7 +90,7 @@ TEST_CASE("Adjustments are computed from the decode, never from the last result"
 
 TEST_CASE("A setting that has not changed is not work to do")
 {
-    DemoPicture picture;
+    LabPicture picture;
     decodeInto(picture, 2, 2);
 
     ImageAdjustments warm;
@@ -104,7 +104,7 @@ TEST_CASE("A setting that has not changed is not work to do")
 TEST_CASE("A new photograph keeps the adjustments already set")
 {
     // What a visitor comparing two pictures under one adjustment expects.
-    DemoPicture picture;
+    LabPicture picture;
     decodeInto(picture, 4, 4);
     ImageAdjustments cool;
     cool.temperature = -0.8f;
@@ -124,7 +124,7 @@ TEST_CASE("A new photograph keeps the adjustments already set")
 
 TEST_CASE("The analysis is offered each new result exactly once")
 {
-    DemoPicture picture;
+    LabPicture picture;
     CHECK_FALSE(picture.hasFreshPixels());
 
     decodeInto(picture, 3, 3);
@@ -141,7 +141,7 @@ TEST_CASE("The analysis is offered each new result exactly once")
 
 TEST_CASE("A picture with no size is refused rather than half-adopted")
 {
-    DemoPicture picture;
+    LabPicture picture;
 
     CHECK(picture.decodeInto(0, 10) == nullptr);
     CHECK(picture.decodeInto(10, -1) == nullptr);
@@ -153,7 +153,7 @@ TEST_CASE("The display carries a new sequence for every result")
 {
     // The texture is uploaded on the strength of this number; a result that
     // reused it would leave the canvas showing the previous adjustment.
-    DemoPicture picture;
+    LabPicture picture;
     decodeInto(picture, 4, 4);
     const uint64_t afterDecode = picture.display().sequence;
 

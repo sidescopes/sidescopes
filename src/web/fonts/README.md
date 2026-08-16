@@ -1,4 +1,4 @@
-# The demo's fonts
+# The lab's fonts
 
 A page has no system fonts to enumerate, so the web build carries two of
 its own. The desktop builds do not use these: there `interfaceFontFiles()`
@@ -14,7 +14,7 @@ with. That is what takes them from 325 KB and 79 KB to 17 KB and 20 KB.
 | `mono.ttf` | Roboto Mono Regular | SIL Open Font License 1.1 |
 
 Inter is chosen because it is a screen UI face and reads close to both SF
-Pro and Segoe UI, so the demo looks like the application on either
+Pro and Segoe UI, so the lab looks like the application on either
 desktop rather than like neither.
 
 Regenerate with:

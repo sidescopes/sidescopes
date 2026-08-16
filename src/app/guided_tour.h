@@ -35,7 +35,7 @@ struct TourStep
 /// and the anchors come from whoever draws the controls.
 ///
 /// It carries no text of its own either. The steps are handed in, because a
-/// tour of the browser demo names things a desktop tour would not, and a
+/// tour of the browser lab names things a desktop tour would not, and a
 /// class that knew both would have to choose.
 class GuidedTour
 {

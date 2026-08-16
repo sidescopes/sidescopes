@@ -1,9 +1,9 @@
 <!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Browser demo · SideScopes</title>
+<title>SideScopes Lab</title>
 <!-- The same mark the website wears, copied out of this repository's brand
-     assets by the build. A demo page that arrived wearing the browser's blank
+     assets by the build. A lab page that arrived wearing the browser's blank
      document icon reads as somebody's scratch file, which is the opposite of
      what it is here to say. -->
 <link rel="icon" href="favicon-32.png" type="image/png" sizes="32x32">
@@ -93,7 +93,7 @@
   /* The adjustments. These stand for the EDITOR a photographer has open
      beside SideScopes, so they are the page's and not the application's -
      drawn inside its window they would say that SideScopes edits photographs,
-     which is the one thing this demo must not teach. Shaped like an editor's
+     which is the one thing this lab must not teach. Shaped like an editor's
      tool panel rather than like a form, because that is what they stand in
      for and because a photographer reads that shape without being told. */
 
@@ -245,7 +245,7 @@
   .offline code { background:#221f1d; border-radius:4px; padding:.1rem .35rem; font-size:.9em }
 </style>
 
-<div class="strip" id="strip"></div>
+<div class="strip" id="strip" aria-label="Sample and local images"></div>
 
 <p class="note">
   <span class="credit" id="credit"></span>
@@ -313,7 +313,7 @@
   </div>
 </div>
 
-<div id="stage"><canvas id="canvas" tabindex="-1"></canvas></div>
+<div id="stage"><canvas id="canvas" tabindex="-1" aria-label="Interactive SideScopes scope panes"></canvas></div>
 </div>
 
 <input type="file" accept="image/*" id="file" hidden>
@@ -321,7 +321,7 @@
 <!-- The engine, as a classic script defining a global factory. The build
      replaces this line with the script INLINED for the standalone file, which
      is what lets that one be opened straight from disk. -->
-<script src="sidescopes-demo.js"></script>
+<script src="sidescopes-lab.js"></script>
 
 <script type="module">
 
@@ -357,15 +357,15 @@ if (location.protocol === 'file:' && !window.__STANDALONE) {
     '<h1>This copy needs a web server</h1>' +
     '<p>A page opened straight from disk may not load the WebAssembly beside it: the browser treats ' +
     'every local file as its own origin and refuses the request.</p>' +
-    '<p><b>Open <code>sidescopes-demo.html</code> instead</b> — the same demo in a single self-contained ' +
+    '<p><b>Open <code>sidescopes-lab.html</code> instead</b> — the same lab in a single self-contained ' +
     'file, built to be opened exactly this way.</p>' +
     '<p>Or serve this directory over HTTP: <code>python3 -m http.server</code>.</p>' +
     '</div>';
-  throw new Error('file:// - open sidescopes-demo.html instead');
+  throw new Error('file:// - open sidescopes-lab.html instead');
 }
 
 const build = new URL(import.meta.url).searchParams.get('b') || '';
-const mod = await SideScopesDemo({
+const mod = await SideScopesLab({
   canvas: document.getElementById('canvas'),
   locateFile: (path) => (build ? `${path}?b=${build}` : path),
 });
@@ -379,7 +379,7 @@ const mod = await SideScopesDemo({
 // ends up saying "SideScopes" - the name drawn in the application's own title
 // bar, which is right there and does not need repeating. Put back afterwards,
 // because the tab is the page's to name.
-document.title = 'Browser demo \u00b7 SideScopes';
+document.title = 'SideScopes Lab';
 
 // The adjustments reach the application as one call carrying all seven, so
 // there is no state where some have arrived and others have not. The
@@ -412,7 +412,7 @@ function refreshReadouts() {
 }
 
 function sendAdjustments() {
-  mod.ccall('demoSetAdjustments', null, ADJUSTMENTS.map(() => 'number'),
+  mod.ccall('labSetAdjustments', null, ADJUSTMENTS.map(() => 'number'),
             sliders.map((slider) => parseFloat(slider.value)));
   refreshReadouts();
 }
@@ -478,15 +478,15 @@ refreshReadouts();
 
 const tourButton = document.getElementById('tour');
 tourButton.addEventListener('click', () => {
-  mod.ccall('demoStartTour', null, [], []);
+  mod.ccall('labStartTour', null, [], []);
   document.getElementById('canvas').focus();
 });
 
 // Public domain, works of the US federal government (17 U.S.C. 105). The
-// portrait in the same set is deliberately absent: a face on a demo page
+// portrait in the same set is deliberately absent: a face on a lab page
 // invites the reading that the person endorses this, which a trace does not.
 const SAMPLES = [
-  ['skin-and-colour', 'Skin tones beside strong colour', 'Library of Congress / Alfred T. Palmer, 1942'],
+  ['skin-and-colour', 'Skin tones beside strong color', 'Library of Congress / Alfred T. Palmer, 1942'],
   ['neutral-detail', 'Near-neutral, fine detail', 'National Park Service'],
   ['wide-tonal-range', 'Deep shadow beside clipped highlight', 'NASA / Bill Ingalls'],
   ['flat-field', 'A mostly uniform field', 'National Park Service'],
@@ -504,10 +504,10 @@ function push(bitmap, limit = 1400) {
   work.width = width; work.height = height;
   wctx.drawImage(bitmap, 0, 0, width, height);
   const image = wctx.getImageData(0, 0, width, height);
-  const ptr = mod.ccall('demoFrameBuffer', 'number', ['number', 'number'], [width, height]);
+  const ptr = mod.ccall('labFrameBuffer', 'number', ['number', 'number'], [width, height]);
   if (!ptr) { return; }
   mod.HEAPU8.set(image.data, ptr);
-  mod.ccall('demoFrameReady', null, [], []);
+  mod.ccall('labFrameReady', null, [], []);
 }
 
 // Any click in the strip takes focus off the canvas, and the application
@@ -529,7 +529,7 @@ async function useSample(name, line, button) {
   // inside it.
   const bitmap = await createImageBitmap(await (await fetch(sampleSource(name))).blob());
   push(bitmap);
-  credit.textContent = line ? `Photograph: ${line}. Public domain.` : '';
+  credit.textContent = line ? `Image: ${line}. Public domain.` : '';
   markCurrent(button);
   returnFocus();
 }
@@ -560,7 +560,8 @@ for (const [name, title, line] of SAMPLES) {
 }
 
 const addButton = document.createElement('button');
-addButton.title = 'Add your own photograph';
+addButton.title = 'Load your own image';
+addButton.setAttribute('aria-label', 'Load your own image');
 addButton.innerHTML = '<span class="add">+</span>';
 addButton.addEventListener('click', () => document.getElementById('file').click());
 // The file dialog steals focus too; take it back when it closes either way.
@@ -580,10 +581,10 @@ function syncPageAnchors() {
   const canvas = canvasElement.getBoundingClientRect();
   for (const [id, element] of pageAnchors) {
     const box = element.getBoundingClientRect();
-    mod.ccall('demoSetPageAnchor', null, ['string', 'number', 'number', 'number', 'number'],
+    mod.ccall('labSetPageAnchor', null, ['string', 'number', 'number', 'number', 'number'],
               [id, box.left - canvas.left, box.top - canvas.top,
                box.right - canvas.left, box.bottom - canvas.top]);
-    element.classList.toggle('spotlight', mod.ccall('demoTourAtAnchor', 'number', ['string'], [id]) === 1);
+    element.classList.toggle('spotlight', mod.ccall('labTourAtAnchor', 'number', ['string'], [id]) === 1);
   }
   requestAnimationFrame(syncPageAnchors);
 }
@@ -608,7 +609,7 @@ document.getElementById('file').addEventListener('change', async (event) => {
   button.appendChild(img);
   const show = () => {
     push(bitmap);
-    credit.textContent = 'Your photograph. It never left this browser.';
+    credit.textContent = 'Your image. Processed locally in this browser.';
     markCurrent(button);
     returnFocus();
   };

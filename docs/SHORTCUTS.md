@@ -1,109 +1,106 @@
 # Keyboard and mouse
 
-Plain letters are shortcuts, so a keystroke reaches the scopes without a
-modifier. Holding Command, Control or Option silences them, leaving those
-chords to the system and the window; Shift alone stays meaningful, and
-stacks.
+Unmodified letter keys control SideScopes while its main window is active.
+Command, Control, or Option suppresses those single-letter shortcuts so system
+and window commands continue to work. Shift modifies several SideScopes
+actions.
 
 ## Scopes
 
 | Key | Action |
-| --- | ------ |
-| V | vectorscope |
-| W | waveform |
-| L | luma waveform |
-| R | RGB parade |
-| H | histogram |
-| C | color picker |
-| Z | step the vectorscope's zoom: 1x, 2x, 4x, round again |
+| --- | --- |
+| V | Show the vectorscope |
+| W | Show the RGB waveform |
+| L | Show the luma waveform |
+| R | Show the RGB parade |
+| H | Show the histogram |
+| C | Show the color picker |
+| Z | Cycle vectorscope zoom: 1x, 2x, 4x |
 
-A letter shows its scope alone. Holding Shift adds it alongside the ones
-already up, or removes it when it is up already; the last one on screen
-stays. Panes follow the order set in the scope selector, not the order the
-scopes were switched on.
+A scope key shows that instrument by itself. Hold Shift to add it to the
+current layout, or to remove it if already visible. At least one scope remains
+open. Pane order follows the scope selector, regardless of the order in which
+the shortcuts were pressed.
 
-## The region
-
-| Key | Action |
-| --- | ------ |
-| A | attach to a window |
-| D | draw a region |
-| F | attach to a face |
-| Esc | clear the region |
-
-Each opens a picker over the dimmed screen, and the picker's own keys
-switch between the three without closing it or disturbing the region.
-
-Escape clears the region, whether a picker is open or not: every attached
-window is detached and the region dropped, leaving the scopes reading
-nothing. It never falls back to a previous selection. When the Settings
-window is open, Escape closes that first.
-
-The region's border on the desktop is a control in its own right: drag it
-to move the region, drag a corner handle to resize, drag an edge's midpoint
-handle to move that edge alone.
-
-## Colors
+## Region
 
 | Key | Action |
-| --- | ------ |
-| P | pin the color under the cursor |
+| --- | --- |
+| A | Select or draw a window-attached region |
+| D | Draw an unattached region |
+| F | Select a detected face |
+| Escape | Clear the region |
 
-The pin tool closes after one pin; Shift-clicking pins and keeps it open.
-Dragging pins the average of the rectangle rather than a single pixel.
+While a region picker is open, A, D, and F switch its mode without closing it.
+Escape closes the Settings window first when that window is open; otherwise it
+clears every attached and unattached region. It does not restore a previous
+selection.
 
-P is silent when no scope that takes pins is on screen.
+On the desktop border, drag inside to move the region, drag a corner to resize
+it, or drag an edge midpoint to move one edge.
 
-## Layouts
-
-| Key | Action |
-| --- | ------ |
-| 1 - 9 | load that preset slot |
-| Cmd/Ctrl+S | save the current layout into the slot you are on |
-| Shift+1 - 9 | save the current layout into that slot, staying put |
-
-The last two are one action aimed at different slots: Cmd+S writes into
-the slot you are on, Shift+digit into one you are not, and neither moves
-you. Saving where you are is what puts the toolbar's save button out;
-saving elsewhere leaves it lit, because the slot you are on still differs
-from the screen.
-
-## The window
+## Color pins
 
 | Key | Action |
-| --- | ------ |
-| Command+W, red button (macOS) | hide the application |
-| Command+comma (macOS) | open Settings |
-| Command+Q (macOS) | quit |
-| Control+W (Windows) | minimize |
-| Control+Q (Windows) | quit |
-| Alt+F4, the close button (Windows) | quit |
+| --- | --- |
+| P | Open the color-pin tool |
 
-These follow the platform's own conventions rather than the application's
-preferences. On macOS, Command+W hides through the system, so the Dock icon
-or Command+Tab brings everything back, the region border included.
+Click to pin the pixel under the pointer. Drag to pin the average of a
+rectangle. Hold Shift while clicking or dragging to keep the tool open for
+additional pins. P has no effect when no visible scope accepts color pins.
+
+## Layout presets
+
+| Key | Action |
+| --- | --- |
+| 1–9 | Load that preset slot |
+| Command+S / Control+S | Save the current layout to the active slot |
+| Shift+1–9 | Save the current layout to that slot without loading it |
+
+Saving to another slot does not change the active slot. The toolbar save
+button remains lit when the on-screen arrangement still differs from the
+active preset.
+
+## Application window
+
+| Key | Action |
+| --- | --- |
+| Command+W or the red window button (macOS) | Hide SideScopes |
+| Command+comma (macOS) | Open Settings |
+| Command+Q (macOS) | Quit |
+| Control+W (Windows) | Minimize |
+| Control+Q (Windows) | Quit |
+| Alt+F4 or the close button (Windows) | Quit |
+
+On macOS, the Dock icon or Command+Tab restores the application and its region
+border after Command+W hides it.
 
 ## Mouse
 
-- Scroll over the vectorscope or a waveform to change how brightly its
-    trace is drawn; double-click to return it to the default.
-- Right-click anywhere for the menus. Right-clicking a scope's own pane
-  offers that scope's options first, since the click says which scope you
-  mean.
-- Drag the divider between two panes to change their share of the window.
-- In the scope selector, drag a row to set the order the panes follow.
-- While the colour picker is up, Shift+click (or Shift+drag) pins a colour
-  and keeps the picker open, so several can be pinned in one pass. The
-  picker says so on screen while it is up.
+- Scroll over a vectorscope or waveform to change trace intensity;
+  double-click to restore its default.
+- Right-click a scope pane for that instrument's options. Right-click elsewhere
+  for the complete menu.
+- Drag a divider to change adjacent pane sizes.
+- Drag rows in the scope selector to reorder panes.
+- While the color-pin tool is open, hold Shift during a click or drag to keep
+  it active.
 
 ## Rebinding
 
-Every letter above is a default, not a fixture. The preferences file holds
-one line per binding — `shortcut_attach_window`, `shortcut_draw_region`,
-`shortcut_attach_face`, `shortcut_pin_color`, `shortcut_vectorscope_zoom`,
-`shortcut_clear_region`, and `shortcut_<scope id>` for each scope. A value
-is a single letter A-Z, or `Escape`. Anything else is ignored and the
-default stands.
+The letter bindings are stored in the plain-text preferences file. Each value
+is one letter A–Z, or `Escape`; invalid values are ignored and the default is
+used. The keys are:
 
-The file is `preferences.txt`, under `Application Support/SideScopes` on
-macOS and `%APPDATA%\SideScopes` on Windows.
+- `shortcut_attach_window`
+- `shortcut_draw_region`
+- `shortcut_attach_face`
+- `shortcut_pin_color`
+- `shortcut_vectorscope_zoom`
+- `shortcut_clear_region`
+- `shortcut_<scope id>` for each scope
+
+The preferences file is located at:
+
+- macOS: `~/Library/Application Support/SideScopes/preferences.txt`
+- Windows: `%APPDATA%\SideScopes\preferences.txt`

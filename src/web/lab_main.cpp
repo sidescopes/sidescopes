@@ -1,4 +1,4 @@
-// The browser demo: the application's own scope panes, over a picture you
+// The browser lab: the application's own scope panes, over a picture you
 // can put a region on.
 //
 // This is not a port of SideScopes and cannot become one — no browser API
@@ -60,12 +60,12 @@
 #include "platform/graphics.h"
 #include "platform/screen_capture.h"
 #include "platform/web/screen_capture_source.h"
-#include "web/demo_layout.h"
-#include "web/demo_picture.h"
-#include "web/demo_shell.h"
-#include "web/demo_storage.h"
-#include "web/demo_tour_steps.h"
 #include "web/image_adjust.h"
+#include "web/lab_layout.h"
+#include "web/lab_picture.h"
+#include "web/lab_shell.h"
+#include "web/lab_storage.h"
+#include "web/lab_tour_steps.h"
 #include "web/region_editor.h"
 
 namespace sidescopes {
@@ -73,9 +73,9 @@ namespace {
 
 constexpr float TitleBarHeight = 26.0f;
 
-/// Everything the demo owns, in one place so the animation-frame callback
+/// Everything the lab owns, in one place so the animation-frame callback
 /// can reach it without a pile of globals.
-struct Demo
+struct Lab
 {
     GLFWwindow* window = nullptr;
     std::unique_ptr<GraphicsBackend> graphics;
@@ -103,7 +103,7 @@ struct Demo
 
     /// The photograph, in the three forms it has to exist in: what the page
     /// decoded, what the engines read, and what the canvas draws.
-    DemoPicture picture;
+    LabPicture picture;
     /// The texture the display copy is uploaded to. The picture holds no
     /// texture and knows no backend, which is what keeps it testable; owning
     /// the graphics is this shell's job.
@@ -161,7 +161,7 @@ struct Demo
     bool saveDue = false;
 };
 
-Demo g_demo;
+Lab g_lab;
 
 /// Uploads the picture's display copy to its texture; defined with the graphics
 /// work further down, needed by the adjustment pass just below.
@@ -173,17 +173,17 @@ void refreshDisplayTexture();
 /// every scope is empty, exactly as the desktop is after Escape.
 std::optional<RegionOfInterest> regionOfPicture()
 {
-    if (!g_demo.region.hasRegion() || g_demo.picture.width() <= 0 || g_demo.picture.height() <= 0) {
+    if (!g_lab.region.hasRegion() || g_lab.picture.width() <= 0 || g_lab.picture.height() <= 0) {
         return std::nullopt;
     }
     // platform/region_geometry's own conversion, which every platform's
     // overlay already uses. Writing the four divisions out here again looked
     // harmless and is exactly how the grab zones drifted.
-    const SsRect rect = g_demo.region.rect();
+    const SsRect rect = g_lab.region.rect();
     const LocalRect local{static_cast<double>(rect.x), static_cast<double>(rect.y), static_cast<double>(rect.width),
                           static_cast<double>(rect.height)};
 
-    return regionFromLocalRect(local, g_demo.picture.width(), g_demo.picture.height());
+    return regionFromLocalRect(local, g_lab.picture.width(), g_lab.picture.height());
 }
 
 /// One turn of the analysis, through the REAL pipeline.
@@ -195,25 +195,25 @@ std::optional<RegionOfInterest> regionOfPicture()
 /// copy is free to drift from the one that ships.
 void analyse()
 {
-    if (g_demo.picture.refresh()) {
+    if (g_lab.picture.refresh()) {
         refreshDisplayTexture();
     }
-    if (g_demo.picture.hasFreshPixels()) {
-        submitCapturedPicture(g_demo.picture.analysed().data(), g_demo.picture.width(), g_demo.picture.height());
-        g_demo.picture.pixelsTaken();
+    if (g_lab.picture.hasFreshPixels()) {
+        submitCapturedPicture(g_lab.picture.analysed().data(), g_lab.picture.width(), g_lab.picture.height());
+        g_lab.picture.pixelsTaken();
     }
-    if (g_demo.settingsDirty) {
+    if (g_lab.settingsDirty) {
         // The region the editor holds is in PICTURE pixels; the worker reads
         // percentages of the frame, so a selection survives the frame being
         // a different size - which is the same reason the desktop stores it
         // that way.
-        g_demo.analysis.region = regionOfPicture();
-        g_demo.worker->updateSettings(g_demo.analysis);
-        g_demo.settingsDirty = false;
+        g_lab.analysis.region = regionOfPicture();
+        g_lab.worker->updateSettings(g_lab.analysis);
+        g_lab.settingsDirty = false;
     }
     // The worker has no thread of its own here, so its pass runs on this one.
-    g_demo.worker->pump();
-    (void)g_demo.worker->fetchOutput(g_demo.outputVersion, g_demo.output);
+    g_lab.worker->pump();
+    (void)g_lab.worker->fetchOutput(g_lab.outputVersion, g_lab.output);
 }
 
 /// Fits the picture into @p area, centred, never enlarged past its own
@@ -221,11 +221,11 @@ void analyse()
 /// there.
 [[nodiscard]] RegionEditor::Placement placePicture(const ImVec2& cursor, const ImVec2& area)
 {
-    const float wide = area.x / static_cast<float>(std::max(1, g_demo.picture.display().width));
-    const float tall = area.y / static_cast<float>(std::max(1, g_demo.picture.display().height));
+    const float wide = area.x / static_cast<float>(std::max(1, g_lab.picture.display().width));
+    const float tall = area.y / static_cast<float>(std::max(1, g_lab.picture.display().height));
     const float scale = std::min({wide, tall, 1.0f});
-    const float width = static_cast<float>(g_demo.picture.display().width) * scale;
-    const float height = static_cast<float>(g_demo.picture.display().height) * scale;
+    const float width = static_cast<float>(g_lab.picture.display().width) * scale;
+    const float height = static_cast<float>(g_lab.picture.display().height) * scale;
 
     return RegionEditor::Placement{ImVec2{cursor.x + (area.x - width) * 0.5f, cursor.y + (area.y - height) * 0.5f},
                                    scale};
@@ -240,41 +240,41 @@ void analyse()
 ///         leaves the pointer alone this frame.
 [[nodiscard]] bool runPinTool(const RegionEditor::Placement& placement)
 {
-    if (!g_demo.pinArmed) {
+    if (!g_lab.pinArmed) {
         return false;
     }
     const ImVec2 mouse = ImGui::GetMousePos();
     if (ImGui::IsMouseClicked(ImGuiMouseButton_Left) && ImGui::IsWindowHovered()) {
-        g_demo.pinning = true;
-        g_demo.pinFrom = mouse;
+        g_lab.pinning = true;
+        g_lab.pinFrom = mouse;
     }
-    if (!g_demo.pinning) {
+    if (!g_lab.pinning) {
         return true;
     }
     const float scale = placement.scale > 0.0f ? placement.scale : 1.0f;
-    const ImVec2 from{std::min(g_demo.pinFrom.x, mouse.x), std::min(g_demo.pinFrom.y, mouse.y)};
-    const ImVec2 to{std::max(g_demo.pinFrom.x, mouse.x), std::max(g_demo.pinFrom.y, mouse.y)};
+    const ImVec2 from{std::min(g_lab.pinFrom.x, mouse.x), std::min(g_lab.pinFrom.y, mouse.y)};
+    const ImVec2 to{std::max(g_lab.pinFrom.x, mouse.x), std::max(g_lab.pinFrom.y, mouse.y)};
     if (ImGui::IsMouseDown(ImGuiMouseButton_Left) && (to.x - from.x > 2.0f || to.y - from.y > 2.0f)) {
         ImGui::GetWindowDrawList()->AddRect(from, to, IM_COL32(255, 255, 255, 200));
     }
     if (!ImGui::IsMouseReleased(ImGuiMouseButton_Left)) {
         return true;
     }
-    g_demo.pinning = false;
+    g_lab.pinning = false;
     const SsRect area{static_cast<int>((from.x - placement.origin.x) / scale),
                       static_cast<int>((from.y - placement.origin.y) / scale),
                       std::max(1, static_cast<int>((to.x - from.x) / scale)),
                       std::max(1, static_cast<int>((to.y - from.y) / scale))};
     const std::optional<FloatColor> colour = shell::averageOver(
-        area, g_demo.picture.display().rgba, g_demo.picture.display().width, g_demo.picture.display().height);
+        area, g_lab.picture.display().rgba, g_lab.picture.display().width, g_lab.picture.display().height);
     if (colour.has_value()) {
-        g_demo.pins->pin(*colour);
-        g_demo.saveDue = true;
+        g_lab.pins->pin(*colour);
+        g_lab.saveDue = true;
     }
     // Shift keeps the tool up to pin several, as the application does.
-    g_demo.pinArmed = shell::modifiers().shift;
-    g_demo.panes->setStatus(g_demo.pinArmed ? "Pinned - keep pinning, or release Shift"
-                                            : (colour.has_value() ? "Colour pinned" : "Nothing under the pointer"));
+    g_lab.pinArmed = shell::modifiers().shift;
+    g_lab.panes->setStatus(g_lab.pinArmed ? "Pinned - keep pinning, or release Shift"
+                                          : (colour.has_value() ? "Color pinned" : "Nothing under the pointer"));
 
     return true;
 }
@@ -293,36 +293,35 @@ void analyse()
     ImGui::Begin("##screen", nullptr,
                  ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings |
                      ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoScrollbar);
-    if (g_demo.displayTexture != nullptr && g_demo.picture.display().width > 0) {
-        g_demo.placement = placePicture(ImGui::GetCursorScreenPos(), area);
-        const ImVec2 size{static_cast<float>(g_demo.picture.display().width) * g_demo.placement.scale,
-                          static_cast<float>(g_demo.picture.display().height) * g_demo.placement.scale};
+    if (g_lab.displayTexture != nullptr && g_lab.picture.display().width > 0) {
+        g_lab.placement = placePicture(ImGui::GetCursorScreenPos(), area);
+        const ImVec2 size{static_cast<float>(g_lab.picture.display().width) * g_lab.placement.scale,
+                          static_cast<float>(g_lab.picture.display().height) * g_lab.placement.scale};
         ImGui::GetWindowDrawList()->AddImage(
-            g_demo.displayTexture->textureId(), g_demo.placement.origin,
-            ImVec2{g_demo.placement.origin.x + size.x, g_demo.placement.origin.y + size.y});
-        if (!runPinTool(g_demo.placement)) {
-            moved =
-                g_demo.region.update(g_demo.placement, g_demo.picture.display().width, g_demo.picture.display().height);
+            g_lab.displayTexture->textureId(), g_lab.placement.origin,
+            ImVec2{g_lab.placement.origin.x + size.x, g_lab.placement.origin.y + size.y});
+        if (!runPinTool(g_lab.placement)) {
+            moved = g_lab.region.update(g_lab.placement, g_lab.picture.display().width, g_lab.picture.display().height);
         }
         // The desktop samples the screen under the pointer; the only picture
         // here is this one, so it is sampled the same way.
         const std::optional<FloatColor> live =
-            shell::sampleAt(ImGui::GetMousePos(), g_demo.placement, g_demo.picture.display().rgba,
-                            g_demo.picture.display().width, g_demo.picture.display().height);
+            shell::sampleAt(ImGui::GetMousePos(), g_lab.placement, g_lab.picture.display().rgba,
+                            g_lab.picture.display().width, g_lab.picture.display().height);
         if (live.has_value()) {
-            g_demo.readoutColour = live;
+            g_lab.readoutColour = live;
         }
         // The trace markers mean "this colour, in the region being measured",
         // so they go quiet the moment the pointer leaves it - exactly as they
         // do on the desktop.
-        const SsRect region = g_demo.region.rect();
-        const float scale = g_demo.placement.scale > 0.0f ? g_demo.placement.scale : 1.0f;
+        const SsRect region = g_lab.region.rect();
+        const float scale = g_lab.placement.scale > 0.0f ? g_lab.placement.scale : 1.0f;
         const ImVec2 mouse = ImGui::GetMousePos();
-        const int imageX = static_cast<int>((mouse.x - g_demo.placement.origin.x) / scale);
-        const int imageY = static_cast<int>((mouse.y - g_demo.placement.origin.y) / scale);
-        const bool inRegion = g_demo.region.hasRegion() && imageX >= region.x && imageY >= region.y &&
+        const int imageX = static_cast<int>((mouse.x - g_lab.placement.origin.x) / scale);
+        const int imageY = static_cast<int>((mouse.y - g_lab.placement.origin.y) / scale);
+        const bool inRegion = g_lab.region.hasRegion() && imageX >= region.x && imageY >= region.y &&
                               imageX < region.x + region.width && imageY < region.y + region.height;
-        g_demo.traceColour = inRegion ? live : std::nullopt;
+        g_lab.traceColour = inRegion ? live : std::nullopt;
     } else {
         ImGui::TextDisabled("Choose a picture to measure.");
     }
@@ -339,25 +338,25 @@ void applyOutcome(const PaneRenderOutcome& outcome)
 {
     if (outcome.chosenScope.has_value()) {
         const ScopeChoice& choice = *outcome.chosenScope;
-        (void)g_demo.view->stack().choose(choice.id, choice.stack);
-        g_demo.analysis.enabledScopes = g_demo.view->stack().ids();
-        g_demo.settingsDirty = true;
+        (void)g_lab.view->stack().choose(choice.id, choice.stack);
+        g_lab.analysis.enabledScopes = g_lab.view->stack().ids();
+        g_lab.settingsDirty = true;
     }
     if (outcome.clearRegion) {
         // The desktop's own answer: the region goes, and the scopes read
         // nothing. An empty scope is a state rather than a failure, and a
-        // demo that quietly selected the whole picture instead would be
+        // lab that quietly selected the whole picture instead would be
         // teaching something the application does not do.
-        g_demo.region.clear();
-        g_demo.panes->releaseTraces();
-        g_demo.settingsDirty = true;
+        g_lab.region.clear();
+        g_lab.panes->releaseTraces();
+        g_lab.settingsDirty = true;
     }
     if (outcome.analysisDirty) {
-        g_demo.panes->configureProjections();
-        g_demo.settingsDirty = true;
+        g_lab.panes->configureProjections();
+        g_lab.settingsDirty = true;
     }
     if (outcome.chosenScope.has_value() || outcome.analysisDirty || outcome.preferencesSaveDue) {
-        g_demo.saveDue = true;
+        g_lab.saveDue = true;
     }
 }
 
@@ -368,14 +367,14 @@ void applyOutcome(const PaneRenderOutcome& outcome)
 void applyPreset(const LayoutPresetOutcome& outcome)
 {
     if (!outcome.status.empty()) {
-        g_demo.panes->setStatus(outcome.status);
+        g_lab.panes->setStatus(outcome.status);
     }
     if (outcome.analysisDirty) {
-        g_demo.analysis.enabledScopes = g_demo.view->stack().ids();
-        g_demo.panes->configureProjections();
-        g_demo.settingsDirty = true;
+        g_lab.analysis.enabledScopes = g_lab.view->stack().ids();
+        g_lab.panes->configureProjections();
+        g_lab.settingsDirty = true;
     }
-    g_demo.saveDue = true;
+    g_lab.saveDue = true;
 }
 
 void applyShortcut(const ShortcutAction& action)
@@ -387,8 +386,8 @@ void applyShortcut(const ShortcutAction& action)
         applyOutcome(outcome);
         break;
     case ShortcutAction::Kind::SetZoom:
-        g_demo.view->setZoom(action.zoomLevel);
-        g_demo.settingsDirty = true;
+        g_lab.view->setZoom(action.zoomLevel);
+        g_lab.settingsDirty = true;
         break;
     case ShortcutAction::Kind::ClearRegion:
         outcome.clearRegion = true;
@@ -398,16 +397,16 @@ void applyShortcut(const ShortcutAction& action)
         // Through the picker, not straight to the tool: the toolbar
         // buttons raise their requests the same way, so the keyboard and
         // the buttons meet at one place instead of two.
-        g_demo.picker->request(action.pickMode);
+        g_lab.picker->request(action.pickMode);
         break;
     case ShortcutAction::Kind::LoadPreset:
-        applyPreset(g_demo.presetController->load(action.presetSlot));
+        applyPreset(g_lab.presetController->load(action.presetSlot));
         break;
     case ShortcutAction::Kind::CopyPresetTo:
     case ShortcutAction::Kind::SaveActivePreset:
-        applyPreset(g_demo.presetController->saveInto(action.kind == ShortcutAction::Kind::CopyPresetTo
-                                                          ? action.presetSlot
-                                                          : g_demo.presetController->activeSlot()));
+        applyPreset(g_lab.presetController->saveInto(action.kind == ShortcutAction::Kind::CopyPresetTo
+                                                         ? action.presetSlot
+                                                         : g_lab.presetController->activeSlot()));
         break;
     // NO `default:`, deliberately, and this is the whole guard. Twice a
     // catch-all here silently swallowed an action the resolver was emitting -
@@ -424,7 +423,7 @@ void applyShortcut(const ShortcutAction& action)
     case ShortcutAction::Kind::MinimizeWindow:
     case ShortcutAction::Kind::QuitWindow:
         break;
-    // The settings window is not built in the demo, so there is nothing to
+    // The settings window is not built in the lab, so there is nothing to
     // open and nothing to close.
     case ShortcutAction::Kind::OpenSettings:
     case ShortcutAction::Kind::CloseSettings:
@@ -442,9 +441,9 @@ void applyShortcuts()
         return;
     }
     const ShortcutContext context =
-        shortcutContextFor(*g_demo.view, *g_demo.registry, /*settingsOpen=*/false, /*wantsTextInput=*/false);
+        shortcutContextFor(*g_lab.view, *g_lab.registry, /*settingsOpen=*/false, /*wantsTextInput=*/false);
     for (const ShortcutAction& action :
-         g_demo.shortcuts->resolvePressed(context, shell::modifiers(), shell::keyPressed)) {
+         g_lab.shortcuts->resolvePressed(context, shell::modifiers(), shell::keyPressed)) {
         applyShortcut(action);
     }
 }
@@ -456,13 +455,13 @@ void drawContextMenu(int clickedPane, bool overApplication)
 {
     if (overApplication && ImGui::IsMouseClicked(ImGuiMouseButton_Right) && !nativeContextMenuAvailable()) {
         const ContextMenuModel model{
-            *g_demo.view,  *g_demo.registry,       *g_demo.shortcuts,       g_demo.analysis.scopeParams,
-            g_demo.attach, g_demo.presets.all(),   g_demo.pins->empty(),    0,
-            1.0f,          QualityLevel::Standard, /*regionSelected=*/true,
+            *g_lab.view,  *g_lab.registry,        *g_lab.shortcuts,        g_lab.analysis.scopeParams,
+            g_lab.attach, g_lab.presets.all(),    g_lab.pins->empty(),     0,
+            1.0f,         QualityLevel::Standard, /*regionSelected=*/true,
         };
         std::vector<NativeMenuItem> items;
-        g_demo.menuParams.clear();
-        buildContextMenu(model, clickedPane, items, g_demo.menuParams);
+        g_lab.menuParams.clear();
+        buildContextMenu(model, clickedPane, items, g_lab.menuParams);
         openImGuiContextMenu(std::move(items));
     }
 
@@ -470,16 +469,16 @@ void drawContextMenu(int clickedPane, bool overApplication)
     if (menu.chosen < 0) {
         return;
     }
-    if (const std::optional<std::string> scope = menuScopeToggle(menu.chosen, *g_demo.registry)) {
+    if (const std::optional<std::string> scope = menuScopeToggle(menu.chosen, *g_lab.registry)) {
         PaneRenderOutcome outcome;
         outcome.chosenScope = ScopeChoice{*scope, /*stack=*/true};
         applyOutcome(outcome);
-    } else if (const ParamMenuAction* param = menuScopeParam(menu.chosen, g_demo.menuParams)) {
-        g_demo.analysis.scopeParams[param->scopeId][param->paramKey] = param->value;
-        g_demo.panes->configureProjections();
-        g_demo.settingsDirty = true;
+    } else if (const ParamMenuAction* param = menuScopeParam(menu.chosen, g_lab.menuParams)) {
+        g_lab.analysis.scopeParams[param->scopeId][param->paramKey] = param->value;
+        g_lab.panes->configureProjections();
+        g_lab.settingsDirty = true;
     } else if (const std::optional<float> strength = menuGraticuleStrength(menu.chosen)) {
-        g_demo.view->setGraticuleStrength(*strength);
+        g_lab.view->setGraticuleStrength(*strength);
     } else if (const std::optional<ShortcutAction> action = menuShortcutAction(menu.chosen)) {
         applyShortcut(*action);
     }
@@ -500,15 +499,15 @@ void frame()
 
     int width = 0;
     int height = 0;
-    glfwGetFramebufferSize(g_demo.window, &width, &height);
-    if (width <= 0 || height <= 0 || !g_demo.graphics->beginFrame(width, height)) {
+    glfwGetFramebufferSize(g_lab.window, &width, &height);
+    if (width <= 0 || height <= 0 || !g_lab.graphics->beginFrame(width, height)) {
         return;
     }
 
     ImGui::NewFrame();
     drawShell();
     ImGui::Render();
-    g_demo.graphics->endFrame();
+    g_lab.graphics->endFrame();
 }
 
 /// The window's own chrome: a title bar, an edge, and a shadow under it.
@@ -562,33 +561,33 @@ void drawAppWindow(const ShellLayout& layout, const PaneRenderInput& input)
     // groups are for, and it means the tour follows the controls rather than
     // coordinates written down once and left to rot.
     ImGui::BeginGroup();
-    applyOutcome(g_demo.panes->drawScopeToggles(shell::modifiers().shift));
+    applyOutcome(g_lab.panes->drawScopeToggles(shell::modifiers().shift));
     ImGui::EndGroup();
-    g_demo.anchors.note("chooser", ImGui::GetItemRectMin(), ImGui::GetItemRectMax());
+    g_lab.anchors.note("chooser", ImGui::GetItemRectMin(), ImGui::GetItemRectMax());
     ImGui::SameLine();
     // The preset chip sits between the scope selector and the region tools,
     // as it does on the desktop.
-    (void)g_demo.presetPicker->draw(g_demo.panes->icons());
+    (void)g_lab.presetPicker->draw(g_lab.panes->icons());
     ImGui::SameLine();
-    applyOutcome(g_demo.panes->drawRegionToolIcons(input));
+    applyOutcome(g_lab.panes->drawRegionToolIcons(input));
 
     ImGui::BeginGroup();
-    applyOutcome(g_demo.panes->drawScopePanes(input));
+    applyOutcome(g_lab.panes->drawScopePanes(input));
     ImGui::EndGroup();
-    g_demo.anchors.note("scopes", ImGui::GetItemRectMin(), ImGui::GetItemRectMax());
-    g_demo.panes->drawStatusBar(input);
+    g_lab.anchors.note("scopes", ImGui::GetItemRectMin(), ImGui::GetItemRectMax());
+    g_lab.panes->drawStatusBar(input);
     // Asked of the controls themselves. The region tools are right-aligned
     // and the pin sits at the other end of the application, so a group around
     // either call would frame most of the window instead of two buttons.
-    noteControlAnchor("tools", g_demo.panes->regionToolBounds());
-    noteControlAnchor("pin", g_demo.panes->pinToolBounds());
-    for (const auto& [id, bounds] : g_demo.pageAnchors) {
-        g_demo.anchors.note(id, ImVec2{bounds.x, bounds.y}, ImVec2{bounds.z, bounds.w});
+    noteControlAnchor("tools", g_lab.panes->regionToolBounds());
+    noteControlAnchor("pin", g_lab.panes->pinToolBounds());
+    for (const auto& [id, bounds] : g_lab.pageAnchors) {
+        g_lab.anchors.note(id, ImVec2{bounds.x, bounds.y}, ImVec2{bounds.z, bounds.w});
     }
     // Only over the application. Right-clicking the picture is the
     // workspace's business on a desktop - there it would raise the editor's
     // menu, not this one - so it raises nothing here.
-    drawContextMenu(g_demo.panes->paneAt(ImGui::GetMousePos()), ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows));
+    drawContextMenu(g_lab.panes->paneAt(ImGui::GetMousePos()), ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows));
 
     ImGui::End();
     ImGui::PopStyleVar(2);
@@ -599,26 +598,26 @@ void drawAppWindow(const ShellLayout& layout, const PaneRenderInput& input)
 /// picture and the two that need a desktop say plainly that they cannot.
 void answerPickRequest()
 {
-    const std::optional<RegionPickerMode> want = g_demo.picker->pendingRequest();
+    const std::optional<RegionPickerMode> want = g_lab.picker->pendingRequest();
     if (!want.has_value()) {
         return;
     }
-    g_demo.picker->clearRequest();
+    g_lab.picker->clearRequest();
     if (*want == RegionPickerMode::PinColor) {
         // Pinning needs no desktop: it samples the picture, which is right
         // here. Refusing it was simply wrong.
-        g_demo.pinArmed = true;
-        g_demo.panes->setStatus("Click a colour to pin it, or drag to pin an area's average");
+        g_lab.pinArmed = true;
+        g_lab.panes->setStatus("Click a color to pin it, or drag to pin an area's average");
 
         return;
     }
     if (*want == RegionPickerMode::DrawGlobal) {
-        g_demo.region.armDraw();
-        g_demo.panes->setStatus("Drag on the picture to draw a region");
+        g_lab.region.armDraw();
+        g_lab.panes->setStatus("Drag on the picture to draw a region");
 
         return;
     }
-    g_demo.panes->setStatus("Attaching to a window or a face needs the desktop application");
+    g_lab.panes->setStatus("Attaching to a window or a face needs the desktop application");
 }
 
 /// Notes a control's own rectangle, when it has drawn at least once.
@@ -627,28 +626,28 @@ void noteControlAnchor(const char* id, const std::optional<ImVec4>& bounds)
     if (!bounds) {
         return;
     }
-    g_demo.anchors.note(id, ImVec2{bounds->x, bounds->y}, ImVec2{bounds->z, bounds->w});
+    g_lab.anchors.note(id, ImVec2{bounds->x, bounds->y}, ImVec2{bounds->z, bounds->w});
 }
 
 /// Where the picture and the region landed, for the walk-through to point at.
-/// These are the two the demo owns; the toolbar and the panes note their own
+/// These are the two the lab owns; the toolbar and the panes note their own
 /// as they draw, which is what keeps the tour pointing at controls rather
 /// than at coordinates written down once and left to rot.
 void notePictureAnchors()
 {
-    const RegionEditor::Placement& at = g_demo.placement;
-    g_demo.anchors.note("picture", at.origin,
-                        ImVec2{at.origin.x + static_cast<float>(g_demo.picture.display().width) * at.scale,
-                               at.origin.y + static_cast<float>(g_demo.picture.display().height) * at.scale});
-    if (!g_demo.region.hasRegion()) {
+    const RegionEditor::Placement& at = g_lab.placement;
+    g_lab.anchors.note("picture", at.origin,
+                       ImVec2{at.origin.x + static_cast<float>(g_lab.picture.display().width) * at.scale,
+                              at.origin.y + static_cast<float>(g_lab.picture.display().height) * at.scale});
+    if (!g_lab.region.hasRegion()) {
         return;
     }
-    const SsRect rect = g_demo.region.rect();
+    const SsRect rect = g_lab.region.rect();
     const ImVec2 topLeft{at.origin.x + static_cast<float>(rect.x) * at.scale,
                          at.origin.y + static_cast<float>(rect.y) * at.scale};
-    g_demo.anchors.note("region", topLeft,
-                        ImVec2{topLeft.x + static_cast<float>(rect.width) * at.scale,
-                               topLeft.y + static_cast<float>(rect.height) * at.scale});
+    g_lab.anchors.note("region", topLeft,
+                       ImVec2{topLeft.x + static_cast<float>(rect.width) * at.scale,
+                              topLeft.y + static_cast<float>(rect.height) * at.scale});
 }
 
 /// The walk-through, drawn last so its veil covers what it is talking about,
@@ -656,15 +655,15 @@ void notePictureAnchors()
 void runTour(const ImVec2& shellPos, const ImVec2& shellSize)
 {
     const ImVec2 shellMax{shellPos.x + shellSize.x, shellPos.y + shellSize.y};
-    switch (drawTourOverlay(*g_demo.tour, g_demo.anchors, shellPos, shellMax)) {
+    switch (drawTourOverlay(*g_lab.tour, g_lab.anchors, shellPos, shellMax)) {
     case TourAction::Advance:
-        g_demo.tour->advance();
+        g_lab.tour->advance();
         // Settling is worth remembering; which step was reached is not.
-        g_demo.saveDue = g_demo.saveDue || g_demo.tour->settled();
+        g_lab.saveDue = g_lab.saveDue || g_lab.tour->settled();
         break;
     case TourAction::Skip:
-        g_demo.tour->skip();
-        g_demo.saveDue = true;
+        g_lab.tour->skip();
+        g_lab.saveDue = true;
         break;
     case TourAction::None:
         break;
@@ -682,31 +681,31 @@ void drawShell()
     // on a value the application already smooths is not a lag anyone sees.
     const PaneRenderInput input{
         /*uiScale=*/1.0f,
-        /*regionSelected=*/g_demo.region.hasRegion(),
+        /*regionSelected=*/g_lab.region.hasRegion(),
         /*pinsAvailable=*/true,
-        /*vectorscopeColor=*/g_demo.traceColour,
-        /*waveformColor=*/g_demo.traceColour,
-        /*readoutColor=*/g_demo.readoutColour,
-        /*monospaceFont=*/g_demo.monospaceFont,
+        /*vectorscopeColor=*/g_lab.traceColour,
+        /*waveformColor=*/g_lab.traceColour,
+        /*readoutColor=*/g_lab.readoutColour,
+        /*monospaceFont=*/g_lab.monospaceFont,
     };
 
     // Dropped every frame, so a control that stops drawing stops being
     // pointed at rather than leaving the tour aimed at where it used to be.
-    g_demo.anchors.clear();
+    g_lab.anchors.clear();
 
     if (drawPicture(ImVec2{layout.screenPos.x, layout.screenPos.y}, ImVec2{layout.screenSize.x, layout.screenSize.y})) {
-        g_demo.settingsDirty = true;
+        g_lab.settingsDirty = true;
     }
     notePictureAnchors();
     // The border's own close badge dismisses the region, and it means the
     // same thing the toolbar's clear does - so it goes through the same path.
-    if (g_demo.region.takeDismissed()) {
+    if (g_lab.region.takeDismissed()) {
         PaneRenderOutcome dismissed;
         dismissed.clearRegion = true;
         applyOutcome(dismissed);
     }
     analyse();
-    g_demo.panes->uploadVisibleScopes(g_demo.region.hasRegion());
+    g_lab.panes->uploadVisibleScopes(g_lab.region.hasRegion());
 
     drawAppWindow(layout, input);
     answerPickRequest();
@@ -714,11 +713,11 @@ void drawShell()
     // The region tools want a crosshair, which Dear ImGui's cursor enum does
     // not carry, so the canvas is told directly. Handing it back to Dear
     // ImGui the moment neither tool is up keeps the resize cursors working.
-    if (g_demo.pinArmed) {
+    if (g_lab.pinArmed) {
         // Crosshair AND swatch in the cursor image, so neither can trail the
         // pointer - the desktop's construction, for the same reason.
-        shell::setPinCursor(g_demo.readoutColour);
-    } else if (g_demo.region.armed()) {
+        shell::setPinCursor(g_lab.readoutColour);
+    } else if (g_lab.region.armed()) {
         shell::setCanvasCursor("crosshair");
     } else {
         shell::setCanvasCursor(nullptr);
@@ -726,9 +725,9 @@ void drawShell()
 
     runTour(viewport->WorkPos, viewport->WorkSize);
 
-    if (g_demo.saveDue) {
+    if (g_lab.saveDue) {
         savePreferencesNow();
-        g_demo.saveDue = false;
+        g_lab.saveDue = false;
     }
 }
 
@@ -737,10 +736,10 @@ void drawShell()
 /// alone holds, which here is the preset slots.
 void savePreferencesNow()
 {
-    Preferences saved = capturePreferences(*g_demo.view, *g_demo.pins, *g_demo.shortcuts, g_demo.analysis);
-    saved.layoutPresets = g_demo.presetController->all();
-    saved.layoutActiveSlot = g_demo.presetController->activeSlot();
-    saved.tourSettled = g_demo.tour->settled() ? 1 : 0;
+    Preferences saved = capturePreferences(*g_lab.view, *g_lab.pins, *g_lab.shortcuts, g_lab.analysis);
+    saved.layoutPresets = g_lab.presetController->all();
+    saved.layoutActiveSlot = g_lab.presetController->activeSlot();
+    saved.tourSettled = g_lab.tour->settled() ? 1 : 0;
     if (!savePreferences(saved, preferencesFilePath())) {
         return;
     }
@@ -753,7 +752,7 @@ void savePreferencesNow()
 
 /// Puts a previous visit back, if this browser holds one. Whatever is
 /// missing or malformed simply defaults - the application already tolerates
-/// an old or hand-edited file, and a demo that refused to start over a
+/// an old or hand-edited file, and a lab that refused to start over a
 /// preference would be worse than one that forgets.
 void restorePreferencesNow()
 {
@@ -764,7 +763,7 @@ void restorePreferencesNow()
         // to the read below, because that path is not taken at all here and a
         // tour that opened for everyone EXCEPT a newcomer would be the exact
         // opposite of the point.
-        g_demo.tourSettled = false;
+        g_lab.tourSettled = false;
 
         return;
     }
@@ -777,12 +776,12 @@ void restorePreferencesNow()
         out.write(text.data(), static_cast<std::streamsize>(text.size()));
     }
     const Preferences saved = loadPreferences(preferencesFilePath());
-    restorePreferences(saved, *g_demo.view, *g_demo.pins, *g_demo.shortcuts, g_demo.analysis);
-    g_demo.presetController->restore(saved.layoutPresets, saved.layoutActiveSlot);
+    restorePreferences(saved, *g_lab.view, *g_lab.pins, *g_lab.shortcuts, g_lab.analysis);
+    g_lab.presetController->restore(saved.layoutPresets, saved.layoutActiveSlot);
     // Applied by the caller once the tour exists: it is built after this, so
     // its text can quote the bindings this just restored.
-    g_demo.tourSettled = saved.tourSettled != 0;
-    g_demo.analysis.enabledScopes = g_demo.view->stack().ids();
+    g_lab.tourSettled = saved.tourSettled != 0;
+    g_lab.analysis.enabledScopes = g_lab.view->stack().ids();
 }
 
 /// Everything downstream of the window: the registry, the view, the capture
@@ -793,40 +792,40 @@ void buildScopes()
 {
     // builtinModules() is the registry the desktop build uses too: the
     // module entries are linked in and register themselves.
-    g_demo.registry = std::make_unique<ScopeRegistry>(builtinModules());
-    g_demo.view = std::make_unique<ScopeView>(*g_demo.registry);
-    g_demo.pins = std::make_unique<PinBoard>();
-    g_demo.capture = createScreenCaptureSource();
-    g_demo.captureController = std::make_unique<CaptureController>(*g_demo.capture, g_demo.mailbox);
-    (void)g_demo.captureController->requestPermission();
+    g_lab.registry = std::make_unique<ScopeRegistry>(builtinModules());
+    g_lab.view = std::make_unique<ScopeView>(*g_lab.registry);
+    g_lab.pins = std::make_unique<PinBoard>();
+    g_lab.capture = createScreenCaptureSource();
+    g_lab.captureController = std::make_unique<CaptureController>(*g_lab.capture, g_lab.mailbox);
+    (void)g_lab.captureController->requestPermission();
     // A paused pipeline is not a dead one — the controller's own words. The
-    // demo asks for no stream because there is no screen to stream, which is
+    // lab asks for no stream because there is no screen to stream, which is
     // precisely what suspend() describes; without it dead() is true and the
     // panes draw a "capture was interrupted" page over the scopes.
     // The picture arrives through the capture source like any other frame, so
     // the stream is genuinely running - the target is the page rather than a
     // display, and the host feeds it.
-    (void)g_demo.captureController->start();
+    (void)g_lab.captureController->start();
 
-    seedImageSizes(g_demo.analysis);
+    seedImageSizes(g_lab.analysis);
 
     // The REAL worker, running its passes on this thread. A page has no
     // threads to give, so it is pumped from the frame loop rather than
     // started on its own; the passes are the same passes the desktop runs.
-    g_demo.worker = std::make_unique<AnalysisWorker>(g_demo.mailbox);
-    g_demo.worker->startInline();
-    g_demo.picker = std::make_unique<RegionPicker>(*g_demo.captureController, *g_demo.worker, *g_demo.capture);
-    g_demo.shortcuts = std::make_unique<ShortcutResolver>(*g_demo.registry);
-    g_demo.presetController = std::make_unique<LayoutPresetController>(*g_demo.view, *g_demo.registry, g_demo.analysis);
-    g_demo.presetPicker = std::make_unique<LayoutPresetPicker>(*g_demo.presetController);
+    g_lab.worker = std::make_unique<AnalysisWorker>(g_lab.mailbox);
+    g_lab.worker->startInline();
+    g_lab.picker = std::make_unique<RegionPicker>(*g_lab.captureController, *g_lab.worker, *g_lab.capture);
+    g_lab.shortcuts = std::make_unique<ShortcutResolver>(*g_lab.registry);
+    g_lab.presetController = std::make_unique<LayoutPresetController>(*g_lab.view, *g_lab.registry, g_lab.analysis);
+    g_lab.presetPicker = std::make_unique<LayoutPresetPicker>(*g_lab.presetController);
 
     const ScopePaneContext context{
-        *g_demo.graphics,          *g_demo.view,   *g_demo.registry, g_demo.analysis,   g_demo.output,
-        *g_demo.captureController, *g_demo.picker, *g_demo.pins,     *g_demo.shortcuts,
+        *g_lab.graphics,          *g_lab.view,   *g_lab.registry, g_lab.analysis,   g_lab.output,
+        *g_lab.captureController, *g_lab.picker, *g_lab.pins,     *g_lab.shortcuts,
     };
-    g_demo.panes = std::make_unique<ScopePaneRenderer>(context, createProjectionInstances(*g_demo.registry),
-                                                       createScopeTextures(*g_demo.registry));
-    g_demo.analysis.enabledScopes = g_demo.view->stack().ids();
+    g_lab.panes = std::make_unique<ScopePaneRenderer>(context, createProjectionInstances(*g_lab.registry),
+                                                      createScopeTextures(*g_lab.registry));
+    g_lab.analysis.enabledScopes = g_lab.view->stack().ids();
 
     // Last, so a previous visit lands on top of the defaults rather than
     // under them. The desktop restores in this same order.
@@ -837,20 +836,20 @@ void buildScopes()
     // whatever the defaults say and been wrong for anyone who had rebound a
     // key. Settling it is the last step, so a visitor who has not seen it
     // through finds it open.
-    g_demo.tour = std::make_unique<GuidedTour>(demoTourSteps(*g_demo.shortcuts));
-    g_demo.tour->restoreSettled(g_demo.tourSettled);
-    g_demo.panes->configureProjections();
+    g_lab.tour = std::make_unique<GuidedTour>(labTourSteps(*g_lab.shortcuts));
+    g_lab.tour->restoreSettled(g_lab.tourSettled);
+    g_lab.panes->configureProjections();
 }
 
 /// Builds the picture's own texture, remade whenever its size changes.
 void refreshDisplayTexture()
 {
-    if (g_demo.displayTexture == nullptr || g_demo.displayTexture->width() != g_demo.picture.display().width ||
-        g_demo.displayTexture->height() != g_demo.picture.display().height) {
-        g_demo.displayTexture =
-            g_demo.graphics->createScopeTexture(g_demo.picture.display().width, g_demo.picture.display().height);
+    if (g_lab.displayTexture == nullptr || g_lab.displayTexture->width() != g_lab.picture.display().width ||
+        g_lab.displayTexture->height() != g_lab.picture.display().height) {
+        g_lab.displayTexture =
+            g_lab.graphics->createScopeTexture(g_lab.picture.display().width, g_lab.picture.display().height);
     }
-    g_demo.displayTexture->upload(g_demo.picture.display());
+    g_lab.displayTexture->upload(g_lab.picture.display());
 }
 
 }  // namespace
@@ -860,19 +859,19 @@ extern "C" {
 
 /// The page writes RGBA straight into this buffer, so there is one copy
 /// rather than two. Null if the size is not usable.
-EMSCRIPTEN_KEEPALIVE uint8_t* demoFrameBuffer(int width, int height)
+EMSCRIPTEN_KEEPALIVE uint8_t* labFrameBuffer(int width, int height)
 {
     using namespace sidescopes;
     if (width <= 0 || height <= 0) {
         return nullptr;
     }
-    return g_demo.picture.decodeInto(width, height);
+    return g_lab.picture.decodeInto(width, height);
 }
 
 /// Takes the picture the page just wrote, and gives it a region to start from
 /// if this is the first one. The three forms it has to exist in, and keeping
 /// them agreed, are the picture's own business.
-EMSCRIPTEN_KEEPALIVE void demoFrameReady()
+EMSCRIPTEN_KEEPALIVE void labFrameReady()
 {
     using namespace sidescopes;
     // The decode is kept as it arrived and everything on screen is derived
@@ -880,7 +879,7 @@ EMSCRIPTEN_KEEPALIVE void demoFrameReady()
     // which is what a visitor comparing two pictures under one adjustment
     // expects - and there is no state where the canvas and the scopes are
     // looking at different pixels.
-    g_demo.picture.adoptDecoded();
+    g_lab.picture.adoptDecoded();
     refreshDisplayTexture();
     // The region STAYS WHERE IT IS. It is a rectangle on what stands in for a
     // display, and changing the photograph beneath it is no more reason to
@@ -889,12 +888,12 @@ EMSCRIPTEN_KEEPALIVE void demoFrameReady()
     // landscape region became a portrait one because the photograph did.
     //
     // The first picture has none to hold, and gets one to start from.
-    if (g_demo.region.hasRegion()) {
-        g_demo.region.holdOnScreen(g_demo.placement);
+    if (g_lab.region.hasRegion()) {
+        g_lab.region.holdOnScreen(g_lab.placement);
     } else {
-        g_demo.region.reset(g_demo.picture.width(), g_demo.picture.height());
+        g_lab.region.reset(g_lab.picture.width(), g_lab.picture.height());
     }
-    g_demo.settingsDirty = true;
+    g_lab.settingsDirty = true;
 }
 
 /// The seven controls, from the page. Values are the ImageAdjustments ranges:
@@ -903,9 +902,9 @@ EMSCRIPTEN_KEEPALIVE void demoFrameReady()
 /// The controls belong to the PAGE rather than to the application's window,
 /// and deliberately: they stand for the editor a photographer has open beside
 /// SideScopes. Drawn inside the application they would teach that SideScopes
-/// edits photographs, which is the one thing this demo must not say.
-EMSCRIPTEN_KEEPALIVE void demoSetAdjustments(float exposure, float contrast, float highlights, float shadows,
-                                             float temperature, float tint, float saturation)
+/// edits photographs, which is the one thing this lab must not say.
+EMSCRIPTEN_KEEPALIVE void labSetAdjustments(float exposure, float contrast, float highlights, float shadows,
+                                            float temperature, float tint, float saturation)
 {
     using namespace sidescopes;
     ImageAdjustments wanted;
@@ -916,16 +915,16 @@ EMSCRIPTEN_KEEPALIVE void demoSetAdjustments(float exposure, float contrast, flo
     wanted.temperature = temperature;
     wanted.tint = tint;
     wanted.saturation = saturation;
-    (void)g_demo.picture.setAdjustments(wanted);
+    (void)g_lab.picture.setAdjustments(wanted);
 }
 
 /// Opens the walk-through from the first stop, however settled it is. The
 /// page's "take the tour" button, and the only way back in once it has been
 /// seen through or waved away.
-EMSCRIPTEN_KEEPALIVE void demoStartTour()
+EMSCRIPTEN_KEEPALIVE void labStartTour()
 {
     using namespace sidescopes;
-    g_demo.tour->start();
+    g_lab.tour->start();
 }
 
 /// Where a control that belongs to the PAGE sits, in points relative to the
@@ -936,21 +935,21 @@ EMSCRIPTEN_KEEPALIVE void demoStartTour()
 /// Their y is NEGATIVE - both sit above the canvas - which is exactly what
 /// puts the bubble at the top of the application, pointing the right way. The
 /// page highlights the control itself, since nothing drawn here can reach it.
-EMSCRIPTEN_KEEPALIVE void demoSetPageAnchor(const char* id, float left, float top, float right, float bottom)
+EMSCRIPTEN_KEEPALIVE void labSetPageAnchor(const char* id, float left, float top, float right, float bottom)
 {
     using namespace sidescopes;
     if (id == nullptr) {
         return;
     }
-    g_demo.pageAnchors[id] = ImVec4{left, top, right, bottom};
+    g_lab.pageAnchors[id] = ImVec4{left, top, right, bottom};
 }
 
 /// Whether the walk-through is on the stop that names @p id, so the page can
 /// light up its own control while it is.
-EMSCRIPTEN_KEEPALIVE int demoTourAtAnchor(const char* id)
+EMSCRIPTEN_KEEPALIVE int labTourAtAnchor(const char* id)
 {
     using namespace sidescopes;
-    const TourStep* step = g_demo.tour->current();
+    const TourStep* step = g_lab.tour->current();
 
     return step != nullptr && id != nullptr && step->anchor == id ? 1 : 0;
 }
@@ -964,16 +963,16 @@ int main()
     if (glfwInit() == GLFW_FALSE) {
         return 1;
     }
-    g_demo.graphics = createGraphicsBackend();
-    g_demo.graphics->setWindowHints();
+    g_lab.graphics = createGraphicsBackend();
+    g_lab.graphics->setWindowHints();
     // The contrib GLFW port binds a window to a NAMED canvas, and that
     // binding is what its event listeners attach to. Without this the
     // context still renders - the default canvas backs it - and no pointer
-    // or key event ever reaches the interface, which reads as a demo that
+    // or key event ever reaches the interface, which reads as a lab that
     // draws correctly and ignores the mouse.
     emscripten::glfw3::SetNextWindowCanvasSelector("#canvas");
-    g_demo.window = glfwCreateWindow(560, 880, "SideScopes", nullptr, nullptr);
-    if (g_demo.window == nullptr) {
+    g_lab.window = glfwCreateWindow(560, 880, "SideScopes", nullptr, nullptr);
+    if (g_lab.window == nullptr) {
         glfwTerminate();
 
         return 1;
@@ -981,10 +980,10 @@ int main()
     // The canvas follows its container, so the shell can lay itself out side
     // by side on a wide page and stacked on a narrow one - the same choice a
     // desktop user makes by dragging the window.
-    (void)emscripten::glfw3::MakeCanvasResizable(g_demo.window, "#stage");
+    (void)emscripten::glfw3::MakeCanvasResizable(g_lab.window, "#stage");
 
-    g_demo.monospaceFont = startImGui(g_demo.window);
-    if (!g_demo.graphics->init(g_demo.window)) {
+    g_lab.monospaceFont = startImGui(g_lab.window);
+    if (!g_lab.graphics->init(g_lab.window)) {
         return 1;
     }
 

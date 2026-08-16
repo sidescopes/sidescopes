@@ -120,10 +120,10 @@ DeckLayout computeDeckLayout(const PickerContext& ctx, float deckWidth)
     layout.swatchX = ctx.lineHeight + 3.0f * ctx.columnGap;
     layout.hexX = layout.swatchX + ctx.lineHeight + ctx.columnGap;
     const float leftPartEnd = layout.hexX + hexColumn;
-    const float deltaECol = std::max(hexFontWidth(ctx.monospaceFont, "199.9"), ImGui::CalcTextSize("ΔE").x);
+    const float deltaECol = std::max(hexFontWidth(ctx.monospaceFont, "199.9"), ImGui::CalcTextSize("ΔE00").x);
     // Every numeric column in the deck is a difference against the live color,
     // so each carries the delta the hero row's absolute channels do without.
-    const char* lchLabels[3] = {"ΔL", "ΔC", "ΔH"};
+    const char* lchLabels[3] = {"ΔL*", "ΔC*", "ΔH*"};
     const char* rgbLabels[3] = {"ΔR", "ΔG", "ΔB"};
     float lchCol[3];
     float rgbCol[3];
@@ -162,12 +162,12 @@ void drawPickerDeckHeader(const DeckLayout& layout)
         wrappedTooltip(tip);
     };
     if (layout.showDeltaE) {
-        headerCell(layout.deltaERight, layout.deltaETypical, "ΔE", PickerDeltaETip);
+        headerCell(layout.deltaERight, layout.deltaETypical, "ΔE00", PickerDeltaETip);
     }
     if (layout.showLch) {
-        headerCell(layout.lchRight[0], layout.lchTypical, "ΔL", PickerLchTips[0]);
-        headerCell(layout.lchRight[1], layout.lchTypical, "ΔC", PickerLchTips[1]);
-        headerCell(layout.lchRight[2], layout.lchTypical, "ΔH", PickerLchTips[2]);
+        headerCell(layout.lchRight[0], layout.lchTypical, "ΔL*", PickerLchTips[0]);
+        headerCell(layout.lchRight[1], layout.lchTypical, "ΔC*", PickerLchTips[1]);
+        headerCell(layout.lchRight[2], layout.lchTypical, "ΔH*", PickerLchTips[2]);
     }
     if (layout.showRgb) {
         headerCell(layout.rgbRight[0], layout.rgbTypical, "ΔR", PickerRgbTips[0]);

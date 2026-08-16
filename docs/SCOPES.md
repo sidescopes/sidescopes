@@ -1,197 +1,210 @@
 # The scopes
 
-Five scopes and a color picker. Any combination of them can be on screen at
-once, splitting the window into panes; the scope selector in the toolbar
-chooses which, and the letters do the same from the keyboard.
+SideScopes provides five scopes and a color picker. Any combination can share
+the window, one pane per instrument. Use the scope selector to choose and order
+them, or use the keyboard shortcuts.
 
-Every scope measures the selected region and nothing else. With no region
-selected they stay empty, keeping their graticule, while the pointer marker
-and the color readout go on following the cursor anywhere on screen — so a
-color can still be measured against the graticule with nothing selected.
+The plots analyze only the selected screen region. With no region selected,
+their graticules remain visible but their traces are empty. The pointer readout
+and markers can still sample a color anywhere on screen.
+
+All levels are derived from the captured desktop pixels. SideScopes does not
+have access to a source file, timeline, document profile, or signal before the
+source application renders it. See
+[Measurement boundary](#measurement-boundary) before using the scopes for
+color-managed or signal-compliance decisions.
 
 ## Vectorscope (V)
 
-A density plot of color with brightness thrown away. Distance from the
-center is saturation and the angle around it is hue, so a neutral image is
-a small cloud in the middle and a color cast is that same cloud pushed off
-center in the direction of the cast.
+The vectorscope converts each captured RGB sample to two chroma coordinates.
+Angle around the center corresponds to hue; radial distance corresponds to
+chroma magnitude in this projection. Equal-channel neutrals lie at the center.
+Level and image position are discarded, so light and dark samples with the
+same chroma can occupy the same position.
 
-The graticule carries the classic targets — the primaries and secondaries
-at their 75% and 100% positions — and a skin-tone line running from the
-center toward orange. Human skin sits along that line whatever its color,
-which is what makes it useful: the tone can be lighter or darker, but it
-should not drift off the line.
+Trace brightness represents sample density. A strong extension toward a hue
+usually identifies a population of pixels in that direction. An off-center
+neutral reference indicates chroma bias; an off-center whole-image trace may
+instead describe the subject or an intentional grade.
 
-Zoom magnifies the plot 1x, 2x or 4x around the center for when the
-interesting part of the trace is the neutral core rather than the saturated
-edges.
+The labeled boxes mark reference positions for 75% Rec.709 color-bar values;
+the smaller unlabeled boxes mark the full-value positions. They are not gamut
+boundaries or saturation limits. The skin-tone indicator is a directional
+reference for comparison, not a target that every complexion should meet.
 
-The measurement is BT.709, and there is no second matrix to choose from,
-because on a computer display there is no reasonable second answer: sRGB's
-color primaries are BT.709's. BT.601's are tied to television phosphors
-from 1953 and would put the targets where nothing on the screen is.
+**Zoom** magnifies the central area at 1x, 2x, or 4x. It changes the view, not
+the underlying coordinates.
 
-## Waveform (W)
+SideScopes uses one fixed, full-range Rec.709-style RGB-to-Cb/Cr matrix. This
+is most directly interpretable for SDR, sRGB/Rec.709-like rendered output. It
+does not make the vectorscope a color-managed gamut test.
 
-Levels across the width of the region. The horizontal axis is the region's
-own horizontal axis, so a feature on the right of the image is on the right
-of the trace; the vertical axis is level, black at the bottom and white at
-the top. A column of the image holding both bright and dark pixels draws
-the whole range between them.
+## RGB waveform (W)
 
-The three channels are drawn overlaid in their own colors, which is what
-makes a cast readable at a glance: a trace whose blue rides above its red
-at the top is a cool highlight, and the gap between them is how cool.
+The RGB waveform overlays red, green, and blue channel levels. Its horizontal
+axis follows the selected region from left to right; its vertical axis is
+captured channel code value, normalized from 0 at the bottom to 100 at the top.
+This is a full-range display-code scale, not a legal-range video scale.
+
+Each sampled pixel contributes at its actual channel level. A vertical slice
+therefore shows the values present in the corresponding image column; the
+scope does not fill every value between the lowest and highest samples.
+
+Channel separation is meaningful in context. Over a verified neutral, it can
+show a rendered color bias and the tonal range in which that bias occurs. Over
+a colored subject, the same separation may simply describe the subject.
+
+A strong accumulation at 0 or 100 means captured output pixels reached that
+endpoint. It may be consistent with clipping or crushing in the rendered
+output, but does not identify the limiting stage or prove that a RAW file,
+timeline, or source signal has no recoverable detail.
 
 ## Luma waveform (L)
 
-The same plot, of brightness alone, which is what to read for exposure. The
-top of the trace is the brightest pixel in each column and the bottom the
-darkest, so an uneven exposure shows as a slope and a flat subject as a
-band.
+The luma waveform retains the waveform's horizontal image position and plots a
+single weighted level:
 
-The waveform reads balance and this one reads exposure. They are separate
-scopes so that both can stand on screen at once rather than one replacing
-the other.
+`Y′ ≈ 0.2126 R′ + 0.7152 G′ + 0.0722 B′`
 
-The Colored style tints each column with that column's own average color,
-which puts a hint of the balance back without separating the channels.
-Plain draws it in white.
+The calculation uses the encoded captured channel values. Y′ is not physical
+luminance, scene brightness, or a direct exposure measurement. It is useful
+for locating and comparing level distributions in the rendered output.
+
+**Plain** draws a neutral trace. **Colored** tints the trace from the captured
+RGB contributions while keeping the same luma coordinate.
 
 ## RGB parade (R)
 
-The same waveform measurement with the three channels laid side by side
-instead of overlaid: red, then green, then blue across the pane. Overlap
-hides things, and three separate traces let you compare their shapes
-exactly — which is the usual way to see which channel clips first, or that
-the shadows of one channel sit higher than the others.
+The RGB parade places the three channel waveforms side by side: red, green,
+then blue. Each panel maps the full width of the selected region. The image is
+not divided into thirds.
+
+The separate panels prevent overlapping traces from hiding one another. This
+makes channel shape, level, and endpoint behavior easier to compare. As with
+the overlay waveform, alignment indicates neutrality only for a subject that
+is independently expected to be neutral.
 
 ## Histogram (H)
 
-How many pixels sit at each level. The Per Channel style stacks red, green
-and blue in bands, each shape complete with nothing occluding it, and is
-what the scope opens on. Combined overlays all three at full height, where
-the overlap itself is the information — a gray subject shows the three
-curves lying on top of one another, and most photo editors draw it this
-way.
+The histogram counts how many sampled red, green, and blue values fall into
+each of 256 bins. Minimum channel values are at the left and maximum values at
+the right. It discards image position.
 
-Bar heights follow a square-root curve, the way photo editors draw a
-histogram, so one tall peak does not flatten everything around it.
+**Per Channel** places the complete red, green, and blue distributions in
+separate vertical bands. **Combined** overlays them at full height. The
+displayed heights use a square-root response so a large population does not
+hide smaller ones; height is therefore not linearly proportional to count.
+
+A peak identifies a large population at that code value. A gap identifies few
+or no sampled values in an interval. Neither proves a particular processing
+fault: gaps do not by themselves establish visible posterization, and endpoint
+peaks do not identify where limiting occurred.
 
 ## Color picker (C)
 
-Not a plot but a comparison. The live color under the pointer sits beside a
-color you pinned earlier, with the difference between them given as ΔE
-(CIEDE2000) and split three ways: how much lighter or darker the live color
-is, how much more colorful or duller, and how far its hue has drifted. Hue
-drift counts for less when the color is dull, which is what the eye does
-too. Every value is one click to copy.
+The color picker places the live sample beside pinned references. It reports
+captured RGB values and, when a reference is selected, an assumed-sRGB color
+difference.
 
-This is the mechanism for matching across images. Pin a color in one
-photograph, open the next, and hover the tone that should match it.
+Click to pin the pixel under the pointer. Drag to pin the average of a
+rectangle, which is generally more repeatable for textured or noisy material.
+Hold Shift to keep the pin tool active for additional samples.
+
+SideScopes converts the reference and live samples from assumed sRGB to CIELAB
+under D65. It reports CIEDE2000 **ΔE00** and three signed diagnostics:
+
+- **ΔL\***, the CIELAB lightness difference;
+- **ΔC\***, the CIELAB chroma difference;
+- **ΔH\***, a chroma-weighted hue-difference term.
+
+The components do not correspond one-to-one with exposure, saturation, or
+white-balance controls, and the ΔE00 total is not their simple sum. There is no
+universal acceptable ΔE00 threshold; the relevant tolerance depends on the
+colors, sample area, viewing conditions, and task.
 
 ## Markers and pins
 
-The color under the pointer is drawn as a marker on every visible scope at
-once — its position on the vectorscope, its level on the waveform, its bin
-on the histogram — which is how a single tone can be read against all of
-them together. The marker works with or without a region selected.
+The color under the pointer is marked on every visible compatible scope: its
+chroma position on the vectorscope, channel or luma level on waveforms, and
+bin on the histogram. Markers work with or without an analysis region.
 
-The pin tool keeps a color for later. Clicking pins the color under the
-cursor; dragging pins the average of a rectangle, which is what a textured
-photograph needs, since a single pixel of skin or sky is rarely
-representative. Holding Shift keeps the tool open to pin several. Pinned
-colors show on the vectorscope and in the color picker.
+Pinned colors appear on the vectorscope and in the color picker. Pins persist
+between sessions and can be selected as comparison references.
 
-## The controls that shape a trace
+## Trace controls
 
-### On the right-click menu
+Right-click a scope pane to reach that instrument's options directly.
+Right-click elsewhere to open the complete menu.
 
-Right-clicking a scope's own pane offers that scope's options directly,
-since the click says which scope you mean; right-clicking anywhere else
-groups them under the scope they belong to.
+**Graticule strength** changes the opacity of grid lines, rings, target boxes,
+and labels. The choices are Faint, Soft, Normal, and Bold.
 
-**Graticule strength** dims or strengthens the overlay as a whole — lines,
-rings, target boxes and labels together — so it can be quietened over a
-busy trace. Faint, Soft, Normal and Bold; Normal is the strength the scopes
-are graded at, and the faintest still reads.
+**Zoom** changes vectorscope magnification between 1x, 2x, and 4x.
 
-**Zoom**, on the vectorscope, magnifies 1x, 2x or 4x around the center.
+**Style** selects Plain or Colored for the luma waveform, and Per Channel or
+Combined for the histogram.
 
-**Style**, on the luma waveform, chooses Plain or Colored; on the
-histogram, Per Channel or Combined.
+**Quality** sets capture cadence and analysis detail. Standard, the default,
+targets 15 captures per second. High targets 20, retains full detail while a
+region is dragged, and uses finer analysis for vectorscope and histogram panes
+where their size benefits from it. High uses more processing time.
 
-**Quality** sets how often the screen is read and how finely the scope
-images are computed. Standard is the default and reads the screen fifteen
-times a second. High reads it twenty times a second, keeps full detail
-while a region is being dragged, and computes the vectorscope and histogram
-images at a finer step on a smaller pane. It costs more processor time.
-Nothing else differs between the two, deliberately: measurement found no
-gain on the other axes.
+The Settings window opens from the right-click menu, or with Command+comma on
+macOS. The waveform and parade share one set of trace settings because they
+render the same channel measurement in different arrangements.
 
-### By gesture, and in the Settings window
+**Intensity** controls how much each sample contributes before the rendered
+trace saturates. Scroll over a vectorscope or waveform to change it;
+double-click to restore the default. It changes visibility, not coordinates.
 
-The Settings window opens from the right-click menu, or with Command+comma
-on macOS. It lists three sets of sliders rather than five, because the
-waveform and the parade are one measurement drawn twice and share their
-tuning, while the luma waveform and the vectorscope each have their own.
+**Sampling stride** samples every Nth pixel, from 1 through 8. A stride of 1
+includes every pixel. Larger strides reduce analysis cost and may make sparse
+or highly regular content less exact.
 
-**Intensity** is how brightly a trace is drawn — really how much a single
-sample contributes before the plot saturates. Scroll over the vectorscope
-or a waveform to change it, and double-click to return to the default; the
-value shows briefly on the pane as you turn it. A low intensity shows only
-where the image is dense, a high one brings out the sparse edges of the
-cloud. The histogram has no such control: a bar is a count.
+**Smoothing** controls how long the pointer marker takes to settle after the
+sample changes, from 0 to 500 milliseconds. It affects the marker, not the
+scope trace.
 
-**Sampling stride** takes every Nth pixel instead of all of them, from 1 to
-8. The scopes plot the same shape either way on a photograph, and a larger
-stride costs less; 1 is exact.
+**Trace gamma**, available for the vectorscope, changes the density response
+used to display the trace. Lower values reveal sparse populations more
+strongly; higher values preserve greater contrast against the densest areas.
+The range is 0.40 to 1.40.
 
-**Smoothing** is how long the cursor marker takes to settle on a new color,
-from 0 to 500 milliseconds. Too little and the marker jitters as the
-pointer crosses a textured photograph; too much and it lags behind the
-hand. Each set has its own, because the scopes are read at different
-rhythms.
+## Arranging panes
 
-**Trace gamma**, on the vectorscope, sets how hard the middle of the trace
-is lifted toward the densest chroma in the frame. Lower brings the sparse
-body of the cloud up, higher leaves it nearer its own density. The range is
-0.40 to 1.40.
+Scopes divide the window in the order shown in the scope selector; drag rows
+there to reorder them. The order belongs to the active preset. Turning a scope
+off and on does not move it within that order.
 
-## Arranging the panes
+The Layout menu controls the division axis. **Automatic** uses the longer
+window axis; **Vertical (stacked)** and **Horizontal (side by side)** force an
+orientation. Drag a divider to change the adjacent panes' shares.
 
-Scopes split the window in the order the scope selector lists them, and
-that order can be dragged. The order belongs to the preset you are on, so
-different slots can lay the same scopes out differently. A scope switched
-off and back on returns to the place it was left.
+Nine preset slots store scope visibility, order, division, pane weights, and
+per-scope style. A digit loads its slot. Use the preset list to load or rename
+slots.
 
-The Layout menu chooses how the window is divided. Automatic splits the
-longer axis, so panes stack in a tall window and sit side by side in a wide
-one; Vertical (stacked) and Horizontal (side by side) force it either way.
-Dragging the divider between two panes changes their share.
+Changing the current arrangement does not overwrite its slot. The toolbar save
+button lights while the arrangement differs from the loaded preset. Click it,
+or press Command+S on macOS or Control+S on Windows, to update that slot.
+Shift+1 through Shift+9 writes the current arrangement to another slot without
+loading it.
 
-Nine preset slots hold layouts. A digit loads its slot; the picker in the
-toolbar opens the same nine as a list, where clicking a row loads it and
-the pen on each row renames it. A slot nothing has been saved into opens
-on the vectorscope alone, which is where the application starts.
+The current working arrangement persists separately, including when it has not
+been saved to a preset. Loading another slot intentionally replaces that
+working arrangement without a confirmation prompt.
 
-Nothing reaches a slot until you say so. Rearrange the scopes and the save
-button beside the picker lights: the layout on screen now differs from the
-slot it came from. Click it, or press Cmd+S (Ctrl+S on Windows), and the
-slot takes it. That button is the only thing that says a layout is
-unsaved, and while it is dark there is nothing to save.
+Trace intensity, sampling, smoothing, trace gamma, window position, and window
+size are not part of a layout preset.
 
-What is on screen is kept for you regardless, saved or not. Quit while the
-button is lit and you come back exactly where you were: the same slot, the
-same arrangement, the same button still lit. The slots and the layout you
-are working on are two different things that persist separately, which is
-what lets a mistyped scope letter be an annoyance rather than the loss of
-a preset — the slot was never written to.
+## Measurement boundary
 
-Loading another slot replaces what is on screen and asks nothing. What was
-unsaved was never in a slot to begin with, and you asked to go elsewhere.
+SideScopes receives the composited screen-capture result. The desktop capture
+is requested or labeled as sRGB where the platform API permits, and the scope
+calculations treat the received values as full-range, sRGB/Rec.709-like output.
 
-A preset stores which scopes are shown, their order, the split, the pane
-weights and each scope's style — but not intensity, sampling, smoothing or
-trace gamma, which are tuning rather than layout, and not the window's
-position or size.
+SideScopes does not inspect the source profile, timeline color space, display
+ICC profile, printer profile, HDR metadata, or upstream signal range. It is
+not a soft-proofing system, HDR reference monitor, gamut checker, or
+source-signal compliance scope. Use the source application's own configured
+scopes when those stages matter.

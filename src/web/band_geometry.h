@@ -9,7 +9,7 @@ namespace sidescopes {
 /// Deliberately not an ImGui type. This unit is arithmetic that decides
 /// whether the region border draws correctly, and keeping it free of Dear
 /// ImGui and of Emscripten is what lets it be tested on any machine rather
-/// than only inside a browser - the same trade the demo's image adjustments
+/// than only inside a browser - the same trade the lab's image adjustments
 /// already make.
 struct BandRect
 {

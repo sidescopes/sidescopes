@@ -271,7 +271,7 @@ def _fetch_named(names, cache_dir):
 
 
 if __name__ == "__main__":
-    # `python3 content.py <cache-dir> <name>...` - the demo build's way of
+    # `python3 content.py <cache-dir> <name>...` - the lab build's way of
     # getting the photographs it shows without depending on anyone having run
     # the scenario harness first.
     raise SystemExit(_fetch_named(sys.argv[2:], pathlib.Path(sys.argv[1])))

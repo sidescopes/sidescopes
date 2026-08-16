@@ -11,7 +11,7 @@ namespace {
 
 // src/platform/macos/region_border_view.h's own numbers. The desktop border
 // is a window on the desktop and cannot run here, but its geometry can, and
-// a demo whose border is a near-miss of the application's teaches the wrong
+// a lab whose border is a near-miss of the application's teaches the wrong
 // thing about the application.
 constexpr float BorderPad = 12.0f;     // the grab band outside the region
 constexpr float HandleRadius = 3.5f;   // one handle dot
@@ -175,7 +175,7 @@ namespace {
 /// at full strength.
 ///
 /// Scoped to the region border ON PURPOSE rather than set once for the whole
-/// interface: every other pixel of this demo is drawn by the same Dear ImGui
+/// interface: every other pixel of this lab is drawn by the same Dear ImGui
 /// code the desktop application draws with and matches it already. The border
 /// is the one part the desktop draws with AppKit instead, so it is the one
 /// part with a native rendering to be held against.

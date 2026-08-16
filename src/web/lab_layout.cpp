@@ -1,4 +1,4 @@
-#include "web/demo_layout.h"
+#include "web/lab_layout.h"
 
 #include <algorithm>
 

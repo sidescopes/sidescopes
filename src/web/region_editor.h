@@ -9,13 +9,13 @@
 
 namespace sidescopes {
 
-/// @brief A draggable region over the demo's picture.
+/// @brief A draggable region over the lab's picture.
 ///
 /// The desktop draws its region border as a native window on the desktop,
 /// per platform, so none of that code can run in a page. The GEOMETRY and
 /// the LOOK are taken from it rather than invented — the constants below
 /// are src/platform/macos/region_border_view.h's, and the drawing follows
-/// what that view draws — so the demo's border reads as the application's.
+/// what that view draws — so the lab's border reads as the application's.
 ///
 /// The gesture is the documented one, and it is not the obvious one:
 ///

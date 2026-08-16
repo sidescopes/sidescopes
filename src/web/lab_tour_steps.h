@@ -24,9 +24,9 @@ namespace sidescopes {
 ///
 /// A unit of its own because it is CONTENT, not machinery: the words a visitor
 /// reads, and which of them are quoted from the bindings in force. Nothing
-/// here touches the demo's state, so it belongs beside the walk-through rather
+/// here touches the lab's state, so it belongs beside the walk-through rather
 /// than inside the shell that happens to start it - and so it can be tested,
 /// which is what stops the keys drifting back to the shipped defaults.
-[[nodiscard]] std::vector<TourStep> demoTourSteps(const ShortcutResolver& shortcuts);
+[[nodiscard]] std::vector<TourStep> labTourSteps(const ShortcutResolver& shortcuts);
 
 }  // namespace sidescopes

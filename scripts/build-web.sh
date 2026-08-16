@@ -1,8 +1,8 @@
 #!/bin/sh
-# Builds the browser demo: the application, in WebAssembly.
+# Builds the browser lab: the application, in WebAssembly.
 #
 # The web is a platform here, not a side project. src/platform/web answers the
-# same seams macOS and Windows answer, the demo links the same libraries the
+# same seams macOS and Windows answer, the lab links the same libraries the
 # desktop executables link, and CMake owns the source lists for all of them —
 # so a new src/app unit reaches this build without anyone remembering to add
 # it. This script only configures that build and assembles the page around it.
@@ -49,11 +49,11 @@ mkdir -p "$OUT"
     emcmake cmake -S "$ROOT" -B "$BUILD" -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build "$BUILD"
 
-# Anything named for the demo goes first. The whole directory is what gets
+# Anything named for the lab goes first. The whole directory is what gets
 # uploaded, so a renamed artefact - the module was .mjs before it became a
 # classic .js - would otherwise sit there being published indefinitely.
-rm -f "$OUT"/sidescopes-demo.*
-cp "$BUILD/sidescopes-demo.js" "$BUILD/sidescopes-demo.wasm" "$OUT/"
+rm -f "$OUT"/sidescopes-lab.*
+cp "$BUILD/sidescopes-lab.js" "$BUILD/sidescopes-lab.wasm" "$OUT/"
 
 # Sample photographs, small enough to fetch on a page.
 #
@@ -62,7 +62,7 @@ cp "$BUILD/sidescopes-demo.js" "$BUILD/sidescopes-demo.wasm" "$OUT/"
 #
 # face-portrait.jpg is deliberately NOT among them, and the distinction is
 # worth keeping straight: right of publicity is separate from copyright, and a
-# LIVING person's official portrait on a demo page invites the reading that
+# LIVING person's official portrait on a lab page invites the reading that
 # she endorses this. skin-and-colour.jpg carries a face too and is shown,
 # because it is an archival photograph from 1942 and nothing about it suggests
 # its subject endorses software made eighty years later. The test for a face
@@ -73,14 +73,14 @@ SAMPLES="skin-and-colour neutral-detail wide-tonal-range flat-field"
 # Fetched here rather than assumed: the manifest is the citable artefact and
 # checks every download against its digest, so this needs nothing committed to
 # the repository and nobody to have run the scenario harness first. A failure
-# is not fatal - the demo falls back to generated patterns and says so, which
+# is not fatal - the lab falls back to generated patterns and says so, which
 # is the same contract the harness degrades under.
 for name in $SAMPLES; do
     [ -f "$CACHE/$name.jpg" ] || python3 "$ROOT/scripts/scenarios/content.py" "$CACHE" "$name.jpg" || true
 done
 
 # The same mark the website wears, taken from this repository's own brand
-# assets: nothing new is committed, and the demo does not reach into the
+# assets: nothing new is committed, and the lab does not reach into the
 # website repo to dress itself.
 cp "$ROOT/assets/brand/icons/linux/sidescopes-32.png" "$OUT/favicon-32.png"
 cp "$ROOT/assets/brand/icons/linux/sidescopes-256.png" "$OUT/apple-touch-icon.png"
@@ -106,7 +106,7 @@ for name in $SAMPLES; do
 done
 if [ "$made" -eq 0 ]; then
     echo "build-web: no sample photographs at $CACHE, and none could be fetched."
-    echo "  The demo falls back to generated patterns. Check the network, or the"
+    echo "  The lab falls back to generated patterns. Check the network, or the"
     echo "  digests in scripts/scenarios/photos.json if a source has changed."
 else
     echo "build-web: $made sample photograph(s) in $OUT/samples"
@@ -116,8 +116,8 @@ fi
 # happily keeps the previous module - the page changes, the WebAssembly does
 # not, and the result reads as "my change did nothing" rather than as a
 # cache. Cost nothing on R2, where the whole directory is already hashed.
-DIGEST=$(shasum -a 256 "$OUT/sidescopes-demo.wasm" | cut -c1-10)
-sed "s|src=\"sidescopes-demo.js\"|src=\"sidescopes-demo.js?b=$DIGEST\"|" \
+DIGEST=$(shasum -a 256 "$OUT/sidescopes-lab.wasm" | cut -c1-10)
+sed "s|src=\"sidescopes-lab.js\"|src=\"sidescopes-lab.js?b=$DIGEST\"|" \
     "$ROOT/src/web/index.html" > "$OUT/index.html"
 
 # --standalone: one file that can be downloaded and opened by double-clicking
@@ -133,18 +133,18 @@ if [ "$STANDALONE" -eq 1 ]; then
     cmake --build "$SINGLE"
     python3 "$ROOT/scripts/web-standalone.py" \
         --page "$ROOT/src/web/index.html" \
-        --engine "$SINGLE/sidescopes-demo.js" \
+        --engine "$SINGLE/sidescopes-lab.js" \
         --samples "$OUT/samples" \
         --icon "$ROOT/assets/brand/icons/linux/sidescopes-32.png" \
-        --out "$OUT/sidescopes-demo.html"
-    ls -lh "$OUT/sidescopes-demo.html" | awk '{print "standalone:", $5, $9}'
+        --out "$OUT/sidescopes-lab.html"
+    ls -lh "$OUT/sidescopes-lab.html" | awk '{print "standalone:", $5, $9}'
 fi
 
 echo
 echo "built into $OUT"
 echo "  index.html            needs a web server - it loads the .wasm beside it"
-if [ -f "$OUT/sidescopes-demo.html" ]; then
-    echo "  sidescopes-demo.html  self-contained; open it straight from disk"
+if [ -f "$OUT/sidescopes-lab.html" ]; then
+    echo "  sidescopes-lab.html  self-contained; open it straight from disk"
 else
     echo "  (pass --standalone for a single file that opens from disk)"
 fi

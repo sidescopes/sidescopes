@@ -7,7 +7,7 @@
 // paints inside its own canvas and nowhere else, and no browser API will
 // ever change that.
 //
-// So the demo does the equivalent INSIDE its canvas, over the picture
+// So the lab does the equivalent INSIDE its canvas, over the picture
 // standing in for the screen, in src/web/region_editor.cpp. That is a
 // different surface rather than an implementation of this one, which is why
 // these answer "nothing" instead of forwarding.
@@ -60,7 +60,7 @@ void updatePickerFaces(uint32_t, const std::vector<SuggestedRegion>&)
 void setRegionPickChipColor(const std::optional<FloatColor>&)
 {
     // The pin swatch rides the CURSOR here, which the desktop layers also
-    // do; web/demo_shell.cpp builds it. This seam is the picker window's
+    // do; web/lab_shell.cpp builds it. This seam is the picker window's
     // copy of the same idea and has no window to sit in.
 }
 

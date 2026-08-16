@@ -5,7 +5,7 @@ namespace sidescopes {
 /// The application's window keeps a fixed share; the picture - which stands
 /// in for the screen it would be reading - takes the rest. Side by side on a
 /// wide viewport, stacked on a tall one, and never inside the application's
-/// own window: on a desktop the two are separate windows, and a demo that
+/// own window: on a desktop the two are separate windows, and a lab that
 /// nests one in the other teaches the wrong shape.
 constexpr float AppWidthPoints = 400.0f;
 constexpr float AppHeightShare = 0.52f;
@@ -37,7 +37,7 @@ struct ShellLayout
 };
 
 /// The rule itself, kept where it can be TESTED. It decides the one thing
-/// about this demo that would teach something false if it were wrong: the
+/// about this lab that would teach something false if it were wrong: the
 /// application is a window BESIDE the picture, never a frame around it,
 /// because beside is what it is on a desktop.
 [[nodiscard]] ShellLayout layoutFor(const LayoutPoint& origin, const LayoutPoint& size);

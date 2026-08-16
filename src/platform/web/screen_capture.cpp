@@ -2,13 +2,13 @@
 //
 // A page cannot read another program's window, so there is no screen to
 // capture and there never will be. What there IS, is pixels the host can
-// hand over - the photograph the demo's visitor chose, or, in a browser
+// hand over - the photograph the lab's visitor chose, or, in a browser
 // extension, frames from tabCapture. Those go into the mailbox through the
 // ordinary source, so the analysis, the region and the colour readout all
 // reach them exactly as they reach a desktop's frames.
 //
 // That is the whole reason this is not a stub. A host that pushed pixels
-// straight into its own analysis - which is what the demo did first - ends up
+// straight into its own analysis - which is what the lab did first - ends up
 // carrying a private copy of the pipeline, and a private copy drifts.
 
 #include "platform/screen_capture.h"

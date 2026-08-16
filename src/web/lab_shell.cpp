@@ -1,4 +1,4 @@
-#include "web/demo_shell.h"
+#include "web/lab_shell.h"
 
 #include <emscripten/emscripten.h>
 
@@ -88,7 +88,7 @@ namespace {
 std::string g_cursor = "\x01";  // no CSS value, so the first call always writes
 
 // clang-format off
-// JavaScript, not C++ - see demo_storage.cpp.
+// JavaScript, not C++ - see lab_storage.cpp.
 EM_JS(void, jsSetCursor, (const char* css), {
     const canvas = document.getElementById("canvas");
     if (canvas) {

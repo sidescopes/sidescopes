@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Folds the browser demo into ONE file that opens straight from disk.
+"""Folds the browser lab into ONE file that opens straight from disk.
 
 A page loaded over file:// is treated as its own opaque origin, which rules
-out three of the things the served demo does: it may not import an ES module,
+out three of the things the served lab does: it may not import an ES module,
 may not fetch the sibling .wasm the engine asks for, and may not fetch the
 sample photographs. Each has an answer that costs only size:
 
@@ -44,9 +44,9 @@ def main():
     # The engine, inline. The script tag is matched rather than assumed, so a
     # rename in the page is a loud failure here instead of a file that builds
     # and then loads nothing.
-    engine_tag = re.search(r'<script src="sidescopes-demo\.js"[^>]*></script>', page)
+    engine_tag = re.search(r'<script src="sidescopes-lab\.js"[^>]*></script>', page)
     if engine_tag is None:
-        print("web-standalone: the page no longer loads sidescopes-demo.js by that name", file=sys.stderr)
+        print("web-standalone: the page no longer loads sidescopes-lab.js by that name", file=sys.stderr)
 
         return 1
     engine = args.engine.read_text()

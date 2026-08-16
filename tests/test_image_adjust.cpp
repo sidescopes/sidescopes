@@ -8,7 +8,7 @@
 namespace sidescopes {
 namespace {
 
-/// One BGRA pixel in, one out. The demo's picture is a million of these and
+/// One BGRA pixel in, one out. The lab's picture is a million of these and
 /// nothing about the maths is neighbour-dependent, so a single pixel is the
 /// whole unit under test.
 /// Channels held as int, deliberately: Catch2 prints a uint8_t as a

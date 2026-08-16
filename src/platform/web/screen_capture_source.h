@@ -8,7 +8,7 @@ namespace sidescopes {
 ///
 /// A page cannot read another program's window and never will - that is the
 /// security model working. So this platform's capture source is fed by its
-/// HOST rather than by an operating system: the demo hands it the photograph
+/// HOST rather than by an operating system: the lab hands it the photograph
 /// the visitor chose, and a browser extension would hand it frames from
 /// `tabCapture`. Either way they arrive through the ordinary
 /// ScreenCaptureSource and reach the analysis the same way a desktop's do,
