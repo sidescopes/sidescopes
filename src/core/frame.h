@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <vector>
 
 namespace sidescopes {
 
@@ -259,5 +260,12 @@ struct FrameView
                           static_cast<float>(sample.b) * scale};
     }
 };
+
+/// A tightly packed eight-bit BGRA copy of @p frame. Screen capture can
+/// deliver ten-bit packed pixels while system image APIs commonly accept
+/// eight-bit BGRA; keeping this conversion beside FrameView makes those
+/// bridges format-independent instead of silently rejecting the deeper
+/// stream. Alpha is made opaque because captured display pixels are opaque.
+[[nodiscard]] std::vector<uint8_t> copyAsBgra8(const FrameView& frame);
 
 }  // namespace sidescopes

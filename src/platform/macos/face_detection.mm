@@ -12,14 +12,11 @@ namespace {
 // Faces smaller than this (in points) are thumbnails, not scoping targets.
 constexpr double MinimumFacePoints = 72.0;
 
-// Whether Vision can be handed this frame's memory directly. The buffer it is
-// wrapped in is uncopied and declared eight-bit BGRA, so a frame in any other
-// layout would be read as though it were that - a plausible image made of the
-// wrong bits. Callers pass either a one-shot capture, which is always
-// eight-bit, or a crop that narrowed the frame while copying it.
+// Whether this frame contains enough well-formed storage to give Vision. An
+// eight-bit frame is wrapped directly; a deeper frame is converted below.
 bool readableByVision(const FrameView& frame)
 {
-    return frame.pixels != nullptr && frame.format == PixelFormat::Bgra8 && frame.width > 0 && frame.height > 0;
+    return frame.pixels != nullptr && frame.width > 0 && frame.height > 0 && frame.strideBytes >= frame.width * 4;
 }
 
 }  // namespace
@@ -48,13 +45,25 @@ std::vector<IntRect> detectFaces(const FrameView& frame, float pixelsPerPoint)
         return faces;
     }
 
-    // The pixel buffer wraps the frame without copying; the frame outlives
-    // the synchronous request below.
+    // Vision accepts eight-bit BGRA, while the normal macOS capture stream is
+    // ten-bit. Preserve the zero-copy path for an eight-bit frame and convert
+    // only the deeper stream. The owned copy outlives the synchronous request.
+    std::vector<uint8_t> converted;
+    const uint8_t* pixels = frame.pixels;
+    std::size_t strideBytes = static_cast<std::size_t>(frame.strideBytes);
+    if (frame.format != PixelFormat::Bgra8) {
+        converted = copyAsBgra8(frame);
+        if (converted.empty()) {
+            return faces;
+        }
+        pixels = converted.data();
+        strideBytes = static_cast<std::size_t>(frame.width) * 4;
+    }
+
     CVPixelBufferRef buffer = nullptr;
     const CVReturn wrapped = CVPixelBufferCreateWithBytes(
         kCFAllocatorDefault, static_cast<size_t>(frame.width), static_cast<size_t>(frame.height),
-        kCVPixelFormatType_32BGRA, const_cast<uint8_t*>(frame.pixels), static_cast<size_t>(frame.strideBytes), nullptr,
-        nullptr, nullptr, &buffer);
+        kCVPixelFormatType_32BGRA, const_cast<uint8_t*>(pixels), strideBytes, nullptr, nullptr, nullptr, &buffer);
     if (wrapped != kCVReturnSuccess || !buffer) {
         return faces;
     }

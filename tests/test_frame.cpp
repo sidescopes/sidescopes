@@ -1,6 +1,7 @@
 #include <array>
 #include <catch2/catch_test_macros.hpp>
 #include <cstddef>
+#include <vector>
 
 #include "core/analysis_worker.h"
 #include "core/frame.h"
@@ -77,6 +78,33 @@ TEST_CASE("FrameView reads BGRA pixels as RGB colors")
     CHECK(mixed.r == 17);
     CHECK(mixed.g == 34);
     CHECK(mixed.b == 51);
+}
+
+TEST_CASE("FrameView copies either capture depth to tightly packed BGRA8")
+{
+    SECTION("an eight-bit frame loses row padding but not pixel bytes")
+    {
+        constexpr int Stride = 12;
+        const std::array<uint8_t, Stride> pixels{3, 2, 1, 17, 6, 5, 4, 18, 99, 99, 99, 99};
+        const FrameView view{pixels.data(), Stride, 2, 1, ColorSpaceHint::Srgb, 1};
+
+        CHECK(copyAsBgra8(view) == std::vector<uint8_t>{3, 2, 1, 17, 6, 5, 4, 18});
+    }
+
+    SECTION("a ten-bit frame is rounded onto the display scale with opaque alpha")
+    {
+        const auto packed = [](uint16_t r, uint16_t g, uint16_t b) {
+            const uint32_t word = (3u << 30) | (static_cast<uint32_t>(r) << 20) |
+                                  (static_cast<uint32_t>(g) << 10) | b;
+            return std::array<uint8_t, 4>{static_cast<uint8_t>(word), static_cast<uint8_t>(word >> 8),
+                                          static_cast<uint8_t>(word >> 16), static_cast<uint8_t>(word >> 24)};
+        };
+        const std::array<uint8_t, 4> pixels = packed(1023, 512, 0);
+        const FrameView view{pixels.data(), 4, 1, 1, ColorSpaceHint::Srgb, 1, 0, 0, 0, 0,
+                             PixelFormat::Argb2101010};
+
+        CHECK(copyAsBgra8(view) == std::vector<uint8_t>{0, 128, 255, 255});
+    }
 }
 
 TEST_CASE("A frame that covers its whole display reports itself as the display")
