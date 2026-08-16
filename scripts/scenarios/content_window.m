@@ -358,6 +358,7 @@ static CGImageRef newImageFromFile(NSString* path, size_t width, size_t height)
 
 @interface ContentController : NSObject
 @property(nonatomic, strong) NSWindow* window;
+@property(nonatomic, strong) NSWindow* backdrop;
 @property(nonatomic, strong) NSMutableArray* images;  // CGImageRef, boxed as id
 @property(nonatomic, assign) NSUInteger index;
 @property(nonatomic, assign) double phase;
@@ -472,6 +473,7 @@ typedef struct
     const char* title;
     double period;
     double fps;
+    double backdrop;
 } Options;
 
 static int parseOptions(int argc, const char** argv, Options* options)
@@ -503,6 +505,8 @@ static int parseOptions(int argc, const char** argv, Options* options)
             options->period = atof(value);
         } else if (strcmp(flag, "--fps") == 0) {
             options->fps = atof(value);
+        } else if (strcmp(flag, "--backdrop") == 0) {
+            options->backdrop = atof(value);
         } else {
             fprintf(stderr, "content_window: unknown option %s\n", flag);
 
@@ -583,6 +587,33 @@ static NSWindow* newContentWindow(const Options* options)
     return window;
 }
 
+// A controlled neutral surround for captures that retain the native window
+// edge. Desktop-rectangle capture is required when a SideScopes region overlay
+// is visible, but without this surround the few pixels outside the rounded
+// corner would disclose whichever unrelated window happened to be behind the
+// scenario. The backdrop is borderless, noninteractive, and deliberately has
+// no shadow of its own; the content window above it remains entirely native.
+static NSWindow* newBackdropWindow(NSWindow* contentWindow, double margin)
+{
+    if (margin <= 0.0) {
+        return nil;
+    }
+    const NSRect frame = NSInsetRect(contentWindow.frame, -margin, -margin);
+    NSWindow* backdrop = [[NSWindow alloc] initWithContentRect:frame
+                                                     styleMask:NSWindowStyleMaskBorderless
+                                                       backing:NSBackingStoreBuffered
+                                                         defer:NO];
+    backdrop.backgroundColor = [NSColor colorWithSRGBRed:0.055 green:0.055 blue:0.055 alpha:1.0];
+    backdrop.opaque = YES;
+    backdrop.hasShadow = NO;
+    backdrop.ignoresMouseEvents = YES;
+    backdrop.releasedWhenClosed = NO;
+    [backdrop orderFrontRegardless];
+    [contentWindow orderFrontRegardless];
+
+    return backdrop;
+}
+
 // The mode's own timer, plus the watch that leaves the screen if the harness
 // that started this is gone.
 static void startTimers(ContentController* controller, const Options* options)
@@ -638,7 +669,8 @@ int main(int argc, const char** argv)
                            .mode = "still",
                            .title = "SideScopes measurement content",
                            .period = 2.0,
-                           .fps = 30.0};
+                           .fps = 30.0,
+                           .backdrop = 0.0};
         if (!parseOptions(argc, argv, &options)) {
             return 2;
         }
@@ -649,6 +681,7 @@ int main(int argc, const char** argv)
         [NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory];
 
         NSWindow* window = newContentWindow(&options);
+        NSWindow* backdrop = newBackdropWindow(window, options.backdrop);
         const double backing = window.backingScaleFactor;
         NSMutableArray* images = buildImages(&options, (size_t)(options.width * backing * PanSurplus),
                                              (size_t)(options.height * backing));
@@ -660,6 +693,7 @@ int main(int argc, const char** argv)
 
         ContentController* controller = [[ContentController alloc] init];
         controller.window = window;
+        controller.backdrop = backdrop;
         controller.images = images;
         controller.parent = getppid();
         // The video pan's travel, in the image's own pixels. Reported below so

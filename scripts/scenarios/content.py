@@ -163,13 +163,15 @@ class ContentWindow:
     region at that rather than at what they asked for.
     """
 
-    def __init__(self, binary, rect, content_set, mode="still", period=2.0, fps=None, title=None):
+    def __init__(self, binary, rect, content_set, mode="still", period=2.0, fps=None, title=None, backdrop=0):
         arguments = [str(binary), "--rect", ",".join(f"{value:.0f}" for value in rect), "--mode", mode,
                      "--period", str(period)]
         if fps is not None:
             arguments += ["--fps", str(fps)]
         if title is not None:
             arguments += ["--title", title]
+        if backdrop > 0:
+            arguments += ["--backdrop", str(backdrop)]
         if content_set.files:
             arguments += ["--image", ",".join(str(path) for path in content_set.files)]
         else:
