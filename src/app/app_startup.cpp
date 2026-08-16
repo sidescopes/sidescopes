@@ -327,6 +327,12 @@ MainWindow createMainWindow(const Preferences& startup, const VersionInfo& versi
     glfwSetWindowUserPointer(window, &callbackState);
     restoreWindowPlacement(window, startup);
     glfwShowWindow(window);
+    // AppKit centres a newly shown GLFW window even when it was positioned
+    // while hidden. Reapply the same placement before the first frame so a
+    // fresh session actually opens at the left and saved positions survive
+    // the transition to a visible native window. Other platforms simply see
+    // the already-applied rectangle again.
+    restoreWindowPlacement(window, startup);
     // A development build wears its version in the title bar; a release keeps
     // the plain name. Deterministic product captures ask for the release title
     // so documentation does not carry a local hash or become stale at the next
