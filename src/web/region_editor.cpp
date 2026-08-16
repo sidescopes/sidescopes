@@ -23,7 +23,6 @@ constexpr float CrossThickness = 1.3f;
 constexpr float CloseRadius = 6.5f;
 constexpr float CloseHitRadius = 11.0f;
 constexpr float CloseCornerInset = 2.0f;
-constexpr float MinimumWidthForClose = 48.0f;
 // Dear ImGui picks a circle's segment count from its radius in ITS units and
 // knows nothing of the device scale, so a 6.5-point disc is tessellated for
 // 6.5 pixels and drawn into thirteen - a visible polygon where AppKit strokes
@@ -345,17 +344,14 @@ bool RegionEditor::closeOffered(const Placement& placement) const
 {
     // A narrow region keeps its corner for resizing; the badge would sit on
     // top of the grab zones and win a press meant for them.
-    return static_cast<float>(m_rect.width) * placement.scale >= MinimumWidthForClose;
+    return regionCloseAvailable(static_cast<float>(m_rect.width) * placement.scale);
 }
 
-/// Always visible while the border is up, which is the desktop's rule, and
-/// the reason behind it is the part worth keeping: revealing it on hover
-/// flickered on every crossing of the band, and crossing the band is what a
-/// pointer does all day. It still stands down mid-drag and on a region too
-/// narrow to hold it.
+/// Visible throughout a drag so it travels with the border. A region too
+/// narrow to hold it still yields its corner to the resize zones.
 bool RegionEditor::closeVisible(const Placement& placement) const
 {
-    return m_grab == ZoneNone && !m_arming && closeOffered(placement);
+    return !m_arming && closeOffered(placement);
 }
 
 void RegionEditor::drawCloseBadge(const ImVec2& centre) const

@@ -37,7 +37,7 @@ constexpr double HandleMargin = HandleRadius + 2.0;
 constexpr double WindowPad = BorderPad + HandleMargin;
 // Regions cannot shrink beyond this many points per side.
 constexpr double MinimumRegionSize = 24.0;
-// The hover-revealed close button: a badge on the band's outer corner,
+// The close button: a badge on the band's outer corner,
 // diagonally off the corner handle, so it visibly belongs to the region
 // as a whole. Pulled inward a touch so the disc mostly rides the band;
 // tiny regions still yield it to the resize zones.
@@ -57,7 +57,6 @@ constexpr double CloseRadius = 6.5;
 constexpr double CloseHitRadius = 11.0;
 constexpr double CloseCornerInset = 2.0;
 constexpr double TabAttachZone = 18.0;
-constexpr double MinimumWidthForClose = 48.0;
 
 struct BorderState
 {

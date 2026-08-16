@@ -87,6 +87,14 @@ TEST_CASE("A selection drag that never moved is empty")
     CHECK(rect.height == Approx(0.0));
 }
 
+TEST_CASE("The region close control depends only on available room")
+{
+    CHECK_FALSE(regionCloseAvailable(47.0));
+    CHECK(regionCloseAvailable(48.0));
+    CHECK_FALSE(regionCloseAvailable(95.0, 2.0));
+    CHECK(regionCloseAvailable(96.0, 2.0));
+}
+
 // ---------------------------------------------------------------------------
 // Corner grab zones
 // ---------------------------------------------------------------------------

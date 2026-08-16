@@ -35,6 +35,14 @@ struct LocalRect
     double height = 0.0;
 };
 
+/// The close control needs enough horizontal room to stay clear of the corner
+/// resize zones. It remains available throughout a drag.
+inline constexpr double MinimumRegionWidthForClose = 48.0;
+
+/// @return Whether a region of @p width has room for its close control at the
+///         current platform @p scale.
+[[nodiscard]] bool regionCloseAvailable(double width, double scale = 1.0);
+
 /// Overlay-local points to display-relative percentages, and back. The
 /// percentages let a selection survive capture-resolution changes.
 RegionOfInterest regionFromLocalRect(const LocalRect& rect, double width, double height);

@@ -86,13 +86,12 @@ void drawHandleDot(CGFloat x, CGFloat y)
     return rect;
 }
 
-// Always visible while the border is up - hover-revealing it flickered
-// on every band crossing, and crossing the band is what a cursor does
-// all day. It still hides during drags and yields on tiny regions.
+// Visible throughout a drag so it travels with the border. A narrow region
+// still yields its corner to the resize zones.
 - (BOOL)closeVisible
 {
     const NSRect region = [self regionRect];
-    return self.dragZone == sidescopes::ZoneNone && region.size.width >= sidescopes::MinimumWidthForClose;
+    return sidescopes::regionCloseAvailable(region.size.width);
 }
 
 // On the band's outer corner, at forty-five degrees off the top-right
@@ -235,7 +234,7 @@ void drawHandleDot(CGFloat x, CGFloat y)
     drawHandleDot(NSMaxX(lane), NSMaxY(lane));
 }
 
-// The hover-revealed close button, in the handles' own visual language: a dark
+// The close button, in the handles' own visual language: a dark
 // disc where the dots are light, so it reads as an action rather than a grip,
 // with the same bright ring and an x.
 - (void)drawCloseButton
@@ -457,7 +456,6 @@ void drawHandleDot(CGFloat x, CGFloat y)
     startRegion.size.height -= self.labelBand;
     self.dragStartRegion = startRegion;
     sidescopes::g_borderEditing = true;
-    self.needsDisplay = YES;  // the close button hides while dragging
 }
 
 - (void)mouseDragged:(NSEvent*)event

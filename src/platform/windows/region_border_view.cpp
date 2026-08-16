@@ -87,13 +87,12 @@ Gdiplus::RectF borderRegionLocal(double scale)
 // Eight handles, no modifier: the corners resize both axes, the edge
 // midpoints resize their edge, and the rest of the band moves. The
 // visible handles say which is which - a modifier key never could.
-// Always visible while the border is up - hover-revealing it flickered
-// on every band crossing, and crossing the band is what a cursor does
-// all day. It still hides during drags and yields on tiny regions.
+// Visible throughout a drag so it travels with the border. A narrow region
+// still yields its corner to the resize zones.
 bool closeVisible(double scale)
 {
     const Gdiplus::RectF region = borderRegionLocal(scale);
-    return g_border.dragZone == ZoneNone && region.Width >= MinimumWidthForClose * scale;
+    return regionCloseAvailable(region.Width, scale);
 }
 
 // On the band's outer corner, at forty-five degrees off the top-right
@@ -248,7 +247,7 @@ void paintBorderHandles(Gdiplus::Graphics& canvas, const Gdiplus::RectF& region,
     paintHandleDot(canvas, region.GetRight(), region.GetBottom(), scale);
 }
 
-// The hover-revealed close button, in the handles' own visual
+// The close button, in the handles' own visual
 // language: a dark disc where the dots are light, so it reads as an
 // action rather than a grip, with the same bright ring and an x.
 // The attached window's name rides the band above the top edge: the attached
@@ -512,7 +511,6 @@ LRESULT borderOnLButtonDown(HWND window, LPARAM lParam)
     g_border.dragStartRegion = g_border.region;
     g_borderEditing = true;
     SetCapture(window);
-    paintBorder();  // the close button hides while dragging
     return 0;
 }
 

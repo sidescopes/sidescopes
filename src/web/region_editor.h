@@ -115,7 +115,7 @@ private:
     void announceCursor(const Placement& placement) const;
     void restoreHeldPosition(const Placement& placement, int imageWidth, int imageHeight);
     void drawBorder(const Placement& placement, int imageWidth, int imageHeight) const;
-    /// The hover-revealed close badge's centre, on the band's outer top
+    /// The close badge's centre, on the band's outer top
     /// corner at forty-five degrees off the corner handle.
     /// The region's rectangle on screen, SNAPPED to whole points.
     ///
