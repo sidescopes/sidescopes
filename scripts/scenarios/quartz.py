@@ -64,6 +64,8 @@ _cg.CGEventCreateKeyboardEvent.restype = ctypes.c_void_p
 _cg.CGEventCreateKeyboardEvent.argtypes = [ctypes.c_void_p, ctypes.c_uint16, ctypes.c_bool]
 _cg.CGEventSetFlags.argtypes = [ctypes.c_void_p, ctypes.c_uint64]
 _cg.CGEventPost.argtypes = [ctypes.c_uint32, ctypes.c_void_p]
+_cg.CGPreflightPostEventAccess.restype = ctypes.c_bool
+_cg.CGPreflightPostEventAccess.argtypes = []
 
 _HID_EVENT_TAP = 0
 _MOUSE_MOVED = 5
@@ -268,14 +270,42 @@ def pointer_works():
     whole run would then measure an application nobody touched. Moves the
     pointer a little and puts it back.
     """
-    before = pointer_position()
-    target = (before[0] + 20.0, before[1] + 20.0)
-    move_pointer(target)
-    time.sleep(0.25)
-    after = pointer_position()
-    move_pointer(before)
+    # The system's TCC preflight is authoritative and does not race with the
+    # user moving the same pointer while the probe is in flight.
+    if _cg.CGPreflightPostEventAccess():
+        return True
 
-    return abs(after[0] - target[0]) < 2.0 and abs(after[1] - target[1]) < 2.0
+    # Retain an event probe as a conservative fallback for an unusual host
+    # where the preflight says no even though an inherited event tap works.
+    before = pointer_position()
+    # Stay inside whichever display owns the pointer. A fixed positive offset
+    # is not a valid probe at its bottom-right edge, where macOS clamps the
+    # event and makes a working permission look unavailable.
+    target = (before[0] + 20.0, before[1] + 20.0)
+    for display in displays():
+        left, top = display["origin"]
+        width, height = display["points"]
+        if left <= before[0] < left + width and top <= before[1] < top + height:
+            dx = 20.0 if before[0] + 20.0 < left + width else -20.0
+            dy = 20.0 if before[1] + 20.0 < top + height else -20.0
+            target = (before[0] + dx, before[1] + dy)
+            break
+
+    works = False
+    # The first posted event after a fresh Python process can be delayed while
+    # the system event tap wakes. Retry the same harmless move before declaring
+    # that Accessibility is unavailable.
+    for _ in range(3):
+        move_pointer(target)
+        time.sleep(0.25)
+        after = pointer_position()
+        if abs(after[0] - target[0]) < 2.0 and abs(after[1] - target[1]) < 2.0:
+            works = True
+            break
+    move_pointer(before)
+    time.sleep(0.05)
+
+    return works
 
 
 # --- Per-process counters ---------------------------------------------------
