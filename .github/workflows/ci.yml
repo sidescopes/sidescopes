@@ -195,14 +195,14 @@ jobs:
         run: emcmake cmake -B build-web -DSIDESCOPES_WERROR=ON -DCMAKE_BUILD_TYPE=Release
       - name: Build
         run: cmake --build build-web
-      - name: The demo is present and non-trivial
+      - name: The Lab is present and non-trivial
         # A link that emits nothing still exits 0. Naming the artefacts and
-        # asserting a floor turns "the step passed" into "the demo exists".
+        # asserting a floor turns "the step passed" into "the Lab exists".
         run: |
-          test -f build-web/sidescopes-demo.js
-          test -f build-web/sidescopes-demo.wasm
-          size=$(wc -c < build-web/sidescopes-demo.wasm)
-          echo "sidescopes-demo.wasm: $size bytes"
+          test -f build-web/sidescopes-lab.js
+          test -f build-web/sidescopes-lab.wasm
+          size=$(wc -c < build-web/sidescopes-lab.wasm)
+          echo "sidescopes-lab.wasm: $size bytes"
           test "$size" -gt 500000
 
   # Address+UB and thread sanitizers exercise the test suite; the analysis
