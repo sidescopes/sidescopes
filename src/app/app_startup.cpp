@@ -16,6 +16,7 @@
 #include "app/interface_style.h"
 #include "app/scope_view.h"
 #include "app/ui_scaling.h"
+#include "core/environment.h"
 #include "core/page_allocator.h"
 #include "core/scopes/histogram.h"
 #include "core/scopes/vectorscope.h"
@@ -316,8 +317,10 @@ MainWindow createMainWindow(const Preferences& startup, const VersionInfo& versi
     restoreWindowPlacement(window, startup);
     glfwShowWindow(window);
     // A development build wears its version in the title bar; a release keeps
-    // the plain name.
-    if (version.development) {
+    // the plain name. Deterministic product captures ask for the release title
+    // so documentation does not carry a local hash or become stale at the next
+    // version.
+    if (version.development && environmentValue("SIDESCOPES_PLAIN_TITLE").empty()) {
         glfwSetWindowTitle(window, ("SideScopes " + version.display).c_str());
     }
     glfwSetWindowIconifyCallback(window, [](GLFWwindow* iconifyTarget, int) {

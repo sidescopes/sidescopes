@@ -1,4 +1,4 @@
-# The scopes
+# Scopes
 
 SideScopes provides five scopes and a color picker. Any combination can share
 the window, one pane per instrument. Use the scope selector to choose and order
@@ -14,7 +14,13 @@ source application renders it. See
 [Measurement boundary](#measurement-boundary) before using the scopes for
 color-managed or signal-compliance decisions.
 
-## Vectorscope (V)
+## Vectorscope
+
+<aside class="shortcut-note">
+<strong>Default shortcut:</strong> <kbd>V</kbd> shows the vectorscope by itself.
+<kbd>Shift+V</kbd> adds it to the current layout, or removes it when another
+instrument remains.
+</aside>
 
 The vectorscope converts each captured RGB sample to two chroma coordinates.
 Angle around the center corresponds to hue; radial distance corresponds to
@@ -32,6 +38,8 @@ the smaller unlabeled boxes mark the full-value positions. They are not gamut
 boundaries or saturation limits. The skin-tone indicator is a directional
 reference for comparison, not a target that every complexion should meet.
 
+![Vectorscope showing a compact trace near the center of the graticule.](https://media.sidescopes.org/shots/vectorscope-neutral.png)
+
 **Zoom** magnifies the central area at 1x, 2x, or 4x. It changes the view, not
 the underlying coordinates.
 
@@ -39,7 +47,13 @@ SideScopes uses one fixed, full-range Rec.709-style RGB-to-Cb/Cr matrix. This
 is most directly interpretable for SDR, sRGB/Rec.709-like rendered output. It
 does not make the vectorscope a color-managed gamut test.
 
-## RGB waveform (W)
+## RGB waveform
+
+<aside class="shortcut-note">
+<strong>Default shortcut:</strong> <kbd>W</kbd> shows the RGB waveform by itself.
+<kbd>Shift+W</kbd> adds it to the current layout, or removes it when another
+instrument remains.
+</aside>
 
 The RGB waveform overlays red, green, and blue channel levels. Its horizontal
 axis follows the selected region from left to right; its vertical axis is
@@ -54,12 +68,20 @@ Channel separation is meaningful in context. Over a verified neutral, it can
 show a rendered color bias and the tonal range in which that bias occurs. Over
 a colored subject, the same separation may simply describe the subject.
 
+![RGB waveform showing the red, green, and blue channels overlaid.](https://media.sidescopes.org/shots/waveform-rgb.png)
+
 A strong accumulation at 0 or 100 means captured output pixels reached that
 endpoint. It may be consistent with clipping or crushing in the rendered
 output, but does not identify the limiting stage or prove that a RAW file,
 timeline, or source signal has no recoverable detail.
 
-## Luma waveform (L)
+## Luma waveform
+
+<aside class="shortcut-note">
+<strong>Default shortcut:</strong> <kbd>L</kbd> shows the luma waveform by itself.
+<kbd>Shift+L</kbd> adds it to the current layout, or removes it when another
+instrument remains.
+</aside>
 
 The luma waveform retains the waveform's horizontal image position and plots a
 single weighted level:
@@ -70,21 +92,37 @@ The calculation uses the encoded captured channel values. Y′ is not physical
 luminance, scene brightness, or a direct exposure measurement. It is useful
 for locating and comparing level distributions in the rendered output.
 
+![Luma waveform showing the tonal structure of a snow-covered forest.](https://media.sidescopes.org/shots/waveform-luma.png)
+
 **Plain** draws a neutral trace. **Colored** tints the trace from the captured
 RGB contributions while keeping the same luma coordinate.
 
-## RGB parade (R)
+## RGB parade
+
+<aside class="shortcut-note">
+<strong>Default shortcut:</strong> <kbd>R</kbd> shows the RGB parade by itself.
+<kbd>Shift+R</kbd> adds it to the current layout, or removes it when another
+instrument remains.
+</aside>
 
 The RGB parade places the three channel waveforms side by side: red, green,
 then blue. Each panel maps the full width of the selected region. The image is
 not divided into thirds.
+
+![RGB parade showing the red, green, and blue channel waveforms side by side.](https://media.sidescopes.org/shots/parade-clipping.png)
 
 The separate panels prevent overlapping traces from hiding one another. This
 makes channel shape, level, and endpoint behavior easier to compare. As with
 the overlay waveform, alignment indicates neutrality only for a subject that
 is independently expected to be neutral.
 
-## Histogram (H)
+## Histogram
+
+<aside class="shortcut-note">
+<strong>Default shortcut:</strong> <kbd>H</kbd> shows the histogram by itself.
+<kbd>Shift+H</kbd> adds it to the current layout, or removes it when another
+instrument remains.
+</aside>
 
 The histogram counts how many sampled red, green, and blue values fall into
 each of 256 bins. Minimum channel values are at the left and maximum values at
@@ -95,12 +133,20 @@ separate vertical bands. **Combined** overlays them at full height. The
 displayed heights use a square-root response so a large population does not
 hide smaller ones; height is therefore not linearly proportional to count.
 
+![Histogram showing the red, green, and blue distributions in separate bands.](https://media.sidescopes.org/shots/histogram.png)
+
 A peak identifies a large population at that code value. A gap identifies few
 or no sampled values in an interval. Neither proves a particular processing
 fault: gaps do not by themselves establish visible posterization, and endpoint
 peaks do not identify where limiting occurred.
 
-## Color picker (C)
+## Color picker
+
+<aside class="shortcut-note">
+<strong>Default shortcut:</strong> <kbd>C</kbd> shows the color picker by itself.
+<kbd>Shift+C</kbd> adds it to the current layout, or removes it when another
+instrument remains.
+</aside>
 
 The color picker places the live sample beside pinned references. It reports
 captured RGB values and, when a reference is selected, an assumed-sRGB color
@@ -109,6 +155,8 @@ difference.
 Click to pin the pixel under the pointer. Drag to pin the average of a
 rectangle, which is generally more repeatable for textured or noisy material.
 Hold Shift to keep the pin tool active for additional samples.
+
+![Color picker showing a live RGB sample and its comparison fields.](https://media.sidescopes.org/shots/color-picker.png)
 
 SideScopes converts the reference and live samples from assumed sRGB to CIELAB
 under D65. It reports CIEDE2000 **ΔE00** and three signed diagnostics:

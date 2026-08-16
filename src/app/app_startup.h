@@ -64,7 +64,8 @@ struct MainWindow
 /// Creates the always-on-top main window: the backend's hints first, then the
 /// saved placement clamped onto a visible monitor, and the iconify callback
 /// routed through @p callbackState. A development @p version wears itself in
-/// the title bar.
+/// the title bar unless deterministic product capture requests the plain
+/// release title.
 [[nodiscard]] MainWindow createMainWindow(const Preferences& startup, const VersionInfo& version,
                                           AppCallbackState& callbackState);
 

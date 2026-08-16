@@ -217,15 +217,22 @@
     .edit label { padding:.3rem 0 }
   }
 
-  /* A PHONE, and nothing wider. The column survives to here because its rows
-     are only a name, a track and a reading; below it the picture would be left
-     nothing worth looking at, so the tools lie down over the top in two
-     columns - and the row folds, putting the track on its own line where it
-     gets the whole column instead of the third of it left over after a name
-     and a number. A track too short to place a value on is not a control. */
-  @media (max-width: 30rem) {
-    .work { flex-direction:column }
-    .edit { flex:0 0 auto; max-height:44vh;
+  /* A PHONE, or a touch device held sideways. The document becomes one
+     ordinary page instead of trying to compress every control into a single
+     viewport. The stage is intentionally taller than it is wide: that gives
+     the picture and the application enough room to stack, rather than
+     shrinking them into an unusable side-by-side pair. The parent page learns
+     this document's height below, so an embedded Lab still has one scrollbar,
+     not a page scrolling inside another page.
+
+     The adjustment panel keeps two groups side by side. Within each group a
+     row folds, putting the track on its own line where it gets the whole
+     column instead of the third left after a name and a number. */
+  @media (max-width: 40rem), (max-height: 38rem) and (pointer: coarse) {
+    html, body { height:auto; min-height:100%; overflow:visible }
+    body { min-height:100vh }
+    .work { flex:0 0 auto; flex-direction:column }
+    .edit { flex:0 0 auto; max-height:none; overflow:visible;
             display:grid; grid-template-columns:1fr 1fr; column-gap:1rem; align-content:start }
     .edit .edit-head { grid-column:1/-1 }
     .edit .group { border-bottom:0; padding-bottom:0; margin-bottom:.4rem }
@@ -236,6 +243,7 @@
     .edit label > span { grid-area:name; text-align:left }
     .edit output { grid-area:value }
     .edit input[type=range] { grid-area:track }
+    #stage { flex:0 0 auto; height:clamp(32rem, 145vw, 44rem); min-height:32rem }
   }
 
   /* Shown only when this copy is opened from disk, where it cannot run. */
@@ -318,6 +326,26 @@
 
 <input type="file" accept="image/*" id="file" hidden>
 
+<script>
+// An embedded Lab is a different origin from the website, so it cannot resize
+// its frame directly. It can report its document height without exposing any
+// image or interaction data; the parent validates the sender before using it.
+// ResizeObserver also catches font, thumbnail and responsive-layout changes.
+(function reportDocumentHeight() {
+  if (window.parent === window || typeof ResizeObserver === 'undefined') { return; }
+  var last = 0;
+  function report() {
+    var height = Math.ceil(document.documentElement.scrollHeight);
+    if (height === last) { return; }
+    last = height;
+    window.parent.postMessage({ type: 'sidescopes-lab-height', height: height }, '*');
+  }
+  new ResizeObserver(report).observe(document.body);
+  window.addEventListener('load', report);
+  report();
+}());
+</script>
+
 <!-- The engine, as a classic script defining a global factory. The build
      replaces this line with the script INLINED for the standalone file, which
      is what lets that one be opened straight from disk. -->
@@ -357,11 +385,12 @@ if (location.protocol === 'file:' && !window.__STANDALONE) {
     '<h1>This copy needs a web server</h1>' +
     '<p>A page opened straight from disk may not load the WebAssembly beside it: the browser treats ' +
     'every local file as its own origin and refuses the request.</p>' +
-    '<p><b>Open <code>sidescopes-lab.html</code> instead</b> — the same lab in a single self-contained ' +
-    'file, built to be opened exactly this way.</p>' +
+    '<p>To create a self-contained copy that opens from disk, run ' +
+    '<code>scripts/build-web.sh --standalone</code> from the SideScopes repository, then open ' +
+    '<code>build-web/sidescopes-lab.html</code>.</p>' +
     '<p>Or serve this directory over HTTP: <code>python3 -m http.server</code>.</p>' +
     '</div>';
-  throw new Error('file:// - open sidescopes-lab.html instead');
+  throw new Error('file:// - build the standalone copy or serve this directory');
 }
 
 const build = new URL(import.meta.url).searchParams.get('b') || '';
