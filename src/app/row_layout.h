@@ -66,6 +66,13 @@ struct ReadoutColumns
 /// Measures the readout columns against the current font.
 [[nodiscard]] ReadoutColumns measureReadoutColumns();
 
+/// Vertical centre of the visible ink used by the RGB readout, measured from
+/// the text line's top. Font line boxes reserve ascent/descent space that is
+/// not visually balanced around capital letters, digits and `%`; a swatch
+/// centred on the box therefore sits high or low beside the glyphs. This
+/// answers the real ink centre for the current font, size and raster density.
+[[nodiscard]] float readoutTextInkCenter();
+
 /// How far the status row drops to sit centred in the strip.
 ///
 /// The strip is bounded above by the spacing parting it from the panes and

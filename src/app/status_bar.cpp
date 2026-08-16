@@ -43,10 +43,11 @@ void drawReadoutChannels(const FloatColor& color, float start, const ReadoutColu
 // the interface rather than using the window edge as the swatch's frame.
 void drawCursorReadout(float taken, const std::optional<FloatColor>& color)
 {
-    // A square as tall as the type's visible line box looked taller than the
-    // text because the button paints its own border. Pulling it in one pixel
-    // per side and centering it inside that line box makes the swatch and RGB
-    // values read as one row at every UI scale.
+    // A square as tall as the type's line box looks taller than the text
+    // because the button paints its own border, so pull it in one pixel per
+    // side. Centre it against the readout glyphs' visible ink rather than the
+    // nominal line box: the font reserves uneven ascent/descent space, which
+    // otherwise leaves the swatch predictably high beside capitals and digits.
     if (!color) {
         return;
     }
@@ -54,13 +55,16 @@ void drawCursorReadout(float taken, const std::optional<FloatColor>& color)
     const ReadoutColumns columns = measureReadoutColumns();
     const float lineHeight = ImGui::GetTextLineHeight();
     const float swatch = std::max(1.0f, lineHeight - 2.0f);
-    const float channelsStart = ImGui::GetWindowContentRegionMax().x - RowSeparation - columns.width;
+    // The clear-region glyph at the far end of the toolbar is inset from its
+    // right-aligned button by iconButtonInset(). End the readout on that same
+    // vertical line; RowSeparation is a neighbour gap, not an edge margin.
+    const float channelsStart = ImGui::GetWindowContentRegionMax().x - iconButtonInset() - columns.width;
     const float swatchStart = channelsStart - RowSeparation - swatch;
     if (swatchStart < taken + RowSeparation) {
         return;
     }
     ImGui::SameLine(swatchStart);
-    ImGui::SetCursorPosY(ImGui::GetCursorPosY() + rowTextDrop() + (lineHeight - swatch) / 2.0f);
+    ImGui::SetCursorPosY(ImGui::GetCursorPosY() + rowTextDrop() + readoutTextInkCenter() - swatch / 2.0f);
     ImGui::ColorButton("##cursor-color", ImVec4(live.r / 255.0f, live.g / 255.0f, live.b / 255.0f, 1.0f),
                        ImGuiColorEditFlags_NoTooltip | ImGuiColorEditFlags_NoDragDrop, ImVec2(swatch, swatch));
     drawReadoutChannels(live, channelsStart, columns);

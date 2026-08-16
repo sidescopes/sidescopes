@@ -141,6 +141,39 @@ void readoutColumnsBindValuesToTheirOwnLabel(ImGuiTestContext*)
     IM_CHECK_GT(columns.stride, group);
 }
 
+/// SYMPTOM IF BROKEN: the status swatch is mathematically centred in the font's
+/// line box but still looks high or low beside `R 50% G 43% B 19%`.
+///
+/// The readout uses only capitals, digits and `%`. Their actual glyph bounds,
+/// not unused ascent/descent space in the line box, define its visual centre.
+void readoutInkCentreFollowsVisibleGlyphs(ImGuiTestContext* ctx)
+{
+    const ImGuiStyle saved = ImGui::GetStyle();
+    for (const float scale : {0.5f, 1.0f, 1.5f, 2.0f}) {
+        applyInterfaceScale(scale);
+        ctx->Yield();
+
+        const float centre = readoutTextInkCenter();
+        ImFontBaked* baked = ImGui::GetFont()->GetFontBaked(ImGui::GetFontSize());
+        const float glyphScale = ImGui::GetFontSize() / baked->Size;
+        float top = FLT_MAX;
+        float bottom = -FLT_MAX;
+        for (const char* character = "RGB0123456789%"; *character != '\0'; ++character) {
+            const ImFontGlyph* glyph = baked->FindGlyph(static_cast<ImWchar>(*character));
+            IM_CHECK(glyph != nullptr && glyph->Visible);
+            top = std::min(top, glyph->Y0 * glyphScale);
+            bottom = std::max(bottom, glyph->Y1 * glyphScale);
+        }
+        IM_CHECK_EQ(centre, (top + bottom) / 2.0f);
+
+        const float swatch = std::max(1.0f, ImGui::GetTextLineHeight() - 2.0f);
+        const float swatchTop = rowTextDrop() + centre - swatch / 2.0f;
+        IM_CHECK_EQ(swatchTop + swatch / 2.0f, rowTextDrop() + centre);
+    }
+    ImGui::GetStyle() = saved;
+    ctx->Yield();
+}
+
 /// SYMPTOM IF BROKEN: the status strip's contents sit visibly high or low in
 /// the gap under the panes.
 ///
@@ -714,6 +747,8 @@ void registerLayoutTests(ImGuiTestEngine* engine)
 
     ImGuiTest* columns = IM_REGISTER_TEST(engine, "layout", "readout_columns_bind_to_labels");
     columns->TestFunc = readoutColumnsBindValuesToTheirOwnLabel;
+    ImGuiTest* readoutInk = IM_REGISTER_TEST(engine, "layout", "readout_ink_centre");
+    readoutInk->TestFunc = readoutInkCentreFollowsVisibleGlyphs;
 
     ImGuiTest* strip = IM_REGISTER_TEST(engine, "layout", "status_row_centred_in_strip");
     strip->TestFunc = statusRowSitsCentredInItsStrip;
@@ -755,5 +790,5 @@ int main()
 {
     using namespace sidescopes;
 
-    return uitest::runSuite("layout", registerLayoutTests, /*expectedTests=*/13);
+    return uitest::runSuite("layout", registerLayoutTests, /*expectedTests=*/14);
 }
