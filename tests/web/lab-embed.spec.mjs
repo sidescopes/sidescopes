@@ -40,6 +40,10 @@ test('an embedded mobile Lab keeps one scrollbar and owns interactive gestures',
   expect(await page.evaluate(() => window.scrollY)).toBe(0);
   const lab = page.frameLocator('iframe');
 
+  const stageBox = await lab.locator('#stage').boundingBox();
+  expect(stageBox).not.toBeNull();
+  expect(stageBox.height).toBeGreaterThanOrEqual(790);
+
   const flatField = lab.getByRole('button', { name: 'Near-neutral, fine detail' });
   await flatField.scrollIntoViewIfNeeded();
   const flatFieldBox = await flatField.boundingBox();
