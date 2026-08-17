@@ -68,4 +68,29 @@ TEST_CASE("A narrow viewport does not let the application eat the picture")
     CHECK(layout.screenSize.x >= 250.0f);
 }
 
+TEST_CASE("A global region maps only its overlap with the supplied picture")
+{
+    const LayoutRect picture{LayoutPoint{100.0f, 50.0f}, LayoutPoint{400.0f, 300.0f}};
+    const LayoutPoint pixels{800.0f, 600.0f};
+
+    const auto inside =
+        picturePixelsUnderRegion(LayoutRect{LayoutPoint{200.0f, 100.0f}, LayoutPoint{100.0f, 50.0f}}, picture, pixels);
+    REQUIRE(inside);
+    CHECK(inside->position.x == 200.0f);
+    CHECK(inside->position.y == 100.0f);
+    CHECK(inside->size.x == 200.0f);
+    CHECK(inside->size.y == 100.0f);
+
+    const auto crossing =
+        picturePixelsUnderRegion(LayoutRect{LayoutPoint{50.0f, 0.0f}, LayoutPoint{100.0f, 100.0f}}, picture, pixels);
+    REQUIRE(crossing);
+    CHECK(crossing->position.x == 0.0f);
+    CHECK(crossing->position.y == 0.0f);
+    CHECK(crossing->size.x == 100.0f);
+    CHECK(crossing->size.y == 100.0f);
+
+    CHECK_FALSE(
+        picturePixelsUnderRegion(LayoutRect{LayoutPoint{520.0f, 100.0f}, LayoutPoint{80.0f, 80.0f}}, picture, pixels));
+}
+
 }  // namespace sidescopes

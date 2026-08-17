@@ -16,7 +16,7 @@ namespace {
 constexpr float BorderPad = 12.0f;     // the grab band outside the region
 constexpr float HandleRadius = 3.5f;   // one handle dot
 constexpr float EdgeRing = 1.0f;       // the measured edge's thickness
-constexpr int MinimumRegionSize = 24;  // per side, in image pixels
+constexpr int MinimumRegionSize = 24;  // per side, in display units
 
 // The close badge, again the desktop's numbers.
 constexpr float CrossThickness = 1.3f;
@@ -47,49 +47,18 @@ constexpr int CircleSegments = 48;
 
 }  // namespace
 
-void RegionEditor::reset(int imageWidth, int imageHeight, float fraction)
+void RegionEditor::reset(const RegionOfInterest& region, int displayWidth, int displayHeight)
 {
-    const int width = std::max(MinimumRegionSize, static_cast<int>(static_cast<float>(imageWidth) * fraction));
-    const int height = std::max(MinimumRegionSize, static_cast<int>(static_cast<float>(imageHeight) * fraction));
-    m_rect = SsRect{(imageWidth - width) / 2, (imageHeight - height) / 2, width, height};
-    m_grab = ZoneNone;
-}
-
-void RegionEditor::holdOnScreen(const Placement& placement)
-{
-    if (!hasRegion() || placement.scale <= 0.0f) {
-        return;
-    }
-    const float left = placement.origin.x + static_cast<float>(m_rect.x) * placement.scale;
-    const float top = placement.origin.y + static_cast<float>(m_rect.y) * placement.scale;
-
-    m_heldOnScreen = ImVec4{left, top, static_cast<float>(m_rect.width) * placement.scale,
-                            static_cast<float>(m_rect.height) * placement.scale};
-}
-
-/// Puts a held region back where it was on screen, in the new picture's own
-/// pixels. Clamped into the picture, because a region has to be somewhere the
-/// scopes can read: a rectangle left hanging over the letterbox would measure
-/// nothing.
-void RegionEditor::restoreHeldPosition(const Placement& placement, int imageWidth, int imageHeight)
-{
-    const ImVec4 held = *m_heldOnScreen;
-    m_heldOnScreen.reset();
-    if (placement.scale <= 0.0f) {
-        return;
-    }
-    const LocalRect wanted{(held.x - placement.origin.x) / placement.scale,
-                           (held.y - placement.origin.y) / placement.scale, held.z / placement.scale,
-                           held.w / placement.scale};
-    const LocalRect fitted = rectClampedWithin(wanted, imageWidth, imageHeight);
+    const LocalRect fitted =
+        rectClampedWithin(localRectFromRegion(region, displayWidth, displayHeight), displayWidth, displayHeight);
     m_rect = SsRect{static_cast<int>(std::lround(fitted.x)), static_cast<int>(std::lround(fitted.y)),
                     std::max(MinimumRegionSize, static_cast<int>(std::lround(fitted.width))),
                     std::max(MinimumRegionSize, static_cast<int>(std::lround(fitted.height)))};
+    m_grab = ZoneNone;
 }
 
 void RegionEditor::clear()
 {
-    m_heldOnScreen.reset();
     m_rect = SsRect{0, 0, 0, 0};
     m_grab = ZoneNone;
     m_arming = false;
@@ -145,19 +114,18 @@ unsigned RegionEditor::grabAt(const ImVec2& point, const Placement& placement) c
     return zoneAtPoint(region, point.x, point.y, BorderPad);
 }
 
-void RegionEditor::applyDrag(const ImVec2& delta, int imageWidth, int imageHeight)
+void RegionEditor::applyDrag(const ImVec2& delta, int displayWidth, int displayHeight)
 {
     // The drag itself is platform/region_geometry's, so a resize behaves the
     // same here as under either desktop border - including how an edge is
-    // stopped from crossing its opposite. Only the clamp to the PICTURE is
-    // added: the desktop clamps to a display, and the picture is what stands
-    // in for one.
+    // stopped from crossing its opposite. The clamp is to the virtual display,
+    // exactly as the desktop clamps a global region to its physical display.
     const LocalRect start{static_cast<double>(m_pressed.x), static_cast<double>(m_pressed.y),
                           static_cast<double>(m_pressed.width), static_cast<double>(m_pressed.height)};
-    // The delta arrives already in image pixels: the caller divides by the
-    // placement's scale, so the region math is in the same units as m_rect.
+    // The caller divides by the placement's scale, so the region math is in
+    // the same display units as m_rect.
     const LocalRect dragged = draggedRegionRect(m_grab, start, delta.x, delta.y, MinimumRegionSize);
-    const LocalRect fitted = rectClampedWithin(dragged, imageWidth, imageHeight);
+    const LocalRect fitted = rectClampedWithin(dragged, displayWidth, displayHeight);
     m_rect = SsRect{static_cast<int>(std::lround(fitted.x)), static_cast<int>(std::lround(fitted.y)),
                     static_cast<int>(std::lround(fitted.width)), static_cast<int>(std::lround(fitted.height))};
 }
@@ -392,27 +360,18 @@ void RegionEditor::drawCloseBadge(const ImVec2& centre) const
     }
 }
 
-void RegionEditor::drawBorder(const Placement& placement, int imageWidth, int imageHeight) const
+void RegionEditor::drawBorder(const Placement& placement, int displayWidth, int displayHeight) const
 {
     ImDrawList* draw = ImGui::GetWindowDrawList();
     const DeviceFringe crispWhileDrawing{draw};
     const auto [topLeft, bottomRight] = screenRect(placement);
 
-    // Bounded by the PICTURE, which is what stands in for a display here, so
-    // a region pushed into a corner is cut the same way on both axes.
-    //
-    // Without this the band simply drew wherever it landed, and how much of
-    // it survived depended on how much room happened to be outside the
-    // picture on that side: over a letterboxed edge the whole 12 points
-    // showed, against a snug one the pane clipped it to a sliver. Two edges
-    // of one rectangle stopping differently is what that looked like.
-    //
-    // The desktop needs no such clip because its band IS a window on the
-    // desktop and the display's own edge cuts it - which is the behaviour
-    // this reproduces rather than invents.
+    // The virtual display clips the band exactly as a physical display clips
+    // the desktop border window. The image beneath it is deliberately not a
+    // boundary: this is a global region and may cross the image edge.
     draw->PushClipRect(placement.origin,
-                       ImVec2{placement.origin.x + static_cast<float>(imageWidth) * placement.scale,
-                              placement.origin.y + static_cast<float>(imageHeight) * placement.scale},
+                       ImVec2{placement.origin.x + static_cast<float>(displayWidth) * placement.scale,
+                              placement.origin.y + static_cast<float>(displayHeight) * placement.scale},
                        true);
 
     drawBand(draw, topLeft, bottomRight);
@@ -430,11 +389,8 @@ void RegionEditor::drawBorder(const Placement& placement, int imageWidth, int im
     draw->PopClipRect();
 
     // Last, as the desktop draws it last: the badge sits ON the band and a
-    // band painted afterwards would bury it. The picture is content inside
-    // this pane, not the physical edge of a display, so its letterbox must
-    // not crop an action that belongs to the region. The pane's own clip
-    // still contains the badge while the region keeps the same screen
-    // rectangle across differently shaped samples.
+    // band painted afterwards would bury it. The outer ImGui window still
+    // clips the badge at the virtual display edge.
     if (closeVisible(placement)) {
         drawCloseBadge(closeCentre(topLeft, bottomRight));
     }
@@ -476,8 +432,8 @@ void RegionEditor::dashedRect(ImDrawList* draw, const ImVec2& topLeft, const ImV
 
 /// What the desktop picker puts on screen while it is open: the workspace
 /// dimmed so the selection reads against it, and a banner saying what to do.
-/// A page cannot dim a desktop, but it can dim the picture standing in for
-/// one, and the instruction is the same.
+/// A page cannot dim a physical desktop, but it can dim the Lab's virtual
+/// display, and the instruction is the same.
 ///
 /// While the drag is live the selection is PUNCHED out of the dim - you
 /// cannot judge content through a wash - and carries only a dashed
@@ -485,12 +441,12 @@ void RegionEditor::dashedRect(ImDrawList* draw, const ImVec2& topLeft, const ImV
 /// region and arrive when the button comes up, which is the desktop's
 /// division too: the picker overlay draws the drag, the border view draws
 /// the result.
-void RegionEditor::drawPickerOverlay(const Placement& placement, int imageWidth, int imageHeight) const
+void RegionEditor::drawPickerOverlay(const Placement& placement, int displayWidth, int displayHeight) const
 {
     ImDrawList* draw = ImGui::GetWindowDrawList();
     const ImVec2 topLeft = placement.origin;
-    const ImVec2 bottomRight{topLeft.x + static_cast<float>(imageWidth) * placement.scale,
-                             topLeft.y + static_cast<float>(imageHeight) * placement.scale};
+    const ImVec2 bottomRight{topLeft.x + static_cast<float>(displayWidth) * placement.scale,
+                             topLeft.y + static_cast<float>(displayHeight) * placement.scale};
     const ImU32 dim = grey(0.0f, 0.35f);
     const bool live = m_drawing && hasRegion();
 
@@ -511,7 +467,7 @@ void RegionEditor::drawPickerOverlay(const Placement& placement, int imageWidth,
 
     draw->AddRectFilled(topLeft, bottomRight, dim);
 
-    // The banner, centred over the dimmed picture, in the picker's own
+    // The banner, centred over the dimmed display, in the picker's own
     // words: it suggests only what it can actually do. It stands down once
     // the drag begins, as the desktop's does - the selection is the subject
     // then, and a caption over it is in the way.
@@ -525,7 +481,7 @@ void RegionEditor::drawPickerOverlay(const Placement& placement, int imageWidth,
     draw->AddText(ImVec2{centre.x - text.x * 0.5f, centre.y - text.y * 0.5f}, grey(0.95f, 1.0f), line);
 }
 
-bool RegionEditor::updateDrawing(const Placement& placement, int imageWidth, int imageHeight)
+bool RegionEditor::updateDrawing(const Placement& placement, int displayWidth, int displayHeight)
 {
     const ImVec2 mouse = ImGui::GetMousePos();
     const float scale = placement.scale > 0.0f ? placement.scale : 1.0f;
@@ -538,10 +494,10 @@ bool RegionEditor::updateDrawing(const Placement& placement, int imageWidth, int
     if (m_drawing && ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
         const ImVec2 from{std::min(m_drawFrom.x, mouse.x), std::min(m_drawFrom.y, mouse.y)};
         const ImVec2 to{std::max(m_drawFrom.x, mouse.x), std::max(m_drawFrom.y, mouse.y)};
-        const int left = clampInt(static_cast<int>((from.x - placement.origin.x) / scale), 0, imageWidth);
-        const int top = clampInt(static_cast<int>((from.y - placement.origin.y) / scale), 0, imageHeight);
-        const int right = clampInt(static_cast<int>((to.x - placement.origin.x) / scale), left, imageWidth);
-        const int bottom = clampInt(static_cast<int>((to.y - placement.origin.y) / scale), top, imageHeight);
+        const int left = clampInt(static_cast<int>((from.x - placement.origin.x) / scale), 0, displayWidth);
+        const int top = clampInt(static_cast<int>((from.y - placement.origin.y) / scale), 0, displayHeight);
+        const int right = clampInt(static_cast<int>((to.x - placement.origin.x) / scale), left, displayWidth);
+        const int bottom = clampInt(static_cast<int>((to.y - placement.origin.y) / scale), top, displayHeight);
         m_rect = SsRect{left, top, right - left, bottom - top};
         changed = true;
     }
@@ -573,7 +529,7 @@ void RegionEditor::announceCursor(const Placement& placement) const
     }
 }
 
-bool RegionEditor::updateEditing(const Placement& placement, int imageWidth, int imageHeight)
+bool RegionEditor::updateEditing(const Placement& placement, int displayWidth, int displayHeight)
 {
     bool changed = false;
     if (ImGui::IsMouseClicked(ImGuiMouseButton_Left) && ImGui::IsWindowHovered()) {
@@ -583,13 +539,15 @@ bool RegionEditor::updateEditing(const Placement& placement, int imageWidth, int
     if (m_grab != ZoneNone && ImGui::IsMouseDragging(ImGuiMouseButton_Left)) {
         const ImVec2 raw = ImGui::GetMouseDragDelta(ImGuiMouseButton_Left);
         const float scale = placement.scale > 0.0f ? placement.scale : 1.0f;
-        applyDrag(ImVec2{raw.x / scale, raw.y / scale}, imageWidth, imageHeight);
+        applyDrag(ImVec2{raw.x / scale, raw.y / scale}, displayWidth, displayHeight);
         changed = true;
     }
     if (ImGui::IsMouseReleased(ImGuiMouseButton_Left)) {
         m_grab = ZoneNone;
     }
-    announceCursor(placement);
+    if (ImGui::IsWindowHovered()) {
+        announceCursor(placement);
+    }
 
     return changed;
 }
@@ -598,7 +556,7 @@ bool RegionEditor::updateEditing(const Placement& placement, int imageWidth, int
 /// is DRAWN by drawBorder, last, so nothing paints over it.
 bool RegionEditor::updateClose(const Placement& placement)
 {
-    if (!closeVisible(placement)) {
+    if (!closeVisible(placement) || !ImGui::IsWindowHovered()) {
         return false;
     }
     const auto [topLeft, bottomRight] = screenRect(placement);
@@ -621,27 +579,36 @@ bool RegionEditor::updateClose(const Placement& placement)
     return true;
 }
 
-bool RegionEditor::update(const Placement& placement, int imageWidth, int imageHeight)
+bool RegionEditor::update(const Placement& placement, int displayWidth, int displayHeight)
 {
-    // A picture changed under the region since the last frame, and this is
-    // the first frame in which the new one's placement is known.
-    if (m_heldOnScreen) {
-        restoreHeldPosition(placement, imageWidth, imageHeight);
+    // A browser resize may make the virtual display smaller. Keep the region
+    // valid without otherwise changing it; image changes are irrelevant.
+    bool changed = false;
+    if (hasRegion()) {
+        const LocalRect current{static_cast<double>(m_rect.x), static_cast<double>(m_rect.y),
+                                static_cast<double>(m_rect.width), static_cast<double>(m_rect.height)};
+        const LocalRect fitted = rectClampedWithin(current, displayWidth, displayHeight);
+        const SsRect next{static_cast<int>(std::lround(fitted.x)), static_cast<int>(std::lround(fitted.y)),
+                          static_cast<int>(std::lround(fitted.width)), static_cast<int>(std::lround(fitted.height))};
+        if (next.x != m_rect.x || next.y != m_rect.y || next.width != m_rect.width || next.height != m_rect.height) {
+            m_rect = next;
+            changed = true;
+        }
     }
     // The badge is offered first: it sits on the band, and a press meant
     // for it must not become a drag of the region under it.
     const bool onClose = !m_arming && hasRegion() && updateClose(placement);
-    const bool changed = m_arming
-                             ? updateDrawing(placement, imageWidth, imageHeight)
-                             : (hasRegion() && !onClose ? updateEditing(placement, imageWidth, imageHeight) : false);
+    changed = (m_arming ? updateDrawing(placement, displayWidth, displayHeight)
+                        : (hasRegion() && !onClose ? updateEditing(placement, displayWidth, displayHeight) : false)) ||
+              changed;
     // One or the other, never both. While the picker is up the drag owns the
-    // picture and wears a dashed rectangle; the band, the handles and the
+    // display and wears a dashed rectangle; the band, the handles and the
     // badge are what a SETTLED region looks like, and drawing them over a
     // live drag was the whole difference from the desktop.
     if (m_arming) {
-        drawPickerOverlay(placement, imageWidth, imageHeight);
+        drawPickerOverlay(placement, displayWidth, displayHeight);
     } else if (hasRegion()) {
-        drawBorder(placement, imageWidth, imageHeight);
+        drawBorder(placement, displayWidth, displayHeight);
     }
 
     return changed;

@@ -19,6 +19,7 @@
 #include <emscripten/emscripten.h>
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -50,6 +51,7 @@
 #include "app/scope_view.h"
 #include "app/shortcut_resolver.h"
 #include "app/tour_overlay.h"
+#include "app/window_place.h"
 #include "core/analysis_worker.h"
 #include "core/frame.h"
 #include "core/page_allocator.h"
@@ -142,9 +144,14 @@ struct Lab
     bool pinArmed = false;
     bool pinning = false;
     ImVec2 pinFrom{0.0f, 0.0f};
-    /// Where the picture last landed, so the pointer sample and the region
-    /// gesture measure against the same rectangle.
-    RegionEditor::Placement placement;
+    /// The supplied image and the Lab's virtual display have separate
+    /// coordinate systems. The global region belongs to the latter and keeps
+    /// its position when the image beneath it changes.
+    RegionEditor::Placement picturePlacement;
+    RegionEditor::Placement displayPlacement;
+    /// The desktop starter policy needs the display and application window
+    /// rectangles, which are known only after the first layout pass.
+    bool starterRegionDue = true;
     /// The three colours the pane input distinguishes, and they are not the
     /// same value. The READOUT follows the cursor wherever it is - on the
     /// desktop that is always over pixels, and here the picture is what
@@ -176,12 +183,27 @@ std::optional<RegionOfInterest> regionOfPicture()
     if (!g_lab.region.hasRegion() || g_lab.picture.width() <= 0 || g_lab.picture.height() <= 0) {
         return std::nullopt;
     }
-    // platform/region_geometry's own conversion, which every platform's
-    // overlay already uses. Writing the four divisions out here again looked
-    // harmless and is exactly how the grab zones drifted.
     const SsRect rect = g_lab.region.rect();
-    const LocalRect local{static_cast<double>(rect.x), static_cast<double>(rect.y), static_cast<double>(rect.width),
-                          static_cast<double>(rect.height)};
+    const LayoutRect regionOnDisplay{
+        LayoutPoint{g_lab.displayPlacement.origin.x + static_cast<float>(rect.x) * g_lab.displayPlacement.scale,
+                    g_lab.displayPlacement.origin.y + static_cast<float>(rect.y) * g_lab.displayPlacement.scale},
+        LayoutPoint{static_cast<float>(rect.width) * g_lab.displayPlacement.scale,
+                    static_cast<float>(rect.height) * g_lab.displayPlacement.scale}};
+    const LayoutRect pictureOnDisplay{
+        LayoutPoint{g_lab.picturePlacement.origin.x, g_lab.picturePlacement.origin.y},
+        LayoutPoint{static_cast<float>(g_lab.picture.display().width) * g_lab.picturePlacement.scale,
+                    static_cast<float>(g_lab.picture.display().height) * g_lab.picturePlacement.scale}};
+    const std::optional<LayoutRect> pixels = picturePixelsUnderRegion(
+        regionOnDisplay, pictureOnDisplay,
+        LayoutPoint{static_cast<float>(g_lab.picture.width()), static_cast<float>(g_lab.picture.height())});
+    if (!pixels) {
+        return std::nullopt;
+    }
+    // platform/region_geometry's own conversion, which every platform's
+    // overlay already uses. The Lab offers only the image pixels beneath the
+    // global region; the surrounding virtual desktop is not fabricated as
+    // captured black pixels.
+    const LocalRect local{pixels->position.x, pixels->position.y, pixels->size.x, pixels->size.y};
 
     return regionFromLocalRect(local, g_lab.picture.width(), g_lab.picture.height());
 }
@@ -203,10 +225,9 @@ void analyse()
         g_lab.picture.pixelsTaken();
     }
     if (g_lab.settingsDirty) {
-        // The region the editor holds is in PICTURE pixels; the worker reads
-        // percentages of the frame, so a selection survives the frame being
-        // a different size - which is the same reason the desktop stores it
-        // that way.
+        // The region lives on the virtual display. The worker reads the part
+        // that intersects the supplied image, expressed as percentages of
+        // that image's frame.
         g_lab.analysis.region = regionOfPicture();
         g_lab.worker->updateSettings(g_lab.analysis);
         g_lab.settingsDirty = false;
@@ -279,8 +300,28 @@ void analyse()
     return true;
 }
 
-/// The picture, with the region on it. @return Whether the region moved.
-[[nodiscard]] bool drawPicture(const ImVec2& position, const ImVec2& area)
+/// Applies the desktop application's first-run placement policy once the
+/// virtual display and application window have real geometry.
+[[nodiscard]] bool initializeStarterRegion(const ImVec2& position, const ImVec2& area, const ShellLayout& layout)
+{
+    if (!g_lab.starterRegionDue) {
+        return false;
+    }
+    const DisplayGeometry display{position.x, position.y, area.x, area.y};
+    const WindowPlacement application{
+        static_cast<int>(std::lround(layout.appPos.x)), static_cast<int>(std::lround(layout.appPos.y)),
+        static_cast<int>(std::lround(layout.appSize.x)), static_cast<int>(std::lround(layout.appSize.y))};
+    g_lab.region.reset(starterGlobalRegion(application, display), static_cast<int>(std::lround(area.x)),
+                       static_cast<int>(std::lround(area.y)));
+    g_lab.starterRegionDue = false;
+
+    return true;
+}
+
+/// The Lab's virtual display: the supplied picture beneath a global region.
+/// The application window is drawn afterwards so it stays above the region,
+/// just as it does on the desktop. @return Whether the region moved.
+[[nodiscard]] bool drawDisplay(const ImVec2& position, const ImVec2& area, const ShellLayout& layout)
 {
     bool moved = false;
     ImGui::SetNextWindowPos(position);
@@ -294,19 +335,24 @@ void analyse()
                  ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings |
                      ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoScrollbar);
     if (g_lab.displayTexture != nullptr && g_lab.picture.display().width > 0) {
-        g_lab.placement = placePicture(ImGui::GetCursorScreenPos(), area);
-        const ImVec2 size{static_cast<float>(g_lab.picture.display().width) * g_lab.placement.scale,
-                          static_cast<float>(g_lab.picture.display().height) * g_lab.placement.scale};
+        g_lab.displayPlacement = RegionEditor::Placement{position, 1.0f};
+        g_lab.picturePlacement = placePicture(ImVec2{layout.screenPos.x, layout.screenPos.y},
+                                              ImVec2{layout.screenSize.x, layout.screenSize.y});
+        const ImVec2 size{static_cast<float>(g_lab.picture.display().width) * g_lab.picturePlacement.scale,
+                          static_cast<float>(g_lab.picture.display().height) * g_lab.picturePlacement.scale};
         ImGui::GetWindowDrawList()->AddImage(
-            g_lab.displayTexture->textureId(), g_lab.placement.origin,
-            ImVec2{g_lab.placement.origin.x + size.x, g_lab.placement.origin.y + size.y});
-        if (!runPinTool(g_lab.placement)) {
-            moved = g_lab.region.update(g_lab.placement, g_lab.picture.display().width, g_lab.picture.display().height);
+            g_lab.displayTexture->textureId(), g_lab.picturePlacement.origin,
+            ImVec2{g_lab.picturePlacement.origin.x + size.x, g_lab.picturePlacement.origin.y + size.y});
+        moved = initializeStarterRegion(position, area, layout);
+        if (!runPinTool(g_lab.picturePlacement)) {
+            moved = g_lab.region.update(g_lab.displayPlacement, static_cast<int>(std::lround(area.x)),
+                                        static_cast<int>(std::lround(area.y))) ||
+                    moved;
         }
         // The desktop samples the screen under the pointer; the only picture
         // here is this one, so it is sampled the same way.
         const std::optional<FloatColor> live =
-            shell::sampleAt(ImGui::GetMousePos(), g_lab.placement, g_lab.picture.display().rgba,
+            shell::sampleAt(ImGui::GetMousePos(), g_lab.picturePlacement, g_lab.picture.display().rgba,
                             g_lab.picture.display().width, g_lab.picture.display().height);
         if (live.has_value()) {
             g_lab.readoutColour = live;
@@ -315,12 +361,12 @@ void analyse()
         // so they go quiet the moment the pointer leaves it - exactly as they
         // do on the desktop.
         const SsRect region = g_lab.region.rect();
-        const float scale = g_lab.placement.scale > 0.0f ? g_lab.placement.scale : 1.0f;
+        const float scale = g_lab.displayPlacement.scale > 0.0f ? g_lab.displayPlacement.scale : 1.0f;
         const ImVec2 mouse = ImGui::GetMousePos();
-        const int imageX = static_cast<int>((mouse.x - g_lab.placement.origin.x) / scale);
-        const int imageY = static_cast<int>((mouse.y - g_lab.placement.origin.y) / scale);
-        const bool inRegion = g_lab.region.hasRegion() && imageX >= region.x && imageY >= region.y &&
-                              imageX < region.x + region.width && imageY < region.y + region.height;
+        const int displayX = static_cast<int>((mouse.x - g_lab.displayPlacement.origin.x) / scale);
+        const int displayY = static_cast<int>((mouse.y - g_lab.displayPlacement.origin.y) / scale);
+        const bool inRegion = g_lab.region.hasRegion() && displayX >= region.x && displayY >= region.y &&
+                              displayX < region.x + region.width && displayY < region.y + region.height;
         g_lab.traceColour = inRegion ? live : std::nullopt;
     } else {
         ImGui::TextDisabled("Choose a picture to measure.");
@@ -333,7 +379,7 @@ void analyse()
 
 /// What a click on a chip or a tool decided, carried out. The host does this
 /// on the desktop too; only the region actions differ, because a region here
-/// is a rectangle on a picture rather than on a desktop.
+/// is a rectangle on the Lab's virtual display rather than a native window.
 void applyOutcome(const PaneRenderOutcome& outcome)
 {
     if (outcome.chosenScope.has_value()) {
@@ -546,11 +592,15 @@ void drawAppWindow(const ShellLayout& layout, const PaneRenderInput& input)
 {
     ImGui::SetNextWindowPos(ImVec2{layout.appPos.x, layout.appPos.y});
     ImGui::SetNextWindowSize(ImVec2{layout.appSize.x, layout.appSize.y});
+    // The virtual display is one full-canvas ImGui window. Keep the
+    // application explicitly above it, including after a region gesture has
+    // focused the display beneath. This is the desktop's window ordering, not
+    // merely a paint order: controls hidden by the app must not remain live.
+    ImGui::SetNextWindowFocus();
     ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
     ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
     ImGui::Begin("##app", nullptr,
-                 ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings |
-                     ImGuiWindowFlags_NoBringToFrontOnFocus);
+                 ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings);
 
     drawWindowChrome(ImVec2{layout.appPos.x, layout.appPos.y}, ImVec2{layout.appSize.x, layout.appSize.y});
     ImGui::Dummy(ImVec2{0.0f, TitleBarHeight});
@@ -613,7 +663,7 @@ void answerPickRequest()
     }
     if (*want == RegionPickerMode::DrawGlobal) {
         g_lab.region.armDraw();
-        g_lab.panes->setStatus("Drag on the picture to draw a region");
+        g_lab.panes->setStatus("Drag on the display to draw a region");
 
         return;
     }
@@ -629,25 +679,26 @@ void noteControlAnchor(const char* id, const std::optional<ImVec4>& bounds)
     g_lab.anchors.note(id, ImVec2{bounds->x, bounds->y}, ImVec2{bounds->z, bounds->w});
 }
 
-/// Where the picture and the region landed, for the walk-through to point at.
+/// Where the picture and the global region landed, for the walk-through to point at.
 /// These are the two the lab owns; the toolbar and the panes note their own
 /// as they draw, which is what keeps the tour pointing at controls rather
 /// than at coordinates written down once and left to rot.
 void notePictureAnchors()
 {
-    const RegionEditor::Placement& at = g_lab.placement;
-    g_lab.anchors.note("picture", at.origin,
-                       ImVec2{at.origin.x + static_cast<float>(g_lab.picture.display().width) * at.scale,
-                              at.origin.y + static_cast<float>(g_lab.picture.display().height) * at.scale});
+    const RegionEditor::Placement& picture = g_lab.picturePlacement;
+    g_lab.anchors.note("picture", picture.origin,
+                       ImVec2{picture.origin.x + static_cast<float>(g_lab.picture.display().width) * picture.scale,
+                              picture.origin.y + static_cast<float>(g_lab.picture.display().height) * picture.scale});
     if (!g_lab.region.hasRegion()) {
         return;
     }
     const SsRect rect = g_lab.region.rect();
-    const ImVec2 topLeft{at.origin.x + static_cast<float>(rect.x) * at.scale,
-                         at.origin.y + static_cast<float>(rect.y) * at.scale};
+    const RegionEditor::Placement& display = g_lab.displayPlacement;
+    const ImVec2 topLeft{display.origin.x + static_cast<float>(rect.x) * display.scale,
+                         display.origin.y + static_cast<float>(rect.y) * display.scale};
     g_lab.anchors.note("region", topLeft,
-                       ImVec2{topLeft.x + static_cast<float>(rect.width) * at.scale,
-                              topLeft.y + static_cast<float>(rect.height) * at.scale});
+                       ImVec2{topLeft.x + static_cast<float>(rect.width) * display.scale,
+                              topLeft.y + static_cast<float>(rect.height) * display.scale});
 }
 
 /// The walk-through, drawn last so its veil covers what it is talking about,
@@ -693,7 +744,7 @@ void drawShell()
     // pointed at rather than leaving the tour aimed at where it used to be.
     g_lab.anchors.clear();
 
-    if (drawPicture(ImVec2{layout.screenPos.x, layout.screenPos.y}, ImVec2{layout.screenSize.x, layout.screenSize.y})) {
+    if (drawDisplay(viewport->WorkPos, viewport->WorkSize, layout)) {
         g_lab.settingsDirty = true;
     }
     notePictureAnchors();
@@ -868,9 +919,9 @@ EMSCRIPTEN_KEEPALIVE uint8_t* labFrameBuffer(int width, int height)
     return g_lab.picture.decodeInto(width, height);
 }
 
-/// Takes the picture the page just wrote, and gives it a region to start from
-/// if this is the first one. The three forms it has to exist in, and keeping
-/// them agreed, are the picture's own business.
+/// Takes the picture the page just wrote. The global region belongs to the
+/// virtual display and is initialized once by the first layout pass, so a
+/// picture change never moves or reshapes it.
 EMSCRIPTEN_KEEPALIVE void labFrameReady()
 {
     using namespace sidescopes;
@@ -881,18 +932,6 @@ EMSCRIPTEN_KEEPALIVE void labFrameReady()
     // looking at different pixels.
     g_lab.picture.adoptDecoded();
     refreshDisplayTexture();
-    // The region STAYS WHERE IT IS. It is a rectangle on what stands in for a
-    // display, and changing the photograph beneath it is no more reason to
-    // move it than changing the photograph in an editor is on a desktop.
-    // Centring a fresh one took its proportions from each new picture, so a
-    // landscape region became a portrait one because the photograph did.
-    //
-    // The first picture has none to hold, and gets one to start from.
-    if (g_lab.region.hasRegion()) {
-        g_lab.region.holdOnScreen(g_lab.placement);
-    } else {
-        g_lab.region.reset(g_lab.picture.width(), g_lab.picture.height());
-    }
     g_lab.settingsDirty = true;
 }
 

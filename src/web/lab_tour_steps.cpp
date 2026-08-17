@@ -24,12 +24,12 @@ std::vector<TourStep> labTourSteps(const ShortcutResolver& shortcuts)
 
     return {
         TourStep{"picture", "The Lab analyzes this image",
-                 "The desktop application measures a region of your screen. In the Lab, the selected image provides "
-                 "the pixels instead.",
+                 "The desktop application measures screen pixels. In the Lab, the selected image supplies the "
+                 "available pixels on a virtual display.",
                  /*halo=*/0.0f},
-        TourStep{"region", "Choose the region to measure",
-                 "Only pixels inside this rectangle reach the scopes. Drag the striped band to move it, drag an edge "
-                 "or corner handle to resize it, or use the close control to clear it.",
+        TourStep{"region", "Move the global region",
+                 "The region stays fixed when you change images and can extend beyond one. Only its overlap with the "
+                 "image reaches the scopes. Drag the band to move it, or a handle to resize it.",
                  // Clear of what the region already wears outside itself: a
                  // twelve-point band, and a close badge beyond that again.
                  /*halo=*/26.0f},

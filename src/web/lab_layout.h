@@ -1,5 +1,7 @@
 #pragma once
 
+#include <optional>
+
 namespace sidescopes {
 
 /// The application's window keeps a fixed share; the picture - which stands
@@ -28,6 +30,12 @@ struct LayoutPoint
     float y = 0.0f;
 };
 
+struct LayoutRect
+{
+    LayoutPoint position;
+    LayoutPoint size;
+};
+
 struct ShellLayout
 {
     LayoutPoint screenPos;
@@ -41,5 +49,13 @@ struct ShellLayout
 /// application is a window BESIDE the picture, never a frame around it,
 /// because beside is what it is on a desktop.
 [[nodiscard]] ShellLayout layoutFor(const LayoutPoint& origin, const LayoutPoint& size);
+
+/// Maps the part of a global desktop region that overlaps the supplied image
+/// back into that image's pixel coordinates. The Lab has no pixels to offer
+/// outside the image, so a region wholly over the surrounding virtual desktop
+/// yields no rectangle rather than pretending the background was captured.
+[[nodiscard]] std::optional<LayoutRect> picturePixelsUnderRegion(const LayoutRect& desktopRegion,
+                                                                 const LayoutRect& pictureOnDesktop,
+                                                                 const LayoutPoint& picturePixels);
 
 }  // namespace sidescopes
