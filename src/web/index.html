@@ -157,18 +157,22 @@
   /* The HEIGHT here is the hit area, not the look: the track stays 4px and
      everything above it is room for the pointer to land. 13px was a mouse-only
      number. */
-  .edit input[type=range] { -webkit-appearance:none; appearance:none; width:100%; min-width:0;
-                            height:22px; background:transparent; cursor:ew-resize; margin:0 }
+  .edit input[type=range] { --thumb-size:12px; -webkit-appearance:none; appearance:none;
+                            width:100%; min-width:0;
+                            height:22px; background:transparent; cursor:ew-resize; margin:0;
+                            touch-action:none }
   .edit input[type=range]::-webkit-slider-runnable-track {
     height:4px; border-radius:2px; background:var(--track);
   }
   .edit input[type=range]::-moz-range-track { height:4px; border-radius:2px; background:var(--track) }
   .edit input[type=range]::-webkit-slider-thumb {
-    -webkit-appearance:none; appearance:none; width:12px; height:12px; margin-top:-4px;
+    -webkit-appearance:none; appearance:none; width:var(--thumb-size); height:var(--thumb-size);
+    margin-top:-4px;
     border-radius:50%; background:#d6d0cc; border:1px solid #0f0e0d;
   }
   .edit input[type=range]::-moz-range-thumb {
-    width:12px; height:12px; border-radius:50%; background:#d6d0cc; border:1px solid #0f0e0d;
+    width:var(--thumb-size); height:var(--thumb-size); border-radius:50%;
+    background:#d6d0cc; border:1px solid #0f0e0d;
   }
   .edit label[data-moved="1"] input[type=range]::-webkit-slider-thumb { background:#8ea2ff }
   .edit label[data-moved="1"] input[type=range]::-moz-range-thumb { background:#8ea2ff }
@@ -211,9 +215,8 @@
      targets grow on POINTER COARSE, which is the thing actually being asked
      about, and the layout changes on width separately. */
   @media (pointer: coarse) {
-    .edit input[type=range] { height:34px }
-    .edit input[type=range]::-webkit-slider-thumb { width:18px; height:18px; margin-top:-7px }
-    .edit input[type=range]::-moz-range-thumb { width:18px; height:18px }
+    .edit input[type=range] { --thumb-size:18px; height:34px }
+    .edit input[type=range]::-webkit-slider-thumb { margin-top:-7px }
     .edit label { padding:.3rem 0 }
   }
 
@@ -418,6 +421,44 @@ const ADJUSTMENTS = ['exposure', 'contrast', 'highlights', 'shadows', 'temperatu
 const sliders = ADJUSTMENTS.map((name) => document.getElementById(`a-${name}`));
 const readouts = ADJUSTMENTS.map((name) => document.getElementById(`v-${name}`));
 const resetButton = document.getElementById('a-reset');
+
+// A framed Lab can be taller than the phone viewport while the frame itself
+// is expanded to avoid a second scrollbar. In that arrangement the website
+// is the nearest scrollable page. WebKit and Chromium may claim a touch drag
+// across the browsing-context boundary even though the interactive element
+// says touch-action:none, cancelling the pointer stream before a slider or
+// region gesture can finish. The first cancelable movement is the browser's
+// remaining seam: suppress scrolling only on the two surfaces that interpret
+// a drag, leaving the filmstrip, labels and empty ground available to scroll
+// the website normally.
+function retainInteractiveTouch(element) {
+  element.addEventListener('touchmove', (event) => {
+    if (event.cancelable) { event.preventDefault(); }
+  }, { passive: false });
+}
+
+retainInteractiveTouch(document.getElementById('canvas'));
+
+function setSliderFromTouch(slider, clientX) {
+  const bounds = slider.getBoundingClientRect();
+  const thumb = parseFloat(getComputedStyle(slider).getPropertyValue('--thumb-size')) || 0;
+  const travel = Math.max(1, bounds.width - thumb);
+  const share = Math.max(0, Math.min(1, (clientX - bounds.left - thumb / 2) / travel));
+  const minimum = Number(slider.min);
+  const maximum = Number(slider.max);
+  const step = Number(slider.step) || 1;
+  const steps = Math.round((share * (maximum - minimum)) / step);
+  slider.value = String(minimum + steps * step);
+  slider.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
+sliders.forEach((slider) => {
+  slider.addEventListener('touchmove', (event) => {
+    if (event.touches.length !== 1) { return; }
+    if (event.cancelable) { event.preventDefault(); }
+    setSliderFromTouch(slider, event.touches[0].clientX);
+  }, { passive: false });
+});
 
 // Exposure is read in STOPS and everything else on the hundred-point scale
 // every editor a photographer already has open uses. Showing 0.55 for

@@ -1,0 +1,26 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Embedded SideScopes Lab test</title>
+<style>
+  html, body { margin:0; background:#eee }
+  .before { height:18rem }
+  .after { height:36rem }
+  iframe { display:block; width:100%; min-height:40rem; border:0 }
+</style>
+<div class="before"></div>
+<iframe title="SideScopes Lab" src="http://127.0.0.1:8099/index.html"
+        scrolling="no" sandbox="allow-scripts allow-same-origin"></iframe>
+<div class="after"></div>
+<script>
+  const frame = document.querySelector('iframe');
+  window.addEventListener('message', (event) => {
+    if (event.source !== frame.contentWindow || event.origin !== 'http://127.0.0.1:8099') { return; }
+    if (event.data && event.data.type === 'sidescopes-lab-height') {
+      frame.style.height = `${Math.ceil(Number(event.data.height))}px`;
+    }
+    if (event.data && event.data.type === 'sidescopes-lab-ready') {
+      frame.dataset.ready = 'true';
+    }
+  });
+</script>

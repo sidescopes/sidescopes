@@ -69,6 +69,10 @@ cp "$BUILD/sidescopes-lab.js" "$BUILD/sidescopes-lab.wasm" "$OUT/"
 # here is that reading, not the presence of a face.
 CACHE=${SIDESCOPES_PHOTO_CACHE:-$HOME/.cache/sidescopes/scenarios}
 SAMPLES="skin-and-colour neutral-detail wide-tonal-range flat-field"
+# Browser CI fulfils these requests with a deterministic in-memory pixel: it
+# is testing touch and embedding, not the availability of four external
+# archives. Production and local builds keep the real public-domain set.
+[ "${SIDESCOPES_WEB_SKIP_SAMPLES:-0}" = "1" ] && SAMPLES=""
 
 # Fetched here rather than assumed: the manifest is the citable artefact and
 # checks every download against its digest, so this needs nothing committed to

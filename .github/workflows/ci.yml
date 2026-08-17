@@ -192,18 +192,29 @@ jobs:
         with:
           version: 4.0.7
       - name: Configure
-        run: emcmake cmake -B build-web -DSIDESCOPES_WERROR=ON -DCMAKE_BUILD_TYPE=Release
-      - name: Build
-        run: cmake --build build-web
+        run: emcmake cmake -B build-web-cmake -DSIDESCOPES_WERROR=ON -DCMAKE_BUILD_TYPE=Release
+      - name: Build and assemble
+        env:
+          SIDESCOPES_WEB_SKIP_SAMPLES: 1
+        run: scripts/build-web.sh build-lab
       - name: The Lab is present and non-trivial
         # A link that emits nothing still exits 0. Naming the artefacts and
         # asserting a floor turns "the step passed" into "the Lab exists".
         run: |
-          test -f build-web/sidescopes-lab.js
-          test -f build-web/sidescopes-lab.wasm
-          size=$(wc -c < build-web/sidescopes-lab.wasm)
+          test -f build-lab/index.html
+          test -f build-lab/sidescopes-lab.js
+          test -f build-lab/sidescopes-lab.wasm
+          size=$(wc -c < build-lab/sidescopes-lab.wasm)
           echo "sidescopes-lab.wasm: $size bytes"
           test "$size" -gt 500000
+      - name: Install browser-test dependencies
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+      - name: Embedded mobile interaction
+        env:
+          SIDESCOPES_LAB_DIR: build-lab
+        run: npm run test:web
 
   # Address+UB and thread sanitizers exercise the test suite; the analysis
   # worker's cross-thread frame handoff is exactly what TSan exists to audit.
