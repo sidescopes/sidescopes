@@ -648,7 +648,13 @@ document.getElementById('file').addEventListener('change', async (event) => {
   event.target.value = '';
 });
 
-// Something to look at immediately: a picture and a region already on it,
+// Something to look at immediately: a picture beneath a global region,
 // rather than an empty scope and an instruction to draw one.
 await useSample(SAMPLES[0][0], SAMPLES[0][2], tiles[0]);
+// The embedding website records only this immutable build's successful ready
+// state. It can then open the same build directly on a later visit instead of
+// asking permission for a download the browser normally serves from cache.
+if (window.parent !== window) {
+  window.parent.postMessage({ type: 'sidescopes-lab-ready' }, '*');
+}
 </script>
