@@ -1,5 +1,18 @@
 import { expect, test } from '@playwright/test';
 
+const SAMPLE_PIXEL = Buffer.from(
+  '/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAMCAgICAgMCAgIDAwMDBAYEBAQEBAgGBgUGCQgKCgkICQkKDA8MCgsOCwkJDRENDg8QEBEQCgwSExIQEw8QEBD/wAALCAAQABABAREA/8QAFAABAAAAAAAAAAAAAAAAAAAAAP/EABQQAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEAAD8AAP/Z',
+  'base64',
+);
+
+test.beforeEach(async ({ page }) => {
+  await page.route('**/samples/*.jpg', (route) => route.fulfill({
+    status: 200,
+    contentType: 'image/jpeg',
+    body: SAMPLE_PIXEL,
+  }));
+});
+
 async function touchDrag(page, from, to) {
   const session = await page.context().newCDPSession(page);
   await session.send('Input.dispatchTouchEvent', {
@@ -20,19 +33,11 @@ async function touchDrag(page, from, to) {
 
 test('an embedded mobile Lab keeps one scrollbar and owns interactive gestures', async ({ page }) => {
   page.on('pageerror', (error) => console.error(`Lab page error: ${error.message}`));
-  const samplePixel = Buffer.from(
-    '/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAMCAgICAgMCAgIDAwMDBAYEBAQEBAgGBgUGCQgKCgkICQkKDA8MCgsOCwkJDRENDg8QEBEQCgwSExIQEw8QEBD/wAALCAAQABABAREA/8QAFAABAAAAAAAAAAAAAAAAAAAAAP/EABQQAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEAAD8AAP/Z',
-    'base64',
-  );
-  await page.route('**/samples/*.jpg', (route) => route.fulfill({
-    status: 200,
-    contentType: 'image/jpeg',
-    body: samplePixel,
-  }));
   await page.goto('http://127.0.0.1:4173/embed.html');
   const frameElement = page.getByTitle('SideScopes Lab');
   await expect(frameElement).toHaveAttribute('data-ready', 'true', { timeout: 20_000 });
   await expect(frameElement).toHaveAttribute('scrolling', 'no');
+  expect(await page.evaluate(() => window.scrollY)).toBe(0);
   const lab = page.frameLocator('iframe');
 
   const flatField = lab.getByRole('button', { name: 'Near-neutral, fine detail' });
@@ -90,4 +95,12 @@ test('an embedded mobile Lab keeps one scrollbar and owns interactive gestures',
     { x: creditBox.x + creditBox.width / 2, y: creditBox.y - 140 },
   );
   expect(await page.evaluate(() => window.scrollY)).toBeGreaterThan(beforeCredit);
+});
+
+test('a standalone Lab takes keyboard focus at startup', async ({ page }) => {
+  await page.goto('http://127.0.0.1:8099/index.html');
+  await expect.poll(
+    () => page.evaluate(() => document.activeElement?.id),
+    { timeout: 20_000 },
+  ).toBe('canvas');
 });

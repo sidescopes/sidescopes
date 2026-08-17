@@ -422,6 +422,15 @@ const sliders = ADJUSTMENTS.map((name) => document.getElementById(`a-${name}`));
 const readouts = ADJUSTMENTS.map((name) => document.getElementById(`v-${name}`));
 const resetButton = document.getElementById('a-reset');
 
+// Keyboard focus belongs on the canvas after a page control has done its
+// work, but focusing a canvas deep inside an expanded iframe may scroll the
+// containing website far enough to reveal it. That is especially disruptive
+// during the initial sample load, when the visitor has not moved the page at
+// all. Keep the keyboard handoff without changing either document's scroll.
+function focusCanvas() {
+  document.getElementById('canvas').focus({ preventScroll: true });
+}
+
 // A framed Lab can be taller than the phone viewport while the frame itself
 // is expanded to avoid a second scrollbar. In that arrangement the website
 // is the nearest scrollable page. WebKit and Chromium may claim a touch drag
@@ -541,7 +550,7 @@ resetButton.addEventListener('click', () => {
   // Focus goes back for the same reason every strip interaction returns it:
   // the application stops hearing the keyboard the moment something else
   // holds focus, which reads as "the shortcuts stopped working".
-  document.getElementById('canvas').focus();
+  focusCanvas();
 });
 
 refreshReadouts();
@@ -549,7 +558,7 @@ refreshReadouts();
 const tourButton = document.getElementById('tour');
 tourButton.addEventListener('click', () => {
   mod.ccall('labStartTour', null, [], []);
-  document.getElementById('canvas').focus();
+  focusCanvas();
 });
 
 // Public domain, works of the US federal government (17 U.S.C. 105). The
@@ -584,7 +593,7 @@ function push(bitmap, limit = 1400) {
 // stops hearing the keyboard - which reads as "the shortcuts do not work"
 // the moment anybody chooses a picture. Focus goes straight back.
 function returnFocus() {
-  document.getElementById('canvas').focus();
+  focusCanvas();
 }
 
 function markCurrent(button) {
@@ -592,7 +601,7 @@ function markCurrent(button) {
   if (button) { button.setAttribute('aria-current', 'true'); }
 }
 
-async function useSample(name, line, button) {
+async function useSample(name, line, button, focusAfter = true) {
   // A data: URI in the standalone file, a sibling JPEG when served. fetch
   // reads a data: URI from a file:// page quite happily; it will not read a
   // sibling file, which is why the standalone one carries its pictures
@@ -601,7 +610,7 @@ async function useSample(name, line, button) {
   push(bitmap);
   credit.textContent = line ? `Image: ${line}. Public domain.` : '';
   markCurrent(button);
-  returnFocus();
+  if (focusAfter) { returnFocus(); }
 }
 
 // Where a photograph comes from: a data: URI in the standalone file, a
@@ -691,7 +700,11 @@ document.getElementById('file').addEventListener('change', async (event) => {
 
 // Something to look at immediately: a picture beneath a global region,
 // rather than an empty scope and an instruction to draw one.
-await useSample(SAMPLES[0][0], SAMPLES[0][2], tiles[0]);
+// A standalone Lab can take keyboard focus immediately. An embedded Lab must
+// wait for a deliberate interaction: focusing anything in a cross-origin
+// frame can make a mobile browser scroll the parent page to reveal the frame,
+// even when the focus call itself requests preventScroll.
+await useSample(SAMPLES[0][0], SAMPLES[0][2], tiles[0], window.parent === window);
 // The embedding website records only this immutable build's successful ready
 // state. It can then open the same build directly on a later visit instead of
 // asking permission for a download the browser normally serves from cache.

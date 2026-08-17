@@ -1006,6 +1006,15 @@ int main()
     // or key event ever reaches the interface, which reads as a lab that
     // draws correctly and ignores the mouse.
     emscripten::glfw3::SetNextWindowCanvasSelector("#canvas");
+    // Creating a focused GLFW window calls focus() on its canvas. Inside an
+    // iframe that also focuses the frame in the parent and mobile browsers
+    // scroll the website down to reveal it before the visitor has touched
+    // anything. A standalone Lab can still take keyboard focus immediately;
+    // an embedded one waits for the first deliberate interaction.
+    // clang-format off
+    const bool embedded = EM_ASM_INT({ return window.parent !== window; }) != 0;
+    // clang-format on
+    glfwWindowHint(GLFW_FOCUSED, embedded ? GLFW_FALSE : GLFW_TRUE);
     g_lab.window = glfwCreateWindow(560, 880, "SideScopes", nullptr, nullptr);
     if (g_lab.window == nullptr) {
         glfwTerminate();
