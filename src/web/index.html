@@ -249,6 +249,15 @@
     #stage { flex:0 0 auto; height:clamp(32rem, 145vw, 44rem); min-height:32rem }
   }
 
+  /* In a narrow portrait viewport the application's window needs enough
+     vertical room for its automatic pane layout to stack two scopes at useful
+     sizes. Three panes remain compact, but readable. Keep the shorter rule
+     above for low-height landscape touch screens, where adding more vertical
+     page length would not improve a naturally wide application window. */
+  @media (max-width: 40rem) {
+    #stage { height:clamp(41rem, 205vw, 56rem); min-height:41rem }
+  }
+
   /* Shown only when this copy is opened from disk, where it cannot run. */
   .offline { max-width:36rem; margin:4rem auto; padding:0 1rem; line-height:1.5 }
   .offline h1 { font-size:1.25rem; margin:0 0 1rem }

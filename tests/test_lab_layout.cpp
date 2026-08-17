@@ -34,6 +34,18 @@ TEST_CASE("On a tall viewport the application sits below the picture")
     CHECK(layout.screenSize.x == 600.0f);
 }
 
+TEST_CASE("A narrow portrait Lab gives the application room to stack scopes")
+{
+    // A 390-point phone viewport leaves 358 points after the page padding;
+    // the narrow CSS stage gives that canvas about 800 points of height.
+    // The application half must then be portrait rather than another short,
+    // wide strip: two scopes can stack comfortably and three remain usable.
+    const ShellLayout layout = layoutFor(LayoutPoint{0.0f, 0.0f}, LayoutPoint{358.0f, 800.0f});
+
+    CHECK(layout.appSize.y > layout.appSize.x);
+    CHECK(layout.screenSize.y >= layout.appSize.x);
+}
+
 TEST_CASE("The application is never a frame around the picture")
 {
     // The one thing this layout would teach falsely if it were wrong. On a
