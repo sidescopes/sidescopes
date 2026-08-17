@@ -427,13 +427,17 @@ void RegionEditor::drawBorder(const Placement& placement, int imageWidth, int im
         draw->AddCircle(point, HandleRadius, grey(0.97f, 0.95f), CircleSegments, 1.0f);
     }
 
+    draw->PopClipRect();
+
     // Last, as the desktop draws it last: the badge sits ON the band and a
-    // band painted afterwards would bury it.
+    // band painted afterwards would bury it. The picture is content inside
+    // this pane, not the physical edge of a display, so its letterbox must
+    // not crop an action that belongs to the region. The pane's own clip
+    // still contains the badge while the region keeps the same screen
+    // rectangle across differently shaped samples.
     if (closeVisible(placement)) {
         drawCloseBadge(closeCentre(topLeft, bottomRight));
     }
-
-    draw->PopClipRect();
 }
 
 /// A rectangle in the live drag's own language: a solid dark line under a
