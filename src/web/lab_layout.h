@@ -1,6 +1,7 @@
 #pragma once
 
-#include <optional>
+#include <cstdint>
+#include <vector>
 
 namespace sidescopes {
 
@@ -12,6 +13,9 @@ namespace sidescopes {
 constexpr float AppWidthPoints = 400.0f;
 constexpr float AppHeightShare = 0.52f;
 constexpr float WideEnough = 1.05f;
+/// A compact square at the centre of the Lab's unobstructed screen area.
+/// Relative to the shorter side so it behaves the same in either layout.
+constexpr float StarterRegionShare = 0.34f;
 /// The application floats above the workspace rather than sitting in it, so
 /// it is drawn inset with an edge and a shadow. Without those it reads as a
 /// frame the picture is embedded in, which is the opposite of what it is.
@@ -44,18 +48,32 @@ struct ShellLayout
     LayoutPoint appSize;
 };
 
+/// Pixels captured from the Lab's virtual display. The byte order is BGRA,
+/// matching every ScreenCaptureSource the analysis pipeline receives.
+struct LabDisplayCapture
+{
+    std::vector<uint8_t> bgra;
+    int width = 0;
+    int height = 0;
+};
+
 /// The rule itself, kept where it can be TESTED. It decides the one thing
 /// about this lab that would teach something false if it were wrong: the
 /// application is a window BESIDE the picture, never a frame around it,
 /// because beside is what it is on a desktop.
 [[nodiscard]] ShellLayout layoutFor(const LayoutPoint& origin, const LayoutPoint& size);
 
-/// Maps the part of a global desktop region that overlaps the supplied image
-/// back into that image's pixel coordinates. The Lab has no pixels to offer
-/// outside the image, so a region wholly over the surrounding virtual desktop
-/// yields no rectangle rather than pretending the background was captured.
-[[nodiscard]] std::optional<LayoutRect> picturePixelsUnderRegion(const LayoutRect& desktopRegion,
-                                                                 const LayoutRect& pictureOnDesktop,
-                                                                 const LayoutPoint& picturePixels);
+/// The Lab's initial global region. It is centred in the virtual screen area,
+/// not placed relative to the simulated application window, so it begins on
+/// the subject and remains at one display position when images change.
+[[nodiscard]] LayoutRect starterRegionFor(const ShellLayout& layout);
+
+/// Rasterizes a global region from the Lab's virtual display. Pixels beneath
+/// the supplied picture come from @p pictureBgra; everything else is opaque
+/// black, which is the virtual desktop the canvas visibly presents.
+[[nodiscard]] LabDisplayCapture captureVirtualDisplayRegion(const LayoutRect& desktopRegion,
+                                                            const LayoutRect& pictureOnDesktop,
+                                                            const LayoutPoint& picturePixels,
+                                                            const std::vector<uint8_t>& pictureBgra);
 
 }  // namespace sidescopes

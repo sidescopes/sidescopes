@@ -51,7 +51,6 @@
 #include "app/scope_view.h"
 #include "app/shortcut_resolver.h"
 #include "app/tour_overlay.h"
-#include "app/window_place.h"
 #include "core/analysis_worker.h"
 #include "core/frame.h"
 #include "core/page_allocator.h"
@@ -174,14 +173,14 @@ Lab g_lab;
 /// work further down, needed by the adjustment pass just below.
 void refreshDisplayTexture();
 
-/// The region the scopes read, as the worker wants it: a share of the frame
-/// rather than a rectangle of pixels. Nothing at all when there is no region,
-/// which is a STATE and not a failure - the worker then publishes nothing and
-/// every scope is empty, exactly as the desktop is after Escape.
-std::optional<RegionOfInterest> regionOfPicture()
+/// Captures the selected part of the Lab's virtual display. The photograph is
+/// only one window on that display: any selected area around it remains the
+/// black desktop the visitor can see, exactly as an operating-system screen
+/// capture would report it to the desktop application.
+LabDisplayCapture captureSelectedDisplay()
 {
     if (!g_lab.region.hasRegion() || g_lab.picture.width() <= 0 || g_lab.picture.height() <= 0) {
-        return std::nullopt;
+        return {};
     }
     const SsRect rect = g_lab.region.rect();
     const LayoutRect regionOnDisplay{
@@ -193,19 +192,10 @@ std::optional<RegionOfInterest> regionOfPicture()
         LayoutPoint{g_lab.picturePlacement.origin.x, g_lab.picturePlacement.origin.y},
         LayoutPoint{static_cast<float>(g_lab.picture.display().width) * g_lab.picturePlacement.scale,
                     static_cast<float>(g_lab.picture.display().height) * g_lab.picturePlacement.scale}};
-    const std::optional<LayoutRect> pixels = picturePixelsUnderRegion(
+    return captureVirtualDisplayRegion(
         regionOnDisplay, pictureOnDisplay,
-        LayoutPoint{static_cast<float>(g_lab.picture.width()), static_cast<float>(g_lab.picture.height())});
-    if (!pixels) {
-        return std::nullopt;
-    }
-    // platform/region_geometry's own conversion, which every platform's
-    // overlay already uses. The Lab offers only the image pixels beneath the
-    // global region; the surrounding virtual desktop is not fabricated as
-    // captured black pixels.
-    const LocalRect local{pixels->position.x, pixels->position.y, pixels->size.x, pixels->size.y};
-
-    return regionFromLocalRect(local, g_lab.picture.width(), g_lab.picture.height());
+        LayoutPoint{static_cast<float>(g_lab.picture.width()), static_cast<float>(g_lab.picture.height())},
+        g_lab.picture.analysed());
 }
 
 /// One turn of the analysis, through the REAL pipeline.
@@ -220,15 +210,20 @@ void analyse()
     if (g_lab.picture.refresh()) {
         refreshDisplayTexture();
     }
-    if (g_lab.picture.hasFreshPixels()) {
-        submitCapturedPicture(g_lab.picture.analysed().data(), g_lab.picture.width(), g_lab.picture.height());
+    // Moving or resizing a GLOBAL region changes the captured frame even when
+    // the photograph itself did not change, because a different share of the
+    // surrounding virtual desktop may now be included.
+    if ((g_lab.picture.hasFreshPixels() || g_lab.settingsDirty) && g_lab.region.hasRegion()) {
+        const LabDisplayCapture captured = captureSelectedDisplay();
+        submitCapturedPicture(captured.bgra.data(), captured.width, captured.height);
         g_lab.picture.pixelsTaken();
     }
     if (g_lab.settingsDirty) {
-        // The region lives on the virtual display. The worker reads the part
-        // that intersects the supplied image, expressed as percentages of
-        // that image's frame.
-        g_lab.analysis.region = regionOfPicture();
+        // The frame submitted above is already the selected desktop region,
+        // so the real analysis pipeline reads all of it. No selected region
+        // still means no measurement, exactly as it does on the desktop.
+        g_lab.analysis.region =
+            g_lab.region.hasRegion() ? std::optional<RegionOfInterest>{RegionOfInterest{}} : std::nullopt;
         g_lab.worker->updateSettings(g_lab.analysis);
         g_lab.settingsDirty = false;
     }
@@ -307,12 +302,15 @@ void analyse()
     if (!g_lab.starterRegionDue) {
         return false;
     }
-    const DisplayGeometry display{position.x, position.y, area.x, area.y};
-    const WindowPlacement application{
-        static_cast<int>(std::lround(layout.appPos.x)), static_cast<int>(std::lround(layout.appPos.y)),
-        static_cast<int>(std::lround(layout.appSize.x)), static_cast<int>(std::lround(layout.appSize.y))};
-    g_lab.region.reset(starterGlobalRegion(application, display), static_cast<int>(std::lround(area.x)),
-                       static_cast<int>(std::lround(area.y)));
+    const LayoutRect starter = starterRegionFor(layout);
+    RegionOfInterest region;
+    if (area.x > 0.0f && area.y > 0.0f) {
+        region.leftPercent = (starter.position.x - position.x) / area.x * 100.0;
+        region.topPercent = (starter.position.y - position.y) / area.y * 100.0;
+        region.rightPercent = (starter.position.x + starter.size.x - position.x) / area.x * 100.0;
+        region.bottomPercent = (starter.position.y + starter.size.y - position.y) / area.y * 100.0;
+    }
+    g_lab.region.reset(region, static_cast<int>(std::lround(area.x)), static_cast<int>(std::lround(area.y)));
     g_lab.starterRegionDue = false;
 
     return true;
@@ -592,11 +590,9 @@ void drawAppWindow(const ShellLayout& layout, const PaneRenderInput& input)
 {
     ImGui::SetNextWindowPos(ImVec2{layout.appPos.x, layout.appPos.y});
     ImGui::SetNextWindowSize(ImVec2{layout.appSize.x, layout.appSize.y});
-    // The virtual display is one full-canvas ImGui window. Keep the
-    // application explicitly above it, including after a region gesture has
-    // focused the display beneath. This is the desktop's window ordering, not
-    // merely a paint order: controls hidden by the app must not remain live.
-    ImGui::SetNextWindowFocus();
+    // The display window is created first and cannot bring itself to the
+    // front, so this later window remains above it without taking focus away
+    // from a region gesture on every frame.
     ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
     ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
     ImGui::Begin("##app", nullptr,
