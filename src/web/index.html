@@ -625,7 +625,9 @@ async function useSample(name, line, button, focusAfter = true) {
   // inside it.
   let bitmap;
   try {
-    const response = await fetch(sampleSource(name));
+    const source = sampleSource(name);
+    if (!source) { throw new Error('Sample unavailable'); }
+    const response = await fetch(source);
     if (!response.ok) { throw new Error('Sample unavailable'); }
     bitmap = await createImageBitmap(await response.blob());
     if (selection !== imageSelection) { return false; }
@@ -651,22 +653,25 @@ async function useSample(name, line, button, focusAfter = true) {
 //
 // fetch reads a data: URI from a file:// page quite happily; it will not read
 // a sibling file, which is why the standalone one carries its pictures.
+// Its map is complete: a missing entry means that photograph was not bundled.
 function sampleSource(name) {
-  return (window.__SAMPLES && window.__SAMPLES[name]) || `samples/${name}.jpg`;
+  return window.__SAMPLES ? window.__SAMPLES[name] : `samples/${name}.jpg`;
 }
 
-const tiles = [];
+const tiles = new Map();
 for (const [name, title, line] of SAMPLES) {
+  const source = sampleSource(name);
+  if (!source) { continue; }
   const button = document.createElement('button');
   button.title = title;
   const img = document.createElement('img');
-  img.src = sampleSource(name);
+  img.src = source;
   img.alt = title;
   img.addEventListener('error', () => button.remove());
   button.appendChild(img);
   button.addEventListener('click', () => { void useSample(name, line, button); });
   strip.appendChild(button);
-  tiles.push(button);
+  tiles.set(name, button);
 }
 
 const addButton = document.createElement('button');
@@ -766,7 +771,7 @@ function showGeneratedSample() {
 // wait for a deliberate interaction: focusing anything in a cross-origin
 // frame can make a mobile browser scroll the parent page to reveal the frame,
 // even when the focus call itself requests preventScroll.
-const loaded = await useSample(SAMPLES[0][0], SAMPLES[0][2], tiles[0], window.parent === window);
+const loaded = await useSample(SAMPLES[0][0], SAMPLES[0][2], tiles.get(SAMPLES[0][0]), window.parent === window);
 // A failed initial download must not prevent the instrument or the embedding
 // ready signal from working. A deliberate choice made while it loaded wins.
 if (!loaded && imageSelection === 1) { showGeneratedSample(); }

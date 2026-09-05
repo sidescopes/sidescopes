@@ -140,6 +140,34 @@ test('missing photographs still produce a usable embedded Lab and ready signal',
   expect(errors).toEqual([]);
 });
 
+for (const [description, names] of [['no photographs', []], ['one photograph', ['neutral-detail']]]) {
+  test(`an embedded sample map with ${description} never requests sibling photographs`, async ({ page }) => {
+    const sampleRequests = [];
+    const errors = [];
+    page.on('request', (request) => {
+      if (request.url().includes('/samples/')) { sampleRequests.push(request.url()); }
+    });
+    page.on('pageerror', (error) => errors.push(error.message));
+    const pictures = Object.fromEntries(names.map((name) =>
+      [name, `data:image/jpeg;base64,${SAMPLE_PIXEL.toString('base64')}`]));
+    await page.addInitScript((samples) => {
+      window.__STANDALONE = true;
+      window.__SAMPLES = samples;
+    }, pictures);
+    await page.goto('http://127.0.0.1:8099/index.html');
+    await expect(page.locator('#credit')).not.toHaveText('', { timeout: 20_000 });
+    expect(sampleRequests).toEqual([]);
+    await expect(page.locator('#credit')).toContainText('Generated color bars');
+    await expect(page.locator('#strip button')).toHaveCount(names.length + 1);
+    if (names.length) {
+      await page.getByRole('button', { name: 'Near-neutral, fine detail' }).click();
+      await expect(page.locator('#credit')).toContainText('National Park Service');
+    }
+    expect(sampleRequests).toEqual([]);
+    expect(errors).toEqual([]);
+  });
+}
+
 test('the last selected sample wins when an earlier download finishes late', async ({ page }) => {
   await page.addInitScript(() => {
     const decode = window.createImageBitmap.bind(window);

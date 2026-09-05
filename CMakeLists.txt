@@ -120,8 +120,8 @@ function(sidescopes_add_module name)
     target_link_libraries(${name} PRIVATE sidescopes_core)
     sidescopes_target_defaults(${name})
     if(SIDESCOPES_MODULES_DYNAMIC)
-        # Hidden visibility with a single default-visible ss_module_entry,
-        # dropped alongside the loader's search directory.
+        # Hide module-owned implementation symbols and explicitly export the
+        # entry table. Place modules in the loader's search directory.
         set_target_properties(${name} PROPERTIES
             CXX_VISIBILITY_PRESET hidden
             VISIBILITY_INLINES_HIDDEN ON
