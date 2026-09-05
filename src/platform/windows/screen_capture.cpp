@@ -72,12 +72,10 @@ struct MappedTexture
     }
 };
 
-// A frame either reached the mailbox, was skipped this iteration, or hit
-// an unrecoverable error that ends the loop.
+// A frame either reached the mailbox or hit an error that ends the loop.
 enum class FrameOutcome
 {
     Published,
-    Skipped,
     Fatal,
 };
 
@@ -375,8 +373,7 @@ private:
     }
 
     // Copies one acquired frame into a CPU buffer and publishes it. Returns
-    // Fatal when the staging texture cannot be created (the loop must end),
-    // Skipped when the frame cannot be mapped, Published otherwise.
+    // Fatal when the frame cannot be copied (the loop must end), Published otherwise.
     FrameOutcome copyFrame(const DuplicationSetup& setup, ID3D11Texture2D* texture, FrameCopyState& state,
                            FrameMailbox& mailbox)
     {
@@ -397,7 +394,8 @@ private:
         {
             D3D11_MAPPED_SUBRESOURCE mapped{};
             if (FAILED(setup.context->Map(state.staging.Get(), 0, D3D11_MAP_READ, 0, &mapped))) {
-                return FrameOutcome::Skipped;
+                reportStatus("could not map capture frame");
+                return FrameOutcome::Fatal;
             }
             const MappedTexture mappedTexture{*setup.context.Get(), *state.staging.Get()};
             state.buffer.sizeTo(static_cast<std::size_t>(stride) * height);

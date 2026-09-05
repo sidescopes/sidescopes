@@ -57,6 +57,30 @@ class ScenarioPreferencesTests(unittest.TestCase):
             catalog.scenario_named('region-redraw'), 'V', old_profile, 'V'))
 
 
+class KeyboardCleanupTests(unittest.TestCase):
+    def test_interrupted_chords_release_every_pressed_key(self):
+        # Load the real binding with inert framework functions. No test input
+        # reaches the desktop, on macOS or on the other CI platforms.
+        with mock.patch('ctypes.CDLL', return_value=mock.MagicMock()):
+            bindings = load_script('quartz_bindings', 'scripts/scenarios/quartz.py')
+        for interrupted_pause in range(3):
+            held = set()
+
+            def post(code, pressed, flags):
+                if pressed:
+                    held.add(code)
+                else:
+                    held.discard(code)
+
+            pauses = [None] * interrupted_pause + [KeyboardInterrupt()]
+            with self.subTest(pause=interrupted_pause), \
+                    mock.patch.object(bindings, '_post_key', side_effect=post), \
+                    mock.patch.object(bindings.time, 'sleep', side_effect=pauses):
+                with self.assertRaises(KeyboardInterrupt):
+                    bindings.press_key('d', command=True, shift=True)
+                self.assertEqual(held, set())
+
+
 @unittest.skipIf(sys.platform == 'win32', 'the content helper uses macOS/POSIX pipes')
 class ContentWindowTests(unittest.TestCase):
     def launch_fake(self, code):

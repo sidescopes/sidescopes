@@ -249,18 +249,42 @@ def drag(start, end, steps=30, step_seconds=0.016, settle=0.12):
     _post_mouse(_LEFT_UP, end)
 
 
+def _post_key(code, pressed, flags):
+    event = _cg.CGEventCreateKeyboardEvent(None, code, pressed)
+    try:
+        _cg.CGEventSetFlags(event, flags)
+        _cg.CGEventPost(_HID_EVENT_TAP, event)
+    finally:
+        _cf.CFRelease(event)
+
+
 def press_key(name, command=False, shift=False):
     code = _KEY_CODES.get(name.lower())
     if code is None:
         raise KeyError(f"no virtual key code for {name!r}")
-    flags = (_FLAG_COMMAND if command else 0) | (_FLAG_SHIFT if shift else 0)
-    for pressed in (True, False):
-        event = _cg.CGEventCreateKeyboardEvent(None, code, pressed)
-        if flags:
-            _cg.CGEventSetFlags(event, flags)
-        _cg.CGEventPost(_HID_EVENT_TAP, event)
-        _cf.CFRelease(event)
+    modifiers = [(55, _FLAG_COMMAND)] if command else []
+    if shift:
+        modifiers.append((56, _FLAG_SHIFT))
+    flags = 0
+    primary_pressed = False
+    try:
+        for modifier, flag in modifiers:
+            flags |= flag
+            _post_key(modifier, True, flags)
+            time.sleep(0.05)
+        primary_pressed = True
+        _post_key(code, True, flags)
         time.sleep(0.05)
+    finally:
+        if primary_pressed:
+            _post_key(code, False, flags)
+        # Flags on a letter event do not release macOS's session modifier
+        # state. Explicit key-up events prevent a chord leaving Command or
+        # Shift held for every later interaction, including real user input.
+        for modifier, flag in reversed(modifiers):
+            flags &= ~flag
+            _post_key(modifier, False, flags)
+    time.sleep(0.05)
 
 
 def pointer_works():
