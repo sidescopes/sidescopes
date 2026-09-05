@@ -12,3 +12,16 @@ target_include_directories(sidescopes_native_tests PRIVATE "${CMAKE_CURRENT_SOUR
 target_link_libraries(sidescopes_native_tests PRIVATE sidescopes_platform Catch2::Catch2WithMain)
 sidescopes_target_defaults(sidescopes_native_tests)
 catch_discover_tests(sidescopes_native_tests TEST_PREFIX "Native: " PROPERTIES LABELS native)
+
+if(WIN32)
+    add_executable(sidescopes_native_allocation_tests
+        test_windows_allocations.cpp
+        ../support/allocation_failure.cpp)
+    target_include_directories(sidescopes_native_allocation_tests PRIVATE ../support)
+    target_compile_definitions(sidescopes_native_allocation_tests PRIVATE UNICODE _UNICODE)
+    target_link_libraries(sidescopes_native_allocation_tests PRIVATE
+        sidescopes_platform Catch2::Catch2WithMain)
+    sidescopes_target_defaults(sidescopes_native_allocation_tests)
+    catch_discover_tests(sidescopes_native_allocation_tests
+        TEST_PREFIX "Native allocation: " PROPERTIES LABELS "native;allocation" TIMEOUT 30)
+endif()

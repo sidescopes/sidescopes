@@ -55,6 +55,14 @@ class PerformanceCliTests(unittest.TestCase):
                     self.assertNotIn('perf: hash tier', result.stderr)
                     self.assertEqual(output.read_text(encoding='utf-8'), 'previous result')
 
+    def test_more_processed_frames_are_reported_as_an_improvement(self):
+        result = self.run_harness('--tiers', 'worker')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        rows = json.loads(result.stdout)
+        throughput = [row for row in rows if row['metric'].startswith('worker-processed ')]
+        self.assertEqual(len(throughput), 18)
+        self.assertTrue(all(row['direction'] == 'higher' for row in throughput))
+
     def test_finite_duration_bounds_and_scientific_notation_are_accepted(self):
         for duration in ['0.5', '3.6e3']:
             with self.subTest(duration=duration):

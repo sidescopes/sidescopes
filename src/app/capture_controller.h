@@ -129,6 +129,7 @@ public:
     [[nodiscard]] std::string status() const;
 
 private:
+    [[nodiscard]] bool startTarget(const CaptureTarget& target);
     void setStatus(const std::string& message);
 
     ScreenCaptureSource& m_source;

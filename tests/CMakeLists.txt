@@ -92,6 +92,10 @@ add_executable(sidescopes_tests
     test_window_place.cpp
     test_window_suggestions.cpp
     test_version.cpp
+    test_boundary_properties.cpp
+    support/preferences_properties.cpp
+    support/geometry_properties.cpp
+    support/module_properties.cpp
 )
 
 # The shared test support headers (frame builders, image probes, temp files)
@@ -166,4 +170,33 @@ sidescopes_target_defaults(sidescopes_tests)
 list(APPEND CMAKE_MODULE_PATH ${catch2_SOURCE_DIR}/extras)
 include(Catch)
 catch_discover_tests(sidescopes_tests)
+
+# Replacing global allocation functions is confined to this executable so
+# failure injection cannot change the behavior of unrelated test suites.
+add_executable(sidescopes_allocation_tests
+    test_analysis_allocations.cpp
+    test_detection_allocations.cpp
+    support/allocation_failure.cpp
+    support/desktop_stubs.cpp
+    support/region_overlay_stubs.cpp
+    ${CMAKE_SOURCE_DIR}/src/platform/region_geometry.cpp)
+target_include_directories(sidescopes_allocation_tests PRIVATE support)
+target_link_libraries(sidescopes_allocation_tests PRIVATE
+    sidescopes_app ${SIDESCOPES_MODULE_LINK_LIBS} sidescopes_core Catch2::Catch2WithMain)
+if(SIDESCOPES_MODULES_DYNAMIC)
+    add_dependencies(sidescopes_allocation_tests
+        sidescopes_module_vectorscope
+        sidescopes_module_waveform
+        sidescopes_module_histogram)
+endif()
+sidescopes_target_defaults(sidescopes_allocation_tests)
+catch_discover_tests(sidescopes_allocation_tests
+    TEST_PREFIX "Allocation: " PROPERTIES LABELS allocation TIMEOUT 30)
+
 add_subdirectory(native)
+if(SIDESCOPES_STRESS_TESTS)
+    add_subdirectory(stress)
+endif()
+if(SIDESCOPES_FUZZ_TESTS)
+    add_subdirectory(fuzz)
+endif()

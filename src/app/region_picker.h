@@ -170,6 +170,8 @@ private:
     [[nodiscard]] std::vector<PickerDisplay> buildPickerDisplays();
     [[nodiscard]] std::vector<SuggestedRegion> scanStreamedDisplayFaces(const FrameView& view, uint32_t streamed);
     void launchDisplayFaceScans(const std::vector<PickerDisplay>& pickerDisplays);
+    static void startDisplayFaceScan(DisplayFaceScan& scan, double widthPoints);
+    static void runDisplayFaceScan(DisplayFaceScan& scan, double widthPoints);
     void consumeDisplayFaceScan(DisplayFaceScan& scan);
     static void logPickerSuggestions(const std::vector<PickerDisplay>& pickerDisplays);
     [[nodiscard]] RegionPickOutcome processPinPoll(const RegionPickPoll& poll,

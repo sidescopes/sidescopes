@@ -156,6 +156,7 @@ private:
     void carryLockWithWindow(Lock& lock, const AttachWindowRect& rect,
                              std::optional<AnalysisWorker::FrameSize> frameSize);
     void launchProbe(const AttachDecision& decision, const FaceLockState& lock);
+    static void runProbe(Probe& probe, const std::vector<uint8_t>& pixels, IntRect roi, float pixelsPerPoint);
     void resetTracking();
     [[nodiscard]] std::optional<RegionOfInterest> mappedRegion(const FaceLockState& lock,
                                                                std::optional<AnalysisWorker::FrameSize> frameSize,

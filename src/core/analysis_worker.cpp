@@ -15,6 +15,19 @@
 #include "modules/module_registry.h"
 
 namespace sidescopes {
+namespace {
+// Withdrawing a partial copy must itself work without allocating. Version and
+// progress belong to the caller: publication advances them, a failed fetch does
+// not consume the version it still owes the interface.
+void clearOutput(AnalysisWorker::Output& output, uint64_t framesProcessed, uint64_t version)
+{
+    output.images.clear();
+    output.outlines.clear();
+    output.accumulateMilliseconds = 0.0;
+    output.framesProcessed = framesProcessed;
+    output.version = version;
+}
+}  // namespace
 
 IntRect RegionOfInterest::toPixels(int frameWidth, int frameHeight) const
 {
@@ -89,9 +102,12 @@ void AnalysisWorker::stop()
 
 void AnalysisWorker::updateSettings(const AnalysisSettings& settings)
 {
+    // Copy before committing: container copy assignment can throw after it
+    // has already changed part of the accepted settings.
+    AnalysisSettings pending = settings;
     {
         std::lock_guard lock(m_settingsMutex);
-        m_settings = settings;
+        m_settings = std::move(pending);
         ++m_settingsVersion;
     }
     // Without the nudge a settings change waits out the frame take's
@@ -106,7 +122,15 @@ bool AnalysisWorker::fetchOutput(uint64_t& lastSeenVersion, Output& output) cons
     if (m_output.version == lastSeenVersion) {
         return false;
     }
-    output = m_output;
+    try {
+        output = m_output;
+    } catch (const std::bad_alloc&) {
+        clearOutput(output, 0, lastSeenVersion);
+        diagEmit(DiagChannel::Perf, "analysis fetch allocation failed; retrying the published output");
+        // The caller must redraw the withdrawal and keep retrying, even if
+        // no new frame or settings change will produce another publication.
+        return true;
+    }
     lastSeenVersion = m_output.version;
     return true;
 }
@@ -513,6 +537,7 @@ bool AnalysisWorker::hasWork(bool newFrame, bool settingsChanged) const
 struct AnalysisWorker::Pass
 {
     std::vector<WorkerScope> scopes;
+    bool scopesInitialized = false;
     std::set<std::string> enabledScopes;
     AnalysisSettings settings;
     uint64_t seenSettingsVersion = 0;
@@ -522,11 +547,23 @@ struct AnalysisWorker::Pass
 
 void AnalysisWorker::run()
 {
-    // Instances are created on this thread, which therefore owns them.
-    Pass pass{makeWorkerScopes(m_registry), {}, {}, 0, {}, 0};
-
     while (!m_stopRequested.load(std::memory_order_relaxed)) {
-        runPass(pass, std::chrono::milliseconds(100));
+        try {
+            // Even an empty map or set can allocate on some standard
+            // libraries. Keep the pass constructor inside recovery too.
+            Pass pass;
+            while (!m_stopRequested.load(std::memory_order_relaxed)) {
+                runPass(pass, std::chrono::milliseconds(100));
+            }
+        } catch (const std::bad_alloc&) {
+            // Keep draining frames and use the normal mailbox wait so a
+            // sustained startup failure neither blocks capture nor spins.
+            const bool newFrame = takeLatestFrame(std::chrono::milliseconds(100));
+            publishAllocationFailure(0);
+            if (newFrame) {
+                m_consumedSequence.store(m_latestFrame.sequence, std::memory_order_release);
+            }
+        }
     }
 }
 
@@ -536,7 +573,7 @@ void AnalysisWorker::startInline()
         return;
     }
     m_stopRequested.store(false);
-    m_inlinePass = std::make_unique<Pass>(Pass{makeWorkerScopes(m_registry), {}, {}, 0, {}, 0});
+    m_inlinePass = std::make_unique<Pass>();
 }
 
 void AnalysisWorker::pump()
@@ -554,12 +591,16 @@ void AnalysisWorker::runPass(Pass& pass, std::chrono::milliseconds wait)
 {
     const bool newFrame = takeLatestFrame(wait);
     try {
+        if (!pass.scopesInitialized) {
+            pass.scopes = makeWorkerScopes(m_registry);
+            pass.scopesInitialized = true;
+        }
         analyzeLatestFrame(pass, newFrame);
     } catch (const std::bad_alloc&) {
-        // Keep the worker alive when host-side output or settings allocation
-        // fails. A later frame retries even if its pixels are unchanged.
+        // A failed settings application may have reconfigured only some
+        // scopes. Withdraw the old reading until a complete pass succeeds.
         pass.lastContentHash.reset();
-        SS_DIAG(Perf, "analysis allocation failed; retrying on the next frame");
+        publishAllocationFailure(pass.framesProcessed);
     }
     if (newFrame) {
         // Publish completion after every analysis/skip path, so callers can
@@ -632,13 +673,9 @@ void AnalysisWorker::publishOutput(Pass& pass, double elapsedMs)
         } catch (const std::bad_alloc&) {
             // Some images may already have been copied. Withdraw the whole
             // partial result before releasing the lock, then retry next frame.
-            m_output.images.clear();
-            m_output.outlines.clear();
-            m_output.accumulateMilliseconds = 0.0;
-            m_output.framesProcessed = pass.framesProcessed;
-            ++m_output.version;
+            clearOutput(m_output, pass.framesProcessed, m_output.version + 1);
             pass.lastContentHash.reset();
-            SS_DIAG(Perf, "analysis output allocation failed; retrying on the next frame");
+            diagEmit(DiagChannel::Perf, "analysis output allocation failed; retrying on the next frame");
         }
     }
     if (std::any_of(scopes.begin(), scopes.end(), [&](const WorkerScope& scope) {
@@ -646,9 +683,30 @@ void AnalysisWorker::publishOutput(Pass& pass, double elapsedMs)
         })) {
         pass.lastContentHash.reset();
     }
-    if (m_outputCallback) {
-        m_outputCallback();
+    notifyOutput();
+}
+
+void AnalysisWorker::notifyOutput() const
+{
+    try {
+        if (m_outputCallback) {
+            m_outputCallback();
+        }
+    } catch (const std::bad_alloc&) {
+        // Notifications can also run from an allocation-recovery path. They
+        // must not escape that catch or invalidate already published output.
+        diagEmit(DiagChannel::Perf, "analysis notification allocation failed; output remains available");
     }
+}
+
+void AnalysisWorker::publishAllocationFailure(uint64_t framesProcessed)
+{
+    {
+        std::lock_guard lock(m_outputMutex);
+        clearOutput(m_output, framesProcessed, m_output.version + 1);
+    }
+    diagEmit(DiagChannel::Perf, "analysis allocation failed; retrying on the next frame");
+    notifyOutput();
 }
 
 }  // namespace sidescopes

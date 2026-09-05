@@ -129,6 +129,10 @@ public:
     AnalysisWorker(const AnalysisWorker&) = delete;
     AnalysisWorker& operator=(const AnalysisWorker&) = delete;
 
+    /// Starts the analysis thread. Failure to create its caller-side state or
+    /// the thread propagates synchronously, with no analysis running; start
+    /// may be retried and stop remains safe. Worker-owned setup allocations
+    /// are contained by the pass and retried on subsequent passes.
     void start();
     void stop();
 
@@ -144,13 +148,16 @@ public:
     /// configuration rather than a degraded one.
     ///
     /// start() and startInline() are alternatives; calling both is a
-    /// programming error and the second is ignored.
+    /// programming error and the second is ignored. Failure to allocate the
+    /// inline state propagates synchronously and leaves startup retryable.
     void startInline();
 
     /// One inline pass. Does nothing unless startInline() opened one, so a
     /// host may call it unconditionally.
     void pump();
 
+    /// Submits a complete settings snapshot. A caller-side allocation failure
+    /// propagates without changing the accepted settings or their version.
     void updateSettings(const AnalysisSettings& settings);
 
     /// Holds analysis without holding the pipeline behind it. Frames are still
@@ -167,6 +174,11 @@ public:
 
     /// Copies the latest output when it is newer than @p lastSeenVersion,
     /// advancing the version. Returns false when nothing new was produced.
+    /// If copying runs out of memory, clears the caller's images, outlines,
+    /// timing and progress, keeps its version at @p lastSeenVersion, and returns
+    /// true so the host redraws the withdrawal. The last-seen version is not
+    /// advanced: the host must keep fetching on later draws, without needing
+    /// another worker publication, until that copy succeeds.
     [[nodiscard]] bool fetchOutput(uint64_t& lastSeenVersion, Output& output) const;
 
     /// Averaged color around a point of the most recent frame, if any. The
@@ -251,6 +263,14 @@ private:
     /// Publishes a completed pass, withdrawing partial copies on allocation
     /// failure and allowing failed scopes to retry unchanged content.
     void publishOutput(Pass& pass, double elapsedMs);
+
+    /// Announces a publication without letting a callback's allocation failure
+    /// escape the worker or discard a result that is already available.
+    void notifyOutput() const;
+
+    /// Withdraws old or partial output without allocating, including when the
+    /// worker could not construct its pass state at all.
+    void publishAllocationFailure(uint64_t framesProcessed);
 
     /// Takes the newest frame from the mailbox into m_latestFrame, returning
     /// whether a frame arrived this pass. Runs only on the thread running the

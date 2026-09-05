@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <exception>
 #include <mutex>
 #include <thread>
 #include <utility>
@@ -446,11 +447,34 @@ void FaceLockController::launchProbe(const AttachDecision& decision, const FaceL
     m_probe.roi = roi;
     m_probe.running.store(true);
     Probe* probe = &m_probe;
-    std::thread([probe, pixels, roi, pixelsPerPoint] {
+    std::thread thread;
+    try {
+        thread = std::thread([probe, pixels, roi, pixelsPerPoint] { runProbe(*probe, *pixels, roi, pixelsPerPoint); });
+        thread.detach();
+    } catch (const std::exception&) {
+        // Do not leave a phantom running probe if construction failed, or
+        // release a started thread's target if detaching it failed.
+        if (thread.joinable()) {
+            thread.join();
+        } else {
+            {
+                std::lock_guard guard(m_probe.mutex);
+                m_probe.faces.clear();
+            }
+            m_probe.ready.store(true);
+            m_probe.running.store(false);
+        }
+        diagEmit(DiagChannel::FaceLock, "face probe launch failed; retrying at the next probe");
+    }
+}
+
+void FaceLockController::runProbe(Probe& probe, const std::vector<uint8_t>& pixels, IntRect roi, float pixelsPerPoint)
+{
+    try {
         FrameView view;
         // Eight-bit by construction: cropProbeRoi narrows a deeper frame while
         // it copies, which is what the detectors require.
-        view.pixels = pixels->data();
+        view.pixels = pixels.data();
         view.strideBytes = roi.width * 4;
         view.width = roi.width;
         view.height = roi.height;
@@ -459,16 +483,18 @@ void FaceLockController::launchProbe(const AttachDecision& decision, const FaceL
             box.x += roi.x;
             box.y += roi.y;
         }
-        {
-            std::lock_guard lock(probe->mutex);
-            probe->faces = std::move(faces);
-        }
-        probe->ready.store(true);
-        // The wake goes out before the running flag clears: the shutdown
-        // drain waits on running, and GLFW must still be alive to hear it.
-        glfwPostEmptyEvent();
-        probe->running.store(false);
-    }).detach();
+        std::lock_guard lock(probe.mutex);
+        probe.faces = std::move(faces);
+    } catch (const std::bad_alloc&) {
+        std::lock_guard lock(probe.mutex);
+        probe.faces.clear();
+        diagEmit(DiagChannel::FaceLock, "face probe allocation failed; retrying at the next probe");
+    }
+    probe.ready.store(true);
+    // The shutdown drain may release this target once running clears. The
+    // wake must have finished before it can tear down the event loop too.
+    glfwPostEmptyEvent();
+    probe.running.store(false);
 }
 
 // The adopted anchor's region, mapped through the same path as a border

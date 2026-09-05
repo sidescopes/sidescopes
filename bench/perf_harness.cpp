@@ -483,7 +483,9 @@ void recordWorker(std::vector<MetricRow>& rows, const WorkerScenario& scenario, 
         {"scenario", scenario.name}, {"region", region.name}, {"pane", pane.name}};
     const double cores = result.wallSeconds > 0.0 ? result.cpuSeconds / result.wallSeconds : 0.0;
     record(rows, "worker-cores " + suffix, cores, "cores", tags);
-    record(rows, "worker-processed " + suffix, static_cast<double>(result.processed), "frames", tags);
+    auto throughputTags = tags;
+    throughputTags.emplace_back("direction", "higher");
+    record(rows, "worker-processed " + suffix, static_cast<double>(result.processed), "frames", throughputTags);
     const double skipped = result.delivered > 0 ? 100.0 * static_cast<double>(result.delivered - result.processed) /
                                                       static_cast<double>(result.delivered)
                                                 : 0.0;

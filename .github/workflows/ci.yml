@@ -46,7 +46,7 @@ jobs:
       - name: Install clang-tidy
         run: sudo apt-get update && sudo apt-get install -y clang-tidy-18
       - name: Configure
-        run: cmake -B build
+        run: cmake -B build -DSIDESCOPES_STRESS_TESTS=ON
       - name: Analyze
         run: |
           # tests/ui is the optional UI-test target; test_windows_platform.cpp
@@ -54,7 +54,7 @@ jobs:
           # database, so clang-tidy cannot parse them here.
           # The loader also compiles into the static test binary, so both it
           # and its tests are covered by this compile database.
-          files=$(git ls-files 'src/core/*.cpp' 'src/core/**/*.cpp' 'src/modules/*.cpp' 'tests/*.cpp' ':(exclude)tests/ui/*' ':(exclude)tests/test_windows_platform.cpp' ':(exclude)tests/native/*')
+          files=$(git ls-files 'src/core/*.cpp' 'src/core/**/*.cpp' 'src/modules/*.cpp' 'tests/*.cpp' ':(exclude)tests/ui/*' ':(exclude)tests/test_windows_platform.cpp' ':(exclude)tests/native/*' ':(exclude)tests/fuzz/*')
           clang-tidy-18 -p build --quiet $files
 
   tidy-macos:
@@ -68,7 +68,7 @@ jobs:
         # generated version header and the fetched ImGui headers must exist
         # before clang-tidy can parse the app layer.
         run: |
-          cmake -B build -DSIDESCOPES_UI_TESTS=ON -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+          cmake -B build -DSIDESCOPES_UI_TESTS=ON -DSIDESCOPES_STRESS_TESTS=ON -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
           cmake --build build
       - name: Analyze
         # The app layer, the macOS platform sources, and the UI tests build only
@@ -78,7 +78,7 @@ jobs:
         # the test files, whose Catch2/test-engine macros use __COUNTER__ (a no-op
         # for the non-test sources).
         run: |
-          files=$(git ls-files 'src/app/*.cpp' 'src/platform/macos/*.mm' 'tests/native/*.mm' 'tests/ui/*.cpp')
+          files=$(git ls-files 'src/app/*.cpp' 'src/platform/macos/*.mm' 'tests/native/*.mm' 'tests/stress/*.mm' 'tests/ui/*.cpp')
           "$(brew --prefix llvm@22)/bin/clang-tidy" -p build --quiet \
             --extra-arg=-isysroot --extra-arg="$(xcrun --show-sdk-path)" \
             --extra-arg=-Wno-c2y-extensions $files
@@ -123,7 +123,7 @@ jobs:
       # someone tried to measure. Two small translation units; the suites
       # themselves still only run when asked.
       - name: Configure
-        run: cmake -B build -DSIDESCOPES_WERROR=ON -DSIDESCOPES_BENCH=ON
+        run: cmake -B build -DSIDESCOPES_WERROR=ON -DSIDESCOPES_BENCH=ON -DSIDESCOPES_STRESS_TESTS=ON
       - name: Build
         run: cmake --build build --config Release
       - name: Test
@@ -174,7 +174,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: Configure
-        run: cmake -B build -DSIDESCOPES_WERROR=ON -DSIDESCOPES_MODULES_DYNAMIC=ON
+        run: cmake -B build -DSIDESCOPES_WERROR=ON -DSIDESCOPES_MODULES_DYNAMIC=ON -DSIDESCOPES_STRESS_TESTS=ON
       - name: Build
         run: cmake --build build --config Release
       - name: Test
@@ -236,12 +236,53 @@ jobs:
       - name: Configure
         run: >
           cmake -B build -DSIDESCOPES_WERROR=ON
+          -DSIDESCOPES_STRESS_TESTS=ON
           -DCMAKE_BUILD_TYPE=RelWithDebInfo
           -DSIDESCOPES_SANITIZE=${{ matrix.sanitizer }}
       - name: Build
         run: cmake --build build
       - name: Test
         run: ctest --test-dir build --output-on-failure --timeout 120
+
+  fuzz:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install Clang and libFuzzer
+        run: sudo apt-get update && sudo apt-get install -y clang-18 clang-tidy-18 libclang-rt-18-dev
+      - name: Configure
+        run: >
+          cmake -B build -DCMAKE_C_COMPILER=clang-18 -DCMAKE_CXX_COMPILER=clang++-18
+          -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_CXX_FLAGS_RELWITHDEBINFO='-O1 -g -DNDEBUG'
+          -DSIDESCOPES_WERROR=ON -DSIDESCOPES_FUZZ_TESTS=ON
+          -DSIDESCOPES_SANITIZE=address,undefined
+      - name: Build
+        run: cmake --build build --parallel 2 --target sidescopes_fuzz_preferences sidescopes_fuzz_geometry sidescopes_fuzz_modules
+      - name: Analyze fuzz entry points
+        run: clang-tidy-18 -p build tests/fuzz/*.cpp
+      - name: Exercise boundaries
+        run: |
+          mkdir -p fuzz-results
+          for boundary in preferences geometry modules; do
+            mkdir -p "fuzz-results/$boundary"
+            python3 -c 'import random,sys; open(sys.argv[1], "wb").write(random.Random(1592598566).randbytes(1200))' "fuzz-results/$boundary/seed"
+            dictionary=()
+            if [ "$boundary" = preferences ]; then
+              dictionary=(-dict=tests/fuzz/preferences.dict)
+            fi
+            "build/tests/fuzz/sidescopes_fuzz_$boundary" \
+              -seed=1592598566 -max_total_time=60 -timeout=10 -rss_limit_mb=2048 \
+              -max_len=4096 -artifact_prefix="fuzz-results/$boundary/" \
+              "${dictionary[@]}" "fuzz-results/$boundary"
+          done
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: fuzz-reproductions
+          path: fuzz-results
 
   # AddressSanitizer over the UI suites, which the portable sanitize job does
   # not build. The pipeline suite drives the worker's frame handoff across

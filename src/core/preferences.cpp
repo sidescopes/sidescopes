@@ -53,7 +53,7 @@ std::map<std::string, std::string, std::less<>> parseKeyValueLines(std::istream&
     std::map<std::string, std::string, std::less<>> values;
     std::string line;
     while (std::getline(input, line)) {
-        if (!line.empty() && line.back() == '\r') {
+        while (!line.empty() && line.back() == '\r') {
             line.pop_back();
         }
         const auto separator = line.find('=');

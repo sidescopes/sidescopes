@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <exception>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -315,24 +316,52 @@ void RegionPicker::launchDisplayFaceScans(const std::vector<PickerDisplay>& pick
         DisplayFaceScan* scan = m_displayFaceScans.back().get();
         scan->displayId = entry.displayId;
         scan->generation = m_facePickGeneration;
-        scan->running.store(true);
-        const uint32_t displayId = entry.displayId;
-        std::thread([scan, displayId, widthPoints] {
-            ScanResult scanned = scanDisplayForFaces(displayId, widthPoints);
-            {
-                std::lock_guard lock(scan->mutex);
-                scan->faces = std::move(scanned.faces);
-                scan->frameWidth = scanned.width;
-                scan->frameHeight = scanned.height;
-                scan->elapsedMs = scanned.elapsedMs;
-            }
-            scan->ready.store(true);
-            // The wake goes out before the running flag clears: the shutdown
-            // drain waits on running, and GLFW must still be alive to hear it.
-            glfwPostEmptyEvent();
-            scan->running.store(false);
-        }).detach();
+        startDisplayFaceScan(*scan, widthPoints);
     }
+}
+
+void RegionPicker::startDisplayFaceScan(DisplayFaceScan& scan, double widthPoints)
+{
+    scan.running.store(true);
+    std::thread thread;
+    try {
+        thread = std::thread([&scan, widthPoints] { runDisplayFaceScan(scan, widthPoints); });
+        thread.detach();
+    } catch (const std::exception&) {
+        // Construction can fail before a thread exists. A detach failure
+        // instead leaves a joinable thread: retain its target until it ends.
+        if (thread.joinable()) {
+            thread.join();
+        } else {
+            scan.ready.store(true);
+            scan.running.store(false);
+        }
+        diagEmit(DiagChannel::Suggestions, "display face scan launch failed; retry on the next picker opening");
+    }
+}
+
+void RegionPicker::runDisplayFaceScan(DisplayFaceScan& scan, double widthPoints)
+{
+    try {
+        ScanResult scanned = scanDisplayForFaces(scan.displayId, widthPoints);
+        std::lock_guard lock(scan.mutex);
+        scan.faces = std::move(scanned.faces);
+        scan.frameWidth = scanned.width;
+        scan.frameHeight = scanned.height;
+        scan.elapsedMs = scanned.elapsedMs;
+    } catch (const std::bad_alloc&) {
+        std::lock_guard lock(scan.mutex);
+        scan.faces.clear();
+        scan.frameWidth = 0;
+        scan.frameHeight = 0;
+        scan.elapsedMs = 0.0;
+        diagEmit(DiagChannel::Suggestions, "display face scan allocation failed; retry on the next picker opening");
+    }
+    scan.ready.store(true);
+    // The shutdown drain waits on running, so the final wake must happen
+    // before that flag allows the session and event loop to be destroyed.
+    glfwPostEmptyEvent();
+    scan.running.store(false);
 }
 
 // Drains every finished display scan into the open picker. Runs each frame,

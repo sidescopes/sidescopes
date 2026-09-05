@@ -23,6 +23,8 @@
 #include <algorithm>
 #include <atomic>
 #include <cstdint>
+#include <new>
+#include <system_error>
 #include <thread>
 #include <vector>
 
@@ -166,16 +168,36 @@ bool supportsFaceDetection()
         return known == 1;
     }
     if (!querying.exchange(true)) {
-        std::thread([] {
-            bool answer = false;
-            try {
-                const FaceApartment apartment;
-                answer = FaceDetector::IsSupported();
-            } catch (...) {
-                answer = false;
-            }
-            supported.store(answer ? 1 : 0);
-        }).detach();
+        std::thread worker;
+        try {
+            worker = std::thread([] {
+                bool answer = false;
+                try {
+                    const FaceApartment apartment;
+                    answer = FaceDetector::IsSupported();
+                } catch (...) {
+                    answer = false;
+                }
+                supported.store(answer ? 1 : 0);
+                diagEmit(DiagChannel::FaceLock,
+                         answer ? "face_support completed supported=1" : "face_support completed supported=0");
+            });
+        } catch (const std::bad_alloc&) {
+            querying.store(false);
+            diagEmit(DiagChannel::FaceLock, "face_support worker allocation failed");
+            return false;
+        } catch (const std::system_error&) {
+            querying.store(false);
+            diagEmit(DiagChannel::FaceLock, "face_support worker creation failed");
+            return false;
+        }
+        try {
+            worker.detach();
+        } catch (const std::system_error&) {
+            // A started query still owns its captures: finish it before the
+            // joinable worker leaves scope if detaching is unavailable.
+            worker.join();
+        }
     }
     return false;
 }
@@ -200,7 +222,16 @@ std::vector<IntRect> detectFaces(const FrameView& frame, float pixelsPerPoint)
         return faces;
     }
 
-    std::thread worker([&] { faces = detectWithDiagnostics(frame, pixelsPerPoint); });
+    std::thread worker;
+    try {
+        worker = std::thread([&] { faces = detectWithDiagnostics(frame, pixelsPerPoint); });
+    } catch (const std::bad_alloc&) {
+        diagEmit(DiagChannel::FaceLock, "face_detection worker allocation failed");
+        return faces;
+    } catch (const std::system_error&) {
+        diagEmit(DiagChannel::FaceLock, "face_detection worker creation failed");
+        return faces;
+    }
     worker.join();
     return faces;
 }

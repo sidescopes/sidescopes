@@ -19,9 +19,12 @@
 #include <atomic>
 #include <chrono>
 #include <cstring>
+#include <new>
+#include <system_error>
 #include <thread>
 #include <utility>
 
+#include "core/diagnostics.h"
 #include "platform/windows/display_identity.h"
 
 namespace sidescopes {
@@ -46,6 +49,27 @@ struct FrameCopyState
     ComPtr<ID3D11Texture2D> staging;
     FrameBuffer buffer;
     uint64_t sequence = 0;
+};
+
+struct AcquiredFrame
+{
+    IDXGIOutputDuplication& duplication;
+
+    ~AcquiredFrame()
+    {
+        duplication.ReleaseFrame();
+    }
+};
+
+struct MappedTexture
+{
+    ID3D11DeviceContext& context;
+    ID3D11Texture2D& texture;
+
+    ~MappedTexture()
+    {
+        context.Unmap(&texture, 0);
+    }
 };
 
 // A frame either reached the mailbox, was skipped this iteration, or hit
@@ -127,10 +151,18 @@ public:
         outputIndex = static_cast<UINT>(std::strtoul(target.identifier.c_str() + separator + 1, nullptr, 10));
 
         m_stopRequested.store(false);
-        m_worker = std::thread([this, adapterIndex, outputIndex, maxFramesPerSecond, &mailbox] {
-            captureLoop(adapterIndex, outputIndex, maxFramesPerSecond, mailbox);
-        });
-        return true;
+        try {
+            m_worker = std::thread([this, adapterIndex, outputIndex, maxFramesPerSecond, &mailbox] {
+                run(adapterIndex, outputIndex, maxFramesPerSecond, mailbox);
+            });
+            return true;
+        } catch (const std::bad_alloc&) {
+            reportStatus("capture worker allocation failed");
+        } catch (const std::system_error&) {
+            reportStatus("could not start the capture worker");
+        }
+        m_stopRequested.store(true);
+        return false;
     }
 
     void stop() override
@@ -147,11 +179,37 @@ public:
     }
 
 private:
-    void reportStatus(const std::string& message)
+    void reportStatus(const char* message)
     {
-        if (m_statusCallback) {
-            m_statusCallback(message);
+        // An empty message still withdraws the stream if memory is too scarce
+        // to store the explanation. The callback must run even in that case.
+        std::string status;
+        try {
+            status = message;
+        } catch (const std::bad_alloc&) {
+            diagEmit(DiagChannel::Perf, "capture status allocation failed");
         }
+        try {
+            if (m_statusCallback) {
+                m_statusCallback(status);
+            }
+        } catch (const std::bad_alloc&) {
+            diagEmit(DiagChannel::Perf, "capture status callback allocation failed");
+        } catch (const std::system_error&) {
+            diagEmit(DiagChannel::Perf, "capture status callback unavailable");
+        }
+    }
+
+    void run(UINT adapterIndex, UINT outputIndex, int maxFramesPerSecond, FrameMailbox& mailbox)
+    {
+        try {
+            captureLoop(adapterIndex, outputIndex, maxFramesPerSecond, mailbox);
+        } catch (const std::bad_alloc&) {
+            reportStatus("capture frame allocation failed");
+        } catch (const std::system_error&) {
+            reportStatus("capture worker unavailable");
+        }
+        m_stopRequested.store(true);
     }
 
     void captureLoop(UINT adapterIndex, UINT outputIndex, int maxFramesPerSecond, FrameMailbox& mailbox)
@@ -188,19 +246,18 @@ private:
             if (acquired == AcquireResult::Retry) {
                 continue;
             }
+            const AcquiredFrame acquiredFrame{*duplication};
 
             ComPtr<ID3D11Texture2D> texture;
             if (SUCCEEDED(resource.As(&texture))) {
                 const FrameOutcome outcome = copyFrame(setup, texture.Get(), state, mailbox);
                 if (outcome == FrameOutcome::Fatal) {
-                    duplication->ReleaseFrame();
                     return;
                 }
                 if (outcome == FrameOutcome::Published) {
                     lastPublish = now;
                 }
             }
-            duplication->ReleaseFrame();
         }
     }
 
@@ -334,20 +391,22 @@ private:
         }
         setup.context->CopyResource(state.staging.Get(), texture);
 
-        D3D11_MAPPED_SUBRESOURCE mapped{};
-        if (FAILED(setup.context->Map(state.staging.Get(), 0, D3D11_MAP_READ, 0, &mapped))) {
-            return FrameOutcome::Skipped;
-        }
         const int width = static_cast<int>(description.Width);
         const int height = static_cast<int>(description.Height);
         const int stride = width * 4;
-        state.buffer.sizeTo(static_cast<std::size_t>(stride) * height);
-        const auto* source = static_cast<const uint8_t*>(mapped.pData);
-        for (int row = 0; row < height; ++row) {
-            std::memcpy(state.buffer.data.data() + static_cast<std::size_t>(row) * stride,
-                        source + static_cast<std::size_t>(row) * mapped.RowPitch, static_cast<std::size_t>(stride));
+        {
+            D3D11_MAPPED_SUBRESOURCE mapped{};
+            if (FAILED(setup.context->Map(state.staging.Get(), 0, D3D11_MAP_READ, 0, &mapped))) {
+                return FrameOutcome::Skipped;
+            }
+            const MappedTexture mappedTexture{*setup.context.Get(), *state.staging.Get()};
+            state.buffer.sizeTo(static_cast<std::size_t>(stride) * height);
+            const auto* source = static_cast<const uint8_t*>(mapped.pData);
+            for (int row = 0; row < height; ++row) {
+                std::memcpy(state.buffer.data.data() + static_cast<std::size_t>(row) * stride,
+                            source + static_cast<std::size_t>(row) * mapped.RowPitch, static_cast<std::size_t>(stride));
+            }
         }
-        setup.context->Unmap(state.staging.Get(), 0);
 
         state.buffer.strideBytes = stride;
         state.buffer.width = width;

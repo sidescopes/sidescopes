@@ -55,6 +55,40 @@ TEST_CASE("start captures the first target when no display is desired")
     CHECK(controller.status() == "capturing primary");
 }
 
+TEST_CASE("A capture failure reported during startup survives startup completion")
+{
+    class EarlyFailureSource : public FakeCaptureSource
+    {
+    public:
+        bool failDuringStart = true;
+
+        bool start(const CaptureTarget& target, int framesPerSecond, FrameMailbox& mailbox) override
+        {
+            const bool started = FakeCaptureSource::start(target, framesPerSecond, mailbox);
+            if (failDuringStart) {
+                fireStatus("capture target disappeared");
+            }
+            return started;
+        }
+    } source;
+
+    source.targets = {makeTarget(7, "primary")};
+    FrameMailbox mailbox;
+    CaptureController controller(source, mailbox);
+    REQUIRE(controller.requestPermission());
+
+    REQUIRE(controller.start());
+    CHECK(controller.dead());
+    CHECK(controller.status() == "capture target disappeared");
+
+    source.failDuringStart = false;
+    controller.service(10.0);
+    CHECK(source.startCount == 2);
+    CHECK(source.stopCount == 1);
+    CHECK_FALSE(controller.dead());
+    CHECK(controller.status() == "capturing primary");
+}
+
 TEST_CASE("A new rate replaces the stream that carries the old one")
 {
     // The rate is fixed when a stream is created, so the only way to change it

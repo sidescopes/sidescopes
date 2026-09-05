@@ -51,6 +51,10 @@ public:
 
     bool faceDetectionSupported = false;
     std::vector<IntRect> faces;
+    /// Optional stress-test gates, configured before work starts and kept
+    /// unchanged until every background probe has drained.
+    std::function<void()> beforeDetection;
+    std::function<double()> clock;
 
     bool applicationHidden = false;
     std::string displayName = "Test display";

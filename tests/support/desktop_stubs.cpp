@@ -13,15 +13,16 @@
 #include "platform/face_detection.h"
 
 // The test binary links no windowing library, so the wake the controllers post
-// when a background thread lands is answered here. The clock is frozen: a
-// controller that waits on it must be driven with the wait already satisfied.
+// when a background thread lands is answered here. The clock is frozen unless
+// a stress test supplies one for paths that wait on real frame delivery.
 extern "C" void glfwPostEmptyEvent(void)
 {
 }
 
 extern "C" double glfwGetTime(void)
 {
-    return 0.0;
+    const auto& clock = sidescopes::test::desktopStubs().clock;
+    return clock ? clock() : 0.0;
 }
 
 extern "C" void glfwWaitEventsTimeout(double)
@@ -180,6 +181,9 @@ void unobserveSystemEvents()
 std::vector<IntRect> detectFaces(const FrameView& view, float pixelsPerPoint)
 {
     g_stubs.recordDetection(view, pixelsPerPoint);
+    if (g_stubs.beforeDetection) {
+        g_stubs.beforeDetection();
+    }
 
     return g_stubs.faces;
 }
@@ -197,6 +201,8 @@ void DesktopStubs::reset()
     displayImage.reset();
     faceDetectionSupported = false;
     faces.clear();
+    beforeDetection = {};
+    clock = {};
     applicationHidden = false;
     displayName = "Test display";
     captureVisible = false;

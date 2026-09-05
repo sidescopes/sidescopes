@@ -124,6 +124,22 @@ private:
 
 }  // namespace
 
+TEST_CASE("Repeated carriage returns are removed in one preferences load", "[preferences]")
+{
+    const TempFile input("repeated-carriage-returns.conf");
+    const TempFile first("normalized-preferences.conf");
+    const TempFile second("reloaded-preferences.conf");
+    std::ofstream(input.path(), std::ios::binary)
+        << "layout.preset1.stack=\r\r\nquality=high\r\r\nwindow_width=640\r\r\n";
+    const auto loaded = loadPreferences(input.path());
+    CHECK(loaded.layoutPresets[0].stack.empty());
+    CHECK(loaded.quality == "high");
+    CHECK(loaded.windowWidth == 640);
+    REQUIRE(savePreferences(loaded, first.path()));
+    REQUIRE(savePreferences(loadPreferences(first.path()), second.path()));
+    CHECK(contentsOf(first.path()) == contentsOf(second.path()));
+}
+
 TEST_CASE("Preferences round-trip through a file")
 {
     Preferences saved;

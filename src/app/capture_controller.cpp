@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <utility>
 
 namespace sidescopes {
 namespace {
@@ -50,8 +51,8 @@ CaptureController::CaptureController(ScreenCaptureSource& source, FrameMailbox& 
     // withdraws the stream, which is all service() needs to start building
     // another.
     m_source.setStatusCallback([this](const std::string& message) {
-        setStatus(message);
         m_streamAlive.store(false);
+        setStatus(message);
     });
 }
 
@@ -117,14 +118,33 @@ bool CaptureController::start()
         target = &*wanted;
     }
 
-    if (!m_source.start(*target, m_frameRate, m_mailbox)) {
-        return false;
+    return startTarget(*target);
+}
+
+bool CaptureController::startTarget(const CaptureTarget& target)
+{
+    std::string startedStatus = "capturing " + target.description;
+    // A backend can report failure before start returns. Its verdict must
+    // survive the caller finishing startup, including its status message.
+    m_streamAlive.store(true);
+    try {
+        if (!m_source.start(target, m_frameRate, m_mailbox)) {
+            m_streamAlive.store(false);
+            return false;
+        }
+    } catch (...) {
+        m_streamAlive.store(false);
+        throw;
     }
 
-    m_capturedDisplay = target->displayId;
-    m_desiredDisplay = target->displayId;
-    setStatus("capturing " + target->description);
-    m_streamAlive.store(true);
+    m_capturedDisplay = target.displayId;
+    m_desiredDisplay = target.displayId;
+    {
+        std::lock_guard lock(m_statusMutex);
+        if (m_streamAlive.load()) {
+            m_status = std::move(startedStatus);
+        }
+    }
     m_running = true;
 
     return true;

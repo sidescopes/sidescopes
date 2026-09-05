@@ -113,6 +113,44 @@ cmake --build build
 ctest --test-dir build --output-on-failure
 ```
 
+The regular suite includes fixed-seed boundary properties and a separate
+allocation-failure executable. Its replacement allocation functions are never
+linked into the application or the other tests.
+
+For longer lifecycle checks, enable the optional stress targets:
+
+```sh
+cmake -B build-stress -DSIDESCOPES_STRESS_TESTS=ON -DSIDESCOPES_WERROR=ON
+cmake --build build-stress
+SIDESCOPES_STRESS_SEED=1592598566 SIDESCOPES_STRESS_CYCLES=1000 \
+    ctest --test-dir build-stress -L stress --output-on-failure
+```
+
+These exercise threaded capture and application controllers through scripted
+desktop interfaces, plus native observer and offscreen picker lifetimes on
+macOS. They do not replace interactive testing of real capture and displays.
+
+Coverage-guided boundary tests require Clang with libFuzzer and statically
+linked scope modules. On macOS, use a complete LLVM installation and configure
+`CMAKE_OBJCXX_COMPILER` to its `clang++` as well.
+
+```sh
+cmake -B build-fuzz -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
+    -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+    -DCMAKE_CXX_FLAGS_RELWITHDEBINFO='-O1 -g -DNDEBUG' \
+    -DSIDESCOPES_FUZZ_TESTS=ON -DSIDESCOPES_SANITIZE=address,undefined
+cmake --build build-fuzz --target sidescopes_fuzz_preferences \
+    sidescopes_fuzz_geometry sidescopes_fuzz_modules
+mkdir -p build-fuzz/corpus/preferences
+build-fuzz/tests/fuzz/sidescopes_fuzz_preferences \
+    -max_total_time=300 -timeout=10 -rss_limit_mb=2048 -max_len=4096 \
+    build-fuzz/corpus/preferences
+```
+
+Run the geometry and modules executables with separate corpus directories.
+Keep any reproducing input and add a focused regression test when fixing a
+failure. Sanitizer and stress builds are unsuitable for performance comparisons.
+
 ## Expectations
 
 - Every change ships with its tests and any needed documentation in the same

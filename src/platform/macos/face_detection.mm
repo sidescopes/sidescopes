@@ -3,7 +3,9 @@
 
 #include <algorithm>
 #include <cmath>
+#include <memory>
 #include <optional>
+#include <type_traits>
 
 #include "platform/face_detection.h"
 
@@ -91,6 +93,8 @@ std::vector<IntRect> detectFaces(const FrameView& frame, float pixelsPerPoint)
     if (wrapped != kCVReturnSuccess || !buffer) {
         return faces;
     }
+    const std::unique_ptr<std::remove_pointer_t<CVPixelBufferRef>, decltype(&CVPixelBufferRelease)> ownedBuffer(
+        buffer, CVPixelBufferRelease);
 
     VNDetectFaceRectanglesRequest* request = [[VNDetectFaceRectanglesRequest alloc] init];
     VNImageRequestHandler* handler = [[VNImageRequestHandler alloc] initWithCVPixelBuffer:buffer options:@{}];
@@ -104,7 +108,6 @@ std::vector<IntRect> detectFaces(const FrameView& frame, float pixelsPerPoint)
             }
         }
     }
-    CVPixelBufferRelease(buffer);
 
     std::sort(faces.begin(), faces.end(), [](const IntRect& a, const IntRect& b) {
         return static_cast<int64_t>(a.width) * a.height > static_cast<int64_t>(b.width) * b.height;
