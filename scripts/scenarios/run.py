@@ -121,10 +121,11 @@ class PreferencesGuard:
 
 
 def _environment(guard, diagnostics_path):
-    environment = {"SIDESCOPES_PREFS_FILE": str(guard.override)}
+    environment = {"SIDESCOPES_PREFS_FILE": str(guard.override), "SIDESCOPES_DIAG": ""}
     if diagnostics_path is not None:
         environment["SIDESCOPES_DIAG"] = "perf"
         environment["SIDESCOPES_DIAG_FILE"] = str(diagnostics_path)
+        environment["SIDESCOPES_DIAG_FLUSH"] = "1"
 
     return environment
 
@@ -136,6 +137,10 @@ def _run_one(scenario, stack, bundle, plan, guard, helper, content_set, diagnost
     window = None
     application = None
     tail = session.DiagnosticTail(diagnostics_path) if diagnostics_path else None
+    if diagnostics_path is not None:
+        # A from-launch window can begin before the new logger opens. Never
+        # mistake the preceding launch's log for this launch's first boundary.
+        diagnostics_path.unlink(missing_ok=True)
     try:
         if scenario.content is not None:
             window = content_module.ContentWindow(helper, plan.content_rect, content_set, mode=scenario.content,
@@ -222,6 +227,7 @@ def _rows(result, build):
         "scenario": result.scenario.id,
         "stack": result.stack,
         "comparable": comparable,
+        "measurement_method": measurement.measurement_method,
     }
     if not comparable:
         common["incomparable_reason"] = ("; ".join(result.warnings) if result.warnings
@@ -231,14 +237,24 @@ def _rows(result, build):
         ("cpu", measurement.cores, "cores", "lower", "processor time over wall time, in cores of one core"),
         ("footprint", measurement.footprint_mb, "MB", "lower", "peak phys_footprint, what Activity Monitor shows"),
         ("resident", measurement.resident_mb, "MB", "lower", "peak resident size, which is NOT the footprint"),
-        ("frames", measurement.frames_per_second, "per second", "none", "rendered frames, reported without a verdict"),
-        ("passes", measurement.passes_per_second, "per second", "none", "analysis passes, reported without a verdict"),
+        ("frames", measurement.frames_per_second, "per second", "none", "observed frame lines over the full window"),
+        ("passes", measurement.passes_per_second, "per second", "none",
+         "observed analysis-output lines over the full window"),
         ("content-cpu", measurement.content_cores, "cores", "none",
          "what the harness's own content window cost, so two runs can be checked for equal load"),
     ) + _tracking_readings(measurement.tracking)
 
-    return [dict(common, metric=f"{kind} {name}", value=round(value, 4), unit=unit, direction=direction, detail=detail)
-            for kind, value, unit, direction, detail in readings]
+    rows = []
+    for kind, value, unit, direction, detail in readings:
+        row = dict(common, metric=f"{kind} {name}", value=round(value, 4),
+                   unit=unit, direction=direction, detail=detail)
+        window = (measurement.windows or {}).get("diagnostics" if kind in ("frames", "passes") else kind)
+        if window is not None:
+            row["window"] = window
+        if kind in ("frames", "passes") and window is None:
+            row.update(comparable=False, incomparable_reason="diagnostics were disabled")
+        rows.append(row)
+    return rows
 
 
 def _tracking_readings(tracking):
@@ -387,6 +403,7 @@ def main(argv=None):
 
     document = {
         "schema": "sidescopes-app-scenarios/1",
+        "measurement_method": session.measurement_method(diagnostics_path is not None),
         "conditions": facts,
         "layout": plan.describe(),
         "profile": {"name": profile.name, "behaviour": profile.summary, "scopes": setup["scopes"],

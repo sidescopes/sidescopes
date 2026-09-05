@@ -53,6 +53,7 @@ def _summary(document):
         "region": "x".join(str(value) for value in document.get("layout", {}).get("region_pixels", [])) + " pixels",
         "content": json.dumps({key: content.get(key) for key in
                                ("kind", "patterns", "photographs", "degraded")}, sort_keys=True),
+        "method": json.dumps(document.get("measurement_method", "legacy-unspecified"), sort_keys=True),
         "build": f"{application.get('version', '?')} {application.get('binary_sha256', '?')} "
                  f"[{document.get('profile', {}).get('name', '?')}]",
     }
@@ -60,7 +61,7 @@ def _summary(document):
 
 # The build is expected to differ - that is usually the point of the comparison.
 # Everything else differing means the two runs are not like for like.
-_CONDITION_KEYS = ("machine", "os", "power", "displays", "region", "content", "build")
+_CONDITION_KEYS = ("machine", "os", "power", "displays", "region", "content", "method", "build")
 
 
 def report_conditions(baseline_document, current_document):
@@ -99,6 +100,9 @@ def compare(baseline, current, threshold, condition_reason=""):
         note = ""
         if condition_reason:
             note = "   NOT COMPARABLE: " + condition_reason
+        elif (before.get("measurement_method", "legacy-unspecified")
+              != after.get("measurement_method", "legacy-unspecified")):
+            note = "   NOT COMPARABLE: measurement methods differ"
         elif before.get("unit", "ns") != unit:
             note = "   NOT COMPARABLE: measurement units differ"
         elif before.get("direction", "lower") != direction:

@@ -16,8 +16,8 @@ What is measured, and in what units:
             Not resident size: for this application the two differ by two
             orders of magnitude, because the graphics driver's arena is charged
             to the process without being mapped into it.
-  frames    Rendered frames a second, counted from the application's own
-            diagnostic channel and timed by its own clock.
+  frames    Complete frame diagnostic lines observed per second over the
+            full measurement window, including idle time.
   passes    Analysis passes a second, from the same place. Frames and passes
             are reported without a verdict: a build that keeps up where another
             dropped frames costs MORE processor time for a better result, so a
@@ -42,9 +42,6 @@ _QUIT_TIMEOUT_SECONDS = 8.0
 # Long enough for the capture stream, the first analysis pass and the window
 # animation to be behind us, so a measurement sees the steady state.
 SETTLE_SECONDS = 3.0
-# The diagnostic sink flushes on an interval; waiting past it means the last
-# lines of a window are counted rather than the next window's first.
-_FLUSH_SECONDS = 0.3
 # A standard titled window's title bar, which is where the content window is
 # grabbed to move it.
 TITLE_BAR_HEIGHT = 28.0
@@ -55,7 +52,7 @@ _REGION_CONFIRM_SECONDS = 3.0
 
 class Measurement:
     def __init__(self, cores, footprint_mb, resident_mb, frames_per_second, passes_per_second, content_cores,
-                 tracking=None):
+                 tracking=None, windows=None, measurement_method=None):
         self.cores = cores
         self.footprint_mb = footprint_mb
         self.resident_mb = resident_mb
@@ -65,6 +62,8 @@ class Measurement:
         # How far the region border trailed the pointer, for the actions that
         # drag it; None for every other scenario.
         self.tracking = tracking
+        self.windows = windows
+        self.measurement_method = measurement_method
 
 
 class ScenarioResult:
@@ -91,6 +90,16 @@ HARNESS_MARKER = "scenario_harness=1"
 # against each other on one binary. Unset leaves the key out entirely, so the
 # application defaults it and a build that predates the setting is unaffected.
 QUALITY_VARIABLE = "SIDESCOPES_SCENARIO_QUALITY"
+
+
+def measurement_method(diagnostics_enabled):
+    return {
+        "version": "observed-window/2",
+        "diagnostics": {"enabled": diagnostics_enabled,
+                        "flush": "every-line" if diagnostics_enabled else "disabled"},
+        # Empty means the build's default; do not guess the resolved quality.
+        "quality_override": {QUALITY_VARIABLE: os.environ.get(QUALITY_VARIABLE, "")},
+    }
 
 
 def preferences_text(stack, window_rect):
@@ -189,41 +198,69 @@ def quit_application(pid):
 
 
 class DiagnosticTail:
-    """Counts the application's own frame and pass lines over a window.
+    """Counts complete lines becoming visible between file-size snapshots.
 
-    Rates come from the timestamps the application wrote, not from the
-    harness's clock, so a flush landing either side of a boundary cannot skew
-    them.
+    Launches use every-line flushing. These are observation boundaries, not
+    exact source-event boundaries: an in-flight write can straddle either end.
+    The diagnostic clock starts inside the app and cannot time our CPU samples.
     """
 
     def __init__(self, path):
         self.path = path
-        self._offset = 0
+        self._start = None
+
+    def _snapshot(self):
+        before = time.monotonic()
+        try:
+            with self.path.open("rb") as handle:
+                state = os.fstat(handle.fileno())
+                after = time.monotonic()
+                # Later appends cannot enter this observation.
+                data = handle.read(state.st_size)
+                if len(data) != state.st_size:
+                    raise RuntimeError("diagnostic log changed while being read")
+                identity = (state.st_dev, state.st_ino)
+        except FileNotFoundError:
+            after = time.monotonic()
+            data, identity = b"", None
+        return data, identity, ((before + after) / 2.0, after - before)
 
     def mark(self):
-        self._offset = self.path.stat().st_size if self.path.exists() else 0
+        self._start = self._snapshot()
 
-    def rates(self):
-        if not self.path.exists():
-            return (0.0, 0.0)
-        with open(self.path, "r", errors="replace") as handle:
-            handle.seek(self._offset)
-            block = handle.read()
-        stamps = {"frame": [], "pass": []}
-        for line in block.splitlines():
+    def finish(self):
+        initial, identity, start = self._start
+        final, final_identity, end = self._snapshot()
+        if final_identity is None:
+            raise RuntimeError("diagnostic log was not produced")
+        if (identity is not None and identity != final_identity) or not final.startswith(initial):
+            raise RuntimeError("diagnostic log rotated or was rewritten during measurement")
+        # A partial line at either boundary belongs to the window in which
+        # its newline becomes visible, even if its source timestamp is earlier.
+        first = initial.rfind(b"\n") + 1
+        last = final.rfind(b"\n") + 1
+        counts = {"frame": 0, "pass": 0}
+        for line in final[first:last].decode(errors="replace").splitlines():
             found = _DIAG_LINE.match(line)
             if found:
-                stamps[found.group(2)].append(float(found.group(1)))
+                counts[found.group(2)] += 1
+        return dict(_window(start, end), counts=counts,
+                    start_byte=first, end_byte=last)
 
-        return (_rate(stamps["frame"]), _rate(stamps["pass"]))
+
+def _window(start, end):
+    duration = end[0] - start[0]
+    if duration <= 0:
+        raise RuntimeError("measurement window has no positive duration")
+    return {"start_seconds": start[0], "end_seconds": end[0], "duration_seconds": duration,
+            "start_sample_span_seconds": start[1], "end_sample_span_seconds": end[1]}
 
 
-def _rate(stamps):
-    if len(stamps) < 2:
-        return 0.0
-    span = stamps[-1] - stamps[0]
-
-    return (len(stamps) - 1) / span if span > 0 else 0.0
+def _process_sample(pid):
+    before = time.monotonic()
+    sample = quartz.process_sample(pid)
+    after = time.monotonic()
+    return sample, ((before + after) / 2.0, after - before)
 
 
 # --- What the harness does while measuring ----------------------------------
@@ -659,8 +696,8 @@ def measure(pid, content_pid, seconds, tail=None, sample_seconds=0.5, action=Non
     if tail is not None:
         tail.mark()
     started = time.monotonic()
-    first = quartz.process_sample(pid)
-    content_first = quartz.process_sample(content_pid) if content_pid else None
+    first, app_start = _process_sample(pid)
+    content_first, content_start = _process_sample(content_pid) if content_pid else (None, None)
     peak_footprint = first.footprint_bytes if first else 0
     peak_resident = first.resident_bytes if first else 0
     while time.monotonic() - started < seconds:
@@ -670,24 +707,32 @@ def measure(pid, content_pid, seconds, tail=None, sample_seconds=0.5, action=Non
             raise RuntimeError("the application exited during the measurement")
         peak_footprint = max(peak_footprint, sample.footprint_bytes)
         peak_resident = max(peak_resident, sample.resident_bytes)
-    elapsed = time.monotonic() - started
-    last = quartz.process_sample(pid)
+    last, app_end = _process_sample(pid)
+    content_last, content_end = _process_sample(content_pid) if content_pid else (None, None)
     if first is None or last is None:
         raise RuntimeError("the application could not be sampled")
-    time.sleep(_FLUSH_SECONDS)
-    frames, passes = tail.rates() if tail is not None else (0.0, 0.0)
+    peak_footprint = max(peak_footprint, last.footprint_bytes)
+    peak_resident = max(peak_resident, last.resident_bytes)
+    if content_pid and (content_first is None or content_last is None):
+        raise RuntimeError("the content window could not be sampled")
+    app_window = _window(app_start, app_end)
+    content_window = _window(content_start, content_end) if content_pid else None
+    diagnostic_window = tail.finish() if tail is not None else None
+    frames = diagnostic_window["counts"]["frame"] / diagnostic_window["duration_seconds"] if tail else 0.0
+    passes = diagnostic_window["counts"]["pass"] / diagnostic_window["duration_seconds"] if tail else 0.0
     content_cores = 0.0
-    if content_first is not None:
-        content_last = quartz.process_sample(content_pid)
-        if content_last is not None:
-            content_cores = (content_last.cpu_nanoseconds - content_first.cpu_nanoseconds) / (elapsed * 1e9)
+    if content_window is not None:
+        content_cores = ((content_last.cpu_nanoseconds - content_first.cpu_nanoseconds)
+                         / (content_window["duration_seconds"] * 1e9))
 
     return Measurement(
-        cores=(last.cpu_nanoseconds - first.cpu_nanoseconds) / (elapsed * 1e9),
+        cores=(last.cpu_nanoseconds - first.cpu_nanoseconds) / (app_window["duration_seconds"] * 1e9),
         footprint_mb=peak_footprint / 1e6,
         resident_mb=peak_resident / 1e6,
         frames_per_second=frames,
         passes_per_second=passes,
         content_cores=content_cores,
         tracking=action.tracking() if hasattr(action, "tracking") else None,
+        windows={"cpu": app_window, "content-cpu": content_window, "diagnostics": diagnostic_window},
+        measurement_method=measurement_method(tail is not None),
     )

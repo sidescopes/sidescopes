@@ -20,7 +20,7 @@ sys.path.insert(0, str(ROOT))
 # These tests exercise orchestration with an explicit fake platform. They run
 # on Linux and Windows too and never read or move the user's real pointer.
 sys.modules['scripts.scenarios.quartz'] = types.ModuleType('quartz')
-from scripts.scenarios import catalog, conditions, content, session
+from scripts.scenarios import catalog, conditions, content, run, session
 
 
 def load_script(name, path):
@@ -148,6 +148,167 @@ class ComparisonTests(unittest.TestCase):
         regression, output = self.compare({'value': 1}, {'value': 2}, condition_reason='different machines')
         self.assertFalse(regression)
         self.assertIn('NOT COMPARABLE: different machines', output)
+
+    def test_method_quality_and_diagnostics_mismatches_are_not_compared(self):
+        with mock.patch.dict(os.environ, {session.QUALITY_VARIABLE: 'standard'}):
+            method = session.measurement_method(True)
+        alternatives = [None, dict(method, version='other'),
+                        dict(method, quality_override={session.QUALITY_VARIABLE: 'high'}),
+                        dict(method, diagnostics={'enabled': False, 'flush': 'disabled'}),
+                        dict(method, diagnostics={'enabled': True, 'flush': 'interval'})]
+        for alternative in alternatives:
+            left, right = {'value': 1, 'measurement_method': method}, {'value': 2}
+            before, after = {'measurement_method': method}, {}
+            if alternative is not None:
+                right['measurement_method'] = alternative
+                after['measurement_method'] = alternative
+            with self.subTest(method=alternative), contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(compare.report_conditions(before, after), ['method'])
+                regression, output = self.compare(left, right)
+                self.assertFalse(regression)
+                self.assertIn('NOT COMPARABLE', output)
+        regression, output = self.compare({'value': 1, 'measurement_method': method},
+                                          {'value': 2, 'measurement_method': method})
+        self.assertTrue(regression)
+        self.assertNotIn('NOT COMPARABLE', output)
+
+
+class MeasurementWindowTests(unittest.TestCase):
+    def test_zero_one_burst_and_continuous_events_use_the_full_window(self):
+        for stamps in ([], [0.2], [n / 20 for n in range(10)], [n * 1.4 for n in range(10)]):
+            with self.subTest(stamps=stamps), tempfile.TemporaryDirectory() as directory, \
+                    mock.patch.object(session.time, 'monotonic', side_effect=[0, 0, 15, 15]):
+                path = pathlib.Path(directory) / 'diagnostics.log'
+                path.write_text('# header\n')
+                tail = session.DiagnosticTail(path)
+                tail.mark()
+                with path.open('a') as handle:
+                    handle.writelines(f't={stamp} perf frame data\n' for stamp in stamps)
+                window = tail.finish()
+                self.assertEqual(window['counts'], {'frame': len(stamps), 'pass': 0})
+                self.assertEqual(window['duration_seconds'], 15)
+                self.assertEqual(window['counts']['frame'] / window['duration_seconds'], len(stamps) / 15)
+
+    def test_visibility_boundaries_handle_delayed_and_incomplete_lines(self):
+        for newline in (b'\n', b'\r\n'):
+            with self.subTest(newline=newline), tempfile.TemporaryDirectory() as directory, \
+                    mock.patch.object(session.time, 'monotonic', side_effect=[10, 10, 25, 25]):
+                path = pathlib.Path(directory) / 'diagnostics.log'
+                initial = b't=0 perf frame excluded' + newline
+                path.write_bytes(initial + b't=1 perf frame partial')
+                tail = session.DiagnosticTail(path)
+                tail.mark()
+                with path.open('ab') as handle:
+                    handle.write(newline + b't=0.5 perf pass delayed' + newline + b't=20 perf frame incomplete')
+                window = tail.finish()
+                # Source timestamps do not define this observation window. A line
+                # completed during it counts; one completed afterwards does not.
+                with path.open('ab') as handle:
+                    handle.write(newline + b't=21 perf pass arrived after the boundary' + newline)
+                self.assertEqual(window['counts'], {'frame': 1, 'pass': 1})
+                self.assertEqual(window['start_byte'], len(initial))
+                self.assertEqual(window['duration_seconds'], 15)
+
+    def test_a_log_created_after_start_is_allowed_but_missing_or_rotated_logs_are_not(self):
+        for change in ('created', 'missing', 'rotated', 'rewritten'):
+            with self.subTest(change=change), tempfile.TemporaryDirectory() as directory, \
+                    mock.patch.object(session.time, 'monotonic', side_effect=[0, 0, 15, 15]):
+                path = pathlib.Path(directory) / 'diagnostics.log'
+                if change in ('rotated', 'rewritten'):
+                    path.write_text('# original header\n')
+                tail = session.DiagnosticTail(path)
+                tail.mark()
+                if change == 'rotated':
+                    path.rename(path.with_suffix('.previous'))
+                if change != 'missing':
+                    path.write_text('t=1 perf frame new\n')
+                if change == 'created':
+                    self.assertEqual(tail.finish()['counts']['frame'], 1)
+                else:
+                    with self.assertRaises(RuntimeError):
+                        tail.finish()
+
+    def test_an_append_after_the_file_size_snapshot_is_excluded(self):
+        with tempfile.TemporaryDirectory() as directory, \
+                mock.patch.object(session.time, 'monotonic', side_effect=[0, 0, 15, 15]):
+            path = pathlib.Path(directory) / 'diagnostics.log'
+            path.write_text('# header\n')
+            tail = session.DiagnosticTail(path)
+            tail.mark()
+            path.write_text('# header\nt=1 perf frame inside\n')
+            fstat = os.fstat
+
+            def append_after_snapshot(fd):
+                state = fstat(fd)
+                with path.open('a') as handle:
+                    handle.write('t=2 perf pass outside\n')
+                return state
+
+            with mock.patch.object(session.os, 'fstat', side_effect=append_after_snapshot):
+                self.assertEqual(tail.finish()['counts'], {'frame': 1, 'pass': 0})
+
+    def test_cpu_denominators_match_each_process_sample_interval(self):
+        clock = [0.0]
+        sleeps, calls = [], []
+        costs = {1: iter([0.02, 0.1, 0.1, 0.02]), 2: iter([0.04, 0.08])}
+
+        def sleep(seconds):
+            sleeps.append(seconds)
+            clock[0] += seconds
+
+        def sample(pid):
+            calls.append(pid)
+            cost = next(costs[pid])
+            midpoint = clock[0] + cost / 2
+            clock[0] += cost
+            final_app = pid == 1 and calls.count(1) == 4
+            return types.SimpleNamespace(cpu_nanoseconds=midpoint * pid * 1e9,
+                                         footprint_bytes=30 if final_app else 10,
+                                         resident_bytes=40 if final_app else 20)
+
+        class Tail:
+            def mark(self):
+                calls.append('mark')
+                clock[0] += 0.02
+
+            def finish(self):
+                calls.append('finish')
+                window = dict(session._window((0, 0), (clock[0], 0)), counts={'frame': 1, 'pass': 0})
+                clock[0] += 3  # Reading/processing diagnostics cannot enter CPU numerators.
+                return window
+
+        with mock.patch.object(session.time, 'monotonic', side_effect=lambda: clock[0]), \
+                mock.patch.object(session.time, 'sleep', side_effect=sleep), \
+                mock.patch.object(session.quartz, 'process_sample', side_effect=sample, create=True):
+            measured = session.measure(1, 2, 1, tail=Tail())
+        self.assertAlmostEqual(measured.cores, 1)
+        self.assertAlmostEqual(measured.content_cores, 2)
+        self.assertEqual(measured.footprint_mb, 30 / 1e6)
+        self.assertEqual(measured.resident_mb, 40 / 1e6)
+        self.assertAlmostEqual(measured.windows['cpu']['duration_seconds'], 1.26)
+        self.assertAlmostEqual(measured.windows['content-cpu']['duration_seconds'], 1.28)
+        self.assertAlmostEqual(measured.windows['content-cpu']['end_sample_span_seconds'], 0.08)
+        self.assertAlmostEqual(measured.frames_per_second, 1 / 1.38)
+        self.assertEqual(calls, ['mark', 1, 2, 1, 1, 1, 2, 'finish'])
+        self.assertEqual(sleeps, [0.5, 0.5])
+
+    def test_method_and_raw_window_evidence_survive_flat_row_export(self):
+        with mock.patch.dict(os.environ, {session.QUALITY_VARIABLE: '  standard  '}):
+            method = session.measurement_method(True)
+        self.assertEqual(method['quality_override'][session.QUALITY_VARIABLE], '  standard  ')
+        with mock.patch.dict(os.environ, {session.QUALITY_VARIABLE: ''}):
+            self.assertEqual(session.measurement_method(False)['quality_override'][session.QUALITY_VARIABLE], '')
+        window = {'counts': {'frame': 1, 'pass': 0}, 'duration_seconds': 15}
+        measured = session.Measurement(1, 2, 3, 1 / 15, 0, 0,
+                                       windows={'diagnostics': window}, measurement_method=method)
+        result = session.ScenarioResult(catalog.scenario_named('idle-region'), 'W', measured)
+        rows = run._rows(result, dict(machine='m', os='o', build='b', version='v'))
+        frame = next(row for row in rows if row['metric'].startswith('frames '))
+        self.assertEqual(frame['window'], window)
+        self.assertEqual(frame['measurement_method'], method)
+        guard = types.SimpleNamespace(override='unused')
+        self.assertEqual(run._environment(guard, pathlib.Path('diagnostics.log'))['SIDESCOPES_DIAG_FLUSH'], '1')
+        self.assertEqual(run._environment(guard, None)['SIDESCOPES_DIAG'], '')
 
 
 class PowerStateTests(unittest.TestCase):
