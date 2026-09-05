@@ -46,8 +46,23 @@ mkdir -p "$OUT"
 
 # Refresh compiler and toolchain paths after SDK upgrades. Disconnected
 # updates reuse fetched dependencies while still permitting initial population.
-emcmake cmake -S "$ROOT" -B "$BUILD" -G Ninja -DCMAKE_BUILD_TYPE=Release \
-    -DFETCHCONTENT_UPDATES_DISCONNECTED=ON
+# A caller may already have configured a different generator, as CI does.
+configure_web() {
+    web_build_dir=$1
+    shift
+    web_generator=Ninja
+    if [ -f "$web_build_dir/CMakeCache.txt" ]; then
+        web_generator=$(sed -n 's/^CMAKE_GENERATOR:INTERNAL=//p' "$web_build_dir/CMakeCache.txt")
+        [ -n "$web_generator" ] || {
+            echo "build-web: no generator recorded in $web_build_dir/CMakeCache.txt" >&2
+            exit 2
+        }
+    fi
+    emcmake cmake -S "$ROOT" -B "$web_build_dir" -G "$web_generator" \
+        -DCMAKE_BUILD_TYPE=Release -DFETCHCONTENT_UPDATES_DISCONNECTED=ON "$@"
+}
+
+configure_web "$BUILD"
 cmake --build "$BUILD"
 
 # Anything named for the lab goes first. The whole directory is what gets
@@ -136,8 +151,7 @@ sed "s|src=\"sidescopes-lab.js\"|src=\"sidescopes-lab.js?b=$DIGEST\"|" \
 # go in as data: URIs, which fetch WILL read from a file:// page.
 if [ "$STANDALONE" -eq 1 ]; then
     SINGLE=$ROOT/build-web-single
-    emcmake cmake -S "$ROOT" -B "$SINGLE" -G Ninja -DCMAKE_BUILD_TYPE=Release \
-        -DFETCHCONTENT_UPDATES_DISCONNECTED=ON -DSIDESCOPES_WEB_SINGLE_FILE=ON
+    configure_web "$SINGLE" -DSIDESCOPES_WEB_SINGLE_FILE=ON
     cmake --build "$SINGLE"
     python3 "$ROOT/scripts/web-standalone.py" \
         --page "$ROOT/src/web/index.html" \

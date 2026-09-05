@@ -1,6 +1,7 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <chrono>
+#include <cstddef>
 #include <fstream>
 #include <iterator>
 #include <string>
@@ -110,7 +111,7 @@ TEST_CASE("Face detection survives repeated independent COM apartments", "[nativ
     // Each call activates the real Windows detector on a fresh worker and
     // tears its apartment down. A stale cached factory can fail on re-entry.
     constexpr int Edge = 128;
-    const std::vector<uint8_t> pixels(Edge * Edge * 4, 0);
+    const std::vector<uint8_t> pixels(static_cast<std::size_t>(Edge) * Edge * 4, 0);
     const FrameView frame{pixels.data(), Edge * 4, Edge, Edge};
     for (int iteration = 0; iteration < 3; ++iteration) {
         CHECK(detectFaces(frame, 1.0f).empty());

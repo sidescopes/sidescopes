@@ -18,7 +18,6 @@
 // directly and two machines compare through cost-per-megapixel.
 
 #include <algorithm>
-#include <charconv>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
@@ -636,9 +635,11 @@ std::optional<Options> parseOptions(const std::vector<std::string>& arguments, s
             }
         } else {
             double seconds = 0.0;
-            const auto parsed = std::from_chars(value.data(), value.data() + value.size(), seconds);
-            if (parsed.ec != std::errc{} || parsed.ptr != value.data() + value.size() || !std::isfinite(seconds) ||
-                seconds < 0.5 || seconds > 3600.0) {
+            std::istringstream input(value);
+            input.imbue(std::locale::classic());
+            input >> std::noskipws >> seconds;
+            if (!input || !input.eof() || value.starts_with('+') || !std::isfinite(seconds) || seconds < 0.5 ||
+                seconds > 3600.0) {
                 problem = "worker seconds must be a finite number between 0.5 and 3600";
                 return std::nullopt;
             }

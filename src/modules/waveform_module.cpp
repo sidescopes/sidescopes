@@ -403,7 +403,7 @@ SsScopeInstance* create(const char* scopeId, const SsHost* host)
 
 }  // namespace
 
-const SsModuleEntry WaveformModuleEntry{
+constexpr SsModuleEntry WaveformModuleEntry{
     SS_ABI_MAJOR, SS_ABI_MINOR, moduleInit, moduleDeinit, scopeCount, descriptor, create,
 };
 

@@ -43,7 +43,7 @@ class PerformanceCliTests(unittest.TestCase):
                    ['--tiers', 'hash,hash'], ['--tiers', ',hash'], ['--tiers', 'hash,,worker'],
                    ['--tiers', 'hash,unknown']]
         invalid += [['--worker-seconds', value]
-                    for value in ['inf', '-inf', 'nan', '1e9999', '0', '0.49', '3601', '1x', '', ' 1']]
+                    for value in ['inf', '-inf', 'nan', '1e9999', '0', '0.49', '3601', '1x', '', ' 1', '1 ', '+1']]
         with tempfile.TemporaryDirectory() as directory:
             output = pathlib.Path(directory) / 'keep.json'
             output.write_text('previous result', encoding='utf-8')

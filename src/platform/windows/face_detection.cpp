@@ -135,6 +135,22 @@ std::vector<IntRect> detectOnOwnApartment(const FrameView& frame, float pixelsPe
     return faces;
 }
 
+// Detection errors produce an empty result; the log retains the reason so
+// callers can distinguish detector failure from an image containing no faces.
+std::vector<IntRect> detectWithDiagnostics(const FrameView& frame, float pixelsPerPoint)
+{
+    try {
+        std::vector<IntRect> faces = detectOnOwnApartment(frame, pixelsPerPoint);
+        SS_DIAG(FaceLock, "face_detection completed faces=%zu", faces.size());
+        return faces;
+    } catch (const winrt::hresult_error& error) {
+        SS_DIAG(FaceLock, "face_detection failed hresult=0x%08x", static_cast<uint32_t>(error.code()));
+    } catch (...) {
+        SS_DIAG(FaceLock, "face_detection failed with an unexpected exception");
+    }
+    return {};
+}
+
 }  // namespace
 
 bool supportsFaceDetection()
@@ -184,18 +200,7 @@ std::vector<IntRect> detectFaces(const FrameView& frame, float pixelsPerPoint)
         return faces;
     }
 
-    std::thread worker([&] {
-        try {
-            faces = detectOnOwnApartment(frame, pixelsPerPoint);
-            SS_DIAG(FaceLock, "face_detection completed faces=%zu", faces.size());
-        } catch (const winrt::hresult_error& error) {
-            SS_DIAG(FaceLock, "face_detection failed hresult=0x%08x", static_cast<uint32_t>(error.code()));
-            faces.clear();
-        } catch (...) {
-            SS_DIAG(FaceLock, "face_detection failed with an unexpected exception");
-            faces.clear();
-        }
-    });
+    std::thread worker([&] { faces = detectWithDiagnostics(frame, pixelsPerPoint); });
     worker.join();
     return faces;
 }

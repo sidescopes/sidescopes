@@ -172,16 +172,74 @@ class NoticeCollectionTests(unittest.TestCase):
 
 @unittest.skipIf(sys.platform == 'win32', 'the browser build wrapper is a POSIX shell script')
 class BrowserPackagingTests(unittest.TestCase):
+    def prepare_fixture(self, root):
+        for relative in ['scripts', 'src/web/fonts', 'assets/brand/icons/linux', 'bin']:
+            (root / relative).mkdir(parents=True)
+        for relative in ['scripts/build-web.sh', 'scripts/web-standalone.py', 'src/web/index.html',
+                         'src/web/fonts/Inter-OFL.txt', 'src/web/fonts/RobotoMono-OFL.txt']:
+            shutil.copy2(ROOT / relative, root / relative)
+        for name in ['sidescopes-32.png', 'sidescopes-256.png']:
+            (root / 'assets/brand/icons/linux' / name).write_bytes(b'icon')
+        return dict(os.environ, PATH=str(root / 'bin') + os.pathsep + os.environ['PATH'],
+                    SIDESCOPES_WEB_SKIP_SAMPLES='1')
+
+    def run_wrapper(self, root, environment):
+        result = subprocess.run(['sh', str(root / 'scripts/build-web.sh'), '--standalone'],
+                                env=environment, capture_output=True, text=True, timeout=60)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def check_real_generator(self, preconfigured_generator):
+        # Real CMake validates the cached generator and builds the artifacts;
+        # only Emscripten is replaced, so these tests need no SDK or downloads.
+        with tempfile.TemporaryDirectory(prefix='browser packaging ') as directory:
+            root = pathlib.Path(directory)
+            environment = self.prepare_fixture(root)
+            environment['CMAKE_GENERATOR'] = 'Ninja' if preconfigured_generator else 'Unix Makefiles'
+            configure = root / 'bin/emcmake'
+            configure.write_text('#!/bin/sh\nexec "$@"\n')
+            configure.chmod(0o755)
+            (root / 'engine.js').write_text('// SINGLE_FILE\n')
+            (root / 'engine.wasm').write_bytes(b'module')
+            (root / 'CMakeLists.txt').write_text('''cmake_minimum_required(VERSION 3.20)
+project(BrowserPackagingFixture LANGUAGES NONE)
+file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/licenses")
+file(WRITE "${CMAKE_BINARY_DIR}/licenses/Dependency.txt" "Dependency notice.\\n")
+add_custom_target(lab ALL
+    COMMAND "${CMAKE_COMMAND}" -E copy "${CMAKE_SOURCE_DIR}/engine.js" "${CMAKE_BINARY_DIR}/sidescopes-lab.js"
+    COMMAND "${CMAKE_COMMAND}" -E copy "${CMAKE_SOURCE_DIR}/engine.wasm" "${CMAKE_BINARY_DIR}/sidescopes-lab.wasm")
+''')
+            build_dirs = [root / 'build-web-cmake', root / 'build-web-single']
+            if preconfigured_generator:
+                for build in build_dirs:
+                    result = subprocess.run(['cmake', '-S', str(root), '-B', str(build),
+                                             '-G', preconfigured_generator, '-DCMAKE_BUILD_TYPE=Debug'],
+                                            env=environment, capture_output=True, text=True, timeout=60)
+                    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            for _ in range(2):
+                self.run_wrapper(root, environment)
+                for build in build_dirs:
+                    cache = (build / 'CMakeCache.txt').read_text()
+                    generator = preconfigured_generator or 'Ninja'
+                    self.assertIn(f'CMAKE_GENERATOR:INTERNAL={generator}\n', cache)
+                    self.assertRegex(cache, r'(?m)^CMAKE_BUILD_TYPE:[^=]+=Release$')
+                    self.assertRegex(cache, r'(?m)^FETCHCONTENT_UPDATES_DISCONNECTED:[^=]+=ON$')
+                self.assertRegex(cache, r'(?m)^SIDESCOPES_WEB_SINGLE_FILE:[^=]+=ON$')
+                self.assertEqual((root / 'build-web/sidescopes-lab.wasm').read_bytes(), b'module')
+                self.assertIn('window.__STANDALONE = true',
+                              (root / 'build-web/sidescopes-lab.html').read_text())
+
+    @unittest.skipUnless(shutil.which('cmake') and shutil.which('make'), 'requires CMake and Make')
+    def test_preconfigured_makefiles_builds_keep_their_generator(self):
+        self.check_real_generator('Unix Makefiles')
+
+    @unittest.skipUnless(shutil.which('cmake') and shutil.which('ninja'), 'requires CMake and Ninja')
+    def test_cold_builds_select_ninja(self):
+        self.check_real_generator(None)
+
     def test_repeated_builds_refresh_both_toolchains_and_ship_font_notices(self):
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)
-            for relative in ['scripts', 'src/web/fonts', 'assets/brand/icons/linux', 'bin']:
-                (root / relative).mkdir(parents=True)
-            for relative in ['scripts/build-web.sh', 'scripts/web-standalone.py', 'src/web/index.html',
-                             'src/web/fonts/Inter-OFL.txt', 'src/web/fonts/RobotoMono-OFL.txt']:
-                shutil.copy2(ROOT / relative, root / relative)
-            for name in ['sidescopes-32.png', 'sidescopes-256.png']:
-                (root / 'assets/brand/icons/linux' / name).write_bytes(b'icon')
+            environment = self.prepare_fixture(root)
             configure = root / 'bin/emcmake'
             configure.write_text(f"#!{sys.executable}\n" + r'''import json,pathlib,sys
 root = pathlib.Path(__file__).resolve().parents[1]
@@ -190,6 +248,7 @@ with (root / 'configured.jsonl').open('a') as output:
 build = pathlib.Path(sys.argv[sys.argv.index('-B') + 1])
 build.mkdir(exist_ok=True)
 (build / 'build.ninja').write_text('configured')
+(build / 'CMakeCache.txt').write_text('CMAKE_GENERATOR:INTERNAL=Ninja\n')
 (build / 'sidescopes-lab.js').write_text('// SINGLE_FILE\n')
 (build / 'sidescopes-lab.wasm').write_bytes(b'module')
 (build / 'licenses').mkdir(exist_ok=True)
@@ -201,11 +260,8 @@ for notice in (root / 'src/web/fonts').glob('*.txt'):
             build = root / 'bin/cmake'
             build.write_text('#!/bin/sh\nexit 0\n')
             build.chmod(0o755)
-            environment = dict(os.environ, PATH=str(root / 'bin') + os.pathsep + os.environ['PATH'],
-                               SIDESCOPES_WEB_SKIP_SAMPLES='1')
             for _ in range(2):
-                subprocess.run(['sh', str(root / 'scripts/build-web.sh'), '--standalone'],
-                               env=environment, check=True, capture_output=True, text=True)
+                self.run_wrapper(root, environment)
             configured = [json.loads(line) for line in (root / 'configured.jsonl').read_text().splitlines()]
             self.assertEqual(len(configured), 4)
             self.assertTrue(all('-DFETCHCONTENT_UPDATES_DISCONNECTED=ON' in args for args in configured))
