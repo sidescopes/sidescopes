@@ -174,6 +174,7 @@ catch_discover_tests(sidescopes_tests)
 # Replacing global allocation functions is confined to this executable so
 # failure injection cannot change the behavior of unrelated test suites.
 add_executable(sidescopes_allocation_tests
+    test_allocation_failure.cpp
     test_analysis_allocations.cpp
     test_detection_allocations.cpp
     support/allocation_failure.cpp
