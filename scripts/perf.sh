@@ -24,6 +24,11 @@ cmake --build "$build_dir" --target sidescopes_perf >/dev/null
 results_dir="$repo_root/bench-results"
 mkdir -p "$results_dir"
 out_json="$results_dir/perf-$machine-$commit.json"
+previous_argument=""
+for argument do
+    [ "$previous_argument" != --out ] || out_json="$argument"
+    previous_argument="$argument"
+done
 
 "$build_dir/bench/sidescopes_perf" \
     --machine "$machine" --os "$os" --commit "$commit" --out "$out_json" "$@"

@@ -57,7 +57,7 @@ struct Fixture
         REQUIRE(capture.start());
         desktop.faceDetectionSupported = true;
         desktop.displayGeometry = DisplayGeometry{0.0, 0.0, 200.0, 100.0};
-        desktop.faces = {{40, 40, 20, 20}};
+        desktop.faces.push_back({40, 40, 20, 20});
         desktop.displayImage = CapturedImage{PixelStorage(std::size_t{200} * 100 * 4, 8), 200, 100};
     }
 

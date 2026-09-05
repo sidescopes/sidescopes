@@ -1,6 +1,7 @@
 #include "core/environment.h"
 
 #include <cstdlib>
+#include <memory>
 
 namespace sidescopes {
 
@@ -12,10 +13,8 @@ std::string environmentValue(const char* name)
     if (_dupenv_s(&value, &size, name) != 0 || value == nullptr) {
         return std::string();
     }
-    std::string result(value);
-    std::free(value);
-
-    return result;
+    const std::unique_ptr<char, decltype(&std::free)> ownedValue(value, std::free);
+    return std::string(value);
 #else
     const char* value = std::getenv(name);
 
