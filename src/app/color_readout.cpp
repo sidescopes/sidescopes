@@ -46,20 +46,13 @@ PickerColumns measurePickerColumns()
 
 }  // namespace
 
-// The color picker pane: the sampled cursor color as a large
-// swatch with its values spelled out three ways at once - 0-255,
-// percent, and hex - because matching a reference means never
-// converting in your head. Clicking the swatch or the hex line
-// copies the hex; the pinned colors (P) ride along as small
-// swatches with the same click.
+// The sampled color and pinned references share a comparator, with additional
+// readouts and a reference deck as the available space permits.
 void drawColorPicker(const std::optional<FloatColor>& liveColor, PinBoard& pins, ImFont* monospaceFont)
 {
     const ImVec2 area = ImGui::GetContentRegionAvail();
     const float lineHeight = ImGui::GetTextLineHeightWithSpacing();
     const ImGuiStyle& style = ImGui::GetStyle();
-    if (pins.comparator() >= static_cast<int>(pins.size())) {
-        pins.selectComparator(-1);
-    }
     if (!liveColor) {
         drawPickerNoColor(area, lineHeight);
 

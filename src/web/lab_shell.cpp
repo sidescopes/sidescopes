@@ -12,6 +12,8 @@ namespace sidescopes {
 namespace shell {
 namespace {
 
+constexpr float TitleBarHeight = 26.0f;
+
 /// A binding name to the Dear ImGui key it stands for. The names are the
 /// ones ShortcutResolver uses, so this is a translation and not a second
 /// opinion about what any key means.
@@ -40,6 +42,32 @@ namespace {
 }
 
 }  // namespace
+
+float drawWindowChrome(const ImVec2& position, const ImVec2& size)
+{
+    ImDrawList* under = ImGui::GetBackgroundDrawList();
+    // A soft shadow, built from a few expanding rounded rectangles - enough
+    // to lift the window off what is behind it.
+    for (int step = 6; step >= 1; --step) {
+        const float spread = static_cast<float>(step) * 1.6f;
+        under->AddRectFilled(ImVec2{position.x - spread, position.y - spread + 2.0f},
+                             ImVec2{position.x + size.x + spread, position.y + size.y + spread + 2.0f},
+                             IM_COL32(0, 0, 0, 16), 10.0f + spread);
+    }
+
+    ImDrawList* draw = ImGui::GetWindowDrawList();
+    const ImVec2 corner{position.x + size.x, position.y + size.y};
+    draw->AddRectFilled(position, ImVec2{corner.x, position.y + TitleBarHeight}, IM_COL32(38, 36, 35, 255), 10.0f,
+                        ImDrawFlags_RoundCornersTop);
+    const char* name = "SideScopes";
+    const ImVec2 text = ImGui::CalcTextSize(name);
+    draw->AddText(ImVec2{position.x + (size.x - text.x) * 0.5f, position.y + (TitleBarHeight - text.y) * 0.5f},
+                  IM_COL32(196, 190, 186, 255), name);
+    // One hairline around the whole thing: the edge the operating system
+    // would have drawn.
+    draw->AddRect(position, corner, IM_COL32(74, 70, 67, 255), 10.0f, 0, 1.0f);
+    return TitleBarHeight;
+}
 
 bool keyPressed(std::string_view name)
 {
@@ -120,13 +148,9 @@ EM_JS(void, jsSetPinCursor, (int rgb), {
     if (!canvas) {
         return;
     }
-    // The image is a function of the COLOUR alone. The pointer's position is
-    // the compositor's business, which is the whole point of drawing here.
-    if (canvas.__pinCursorRgb === rgb) {
-        return;
-    }
-    canvas.__pinCursorRgb = rgb;
-
+    // C++ caches the current cursor, including transitions between tools.
+    // A second colour cache here would skip restoring an unchanged swatch
+    // after a different tool replaced the canvas cursor.
     const HOTSPOT = 12, ARM = 8, GAP = 2, OFFSET = 7, SWATCH = 13;
     const side = HOTSPOT + OFFSET + SWATCH + 2;
     const ratio = window.devicePixelRatio || 1;

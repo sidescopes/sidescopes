@@ -16,13 +16,17 @@ build everywhere.
 
 ### macOS
 
-Xcode Command Line Tools provide the compiler. The rest comes from
-[Homebrew](https://brew.sh):
+macOS 14 or later is required. Xcode Command Line Tools provide the compiler.
+The rest comes from [Homebrew](https://brew.sh):
 
 ```sh
 xcode-select --install
 brew install cmake ninja clang-format
 ```
+
+Release archives contain both Apple silicon and Intel code. To reproduce that
+build locally, configure with `'-DCMAKE_OSX_ARCHITECTURES=arm64;x86_64'`; ordinary
+development builds use the host architecture.
 
 ### Windows
 

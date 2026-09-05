@@ -1,28 +1,12 @@
-// The browser lab: the application's own scope panes, over a picture you
-// can put a region on.
-//
-// This is not a port of SideScopes and cannot become one — no browser API
-// reads another program's window, so the region tools have nothing to stand
-// on. What it is, is the INSTRUMENT: the same engines, drawn by the same
-// PaneArea the desktop build draws with, so the graticule, the target
-// boxes, the skin-tone line, the dividers and the styling are the shipped
-// ones rather than a second implementation that could drift from them.
-//
-// The one thing rebuilt rather than reused is the region border, because
-// the desktop draws it as a native window on the desktop and a page has no
-// desktop. It follows the same rules — see web/region_editor.h.
-//
-// The picture comes from the page: a bundled photograph, or a file the
-// visitor chose. Nothing is uploaded, because there is no code here that
-// could.
+// Browser Lab host for the shared scope pipeline and pane UI. The host
+// supplies local images and a virtual display region in place of native
+// capture and desktop overlays. Loaded image pixels remain in the browser.
 
 #include <emscripten/emscripten.h>
 
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
-#include <filesystem>
-#include <fstream>
 #include <map>
 #include <memory>
 #include <optional>
@@ -53,7 +37,6 @@
 #include "app/tour_overlay.h"
 #include "core/analysis_worker.h"
 #include "core/frame.h"
-#include "core/page_allocator.h"
 #include "core/preferences.h"
 #include "imgui.h"
 #include "modules/module_registry.h"
@@ -71,8 +54,6 @@
 
 namespace sidescopes {
 namespace {
-
-constexpr float TitleBarHeight = 26.0f;
 
 /// Everything the lab owns, in one place so the animation-frame callback
 /// can reach it without a pile of globals.
@@ -115,11 +96,8 @@ struct Lab
     /// tracks itself.
     bool settingsDirty = false;
 
-    /// The context menu's model wants both; neither does anything here -
-    /// nothing can be attached in a page, and presets are not wired yet -
-    /// but the menu is built from the real types rather than a stand-in.
+    /// No window can be attached in a page; the menu reads the empty state.
     AttachController attach;
-    LayoutPresetStore presets;
     /// The layout chip and its save button: the middle of the application's
     /// toolbar, and without it the row reads as two stray icons.
     std::unique_ptr<LayoutPresetController> presetController;
@@ -148,8 +126,7 @@ struct Lab
     /// its position when the image beneath it changes.
     RegionEditor::Placement picturePlacement;
     RegionEditor::Placement displayPlacement;
-    /// The desktop starter policy needs the display and application window
-    /// rectangles, which are known only after the first layout pass.
+    /// The Lab starter policy needs geometry from the first layout pass.
     bool starterRegionDue = true;
     /// The three colours the pane input distinguishes, and they are not the
     /// same value. The READOUT follows the cursor wherever it is - on the
@@ -295,8 +272,7 @@ void analyse()
     return true;
 }
 
-/// Applies the desktop application's first-run placement policy once the
-/// virtual display and application window have real geometry.
+/// Applies the Lab starter-region policy once the virtual display is laid out.
 [[nodiscard]] bool initializeStarterRegion(const ImVec2& position, const ImVec2& area, const ShellLayout& layout)
 {
     if (!g_lab.starterRegionDue) {
@@ -404,8 +380,6 @@ void applyOutcome(const PaneRenderOutcome& outcome)
     }
 }
 
-/// One shortcut action, carried out. Split from the scan so neither grows
-/// past what one screen holds.
 /// A preset outcome, applied. The controller does the work; the host pushes
 /// what changed, exactly as the desktop one does.
 void applyPreset(const LayoutPresetOutcome& outcome)
@@ -418,7 +392,20 @@ void applyPreset(const LayoutPresetOutcome& outcome)
         g_lab.panes->configureProjections();
         g_lab.settingsDirty = true;
     }
-    g_lab.saveDue = true;
+    g_lab.saveDue = g_lab.saveDue || outcome.preferencesSaveDue;
+}
+
+void cancelRegionInteraction()
+{
+    if (g_lab.pinArmed) {
+        g_lab.pinArmed = false;
+        g_lab.pinning = false;
+        g_lab.panes->setStatus("Pinning cancelled");
+        return;
+    }
+    PaneRenderOutcome outcome;
+    outcome.clearRegion = true;
+    applyOutcome(outcome);
 }
 
 void applyShortcut(const ShortcutAction& action)
@@ -432,10 +419,10 @@ void applyShortcut(const ShortcutAction& action)
     case ShortcutAction::Kind::SetZoom:
         g_lab.view->setZoom(action.zoomLevel);
         g_lab.settingsDirty = true;
+        g_lab.saveDue = true;
         break;
     case ShortcutAction::Kind::ClearRegion:
-        outcome.clearRegion = true;
-        applyOutcome(outcome);
+        cancelRegionInteraction();
         break;
     case ShortcutAction::Kind::RequestPick:
         // Through the picker, not straight to the tool: the toolbar
@@ -452,17 +439,8 @@ void applyShortcut(const ShortcutAction& action)
                                                          ? action.presetSlot
                                                          : g_lab.presetController->activeSlot()));
         break;
-    // NO `default:`, deliberately, and this is the whole guard. Twice a
-    // catch-all here silently swallowed an action the resolver was emitting -
-    // D did nothing, then the preset digits did nothing - and neither
-    // failed, they just quietly did not happen. Listing every kind makes the
-    // NEXT one a compile error under -Werror instead, which is how App's own
-    // switch has always been written and why App never lost one.
-    //
-    // The window chords belong to the browser: a page that intercepted them
-    // would be taking the reader's own window controls away, and the platform
-    // seams already answer false for all three so the resolver never emits
-    // them here.
+    // Exhaustive so newly resolved actions cannot be silently dropped.
+    // Window chords belong to the browser and are disabled by its platform.
     case ShortcutAction::Kind::HideApplication:
     case ShortcutAction::Kind::MinimizeWindow:
     case ShortcutAction::Kind::QuitWindow:
@@ -499,9 +477,18 @@ void drawContextMenu(int clickedPane, bool overApplication)
 {
     if (overApplication && ImGui::IsMouseClicked(ImGuiMouseButton_Right) && !nativeContextMenuAvailable()) {
         const ContextMenuModel model{
-            *g_lab.view,  *g_lab.registry,        *g_lab.shortcuts,        g_lab.analysis.scopeParams,
-            g_lab.attach, g_lab.presets.all(),    g_lab.pins->empty(),     0,
-            1.0f,         QualityLevel::Standard, /*regionSelected=*/true,
+            *g_lab.view,
+            *g_lab.registry,
+            *g_lab.shortcuts,
+            g_lab.analysis.scopeParams,
+            g_lab.attach,
+            g_lab.presetController->all(),
+            g_lab.pins->empty(),
+            g_lab.presetController->activeSlot(),
+            1.0f,
+            QualityLevel::Standard,
+            g_lab.region.hasRegion(),
+            /*applicationControlsAvailable=*/false,
         };
         std::vector<NativeMenuItem> items;
         g_lab.menuParams.clear();
@@ -526,10 +513,14 @@ void drawContextMenu(int clickedPane, bool overApplication)
     } else if (const std::optional<ShortcutAction> action = menuShortcutAction(menu.chosen)) {
         applyShortcut(*action);
     }
-    // Everything else is left alone on purpose. The layout orientation lives
-    // with the pane renderer rather than the view and has no setter reachable
-    // from here; the presets, the settings window, the diagnostics and the
-    // window chords are desktop actions a page does not carry out.
+    if (const std::optional<LayoutOrientation> orientation = menuOrientation(menu.chosen)) {
+        g_lab.view->layout().setOrientation(*orientation);
+        g_lab.settingsDirty = true;
+    }
+    if (menu.chosen == MenuClearPinnedMarkers) {
+        g_lab.pins->clear();
+    }
+    g_lab.saveDue = true;
 }
 
 void drawShell();
@@ -554,35 +545,6 @@ void frame()
     g_lab.graphics->endFrame();
 }
 
-/// The window's own chrome: a title bar, an edge, and a shadow under it.
-/// The desktop gets all three from the operating system; a page gets none
-/// of them, and without them the application reads as a frame around the
-/// picture rather than a window floating over it.
-void drawWindowChrome(const ImVec2& position, const ImVec2& size)
-{
-    ImDrawList* under = ImGui::GetBackgroundDrawList();
-    // A soft shadow, built from a few expanding rounded rectangles - enough
-    // to lift the window off what is behind it.
-    for (int step = 6; step >= 1; --step) {
-        const float spread = static_cast<float>(step) * 1.6f;
-        under->AddRectFilled(ImVec2{position.x - spread, position.y - spread + 2.0f},
-                             ImVec2{position.x + size.x + spread, position.y + size.y + spread + 2.0f},
-                             IM_COL32(0, 0, 0, 16), 10.0f + spread);
-    }
-
-    ImDrawList* draw = ImGui::GetWindowDrawList();
-    const ImVec2 corner{position.x + size.x, position.y + size.y};
-    draw->AddRectFilled(position, ImVec2{corner.x, position.y + TitleBarHeight}, IM_COL32(38, 36, 35, 255), 10.0f,
-                        ImDrawFlags_RoundCornersTop);
-    const char* name = "SideScopes";
-    const ImVec2 text = ImGui::CalcTextSize(name);
-    draw->AddText(ImVec2{position.x + (size.x - text.x) * 0.5f, position.y + (TitleBarHeight - text.y) * 0.5f},
-                  IM_COL32(196, 190, 186, 255), name);
-    // One hairline around the whole thing: the edge the operating system
-    // would have drawn.
-    draw->AddRect(position, corner, IM_COL32(74, 70, 67, 255), 10.0f, 0, 1.0f);
-}
-
 /// The application's window: the toolbar, the panes and the status strip,
 /// drawn as its own window rather than as a band of the page - because on a
 /// desktop that is exactly what it is.
@@ -598,8 +560,9 @@ void drawAppWindow(const ShellLayout& layout, const PaneRenderInput& input)
     ImGui::Begin("##app", nullptr,
                  ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings);
 
-    drawWindowChrome(ImVec2{layout.appPos.x, layout.appPos.y}, ImVec2{layout.appSize.x, layout.appSize.y});
-    ImGui::Dummy(ImVec2{0.0f, TitleBarHeight});
+    const float titleBarHeight =
+        shell::drawWindowChrome(ImVec2{layout.appPos.x, layout.appPos.y}, ImVec2{layout.appSize.x, layout.appSize.y});
+    ImGui::Dummy(ImVec2{0.0f, titleBarHeight});
 
     applyShortcuts();
     // Each toolbar group is wrapped so the walk-through can point at it: a
@@ -607,13 +570,13 @@ void drawAppWindow(const ShellLayout& layout, const PaneRenderInput& input)
     // groups are for, and it means the tour follows the controls rather than
     // coordinates written down once and left to rot.
     ImGui::BeginGroup();
-    applyOutcome(g_lab.panes->drawScopeToggles(shell::modifiers().shift));
+    applyOutcome(g_lab.panes->drawScopeToggles());
     ImGui::EndGroup();
     g_lab.anchors.note("chooser", ImGui::GetItemRectMin(), ImGui::GetItemRectMax());
     ImGui::SameLine();
     // The preset chip sits between the scope selector and the region tools,
     // as it does on the desktop.
-    (void)g_lab.presetPicker->draw(g_lab.panes->icons());
+    applyPreset(g_lab.presetPicker->draw(g_lab.panes->icons()));
     ImGui::SameLine();
     applyOutcome(g_lab.panes->drawRegionToolIcons(input));
 
@@ -652,13 +615,22 @@ void answerPickRequest()
     if (*want == RegionPickerMode::PinColor) {
         // Pinning needs no desktop: it samples the picture, which is right
         // here. Refusing it was simply wrong.
+        if (g_lab.region.armed()) {
+            g_lab.region.clear();
+            g_lab.settingsDirty = true;
+        }
+        g_lab.pinning = false;
         g_lab.pinArmed = true;
         g_lab.panes->setStatus("Click a color to pin it, or drag to pin an area's average");
 
         return;
     }
     if (*want == RegionPickerMode::DrawGlobal) {
+        g_lab.pinArmed = false;
+        g_lab.pinning = false;
         g_lab.region.armDraw();
+        g_lab.panes->releaseTraces();
+        g_lab.settingsDirty = true;
         g_lab.panes->setStatus("Drag on the display to draw a region");
 
         return;
@@ -787,14 +759,7 @@ void savePreferencesNow()
     saved.layoutPresets = g_lab.presetController->all();
     saved.layoutActiveSlot = g_lab.presetController->activeSlot();
     saved.tourSettled = g_lab.tour->settled() ? 1 : 0;
-    if (!savePreferences(saved, preferencesFilePath())) {
-        return;
-    }
-    const sidescopes::MappedFile file = sidescopes::mapFileReadOnly(preferencesFilePath().c_str());
-    if (!file.valid()) {
-        return;
-    }
-    storage::writeSaved(std::string(reinterpret_cast<const char*>(file.data), file.size));
+    storage::save(saved);
 }
 
 /// Puts a previous visit back, if this browser holds one. Whatever is
@@ -803,26 +768,12 @@ void savePreferencesNow()
 /// preference would be worse than one that forgets.
 void restorePreferencesNow()
 {
-    const std::string text = storage::readSaved();
-    if (text.empty()) {
-        // Nothing remembered, so this is a first visit - which is precisely
-        // who the walk-through is for. Recorded explicitly rather than left
-        // to the read below, because that path is not taken at all here and a
-        // tour that opened for everyone EXCEPT a newcomer would be the exact
-        // opposite of the point.
+    const std::optional<Preferences> previous = storage::load();
+    if (!previous) {
         g_lab.tourSettled = false;
-
         return;
     }
-    std::filesystem::create_directories(std::filesystem::path(preferencesFilePath()).parent_path());
-    {
-        std::ofstream out(preferencesFilePath(), std::ios::binary | std::ios::trunc);
-        if (!out) {
-            return;
-        }
-        out.write(text.data(), static_cast<std::streamsize>(text.size()));
-    }
-    const Preferences saved = loadPreferences(preferencesFilePath());
+    const Preferences& saved = *previous;
     restorePreferences(saved, *g_lab.view, *g_lab.pins, *g_lab.shortcuts, g_lab.analysis);
     g_lab.presetController->restore(saved.layoutPresets, saved.layoutActiveSlot);
     // Applied by the caller once the tour exists: it is built after this, so
@@ -845,10 +796,6 @@ void buildScopes()
     g_lab.capture = createScreenCaptureSource();
     g_lab.captureController = std::make_unique<CaptureController>(*g_lab.capture, g_lab.mailbox);
     (void)g_lab.captureController->requestPermission();
-    // A paused pipeline is not a dead one — the controller's own words. The
-    // lab asks for no stream because there is no screen to stream, which is
-    // precisely what suspend() describes; without it dead() is true and the
-    // panes draw a "capture was interrupted" page over the scopes.
     // The picture arrives through the capture source like any other frame, so
     // the stream is genuinely running - the target is the page rather than a
     // display, and the host feeds it.
@@ -967,9 +914,8 @@ EMSCRIPTEN_KEEPALIVE void labStartTour()
 /// the adjustment controls are part of it rather than of the application, and
 /// they are the stops the walk-through names that this side cannot measure.
 ///
-/// Their y is NEGATIVE - both sit above the canvas - which is exactly what
-/// puts the bubble at the top of the application, pointing the right way. The
-/// page highlights the control itself, since nothing drawn here can reach it.
+/// Controls outside the canvas may have negative coordinates. The page
+/// highlights them itself, since the canvas cannot draw beyond its bounds.
 EMSCRIPTEN_KEEPALIVE void labSetPageAnchor(const char* id, float left, float top, float right, float bottom)
 {
     using namespace sidescopes;

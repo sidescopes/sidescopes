@@ -57,7 +57,8 @@ inline constexpr int MaxParallelChunks = 4;
 /// caller, spawning nothing. Each invocation must confine its writes to state
 /// private to its chunk index or to output rows in its own range; nothing
 /// between chunks is synchronized, so this is data-race free only under that
-/// discipline.
+/// discipline. Worker-thread invocations must not throw. If thread creation
+/// or the caller invocation throws, every started thread is joined first.
 template <typename Body>
 void runParallelChunks(int chunkCount, int rowCount, const Body& body)
 {
@@ -69,6 +70,19 @@ void runParallelChunks(int chunkCount, int rowCount, const Body& body)
     const int base = rowCount / chunkCount;
     const int remainder = rowCount % chunkCount;
     std::vector<std::thread> threads;
+
+    struct JoinThreads
+    {
+        std::vector<std::thread>& threads;
+
+        ~JoinThreads()
+        {
+            for (auto& thread : threads) {
+                thread.join();
+            }
+        }
+    } join{threads};
+
     threads.reserve(static_cast<std::size_t>(chunkCount) - 1);
     int begin = 0;
     for (int chunk = 0; chunk < chunkCount; ++chunk) {
@@ -80,9 +94,6 @@ void runParallelChunks(int chunkCount, int rowCount, const Body& body)
             body(chunk, begin, end);
         }
         begin = end;
-    }
-    for (std::thread& thread : threads) {
-        thread.join();
     }
 }
 

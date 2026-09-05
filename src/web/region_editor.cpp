@@ -523,8 +523,9 @@ void RegionEditor::announceCursor(const Placement& placement) const
     } else if (over != ZoneNone) {
         const bool horizontal = (over & (ZoneLeft | ZoneRight)) != 0;
         const bool vertical = (over & (ZoneTop | ZoneBottom)) != 0;
+        const bool northwestSoutheast = ((over & ZoneLeft) != 0) == ((over & ZoneTop) != 0);
         ImGui::SetMouseCursor(horizontal && vertical
-                                  ? ImGuiMouseCursor_ResizeNWSE
+                                  ? (northwestSoutheast ? ImGuiMouseCursor_ResizeNWSE : ImGuiMouseCursor_ResizeNESW)
                                   : (horizontal ? ImGuiMouseCursor_ResizeEW : ImGuiMouseCursor_ResizeNS));
     }
 }

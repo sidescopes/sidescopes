@@ -15,18 +15,20 @@ namespace sidescopes {
 class ScopeView;
 class ScopeRegistry;
 
-/// @brief The keyboard, and the colour under the pointer.
+/// @brief Browser replacements for the desktop's window chrome and input.
 ///
-/// The two pieces of the application shell that the lab has to supply
-/// itself, because the desktop takes both from the operating system: keys
-/// arrive through GLFW callbacks the shell installs, and the colour comes
-/// from a screen sample. Neither exists here in that form — the keys come
-/// from Dear ImGui, and the "screen" is a picture in a pane.
+/// The lab paints its own window decoration, reads keys through Dear ImGui,
+/// and samples the supplied picture. The desktop gets window decoration and
+/// screen samples from the operating system and keys through native callbacks.
 ///
 /// The MAPPING is not rebuilt. ShortcutResolver owns which key means what,
-/// and this only answers "is that key down" and applies what it returns, so
+/// and this only answers "is that key down" for the host to resolve, so
 /// the lab's keyboard cannot drift from the application's.
 namespace shell {
+
+/// Paints the title bar, border, and shadow supplied by the operating system
+/// on desktop. Returns the title-bar height to reserve above the window content.
+[[nodiscard]] float drawWindowChrome(const ImVec2& position, const ImVec2& size);
 
 /// Whether the named binding went down this frame. Names are what a binding
 /// holds: a letter A-Z, "Escape", a digit "1"-"9", or "Comma".

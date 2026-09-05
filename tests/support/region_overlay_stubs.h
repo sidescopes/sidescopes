@@ -34,12 +34,15 @@ struct RegionOverlayStubs
     /// What the picker overlay answers: whether it can open at all, and the
     /// poll it reports each frame.
     bool pickOpens = true;
+    bool pickActive = false;
+    bool pickCancelled = false;
     RegionPickPoll poll;
     /// What the border's live edit reports each frame.
     RegionBorderEdit borderEdit;
 
     /// What the picker overlay was told.
     int pickCancels = 0;
+    int pickPolls = 0;
     /// The pin tool's cursor chip, pushed every poll: empty when the sample
     /// could not be taken.
     std::optional<FloatColor> chipColor;

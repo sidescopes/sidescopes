@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <filesystem>
 #include <map>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -70,6 +71,13 @@ struct ShortcutBindings
     std::string clearRegion = "Escape";
 };
 
+/// A saved desktop position; either coordinate may be negative.
+struct WindowPosition
+{
+    int x = 0;
+    int y = 0;
+};
+
 /// Everything worth remembering between sessions. Serialized as a small
 /// key=value text file: trivially diffable, no dependency, and unknown keys
 /// are ignored so older builds tolerate newer files.
@@ -105,9 +113,6 @@ struct Preferences
     /// means none named, and every scope falls back to the order the modules
     /// register in.
     std::string scopeOrder;
-    /// The order the user keeps the scopes in - the sequence the menu lists
-    /// them in and the panes follow - in the same token vocabulary as
-    /// @ref scopeStack, and naming scopes whether or not they are on screen.
     /// How strongly the graticule is drawn, a multiplier on its shipped ink and
     /// one of the discrete GraticuleStrengths. Bounded below rather than
     /// switchable off, so a stored value can quieten the graticule but never
@@ -144,8 +149,8 @@ struct Preferences
     /// "standard" or "high". The app resolves it; anything else reads as the
     /// default.
     std::string quality = "standard";
-    int windowX = -1;  ///< Negative selects the compact first-run placement.
-    int windowY = -1;
+    /// Absent until a placement is saved; starts beside the primary work area.
+    std::optional<WindowPosition> windowPosition;
     int windowWidth = 340;
     int windowHeight = 500;
     ShortcutBindings shortcuts;
@@ -186,7 +191,8 @@ inline constexpr char PreferencesFileVariable[] = "SIDESCOPES_PREFS_FILE";
 /// unknown keys are skipped.
 [[nodiscard]] Preferences loadPreferences(const std::filesystem::path& file);
 
-/// Creates parent directories as needed. Returns false when writing failed.
+/// Creates parent directories as needed and replaces the previous file only
+/// after the new contents close successfully. Returns false on failure.
 [[nodiscard]] bool savePreferences(const Preferences& preferences, const std::filesystem::path& file);
 
 }  // namespace sidescopes

@@ -67,6 +67,10 @@ void drawHandleDot(CGFloat x, CGFloat y)
         sidescopes::g_borderKeyPresses.push_back({std::string(), false, true});
         return;
     }
+    if (event.modifierFlags & (NSEventModifierFlagCommand | NSEventModifierFlagControl | NSEventModifierFlagOption)) {
+        [super keyDown:event];
+        return;
+    }
     NSString* characters = event.charactersIgnoringModifiers.uppercaseString;
     if (characters.length == 0) {
         [super keyDown:event];
@@ -414,11 +418,8 @@ void drawHandleDot(CGFloat x, CGFloat y)
     if (zone == sidescopes::ZoneNone) {
         return;
     }
-    // The band is mouse-only: its borderless window can never become
-    // key, so a click here would otherwise strand the keyboard with no
-    // key window at all - every application shortcut dead until the
-    // scope window is clicked. Hand the keyboard to the application
-    // window instead.
+    // Button clicks return the keyboard to the application window. A drag
+    // gives the border panel key status below.
     for (NSWindow* candidate in NSApp.orderedWindows) {
         if (candidate == self.window) {
             continue;

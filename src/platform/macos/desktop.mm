@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <cstdlib>
+#include <memory>
 
 namespace sidescopes {
 
@@ -503,6 +504,34 @@ float monospaceFontScale()
     return 1.0f;
 }
 
+namespace {
+
+struct SystemObserver
+{
+    NSNotificationCenter* center = nil;
+    id token = nil;
+    std::shared_ptr<std::function<void()>> callback;
+};
+
+std::vector<SystemObserver> g_systemObservers;
+id g_escapeMonitor = nil;
+
+void addSystemObserver(NSNotificationCenter* center, NSNotificationName name,
+                       std::shared_ptr<std::function<void()>> callback)
+{
+    id token = [center addObserverForName:name
+                                   object:nil
+                                    queue:[NSOperationQueue mainQueue]
+                               usingBlock:^(NSNotification*) {
+                                 if (*callback) {
+                                     (*callback)();
+                                 }
+                               }];
+    g_systemObservers.push_back({center, token, std::move(callback)});
+}
+
+}  // namespace
+
 void observeSystemWake(std::function<void()> callback)
 {
     // Waking the display or unlocking the session can leave a capture
@@ -512,28 +541,14 @@ void observeSystemWake(std::function<void()> callback)
     // application to force a restart - cheap on a screen that was just
     // black.
     auto shared = std::make_shared<std::function<void()>>(std::move(callback));
-    const auto observe = ^(NSNotification*) {
-      (*shared)();
-    };
-    [[[NSWorkspace sharedWorkspace] notificationCenter] addObserverForName:NSWorkspaceScreensDidWakeNotification
-                                                                    object:nil
-                                                                     queue:[NSOperationQueue mainQueue]
-                                                                usingBlock:observe];
-    [[[NSWorkspace sharedWorkspace] notificationCenter] addObserverForName:NSWorkspaceSessionDidBecomeActiveNotification
-                                                                    object:nil
-                                                                     queue:[NSOperationQueue mainQueue]
-                                                                usingBlock:observe];
-    [[NSDistributedNotificationCenter defaultCenter] addObserverForName:@"com.apple.screenIsUnlocked"
-                                                                 object:nil
-                                                                  queue:[NSOperationQueue mainQueue]
-                                                             usingBlock:observe];
+    NSNotificationCenter* workspace = [[NSWorkspace sharedWorkspace] notificationCenter];
+    addSystemObserver(workspace, NSWorkspaceScreensDidWakeNotification, shared);
+    addSystemObserver(workspace, NSWorkspaceSessionDidBecomeActiveNotification, shared);
+    addSystemObserver([NSDistributedNotificationCenter defaultCenter], @"com.apple.screenIsUnlocked", shared);
     // Display topology changes (a monitor connected, removed, or given a
     // new resolution) can leave the stream running against a stale
     // configuration; a restart is cheap and re-resolves the display.
-    [[NSNotificationCenter defaultCenter] addObserverForName:NSApplicationDidChangeScreenParametersNotification
-                                                      object:nil
-                                                       queue:[NSOperationQueue mainQueue]
-                                                  usingBlock:observe];
+    addSystemObserver([NSNotificationCenter defaultCenter], NSApplicationDidChangeScreenParametersNotification, shared);
 }
 
 void observeSystemSleep(std::function<void()> callback)
@@ -544,27 +559,17 @@ void observeSystemSleep(std::function<void()> callback)
     // retry that runs while the screen is locked is what binds a stream to the
     // wrong session in the first place.
     auto shared = std::make_shared<std::function<void()>>(std::move(callback));
-    const auto observe = ^(NSNotification*) {
-      (*shared)();
-    };
-    [[[NSWorkspace sharedWorkspace] notificationCenter] addObserverForName:NSWorkspaceScreensDidSleepNotification
-                                                                    object:nil
-                                                                     queue:[NSOperationQueue mainQueue]
-                                                                usingBlock:observe];
-    [[[NSWorkspace sharedWorkspace] notificationCenter] addObserverForName:NSWorkspaceSessionDidResignActiveNotification
-                                                                    object:nil
-                                                                     queue:[NSOperationQueue mainQueue]
-                                                                usingBlock:observe];
-    [[NSDistributedNotificationCenter defaultCenter] addObserverForName:@"com.apple.screenIsLocked"
-                                                                 object:nil
-                                                                  queue:[NSOperationQueue mainQueue]
-                                                             usingBlock:observe];
+    NSNotificationCenter* workspace = [[NSWorkspace sharedWorkspace] notificationCenter];
+    addSystemObserver(workspace, NSWorkspaceScreensDidSleepNotification, shared);
+    addSystemObserver(workspace, NSWorkspaceSessionDidResignActiveNotification, shared);
+    addSystemObserver([NSDistributedNotificationCenter defaultCenter], @"com.apple.screenIsLocked", shared);
 }
 
 namespace {
 
 // The activation observer's token, kept so teardown can retire it.
 id g_foregroundObserver = nil;
+std::shared_ptr<std::function<void()>> g_foregroundCallback;
 
 }  // namespace
 
@@ -577,17 +582,24 @@ void observeForegroundChanges(std::function<void()> callback)
     // application switches and arrive on this observer.
     unobserveForegroundChanges();
     auto shared = std::make_shared<std::function<void()>>(std::move(callback));
+    g_foregroundCallback = shared;
     g_foregroundObserver = [[[NSWorkspace sharedWorkspace] notificationCenter]
         addObserverForName:NSWorkspaceDidActivateApplicationNotification
                     object:nil
                      queue:[NSOperationQueue mainQueue]
                 usingBlock:^(NSNotification*) {
-                  (*shared)();
+                  if (*shared) {
+                      (*shared)();
+                  }
                 }];
 }
 
 void unobserveForegroundChanges()
 {
+    if (g_foregroundCallback) {
+        *g_foregroundCallback = {};
+        g_foregroundCallback.reset();
+    }
     if (g_foregroundObserver) {
         [[[NSWorkspace sharedWorkspace] notificationCenter] removeObserver:g_foregroundObserver];
         g_foregroundObserver = nil;
@@ -596,21 +608,37 @@ void unobserveForegroundChanges()
 
 void observeEscapeWithoutKeyWindow(std::function<void()> callback)
 {
-    // Clicking the region border activates the application without
-    // giving any window keyboard focus - the border refuses key status
-    // by design, so grabbing it never pulls the keyboard out of the
-    // editor. Key presses in that state reach the application object and
-    // die there; a local monitor picks them up. Local monitors never see
-    // other applications' input.
+    // Some activation paths leave the application without a key window.
+    // Escape in that state reaches the application object rather than a
+    // view, so a local monitor handles it. Local monitors never see other
+    // applications' input.
     auto shared = std::make_shared<std::function<void()>>(std::move(callback));
-    [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskKeyDown
-                                          handler:^NSEvent*(NSEvent* event) {
-                                            if (event.keyCode == 53 && NSApp.keyWindow == nil) {
-                                                (*shared)();
-                                                return nil;  // consumed
-                                            }
-                                            return event;
-                                          }];
+    if (g_escapeMonitor) {
+        [NSEvent removeMonitor:g_escapeMonitor];
+    }
+    g_escapeMonitor = [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskKeyDown
+                                                            handler:^NSEvent*(NSEvent* event) {
+                                                              if (event.keyCode == 53 && NSApp.keyWindow == nil) {
+                                                                  (*shared)();
+                                                                  return nil;  // consumed
+                                                              }
+                                                              return event;
+                                                            }];
+}
+
+void unobserveSystemEvents()
+{
+    for (const SystemObserver& observer : g_systemObservers) {
+        // A notification already queued for the main thread must also lose
+        // access to the application before its state is destroyed.
+        *observer.callback = {};
+        [observer.center removeObserver:observer.token];
+    }
+    g_systemObservers.clear();
+    if (g_escapeMonitor) {
+        [NSEvent removeMonitor:g_escapeMonitor];
+        g_escapeMonitor = nil;
+    }
 }
 
 }  // namespace sidescopes

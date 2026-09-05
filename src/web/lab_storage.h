@@ -1,6 +1,8 @@
 #pragma once
 
-#include <string>
+#include <optional>
+
+#include "core/preferences.h"
 
 namespace sidescopes {
 namespace storage {
@@ -24,14 +26,13 @@ namespace storage {
 /// Nothing here leaves the browser. It is the same promise the rest of the
 /// lab makes about the pictures.
 
-/// The saved text, or empty when this browser has none yet.
-[[nodiscard]] std::string readSaved();
+/// Restores browser storage through the shared preferences parser. Nothing
+/// saved, or storage unavailable, returns no previous session.
+[[nodiscard]] std::optional<Preferences> load();
 
-/// Keeps @p text for next time. Silently does nothing where local storage is
-/// unavailable - a private window with storage disabled, say - because a
-/// lab that refused to run without somewhere to save would be worse than
-/// one that simply forgets.
-void writeSaved(const std::string& text);
+/// Writes through the shared preferences serializer and mirrors the file into
+/// browser storage. Storage failures leave the current session usable.
+void save(const Preferences& preferences);
 
 }  // namespace storage
 }  // namespace sidescopes

@@ -35,21 +35,6 @@ using namespace sidescopes;
 // shell owns the toolkit for as long as it runs.
 AppCallbackState* g_monitorCallbackState = nullptr;
 
-// Applies the saved window placement and keeps the window on screen.
-//
-// Saved sizes are in the platform's own window units (physical pixels on
-// Windows, points on macOS), so they are restored with an explicit set
-// after creation: passing them through glfwCreateWindow instead would
-// run them through GLFW_SCALE_TO_MONITOR's creation-time scaling on
-// Windows, growing the window by the monitor scale on every launch.
-// Position first, size second - crossing into a differently scaled
-// monitor triggers the hint's automatic resize, and the explicit size
-// must land after it.
-//
-// The rectangle is then clamped into the work area of the monitor it
-// mostly lies on. A window that starts beyond the desktop edge shows
-// its never-composited strip as white while a drag holds the frame
-// loop; a window that never starts off screen has no such strip.
 struct MonitorWorkArea
 {
     int x;
@@ -82,9 +67,12 @@ GLFWmonitor* monitorUnderWindow(GLFWwindow* window)
         int monitorWidth = 0;
         int monitorHeight = 0;
         glfwGetMonitorWorkarea(monitors[index], &monitorX, &monitorY, &monitorWidth, &monitorHeight);
-        const long long overlapWidth = std::min<long long>(x + width, monitorX + monitorWidth) - std::max(x, monitorX);
+        const long long overlapWidth =
+            std::min(static_cast<long long>(x) + width, static_cast<long long>(monitorX) + monitorWidth) -
+            std::max(x, monitorX);
         const long long overlapHeight =
-            std::min<long long>(y + height, monitorY + monitorHeight) - std::max(y, monitorY);
+            std::min(static_cast<long long>(y) + height, static_cast<long long>(monitorY) + monitorHeight) -
+            std::max(y, monitorY);
         const long long overlap = std::max<long long>(overlapWidth, 0) * std::max<long long>(overlapHeight, 0);
         if (overlap > bestOverlap) {
             bestOverlap = overlap;
@@ -103,13 +91,32 @@ MonitorWorkArea workAreaOf(GLFWmonitor* monitor)
     return work;
 }
 
+// Applies the saved window placement and keeps the window on screen.
+//
+// Saved sizes are in the platform's own window units (physical pixels on
+// Windows, points on macOS), so they are restored with an explicit set
+// after creation: passing them through glfwCreateWindow instead would
+// run them through GLFW_SCALE_TO_MONITOR's creation-time scaling on
+// Windows, growing the window by the monitor scale on every launch.
+// Position first, size second - crossing into a differently scaled
+// monitor triggers the hint's automatic resize, and the explicit size
+// must land after it.
+//
+// The rectangle is then clamped into the work area of the monitor it
+// mostly lies on. A window that starts beyond the desktop edge shows
+// its never-composited strip as white while a drag holds the frame
+// loop; a window that never starts off screen has no such strip.
 void restoreWindowPlacement(GLFWwindow* window, const Preferences& startup)
 {
     GLFWmonitor* display = nullptr;
-    if (startup.windowX >= 0) {
-        glfwSetWindowPos(window, startup.windowX, startup.windowY);
-        glfwSetWindowSize(window, startup.windowWidth, startup.windowHeight);
+    if (startup.windowPosition) {
+        glfwSetWindowPos(window, startup.windowPosition->x, startup.windowPosition->y);
         display = monitorUnderWindow(window);
+        if (display != nullptr) {
+            const MonitorWorkArea work = workAreaOf(display);
+            glfwSetWindowSize(window, std::clamp(startup.windowWidth, 1, std::max(1, work.width)),
+                              std::clamp(startup.windowHeight, 1, std::max(1, work.height)));
+        }
     } else {
         display = glfwGetPrimaryMonitor();
         if (display != nullptr) {
@@ -316,7 +323,16 @@ MainWindow createMainWindow(const Preferences& startup, const VersionInfo& versi
     // Hidden until the saved placement is applied: geometry settles before the
     // first paint, and no intermediate rectangle flashes.
     glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
-    GLFWwindow* window = glfwCreateWindow(startup.windowWidth, startup.windowHeight, "SideScopes", nullptr, nullptr);
+    GLFWmonitor* primary = glfwGetPrimaryMonitor();
+    if (primary == nullptr) {
+        glfwTerminate();
+
+        return {};
+    }
+    const MonitorWorkArea work = workAreaOf(primary);
+    const int width = std::clamp(startup.windowWidth, 1, std::max(1, work.width));
+    const int height = std::clamp(startup.windowHeight, 1, std::max(1, work.height));
+    GLFWwindow* window = glfwCreateWindow(width, height, "SideScopes", nullptr, nullptr);
     if (!window) {
         glfwTerminate();
 
@@ -327,11 +343,9 @@ MainWindow createMainWindow(const Preferences& startup, const VersionInfo& versi
     glfwSetWindowUserPointer(window, &callbackState);
     restoreWindowPlacement(window, startup);
     glfwShowWindow(window);
-    // AppKit centres a newly shown GLFW window even when it was positioned
-    // while hidden. Reapply the same placement before the first frame so a
-    // fresh session actually opens at the left and saved positions survive
-    // the transition to a visible native window. Other platforms simply see
-    // the already-applied rectangle again.
+    // AppKit recenters a newly shown GLFW window. Reapply placement before
+    // the first frame so saved coordinates and the first-run position survive
+    // the transition from hidden to visible.
     restoreWindowPlacement(window, startup);
     // A development build wears its version in the title bar; a release keeps
     // the plain name. Deterministic product captures ask for the release title
@@ -343,11 +357,8 @@ MainWindow createMainWindow(const Preferences& startup, const VersionInfo& versi
     glfwSetWindowIconifyCallback(window, [](GLFWwindow* iconifyTarget, int) {
         static_cast<AppCallbackState*>(glfwGetWindowUserPointer(iconifyTarget))->iconifyChanged.store(true);
     });
-    // A monitor arriving or leaving is the one change the capture layer cannot
-    // see for itself, and it is evidence that a capture which could not be
-    // established may now succeed. Recovery does not depend on it - the retry
-    // runs regardless - so all this does is skip the wait the failures before
-    // it had earned.
+    // A display change can make capture available again; skip the recovery
+    // backoff instead of waiting for its normal retry.
     g_monitorCallbackState = &callbackState;
     glfwSetMonitorCallback([](GLFWmonitor*, int) {
         if (g_monitorCallbackState != nullptr) {

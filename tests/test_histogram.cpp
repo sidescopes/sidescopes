@@ -57,10 +57,9 @@ TEST_CASE("Histogram places uniform color at its channel values")
     scope.configure(fullHeight);
     scope.accumulate(frame.view(), IntRect{0, 0, 32, 32});
 
-    // Smoothing spreads one bin's population to its neighbors; the true
-    // value stays the tallest.
     // Smoothing and interpolation spread one bin's population to its
     // neighborhood; the true value stays the tallest.
+    REQUIRE_FALSE(litValues(scope.image(), 0).empty());
     CHECK(litValues(scope.image(), 0).front() >= 7);
     CHECK(litValues(scope.image(), 0).back() <= 13);
     CHECK(barHeight(scope.image(), 10, 0) >= Histogram::Height - 20);
@@ -115,7 +114,7 @@ TEST_CASE("Histogram bar heights order by pixel population")
 
 TEST_CASE("Histogram is invariant to sampling stride and region size")
 {
-    // 3:1 color mix arranged so both strides and the half-width region see
+    // 3:1 color mix arranged so both strides and the half-height region see
     // the same ratio; per-sample normalization must yield identical images.
     TestFrame frame(64, 64, 255);
     frame.fillColumns(0, 48, Color{64, 64, 64});
@@ -130,6 +129,8 @@ TEST_CASE("Histogram is invariant to sampling stride and region size")
     strided.configure(settings);
     strided.accumulate(frame.view(), IntRect{0, 0, 64, 64});
 
+    CHECK(reference.image().rgba == strided.image().rgba);
+    strided.accumulate(frame.view(), IntRect{0, 16, 64, 32});
     CHECK(reference.image().rgba == strided.image().rgba);
 }
 

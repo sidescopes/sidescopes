@@ -39,8 +39,7 @@ public:
         float scale = 1.0f;
     };
 
-    /// Starts from the same display-relative region the desktop application
-    /// chooses on a fresh run.
+    /// Sets a display-relative region and clamps it to the virtual display.
     void reset(const RegionOfInterest& region, int displayWidth, int displayHeight);
 
     /// Drops the region entirely. The scopes then read nothing, which is the

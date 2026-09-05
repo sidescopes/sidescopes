@@ -263,4 +263,14 @@ TEST_CASE("Side-table ids continue across scopes in one menu build")
     CHECK(items.back().actionId == ParamMenuActionBase + 3);
 }
 
+TEST_CASE("An unrepresentable choice value never overflows an integer conversion")
+{
+    std::vector<NativeMenuItem> items;
+    std::vector<ParamMenuAction> actions;
+    appendScopeChoiceMenus(TintScope, {{"tint", 1e300}}, true, items, actions);
+    REQUIRE(items.size() == 2);
+    CHECK_FALSE(items[0].checked);
+    CHECK_FALSE(items[1].checked);
+}
+
 }  // namespace sidescopes

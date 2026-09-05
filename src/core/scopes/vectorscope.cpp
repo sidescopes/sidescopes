@@ -105,14 +105,24 @@ void Vectorscope::configure(const VectorscopeSettings& settings)
 
 void Vectorscope::resize(int size)
 {
+    const std::size_t codeCount = static_cast<std::size_t>(CodeGridSize) * CodeGridSize;
+    const std::size_t imageCount = static_cast<std::size_t>(size) * size;
+    const std::size_t upsampledCount = size > CodeGridSize ? imageCount : 0;
+    // Reserve every allocation before changing sizes or geometry. If any
+    // allocation fails, the previous layout remains usable for a later pass.
+    m_bins.reserve(codeCount);
+    m_smoothed.reserve(codeCount);
+    m_upsampled.reserve(upsampledCount);
+    m_tint.reserve(imageCount * 3);
+    m_image.rgba.reserve(imageCount * 4);
+    m_bins.assign(codeCount, 0);
+    m_smoothed.assign(codeCount, 0.0f);
+    m_upsampled.assign(upsampledCount, 0.0f);
+    m_tint.assign(imageCount * 3, 0);
+    m_image.rgba.assign(imageCount * 4, 0);
     m_imageSize = size;
-    m_bins.assign(static_cast<std::size_t>(CodeGridSize) * CodeGridSize, 0);
-    m_smoothed.assign(static_cast<std::size_t>(CodeGridSize) * CodeGridSize, 0.0f);
-    m_upsampled.assign(m_imageSize > CodeGridSize ? static_cast<std::size_t>(m_imageSize) * m_imageSize : 0, 0.0f);
-    m_tint.assign(static_cast<std::size_t>(m_imageSize) * m_imageSize * 3, 0);
     m_image.width = m_imageSize;
     m_image.height = m_imageSize;
-    m_image.rgba.assign(static_cast<std::size_t>(m_imageSize) * m_imageSize * 4, 0);
     rebuildTintTable();
 }
 

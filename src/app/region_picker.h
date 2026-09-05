@@ -45,8 +45,8 @@ struct RegionPickOutcome
     std::optional<FloatColor> pinColor;
     /// A confirmed region pick: the host attaches or draws it.
     std::optional<ConfirmedPick> confirmed;
-    /// Cancelled with Esc, and not by a tool switch: the host resets to full
-    /// screen. A cancel ordered by a tool switch is not the user's Esc and
+    /// Cancelled with Esc, and not by a tool switch: the host clears the
+    /// selection. A cancel ordered by a tool switch is not the user's Esc and
     /// resets nothing.
     bool cancelled = false;
     /// The pick ended (confirm or cancel): the host re-syncs the region border.
@@ -92,6 +92,9 @@ public:
     /// Clears any pending request. The frame loop calls this at the top of each
     /// frame, so a request lives only within the frame that raised it.
     void clearRequest();
+
+    /// Cancels the active overlay and every requested replacement tool.
+    void cancel();
 
     /// The pending request, if one was raised this frame. The desktop host
     /// answers it through openIfRequested; a host with no desktop to open a
@@ -187,6 +190,9 @@ private:
     bool m_isPin = false;
     bool m_swallowCancel = false;
     std::optional<RegionPickerMode> m_want;
+    /// A tool switch must survive the next frame's transient request reset
+    /// while the current platform overlay finishes closing.
+    std::optional<RegionPickerMode> m_nextTool;
 
     std::vector<WindowCandidate> m_windowCandidates;
     std::vector<FaceCandidate> m_faceCandidates;

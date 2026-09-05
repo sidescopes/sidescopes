@@ -57,10 +57,14 @@ struct MenuUnderTest
     std::vector<ParamMenuAction> paramActions;
 
     // Builds the background menu (no pane clicked), which carries every list.
-    void build()
+    void build(bool applicationControlsAvailable = true)
     {
-        const ContextMenuModel model{
-            view, registry(), shortcuts, scopeParams, attach, presets, true, 0, 1.0f, QualityLevel::Standard, false};
+        const ContextMenuModel model{view,      registry(),
+                                     shortcuts, scopeParams,
+                                     attach,    presets,
+                                     true,      0,
+                                     1.0f,      QualityLevel::Standard,
+                                     false,     applicationControlsAvailable};
         items.clear();
         paramActions.clear();
         buildContextMenu(model, -1, items, paramActions);
@@ -172,6 +176,22 @@ TEST_CASE("The graticule steps are offered as words, not percentages")
     menu.build();
 
     CHECK(menu.submenu("Graticule") == std::vector<std::string>{"Faint", "Soft", "Normal", "Bold"});
+}
+
+TEST_CASE("A scope-only shell offers no application controls")
+{
+    MenuUnderTest menu;
+    menu.build(false);
+    CHECK_FALSE(menu.submenu("Graticule").empty());
+    CHECK_FALSE(menu.submenu("Scopes").empty());
+    CHECK(menu.submenu("Diagnostics").empty());
+    CHECK(menu.submenu("Quality").empty());
+    CHECK(menu.submenu("UI Scaling").empty());
+    for (const NativeMenuItem& item : menu.items) {
+        CHECK(item.actionId != MenuOpenSettings);
+        CHECK(item.actionId != MenuAbout);
+        CHECK(item.actionId != MenuQuit);
+    }
 }
 
 TEST_CASE("No menu id means two things at once")

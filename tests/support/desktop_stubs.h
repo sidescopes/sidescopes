@@ -2,6 +2,7 @@
 
 #include <array>
 #include <cstdint>
+#include <functional>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -59,6 +60,12 @@ public:
     bool hidesWindowOnCommandW = false;
     bool minimizesWindowOnControlW = false;
     bool quitsOnControlQ = false;
+    int64_t ownPid = 100;
+    int64_t foregroundPid = 0;
+    std::optional<uint64_t> focusedWindow;
+    uint64_t watchedWindow = 0;
+    uint64_t raisedWindow = 0;
+    std::function<void(WindowMotionSignal)> windowMotion;
 
     /// The one-shot screen read the cursor readout falls back to off the
     /// captured display: what it answers, and how often it was asked - the

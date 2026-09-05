@@ -158,12 +158,7 @@ TEST_CASE("A narrowed capture still reads the point the cursor is over")
     SamplerFixture fix;
     desktopStubs().cursorDisplay = StreamedDisplay;
     desktopStubs().screenSample = FloatColor{11.0f, 22.0f, 33.0f};
-    fix.mailbox.publish(makeNarrowedFrameBuffer(Color{0, 128, 255}, 2));
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
-    while (fix.worker.consumedFrameSequence() != 2 && std::chrono::steady_clock::now() < deadline) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(2));
-    }
-    REQUIRE(fix.worker.consumedFrameSequence() == 2);
+    publishAndAwait(fix, makeNarrowedFrameBuffer(Color{0, 128, 255}, 2));
 
     // Inside the crop: the stream's own pixels answer.
     desktopStubs().cursor = DesktopPoint{32.0, 32.0};
@@ -255,12 +250,7 @@ TEST_CASE("Only a marker that moves counts as interaction")
     }
 
     // But a colour that really changes under the pointer does wake it.
-    fix.mailbox.publish(makeSolidFrameBuffer(64, 64, Color{20, 200, 90}, 2));
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
-    while (fix.worker.consumedFrameSequence() != 2 && std::chrono::steady_clock::now() < deadline) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(2));
-    }
-    REQUIRE(fix.worker.consumedFrameSequence() == 2);
+    publishAndAwait(fix, makeSolidFrameBuffer(64, 64, Color{20, 200, 90}, 2));
     CHECK(fix.sampler.update(FrameSize, WholeDisplay, Instant, 1.3, 1.0f / 60.0f).changed);
 }
 
@@ -373,12 +363,7 @@ TEST_CASE("A marker that comes back appears where the pointer is")
     REQUIRE_FALSE(fix.sampler.update(FrameSize, Quadrant, Smoothed, 5.0, 1.0f / 60.0f).vectorscopeColor.has_value());
 
     // A different colour under the pointer on the way back in.
-    fix.mailbox.publish(makeSolidFrameBuffer(64, 64, Color{20, 200, 90}, 2));
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
-    while (fix.worker.consumedFrameSequence() != 2 && std::chrono::steady_clock::now() < deadline) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(2));
-    }
-    REQUIRE(fix.worker.consumedFrameSequence() == 2);
+    publishAndAwait(fix, makeSolidFrameBuffer(64, 64, Color{20, 200, 90}, 2));
     desktopStubs().cursor = DesktopPoint{8.0, 8.0};
     const CursorSample back = fix.sampler.update(FrameSize, Quadrant, Smoothed, 5.1, 1.0f / 60.0f);
 
@@ -402,12 +387,7 @@ TEST_CASE("A marker takes a new colour at its own interval")
 
     // A different colour under the pointer, well inside the interval: the
     // marker is still travelling towards the one it took.
-    fix.mailbox.publish(makeSolidFrameBuffer(64, 64, Color{20, 200, 90}, 2));
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
-    while (fix.worker.consumedFrameSequence() != 2 && std::chrono::steady_clock::now() < deadline) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(2));
-    }
-    REQUIRE(fix.worker.consumedFrameSequence() == 2);
+    publishAndAwait(fix, makeSolidFrameBuffer(64, 64, Color{20, 200, 90}, 2));
 
     const CursorSample within =
         fix.sampler.update(FrameSize, Quadrant, Instant, 1.0 + MarkerSampleSeconds / 2.0, 1.0f / 60.0f);
@@ -460,12 +440,7 @@ TEST_CASE("A marker does not spend a frame on movement below a pixel")
     constexpr std::size_t Neighbour = 31;
     const std::size_t green = Neighbour * static_cast<std::size_t>(nudged.strideBytes) + Neighbour * 4 + 1;
     nudged.data[green] = 51;
-    fix.mailbox.publish(std::move(nudged));
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
-    while (fix.worker.consumedFrameSequence() != 2 && std::chrono::steady_clock::now() < deadline) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(2));
-    }
-    REQUIRE(fix.worker.consumedFrameSequence() == 2);
+    publishAndAwait(fix, std::move(nudged));
 
     // The reading really did change - a ninth of a code - and is still not
     // worth a frame.
@@ -475,12 +450,7 @@ TEST_CASE("A marker does not spend a frame on movement below a pixel")
     CHECK_FALSE(nudge.changed);
 
     // A whole code across the neighbourhood is a pane pixel, and does count.
-    fix.mailbox.publish(makeSolidFrameBuffer(64, 64, Color{200, 52, 30}, 3));
-    const auto second = std::chrono::steady_clock::now() + std::chrono::seconds(2);
-    while (fix.worker.consumedFrameSequence() != 3 && std::chrono::steady_clock::now() < second) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(2));
-    }
-    REQUIRE(fix.worker.consumedFrameSequence() == 3);
+    publishAndAwait(fix, makeSolidFrameBuffer(64, 64, Color{200, 52, 30}, 3));
     CHECK(fix.sampler.update(FrameSize, WholeDisplay, Instant, 1.4, 1.0f / 60.0f).changed);
 }
 
@@ -497,12 +467,7 @@ TEST_CASE("A marker crosses the trace at an even speed between samples")
     desktopStubs().cursor = DesktopPoint{8.0, 8.0};
 
     REQUIRE(fix.sampler.update(FrameSize, Quadrant, Instant, 1.0, 1.0f / 60.0f).vectorscopeColor.has_value());
-    fix.mailbox.publish(makeSolidFrameBuffer(64, 64, Color{20, 200, 90}, 2));
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
-    while (fix.worker.consumedFrameSequence() != 2 && std::chrono::steady_clock::now() < deadline) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(2));
-    }
-    REQUIRE(fix.worker.consumedFrameSequence() == 2);
+    publishAndAwait(fix, makeSolidFrameBuffer(64, 64, Color{20, 200, 90}, 2));
 
     // The sample that takes the new colour, and the glide it starts.
     constexpr double Sampled = 1.0 + MarkerSampleSeconds;
@@ -563,12 +528,7 @@ TEST_CASE("The readout reports its own movement")
     // The first sample brings both into existence.
     CHECK(fix.sampler.update(FrameSize, Quadrant, Instant, 1.0, 1.0f / 60.0f).readoutChanged);
 
-    fix.mailbox.publish(makeSolidFrameBuffer(64, 64, Color{20, 200, 90}, 2));
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
-    while (fix.worker.consumedFrameSequence() != 2 && std::chrono::steady_clock::now() < deadline) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(2));
-    }
-    REQUIRE(fix.worker.consumedFrameSequence() == 2);
+    publishAndAwait(fix, makeSolidFrameBuffer(64, 64, Color{20, 200, 90}, 2));
 
     // The readout's interval is the slower of the two, so the marker takes the
     // new colour first and reports its own move while the readout waits its

@@ -233,6 +233,10 @@ void observeEscapeWithoutKeyWindow(std::function<void()>)
     // no window is key. A page has no such window to lose the key to.
 }
 
+void unobserveSystemEvents()
+{
+}
+
 void observeForegroundChanges(std::function<void()>)
 {
 }
@@ -315,11 +319,7 @@ void openScreenRecordingSettings()
 
 // --- fonts -------------------------------------------------------------
 //
-// A page has no font files to enumerate, and reaching for one over the
-// network would be a request the lab does not otherwise make. Both lists
-// come back empty, which the startup path already handles: Dear ImGui's
-// own bundled font stands in, and the picker aligns hex codes with the
-// interface font rather than a monospace companion.
+// The browser build embeds its own interface and monospace fonts.
 
 std::vector<std::string> interfaceFontFiles()
 {

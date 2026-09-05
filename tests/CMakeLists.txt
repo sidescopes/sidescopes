@@ -25,6 +25,8 @@ add_executable(sidescopes_tests
     test_trace_intensity.cpp
     test_marker_smoother.cpp
     test_analysis_worker.cpp
+    test_analysis_failures.cpp
+    test_analysis_inline.cpp
     test_graticule.cpp
     test_histogram.cpp
     test_preferences.cpp
@@ -33,8 +35,10 @@ add_executable(sidescopes_tests
     test_scope_goldens.cpp
     test_vectorscope.cpp
     test_modules.cpp
+    test_module_registry.cpp
     test_module_loader.cpp
     test_waveform.cpp
+    test_waveform_bins.cpp
     test_pin_board.cpp
     test_param_menu.cpp
     test_overlay_style.cpp
@@ -60,6 +64,7 @@ add_executable(sidescopes_tests
     test_face_lock_controller.cpp
     test_region_picker.cpp
     test_region_coordinator.cpp
+    test_region_session.cpp
     test_region_motion.cpp
     test_quality.cpp
     test_shortcut_resolver.cpp
@@ -139,6 +144,7 @@ else()
     # test_module_loader.cpp exercises it in either, so the static build
     # compiles it straight into the test binary.
     target_sources(sidescopes_tests PRIVATE ${CMAKE_SOURCE_DIR}/src/modules/module_loader.cpp)
+    target_link_libraries(sidescopes_tests PRIVATE ${CMAKE_DL_LIBS})
 endif()
 
 # sidescopes_app carries the application state and controllers these suites
@@ -160,3 +166,4 @@ sidescopes_target_defaults(sidescopes_tests)
 list(APPEND CMAKE_MODULE_PATH ${catch2_SOURCE_DIR}/extras)
 include(Catch)
 catch_discover_tests(sidescopes_tests)
+add_subdirectory(native)

@@ -18,16 +18,20 @@ namespace sidescopes {
 
 IntRect RegionOfInterest::toPixels(int frameWidth, int frameHeight) const
 {
+    if (frameWidth <= 0 || frameHeight <= 0 || !std::isfinite(leftPercent) || !std::isfinite(topPercent) ||
+        !std::isfinite(rightPercent) || !std::isfinite(bottomPercent)) {
+        return {};
+    }
     // Edges round INWARD: truncation used to include the pixel row just
     // outside the region at some fractional positions, and the region
     // border's own bright ring lives exactly there - it flickered into
     // the waveform as a phantom line near the top. A boundary pixel
     // belongs to the sample only when it is entirely inside.
     const auto floorEdge = [](double percent, int extent) {
-        return static_cast<int>(std::floor(percent * extent / 100.0));
+        return static_cast<int>(std::floor(std::clamp(percent, 0.0, 100.0) * extent / 100.0));
     };
     const auto ceilEdge = [](double percent, int extent) {
-        return static_cast<int>(std::ceil(percent * extent / 100.0));
+        return static_cast<int>(std::ceil(std::clamp(percent, 0.0, 100.0) * extent / 100.0));
     };
     const int left = ceilEdge(leftPercent, frameWidth);
     const int top = ceilEdge(topPercent, frameHeight);
@@ -48,7 +52,13 @@ double scopeParam(const AnalysisSettings& settings, std::string_view id, std::st
 }
 
 AnalysisWorker::AnalysisWorker(FrameMailbox& mailbox)
-    : m_mailbox(mailbox)
+    : AnalysisWorker(mailbox, builtinModules())
+{
+}
+
+AnalysisWorker::AnalysisWorker(FrameMailbox& mailbox, const ModuleRegistry& registry)
+    : m_mailbox(mailbox),
+      m_registry(registry)
 {
 }
 
@@ -59,7 +69,7 @@ AnalysisWorker::~AnalysisWorker()
 
 void AnalysisWorker::start()
 {
-    if (m_thread.joinable()) {
+    if (m_thread.joinable() || m_inlinePass) {
         return;
     }
     m_stopRequested.store(false);
@@ -68,10 +78,12 @@ void AnalysisWorker::start()
 
 void AnalysisWorker::stop()
 {
+    m_inlinePass.reset();
     if (!m_thread.joinable()) {
         return;
     }
     m_stopRequested.store(true);
+    m_mailbox.nudge();
     m_thread.join();
 }
 
@@ -141,7 +153,7 @@ std::optional<AnalysisWorker::FrameSize> AnalysisWorker::latestFrameSize() const
 
 uint64_t AnalysisWorker::consumedFrameSequence() const
 {
-    return m_consumedSequence.load(std::memory_order_relaxed);
+    return m_consumedSequence.load(std::memory_order_acquire);
 }
 
 std::vector<SsParamValue> assembleScopeParams(const std::map<std::string, double>& values,
@@ -149,11 +161,12 @@ std::vector<SsParamValue> assembleScopeParams(const std::map<std::string, double
 {
     std::vector<SsParamValue> assembled;
     for (uint32_t index = 0; index < descriptor.param_count; ++index) {
-        const char* key = descriptor.params[index].key;
+        const SsParamInfo& parameter = descriptor.params[index];
+        const char* key = parameter.key;
         const auto value = values.find(key);
-        if (value != values.end()) {
-            assembled.push_back(SsParamValue{key, value->second});
-        }
+        const double configured =
+            value != values.end() && std::isfinite(value->second) ? value->second : parameter.default_value;
+        assembled.push_back(SsParamValue{key, configured});
     }
 
     return assembled;
@@ -172,16 +185,17 @@ struct WorkerScope
     const SsAdaptiveImageExtension* adaptive = nullptr;
     const SsSampleThinningExtension* thinning = nullptr;
     const SsOutlineExtension* outline = nullptr;
+    bool configured = false;
+    bool accumulated = false;
 };
 
 // A record for every registered built-in scope, with no instance yet: an
 // instance is what allocates a scope's bin and plane sets, and a scope nobody is
 // looking at should not own any. Records are cheap and their order is the
 // registry's, so the per-pass loops are unchanged.
-std::vector<WorkerScope> makeWorkerScopes()
+std::vector<WorkerScope> makeWorkerScopes(const ModuleRegistry& registry)
 {
     std::vector<WorkerScope> scopes;
-    const ModuleRegistry& registry = builtinModules();
     for (const RegisteredScope& registered : registry.scopes()) {
         WorkerScope scope;
         scope.id = registered.descriptor->id;
@@ -202,9 +216,9 @@ std::vector<WorkerScope> makeWorkerScopes()
 // has just appeared is instantiated in time to receive its parameters. Dropping
 // an instance drops whatever it had accumulated, which is right: a scope coming
 // back on screen re-reads the region from the next frame.
-void syncScopeInstances(std::vector<WorkerScope>& scopes, const std::vector<std::string>& enabled)
+void syncScopeInstances(std::vector<WorkerScope>& scopes, const std::vector<std::string>& enabled,
+                        const ModuleRegistry& registry)
 {
-    const ModuleRegistry& registry = builtinModules();
     for (WorkerScope& scope : scopes) {
         const bool wanted = std::find(enabled.begin(), enabled.end(), scope.id) != enabled.end();
         if (wanted == scope.instance.valid()) {
@@ -217,6 +231,8 @@ void syncScopeInstances(std::vector<WorkerScope>& scopes, const std::vector<std:
             scope.outline = nullptr;
             continue;
         }
+        scope.configured = false;
+        scope.accumulated = false;
         scope.instance = registry.createInstance(scope.id);
         if (scope.instance.valid()) {
             scope.adaptive =
@@ -239,43 +255,62 @@ SsFrameView toBoundaryFrame(const FrameView& view)
                        view.format == PixelFormat::Argb2101010 ? SS_PIXEL_FORMAT_ARGB2101010 : SS_PIXEL_FORMAT_BGRA8};
 }
 
-void copyImage(const SsImageView& view, ScopeImage& image)
+bool copyImage(const SsImageView& view, ScopeImage& image)
 {
+    if (view.width <= 0 || view.height <= 0 || !view.rgba) {
+        return false;
+    }
+    const auto width = static_cast<std::size_t>(view.width);
+    const auto height = static_cast<std::size_t>(view.height);
+    if (width > image.rgba.max_size() / 4 / height) {
+        return false;
+    }
+    image.rgba.assign(view.rgba, view.rgba + width * height * 4);
     image.width = view.width;
     image.height = view.height;
     image.sequence = view.sequence;
-    const std::size_t bytes = static_cast<std::size_t>(view.width) * static_cast<std::size_t>(view.height) * 4;
-    image.rgba.assign(view.rgba, view.rgba + bytes);
+    return true;
 }
 
-// Pushes each scope's parameters and display size from the settings map into
-// its module instance. A value is applied only when the settings name a key
-// the scope's descriptor declares, and each SsParamValue borrows the
-// descriptor's key pointer - module-owned and stable to deinit - never a
-// std::string from the settings map. Results are best-effort: a module that
-// fails to configure keeps its last image, which the UI simply stops
-// advancing. Runs only on a settings change, so the temporary key lookups
-// never touch the per-frame path.
+// Applies only declared parameters, filling absent values from the descriptor.
+// Failed configuration is retried before the next accumulate, so a temporary
+// allocation failure does not strand an otherwise usable module.
+void configureScope(WorkerScope& scope, const AnalysisSettings& settings)
+{
+    static const std::map<std::string, double> noParameters;
+    const auto params = settings.scopeParams.find(scope.id);
+    const auto values =
+        assembleScopeParams(params != settings.scopeParams.end() ? params->second : noParameters, *scope.descriptor);
+    scope.configured = scope.instance.configure(values);
+    if (!scope.configured) {
+        return;
+    }
+    const auto size = settings.imageSizes.find(scope.id);
+    if (scope.adaptive && size != settings.imageSizes.end()) {
+        scope.adaptive->setImageSize(scope.instance.raw(), size->second.first, size->second.second);
+    }
+    if (scope.thinning) {
+        scope.thinning->setSampleThinning(scope.instance.raw(), settings.sampleThinning);
+    }
+}
+
+void retryMissingInstances(std::vector<WorkerScope>& scopes, const AnalysisSettings& settings,
+                           const ModuleRegistry& registry)
+{
+    const bool missing = std::any_of(scopes.begin(), scopes.end(), [&](const WorkerScope& scope) {
+        return !scope.instance.valid() && std::find(settings.enabledScopes.begin(), settings.enabledScopes.end(),
+                                                    scope.id) != settings.enabledScopes.end();
+    });
+    if (missing) {
+        syncScopeInstances(scopes, settings.enabledScopes, registry);
+    }
+}
+
 void configureScopes(std::vector<WorkerScope>& scopes, const AnalysisSettings& settings)
 {
     for (WorkerScope& scope : scopes) {
-        if (!scope.instance.valid()) {
-            continue;
-        }
-
-        std::vector<SsParamValue> values;
-        const auto params = settings.scopeParams.find(scope.id);
-        if (params != settings.scopeParams.end() && scope.descriptor) {
-            values = assembleScopeParams(params->second, *scope.descriptor);
-        }
-        (void)scope.instance.configure(values);
-
-        const auto size = settings.imageSizes.find(scope.id);
-        if (scope.adaptive && size != settings.imageSizes.end()) {
-            scope.adaptive->setImageSize(scope.instance.raw(), size->second.first, size->second.second);
-        }
-        if (scope.thinning) {
-            scope.thinning->setSampleThinning(scope.instance.raw(), settings.sampleThinning);
+        if (scope.instance.valid()) {
+            configureScope(scope, settings);
         }
     }
 }
@@ -289,10 +324,10 @@ void configureScopes(std::vector<WorkerScope>& scopes, const AnalysisSettings& s
 // A settings change carrying no region enables nothing, so every instance -
 // and the bins and planes it holds - is dropped along with the selection.
 void applySettings(std::vector<WorkerScope>& scopes, const AnalysisSettings& settings,
-                   std::set<std::string>& enabledScopes)
+                   std::set<std::string>& enabledScopes, const ModuleRegistry& registry)
 {
     const std::vector<std::string> enabled = settings.region ? settings.enabledScopes : std::vector<std::string>{};
-    syncScopeInstances(scopes, enabled);
+    syncScopeInstances(scopes, enabled, registry);
     configureScopes(scopes, settings);
     enabledScopes = std::set<std::string>(enabled.begin(), enabled.end());
 }
@@ -321,12 +356,15 @@ std::optional<IntRect> regionInFrame(const FrameView& view, const RegionOfIntere
 // took. Only the scopes on screen cost anything; a disabled scope's image
 // simply goes stale and the UI never draws it.
 double accumulateScopes(std::vector<WorkerScope>& scopes, const SsFrameView& frame, const SsRect& region,
-                        const std::set<std::string>& enabled)
+                        const std::set<std::string>& enabled, const AnalysisSettings& settings)
 {
     const auto started = std::chrono::steady_clock::now();
     for (WorkerScope& scope : scopes) {
         if (scope.instance.valid() && enabled.count(scope.id) != 0) {
-            (void)scope.instance.accumulate(frame, region);
+            if (!scope.configured) {
+                configureScope(scope, settings);
+            }
+            scope.accumulated = scope.configured && scope.instance.accumulate(frame, region);
         }
     }
 
@@ -341,11 +379,17 @@ void writeOutput(AnalysisWorker::Output& output, std::vector<WorkerScope>& scope
                  double elapsedMs, uint64_t framesProcessed)
 {
     for (WorkerScope& scope : scopes) {
-        if (!scope.instance.valid() || enabled.count(scope.id) == 0) {
+        if (enabled.count(scope.id) == 0) {
             continue;
         }
 
-        copyImage(scope.instance.image(), output.images[scope.id]);
+        ScopeImage& image = output.images[scope.id];
+        if (!scope.instance.valid() || !scope.accumulated || !copyImage(scope.instance.image(), image)) {
+            image = {};
+            output.outlines.erase(scope.id);
+            scope.accumulated = false;
+            continue;
+        }
         if (scope.outline) {
             std::vector<float>& outline = output.outlines[scope.id];
             outline.resize(scope.outline->heights(scope.instance.raw(), nullptr, 0));
@@ -386,7 +430,6 @@ bool AnalysisWorker::takeLatestFrame(std::chrono::milliseconds wait)
     }
     m_latestFrame = std::move(*frame);
     m_hasFrame = true;
-    m_consumedSequence.store(m_latestFrame.sequence, std::memory_order_relaxed);
 
     return true;
 }
@@ -424,8 +467,11 @@ void AnalysisWorker::hold(bool held)
     // no new settings, the two gates below would both skip. Advancing the
     // version is what the settings path already means by "recompute"; the flag
     // is cleared first so a held pass can never consume it.
-    std::lock_guard lock(m_settingsMutex);
-    ++m_settingsVersion;
+    {
+        std::lock_guard lock(m_settingsMutex);
+        ++m_settingsVersion;
+    }
+    m_mailbox.nudge();
 }
 
 bool AnalysisWorker::held() const
@@ -470,14 +516,14 @@ struct AnalysisWorker::Pass
     std::set<std::string> enabledScopes;
     AnalysisSettings settings;
     uint64_t seenSettingsVersion = 0;
-    uint64_t lastContentHash = 0;
+    std::optional<uint64_t> lastContentHash;
     uint64_t framesProcessed = 0;
 };
 
 void AnalysisWorker::run()
 {
     // Instances are created on this thread, which therefore owns them.
-    Pass pass{makeWorkerScopes(), {}, {}, 0, 0, 0};
+    Pass pass{makeWorkerScopes(m_registry), {}, {}, 0, {}, 0};
 
     while (!m_stopRequested.load(std::memory_order_relaxed)) {
         runPass(pass, std::chrono::milliseconds(100));
@@ -490,7 +536,7 @@ void AnalysisWorker::startInline()
         return;
     }
     m_stopRequested.store(false);
-    m_inlinePass = std::make_unique<Pass>(Pass{makeWorkerScopes(), {}, {}, 0, 0, 0});
+    m_inlinePass = std::make_unique<Pass>(Pass{makeWorkerScopes(m_registry), {}, {}, 0, {}, 0});
 }
 
 void AnalysisWorker::pump()
@@ -506,18 +552,39 @@ void AnalysisWorker::pump()
 
 void AnalysisWorker::runPass(Pass& pass, std::chrono::milliseconds wait)
 {
+    const bool newFrame = takeLatestFrame(wait);
+    try {
+        analyzeLatestFrame(pass, newFrame);
+    } catch (const std::bad_alloc&) {
+        // Keep the worker alive when host-side output or settings allocation
+        // fails. A later frame retries even if its pixels are unchanged.
+        pass.lastContentHash.reset();
+        SS_DIAG(Perf, "analysis allocation failed; retrying on the next frame");
+    }
+    if (newFrame) {
+        // Publish completion after every analysis/skip path, so callers can
+        // distinguish a consumed frame from one still being processed.
+        m_consumedSequence.store(m_latestFrame.sequence, std::memory_order_release);
+    }
+}
+
+void AnalysisWorker::analyzeLatestFrame(Pass& pass, bool newFrame)
+{
     std::vector<WorkerScope>& scopes = pass.scopes;
     std::set<std::string>& enabledScopes = pass.enabledScopes;
     AnalysisSettings& settings = pass.settings;
-    const bool newFrame = takeLatestFrame(wait);
-    const bool settingsChanged = syncSettings(settings, pass.seenSettingsVersion);
+    uint64_t candidateSettingsVersion = pass.seenSettingsVersion;
+    const bool settingsChanged = syncSettings(settings, candidateSettingsVersion);
     // A settings change is applied the moment it is seen, before the work
     // gate below. Consumed on a frameless pass it would otherwise advance
     // the settings version without reconfiguring the scopes, so the first
     // frame after it would run the default - on startup, empty - scope set
     // and publish an output with no images.
     if (settingsChanged) {
-        applySettings(scopes, settings, enabledScopes);
+        applySettings(scopes, settings, enabledScopes, m_registry);
+        // Applying settings also allocates. Only a complete application may
+        // consume this version, so a failed partial application is retried.
+        pass.seenSettingsVersion = candidateSettingsVersion;
     }
     if (!settings.region || !hasWork(newFrame, settingsChanged)) {
         return;
@@ -543,15 +610,42 @@ void AnalysisWorker::runPass(Pass& pass, std::chrono::milliseconds wait)
     }
     pass.lastContentHash = contentHash;
 
+    retryMissingInstances(scopes, settings, m_registry);
     const SsFrameView boundaryFrame = toBoundaryFrame(view);
     const SsRect boundaryRegion{region->x, region->y, region->width, region->height};
-    const double elapsedMs = accumulateScopes(scopes, boundaryFrame, boundaryRegion, enabledScopes);
+    const double elapsedMs = accumulateScopes(scopes, boundaryFrame, boundaryRegion, enabledScopes, settings);
     if (newFrame) {
         ++pass.framesProcessed;
     }
 
-    std::lock_guard lock(m_outputMutex);
-    writeOutput(m_output, scopes, enabledScopes, elapsedMs, pass.framesProcessed);
+    publishOutput(pass, elapsedMs);
+}
+
+void AnalysisWorker::publishOutput(Pass& pass, double elapsedMs)
+{
+    std::vector<WorkerScope>& scopes = pass.scopes;
+    const std::set<std::string>& enabledScopes = pass.enabledScopes;
+    {
+        std::lock_guard lock(m_outputMutex);
+        try {
+            writeOutput(m_output, scopes, enabledScopes, elapsedMs, pass.framesProcessed);
+        } catch (const std::bad_alloc&) {
+            // Some images may already have been copied. Withdraw the whole
+            // partial result before releasing the lock, then retry next frame.
+            m_output.images.clear();
+            m_output.outlines.clear();
+            m_output.accumulateMilliseconds = 0.0;
+            m_output.framesProcessed = pass.framesProcessed;
+            ++m_output.version;
+            pass.lastContentHash.reset();
+            SS_DIAG(Perf, "analysis output allocation failed; retrying on the next frame");
+        }
+    }
+    if (std::any_of(scopes.begin(), scopes.end(), [&](const WorkerScope& scope) {
+            return enabledScopes.count(scope.id) != 0 && (!scope.instance.valid() || !scope.accumulated);
+        })) {
+        pass.lastContentHash.reset();
+    }
     if (m_outputCallback) {
         m_outputCallback();
     }

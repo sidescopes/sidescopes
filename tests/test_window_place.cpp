@@ -1,6 +1,7 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <cstdint>
+#include <limits>
 
 #include "app/window_place.h"
 #include "desktop_stubs.h"
@@ -168,6 +169,32 @@ TEST_CASE("The chrome margins grow with the interface scale")
     CHECK(scaled.y == plain.y - 42);
     CHECK(scaled.width == plain.width + 16);
     CHECK(scaled.height == plain.height + 58);
+}
+
+TEST_CASE("A distant window mask clips before conversion to pixels")
+{
+    const int limit = std::numeric_limits<int>::max();
+    const IntRect far = selfWindowMask(WindowPlacement{limit, limit, 400, 300}, secondDisplay(), 5120, 2880, 1.0f);
+    CHECK(far.width == 0);
+    CHECK(far.height == 0);
+    const IntRect overlap = selfWindowMask(WindowPlacement{90, 40, 100, 100}, secondDisplay(), 2560, 1440, 1.0f);
+    CHECK(overlap.x == 0);
+    CHECK(overlap.y == 0);
+    CHECK(overlap.width == 98);
+    CHECK(overlap.height == 106);
+    const IntRect absent = selfWindowMask(WindowPlacement{}, DisplayGeometry{}, 2560, 1440, 1.0f);
+    CHECK(absent.width == 0);
+    CHECK(absent.height == 0);
+}
+
+TEST_CASE("Extreme desktop placement cannot wrap around the coordinate range")
+{
+    const int limit = std::numeric_limits<int>::max();
+    const auto placed = starterWindowPlacement({limit - 10, limit - 10, 1000, 1000}, 300, 500);
+    CHECK(placed.x == limit);
+    CHECK(placed.y == limit);
+    CHECK(placed.width == 300);
+    CHECK(placed.height == 500);
 }
 
 }  // namespace sidescopes

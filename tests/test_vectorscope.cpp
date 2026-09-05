@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
+#include <cmath>
 #include <cstddef>
 #include <cstdlib>
 #include <utility>
@@ -64,11 +65,11 @@ TEST_CASE("Vectorscope projection agrees with accumulation")
     CHECK(point.y == Catch::Approx((255.0 - 211.56) / 255.0).margin(0.005));
 }
 
-TEST_CASE("Vectorscope carries real detail on a finer grid")
+TEST_CASE("Vectorscope keeps red at its scaled position in a finer display image")
 {
-    // The fixed-point chroma transform holds more precision than the
-    // classic 256 grid uses; the finer grid must place the same color on
-    // the scaled coordinate rather than upscale the coarse one.
+    // Accumulation stays on the 256-code grid. A larger display image
+    // interpolates those densities; this checks its size and the scaled
+    // position of the red trace, not an increase in accumulated detail.
     TestFrame frame(32, 32, 255);
     frame.fill(0, 32, Color{191, 0, 0});
 
@@ -78,8 +79,8 @@ TEST_CASE("Vectorscope carries real detail on a finer grid")
     scope.configure(settings);
     scope.accumulate(frame.view(), IntRect{0, 0, 32, 32});
 
-    // BT.709 puts 75% red at bin (109, 43) on the 256 grid, so the 512 grid
-    // must place it near twice that rather than at a magnified 256 bin.
+    // BT.709 puts 75% red near (109, 43) on the code grid. Splatting and
+    // interpolation keep its peak near twice those coordinates at 512.
     CHECK(scope.image().width == 512);
     const auto [px, py] = brightestPixel(scope.image());
     CHECK(px >= 216);
@@ -90,33 +91,39 @@ TEST_CASE("Vectorscope carries real detail on a finer grid")
 
 TEST_CASE("Vectorscope leaves no gap between adjacent chroma codes on the fine grid")
 {
-    // 8-bit content quantizes chroma to whole codes, so neighboring
-    // colors in a photograph sit one code apart - two pixels on the 512
-    // image. Accumulating on a grid that fine renders the quantization
-    // as gridded texture; the fine image must instead interpolate the
-    // code grid, keeping the space between two equally-strong adjacent
-    // codes as bright as the codes themselves.
+    // These equally populated colors peak in neighboring Cb bins on the
+    // code grid, about two pixels apart in the 512 image. Interpolating the
+    // densities must keep the space between them bright.
     TestFrame frame(32, 32, 255);
-    frame.fill(0, 16, Color{191, 0, 0});   // Cb 99.65 -> code 100
-    frame.fill(16, 32, Color{191, 0, 2});  // Cb 100.52 -> code 101
+    frame.fill(0, 16, Color{191, 0, 0});   // BT.709 Cb 108.60 -> code 109
+    frame.fill(16, 32, Color{192, 0, 3});  // BT.709 Cb 109.81 -> code 110
+
+    // Check the actual fixture pixels through the engine's projection. The
+    // former (191, 0, 2) second color rounded to code 109 too; raising red
+    // with blue also keeps the new pair on the same rounded Cr row.
+    const NormalizedPoint first = Vectorscope::project(frame.view().srgbAt(0, 0));
+    const NormalizedPoint next = Vectorscope::project(frame.view().srgbAt(16, 0));
+    REQUIRE(std::lround(first.x * 255.0f) == 109);
+    REQUIRE(std::lround(next.x * 255.0f) == 110);
+    REQUIRE(std::lround(first.y * 255.0f) == std::lround(next.y * 255.0f));
 
     Vectorscope scope;
     VectorscopeSettings settings;
     settings.size = 512;
-    // The two codes carry equal mass, so both reach the ceiling and bloom
-    // alike; what the ratios below measure is the interpolation between them.
+    // Equal pixel counts give both colors equal input mass. The ratios below
+    // check how interpolation joins their rendered neighborhoods.
     settings.gain = 1.0f;
     scope.configure(settings);
     scope.accumulate(frame.view(), IntRect{0, 0, 32, 32});
 
     const auto [px, py] = brightestPixel(scope.image());
     const auto brightness = [&](int x, int y) {
-        const uint8_t* pixel = scope.image().rgba.data() + (static_cast<std::size_t>(y) * 512 + x) * 4;
-        return static_cast<int>(pixel[0]) + pixel[1] + pixel[2];
+        return static_cast<int>(channelAt(scope.image(), x, y, 0)) + channelAt(scope.image(), x, y, 1) +
+               channelAt(scope.image(), x, y, 2);
     };
-    // The two codes render as two nearby peaks; the space between them
-    // must hold, not fall dark.
+    // Nearby bright points must remain connected across the intervening pixels.
     const int peak = brightness(px, py);
+    REQUIRE(peak > 0);
     int secondX = px - 2;
     for (int x = px - 6; x <= px + 6; ++x) {
         if (std::abs(x - px) >= 2 && brightness(x, py) > brightness(secondX, py)) {

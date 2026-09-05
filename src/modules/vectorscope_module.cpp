@@ -2,14 +2,17 @@
 // wraps the C++ engine in the C vtable. The engine stays idiomatic C++;
 // only this file speaks both languages, and no exception ever crosses.
 
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
+#include <memory>
 #include <string>
 
 #include "core/scopes/graticule.h"
 #include "core/scopes/vectorscope.h"
 #include "modules/module_export.h"
 #include "modules/module_frame.h"
+#include "modules/module_params.h"
 #include "modules/module_registry.h"
 #include "modules/module_scratch.h"
 #include "sidescopes/module.h"
@@ -39,16 +42,20 @@ const VectorscopeInstance* impl(const SsScopeInstance* instance)
 
 bool configure(SsScopeInstance* instance, const SsParamValue* values, uint32_t count)
 {
+    if (!validParameters(values, count)) {
+        return false;
+    }
     try {
         VectorscopeInstance* self = impl(instance);
         for (uint32_t index = 0; index < count; ++index) {
             const SsParamValue& value = values[index];
             if (std::strcmp(value.key, "gain") == 0) {
-                self->settings.gain = static_cast<float>(value.value);
+                self->settings.gain = parameterGain(value.value, VectorscopeIntensityShift);
             } else if (std::strcmp(value.key, "stride") == 0) {
-                self->settings.samplingStride = static_cast<int>(value.value);
+                self->settings.samplingStride = static_cast<int>(std::clamp(value.value, 1.0, 8.0));
             } else if (std::strcmp(value.key, "gamma") == 0) {
-                self->settings.traceGamma = static_cast<float>(value.value);
+                self->settings.traceGamma = static_cast<float>(
+                    std::clamp(value.value, static_cast<double>(MinTraceGamma), static_cast<double>(MaxTraceGamma)));
             }
         }
 
@@ -61,6 +68,9 @@ bool configure(SsScopeInstance* instance, const SsParamValue* values, uint32_t c
 
 bool accumulate(SsScopeInstance* instance, const SsFrameView* frame, SsRect region)
 {
+    if (!frame || !validBoundaryFrame(*frame)) {
+        return false;
+    }
     try {
         const FrameView view = frameFromBoundary(*frame);
         lendHostScratch(impl(instance)->engine, impl(instance)->host);
@@ -92,10 +102,10 @@ uint32_t strokeOf(GraticuleStroke stroke)
     return SS_STROKE_GRID;
 }
 
-uint32_t graticule(const SsScopeInstance* instance, SsGraticulePrimitive* primitives, uint32_t capacity)
+uint32_t graticule(const SsScopeInstance*, SsGraticulePrimitive* primitives, uint32_t capacity)
 {
     try {
-        const VectorscopeGraticule layout = buildVectorscopeGraticule(impl(instance)->engine);
+        const VectorscopeGraticule layout = buildVectorscopeGraticule();
         uint32_t needed = 0;
         const auto emit = [&](const SsGraticulePrimitive& primitive) {
             if (needed < capacity) {
@@ -233,12 +243,12 @@ SsScopeInstance* create(const char* scopeId, const SsHost* host)
             return nullptr;
         }
 
-        auto* self = new VectorscopeInstance;
+        auto self = std::make_unique<VectorscopeInstance>();
         // Push the constructed defaults through the engine explicitly, so the
         // instance never relies on the engine's own ctor defaults matching.
         self->engine.configure(self->settings);
         self->host = host;
-        self->vtable.instance_data = self;
+        self->vtable.instance_data = self.get();
         self->vtable.configure = configure;
         self->vtable.accumulate = accumulate;
         self->vtable.image = image;
@@ -246,7 +256,7 @@ SsScopeInstance* create(const char* scopeId, const SsHost* host)
         self->vtable.markers = markers;
         self->vtable.get_extension = getExtension;
         self->vtable.destroy = destroy;
-        return &self->vtable;
+        return &self.release()->vtable;
     } catch (...) {
         return nullptr;
     }

@@ -5,6 +5,17 @@
 
 namespace sidescopes {
 
+/// Reject layouts that cannot describe the supplied pixel rows. Zero-sized
+/// frames are valid empty input; an unknown format is never guessed as BGRA.
+[[nodiscard]] inline bool validBoundaryFrame(const SsFrameView& frame)
+{
+    const bool knownFormat =
+        frame.pixel_format == SS_PIXEL_FORMAT_BGRA8 || frame.pixel_format == SS_PIXEL_FORMAT_ARGB2101010;
+    return knownFormat && frame.width >= 0 && frame.height >= 0 &&
+           (frame.width == 0 || frame.height == 0 ||
+            (frame.pixels && frame.stride_bytes >= static_cast<int64_t>(frame.width) * 4));
+}
+
 /// The engine-side view of a frame the host handed across the boundary.
 ///
 /// Shared rather than repeated in each module: every scope has to agree about
@@ -19,8 +30,7 @@ namespace sidescopes {
     view.height = frame.height;
     view.colorSpace = frame.color_space == SS_COLOR_SPACE_SRGB ? ColorSpaceHint::Srgb : ColorSpaceHint::Unknown;
     view.sequence = frame.sequence;
-    // An unrecognized format reads as the eight-bit one every host before ABI
-    // minor 4 sent, which is what a zeroed field means anyway.
+    // Callers validate the format before constructing the engine's view.
     view.format = frame.pixel_format == SS_PIXEL_FORMAT_ARGB2101010 ? PixelFormat::Argb2101010 : PixelFormat::Bgra8;
 
     return view;

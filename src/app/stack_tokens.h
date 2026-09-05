@@ -23,8 +23,8 @@ class ScopeRegistry;
 [[nodiscard]] std::vector<std::string> parseScopeTokens(const ScopeRegistry& registry, const std::string& text);
 
 /// Reads a preference token string as a scope STACK: @ref parseScopeTokens,
-/// falling back to @ref DefaultScopeStack when it names nothing valid, because
-/// the window is never empty.
+/// falling back to the registered members of @ref DefaultScopeStack, or the
+/// host color picker when those modules are unavailable. The window is never empty.
 [[nodiscard]] std::vector<std::string> parseStackTokens(const ScopeRegistry& registry, const std::string& text);
 
 /// @return @p stack as a preference token string: one bracketed `[id]` per

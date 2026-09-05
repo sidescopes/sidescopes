@@ -137,6 +137,7 @@ private:
         FaceLockState state;
         std::optional<AttachWindowRect> windowRect;
         double anchorVerifiedAt = 0.0;
+        uint64_t generation = 0;
     };
 
     /// The face-probe mailbox: a detached detection thread fills it, the main
@@ -155,6 +156,7 @@ private:
     void carryLockWithWindow(Lock& lock, const AttachWindowRect& rect,
                              std::optional<AnalysisWorker::FrameSize> frameSize);
     void launchProbe(const AttachDecision& decision, const FaceLockState& lock);
+    void resetTracking();
     [[nodiscard]] std::optional<RegionOfInterest> mappedRegion(const FaceLockState& lock,
                                                                std::optional<AnalysisWorker::FrameSize> frameSize,
                                                                uint64_t activeWindowIdentity);
@@ -164,6 +166,9 @@ private:
     CaptureController& m_capture;
 
     std::map<uint64_t, Lock> m_locks;
+    uint64_t m_trackingIdentity = 0;
+    uint64_t m_nextLockGeneration = 0;
+    uint64_t m_probeLockGeneration = 0;
     Probe m_probe;
     double m_nextProbe = 0.0;
     bool m_hunting = false;

@@ -72,10 +72,8 @@ public:
     ScopePaneRenderer(const ScopePaneContext& context, std::map<std::string, ScopeInstance> projections,
                       ScopeTextureSet textures);
 
-    /// The scope letter chips, one per scope the registry lettered. Switching
-    /// is the common case, so a plain click shows one scope alone and
-    /// @p stackModifier stacks.
-    [[nodiscard]] PaneRenderOutcome drawScopeToggles(bool stackModifier);
+    /// The scope selector, whose menu toggles scopes and reorders their panes.
+    [[nodiscard]] PaneRenderOutcome drawScopeToggles();
 
     /// The region toolbox: draw, attach to a window, attach to a face, and the
     /// clear.

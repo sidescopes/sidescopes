@@ -8,12 +8,9 @@
 // Engine. There is no GPU on the null backend, so the assertions read the
 // worker's Output DATA (the CPU-side scope images), not uploaded textures.
 //
-// HONEST CONSTRAINT: the real main() frame loop is not yet drivable (the
-// App/runFrame extraction is Phase B, in progress). This test drives the real
-// pipeline and the real app-state classes through a REPRESENTATIVE UI built in
-// the test's GuiFunc, not the shipped window layout. When runFrame lands, this
-// upgrades to driving the real loop; the pipeline and model assertions carry
-// over unchanged.
+// This covers the pipeline and app-state classes through controls built in
+// the test's GuiFunc. It does not exercise App's frame loop or shipped window
+// layout.
 //
 // Dear ImGui Test Engine (c) 2018-2026 Omar Cornut / DISCO HELLO, used under
 // its Free License; fetched at build time, never vendored.

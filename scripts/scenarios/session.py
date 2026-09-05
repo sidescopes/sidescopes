@@ -33,7 +33,7 @@ import subprocess
 import threading
 import time
 
-from . import quartz
+from . import catalog, quartz
 
 _DIAG_LINE = re.compile(r"^t=([0-9.]+) perf (frame|pass) ")
 
@@ -104,8 +104,9 @@ def preferences_text(stack, window_rect):
     quality = os.environ.get(QUALITY_VARIABLE, "").strip()
     quality_line = f"quality={quality}\n" if quality else ""
 
+    scope_ids = "".join(f"[{catalog.SCOPE_LETTERS[letter]}]" for letter in dict.fromkeys(stack))
     return (f"{HARNESS_MARKER}\n"
-            f"scope_stack={stack}\n"
+            f"scope_stack={scope_ids}\n"
             f"{quality_line}"
             f"window_x={x}\n"
             f"window_y={y}\n"
@@ -634,6 +635,11 @@ def establish_region(pid, kind, region, content_rect, bindings, bundle=None, att
     @return Whether the application ended up on a region.
     """
     if kind == "none":
+        # Current builds start with a starter region. Establish the requested
+        # empty state explicitly; startup-default bypasses this setup.
+        if bundle is not None:
+            activate(bundle)
+        quartz.press_key(bindings.get("clear", "escape"))
         return True
     expected = region if kind == "draw" else content_rect
     for attempt in range(attempts):

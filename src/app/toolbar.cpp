@@ -64,7 +64,7 @@ Toolbar::Toolbar(const ScopeRegistry& registry, ScopeView& view, const ShortcutR
 {
 }
 
-PaneRenderOutcome Toolbar::drawScopeToggles(bool)
+PaneRenderOutcome Toolbar::drawScopeToggles()
 {
     // The scope selector, leading the row: an icon button whose popup
     // checklists every scope. Same shape as the preset picker standing after

@@ -1,4 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
+#include <limits>
 #include <map>
 #include <string>
 #include <vector>
@@ -74,6 +75,17 @@ TEST_CASE("The weights snapshot carries only the stored entries")
     CHECK(snapshot.size() == 2);
     CHECK(snapshot.at(VectorscopeScopeId) == 1.5);
     CHECK(snapshot.at(WaveformScopeId) == 0.5);
+}
+
+TEST_CASE("Malformed pane weights fall back without narrowing overflow")
+{
+    PaneLayout layout;
+    layout.setWeights({{VectorscopeScopeId, 1e300},
+                       {WaveformScopeId, -2.0},
+                       {HistogramScopeId, std::numeric_limits<double>::quiet_NaN()}});
+    CHECK(layout.stackWeights({VectorscopeScopeId, WaveformScopeId, HistogramScopeId}) == std::vector<float>{1, 1, 1});
+    layout.setWeight(VectorscopeScopeId, std::numeric_limits<float>::infinity());
+    CHECK(layout.weight(VectorscopeScopeId) == 1.0f);
 }
 
 }  // namespace sidescopes

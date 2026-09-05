@@ -235,6 +235,9 @@ std::vector<ShortcutAction> ShortcutResolver::resolvePressed(const ShortcutConte
 
 ShortcutAction ShortcutResolver::resolveNamed(const std::string& key, bool shift, const ShortcutContext& context) const
 {
+    if (context.wantsTextInput) {
+        return {};
+    }
     for (const HostScope& scope : m_registry.scopes()) {
         const std::string binding = bindingFor(scope.id);
         if (!binding.empty() && binding == key) {
@@ -273,36 +276,30 @@ std::vector<ShortcutAction> ShortcutResolver::resolvePlainKeys(const ShortcutCon
     // down: two scope letters in one frame both show their scope, and a letter
     // beside a digit switches the stack and loads the preset.
     std::vector<ShortcutAction> actions;
-    appendScopeKeys(shift, pressed, actions);
+    std::vector<std::string> resolved;
+    const auto appendKey = [&](const std::string& key) {
+        if (key.empty() || std::find(resolved.begin(), resolved.end(), key) != resolved.end() || !pressed(key)) {
+            return;
+        }
+        resolved.push_back(key);
+        ShortcutAction action = resolveNamed(key, shift, context);
+        if (action.kind != ShortcutAction::Kind::None) {
+            actions.push_back(std::move(action));
+        }
+    };
+    for (const HostScope& scope : m_registry.scopes()) {
+        appendKey(bindingFor(scope.id));
+    }
     // The bound action keys in the order the shell has always checked them; a
     // key whose action is unavailable resolves to nothing and lets the rest of
     // the scan run.
     for (const std::string& binding : {m_bindings.attachWindow, m_bindings.drawRegion, m_bindings.attachFace,
                                        m_bindings.pinColor, m_bindings.vectorscopeZoom, m_bindings.clearRegion}) {
-        if (!pressed(binding)) {
-            continue;
-        }
-        ShortcutAction action = resolveNamed(binding, shift, context);
-        if (action.kind != ShortcutAction::Kind::None) {
-            actions.push_back(std::move(action));
-        }
+        appendKey(binding);
     }
     appendPresetDigits(shift, pressed, actions);
 
     return actions;
-}
-
-void ShortcutResolver::appendScopeKeys(bool shift, const ShortcutKeyPressed& pressed,
-                                       std::vector<ShortcutAction>& actions) const
-{
-    // Each scope's key is resolved by id; a letterless scope has an empty
-    // binding, which never matches a press.
-    for (const HostScope& scope : m_registry.scopes()) {
-        const std::string binding = bindingFor(scope.id);
-        if (!binding.empty() && pressed(binding)) {
-            actions.push_back(chooseScopeAction(scope.id, shift));
-        }
-    }
 }
 
 ShortcutContext shortcutContextFor(const ScopeView& view, const ScopeRegistry& registry, bool settingsOpen,

@@ -499,6 +499,9 @@ LRESULT borderOnLButtonDown(HWND window, LPARAM lParam)
     if (zone == ZoneNone) {
         return 0;
     }
+    g_border.closePressed = false;
+    g_border.bindingPressed = false;
+    SetCapture(window);
     if ((zone & ZoneClose) != 0) {
         g_border.closePressed = true;
         return 0;
@@ -511,7 +514,6 @@ LRESULT borderOnLButtonDown(HWND window, LPARAM lParam)
     GetCursorPos(&g_border.dragStartMouse);
     g_border.dragStartRegion = g_border.region;
     g_borderEditing = true;
-    SetCapture(window);
     return 0;
 }
 
@@ -553,6 +555,7 @@ LRESULT borderOnLButtonUp(HWND window, LPARAM lParam)
         if ((borderZoneAtPoint(x, y, scale) & ZoneClose) != 0) {
             g_borderDismissed = true;
         }
+        ReleaseCapture();
         return 0;
     }
     if (g_border.bindingPressed) {
@@ -563,6 +566,7 @@ LRESULT borderOnLButtonUp(HWND window, LPARAM lParam)
         if ((borderZoneAtPoint(x, y, scale) & ZoneBinding) != 0) {
             g_borderBindingToggled = true;
         }
+        ReleaseCapture();
         return 0;
     }
     if (g_border.dragZone != ZoneNone) {
@@ -596,6 +600,12 @@ LRESULT CALLBACK borderProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
         return borderOnMouseMove(window);
     case WM_LBUTTONUP:
         return borderOnLButtonUp(window, lParam);
+    case WM_CAPTURECHANGED:
+        g_border.dragZone = ZoneNone;
+        g_borderEditing = false;
+        g_border.closePressed = false;
+        g_border.bindingPressed = false;
+        return 0;
     case WM_TIMER:
         if (wParam == BorderAppearTimer) {
             advanceBorderAppear();

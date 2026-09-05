@@ -24,9 +24,9 @@ IconTextures& ScopePaneRenderer::icons()
     return m_icons;
 }
 
-PaneRenderOutcome ScopePaneRenderer::drawScopeToggles(bool stackModifier)
+PaneRenderOutcome ScopePaneRenderer::drawScopeToggles()
 {
-    return m_toolbar.drawScopeToggles(stackModifier);
+    return m_toolbar.drawScopeToggles();
 }
 
 PaneRenderOutcome ScopePaneRenderer::drawRegionToolIcons(const PaneRenderInput& input)

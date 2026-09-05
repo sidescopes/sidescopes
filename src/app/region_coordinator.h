@@ -88,8 +88,8 @@ public:
     /// unverified or its content unsettled, and @p region is the region the
     /// scopes are reading right now, empty for none. All must outlive the
     /// coordinator.
-    RegionCoordinator(AttachController& attach, const CaptureController& capture, const RegionPicker& picker,
-                      const FaceLockController& faceLock, const std::optional<RegionOfInterest>& region);
+    RegionCoordinator(AttachController& attach, const CaptureController& capture, RegionPicker& picker,
+                      FaceLockController& faceLock, const std::optional<RegionOfInterest>& region);
 
     /// @return The global region - the one bound to no window, which the
     ///         analysis falls back to whenever no attached window is active -
@@ -130,8 +130,8 @@ public:
 private:
     AttachController& m_attach;
     const CaptureController& m_capture;
-    const RegionPicker& m_picker;
-    const FaceLockController& m_faceLock;
+    RegionPicker& m_picker;
+    FaceLockController& m_faceLock;
     const std::optional<RegionOfInterest>& m_region;
 
     std::optional<RegionOfInterest> m_globalRegion;

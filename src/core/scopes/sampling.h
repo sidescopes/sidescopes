@@ -85,9 +85,9 @@ struct SampleGrid
 [[nodiscard]] inline int sampleRowOf(const SampleGrid& grid, IntRect region, int index)
 {
     const int plain = index * grid.rowStride;
-    const int staggered = plain + index % grid.rowStride;
+    const int phase = index % grid.rowStride;
 
-    return region.y + (staggered < region.height ? staggered : plain);
+    return region.y + plain + (phase < region.height - plain ? phase : 0);
 }
 
 }  // namespace sidescopes

@@ -1,6 +1,7 @@
 #include <array>
 #include <catch2/catch_test_macros.hpp>
 #include <cstddef>
+#include <limits>
 #include <vector>
 
 #include "core/analysis_worker.h"
@@ -82,13 +83,13 @@ TEST_CASE("FrameView reads BGRA pixels as RGB colors")
 
 TEST_CASE("FrameView copies either capture depth to tightly packed BGRA8")
 {
-    SECTION("an eight-bit frame loses row padding but not pixel bytes")
+    SECTION("an eight-bit frame drops row padding and makes alpha opaque")
     {
         constexpr int Stride = 12;
         const std::array<uint8_t, Stride> pixels{3, 2, 1, 17, 6, 5, 4, 18, 99, 99, 99, 99};
         const FrameView view{pixels.data(), Stride, 2, 1, ColorSpaceHint::Srgb, 1};
 
-        CHECK(copyAsBgra8(view) == std::vector<uint8_t>{3, 2, 1, 17, 6, 5, 4, 18});
+        CHECK(copyAsBgra8(view) == std::vector<uint8_t>{3, 2, 1, 255, 6, 5, 4, 255});
     }
 
     SECTION("a ten-bit frame is rounded onto the display scale with opaque alpha")
@@ -199,6 +200,36 @@ TEST_CASE("A frame says whether it carries a rectangle of its display")
     const FrameView whole{tiny.data(), 200 * 4, 200, 160, ColorSpaceHint::Srgb, 1};
     CHECK(whole.carries(IntRect{0, 0, 200, 160}));
     CHECK(whole.carries(IntRect{10, 10, 20, 20}));
+}
+
+TEST_CASE("Rectangle geometry stays valid at the integer limits")
+{
+    constexpr int Maximum = std::numeric_limits<int>::max();
+    constexpr int Minimum = std::numeric_limits<int>::min();
+    CHECK(IntRect{Maximum - 2, 0, 10, 10}.contains(Maximum, 1));
+    CHECK(IntRect{Maximum - 2, 0, 10, 10}.clampedTo(Maximum, 10) == IntRect{Maximum - 2, 0, 2, 10});
+    CHECK(IntRect{Minimum, 0, Maximum, 10}.clampedTo(100, 100).empty());
+    CHECK(IntRect{0, 0, 100, 100}.clampedTo(-1, 100).empty());
+    FrameView crop;
+    crop.sourceX = Maximum;
+    crop.width = crop.height = 100;
+    CHECK(crop.fromDisplay(IntRect{Minimum, 0, 1, 1}).x == Minimum);
+    CHECK_FALSE(crop.carries(IntRect{Minimum, 0, 1, 1}));
+}
+
+TEST_CASE("Regions clamp finite percentages before converting them to pixels")
+{
+    CHECK(RegionOfInterest{-1e300, -1e300, 1e300, 1e300}.toPixels(100, 200) == IntRect{0, 0, 100, 200});
+    CHECK(RegionOfInterest{0, 0, std::numeric_limits<double>::infinity(), 100}.toPixels(100, 100).empty());
+    CHECK(RegionOfInterest{0, std::numeric_limits<double>::quiet_NaN(), 100, 100}.toPixels(100, 100).empty());
+    CHECK(RegionOfInterest{}.toPixels(-1, 100).empty());
+}
+
+TEST_CASE("Frame copying rejects a stride that cannot carry its declared width")
+{
+    const std::array<uint8_t, 4> pixel{};
+    const FrameView frame{pixel.data(), 4, std::numeric_limits<int>::max(), 1};
+    CHECK(copyAsBgra8(frame).empty());
 }
 
 }  // namespace sidescopes

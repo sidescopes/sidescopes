@@ -1,5 +1,4 @@
-// Windows screen capture via DXGI output duplication. Compiles on every
-// push via CI; runtime behavior awaits the Windows port proper.
+// Windows screen capture via DXGI output duplication.
 //
 // Duplication delivers a frame only when the desktop changes, which the
 // mailbox design already assumes. Access loss (display mode changes, UAC
@@ -236,9 +235,8 @@ private:
     }
 
     // Opens output duplication for the given adapter and output, preferring
-    // the BGRA path that tone-maps HDR displays and falling back to plain
-    // duplication elsewhere. Reports the reason and returns false on any
-    // failure.
+    // explicit BGRA format request and falling back to plain duplication.
+    // Reports the reason and returns false on any failure.
     bool openDuplication(UINT adapterIndex, UINT outputIndex, DuplicationSetup& setup)
     {
         ComPtr<IDXGIFactory1> factory;
@@ -261,12 +259,8 @@ private:
             reportStatus("could not create a capture device");
             return false;
         }
-        // The engines assume 8-bit BGRA. On an HDR display plain
-        // DuplicateOutput delivers half-float scRGB, so ask for BGRA
-        // explicitly where the system can tone-map for us (Windows 10
-        // 1703+); older systems fall back to the plain call, whose format
-        // is verified below and refused loudly rather than read as
-        // garbage.
+        // Request BGRA explicitly where supported. Plain DuplicateOutput also
+        // converts to BGRA; copyFrame verifies the acquired texture either way.
         ComPtr<IDXGIOutput5> output5;
         HRESULT duplicated = E_NOINTERFACE;
         if (SUCCEEDED(output.As(&output5))) {
@@ -282,10 +276,6 @@ private:
         }
         DXGI_OUTDUPL_DESC duplicationDescription{};
         setup.duplication->GetDesc(&duplicationDescription);
-        if (duplicationDescription.ModeDesc.Format != DXGI_FORMAT_B8G8R8A8_UNORM) {
-            reportStatus("unsupported capture format (HDR display?)");
-            return false;
-        }
         // Rotated outputs deliver rotated rows: colors would survive but
         // the waveform axes and the region mapping would not.
         if (duplicationDescription.Rotation != DXGI_MODE_ROTATION_IDENTITY &&
@@ -335,6 +325,10 @@ private:
     {
         D3D11_TEXTURE2D_DESC description{};
         texture->GetDesc(&description);
+        if (description.Format != DXGI_FORMAT_B8G8R8A8_UNORM) {
+            reportStatus("unsupported capture format");
+            return FrameOutcome::Fatal;
+        }
         if (!ensureStaging(setup.device.Get(), description, state.staging)) {
             return FrameOutcome::Fatal;
         }

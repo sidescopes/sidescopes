@@ -44,9 +44,10 @@ command -v emcmake >/dev/null || {
 
 mkdir -p "$OUT"
 
-# Configure once; reconfiguring on every run would refetch Dear ImGui.
-[ -f "$BUILD/build.ninja" ] || [ -f "$BUILD/Makefile" ] || \
-    emcmake cmake -S "$ROOT" -B "$BUILD" -G Ninja -DCMAKE_BUILD_TYPE=Release
+# Refresh compiler and toolchain paths after SDK upgrades. Disconnected
+# updates reuse fetched dependencies while still permitting initial population.
+emcmake cmake -S "$ROOT" -B "$BUILD" -G Ninja -DCMAKE_BUILD_TYPE=Release \
+    -DFETCHCONTENT_UPDATES_DISCONNECTED=ON
 cmake --build "$BUILD"
 
 # Anything named for the lab goes first. The whole directory is what gets
@@ -80,7 +81,7 @@ SAMPLES="skin-and-colour neutral-detail wide-tonal-range flat-field"
 # is not fatal - the lab falls back to generated patterns and says so, which
 # is the same contract the harness degrades under.
 for name in $SAMPLES; do
-    [ -f "$CACHE/$name.jpg" ] || python3 "$ROOT/scripts/scenarios/content.py" "$CACHE" "$name.jpg" || true
+    python3 "$ROOT/scripts/scenarios/content.py" "$CACHE" "$name.jpg" || true
 done
 
 # The same mark the website wears, taken from this repository's own brand
@@ -88,6 +89,10 @@ done
 # website repo to dress itself.
 cp "$ROOT/assets/brand/icons/linux/sidescopes-32.png" "$OUT/favicon-32.png"
 cp "$ROOT/assets/brand/icons/linux/sidescopes-256.png" "$OUT/apple-touch-icon.png"
+
+mkdir -p "$OUT/licenses"
+rm -f "$OUT/licenses/"*.txt
+cp "$BUILD/licenses/"*.txt "$OUT/licenses/"
 
 mkdir -p "$OUT/samples"
 # Anything the set no longer names goes, because the whole directory is what
@@ -131,15 +136,15 @@ sed "s|src=\"sidescopes-lab.js\"|src=\"sidescopes-lab.js?b=$DIGEST\"|" \
 # go in as data: URIs, which fetch WILL read from a file:// page.
 if [ "$STANDALONE" -eq 1 ]; then
     SINGLE=$ROOT/build-web-single
-    [ -f "$SINGLE/build.ninja" ] || \
-        emcmake cmake -S "$ROOT" -B "$SINGLE" -G Ninja -DCMAKE_BUILD_TYPE=Release \
-            -DSIDESCOPES_WEB_SINGLE_FILE=ON
+    emcmake cmake -S "$ROOT" -B "$SINGLE" -G Ninja -DCMAKE_BUILD_TYPE=Release \
+        -DFETCHCONTENT_UPDATES_DISCONNECTED=ON -DSIDESCOPES_WEB_SINGLE_FILE=ON
     cmake --build "$SINGLE"
     python3 "$ROOT/scripts/web-standalone.py" \
         --page "$ROOT/src/web/index.html" \
         --engine "$SINGLE/sidescopes-lab.js" \
         --samples "$OUT/samples" \
         --icon "$ROOT/assets/brand/icons/linux/sidescopes-32.png" \
+        --licenses "$OUT/licenses" \
         --out "$OUT/sidescopes-lab.html"
     ls -lh "$OUT/sidescopes-lab.html" | awk '{print "standalone:", $5, $9}'
 fi

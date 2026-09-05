@@ -16,6 +16,7 @@ identical in a column of numbers, and this is where they are kept apart.
 
 import argparse
 import json
+import math
 import sys
 
 
@@ -45,11 +46,13 @@ def _summary(document):
     return {
         "machine": f"{machine.get('name', '?')} - {machine.get('cpu', '?')}, {machine.get('logical_cores', '?')} cores",
         "os": machine.get("os", "?"),
-        "power": f"{power.get('source', '?')}, battery {power.get('battery_percent', '?')}%",
+        "power": f"{power.get('source', '?')}, battery {power.get('battery_percent', '?')}%, "
+                 f"charging={power.get('charging', '?')}, cpu_limit={power.get('cpu_speed_limit', '?')}",
         "displays": ", ".join(f"{int(one['points'][0])}x{int(one['points'][1])} at {one['scale']}x"
                               for one in displays),
         "region": "x".join(str(value) for value in document.get("layout", {}).get("region_pixels", [])) + " pixels",
-        "content": content.get("kind", "?") + (" (DEGRADED)" if content.get("degraded") else ""),
+        "content": json.dumps({key: content.get(key) for key in
+                               ("kind", "patterns", "photographs", "degraded")}, sort_keys=True),
         "build": f"{application.get('version', '?')} {application.get('binary_sha256', '?')} "
                  f"[{document.get('profile', {}).get('name', '?')}]",
     }
@@ -81,7 +84,7 @@ def report_conditions(baseline_document, current_document):
     return mismatched
 
 
-def compare(baseline, current, threshold):
+def compare(baseline, current, threshold, condition_reason=""):
     """Print every metric; return whether anything regressed."""
     regressed = False
     for metric in sorted(baseline):
@@ -91,10 +94,18 @@ def compare(baseline, current, threshold):
         before, after = baseline[metric], current[metric]
         unit = after.get("unit", "ns")
         left, right = float(before["value"]), float(after["value"])
-        delta = (right - left) / left * 100.0 if left else 0.0
+        delta = (right - left) / abs(left) * 100.0 if left else (math.copysign(math.inf, right) if right else 0.0)
         direction = after.get("direction", "lower")
         note = ""
-        if not after.get("comparable", True) or not before.get("comparable", True):
+        if condition_reason:
+            note = "   NOT COMPARABLE: " + condition_reason
+        elif before.get("unit", "ns") != unit:
+            note = "   NOT COMPARABLE: measurement units differ"
+        elif before.get("direction", "lower") != direction:
+            note = "   NOT COMPARABLE: metric direction differs"
+        elif not math.isfinite(left) or not math.isfinite(right):
+            note = "   NOT COMPARABLE: measurement is not finite"
+        elif not after.get("comparable", True) or not before.get("comparable", True):
             note = "   NOT COMPARABLE: " + (after.get("incomparable_reason")
                                             or "the two runs measured different situations")
         elif direction == "none":
@@ -131,7 +142,8 @@ def main():
 
     mismatched = report_conditions(baseline_document, current_document)
     print("measurements")
-    regressed = compare(baseline, current, arguments.threshold)
+    reason = "conditions differ: " + ", ".join(mismatched) if mismatched else ""
+    regressed = compare(baseline, current, arguments.threshold, reason)
     for document, label in ((baseline_document, "baseline"), (current_document, "current")):
         report_list(document, "absent", f"not run by the {label} build",
                     lambda entry: f"{entry['scenario']}/{entry['stack']}: {entry['reason']}")

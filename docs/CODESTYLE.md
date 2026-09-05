@@ -62,10 +62,10 @@ drift: replace it rather than letting both live.
 
 ## The C module ABI
 
-`include/sidescopes/module.h` is a frozen C boundary: `Ss`-prefixed types,
+`include/sidescopes/module.h` is the versioned C boundary: `Ss`-prefixed types,
 `SS_`-prefixed macros and constants, and `snake_case` struct fields. Its
-identifiers stay stable across versions and follow C conventions rather than
-the rules above. The C++ that wraps the boundary translates to the conventions
+identifiers follow C conventions rather than the rules above. The 0.x ABI
+requires matching versions; stability begins at 1.0. The C++ that wraps the boundary translates to the conventions
 above; the two naming worlds meet only at that seam.
 
 ## Comments

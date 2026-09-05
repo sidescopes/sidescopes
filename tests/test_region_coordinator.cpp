@@ -152,6 +152,9 @@ TEST_CASE("Clearing the region drops every kind of selection at once")
     fix.coordinator.setGlobalRegion(PartialRegion);
     (void)fix.attach.attach(42, 100, "Editor", AttachWindowRect{0.0, 0.0, 400.0, 400.0},
                             AttachDisplayRect{0.0, 0.0, 1000.0, 1000.0}, PartialRegion);
+    fix.faceLock.addLock(42, FaceLockState{}, 0.0);
+    fix.faceLock.onActivated(42, 5.0);
+    REQUIRE(fix.faceLock.hunting());
 
     const RegionOutcome outcome = fix.coordinator.clearRegion();
 
@@ -159,9 +162,15 @@ TEST_CASE("Clearing the region drops every kind of selection at once")
     CHECK_FALSE(outcome.region.has_value());
     CHECK(outcome.detachedAll);
     CHECK_FALSE(fix.attach.attached());
+    CHECK_FALSE(fix.faceLock.locked());
+    CHECK_FALSE(fix.faceLock.hunting());
     // The pending pick goes too, so nothing lands after the clear.
     CHECK(regionOverlayStubs().pickCancels == 1);
     CHECK_FALSE(fix.coordinator.globalRegion().has_value());
+
+    fix.region = PartialRegion;
+    fix.sync();
+    CHECK(regionOverlayStubs().border.has_value());
 }
 
 TEST_CASE("Clearing with nothing attached reports no detach")
@@ -383,6 +392,30 @@ TEST_CASE("The border is not read while a pick is in flight")
     CHECK_FALSE(outcome.bindingToggled);
     CHECK_FALSE(outcome.edited.has_value());
     CHECK_FALSE(fix.coordinator.borderEditing());
+}
+
+TEST_CASE("A pick or clear ends the attached border's editing veil")
+{
+    CoordinatorFixture fix;
+    desktopStubs().displayGeometry = DisplayGeometry{0.0, 0.0, 1000.0, 500.0};
+    desktopStubs().windowGeometry = WindowGeometry{100.0, 50.0, 400.0, 200.0, false, ""};
+    regionOverlayStubs().borderEdit = RegionBorderEdit{true, false, false, PartialRegion};
+    (void)fix.coordinator.pollBorderEdit(42);
+    REQUIRE(regionOverlayStubs().editDim.has_value());
+
+    SECTION("picker")
+    {
+        fix.picker.request(RegionPickerMode::DrawGlobal);
+        (void)fix.picker.openIfRequested(false);
+        (void)fix.coordinator.pollBorderEdit(42);
+    }
+    SECTION("clear")
+    {
+        (void)fix.coordinator.clearRegion();
+    }
+
+    CHECK_FALSE(fix.coordinator.borderEditing());
+    CHECK_FALSE(regionOverlayStubs().editDim.has_value());
 }
 
 }  // namespace sidescopes

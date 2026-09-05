@@ -219,6 +219,8 @@ void unmapFile(MappedFile mapping) noexcept
     }
 #if defined(_WIN32)
     (void)UnmapViewOfFile(mapping.data);
+#elif defined(__EMSCRIPTEN__)
+    std::free(const_cast<unsigned char*>(mapping.data));
 #else
     (void)munmap(const_cast<unsigned char*>(mapping.data), mapping.size);
 #endif

@@ -115,7 +115,8 @@ TEST_CASE("FrameMailbox delivers across threads")
     });
 
     uint64_t lastSeen = 0;
-    while (lastSeen < Frames) {
+    const auto deadline = std::chrono::steady_clock::now() + 5s;
+    while (lastSeen < Frames && std::chrono::steady_clock::now() < deadline) {
         if (auto frame = mailbox.takeLatest(100ms)) {
             CHECK(frame->sequence > lastSeen);  // never stale, never repeated
             lastSeen = frame->sequence;

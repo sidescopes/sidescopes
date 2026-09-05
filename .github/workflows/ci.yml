@@ -23,6 +23,8 @@ jobs:
         run: |
           files=$(git ls-files '*.h' '*.cpp' '*.mm')
           clang-format-18 --dry-run --Werror $files
+      - name: Test development scripts
+        run: python3 -m unittest discover -s tests/scripts -v
       - name: Install lizard
         run: pipx install lizard
       - name: Check complexity
@@ -50,9 +52,9 @@ jobs:
           # tests/ui is the optional UI-test target; test_windows_platform.cpp
           # includes <windows.h>. Both are absent from this Linux compile
           # database, so clang-tidy cannot parse them here.
-          # module_loader.cpp compiles only in the dynamic configuration, so it
-          # is absent from this build's compile database.
-          files=$(git ls-files 'src/core/*.cpp' 'src/core/**/*.cpp' 'src/modules/*.cpp' 'tests/*.cpp' ':(exclude)tests/ui/*' ':(exclude)tests/test_windows_platform.cpp' ':(exclude)src/modules/module_loader.cpp')
+          # The loader also compiles into the static test binary, so both it
+          # and its tests are covered by this compile database.
+          files=$(git ls-files 'src/core/*.cpp' 'src/core/**/*.cpp' 'src/modules/*.cpp' 'tests/*.cpp' ':(exclude)tests/ui/*' ':(exclude)tests/test_windows_platform.cpp' ':(exclude)tests/native/*')
           clang-tidy-18 -p build --quiet $files
 
   tidy-macos:
@@ -76,7 +78,7 @@ jobs:
         # the test files, whose Catch2/test-engine macros use __COUNTER__ (a no-op
         # for the non-test sources).
         run: |
-          files=$(git ls-files 'src/app/*.cpp' 'src/platform/macos/*.mm' 'tests/ui/*.cpp')
+          files=$(git ls-files 'src/app/*.cpp' 'src/platform/macos/*.mm' 'tests/native/*.mm' 'tests/ui/*.cpp')
           "$(brew --prefix llvm@22)/bin/clang-tidy" -p build --quiet \
             --extra-arg=-isysroot --extra-arg="$(xcrun --show-sdk-path)" \
             --extra-arg=-Wno-c2y-extensions $files
@@ -103,7 +105,7 @@ jobs:
         # -Wno-unused-command-line-argument drops MSVC's /MP, which the compile
         # database carries but clang-tidy's clang-cl parse ignores.
         run: |
-          files=$(git ls-files 'src/platform/windows/*.cpp')
+          files=$(git ls-files 'src/platform/windows/*.cpp' 'tests/test_windows_platform.cpp' 'tests/native/*.cpp')
           clang-tidy -p build --checks='-clang-analyzer-*' \
             --extra-arg=-Wno-unused-command-line-argument $files
 
@@ -138,6 +140,7 @@ jobs:
           binary=build/bench/sidescopes_perf
           [ -x "$binary" ] || binary=build/bench/Release/sidescopes_perf.exe
           "$binary" --quick --out perf-selfcheck.json
+          SIDESCOPES_PERF_BINARY="$binary" python3 -m unittest discover -s tests/scripts -p test_perf_cli.py -v
 
   # The Dear ImGui Test Engine suites drive the interface on the null backend,
   # so the toolbar seating, status-bar layout, and interface scaling are
@@ -159,11 +162,14 @@ jobs:
         run: ctest --test-dir build -C Release --output-on-failure --timeout 120 -R sidescopes_ui --no-tests=error
 
   # The dynamic module configuration loads the built-in scopes as shared
-  # objects through the real loader instead of linking them in. Linux exercises
-  # it on every push so the loader path and the module boundary stay honest;
-  # the Windows dynamic link is verified out of band.
+  # objects through the real loader instead of linking them in. Every native
+  # platform exercises discovery, ABI validation, and module lifetimes.
   test-dynamic:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7

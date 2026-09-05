@@ -119,6 +119,9 @@ TEST_CASE("A missing smoothing key falls back rather than reading zero")
 
     CHECK(live.view.traces().smoothing("org.sidescopes.vectorscope") == 75.0f);
     CHECK(live.view.traces().smoothing("org.sidescopes.waveform") == 100.0f);
+    CHECK(scopeParam(live.analysis, "org.sidescopes.parade", "gain", -1.0) == 0.05);
+    CHECK(scopeParam(live.analysis, "org.sidescopes.parade", "stride", -1.0) == 1.0);
+    CHECK_FALSE(live.analysis.scopeParams.contains("org.sidescopes.waveform"));
 }
 
 TEST_CASE("The parade is seeded from the waveform it mirrors")

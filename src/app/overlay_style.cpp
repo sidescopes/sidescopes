@@ -85,7 +85,7 @@ void styleGraticuleTargetBox(StyledGraticule& out, const SsGraticulePrimitive& p
         label.color = graticuleInk(GraticuleLabel, style.strength);
         label.offsetX = 7.0f;
         label.offsetY = -7.0f;
-        std::memcpy(label.label, primitive.label, sizeof(label.label));
+        std::memcpy(label.label, primitive.label, sizeof(label.label) - 1);
     }
 }
 
@@ -100,7 +100,7 @@ void styleGraticuleText(StyledGraticule& out, const SsGraticulePrimitive& primit
         command.color = graticuleInk(GraticuleLabel, style.strength);
         command.offsetX = 4.0f;
         command.offsetY = 1.0f;
-        std::memcpy(command.label, primitive.label, sizeof(command.label));
+        std::memcpy(command.label, primitive.label, sizeof(command.label) - 1);
     }
 }
 
@@ -120,16 +120,20 @@ std::vector<StyledMarker> mergePerChannelMarkers(const std::vector<SsMarker>& ma
         }
         uint32_t mask = markers[i].channel_mask;
         float sum = markerAxis(markers[i]);
+        float sumX = markers[i].x;
         int members = 1;
         for (std::size_t j = i + 1; j < markers.size(); ++j) {
             if (grouped[j]) {
                 continue;
             }
-            if (markers[j].band_from == markers[i].band_from && markers[j].band_to == markers[i].band_to &&
+            if (markers[j].kind == markers[i].kind && markers[j].band_from == markers[i].band_from &&
+                markers[j].band_to == markers[i].band_to &&
+                (markers[i].kind != SS_MARKER_POINT || std::abs(markers[j].x - markers[i].x) <= MergeEpsilon) &&
                 std::abs(markerAxis(markers[j]) - markerAxis(markers[i])) <= MergeEpsilon) {
                 grouped[j] = true;
                 mask |= markers[j].channel_mask;
                 sum += markerAxis(markers[j]);
+                sumX += markers[j].x;
                 ++members;
             }
         }
@@ -144,7 +148,7 @@ std::vector<StyledMarker> mergePerChannelMarkers(const std::vector<SsMarker>& ma
             marker.y = markers[i].y;
         } else {
             marker.y = axis;
-            marker.x = markers[i].x;
+            marker.x = markers[i].kind == SS_MARKER_POINT ? sumX / static_cast<float>(members) : markers[i].x;
         }
         styled.push_back(marker);
     }

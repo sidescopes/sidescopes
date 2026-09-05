@@ -367,6 +367,7 @@ TEST_CASE("Text input silences every shortcut")
     const ShortcutResolver resolver = defaultResolver();
     ShortcutContext context = readyContext();
     context.wantsTextInput = true;
+    CHECK(resolver.resolveNamed("V", false, context).kind == ShortcutAction::Kind::None);
     ModifierState modifiers;
     modifiers.command = true;
 
@@ -594,6 +595,27 @@ TEST_CASE("The resolution context is gathered from the view and the platform")
 
     view.stack().restore(testing::idTokens("V"));
     CHECK(shortcutContextFor(view, registry, false, false).pinsAvailable);
+}
+
+TEST_CASE("A key claimed by multiple binding groups runs once")
+{
+    ShortcutResolver resolver{registry()};
+    SECTION("A scope overrides an action key")
+    {
+        resolver.restore(ShortcutBindings{}, {{AlphaId, "D"}});
+        const auto action = sole(resolver.resolvePressed(readyContext(), {}, pressing("D")));
+        CHECK(action.kind == ShortcutAction::Kind::ChooseScope);
+        CHECK(action.scopeId == AlphaId);
+    }
+    SECTION("Two actions share a key")
+    {
+        ShortcutBindings bindings;
+        bindings.drawRegion = bindings.attachWindow;
+        resolver.restore(bindings, {});
+        const auto action = sole(resolver.resolvePressed(readyContext(), {}, pressing("A")));
+        CHECK(action.kind == ShortcutAction::Kind::RequestPick);
+        CHECK(action.pickMode == RegionPickerMode::AttachWindow);
+    }
 }
 
 }  // namespace sidescopes

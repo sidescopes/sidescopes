@@ -6,6 +6,7 @@
 // idiomatic C++; only this file speaks both languages, and no exception
 // ever crosses.
 
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
 #include <memory>
@@ -17,6 +18,7 @@
 #include "core/scopes/waveform_bins.h"
 #include "modules/module_export.h"
 #include "modules/module_frame.h"
+#include "modules/module_params.h"
 #include "modules/module_registry.h"
 #include "modules/module_scratch.h"
 #include "modules/module_shared_state.h"
@@ -91,15 +93,18 @@ WaveformMode modeOf(WaveformScope scope, bool colored)
 
 bool configure(SsScopeInstance* instance, const SsParamValue* values, uint32_t count)
 {
+    if (!validParameters(values, count)) {
+        return false;
+    }
     try {
         WaveformInstance* self = impl(instance);
         bool colored = self->settings.mode == WaveformMode::ColoredLuma;
         for (uint32_t index = 0; index < count; ++index) {
             const SsParamValue& value = values[index];
             if (std::strcmp(value.key, "gain") == 0) {
-                self->settings.gain = static_cast<float>(value.value);
+                self->settings.gain = parameterGain(value.value);
             } else if (std::strcmp(value.key, "stride") == 0) {
-                self->settings.samplingStride = static_cast<int>(value.value);
+                self->settings.samplingStride = static_cast<int>(std::clamp(value.value, 1.0, 8.0));
             } else if (std::strcmp(value.key, "style") == 0) {
                 colored = value.value >= 0.5;
             }
@@ -118,6 +123,9 @@ bool configure(SsScopeInstance* instance, const SsParamValue* values, uint32_t c
 
 bool accumulate(SsScopeInstance* instance, const SsFrameView* frame, SsRect region)
 {
+    if (!frame || !validBoundaryFrame(*frame)) {
+        return false;
+    }
     try {
         WaveformInstance* self = impl(instance);
         const FrameView view = frameFromBoundary(*frame);
@@ -374,12 +382,12 @@ SsScopeInstance* create(const char* scopeId, const SsHost* host)
             return nullptr;
         }
 
-        auto* self = new WaveformInstance;
+        auto self = std::make_unique<WaveformInstance>();
         self->scope = *scope;
         self->settings.mode = modeOf(*scope, false);
         self->engine.configure(self->settings);
         self->host = host;
-        self->vtable.instance_data = self;
+        self->vtable.instance_data = self.get();
         self->vtable.configure = configure;
         self->vtable.accumulate = accumulate;
         self->vtable.image = image;
@@ -387,7 +395,7 @@ SsScopeInstance* create(const char* scopeId, const SsHost* host)
         self->vtable.markers = markers;
         self->vtable.get_extension = getExtension;
         self->vtable.destroy = destroy;
-        return &self->vtable;
+        return &self.release()->vtable;
     } catch (...) {
         return nullptr;
     }

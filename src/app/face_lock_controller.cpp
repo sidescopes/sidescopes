@@ -145,23 +145,35 @@ FaceLockController::FaceLockController(AttachController& attach, AnalysisWorker&
 void FaceLockController::addLock(uint64_t identity, FaceLockState state, double verifiedAt,
                                  std::optional<AttachWindowRect> windowRect)
 {
-    m_locks[identity] = Lock{state, windowRect, verifiedAt};
+    m_locks[identity] = Lock{state, windowRect, verifiedAt, ++m_nextLockGeneration};
 }
 
 void FaceLockController::removeLock(uint64_t identity)
 {
     m_locks.erase(identity);
+    if (identity == m_trackingIdentity) {
+        resetTracking();
+    }
 }
 
 void FaceLockController::clear()
 {
     m_locks.clear();
+    resetTracking();
+}
+
+void FaceLockController::resetTracking()
+{
+    m_trackingIdentity = 0;
     m_hunting = false;
     m_contentChangedAt = -1.0;
+    m_contentSamples.clear();
 }
 
 void FaceLockController::onActivated(uint64_t identity, double now)
 {
+    resetTracking();
+    m_trackingIdentity = identity;
     // A face lock's anchor goes stale across a focus gap: dressing the border
     // from it flashes a wrong region for one probe's latency - invisible on a
     // fast detector, half a second on a slow one. Hold the border until this
@@ -208,8 +220,11 @@ FaceLockOutcome FaceLockController::update(const AttachDecision& decision,
             m_probe.faces.clear();
         }
         m_probe.ready.store(false);
-        outcome = ingestProbeResult(boxes, m_probe.roi, m_probe.forWindowIdentity, decision, activeWindowIdentity,
-                                    frameSize, now);
+        const auto probed = m_locks.find(m_probe.forWindowIdentity);
+        if (probed != m_locks.end() && probed->second.generation == m_probeLockGeneration) {
+            outcome = ingestProbeResult(boxes, m_probe.roi, m_probe.forWindowIdentity, decision, activeWindowIdentity,
+                                        frameSize, now);
+        }
     }
     const auto locked = m_locks.find(decision.activeIdentity);
     if (decision.activeIdentity == 0 || locked == m_locks.end()) {
@@ -231,6 +246,7 @@ FaceLockOutcome FaceLockController::update(const AttachDecision& decision,
         return outcome;
     }
     m_nextProbe = now + FaceLockProbeSeconds;
+    m_probeLockGeneration = locked->second.generation;
     launchProbe(decision, locked->second.state);
 
     return outcome;
@@ -249,6 +265,7 @@ FaceLockOutcome FaceLockController::ingestProbeResult(const std::vector<IntRect>
     if (locked == m_locks.end() || forIdentity != decision.activeIdentity) {
         return outcome;
     }
+    m_trackingIdentity = forIdentity;
     const LockRect roiRect{static_cast<double>(roi.x), static_cast<double>(roi.y),
                            static_cast<double>(roi.x + roi.width), static_cast<double>(roi.y + roi.height)};
     std::vector<FaceAnchor> candidates;

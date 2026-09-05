@@ -264,6 +264,9 @@ void appendRegionAndAppSection(const ContextMenuModel& model, std::vector<Native
     menuSeparator(menu);
     appendGraticuleSubmenu(model, menu);
 
+    if (!model.applicationControlsAvailable) {
+        return;
+    }
     menuSeparator(menu);
     // Support tooling in one clearly named place; every checkbox reads the live
     // truth, so a session started by the environment shows as switched on and

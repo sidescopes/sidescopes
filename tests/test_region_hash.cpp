@@ -89,4 +89,28 @@ TEST_CASE("hashRegion handles a mask that overhangs the region edge")
     CHECK(hashRegion(frame.view(), region, masked) != before);
 }
 
+TEST_CASE("Hashing includes a single pixel and the tail of an odd-width span")
+{
+    TestFrame frame(5, 1);
+    for (const IntRect region : {IntRect{0, 0, 1, 1}, IntRect{0, 0, 5, 1}}) {
+        const uint64_t before = hashRegion(frame.view(), region);
+        frame.setPixel(region.width - 1, 0, 200);
+        CHECK(hashRegion(frame.view(), region) != before);
+    }
+    const IntRect mask{1, 0, 3, 1};
+    const uint64_t before = hashRegion(frame.view(), IntRect{0, 0, 5, 1}, mask);
+    frame.setPixel(4, 0, 10);
+    CHECK(hashRegion(frame.view(), IntRect{0, 0, 5, 1}, mask) != before);
+}
+
+TEST_CASE("Identical bytes in a different pixel format are different content")
+{
+    TestFrame frame(4, 4);
+    const IntRect region{0, 0, 4, 4};
+    const uint64_t bgra = hashRegion(frame.view(), region);
+    FrameView packed = frame.view();
+    packed.format = PixelFormat::Argb2101010;
+    CHECK(hashRegion(packed, region) != bgra);
+}
+
 }  // namespace sidescopes

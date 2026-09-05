@@ -1,5 +1,8 @@
 #include "app/pane_layout.h"
 
+#include <cmath>
+#include <limits>
+
 namespace sidescopes {
 
 LayoutOrientation PaneLayout::orientation() const
@@ -21,7 +24,7 @@ float PaneLayout::weight(std::string_view id) const
 
 void PaneLayout::setWeight(std::string_view id, float value)
 {
-    m_weights[std::string{id}] = value;
+    m_weights[std::string{id}] = std::isfinite(value) && value > 0.0f ? value : DefaultPaneWeight;
 }
 
 std::vector<float> PaneLayout::stackWeights(const std::vector<std::string>& stack) const
@@ -39,7 +42,9 @@ void PaneLayout::setWeights(const std::map<std::string, double>& weights)
 {
     m_weights.clear();
     for (const auto& [id, value] : weights) {
-        m_weights[id] = static_cast<float>(value);
+        if (std::isfinite(value) && value > 0.0 && value <= std::numeric_limits<float>::max()) {
+            setWeight(id, static_cast<float>(value));
+        }
     }
 }
 

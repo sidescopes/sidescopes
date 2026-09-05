@@ -705,6 +705,10 @@ LRESULT pickerOnKeyDown(PickerState& picker, WPARAM wParam)
     if (picker.pinMode) {
         return 0;
     }
+    if ((GetKeyState(VK_CONTROL) & 0x8000) != 0 || (GetKeyState(VK_MENU) & 0x8000) != 0 ||
+        (GetKeyState(VK_LWIN) & 0x8000) != 0 || (GetKeyState(VK_RWIN) & 0x8000) != 0) {
+        return 0;
+    }
     if (key == 'A') {
         switchPickerMode(0);
     }

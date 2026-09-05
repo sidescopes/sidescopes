@@ -31,10 +31,11 @@ that is [SCOPES.md](SCOPES.md).
   the sliders, the markers and the graticules are loops over descriptors
   and declarative primitives, so a scope reaches the interface without the
   host naming it.
-- Dynamic loading works on every supported platform behind
+- Dynamic loading works on the supported desktop platforms behind
   `-DSIDESCOPES_MODULES_DYNAMIC=ON`, where each module builds as a shared
   object exporting `ss_module_entry` and a loader gates it on the ABI
-  major. A CI job builds and tests that configuration. Release builds stay
+  version (both numbers must match before 1.0). CI builds and tests that
+  configuration on all native platforms. Release builds stay
   statically registered until there is operational reason to change.
 - The ABI is at 0.5 and carries no stability promise. It freezes at 1.0,
   which is also when the first out-of-tree module is expected to matter.

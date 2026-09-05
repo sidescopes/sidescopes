@@ -436,27 +436,35 @@ void collectPinnedResult(RegionPickPoll& poll)
     }
 }
 
-// The cursor is only ever on one display, so at most one overlay has something
-// to preview.
+// A held drag owns the preview; otherwise it follows the cursor's display.
 void collectPreview(RegionPickPoll& poll)
 {
+    const auto dragged = std::find_if(g_pickerOverlays.begin(), g_pickerOverlays.end(),
+                                      [](const PickerOverlay& overlay) { return overlay.view.dragging; });
+    const auto activeDisplay =
+        dragged != g_pickerOverlays.end() ? std::optional<uint32_t>(dragged->displayId) : displayUnderCursor();
     for (PickerOverlay& overlay : g_pickerOverlays) {
         if (overlay.view.pinMode) {
-            break;  // pin modes never preview a region
+            return;
         }
-        if (!overlay.view.drawMode) {
-            const NSInteger hovered = overlay.view.hoveredSuggestion;
-            if (hovered >= 0 && hovered < static_cast<NSInteger>(overlay.view->m_suggestions.size())) {
-                poll.preview = regionPercentFromViewRect(overlay.view->m_suggestions[hovered].first, overlay.size);
-                poll.displayId = overlay.displayId;
-                break;
+        if (activeDisplay != overlay.displayId) {
+            if (overlay.view.hoveredSuggestion >= 0) {
+                overlay.view.hoveredSuggestion = -1;
+                overlay.view.needsDisplay = YES;
             }
-        } else if (overlay.view.dragging) {
+            continue;
+        }
+        if (overlay.view.dragging) {
             const NSRect selection = [overlay.view selectionRect];
             if (selection.size.width > 8 && selection.size.height > 8) {
                 poll.preview = regionPercentFromViewRect(selection, overlay.size);
                 poll.displayId = overlay.displayId;
-                break;
+            }
+        } else if (!overlay.view.drawMode) {
+            const NSInteger hovered = overlay.view.hoveredSuggestion;
+            if (hovered >= 0 && hovered < static_cast<NSInteger>(overlay.view->m_suggestions.size())) {
+                poll.preview = regionPercentFromViewRect(overlay.view->m_suggestions[hovered].first, overlay.size);
+                poll.displayId = overlay.displayId;
             }
         }
     }

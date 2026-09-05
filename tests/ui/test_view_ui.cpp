@@ -4,13 +4,10 @@
 // the interaction, pinning the click -> state CONTRACTS the shipped toolbar and
 // pin ring rely on.
 //
-// HONEST CONSTRAINT: the real main() frame loop is not yet drivable (the
-// App/runFrame extraction is Phase B, in progress). These tests drive the real
-// app-state classes through a REPRESENTATIVE UI built in the test's GuiFunc -
-// letter buttons stand in for the toolbar and keyboard shortcuts, fixed-label
-// buttons stand in for the pin ring's controls - not the shipped layout. When
-// runFrame lands, these upgrade to driving the real loop; the model assertions
-// carry over unchanged.
+// These tests cover app-state classes through controls built in the test's
+// GuiFunc: letter buttons stand in for the toolbar and keyboard shortcuts,
+// and fixed-label buttons stand in for the pin ring's controls. They do not
+// exercise App's frame loop or shipped window layout.
 //
 // Dear ImGui Test Engine (c) 2018-2026 Omar Cornut / DISCO HELLO, used under
 // its Free License; fetched at build time, never vendored.

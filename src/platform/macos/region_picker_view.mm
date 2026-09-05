@@ -488,6 +488,10 @@
     if (self.pinMode) {
         return;
     }
+    if (event.modifierFlags & (NSEventModifierFlagCommand | NSEventModifierFlagControl | NSEventModifierFlagOption)) {
+        [super keyDown:event];
+        return;
+    }
     NSString* keys = event.charactersIgnoringModifiers;
     if (keys.length == 1) {
         // Modes switch on every display's overlay at once.

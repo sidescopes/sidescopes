@@ -140,8 +140,7 @@ void LayoutPresetPicker::drawSlotRow(int slot, float width, IconTextures& icons,
         beginRename(slot);
     }
     ImGui::SameLine(presetNameX());
-    // A row does one thing: it loads. What is on screen is written into the
-    // slot it belongs to as it is arranged, so there is nothing here to save.
+    // Clicking a row loads it; saving is the toolbar button's action.
     // And loading ends the errand, so the default close-on-select stands. The
     // keep-open flag this row used to carry belongs to the scope selector,
     // whose rows are checkboxes a user toggles several of in one visit; here

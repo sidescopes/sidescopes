@@ -1,5 +1,6 @@
 #include "app/settings_window.h"
 
+#include <algorithm>
 #include <string>
 #include <string_view>
 
@@ -74,7 +75,8 @@ void drawTraceSettings(const SettingsContext& ctx, std::string_view id, const ch
         ctx.view.traces().setIntensity(id, percent);
         write(gain->key, traceGainFromIntensity(percent, static_cast<float>(gain->intensity_shift)));
     }
-    int stride = static_cast<int>(scopeParam(ctx.analysis, id, strideParam->key, strideParam->default_value));
+    int stride = static_cast<int>(std::clamp(scopeParam(ctx.analysis, id, strideParam->key, strideParam->default_value),
+                                             strideParam->min_value, strideParam->max_value));
     if (ImGui::SliderInt((std::string{paramLabel(*strideParam)} + "##" + suffix).c_str(), &stride,
                          static_cast<int>(strideParam->min_value), static_cast<int>(strideParam->max_value))) {
         write(strideParam->key, stride);

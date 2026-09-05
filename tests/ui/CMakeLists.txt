@@ -1,5 +1,5 @@
 # Opt-in UI-test target built on the Dear ImGui Test Engine. Enabled only when
-# SIDESCOPES_UI_TESTS=ON; with the option OFF (the default and what CI uses)
+# SIDESCOPES_UI_TESTS=ON; with the option OFF (the local default)
 # this directory is never added, so nothing here is fetched or built.
 #
 # The Test Engine (https://github.com/ocornut/imgui_test_engine) is NOT an OSI
@@ -12,7 +12,7 @@
 include(FetchContent)
 
 # Pinned to the tag matching the application's Dear ImGui (imgui GIT_TAG
-# v1.92.8 in the top-level CMakeLists); the two version in lockstep.
+# v1.92.8 in the top-level CMakeLists); the two versions stay in lockstep.
 FetchContent_Declare(
     imgui_test_engine
     GIT_REPOSITORY https://github.com/ocornut/imgui_test_engine.git

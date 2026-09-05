@@ -25,11 +25,17 @@ constexpr const char* ModuleExtension = ".dylib";
 constexpr const char* ModuleExtension = ".so";
 #endif
 
+std::string utf8PathString(const std::filesystem::path& file)
+{
+    const std::u8string utf8 = file.u8string();
+    return {utf8.begin(), utf8.end()};
+}
+
 // Loads one module file and registers its entry. Logged failures are the
-// caller's cue to keep scanning; nothing here throws.
+// caller's cue to keep scanning.
 void loadOne(const std::filesystem::path& file, ModuleRegistry& registry)
 {
-    const std::string path = file.string();
+    const std::string path = utf8PathString(file);
 #if defined(_WIN32)
     // The wide entry point matches the rest of the platform layer; a
     // module directory is never a search path, so the plain load suffices.
@@ -74,7 +80,7 @@ bool loadModulesFrom(const std::filesystem::path& directory, ModuleRegistry& reg
     std::error_code ec;
     std::filesystem::directory_iterator it(directory, ec);
     if (ec) {
-        registry.recordFailure("cannot scan " + directory.string() + ": " + ec.message());
+        registry.recordFailure("cannot scan " + utf8PathString(directory) + ": " + ec.message());
         return false;
     }
 
@@ -88,13 +94,13 @@ bool loadModulesFrom(const std::filesystem::path& directory, ModuleRegistry& reg
     std::vector<std::filesystem::path> modules;
     const std::filesystem::directory_iterator end;
     for (; it != end; it.increment(ec)) {
-        if (ec) {
-            registry.recordFailure("scan of " + directory.string() + " interrupted: " + ec.message());
-            break;
-        }
         if (it->path().extension() == ModuleExtension) {
             modules.push_back(it->path());
         }
+    }
+    if (ec) {
+        registry.recordFailure("scan of " + utf8PathString(directory) + " interrupted: " + ec.message());
+        return false;
     }
 
     std::sort(modules.begin(), modules.end());

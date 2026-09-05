@@ -11,7 +11,7 @@ constexpr int MaximumStride = 8;
 
 int countAt(int extent, int stride)
 {
-    return extent <= 0 ? 0 : (extent + stride - 1) / stride;
+    return extent <= 0 ? 0 : 1 + (extent - 1) / stride;
 }
 
 }  // namespace

@@ -134,8 +134,9 @@ void WaveformBins::ensureBuffers(int columns)
     if (!m_bins.empty() && m_columns == columns) {
         return;
     }
+    const std::size_t pitch = static_cast<std::size_t>(columns) + WaveformRowPadding;
+    m_bins.assign((pitch * WaveformLevels + WaveformPlanePadding) * 4, 0);
     m_columns = columns;
-    m_bins.assign(planeSize() * 4, 0);
     // Zeroed bins hold no scatter at all, and the key must say so. A column
     // change already differs from every key that came before it, so this is
     // belt and braces - but a key outliving the bins it describes is exactly
@@ -273,8 +274,8 @@ void WaveformBins::scatter(const FrameView& frame, IntRect region, const SampleG
     // threw would otherwise leave half-filled bins under a key claiming they
     // hold this frame, and every scope after it would read that as an answer.
     m_key = WaveformScatterKey{};
-    ++m_scatters;
     scatterInto(frame, region, grid, waveformModeForSpan(scattered, mode), scattered);
+    ++m_scatters;
     // Under the planes it REALLY wrote, which is what the next scope's request
     // is judged against.
     m_key = key;

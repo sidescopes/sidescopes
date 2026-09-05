@@ -58,8 +58,8 @@ PROFILES = (
     Profile(
         "region-optional",
         "shortcut_clear_region",
-        {"start-empty", "clear-region", "draw-region", "attach-window"},
-        "starts with no region and analyses nothing until one is chosen; Escape clears the region",
+        {"clear-region", "draw-region", "attach-window"},
+        "supports an empty region state; Escape clears the region",
     ),
     Profile(
         "always-scoping",
@@ -121,7 +121,7 @@ class Scenario:
 SCENARIOS = (
     Scenario(
         "idle-no-region", "nothing selected, nothing moving", None, "none", "still",
-        needs=("start-empty",),
+        needs=("clear-region",),
     ),
     Scenario(
         "idle-region", "a region over content that does not change", "still", "draw", "still",
@@ -152,7 +152,7 @@ SCENARIOS = (
     ),
     Scenario(
         "region-redraw", "a region drawn roughly in a fifth of a second, cleared, and drawn again",
-        "still", "none", "region-redraw", needs=("draw-region",),
+        "still", "none", "region-redraw", needs=("draw-region", "clear-region"),
     ),
     Scenario(
         "attached-window-drag", "attached to a window, and that window dragged about",

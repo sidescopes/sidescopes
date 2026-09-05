@@ -7,11 +7,13 @@
 
 #include <algorithm>
 #include <cstring>
+#include <memory>
 #include <vector>
 
 #include "core/scopes/histogram.h"
 #include "modules/module_export.h"
 #include "modules/module_frame.h"
+#include "modules/module_params.h"
 #include "modules/module_registry.h"
 #include "modules/module_scratch.h"
 #include "sidescopes/module.h"
@@ -41,12 +43,15 @@ const HistogramInstance* impl(const SsScopeInstance* instance)
 
 bool configure(SsScopeInstance* instance, const SsParamValue* values, uint32_t count)
 {
+    if (!validParameters(values, count)) {
+        return false;
+    }
     try {
         HistogramInstance* self = impl(instance);
         for (uint32_t index = 0; index < count; ++index) {
             const SsParamValue& value = values[index];
             if (std::strcmp(value.key, "stride") == 0) {
-                self->settings.samplingStride = static_cast<int>(value.value);
+                self->settings.samplingStride = static_cast<int>(std::clamp(value.value, 1.0, 8.0));
             } else if (std::strcmp(value.key, "style") == 0) {
                 // Choice 0 is the per-channel default; 1 overlays the
                 // channels additively into one combined plot.
@@ -62,6 +67,9 @@ bool configure(SsScopeInstance* instance, const SsParamValue* values, uint32_t c
 
 bool accumulate(SsScopeInstance* instance, const SsFrameView* frame, SsRect region)
 {
+    if (!frame || !validBoundaryFrame(*frame)) {
+        return false;
+    }
     try {
         HistogramInstance* self = impl(instance);
         const FrameView view = frameFromBoundary(*frame);
@@ -232,12 +240,12 @@ SsScopeInstance* create(const char* scopeId, const SsHost* host)
             return nullptr;
         }
 
-        auto* self = new HistogramInstance;
+        auto self = std::make_unique<HistogramInstance>();
         // Push the constructed defaults through the engine explicitly, so the
         // instance never relies on the engine's own ctor defaults matching.
         self->engine.configure(self->settings);
         self->host = host;
-        self->vtable.instance_data = self;
+        self->vtable.instance_data = self.get();
         self->vtable.configure = configure;
         self->vtable.accumulate = accumulate;
         self->vtable.image = image;
@@ -245,7 +253,7 @@ SsScopeInstance* create(const char* scopeId, const SsHost* host)
         self->vtable.markers = markers;
         self->vtable.get_extension = getExtension;
         self->vtable.destroy = destroy;
-        return &self->vtable;
+        return &self.release()->vtable;
     } catch (...) {
         return nullptr;
     }

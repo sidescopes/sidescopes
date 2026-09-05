@@ -37,9 +37,10 @@ def main():
     parser.add_argument("--samples", required=True, type=pathlib.Path)
     parser.add_argument("--icon", required=True, type=pathlib.Path)
     parser.add_argument("--out", required=True, type=pathlib.Path)
+    parser.add_argument("--licenses", required=True, type=pathlib.Path)
     args = parser.parse_args()
 
-    page = args.page.read_text()
+    page = args.page.read_text(encoding="utf-8")
 
     # The engine, inline. The script tag is matched rather than assumed, so a
     # rename in the page is a loud failure here instead of a file that builds
@@ -49,7 +50,7 @@ def main():
         print("web-standalone: the page no longer loads sidescopes-lab.js by that name", file=sys.stderr)
 
         return 1
-    engine = args.engine.read_text()
+    engine = args.engine.read_text(encoding="utf-8")
     if "SINGLE_FILE" not in engine and ".wasm" in engine:
         # The giveaway that the engine was built without -sSINGLE_FILE: it
         # still means to fetch a sibling binary, which from disk it cannot.
@@ -61,10 +62,6 @@ def main():
     # The photographs, inline. Whatever the samples directory holds, so the
     # set is the build's own answer rather than a list repeated here.
     pictures = {path.stem: data_uri(path, "image/jpeg") for path in sorted(args.samples.glob("*.jpg"))}
-    if not pictures:
-        print(f"web-standalone: no photographs in {args.samples}", file=sys.stderr)
-
-        return 1
 
     # __STANDALONE tells the page not to refuse to run: it carries a guard
     # for being opened from disk, and this is the build that may be.
@@ -77,7 +74,12 @@ def main():
                         f'<link rel="icon" href="{data_uri(args.icon, "image/png")}" type="image/png" sizes="32x32">')
     page = page.replace('<link rel="apple-touch-icon" href="apple-touch-icon.png">', "")
 
-    args.out.write_text(page)
+    notices = [path.read_bytes().decode("utf-8") for path in sorted(args.licenses.glob("*.txt"))]
+    if not notices:
+        print("web-standalone: distribution license notices are missing", file=sys.stderr)
+        return 1
+    page = "<!--\n" + "\n\n".join(notices) + "\n-->\n" + page
+    args.out.write_bytes(page.encode("utf-8"))
     print(f"web-standalone: {len(pictures)} photograph(s) inline, {args.out}")
 
     return 0

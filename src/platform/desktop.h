@@ -77,8 +77,6 @@ struct WindowGeometry
     std::string title;
 };
 
-/// Windows currently visible on the given display, frontmost first. Window
-/// geometry comes from the window server and needs no capture permission.
 /// Whether this platform can attach a region to a window at all. Where it
 /// cannot - a browser, which can no more enumerate another program's windows
 /// than read them - the tool is not offered, the same way the face tool is
@@ -86,6 +84,8 @@ struct WindowGeometry
 /// cannot work is worse than not offering it.
 [[nodiscard]] bool supportsWindowAttach();
 
+/// Windows currently visible on the given display, frontmost first. Window
+/// geometry comes from the window server and needs no capture permission.
 [[nodiscard]] std::vector<DesktopWindow> onScreenWindows(uint32_t displayId);
 
 /// The current geometry of the window with @p identity (a DesktopWindow's
@@ -328,6 +328,11 @@ void observeSystemWake(std::function<void()> callback);
 /// application in the first place). The callback is invoked on the main
 /// thread.
 void observeEscapeWithoutKeyWindow(std::function<void()> callback);
+
+/// Stops the sleep, wake, and focusless-Escape observations and releases their
+/// callbacks. Safe when nothing is observed. Call on the main thread before
+/// tearing down the application.
+void unobserveSystemEvents();
 
 /// Samples the averaged screen color around a desktop point on whatever
 /// display it falls on, independent of the capture stream, so the cursor

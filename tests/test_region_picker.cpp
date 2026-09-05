@@ -224,11 +224,21 @@ TEST_CASE("A cancel swallowed by a tool switch resets nothing")
     RegionPickPoll poll;
     poll.finished = true;
     poll.displayId = StreamedDisplay;
-    const RegionPickOutcome outcome = fix.picker.processPoll(poll, std::nullopt, std::nullopt);
+    regionOverlayStubs().poll = poll;
+    const RegionPickOutcome outcome = fix.picker.poll(std::nullopt, std::nullopt);
 
     CHECK_FALSE(outcome.cancelled);
     CHECK(outcome.ended);
     CHECK_FALSE(fix.picker.active());
+
+    // The next frame discards transient input, but the requested replacement
+    // tool must survive the old overlay's asynchronous close.
+    fix.picker.clearRequest();
+    const RegionPickOutcome reopened = fix.picker.openIfRequested(false);
+    CHECK(reopened.activity);
+    REQUIRE(regionOverlayStubs().lastMode.has_value());
+    CHECK(*regionOverlayStubs().lastMode == RegionPickerMode::PinColor);
+    CHECK(fix.picker.active());
 }
 
 TEST_CASE("Choosing another region tool switches the open pick's mode")
@@ -706,6 +716,26 @@ TEST_CASE("The pin chip previews the colour under the cursor")
     CHECK_FALSE(regionOverlayStubs().chipColor.has_value());
 
     fix.worker.stop();
+}
+
+TEST_CASE("Cancelling a picker also drops the queued replacement tool")
+{
+    PickerFixture fix;
+    openPick(fix, RegionPickerMode::DrawGlobal);
+    fix.picker.request(RegionPickerMode::PinColor);
+    (void)fix.picker.openIfRequested(false);
+    const int pollsBeforeCancel = regionOverlayStubs().pickPolls;
+    fix.picker.cancel();
+    CHECK(regionOverlayStubs().pickPolls == pollsBeforeCancel + 1);
+    fix.picker.clearRequest();
+    CHECK_FALSE(fix.picker.openIfRequested(false).activity);
+    CHECK_FALSE(fix.picker.active());
+    CHECK_FALSE(fix.picker.pendingRequest());
+    CHECK_FALSE(regionOverlayStubs().pickActive);
+    fix.picker.request(RegionPickerMode::DrawGlobal);
+    (void)fix.picker.openIfRequested(false);
+    CHECK(fix.picker.active());
+    CHECK(regionOverlayStubs().pickActive);
 }
 
 }  // namespace sidescopes

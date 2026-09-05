@@ -27,6 +27,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cstring>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -37,10 +38,18 @@
 
 namespace sidescopes {
 class SckScreenCaptureSource;
-}
 
-@interface SidescopesStreamHandler : NSObject <SCStreamOutput, SCStreamDelegate>
-@property(nonatomic, assign) sidescopes::SckScreenCaptureSource* owner;
+struct SckCallbackState
+{
+    std::mutex mutex;
+    SckScreenCaptureSource* owner = nullptr;
+};
+}  // namespace sidescopes
+
+@interface SidescopesStreamHandler : NSObject <SCStreamOutput, SCStreamDelegate> {
+@public
+    std::shared_ptr<sidescopes::SckCallbackState> callbacks;
+}
 @end
 
 namespace sidescopes {
@@ -243,7 +252,9 @@ public:
         }
 
         m_handler = [[SidescopesStreamHandler alloc] init];
-        m_handler.owner = this;
+        m_callbacks = std::make_shared<SckCallbackState>();
+        m_callbacks->owner = this;
+        m_handler->callbacks = m_callbacks;
         m_stream = [[SCStream alloc] initWithFilter:filter configuration:configuration delegate:m_handler];
         m_queue = dispatch_queue_create("sidescopes.capture", DISPATCH_QUEUE_SERIAL);
 
@@ -283,16 +294,17 @@ public:
             m_crop = rect;
         }
         SCStreamConfiguration* configuration = makeStreamConfiguration(m_display, m_filter, m_maxFramesPerSecond, rect);
+        const auto callbacks = m_callbacks;
         // Fire and forget: frames keep arriving at the old geometry until this
         // lands, and each frame is stamped from the size actually delivered, so
         // nothing downstream depends on when that happens.
-        [m_stream
-            updateConfiguration:configuration
-              completionHandler:^(NSError* error) {
-                if (error != nil && m_status) {
-                    m_status(std::string("narrowing the capture failed: ") + error.localizedDescription.UTF8String);
-                }
-              }];
+        [m_stream updateConfiguration:configuration
+                    completionHandler:^(NSError* error) {
+                      const std::lock_guard lock(callbacks->mutex);
+                      if (callbacks->owner != nullptr) {
+                          callbacks->owner->handleConfigurationError(error);
+                      }
+                    }];
     }
 
     void stop() override
@@ -431,20 +443,34 @@ public:
         }
     }
 
+    void handleConfigurationError(NSError* error)
+    {
+        if (error != nil && m_status) {
+            m_status(std::string("narrowing the capture failed: ") + error.localizedDescription.UTF8String);
+        }
+    }
+
 private:
     // Drops the stream, its handler, and the mailbox link. Shared by both
     // stop() paths - the already-stopped early return and the normal
     // teardown after the stream has been asked to stop.
     void resetStreamState()
     {
-        m_handler.owner = nullptr;
+        if (m_callbacks) {
+            const std::lock_guard lock(m_callbacks->mutex);
+            m_callbacks->owner = nullptr;
+        }
+        m_callbacks.reset();
         m_stream = nil;
         m_handler = nil;
+        m_queue = nil;
         m_mailbox = nullptr;
         // The recycled buffer is a whole display of pixels; a stopped stream
-        // keeps it warm for deliveries that are not coming. The capture queue
-        // has drained by here, so nothing else can be holding it.
+        // keeps it warm for deliveries that are not coming. All callbacks
+        // have finished or lost access to this stream's state by here.
         m_buffer = FrameBuffer{};
+        m_display = nil;
+        m_filter = nil;
     }
 
     bool fail(const std::string& message)
@@ -458,6 +484,7 @@ private:
     SCStream* m_stream = nil;
     SidescopesStreamHandler* m_handler = nil;
     dispatch_queue_t m_queue = nil;
+    std::shared_ptr<SckCallbackState> m_callbacks;
     FrameMailbox* m_mailbox = nullptr;
     FrameBuffer m_buffer;  // recycled storage, touched only on the capture queue
     // The layout this recording has been told about, read on the capture queue
@@ -646,7 +673,8 @@ std::optional<CapturedImage> captureDisplayImage(uint32_t displayId)
     if (type != SCStreamOutputTypeScreen) {
         return;
     }
-    if (auto* owner = self.owner) {
+    const std::lock_guard lock(callbacks->mutex);
+    if (auto* owner = callbacks->owner) {
         owner->handleSample(sampleBuffer);
     }
 }
@@ -654,7 +682,8 @@ std::optional<CapturedImage> captureDisplayImage(uint32_t displayId)
 - (void)stream:(SCStream*)stream didStopWithError:(NSError*)error
 {
     (void)stream;
-    if (auto* owner = self.owner) {
+    const std::lock_guard lock(callbacks->mutex);
+    if (auto* owner = callbacks->owner) {
         owner->handleStopped(error);
     }
 }

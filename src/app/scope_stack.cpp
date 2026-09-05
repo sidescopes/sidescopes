@@ -9,11 +9,9 @@ namespace sidescopes {
 
 ScopeStack::ScopeStack(const ScopeRegistry& registry, const ScopeOrder& order)
     : m_registry(registry),
-      m_order(order)
+      m_order(order),
+      m_ids(parseStackTokens(registry, {}))
 {
-    for (const std::string_view id : DefaultScopeStack) {
-        m_ids.emplace_back(id);
-    }
 }
 
 bool ScopeStack::shows(std::string_view id) const
@@ -28,6 +26,9 @@ const std::vector<std::string>& ScopeStack::ids() const
 
 bool ScopeStack::toggle(std::string_view id)
 {
+    if (m_registry.byId(id) == nullptr) {
+        return false;
+    }
     const auto at = std::find(m_ids.begin(), m_ids.end(), id);
     if (at != m_ids.end()) {
         // The last scope stays: the window never goes empty.
@@ -44,6 +45,9 @@ bool ScopeStack::toggle(std::string_view id)
 
 bool ScopeStack::choose(std::string_view id, bool stack)
 {
+    if (m_registry.byId(id) == nullptr) {
+        return false;
+    }
     if (stack) {
         return toggle(id);
     }

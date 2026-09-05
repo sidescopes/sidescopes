@@ -4,6 +4,33 @@ All notable changes to this project are documented in this file. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- Mac downloads contain both Apple silicon and Intel code and require macOS
+  14 or later, matching the screen-capture APIs used by the application.
+- Desktop archives and both Lab distributions include the notices for their
+  bundled libraries and fonts.
+
+### Fixed
+
+- Saved settings retain fractional values and negative monitor coordinates,
+  reject malformed numbers, and preserve the previous file if saving fails.
+- Cancelling a region pick allows another pick immediately. Clearing a region
+  also clears its attachment and face-tracking state, and delayed native
+  callbacks cannot access a session after it closes.
+- Scope analysis retries failed module operations without displaying stale or
+  partially copied results. Changes to narrow regions and pixel formats now
+  invalidate the content cache correctly.
+- Windows capture reads the acquired texture's pixel format, and repeated face
+  detection releases cached native factories before their apartment closes.
+- Diagnostic recording can be changed safely while capture and analysis emit
+  messages, including when a reporting subsystem is shutting down.
+- The Lab keeps the latest image selection during overlapping loads, measures
+  transparent images against the displayed black background, saves preset
+  selections, and refreshes its engine when a newer build is available.
+
 ## [0.7.0] - 2026-08-17
 
 ### Added

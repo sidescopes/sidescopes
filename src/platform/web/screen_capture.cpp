@@ -77,9 +77,9 @@ public:
         }
     }
 
-    void setStatusCallback(StatusCallback callback) override
+    void setStatusCallback(StatusCallback) override
     {
-        m_status = std::move(callback);
+        // Submission is synchronous; there is no background capture status.
     }
 
     void submit(const uint8_t* bgra, int width, int height)
@@ -115,7 +115,6 @@ public:
 
 private:
     FrameMailbox* m_mailbox = nullptr;
-    StatusCallback m_status;
     FrameBuffer m_buffer;
     uint64_t m_sequence = 0;
     int m_width = 0;

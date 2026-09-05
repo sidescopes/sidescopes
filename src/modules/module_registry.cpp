@@ -1,6 +1,7 @@
 #include "modules/module_registry.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <new>
@@ -57,6 +58,9 @@ uint32_t* hostBorrowScratch(const SsHost*, uint64_t count)
         // thread that never accumulated never grew one.
         return arena.empty() ? nullptr : arena.data();
     }
+    if (count > arena.max_size()) {
+        return nullptr;
+    }
     try {
         if (arena.size() < count) {
             arena.resize(static_cast<std::size_t>(count));
@@ -79,6 +83,38 @@ const void* hostGetExtension(const SsHost*, const char* id)
     }
 
     return nullptr;
+}
+
+bool validParameter(const SsParamInfo& parameter)
+{
+    if (!parameter.key || !parameter.key[0] || !parameter.label || !std::isfinite(parameter.min_value) ||
+        !std::isfinite(parameter.max_value) || !std::isfinite(parameter.default_value) ||
+        parameter.min_value > parameter.max_value) {
+        return false;
+    }
+    if (parameter.kind == SS_PARAM_CHOICE) {
+        return parameter.menu_label && parameter.choices && parameter.choices[0];
+    }
+    return parameter.kind != SS_PARAM_INTENSITY || std::isfinite(parameter.intensity_shift);
+}
+
+bool validDescriptor(const SsScopeDescriptor* descriptor)
+{
+    if (!descriptor || !descriptor->id || !descriptor->id[0] || !descriptor->name ||
+        (descriptor->param_count != 0 && !descriptor->params)) {
+        return false;
+    }
+    for (uint32_t index = 0; index < descriptor->param_count; ++index) {
+        if (!validParameter(descriptor->params[index])) {
+            return false;
+        }
+        for (uint32_t previous = 0; previous < index; ++previous) {
+            if (std::strcmp(descriptor->params[index].key, descriptor->params[previous].key) == 0) {
+                return false;
+            }
+        }
+    }
+    return true;
 }
 
 }  // namespace
@@ -115,6 +151,7 @@ void ModuleRegistry::recordFailure(const std::string& message)
 
 ModuleRegistry::~ModuleRegistry()
 {
+    m_stateReport = {};
     for (const SsModuleEntry* module : m_modules) {
         module->deinit();
     }
@@ -122,12 +159,23 @@ ModuleRegistry::~ModuleRegistry()
 
 bool ModuleRegistry::registerModule(const SsModuleEntry& entry)
 {
-    if (entry.abi_major != SS_ABI_MAJOR) {
+    if (std::find(m_modules.begin(), m_modules.end(), &entry) != m_modules.end()) {
+        return true;
+    }
+    if (entry.abi_major != SS_ABI_MAJOR || (SS_ABI_MAJOR == 0 && entry.abi_minor != SS_ABI_MINOR)) {
         recordFailure("rejected ABI " + std::to_string(entry.abi_major) + "." + std::to_string(entry.abi_minor) +
                       " (host " + std::to_string(SS_ABI_MAJOR) + "." + std::to_string(SS_ABI_MINOR) + ")");
         return false;
     }
+    if (!entry.init || !entry.deinit || !entry.scope_count || !entry.descriptor || !entry.create) {
+        recordFailure("a module is missing required entry points");
+        return false;
+    }
+    // Reserve before initialization so ownership cannot be lost to an allocation
+    // failure between init and registration.
+    m_modules.reserve(m_modules.size() + 1);
     if (!entry.init()) {
+        entry.deinit();
         recordFailure("a module refused to initialize");
         return false;
     }
@@ -135,14 +183,7 @@ bool ModuleRegistry::registerModule(const SsModuleEntry& entry)
     m_modules.push_back(&entry);
     const uint32_t count = entry.scope_count();
     for (uint32_t index = 0; index < count; ++index) {
-        const SsScopeDescriptor* descriptor = entry.descriptor(index);
-        if (!descriptor) {
-            // A misbehaving module that returns null below its own
-            // scope_count() would otherwise be dereferenced at lookup time.
-            recordFailure("null descriptor at index " + std::to_string(index) + " of " + std::to_string(count));
-            continue;
-        }
-        m_scopes.push_back(RegisteredScope{descriptor, &entry});
+        registerScope(entry, index, count);
     }
 
     // Keep the scopes in one canonical order regardless of registration order:
@@ -155,6 +196,20 @@ bool ModuleRegistry::registerModule(const SsModuleEntry& entry)
     });
 
     return true;
+}
+
+void ModuleRegistry::registerScope(const SsModuleEntry& entry, uint32_t index, uint32_t count)
+{
+    const SsScopeDescriptor* descriptor = entry.descriptor(index);
+    if (!validDescriptor(descriptor)) {
+        recordFailure("invalid descriptor at index " + std::to_string(index) + " of " + std::to_string(count));
+        return;
+    }
+    if (findScope(descriptor->id)) {
+        recordFailure("duplicate scope id " + std::string(descriptor->id));
+        return;
+    }
+    m_scopes.push_back(RegisteredScope{descriptor, &entry});
 }
 
 const RegisteredScope* ModuleRegistry::findScope(const std::string& id) const
@@ -173,7 +228,18 @@ ScopeInstance ModuleRegistry::createInstance(const std::string& id) const
     if (!scope) {
         return ScopeInstance{};
     }
-    return ScopeInstance{scope->module->create(id.c_str(), &m_host)};
+    SsScopeInstance* instance = scope->module->create(id.c_str(), &m_host);
+    if (instance && (!instance->configure || !instance->accumulate || !instance->image || !instance->graticule ||
+                     !instance->markers || !instance->get_extension || !instance->destroy)) {
+        // A rejected handle can be reclaimed only through its own destroy
+        // function. Never let a missing required operation reach a caller.
+        if (instance->destroy) {
+            instance->destroy(instance);
+        }
+        SS_DIAG(Modules, "scope id=%s returned an incomplete instance", id.c_str());
+        return ScopeInstance{};
+    }
+    return ScopeInstance{instance};
 }
 
 ModuleRegistry& builtinModules()

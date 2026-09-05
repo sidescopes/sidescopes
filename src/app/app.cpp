@@ -135,9 +135,7 @@ App::App()
       m_worker(m_mailbox),
       m_capture(createScreenCaptureSource()),
       m_captureController(*m_capture, m_mailbox),
-      m_faceLock(m_attach, m_worker, m_captureController),
-      m_regionPicker(m_captureController, m_worker, *m_capture),
-      m_regions(m_attach, m_captureController, m_regionPicker, m_faceLock, m_analysis.region),
+      m_regionSession(m_captureController, m_worker, *m_capture),
       m_scopeRegistry(builtinModules()),
       m_view(m_scopeRegistry),
       m_shortcuts(m_scopeRegistry),
@@ -187,8 +185,9 @@ bool App::init()
     // setupImGui already applied the OS scale at the 1.0 default; fold the
     // preference in now, before the first frame.
     m_uiScale.restore(startupUiScaleFactor(startup, m_window), m_window);
-    const ScopePaneContext paneContext{*m_graphics,         m_view,         m_scopeRegistry, m_analysis, m_output,
-                                       m_captureController, m_regionPicker, m_pins,          m_shortcuts};
+    const ScopePaneContext paneContext{
+        *m_graphics, m_view,     m_scopeRegistry, m_analysis, m_output, m_captureController, m_regionSession.picker(),
+        m_pins,      m_shortcuts};
     m_panes = std::make_unique<ScopePaneRenderer>(paneContext, createProjectionInstances(m_scopeRegistry),
                                                   createScopeTextures(m_scopeRegistry));
 
@@ -198,10 +197,9 @@ bool App::init()
 
     observeSystemEvents();
     rememberApplicationWindow(m_graphics->nativeWindowHandle());
-    m_ownPid = ownApplicationPid();
 
     m_clocks.noteActivity(glfwGetTime());
-    m_regions.syncBorder(borderState());
+    m_regionSession.syncBorder(glfwGetWindowAttrib(m_window, GLFW_ICONIFIED) != 0);
 
     return true;
 }
@@ -220,8 +218,7 @@ void App::initializeStarterRegion()
         return;
     }
     const RegionOfInterest starter = starterGlobalRegion(windowPlacement(), *display);
-    m_regions.setGlobalRegion(starter);
-    m_analysis.region = starter;
+    applyRegionSessionOutcome(m_regionSession.initializeGlobalRegion(starter));
 }
 
 void App::observeSystemEvents()
@@ -259,25 +256,19 @@ void App::run()
 
 void App::shutdown()
 {
-    // No new face-lock probe or display face scan starts once the loop is
-    // done, so drain any still in flight before their targets leave scope:
-    // the detached threads hold pointers into this object.
-    for (;;) {
-        if (!m_faceLock.probeRunning() && !m_regionPicker.scansRunning()) {
-            break;
-        }
-        std::this_thread::yield();
-    }
+    m_regionSession.shutdown();
 
     persistPreferences();
-    unwatchWindowMotion();
     // The observer reaches this object and posts GLFW events, so it must not
     // outlive either.
     unobserveForegroundChanges();
+    unobserveSystemEvents();
     hideAttachedEditDim();
     hideRegionBorder();
     m_worker.stop();
     m_capture->stop();
+    m_panes.reset();
+    m_frameTimer.reset();
     stopRendering(m_window, m_graphics.get());
 }
 
@@ -353,33 +344,20 @@ void App::chooseScope(std::string_view id, bool stack)
     m_analysisDirty = true;
 }
 
-RegionBorderState App::borderState() const
+void App::applyRegionSessionOutcome(const RegionSessionOutcome& outcome)
 {
-    return RegionBorderState{m_attachActiveLabel, m_activeWindowIdentity, m_attachedWindowMoving,
-                             glfwGetWindowAttrib(m_window, GLFW_ICONIFIED) != 0, glfwGetTime()};
-}
-
-// Applies a region decision to host state. The coordinator owns the global
-// region and the border; what lands here is what only the host can carry out -
-// the settings the worker reads, the active window the motion watch follows,
-// and the clock the idle wait measures against.
-void App::applyRegionOutcome(const RegionOutcome& outcome)
-{
-    if (outcome.detachedAll) {
-        unwatchWindowMotion();
-        m_activeWindowIdentity = 0;
-        m_attachedWindowMoving = false;
-        m_attachGripActive = false;
-    }
     if (outcome.regionChanged) {
         m_analysis.region = outcome.region;
         m_analysisDirty = true;
-        if (!m_analysis.region) {
-            // Nothing is being read, so the last region's traces are dropped
-            // rather than left standing: the panes go honestly empty, and the
-            // next region draws onto a clean instrument instead of a ghost.
+        if (!m_analysis.region && m_panes) {
             m_panes->releaseTraces();
         }
+    }
+    if (outcome.pinColor) {
+        m_pins.pin(*outcome.pinColor);
+    }
+    if (outcome.status) {
+        setStatus(*outcome.status);
     }
     if (outcome.activity) {
         m_clocks.noteActivity(glfwGetTime());
@@ -395,7 +373,9 @@ void App::persistPreferences()
     preferences.layoutActiveSlot = m_presets.activeSlot();
     preferences.uiScaleFactor = m_uiScale.userFactor();
     preferences.quality = qualityToken(m_quality);
-    glfwGetWindowPos(m_window, &preferences.windowX, &preferences.windowY);
+    WindowPosition position;
+    glfwGetWindowPos(m_window, &position.x, &position.y);
+    preferences.windowPosition = position;
     glfwGetWindowSize(m_window, &preferences.windowWidth, &preferences.windowHeight);
     if (!savePreferences(preferences, preferencesFilePath())) {
         std::fprintf(stderr, "sidescopes: failed to save preferences to %s\n", preferencesFilePath().c_str());
@@ -407,7 +387,7 @@ void App::runFrame()
     // Frame-scoped signals start clear each iteration, exactly as fresh locals
     // would; the phase methods below fill them in. The cursor colors need no
     // clearing here: the sampler writes all three every frame that draws.
-    m_regionPicker.clearRequest();
+    m_regionSession.picker().clearRequest();
 
     pumpEvents();
     m_frameTimer->markFrameBodyStart();
@@ -423,8 +403,8 @@ void App::runFrame()
     // Attached regions: observe the attached windows and route the analysis by
     // the focused window. The border reconciles here every frame in both
     // regimes, so no missed edge can strand it on screen.
-    followAttachedWindow();
-    m_regions.syncBorder(borderState());
+    applyRegionSessionOutcome(m_regionSession.follow(glfwGetWindowAttrib(m_window, GLFW_ICONIFIED) != 0, m_frameSize));
+    m_regionSession.syncBorder(glfwGetWindowAttrib(m_window, GLFW_ICONIFIED) != 0);
     followWindowDisplay();
     syncUiScaleToMonitor();
     notePointerMovement();
@@ -439,7 +419,7 @@ void App::runFrame()
     const RedrawSignals signals{m_callbackState.lastInputEvent,
                                 m_panes->redrawDueSeconds(),
                                 ImGui::GetIO().WantTextInput,
-                                m_regionPicker.active(),
+                                m_regionSession.picker().active(),
                                 regionInteracting(),
                                 framebufferWidth,
                                 framebufferHeight,
@@ -453,9 +433,8 @@ void App::runFrame()
     // analysis keep flowing underneath. These run whether or not a frame was
     // drawn: a region border grabbed while the loop is quiet reaches the
     // application through this poll and no other way.
-    applyRegionPickOutcome(m_regionPicker.openIfRequested(m_analysis.region.has_value()));
-    applyBorderEditOutcome(m_regions.pollBorderEdit(m_activeWindowIdentity));
-    applyRegionPickOutcome(m_regionPicker.poll(m_frameSize, m_cursor.screenSampleColor()));
+    applyRegionSessionOutcome(m_regionSession.poll(glfwGetWindowAttrib(m_window, GLFW_ICONIFIED) != 0, m_frameSize,
+                                                   m_cursor.screenSampleColor()));
     commitAnalysisChanges(drawing);
 }
 
@@ -485,7 +464,7 @@ void App::drawFrame(int framebufferWidth, int framebufferHeight)
     // Second follow step, right after the vsync wait: the pre-frame geometry
     // is a frame stale by now, and a border moved from it would trail a
     // fast-dragged window visibly.
-    followAttachedWindow();
+    applyRegionSessionOutcome(m_regionSession.follow(glfwGetWindowAttrib(m_window, GLFW_ICONIFIED) != 0, m_frameSize));
 
     m_clocks.noteFrameShown(framebufferWidth, framebufferHeight, m_captureController.status());
 }
@@ -495,7 +474,7 @@ void App::drawFrame(int framebufferWidth, int framebufferHeight)
 // the frame loop, so both take it off its frame period - see frameWaitFor.
 bool App::regionInteracting() const
 {
-    return m_regionPicker.active() || m_regions.borderEditing();
+    return m_regionSession.interacting();
 }
 
 void App::serviceCapture(bool framebufferEmpty, double now)
@@ -508,11 +487,11 @@ void App::serviceCapture(bool framebufferEmpty, double now)
                          glfwGetWindowAttrib(m_window, GLFW_VISIBLE) != 0,
                          framebufferEmpty,
                          !m_analysis.region.has_value(),
-                         m_regionPicker.active() || m_regionPicker.scansRunning() || m_faceLock.probeRunning()};
+                         m_regionSession.picker().active() || m_regionSession.backgroundWorkRunning()};
     conditions.suspended = m_captureController.suspended();
     conditions.frameSize = m_frameSize;
     conditions.region = m_analysis.region;
-    conditions.faceLocked = m_faceLock.locked();
+    conditions.faceLocked = m_regionSession.faceLocked();
 
     const CaptureDecision decision = m_captureSupervisor.update(conditions, now);
     switch (decision.pipeline) {
@@ -537,8 +516,8 @@ void App::serviceCapture(bool framebufferEmpty, double now)
 void App::pumpEvents()
 {
     const double now = glfwGetTime();
-    const FrameWaitDecision wait =
-        frameWaitFor(m_clocks.pacingInputs(now, m_attach.attached(), m_regionPicker.active(), regionInteracting()));
+    const FrameWaitDecision wait = frameWaitFor(m_clocks.pacingInputs(
+        now, m_regionSession.attachments().attached(), m_regionSession.picker().active(), regionInteracting()));
     switch (wait.kind) {
     case FrameWait::FollowInteraction:
         // Ends on the pointer event that moved the region, so the border is
@@ -546,7 +525,7 @@ void App::pumpEvents()
         glfwWaitEventsTimeout(m_clocks.interactionWait(now));
         break;
     case FrameWait::WatchAttachedWindow:
-        idleWaitWatchingAttachedWindow();
+        m_regionSession.idleWaitWatchingAttachedWindow();
         break;
     case FrameWait::Idle:
         // Woken by any event, which is what keeps the application feeling
@@ -569,19 +548,20 @@ void App::drainAsyncSignals()
     // point can stall the tick - a capture restart most of all.
     if (m_callbackState.foregroundChanged.exchange(false)) {
         SS_DIAG(Attach, "fg-event wake");
-        followAttachedWindow();
+        applyRegionSessionOutcome(
+            m_regionSession.follow(glfwGetWindowAttrib(m_window, GLFW_ICONIFIED) != 0, m_frameSize));
         m_clocks.noteActivity(glfwGetTime());
     }
     if (m_callbackState.displaysChanged.exchange(false)) {
         m_captureController.markStale();
     }
-    m_regionPicker.drainFaceScans();
+    m_regionSession.picker().drainFaceScans();
     if (m_callbackState.iconifyChanged.exchange(false)) {
-        m_regions.syncBorder(borderState());
+        m_regionSession.syncBorder(glfwGetWindowAttrib(m_window, GLFW_ICONIFIED) != 0);
         m_clocks.noteActivity(glfwGetTime());
     }
     if (m_orphanEscape.exchange(false)) {
-        applyRegionOutcome(m_regions.clearRegion());
+        applyRegionSessionOutcome(m_regionSession.clear());
         m_clocks.noteActivity(glfwGetTime());
     }
     // Keys the border panel took while it held the keyboard: Escape and the
@@ -590,7 +570,7 @@ void App::drainAsyncSignals()
     // while Escape in the main window stays the full reset.
     for (const BorderKeyPress& press : drainBorderKeyPresses()) {
         if (press.escape) {
-            dismissEditedBorder();
+            applyRegionSessionOutcome(m_regionSession.dismiss());
         } else {
             applyShortcutAction(m_shortcuts.resolveNamed(press.key, press.shift, shortcutContext()));
         }
@@ -603,8 +583,8 @@ void App::followWindowDisplay()
     // With no region drawn and no window attached, capture follows the display
     // this window sits on. A drawn region or an attached window pins capture to
     // its own display regardless of the window.
-    if (m_captureController.permissionGranted() && !m_captureController.dead() && !m_regionPicker.active() &&
-        !m_analysis.region && !m_attach.attached()) {
+    if (m_captureController.permissionGranted() && !m_captureController.dead() && !m_regionSession.picker().active() &&
+        !m_analysis.region && !m_regionSession.attachments().attached()) {
         const auto homeDisplay = displayOfWindow();
         if (homeDisplay && *homeDisplay != m_captureController.capturedDisplay()) {
             m_captureController.requestDisplay(*homeDisplay);
@@ -698,7 +678,7 @@ void App::drawFrameUi()
     // one: a Shift key-up swallowed by a system overlay leaves the cache stuck
     // exactly when the user next switches a scope.
     const ModifierState modifiers = currentModifiers();
-    applyPaneRenderOutcome(m_panes->drawScopeToggles(modifiers.shift));
+    applyPaneRenderOutcome(m_panes->drawScopeToggles());
     applyPresetOutcome(m_presetPicker.draw(m_panes->icons()));
     for (const ShortcutAction& action : m_shortcuts.resolvePressed(shortcutContext(), modifiers, shortcutPressed)) {
         applyShortcutAction(action);
@@ -751,7 +731,7 @@ void App::applyPaneRenderOutcome(const PaneRenderOutcome& outcome)
         chooseScope(outcome.chosenScope->id, outcome.chosenScope->stack);
     }
     if (outcome.clearRegion) {
-        applyRegionOutcome(m_regions.clearRegion());
+        applyRegionSessionOutcome(m_regionSession.clear());
     }
     if (outcome.analysisDirty) {
         m_analysisDirty = true;
@@ -779,7 +759,7 @@ void App::applyShortcutAction(const ShortcutAction& action)
         chooseScope(action.scopeId, action.stack);
         break;
     case ShortcutAction::Kind::RequestPick:
-        m_regionPicker.request(action.pickMode);
+        m_regionSession.picker().request(action.pickMode);
         break;
     case ShortcutAction::Kind::SetZoom:
         m_view.setZoom(action.zoomLevel);
@@ -788,7 +768,7 @@ void App::applyShortcutAction(const ShortcutAction& action)
         m_showSettings = false;
         break;
     case ShortcutAction::Kind::ClearRegion:
-        applyRegionOutcome(m_regions.clearRegion());
+        applyRegionSessionOutcome(m_regionSession.clear());
         break;
     case ShortcutAction::Kind::LoadPreset:
         applyPresetOutcome(m_presets.load(action.presetSlot));
@@ -853,7 +833,7 @@ void App::handleContextMenu()
                                  m_scopeRegistry,
                                  m_shortcuts,
                                  m_analysis.scopeParams,
-                                 m_attach,
+                                 m_regionSession.attachments(),
                                  m_presets.all(),
                                  m_pins.empty(),
                                  m_presets.activeSlot(),
@@ -909,7 +889,7 @@ void App::dispatchShellMenu(int chosen)
     }
     switch (chosen) {
     case MenuDetachWindow:
-        detachActiveWindow();
+        applyRegionSessionOutcome(m_regionSession.detach());
         break;
     case MenuClearPinnedMarkers:
         m_pins.clear();
@@ -957,7 +937,7 @@ void App::commitAnalysisChanges(bool drewThisPass)
         // the drawn frame keeps the scopes at exactly the rate they are shown
         // at. The border is reconciled either way, which is the whole point of
         // the arrangement.
-        m_regions.syncBorder(borderState());
+        m_regionSession.syncBorder(glfwGetWindowAttrib(m_window, GLFW_ICONIFIED) != 0);
         if (regionInteracting() && !drewThisPass) {
             return;  // still dirty: the pass that draws carries it out
         }
@@ -999,7 +979,7 @@ RegionMotion App::trackRegionMotion(double now)
     // was doing a moment ago - and the flag it would otherwise carry cannot
     // clear while the picker is up, because the follow step that clears it is
     // suppressed for the picker's whole duration.
-    const bool carried = m_attachedWindowMoving && !m_regionPicker.active();
+    const bool carried = m_regionSession.carried();
     const RegionMotionStep step = m_motion.update({regionChanged, carried, now, travel});
     if (step.changed) {
         m_worker.hold(step.motion == RegionMotion::Carried || step.thrown);

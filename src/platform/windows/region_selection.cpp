@@ -295,30 +295,38 @@ bool finishRegionPick(RegionPickPoll& poll)
     return true;
 }
 
-// The cursor is only ever on one display, so at most one overlay has
-// something to preview.
+// A held drag owns the preview; otherwise it follows the cursor's display.
 void collectRegionPreview(RegionPickPoll& poll)
 {
+    const auto dragged =
+        std::find_if(g_pickers.begin(), g_pickers.end(), [](const PickerState* picker) { return picker->dragging; });
+    const auto activeDisplay =
+        dragged != g_pickers.end() ? std::optional<uint32_t>((*dragged)->displayId) : displayUnderCursor();
     for (PickerState* picker : g_pickers) {
         if (picker->pinMode) {
-            break;  // pin modes never preview a region
+            return;
         }
-        if (!picker->drawMode) {
+        if (activeDisplay != picker->displayId) {
+            if (picker->hoveredSuggestion >= 0) {
+                picker->hoveredSuggestion = -1;
+                paintPicker(*picker);
+            }
+            continue;
+        }
+        if (picker->dragging) {
+            const Gdiplus::RectF selection = selectionRect(*picker);
+            const double minimum = 8 * uiScale(picker->window);
+            if (selection.Width > minimum && selection.Height > minimum) {
+                poll.preview = regionFromLocalRect(toLocalRect(selection), picker->width, picker->height);
+                poll.displayId = picker->displayId;
+            }
+        } else if (!picker->drawMode) {
             if (picker->hoveredSuggestion >= 0 &&
                 picker->hoveredSuggestion < static_cast<int>(picker->suggestions.size())) {
                 poll.preview = regionFromLocalRect(
                     toLocalRect(picker->suggestions[static_cast<std::size_t>(picker->hoveredSuggestion)].first),
                     picker->width, picker->height);
                 poll.displayId = picker->displayId;
-                break;
-            }
-        } else if (picker->dragging) {
-            const Gdiplus::RectF selection = selectionRect(*picker);
-            const double minimum = 8 * uiScale(picker->window);
-            if (selection.Width > minimum && selection.Height > minimum) {
-                poll.preview = regionFromLocalRect(toLocalRect(selection), picker->width, picker->height);
-                poll.displayId = picker->displayId;
-                break;
             }
         }
     }

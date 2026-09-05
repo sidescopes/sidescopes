@@ -18,13 +18,21 @@
 // directly and two machines compare through cost-per-megapixel.
 
 #include <algorithm>
+#include <charconv>
 #include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
-#include <cstdlib>
+#include <filesystem>
+#include <fstream>
+#include <locale>
 #include <map>
+#include <optional>
 #include <random>
+#include <set>
+#include <sstream>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -521,25 +529,43 @@ void sweepWorker(std::vector<MetricRow>& rows, const std::vector<uint8_t>& pixel
 
 namespace {
 
-void writeJson(std::FILE* out, const std::vector<MetricRow>& rows, const std::string& machine,
-               const std::string& osName, const std::string& commit)
+std::string jsonString(std::string_view value)
 {
-    std::fprintf(out, "[\n");
+    constexpr char Hex[] = "0123456789abcdef";
+    std::string escaped = "\"";
+    for (const unsigned char byte : value) {
+        if (byte == '"' || byte == '\\') {
+            escaped += '\\';
+            escaped += static_cast<char>(byte);
+        } else if (byte < 0x20) {
+            escaped += "\\u00";
+            escaped += Hex[byte >> 4];
+            escaped += Hex[byte & 0xf];
+        } else {
+            escaped += static_cast<char>(byte);
+        }
+    }
+    return escaped + '"';
+}
+
+std::string serializeJson(const std::vector<MetricRow>& rows, const std::string& machine, const std::string& osName,
+                          const std::string& commit)
+{
+    std::ostringstream out;
+    out.imbue(std::locale::classic());
+    out << "[\n";
     for (std::size_t i = 0; i < rows.size(); ++i) {
         const MetricRow& row = rows[i];
-        std::fprintf(out, "  {\n");
-        std::fprintf(out, "    \"machine\": \"%s\",\n", machine.c_str());
-        std::fprintf(out, "    \"os\": \"%s\",\n", osName.c_str());
-        std::fprintf(out, "    \"commit\": \"%s\",\n", commit.c_str());
-        std::fprintf(out, "    \"metric\": \"%s\",\n", row.metric.c_str());
-        std::fprintf(out, "    \"value\": %.6g,\n", row.value);
-        std::fprintf(out, "    \"unit\": \"%s\"", row.unit.c_str());
+        out << "  {\n    \"machine\": " << jsonString(machine) << ",\n    \"os\": " << jsonString(osName)
+            << ",\n    \"commit\": " << jsonString(commit) << ",\n    \"metric\": " << jsonString(row.metric)
+            << ",\n    \"value\": " << row.value << ",\n    \"unit\": " << jsonString(row.unit);
         for (const auto& tag : row.tags) {
-            std::fprintf(out, ",\n    \"%s\": \"%s\"", tag.first.c_str(), tag.second.c_str());
+            out << ",\n    " << jsonString(tag.first) << ": " << jsonString(tag.second);
         }
-        std::fprintf(out, "\n  }%s\n", i + 1 < rows.size() ? "," : "");
+        out << "\n  }" << (i + 1 < rows.size() ? "," : "") << '\n';
     }
-    std::fprintf(out, "]\n");
+    out << "]\n";
+    return out.str();
 }
 
 struct Options
@@ -548,39 +574,77 @@ struct Options
     std::string osName = "unknown";
     std::string commit = "unknown";
     std::string outPath;
-    std::string tiers = "engine,hash,worker";
+    std::set<std::string> tiers{"engine", "hash", "worker"};
     Effort effort;
+    bool help = false;
 };
 
-Options parseOptions(int argc, char** argv)
+bool parseTiers(const std::string& value, std::set<std::string>& tiers)
+{
+    tiers.clear();
+    std::size_t begin = 0;
+    do {
+        const std::size_t end = value.find(',', begin);
+        const std::string tier = value.substr(begin, end == std::string::npos ? end : end - begin);
+        if (tier != "engine" && tier != "hash" && tier != "worker") {
+            return false;
+        }
+        if (!tiers.insert(tier).second) {
+            return false;
+        }
+        if (end == std::string::npos) {
+            return true;
+        }
+        begin = end + 1;
+    } while (begin <= value.size());
+    return false;
+}
+
+std::optional<Options> parseOptions(const std::vector<std::string>& arguments, std::string& problem)
 {
     Options options;
     const std::map<std::string, std::string*> targets{{"--machine", &options.machine},
                                                       {"--os", &options.osName},
                                                       {"--commit", &options.commit},
-                                                      {"--out", &options.outPath},
-                                                      {"--tiers", &options.tiers}};
-    // One forward scan, because --quick carries no value and walking the
-    // arguments in pairs would leave everything after it off by one.
-    for (int i = 1; i < argc; ++i) {
-        const std::string argument = argv[i];
+                                                      {"--out", &options.outPath}};
+    for (std::size_t i = 0; i < arguments.size(); ++i) {
+        const std::string& argument = arguments[i];
         if (argument == "--quick") {
             options.effort = Effort{1, 0.0, 0.5};
             continue;
         }
-        if (i + 1 >= argc) {
-            break;
-        }
-        const auto target = targets.find(argument);
-        if (target != targets.end()) {
-            *target->second = argv[++i];
+        if (argument == "--help") {
+            options.help = true;
             continue;
         }
-        if (argument == "--worker-seconds") {
-            options.effort.workerSeconds = std::max(0.5, std::atof(argv[++i]));
+        const auto target = targets.find(argument);
+        if (target == targets.end() && argument != "--tiers" && argument != "--worker-seconds") {
+            problem = "unknown option: " + argument;
+            return std::nullopt;
+        }
+        if (i + 1 == arguments.size() || arguments[i + 1].starts_with("--")) {
+            problem = "missing value for " + argument;
+            return std::nullopt;
+        }
+        const std::string& value = arguments[++i];
+        if (target != targets.end()) {
+            *target->second = value;
+        } else if (argument == "--tiers") {
+            if (!parseTiers(value, options.tiers)) {
+                problem = "tiers must be distinct names from engine,hash,worker";
+                return std::nullopt;
+            }
+        } else {
+            double seconds = 0.0;
+            const auto parsed = std::from_chars(value.data(), value.data() + value.size(), seconds);
+            if (parsed.ec != std::errc{} || parsed.ptr != value.data() + value.size() || !std::isfinite(seconds) ||
+                seconds < 0.5 || seconds > 3600.0) {
+                problem = "worker seconds must be a finite number between 0.5 and 3600";
+                return std::nullopt;
+            }
+            options.effort.workerSeconds = seconds;
         }
     }
-
     return options;
 }
 
@@ -588,27 +652,27 @@ Options parseOptions(int argc, char** argv)
 /// every run: a tier that produced nothing, a worker that analysed no frames,
 /// or a metric that came back negative all mean the harness is broken rather
 /// than the code it measures being slow, and that is worth an exit code.
-std::string sweepProblem(const std::vector<MetricRow>& rows, const std::string& tiers)
+std::string sweepProblem(const std::vector<MetricRow>& rows, const std::set<std::string>& tiers)
 {
     if (rows.empty()) {
         return "no metrics at all";
     }
     for (const MetricRow& row : rows) {
-        if (!(row.value >= 0.0)) {
-            return "metric '" + row.metric + "' is negative or not a number";
+        if (!std::isfinite(row.value) || row.value < 0.0) {
+            return "metric '" + row.metric + "' is negative or not finite";
         }
     }
     const auto has = [&rows](const char* prefix) {
         return std::any_of(rows.begin(), rows.end(),
                            [prefix](const MetricRow& row) { return row.metric.rfind(prefix, 0) == 0; });
     };
-    if (tiers.find("engine") != std::string::npos && (!has("engine ") || !has("engine-fixed "))) {
+    if (tiers.contains("engine") && (!has("engine ") || !has("engine-fixed "))) {
         return "the engine tier produced no rows";
     }
-    if (tiers.find("hash") != std::string::npos && !has("hash ")) {
+    if (tiers.contains("hash") && !has("hash ")) {
         return "the hash tier produced no rows";
     }
-    if (tiers.find("worker") == std::string::npos) {
+    if (!tiers.contains("worker")) {
         return {};
     }
     if (!has("worker-cores ")) {
@@ -621,60 +685,104 @@ std::string sweepProblem(const std::vector<MetricRow>& rows, const std::string& 
     return analysedSomething ? std::string{} : "the worker tier analysed no frames";
 }
 
-bool wants(const std::string& tiers, const char* tier)
+void printUsage()
 {
-    return tiers.find(tier) != std::string::npos;
+    std::fprintf(stderr,
+                 "usage: sidescopes_perf [--quick] [--tiers engine,hash,worker]\n"
+                 "       [--worker-seconds 0.5..3600] [--machine NAME] [--os NAME]\n"
+                 "       [--commit ID] [--out PATH] [--help]\n");
+}
+
+bool writeOutput(const std::string& json, const std::string& path)
+{
+    if (path.empty()) {
+        const bool written = std::fwrite(json.data(), 1, json.size(), stdout) == json.size();
+        return std::fflush(stdout) == 0 && written;
+    }
+    const std::filesystem::path file = std::u8string(path.begin(), path.end());
+    std::ofstream out(file, std::ios::binary | std::ios::trunc);
+    out.write(json.data(), static_cast<std::streamsize>(json.size()));
+    out.close();
+    return out.good();
 }
 
 }  // namespace
 }  // namespace sidescopes
 
-int main(int argc, char** argv)
+int run(const std::vector<std::string>& arguments)
 {
     using namespace sidescopes;
-
-    const Options options = parseOptions(argc, argv);
+    std::string problem;
+    const auto parsed = parseOptions(arguments, problem);
+    if (!parsed) {
+        std::fprintf(stderr, "perf: %s\n", problem.c_str());
+        printUsage();
+        return 2;
+    }
+    const Options& options = *parsed;
+    if (options.help) {
+        printUsage();
+        return 0;
+    }
     const std::vector<uint8_t> pixels = makeFramePixels(FrameWidth, FrameHeight);
     const FrameView frame{pixels.data(), FrameWidth * 4, FrameWidth, FrameHeight, ColorSpaceHint::Srgb, 1};
 
     std::vector<MetricRow> rows;
-    if (wants(options.tiers, "engine")) {
+    if (options.tiers.contains("engine")) {
         std::fprintf(stderr, "perf: engine tier\n");
         sweepEngines(rows, frame, options.effort);
     }
-    if (wants(options.tiers, "hash")) {
+    if (options.tiers.contains("hash")) {
         std::fprintf(stderr, "perf: hash tier\n");
         sweepHash(rows, frame, options.effort);
     }
-    if (wants(options.tiers, "worker")) {
+    if (options.tiers.contains("worker")) {
         std::fprintf(stderr, "perf: worker tier\n");
         sweepWorker(rows, pixels, options.effort);
     }
-
-    std::FILE* out = stdout;
-    if (!options.outPath.empty()) {
-#if defined(_MSC_VER)
-        if (fopen_s(&out, options.outPath.c_str(), "w") != 0 || out == nullptr) {
-#else
-        out = std::fopen(options.outPath.c_str(), "w");
-        if (out == nullptr) {
-#endif
-            std::fprintf(stderr, "perf: cannot write %s\n", options.outPath.c_str());
-
-            return 1;
-        }
-    }
-    const std::string problem = sweepProblem(rows, options.tiers);
+    problem = sweepProblem(rows, options.tiers);
     if (!problem.empty()) {
         std::fprintf(stderr, "perf: the sweep is not usable - %s\n", problem.c_str());
-
         return 1;
     }
-    writeJson(out, rows, options.machine, options.osName, options.commit);
-    if (out != stdout) {
-        std::fclose(out);
+    const std::string json = serializeJson(rows, options.machine, options.osName, options.commit);
+    if (!writeOutput(json, options.outPath)) {
+        std::fprintf(stderr, "perf: cannot write %s\n", options.outPath.empty() ? "stdout" : options.outPath.c_str());
+        return 1;
+    }
+    if (!options.outPath.empty()) {
         std::fprintf(stderr, "perf: wrote %s\n", options.outPath.c_str());
     }
-
     return 0;
 }
+
+#ifdef _WIN32
+// The wide CRT entry point preserves paths and labels outside the process's
+// legacy code page. The harness carries UTF-8 internally on every platform.
+int wmain(int argc, wchar_t** argv)
+{
+    std::vector<std::string> arguments;
+    for (int i = 1; i < argc; ++i) {
+        const int length =
+            WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, argv[i], -1, nullptr, 0, nullptr, nullptr);
+        if (length <= 0) {
+            std::fprintf(stderr, "perf: invalid Unicode argument\n");
+            return 2;
+        }
+        std::string argument(static_cast<std::size_t>(length), '\0');
+        if (WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, argv[i], -1, argument.data(), length, nullptr,
+                                nullptr) != length) {
+            std::fprintf(stderr, "perf: cannot decode argument\n");
+            return 2;
+        }
+        argument.pop_back();
+        arguments.push_back(std::move(argument));
+    }
+    return run(arguments);
+}
+#else
+int main(int argc, char** argv)
+{
+    return run({argv + 1, argv + argc});
+}
+#endif

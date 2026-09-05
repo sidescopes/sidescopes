@@ -53,7 +53,7 @@ struct DiagConfig
 
 /// @return Whether @p channel is enabled this run. The first call reads
 ///         SIDESCOPES_DIAG and SIDESCOPES_DIAG_FILE and opens the sink;
-///         every later call is a bool lookup.
+///         every later call is an atomic mask lookup.
 [[nodiscard]] bool diagEnabled(DiagChannel channel);
 
 /// Forces the sink open now instead of at the first logged line, so an
@@ -91,31 +91,39 @@ void diagConfigure(const DiagConfig& config);
 /// is the other half of the same problem: dedupe state that outlives a
 /// recording makes the next one's first line wrong rather than missing.
 ///
-/// A report describes; it must not open, close, or register anything.
+/// A report describes; it must not reconfigure diagnostics, initialize it, or
+/// change registrations. Reports run on the configuring thread, so shared
+/// subsystem state must be synchronized by the report's owner.
 using DiagStateReport = std::function<void()>;
+
+struct DiagReportState;
 
 /// Keeps a state report registered for as long as it lives and drops it on
 /// destruction, so a report never outlives the subsystem it describes.
 /// Declare it as the LAST member of that subsystem: members die in reverse
 /// order, so the report goes before the state it reads.
+/// Destruction disarms pending reports and waits for an in-flight report.
+/// Destroy it without holding locks its report needs; if a destructor body
+/// dismantles reported state, reset this registration before doing so.
 class DiagRegistration
 {
 public:
     DiagRegistration() = default;
+    ~DiagRegistration();
     DiagRegistration(DiagRegistration&&) noexcept = default;
-    DiagRegistration& operator=(DiagRegistration&&) noexcept = default;
+    DiagRegistration& operator=(DiagRegistration&& other) noexcept;
     DiagRegistration(const DiagRegistration&) = delete;
     DiagRegistration& operator=(const DiagRegistration&) = delete;
 
 private:
     friend DiagRegistration diagAddStateReport(DiagStateReport report);
 
-    explicit DiagRegistration(std::shared_ptr<DiagStateReport> report)
+    explicit DiagRegistration(std::shared_ptr<DiagReportState> report)
         : m_report(std::move(report))
     {
     }
 
-    std::shared_ptr<DiagStateReport> m_report;
+    std::shared_ptr<DiagReportState> m_report;
 };
 
 /// Registers @p report to run whenever a recording opens - which is what lets

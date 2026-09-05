@@ -224,11 +224,9 @@ TEST_CASE("A boundary frame's format picks the reader the host asked for")
     boundary.pixel_format = SS_PIXEL_FORMAT_BGRA8;
     CHECK(frameFromBoundary(boundary).format == PixelFormat::Bgra8);
 
-    // A host older than ABI minor 4 sends the field zeroed, and a host newer
-    // than this engine may send a format it has never heard of. Both read as
-    // the eight-bit layout every host sent before the field existed.
+    // Unknown formats must be declined before conversion to an engine frame.
     boundary.pixel_format = 4242u;
-    CHECK(frameFromBoundary(boundary).format == PixelFormat::Bgra8);
+    CHECK_FALSE(validBoundaryFrame(boundary));
 }
 
 TEST_CASE("The pixel format survives the crossing into a scope")

@@ -1,9 +1,13 @@
 #include "core/preferences.h"
 
 #include <algorithm>
+#include <atomic>
+#include <chrono>
 #include <cmath>
 #include <cstdlib>
 #include <fstream>
+#include <limits>
+#include <locale>
 #include <map>
 #include <optional>
 #include <sstream>
@@ -12,24 +16,46 @@
 #include <vector>
 
 #include "core/environment.h"
-#include "core/scopes/scope_types.h"
 
 namespace sidescopes {
 namespace {
 
-// The built-in scope ids the file format knows for legacy migration; new files
-// carry them as generic scopeId.paramKey keys the loader parses blind.
-constexpr char VectorscopeId[] = "org.sidescopes.vectorscope";
 constexpr char WaveformId[] = "org.sidescopes.waveform";
 constexpr char ParadeId[] = "org.sidescopes.parade";
-constexpr char HistogramId[] = "org.sidescopes.histogram";
-constexpr char ColorPickerId[] = "org.sidescopes.colorpicker";
+
+std::ostringstream numericStream()
+{
+    std::ostringstream out;
+    out.imbue(std::locale::classic());
+    out.precision(std::numeric_limits<double>::max_digits10);
+    return out;
+}
+
+template <typename Number>
+std::optional<Number> parseNumber(std::string_view text)
+{
+    if (text.empty() || text.front() == '+') {
+        return std::nullopt;
+    }
+    Number value{};
+    std::istringstream input{std::string{text}};
+    input.imbue(std::locale::classic());
+    input >> std::noskipws >> value;
+    if (!input || !input.eof() || !std::isfinite(value)) {
+        return std::nullopt;
+    }
+
+    return value;
+}
 
 std::map<std::string, std::string, std::less<>> parseKeyValueLines(std::istream& input)
 {
     std::map<std::string, std::string, std::less<>> values;
     std::string line;
     while (std::getline(input, line)) {
+        if (!line.empty() && line.back() == '\r') {
+            line.pop_back();
+        }
         const auto separator = line.find('=');
         if (separator == std::string::npos) {
             continue;
@@ -42,14 +68,18 @@ std::map<std::string, std::string, std::less<>> parseKeyValueLines(std::istream&
 void readInt(const std::map<std::string, std::string, std::less<>>& values, const char* key, int& out)
 {
     if (const auto found = values.find(key); found != values.end()) {
-        out = static_cast<int>(std::strtol(found->second.c_str(), nullptr, 10));
+        if (const auto value = parseNumber<int>(found->second)) {
+            out = *value;
+        }
     }
 }
 
 void readFloat(const std::map<std::string, std::string, std::less<>>& values, const char* key, float& out)
 {
     if (const auto found = values.find(key); found != values.end()) {
-        out = std::strtof(found->second.c_str(), nullptr);
+        if (const auto value = parseNumber<float>(found->second)) {
+            out = *value;
+        }
     }
 }
 
@@ -61,16 +91,6 @@ void readBool(const std::map<std::string, std::string, std::less<>>& values, con
         } else if (found->second == "1") {
             out = true;
         }
-    }
-}
-
-// Reads a legacy numeric key straight into a scope parameter slot, leaving the
-// slot's default when the key is absent.
-void readLegacyDouble(const std::map<std::string, std::string, std::less<>>& values, const char* key,
-                      std::map<std::string, double>& params, const char* paramKey)
-{
-    if (const auto found = values.find(key); found != values.end()) {
-        params[paramKey] = std::strtod(found->second.c_str(), nullptr);
     }
 }
 
@@ -104,96 +124,43 @@ void readShortcuts(const std::map<std::string, std::string, std::less<>>& values
     readShortcut(values, "shortcut_clear_region", shortcuts.clearRegion);
 }
 
-// Reads the scope-toggle bindings into the map keyed by scope id. Each retired
-// per-name key folds onto its scope id first; a validated new shortcut_<id> key
-// supersedes it. Only overrides are stored; every other scope defaults to its
-// letter, which the host resolves.
+// Reverse-DNS ids have nonempty dot-separated components. The layout and
+// shortcut namespaces belong to the file format, not to module parameters.
+bool validScopeId(std::string_view id)
+{
+    if (id.empty() || id.starts_with("layout.") || id.starts_with("shortcut_") ||
+        id.find('.') == std::string_view::npos || id.front() == '.' || id.back() == '.' ||
+        id.find("..") != std::string_view::npos) {
+        return false;
+    }
+    return id.find_first_not_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-") ==
+           std::string_view::npos;
+}
+
+// Scope shortcuts use the same ids as the module registry.
 void readScopeShortcuts(const std::map<std::string, std::string, std::less<>>& values, Preferences& preferences)
 {
-    constexpr std::pair<const char*, const char*> Legacy[] = {
-        {"shortcut_vectorscope", VectorscopeId},
-        {"shortcut_waveform", WaveformId},
-        {"shortcut_parade", ParadeId},
-        {"shortcut_histogram", HistogramId},
-        {"shortcut_color_picker", ColorPickerId},
-    };
-    for (const auto& [key, id] : Legacy) {
-        if (const auto found = values.find(key); found != values.end() && validBinding(found->second)) {
-            preferences.scopeShortcuts[id] = found->second;
-        }
-    }
-
-    constexpr std::string_view NewPrefix = "shortcut_org.";
     constexpr std::string_view KeyPrefix = "shortcut_";
     for (const auto& [key, value] : values) {
-        if (key.rfind(NewPrefix, 0) == 0 && validBinding(value)) {
+        if (key.starts_with(KeyPrefix) && validScopeId(std::string_view(key).substr(KeyPrefix.size())) &&
+            validBinding(value)) {
             preferences.scopeShortcuts[key.substr(KeyPrefix.size())] = value;
         }
     }
 }
 
-// The retired waveform_mode enum int maps to the waveform module's style
-// choice: 0 RGB, 1 Luma, 2 Luma (Colored). Only Luma and ColoredLuma had
-// dedicated codes; every other mode read as RGB.
-double waveformModeChoice(long storedMode)
-{
-    if (storedMode == static_cast<int>(WaveformMode::Luma)) {
-        return 1.0;
-    }
-    if (storedMode == static_cast<int>(WaveformMode::ColoredLuma)) {
-        return 2.0;
-    }
-
-    return 0.0;
-}
-
-// Folds the retired per-scope keys into the generic map. A matching generic
-// key read afterwards supersedes any value set here.
-void readLegacyScopeParams(const std::map<std::string, std::string, std::less<>>& values, Preferences& preferences)
-{
-    std::map<std::string, double>& vectorscope = preferences.scopeParams[VectorscopeId];
-    std::map<std::string, double>& waveform = preferences.scopeParams[WaveformId];
-    std::map<std::string, double>& histogram = preferences.scopeParams[HistogramId];
-
-    readLegacyDouble(values, "vectorscope_gain", vectorscope, "gain");
-    readLegacyDouble(values, "vectorscope_stride", vectorscope, "stride");
-    readLegacyDouble(values, "vectorscope_smoothing_ms", vectorscope, "smoothing_ms");
-    readLegacyDouble(values, "waveform_gain", waveform, "gain");
-    readLegacyDouble(values, "waveform_stride", waveform, "stride");
-    readLegacyDouble(values, "waveform_smoothing_ms", waveform, "smoothing_ms");
-    readLegacyDouble(values, "histogram_stride", histogram, "stride");
-
-    // The retired `matrix` and `trace_response` keys are deliberately not read.
-    // BT.601 and the linear response are both gone, so a file naming either -
-    // under its legacy name or the generic `<id>.matrix`, `<id>.response` -
-    // simply goes unread, the way every key no scope declares does. A file is
-    // never refused over a choice that no longer exists, and the vectorscope
-    // runs on its own trace gamma instead.
-    if (const auto found = values.find("waveform_mode"); found != values.end()) {
-        waveform["mode"] = waveformModeChoice(std::strtol(found->second.c_str(), nullptr, 10));
-    }
-    // histogram_per_channel inverts into the style choice: per-channel was the
-    // default and is choice 0, combined is choice 1.
-    if (const auto found = values.find("histogram_per_channel"); found != values.end()) {
-        histogram["style"] = found->second == "1" ? 0.0 : 1.0;
-    }
-}
-
-// Reads every generic scopeId.paramKey key into the map, superseding the legacy
-// values. Ids are reverse-DNS, so a key opening with the org. prefix splits at
-// its last dot; this is how a third-party or letterless scope persists params
-// the host never names.
+// Reads each numeric scopeId.paramKey into the map. The last dot separates
+// the reverse-DNS id from the parameter, regardless of the scope's domain.
 void readGenericScopeParams(const std::map<std::string, std::string, std::less<>>& values, Preferences& preferences)
 {
     for (const auto& [key, value] : values) {
-        if (key.rfind("org.", 0) != 0) {
-            continue;
-        }
         const auto dot = key.rfind('.');
-        if (dot == std::string::npos || dot == 0 || dot + 1 >= key.size()) {
+        if (dot == std::string::npos || dot + 1 >= key.size() || !validScopeId(std::string_view(key).substr(0, dot))) {
             continue;
         }
-        preferences.scopeParams[key.substr(0, dot)][key.substr(dot + 1)] = std::strtod(value.c_str(), nullptr);
+        if (const auto number = parseNumber<double>(value)) {
+            preferences.scopeParams[key.substr(0, dot)][key.substr(dot + 1)] = *number;
+        }
     }
 }
 
@@ -221,7 +188,7 @@ void seedParadeFromWaveform(Preferences& preferences)
 // unambiguous.
 std::string encodeWeights(const std::map<std::string, double>& weights)
 {
-    std::ostringstream out;
+    auto out = numericStream();
     bool first = true;
     for (const auto& [id, weight] : weights) {
         if (!first) {
@@ -244,9 +211,10 @@ std::map<std::string, double> decodeWeights(const std::string& encoded)
         const auto comma = encoded.find(',', at);
         const std::string pair = encoded.substr(at, comma == std::string::npos ? std::string::npos : comma - at);
         if (const auto colon = pair.find(':'); colon != std::string::npos && colon > 0) {
-            const double weight = std::strtod(pair.c_str() + colon + 1, nullptr);
-            if (weight > 0.0) {
-                weights[pair.substr(0, colon)] = weight;
+            const auto weight = parseNumber<double>(std::string_view(pair).substr(colon + 1));
+            if (weight && *weight > 0.0 && *weight <= std::numeric_limits<float>::max() &&
+                static_cast<float>(*weight) > 0.0f) {
+                weights[pair.substr(0, colon)] = *weight;
             }
         }
         if (comma == std::string::npos) {
@@ -263,7 +231,7 @@ std::map<std::string, double> decodeWeights(const std::string& encoded)
 // are C identifiers without dots, so the last dot splits id from key.
 std::string encodeStyles(const std::map<std::string, std::map<std::string, double>>& styles)
 {
-    std::ostringstream out;
+    auto out = numericStream();
     bool first = true;
     for (const auto& [id, params] : styles) {
         for (const auto& [key, value] : params) {
@@ -290,7 +258,9 @@ std::map<std::string, std::map<std::string, double>> decodeStyles(const std::str
         if (const auto colon = pair.find(':'); colon != std::string::npos && colon > 0) {
             const std::string name = pair.substr(0, colon);
             if (const auto dot = name.rfind('.'); dot != std::string::npos && dot > 0 && dot + 1 < name.size()) {
-                styles[name.substr(0, dot)][name.substr(dot + 1)] = std::strtod(pair.c_str() + colon + 1, nullptr);
+                if (const auto value = parseNumber<double>(std::string_view(pair).substr(colon + 1))) {
+                    styles[name.substr(0, dot)][name.substr(dot + 1)] = *value;
+                }
             }
         }
         if (comma == std::string::npos) {
@@ -523,6 +493,58 @@ void writeLayout(std::ostream& out, const Preferences& preferences)
     }
 }
 
+// Reserving a sibling directory is exclusive across processes and keeps the
+// pending file on the destination's filesystem, where replacement is atomic.
+// The previous file is untouched until the complete new file closes cleanly.
+bool replacePreferences(const std::filesystem::path& file, const std::string& contents)
+{
+    std::error_code error;
+    if (!file.parent_path().empty()) {
+        std::filesystem::create_directories(file.parent_path(), error);
+        if (error) {
+            return false;
+        }
+    }
+
+    static std::atomic<unsigned long long> sequence{0};
+    const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
+    std::filesystem::path directory;
+    for (int attempt = 0; attempt < 64; ++attempt) {
+        directory = file.parent_path() / ".sidescopes-preferences-";
+        directory += std::to_string(stamp) + '-' + std::to_string(sequence.fetch_add(1));
+        if (std::filesystem::create_directory(directory, error)) {
+            break;
+        }
+        if (error || attempt == 63) {
+            return false;
+        }
+    }
+
+    struct Cleanup
+    {
+        const std::filesystem::path& directory;
+
+        ~Cleanup()
+        {
+            std::error_code ignored;
+            std::filesystem::remove_all(directory, ignored);
+        }
+    } cleanup{directory};
+
+    const std::filesystem::path pending = directory / "preferences";
+    std::ofstream output(pending, std::ios::binary | std::ios::trunc);
+    if (!output) {
+        return false;
+    }
+    output << contents;
+    output.close();
+    if (!output) {
+        return false;
+    }
+    std::filesystem::rename(pending, file, error);
+    return !error;
+}
+
 }  // namespace
 
 std::string sanitizedPresetName(std::string_view name)
@@ -555,7 +577,6 @@ Preferences loadPreferences(const std::filesystem::path& file)
     }
 
     const auto values = parseKeyValueLines(input);
-    readLegacyScopeParams(values, preferences);
     readGenericScopeParams(values, preferences);
     seedParadeFromWaveform(preferences);
 
@@ -586,14 +607,24 @@ Preferences loadPreferences(const std::filesystem::path& file)
     if (quality != values.end()) {
         preferences.quality = quality->second;
     }
-    readInt(values, "window_x", preferences.windowX);
-    readInt(values, "window_y", preferences.windowY);
+    const auto x = values.find("window_x");
+    const auto y = values.find("window_y");
+    if (x != values.end() && y != values.end()) {
+        const auto positionX = parseNumber<int>(x->second);
+        const auto positionY = parseNumber<int>(y->second);
+        if (positionX && positionY) {
+            preferences.windowPosition = WindowPosition{*positionX, *positionY};
+        }
+    }
     readInt(values, "window_width", preferences.windowWidth);
     readInt(values, "window_height", preferences.windowHeight);
 
-    // Last, because it rewrites what every read above produced: the stack, the
-    // order, each preset, the weights and the shortcut overrides all state
-    // arrangements in the vocabulary it translates.
+    if (preferences.windowWidth <= 0) {
+        preferences.windowWidth = Preferences{}.windowWidth;
+    }
+    if (preferences.windowHeight <= 0) {
+        preferences.windowHeight = Preferences{}.windowHeight;
+    }
 
     return preferences;
 }
@@ -605,10 +636,7 @@ std::string preferencesFileFromEnvironment()
 
 bool savePreferences(const Preferences& preferences, const std::filesystem::path& file)
 {
-    std::error_code error;
-    std::filesystem::create_directories(file.parent_path(), error);
-
-    std::ostringstream out;
+    auto out = numericStream();
     // Generic scope parameters: scopeId.paramKey=value. The parade is never
     // written; it mirrors the waveform and re-seeds from it on load.
     for (const auto& [id, params] : preferences.scopeParams) {
@@ -627,8 +655,6 @@ bool savePreferences(const Preferences& preferences, const std::filesystem::path
         << "tour_settled=" << preferences.tourSettled << '\n'
         << "ui_scale_factor=" << preferences.uiScaleFactor << '\n'
         << "quality=" << preferences.quality << '\n'
-        << "window_x=" << preferences.windowX << '\n'
-        << "window_y=" << preferences.windowY << '\n'
         << "window_width=" << preferences.windowWidth << '\n'
         << "window_height=" << preferences.windowHeight << '\n'
         << "shortcut_attach_window=" << preferences.shortcuts.attachWindow << '\n'
@@ -637,6 +663,10 @@ bool savePreferences(const Preferences& preferences, const std::filesystem::path
         << "shortcut_pin_color=" << preferences.shortcuts.pinColor << '\n'
         << "shortcut_vectorscope_zoom=" << preferences.shortcuts.vectorscopeZoom << '\n'
         << "shortcut_clear_region=" << preferences.shortcuts.clearRegion << '\n';
+    if (preferences.windowPosition) {
+        out << "window_x=" << preferences.windowPosition->x << '\n'
+            << "window_y=" << preferences.windowPosition->y << '\n';
+    }
     // Scope-toggle bindings keyed by scope id: only overrides are written, each
     // as shortcut_<id>, so a scope at its default letter needs no line.
     for (const auto& [id, letter] : preferences.scopeShortcuts) {
@@ -649,12 +679,7 @@ bool savePreferences(const Preferences& preferences, const std::filesystem::path
     }
     writeLayout(out, preferences);
 
-    std::ofstream output(file, std::ios::trunc);
-    if (!output) {
-        return false;
-    }
-    output << out.str();
-    return static_cast<bool>(output);
+    return out && replacePreferences(file, out.str());
 }
 
 }  // namespace sidescopes

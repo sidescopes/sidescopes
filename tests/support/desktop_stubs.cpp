@@ -24,6 +24,10 @@ extern "C" double glfwGetTime(void)
     return 0.0;
 }
 
+extern "C" void glfwWaitEventsTimeout(double)
+{
+}
+
 namespace sidescopes {
 
 namespace {
@@ -37,7 +41,44 @@ bool supportsWindowAttach()
     return true;
 }
 
+int64_t ownApplicationPid()
+{
+    return g_stubs.ownPid;
+}
+
+int64_t foregroundApplicationPid()
+{
+    return g_stubs.foregroundPid;
+}
+
+std::optional<uint64_t> focusedAttachedWindow(int64_t, const std::vector<uint64_t>&)
+{
+    return g_stubs.focusedWindow;
+}
+
+void watchWindowMotion(uint64_t identity, int64_t, std::function<void(WindowMotionSignal)> callback)
+{
+    g_stubs.watchedWindow = identity;
+    g_stubs.windowMotion = std::move(callback);
+}
+
+void unwatchWindowMotion()
+{
+    g_stubs.watchedWindow = 0;
+    g_stubs.windowMotion = {};
+}
+
+void raiseWindow(uint64_t identity, int64_t)
+{
+    g_stubs.raisedWindow = identity;
+}
+
 std::vector<DesktopWindow> onScreenWindows(uint32_t)
+{
+    return g_stubs.onScreenWindows;
+}
+
+std::vector<DesktopWindow> attachCandidateWindows(uint32_t)
 {
     return g_stubs.onScreenWindows;
 }
@@ -132,6 +173,10 @@ void openUrl(const char*)
 {
 }
 
+void unobserveSystemEvents()
+{
+}
+
 std::vector<IntRect> detectFaces(const FrameView& view, float pixelsPerPoint)
 {
     g_stubs.recordDetection(view, pixelsPerPoint);
@@ -148,11 +193,22 @@ void DesktopStubs::reset()
     onScreenWindows.clear();
     cursor.reset();
     cursorDisplay.reset();
+    lastDisplayPoint.reset();
     displayImage.reset();
     faceDetectionSupported = false;
     faces.clear();
     applicationHidden = false;
     displayName = "Test display";
+    captureVisible = false;
+    hidesWindowOnCommandW = false;
+    minimizesWindowOnControlW = false;
+    quitsOnControlQ = false;
+    ownPid = 100;
+    foregroundPid = 0;
+    focusedWindow.reset();
+    watchedWindow = 0;
+    raisedWindow = 0;
+    windowMotion = {};
     screenSample.reset();
     screenSampleRequests = 0;
     const std::lock_guard lock(m_mutex);

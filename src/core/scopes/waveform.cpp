@@ -485,12 +485,18 @@ void Waveform::configure(const WaveformSettings& settings)
 
 void Waveform::resize(int columns, int imageHeight)
 {
+    const std::size_t columnCount = static_cast<std::size_t>(columns);
+    const std::size_t imageBytes = columnCount * imageHeight * 4;
+    // Both allocations must succeed before either buffer changes its logical
+    // size, so a failed resize cannot leave the old geometry over new storage.
+    m_columnDensities.reserve(columnCount);
+    m_image.rgba.reserve(imageBytes);
+    m_columnDensities.assign(columnCount, ColumnDensity{});
+    m_image.rgba.assign(imageBytes, 0);
     m_columns = columns;
     m_imageHeight = imageHeight;
-    m_columnDensities.assign(static_cast<std::size_t>(m_columns), ColumnDensity{});
     m_image.width = m_columns;
     m_image.height = m_imageHeight;
-    m_image.rgba.assign(static_cast<std::size_t>(m_columns) * m_imageHeight * 4, 0);
 }
 
 void Waveform::accumulate(const FrameView& frame, IntRect region)

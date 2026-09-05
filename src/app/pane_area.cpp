@@ -415,7 +415,7 @@ void PaneArea::equalizeDividerWeights(int leftPane, Pass& pass)
     PaneLayout& layout = m_view.layout();
     const std::string& leftId = m_view.stack().ids()[left];
     const std::string& rightId = m_view.stack().ids()[left + 1];
-    const float average = (layout.weight(leftId) + layout.weight(rightId)) * 0.5f;
+    const float average = layout.weight(leftId) * 0.5f + layout.weight(rightId) * 0.5f;
     layout.setWeight(leftId, average);
     layout.setWeight(rightId, average);
     pass.outcome.preferencesSaveDue = true;
@@ -612,16 +612,19 @@ void PaneArea::releaseTraces()
 
 void PaneArea::uploadScope(std::unique_ptr<ScopeTexture>& texture, const ScopeImage& image)
 {
-    if (image.width <= 0 || image.height <= 0) {
-        return;
-    }
-    if (image.rgba.size() < static_cast<std::size_t>(image.width) * static_cast<std::size_t>(image.height) * 4) {
+    if (image.width <= 0 || image.height <= 0 ||
+        image.rgba.size() / 4 / static_cast<std::size_t>(image.width) < static_cast<std::size_t>(image.height)) {
+        // An empty publication also carries state: analysis failed or no
+        // longer produces this image, so its previous trace is no longer live.
+        texture.reset();
         return;
     }
     if (!texture || texture->width() != image.width || texture->height() != image.height) {
         texture = m_graphics.createScopeTexture(image.width, image.height);
     }
-    texture->upload(image);
+    if (texture) {
+        texture->upload(image);
+    }
 }
 
 void PaneArea::uploadVisibleScopes(bool traceLive)

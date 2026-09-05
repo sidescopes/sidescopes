@@ -264,4 +264,18 @@ TEST_CASE("A letterless scope survives a save as an id token")
     CHECK(stack.tokens() == std::string("[") + LetterlessId + "]");
 }
 
+TEST_CASE("A stack remains drawable when the default modules are unavailable")
+{
+    const ModuleRegistry modules;
+    const ScopeRegistry available{modules};
+    ScopeOrder order{available};
+    ScopeStack stack{available, order};
+    CHECK(stack.ids() == std::vector<std::string>{ColorPickerScopeId});
+    CHECK_FALSE(stack.choose(VectorscopeScopeId, false));
+    CHECK_FALSE(stack.toggle("org.example.absent"));
+    CHECK(stack.ids() == std::vector<std::string>{ColorPickerScopeId});
+    stack.restore("[org.example.absent]");
+    CHECK(stack.ids() == std::vector<std::string>{ColorPickerScopeId});
+}
+
 }  // namespace sidescopes

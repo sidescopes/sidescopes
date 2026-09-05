@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <limits>
 
 namespace sidescopes {
@@ -142,8 +143,12 @@ WindowPlacement starterWindowPlacement(const WindowPlacement& workArea, int wind
     const int width = std::clamp(windowWidth, 1, std::max(1, workArea.width));
     const int height = std::clamp(windowHeight, 1, std::max(1, workArea.height));
     const int inset = static_cast<int>(static_cast<double>(std::max(0, workArea.width)) * StarterWindowInset);
-    const int x = std::clamp(workArea.x + inset, workArea.x, workArea.x + std::max(0, workArea.width - width));
-    const int y = workArea.y + std::max(0, workArea.height - height) / 2;
+    const auto coordinate = [](long long value) {
+        return static_cast<int>(std::clamp(value, static_cast<long long>(std::numeric_limits<int>::min()),
+                                           static_cast<long long>(std::numeric_limits<int>::max())));
+    };
+    const int x = coordinate(static_cast<long long>(workArea.x) + std::min(inset, std::max(0, workArea.width - width)));
+    const int y = coordinate(static_cast<long long>(workArea.y) + std::max(0, workArea.height - height) / 2);
 
     return WindowPlacement{x, y, width, height};
 }
@@ -163,10 +168,10 @@ RegionOfInterest starterGlobalRegion(const WindowPlacement& window, const Displa
 
     const double windowLeft = std::clamp(percent(window.x, display.originX, display.widthPoints), 0.0, 100.0);
     const double windowTop = std::clamp(percent(window.y, display.originY, display.heightPoints), 0.0, 100.0);
-    const double windowRight =
-        std::clamp(percent(window.x + window.width, display.originX, display.widthPoints), 0.0, 100.0);
-    const double windowBottom =
-        std::clamp(percent(window.y + window.height, display.originY, display.heightPoints), 0.0, 100.0);
+    const double windowRight = std::clamp(
+        percent(static_cast<double>(window.x) + window.width, display.originX, display.widthPoints), 0.0, 100.0);
+    const double windowBottom = std::clamp(
+        percent(static_cast<double>(window.y) + window.height, display.originY, display.heightPoints), 0.0, 100.0);
     if (separatedFromWindow(centered, windowLeft, windowTop, windowRight, windowBottom)) {
         return centered;
     }
@@ -177,13 +182,31 @@ RegionOfInterest starterGlobalRegion(const WindowPlacement& window, const Displa
 IntRect selfWindowMask(const WindowPlacement& window, const DisplayGeometry& display, int displayWidth,
                        int displayHeight, float uiScale)
 {
+    if (!(display.widthPoints > 0.0) || !(display.heightPoints > 0.0) || displayWidth <= 0 || displayHeight <= 0 ||
+        !std::isfinite(display.originX) || !std::isfinite(display.originY) || !std::isfinite(uiScale)) {
+        return {};
+    }
     const double scaleX = displayWidth / display.widthPoints;
     const double scaleY = displayHeight / display.heightPoints;
+    if (!std::isfinite(scaleX) || !std::isfinite(scaleY)) {
+        return {};
+    }
+    const double x = (window.x - display.originX - MarginLeft * uiScale) * scaleX;
+    const double y = (window.y - display.originY - MarginTop * uiScale) * scaleY;
+    const double xEnd =
+        (static_cast<double>(window.x) + window.width - display.originX + (MarginWidth - MarginLeft) * uiScale) *
+        scaleX;
+    const double yEnd =
+        (static_cast<double>(window.y) + window.height - display.originY + (MarginHeight - MarginTop) * uiScale) *
+        scaleY;
+    // Only the overlap can mask captured pixels. Clip before narrowing to int:
+    // desktop coordinates on another monitor can lie beyond its pixel range.
+    const int left = static_cast<int>(std::clamp(std::floor(x), 0.0, static_cast<double>(displayWidth)));
+    const int top = static_cast<int>(std::clamp(std::floor(y), 0.0, static_cast<double>(displayHeight)));
+    const int right = static_cast<int>(std::clamp(std::ceil(xEnd), 0.0, static_cast<double>(displayWidth)));
+    const int bottom = static_cast<int>(std::clamp(std::ceil(yEnd), 0.0, static_cast<double>(displayHeight)));
 
-    return IntRect{static_cast<int>((window.x - display.originX - MarginLeft * uiScale) * scaleX),
-                   static_cast<int>((window.y - display.originY - MarginTop * uiScale) * scaleY),
-                   static_cast<int>((static_cast<float>(window.width) + MarginWidth * uiScale) * scaleX),
-                   static_cast<int>((static_cast<float>(window.height) + MarginHeight * uiScale) * scaleY)};
+    return IntRect{left, top, std::max(0, right - left), std::max(0, bottom - top)};
 }
 
 }  // namespace sidescopes

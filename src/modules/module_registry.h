@@ -10,8 +10,8 @@ namespace sidescopes {
 
 /// @brief RAII ownership of one module scope instance.
 ///
-/// Move-only; the wrapper calls destroy() and never lets an exception
-/// cross the boundary. Every accessor dereferences the instance, so the
+/// Move-only; the wrapper calls destroy(). Modules must honor the ABI
+/// requirement that exceptions never cross the boundary. Every accessor dereferences the instance, so the
 /// caller must check valid() before using one that may be empty.
 class ScopeInstance
 {
@@ -129,7 +129,7 @@ struct RegisteredScope
 /// @brief The host's collection of scopes.
 ///
 /// Modules register (statically for the built-ins, through the loader
-/// later); the registry gates on the ABI major, initializes each module
+/// later); the registry checks ABI compatibility and required entry points, initializes each module
 /// once, and creates instances by id.
 class ModuleRegistry
 {
@@ -139,7 +139,7 @@ public:
     ModuleRegistry(const ModuleRegistry&) = delete;
     ModuleRegistry& operator=(const ModuleRegistry&) = delete;
 
-    /// Registers a module; false when the ABI major differs or the module's init failed.
+    /// Registers a module; false for an incompatible ABI, missing entry points, or failed initialization.
     [[nodiscard]] bool registerModule(const SsModuleEntry& entry);
 
     /// Notes @p message as a reason a scope is missing - a file that would not
@@ -172,6 +172,9 @@ private:
     /// States the scopes on offer and every reason one is missing, for a
     /// recording that opened long after the modules registered.
     void reportState() const;
+
+    /// Registers one valid, uniquely identified descriptor from an initialized module.
+    void registerScope(const SsModuleEntry& entry, uint32_t index, uint32_t count);
 
     std::vector<const SsModuleEntry*> m_modules;
     std::vector<RegisteredScope> m_scopes;

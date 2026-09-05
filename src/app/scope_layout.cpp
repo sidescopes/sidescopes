@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <limits>
 
 #include "app/scope_view.h"
 
@@ -47,8 +48,8 @@ float splitScore(const std::vector<float>& weights, const std::vector<float>& as
 bool distributeFreePanes(const std::vector<float>& weights, float total, float floorLength, std::vector<bool>& pinned,
                          std::vector<float>& lengths)
 {
-    float freeWeight = 0.0f;
-    float freeLength = total;
+    double freeWeight = 0.0;
+    double freeLength = total;
     std::size_t freeCount = 0;
     for (std::size_t i = 0; i < weights.size(); ++i) {
         if (pinned[i]) {
@@ -65,8 +66,8 @@ bool distributeFreePanes(const std::vector<float>& weights, float total, float f
             lengths[i] = floorLength;
             continue;
         }
-        const float share = freeWeight > 0.0f ? freeLength * std::max(0.0f, weights[i]) / freeWeight
-                                              : freeLength / static_cast<float>(freeCount);
+        const float share = static_cast<float>(freeWeight > 0.0 ? freeLength * std::max(0.0f, weights[i]) / freeWeight
+                                                                : freeLength / static_cast<double>(freeCount));
         lengths[i] = share;
         if (share < floorLength) {
             pinned[i] = true;
@@ -131,7 +132,7 @@ std::vector<float> paneLengths(const std::vector<float>& weights, float totalLen
     const float floorLength = std::max(0.0f, minLength);
     // Too little room to honor the minimum everywhere: split evenly and accept
     // sub-minimum panes rather than overflow the area.
-    if (floorLength <= 0.0f || total <= floorLength * static_cast<float>(count)) {
+    if (total <= floorLength * static_cast<float>(count)) {
         lengths.assign(count, total / static_cast<float>(count));
 
         return lengths;
@@ -150,7 +151,7 @@ std::pair<float, float> dragDividerWeights(float weightFirst, float weightSecond
                                            float deltaPixels, float minLength)
 {
     const float combinedLength = lengthFirst + lengthSecond;
-    const float combinedWeight = std::max(0.0f, weightFirst) + std::max(0.0f, weightSecond);
+    const double combinedWeight = static_cast<double>(std::max(0.0f, weightFirst)) + std::max(0.0f, weightSecond);
     const float floorLength = std::max(0.0f, minLength);
     // Degenerate or too cramped to hold two minimum panes: leave the split be.
     if (combinedLength <= 0.0f || combinedWeight <= 0.0f || combinedLength < 2.0f * floorLength) {
@@ -158,9 +159,14 @@ std::pair<float, float> dragDividerWeights(float weightFirst, float weightSecond
     }
 
     const float newFirst = std::clamp(lengthFirst + deltaPixels, floorLength, combinedLength - floorLength);
-    const float firstShare = newFirst / combinedLength;
+    const double firstShare = static_cast<double>(newFirst) / combinedLength;
+    const double firstWeight = combinedWeight * firstShare;
+    const double secondWeight = combinedWeight * (1.0 - firstShare);
+    if (firstWeight > std::numeric_limits<float>::max() || secondWeight > std::numeric_limits<float>::max()) {
+        return {weightFirst, weightSecond};
+    }
 
-    return {combinedWeight * firstShare, combinedWeight * (1.0f - firstShare)};
+    return {static_cast<float>(firstWeight), static_cast<float>(secondWeight)};
 }
 
 LayoutOrientation orientationFromInt(int value)

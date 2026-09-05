@@ -29,11 +29,9 @@ struct LayoutPresetOutcome
 };
 
 /// Owns the layout preset slots and the capture and apply over them: what a
-/// slot records of the live layout, and the writing back that keeps the active
-/// slot equal to it. It reads and writes the view and the settings it is
-/// constructed with; the status line and the persistence clocks travel back as
-/// a LayoutPresetOutcome the host applies. The picker that draws all this is a
-/// class of its own, so nothing here depends on the toolkit.
+/// slot records of the live layout, and the explicit save and load operations. It reads and writes the view and the
+/// settings it is constructed with; the status line and the persistence clocks travel back as a LayoutPresetOutcome the
+/// host applies. The picker that draws all this is a class of its own, so nothing here depends on the toolkit.
 class LayoutPresetController
 {
 public:
@@ -95,9 +93,8 @@ public:
     /// nothing yet restores @ref defaultLayout, so no click on a slot is ever
     /// refused.
     ///
-    /// The slot being LEFT keeps whatever was on screen: it was written there
-    /// as it was arranged, so switching away is not a discard and there is
-    /// nothing to confirm.
+    /// Unsaved changes to the working layout are discarded; stored slots
+    /// change only through saveInto.
     [[nodiscard]] LayoutPresetOutcome load(int slot);
 
     /// Calls @p slot (1-based) @p typed, or puts it back on its default name
@@ -105,8 +102,8 @@ public:
     [[nodiscard]] LayoutPresetOutcome rename(int slot, std::string_view typed);
 
     /// The arrangement the application opens on and a slot holding nothing
-    /// restores: the vectorscope alone, split automatically, at the styles its
-    /// module declares. Built to the shape @ref capture produces, so a slot
+    /// restores: the default scope stack, split automatically, at the styles its
+    /// modules declare. Built to the shape @ref capture produces, so a slot
     /// restored from it reads back identical and needs no writing back.
     [[nodiscard]] LayoutPreset defaultLayout() const;
 

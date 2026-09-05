@@ -3,6 +3,12 @@
 #include <emscripten/emscripten.h>
 
 #include <cstdlib>
+#include <filesystem>
+#include <fstream>
+#include <string>
+
+#include "core/page_allocator.h"
+#include "platform/desktop.h"
 
 namespace sidescopes {
 namespace storage {
@@ -47,8 +53,6 @@ EM_JS(void, jsWriteSaved, (const char* key, const char* text), {
 
 // clang-format on
 
-}  // namespace
-
 std::string readSaved()
 {
     char* value = jsReadSaved(StorageKey);
@@ -61,9 +65,43 @@ std::string readSaved()
     return text;
 }
 
-void writeSaved(const std::string& text)
+}  // namespace
+
+std::optional<Preferences> load()
 {
-    jsWriteSaved(StorageKey, text.c_str());
+    const std::string text = readSaved();
+    if (text.empty()) {
+        return std::nullopt;
+    }
+    const std::string path = preferencesFilePath();
+    std::error_code error;
+    std::filesystem::create_directories(std::filesystem::path(path).parent_path(), error);
+    if (error) {
+        return std::nullopt;
+    }
+    {
+        std::ofstream out(path, std::ios::binary | std::ios::trunc);
+        out.write(text.data(), static_cast<std::streamsize>(text.size()));
+        out.close();
+        if (!out) {
+            return std::nullopt;
+        }
+    }
+
+    return loadPreferences(path);
+}
+
+void save(const Preferences& preferences)
+{
+    const std::string path = preferencesFilePath();
+    if (!savePreferences(preferences, path)) {
+        return;
+    }
+    const MappedFile file = mapFileReadOnly(path.c_str());
+    if (file.valid()) {
+        const std::string text(reinterpret_cast<const char*>(file.data), file.size);
+        jsWriteSaved(StorageKey, text.c_str());
+    }
 }
 
 }  // namespace storage

@@ -77,8 +77,7 @@ TEST_CASE("Adjustments read the source, so dragging a control does not accumulat
 TEST_CASE("A stop of exposure is a doubling of light, not of the encoded value")
 {
     // Done in gamma space, +1 stop would take 128 to 255 and clip a mid grey.
-    // In light it lands near 188, which is what a photographer expects and
-    // what makes the waveform move the way theirs does.
+    // Linear-light exposure preserves the midtone instead.
     ImageAdjustments up;
     up.exposure = 1.0f;
     const Pixel brighter = adjusted(MidGrey, up);

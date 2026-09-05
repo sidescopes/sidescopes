@@ -1,7 +1,6 @@
 #pragma once
 
 #include <memory>
-#include <mutex>
 #include <utility>
 #include <vector>
 
@@ -9,7 +8,7 @@
 
 namespace sidescopes {
 
-/// @brief State one module's scopes share with each other, one set per host.
+/// @brief State one module's scopes share, one set per host and owning thread.
 ///
 /// Some scopes of one module compute the same thing: the waveform and the RGB
 /// parade scatter a region into bins that agree bin for bin, because they are
@@ -29,10 +28,9 @@ namespace sidescopes {
 /// the largest block a scope owns, and the application drops every instance when
 /// there is no region, so an empty selection must go on holding no engine memory.
 ///
-/// THREADING. Instances accumulate on the analysis thread, one at a time, which
-/// is what makes the shared state itself safe to use without a lock. Only the
-/// table is guarded, and only while a state is found or created - once per
-/// instance, never per pass.
+/// THREADING. Each instance belongs to one thread. Hosts may have several
+/// analysis threads, so each thread keeps its own table and shares only with
+/// the scopes it calls sequentially. No table lock or per-pass lock is needed.
 ///
 /// ONE TABLE PER STATE TYPE, which is what keeps modules out of each other's
 /// way: the statics belong to this template's instantiation, so a module asking
@@ -48,9 +46,7 @@ template <typename State>
         return nullptr;
     }
 
-    static std::mutex mutex;
-    static std::vector<std::pair<const SsHost*, std::weak_ptr<State>>> byHost;
-    const std::lock_guard<std::mutex> lock(mutex);
+    static thread_local std::vector<std::pair<const SsHost*, std::weak_ptr<State>>> byHost;
 
     std::shared_ptr<State> found;
     std::size_t live = 0;

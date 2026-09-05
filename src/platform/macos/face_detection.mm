@@ -17,7 +17,7 @@ constexpr double MinimumFacePoints = 72.0;
 // eight-bit frame is wrapped directly; a deeper frame is converted below.
 bool readableByVision(const FrameView& frame)
 {
-    return frame.pixels != nullptr && frame.width > 0 && frame.height > 0 && frame.strideBytes >= frame.width * 4;
+    return frame.pixels != nullptr && frame.width > 0 && frame.height > 0 && frame.width <= frame.strideBytes / 4;
 }
 
 // Vision reports normalized rectangles from the bottom left. Convert one to

@@ -89,7 +89,6 @@ public:
 
     bool init(GLFWwindow* window) override
     {
-        m_window = window;
         glfwMakeContextCurrent(window);
         // The browser paces presentation through requestAnimationFrame, so
         // asking GLFW for a swap interval as well would be a second cap on
@@ -148,7 +147,6 @@ public:
     }
 
 private:
-    GLFWwindow* m_window = nullptr;
     int m_framebufferWidth = 0;
     int m_framebufferHeight = 0;
 };

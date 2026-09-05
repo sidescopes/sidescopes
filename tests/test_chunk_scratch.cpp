@@ -8,9 +8,12 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include <cstdint>
+#include <limits>
+#include <new>
 #include <thread>
 #include <vector>
 
+#include "core/page_allocator.h"
 #include "core/scopes/chunk_scratch.h"
 #include "core/scopes/histogram.h"
 #include "core/scopes/vectorscope.h"
@@ -188,6 +191,15 @@ TEST_CASE("The host lends one arena, not one per scope")
     CHECK(scratch->borrow(&host, 16) == grown);
 }
 
+TEST_CASE("The host declines scratch requests too large to represent")
+{
+    const SsHost& host = builtinModules().host();
+    const auto* scratch = static_cast<const SsHostScratch*>(host.get_extension(&host, SS_EXT_HOST_SCRATCH));
+    REQUIRE(scratch != nullptr);
+    CHECK(scratch->borrow(&host, std::numeric_limits<uint64_t>::max()) == nullptr);
+    CHECK(scratch->borrow(&host, 16) != nullptr);
+}
+
 TEST_CASE("Every scope the host creates borrows the host's arena")
 {
     // The lending is per-module wiring, so it can be dropped from one scope
@@ -226,6 +238,12 @@ TEST_CASE("An unknown host extension is refused")
 {
     const SsHost& host = builtinModules().host();
     CHECK(host.get_extension(&host, "sidescopes.nothing/1") == nullptr);
+}
+
+TEST_CASE("Page allocation rejects a byte-count overflow before allocating")
+{
+    PageAllocator<uint64_t> allocator;
+    CHECK_THROWS_AS(allocator.allocate(std::numeric_limits<std::size_t>::max()), std::bad_array_new_length);
 }
 
 }  // namespace sidescopes

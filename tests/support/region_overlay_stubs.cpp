@@ -19,20 +19,45 @@ test::RegionOverlayStubs g_overlays;
 
 bool beginRegionPick(const std::vector<PickerDisplay>& displays, RegionPickerMode mode)
 {
+    if (g_overlays.pickActive) {
+        return false;
+    }
     g_overlays.lastDisplays = displays;
     g_overlays.lastMode = mode;
+    g_overlays.pickActive = g_overlays.pickOpens;
+    if (g_overlays.pickActive && !g_overlays.poll.finished) {
+        g_overlays.poll.active = true;
+    }
 
     return g_overlays.pickOpens;
 }
 
 RegionPickPoll pollRegionPick()
 {
-    return g_overlays.poll;
+    ++g_overlays.pickPolls;
+    if (!g_overlays.pickActive) {
+        return {};
+    }
+    RegionPickPoll poll = g_overlays.poll;
+    if (g_overlays.pickCancelled) {
+        poll = {};
+        poll.finished = true;
+        poll.pinMode = g_overlays.lastMode == RegionPickerMode::PinColor;
+    }
+    if (poll.finished || !poll.active) {
+        g_overlays.pickActive = false;
+        g_overlays.pickCancelled = false;
+        g_overlays.poll = {};
+    }
+    return poll;
 }
 
 void cancelRegionPick()
 {
     ++g_overlays.pickCancels;
+    if (g_overlays.pickActive) {
+        g_overlays.pickCancelled = true;
+    }
 }
 
 void setRegionPickMode(RegionPickerMode mode)

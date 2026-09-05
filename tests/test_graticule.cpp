@@ -10,8 +10,7 @@ namespace sidescopes {
 
 TEST_CASE("Vectorscope graticule targets sit exactly on the projections")
 {
-    Vectorscope scope;
-    const VectorscopeGraticule graticule = buildVectorscopeGraticule(scope);
+    const VectorscopeGraticule graticule = buildVectorscopeGraticule();
 
     // Six labeled primaries and six unlabeled 100% secondaries.
     const auto primaries =
@@ -19,7 +18,7 @@ TEST_CASE("Vectorscope graticule targets sit exactly on the projections")
     CHECK(primaries == 6);
     CHECK(graticule.targets.size() == 12);
 
-    const NormalizedPoint red75 = scope.project(FloatColor{191.0f, 0.0f, 0.0f});
+    const NormalizedPoint red75 = Vectorscope::project(FloatColor{191.0f, 0.0f, 0.0f});
     const auto redTarget =
         std::find_if(graticule.targets.begin(), graticule.targets.end(), [](const auto& t) { return t.label == "R"; });
     REQUIRE(redTarget != graticule.targets.end());
@@ -29,8 +28,7 @@ TEST_CASE("Vectorscope graticule targets sit exactly on the projections")
 
 TEST_CASE("Vectorscope graticule includes the skin-tone line on the ring")
 {
-    Vectorscope scope;
-    const VectorscopeGraticule graticule = buildVectorscopeGraticule(scope);
+    const VectorscopeGraticule graticule = buildVectorscopeGraticule();
 
     const auto skinLine = std::find_if(graticule.lines.begin(), graticule.lines.end(),
                                        [](const auto& line) { return line.stroke == GraticuleStroke::SkinTone; });
@@ -44,7 +42,7 @@ TEST_CASE("Vectorscope graticule includes the skin-tone line on the ring")
     CHECK(std::sqrt(dx * dx + dy * dy) == Catch::Approx(0.5).margin(1e-4));
 
     // And it points through the projected reference skin tone.
-    const NormalizedPoint skin = scope.project(FloatColor{203.0f, 171.0f, 153.0f});
+    const NormalizedPoint skin = Vectorscope::project(FloatColor{203.0f, 171.0f, 153.0f});
     const float cross = dx * (skin.y - 0.5f) - dy * (skin.x - 0.5f);
     CHECK(cross == Catch::Approx(0.0).margin(1e-4));
 }

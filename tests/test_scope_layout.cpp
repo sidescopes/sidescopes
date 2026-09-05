@@ -1,5 +1,6 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
+#include <limits>
 #include <numeric>
 #include <vector>
 
@@ -88,6 +89,23 @@ TEST_CASE("Weights divide the axis in proportion")
     REQUIRE(lengths.size() == 2);
     CHECK(lengths[0] == Approx(300.0f));
     CHECK(lengths[1] == Approx(100.0f));
+}
+
+TEST_CASE("A zero minimum preserves the requested pane proportions")
+{
+    CHECK(paneLengths({3.0f, 1.0f}, 400.0f, 0.0f) == std::vector<float>{300.0f, 100.0f});
+    CHECK(resolveSplitDirection(LayoutOrientation::Automatic, 600.0f, 300.0f, {4.0f, 1.0f}, {1.0f, 3.0f}, 6.0f) ==
+          SplitDirection::Stacked);
+}
+
+TEST_CASE("Large finite pane weights preserve proportions without overflow")
+{
+    const float large = std::numeric_limits<float>::max();
+    const std::vector<float> lengths = paneLengths({large, large / 2.0f}, 600.0f, 80.0f);
+    REQUIRE(lengths.size() == 2);
+    CHECK(lengths[0] == Approx(400.0f));
+    CHECK(lengths[1] == Approx(200.0f));
+    CHECK(total(lengths) == Approx(600.0f));
 }
 
 TEST_CASE("A pane never shrinks below the minimum while room remains")
@@ -183,6 +201,16 @@ TEST_CASE("Orientation round-trips through its persisted integer")
     // An out-of-range integer degrades to Automatic rather than a bad cast.
     CHECK(orientationFromInt(9) == LayoutOrientation::Automatic);
     CHECK(orientationFromInt(-1) == LayoutOrientation::Automatic);
+}
+
+TEST_CASE("Dragging large pane weights keeps both results representable")
+{
+    const float large = std::numeric_limits<float>::max();
+    const auto even = dragDividerWeights(large, large, 300.0f, 300.0f, 0.0f, 50.0f);
+    CHECK(even.first == large);
+    CHECK(even.second == large);
+    const auto beyond = dragDividerWeights(large, large, 300.0f, 300.0f, 100.0f, 50.0f);
+    CHECK(beyond == even);
 }
 
 }  // namespace sidescopes

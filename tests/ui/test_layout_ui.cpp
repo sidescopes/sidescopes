@@ -567,23 +567,30 @@ void theErrorHookIsInstalledInEveryBuild(ImGuiTestContext* ctx)
 {
     ctx->Yield();
     const bool savedTooltip = ImGui::GetIO().ConfigErrorRecoveryEnableTooltip;
+    ImGuiContext* context = ImGui::GetCurrentContext();
+    const auto savedCallback = context->ErrorCallback;
+    void* savedUserData = context->ErrorCallbackUserData;
 
     installInterfaceErrorReporting();
+    const bool installed = interfaceErrorReportingInstalled();
+    const bool tooltip = ImGui::GetIO().ConfigErrorRecoveryEnableTooltip;
+    // Restore the test engine's callback before asserting, including when an
+    // assertion fails, so later toolkit errors still reach the harness.
+    context->ErrorCallback = savedCallback;
+    context->ErrorCallbackUserData = savedUserData;
+    ImGui::GetIO().ConfigErrorRecoveryEnableTooltip = savedTooltip;
     // Compared against the hook itself, not against null: the test engine
     // installs a handler of its own around every test, so a null check here
     // would pass whether or not the application installed anything.
-    IM_CHECK(interfaceErrorReportingInstalled());
+    IM_CHECK(installed);
 
 #ifdef NDEBUG
     // A release build reports into the log and puts nothing on screen.
-    IM_CHECK_EQ(ImGui::GetIO().ConfigErrorRecoveryEnableTooltip, false);
+    IM_CHECK_EQ(tooltip, false);
 #else
     // A development build does both: whoever is building wants it at once.
-    IM_CHECK(ImGui::GetIO().ConfigErrorRecoveryEnableTooltip);
+    IM_CHECK(tooltip);
 #endif
-
-    ImGui::GetCurrentContext()->ErrorCallback = nullptr;
-    ImGui::GetIO().ConfigErrorRecoveryEnableTooltip = savedTooltip;
 }
 
 // Where a row's name ink starts as a label and inside the rename field, and

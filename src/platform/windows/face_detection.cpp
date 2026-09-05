@@ -8,12 +8,9 @@
 // thread and the caller joins it, which keeps the seam synchronous without
 // blocking inside the caller's apartment.
 //
-// Those threads open and close an apartment around each call, which is only
-// safe while something else in the process keeps COM alive. The last
-// CoUninitialize unloads the activation DLL, and the cached WinRT factory
-// then points into unmapped memory, so the next activation faults. Measured
-// on Windows: the application never loses it, and a console program built
-// from these sources does.
+// Each apartment clears its cached activation factories before COM can unload
+// their DLLs. Detection does not depend on another part of the process keeping
+// an apartment alive.
 
 #include "platform/face_detection.h"
 
@@ -29,6 +26,8 @@
 #include <thread>
 #include <vector>
 
+#include "core/diagnostics.h"
+
 namespace sidescopes {
 namespace {
 
@@ -39,6 +38,24 @@ using winrt::Windows::Graphics::Imaging::BitmapBufferAccessMode;
 using winrt::Windows::Graphics::Imaging::BitmapPixelFormat;
 using winrt::Windows::Graphics::Imaging::SoftwareBitmap;
 using winrt::Windows::Media::FaceAnalysis::FaceDetector;
+
+class FaceApartment
+{
+public:
+    FaceApartment()
+    {
+        winrt::init_apartment();
+    }
+
+    ~FaceApartment()
+    {
+        winrt::clear_factory_cache();
+        winrt::uninit_apartment();
+    }
+
+    FaceApartment(const FaceApartment&) = delete;
+    FaceApartment& operator=(const FaceApartment&) = delete;
+};
 
 // Rec.709 luma, fixed-point x256: the detector consumes grayscale. Returned on
 // the scale its arguments came in on - a ten-bit pixel yields a ten-bit luma -
@@ -92,7 +109,7 @@ SoftwareBitmap grayBitmapFromFrame(const FrameView& frame)
 std::vector<IntRect> detectOnOwnApartment(const FrameView& frame, float pixelsPerPoint)
 {
     std::vector<IntRect> faces;
-    winrt::init_apartment();
+    const FaceApartment apartment;
     {
         const SoftwareBitmap bitmap = grayBitmapFromFrame(frame);
         const FaceDetector detector = FaceDetector::CreateAsync().get();
@@ -111,7 +128,10 @@ std::vector<IntRect> detectOnOwnApartment(const FrameView& frame, float pixelsPe
             return static_cast<int64_t>(a.width) * a.height > static_cast<int64_t>(b.width) * b.height;
         });
     }
-    winrt::uninit_apartment();
+    constexpr std::size_t MaximumFaces = 8;
+    if (faces.size() > MaximumFaces) {
+        faces.resize(MaximumFaces);
+    }
     return faces;
 }
 
@@ -133,9 +153,8 @@ bool supportsFaceDetection()
         std::thread([] {
             bool answer = false;
             try {
-                winrt::init_apartment();
+                const FaceApartment apartment;
                 answer = FaceDetector::IsSupported();
-                winrt::uninit_apartment();
             } catch (...) {
                 answer = false;
             }
@@ -158,7 +177,7 @@ void warmFaceDetection()
 std::vector<IntRect> detectFaces(const FrameView& frame, float pixelsPerPoint)
 {
     std::vector<IntRect> faces;
-    if (!frame.pixels || frame.width <= 0 || frame.height <= 0) {
+    if (!frame.pixels || frame.width <= 0 || frame.height <= 0 || frame.width > frame.strideBytes / 4) {
         return faces;
     }
     if (!supportsFaceDetection()) {
@@ -168,8 +187,13 @@ std::vector<IntRect> detectFaces(const FrameView& frame, float pixelsPerPoint)
     std::thread worker([&] {
         try {
             faces = detectOnOwnApartment(frame, pixelsPerPoint);
+            SS_DIAG(FaceLock, "face_detection completed faces=%zu", faces.size());
+        } catch (const winrt::hresult_error& error) {
+            SS_DIAG(FaceLock, "face_detection failed hresult=0x%08x", static_cast<uint32_t>(error.code()));
+            faces.clear();
         } catch (...) {
-            faces.clear();  // an honest empty answer beats a crash
+            SS_DIAG(FaceLock, "face_detection failed with an unexpected exception");
+            faces.clear();
         }
     });
     worker.join();

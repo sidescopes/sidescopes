@@ -1,5 +1,5 @@
 // Golden hashes over each scope's rendered image, so the pixel decisions
-// recorded in notes/scope-rendering-decisions.md cannot drift unnoticed.
+// cannot drift unnoticed.
 //
 // The engines are pure CPU and bit-exact across platforms - the parallel
 // rewrite is bit-identical by test - so these goldens are EXACT and shared by
@@ -10,7 +10,7 @@
 // change must be deliberate and reviewed, not a side effect. To inspect it,
 // build with the dump enabled and open the images:
 //
-//     SIDESCOPES_GOLDEN_DUMP=<dir> ctest -R scope_goldens
+//     SIDESCOPES_GOLDEN_DUMP=<dir> ctest -R "renderings match their goldens"
 //
 // which writes one binary PPM per case, then update the table below in the
 // same commit as the change that moved them.

@@ -301,6 +301,25 @@ TEST_CASE("A secondary target box is a smaller unlabeled box")
     CHECK(styled.commands[0].halfBox == 3.0f);
 }
 
+TEST_CASE("A full module label is bounded before drawing")
+{
+    SsGraticulePrimitive primitive{};
+    std::memset(primitive.label, 'X', sizeof(primitive.label));
+    SECTION("Text")
+    {
+        primitive.kind = SS_PRIMITIVE_TEXT;
+    }
+    SECTION("Target")
+    {
+        primitive.kind = SS_PRIMITIVE_TARGET_BOX;
+    }
+    const StyledGraticule styled = styleGraticulePrimitive(primitive, GraticuleStyle{});
+    REQUIRE(styled.count > 0);
+    const auto& label = styled.commands[styled.count - 1].label;
+    CHECK(label[sizeof(label) - 1] == '\0');
+    CHECK(std::string(label, sizeof(label) - 1) == std::string(sizeof(label) - 1, 'X'));
+}
+
 TEST_CASE("Minor scale labels appear only when the pane is roomy")
 {
     SsGraticulePrimitive text{};
@@ -401,6 +420,38 @@ TEST_CASE("Coincident value markers merge like level markers")
     CHECK(merged[0].kind == SS_MARKER_VALUE);
     CHECK(merged[0].color == channelMaskColor(0b111));
     CHECK(merged[0].x == 0.3f);
+}
+
+TEST_CASE("Coincident marker axes do not merge different geometry")
+{
+    const auto styled = styleMarkers({level(0.5f, 0b001, 0.0f, 1.0f), value(0.5f, 0b010, 0.0f, 1.0f)}, std::nullopt);
+    REQUIRE(styled.size() == 2);
+    CHECK(styled[0].kind == SS_MARKER_LEVEL);
+    CHECK(styled[1].kind == SS_MARKER_VALUE);
+}
+
+TEST_CASE("Point markers merge only when both coordinates coincide")
+{
+    SsMarker first{};
+    first.kind = SS_MARKER_POINT;
+    first.x = 0.25f;
+    first.y = 0.5f;
+    first.channel_mask = 0b001;
+    SsMarker second = first;
+    second.channel_mask = 0b010;
+    SECTION("Separated on the horizontal axis")
+    {
+        second.x = 0.75f;
+        CHECK(styleMarkers({first, second}, std::nullopt).size() == 2);
+    }
+    SECTION("Coincident within tolerance")
+    {
+        second.x += 1.0f / 255.0f;
+        const auto merged = styleMarkers({first, second}, std::nullopt);
+        REQUIRE(merged.size() == 1);
+        CHECK(merged[0].x == (first.x + second.x) * 0.5f);
+        CHECK(merged[0].color == channelMaskColor(0b011));
+    }
 }
 
 namespace {

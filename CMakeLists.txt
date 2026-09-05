@@ -1,6 +1,17 @@
 cmake_minimum_required(VERSION 3.24)
 
+# ScreenCaptureKit's one-shot capture and display geometry require macOS 14.
+# Set this before project() initializes the toolchain; a newer build host must
+# not silently raise the minimum supported OS of the downloaded application.
+if(CMAKE_HOST_APPLE AND NOT CMAKE_OSX_DEPLOYMENT_TARGET)
+    set(CMAKE_OSX_DEPLOYMENT_TARGET "14.0" CACHE STRING "Minimum supported macOS version" FORCE)
+endif()
+
 project(sidescopes VERSION 0.7.0 LANGUAGES CXX)
+
+if(APPLE AND CMAKE_OSX_DEPLOYMENT_TARGET VERSION_LESS "14.0")
+    message(FATAL_ERROR "SideScopes requires macOS 14.0 or later")
+endif()
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -27,6 +38,9 @@ option(SIDESCOPES_WERROR "Treat compiler warnings as errors" OFF)
 option(SIDESCOPES_MODULES_DYNAMIC "Load built-in scope modules dynamically" OFF)
 option(SIDESCOPES_UI_TESTS "Build the Dear ImGui Test Engine UI-test target" OFF)
 option(SIDESCOPES_WEB_SINGLE_FILE "Emit the browser lab as one self-contained file" OFF)
+if(EMSCRIPTEN AND SIDESCOPES_MODULES_DYNAMIC)
+    message(FATAL_ERROR "The browser build requires statically linked scope modules")
+endif()
 set(SIDESCOPES_SANITIZE "" CACHE STRING
     "Comma-separated sanitizers to build and link with (e.g. address,undefined or thread)")
 
@@ -163,6 +177,7 @@ if(SIDESCOPES_MODULES_DYNAMIC)
         SIDESCOPES_MODULES_DYNAMIC
         "SIDESCOPES_MODULES_DIR=\"${CMAKE_BINARY_DIR}/modules\"")
     target_sources(sidescopes_core PRIVATE src/modules/module_loader.cpp)
+    target_link_libraries(sidescopes_core PRIVATE ${CMAKE_DL_LIBS})
     set(SIDESCOPES_MODULE_LINK_LIBS "")
 else()
     # core and the module libs depend on each other: the registry references
@@ -199,6 +214,7 @@ if(APPLE)
         "-framework CoreGraphics"
         "-framework CoreMedia"
         "-framework CoreVideo"
+        "-framework QuartzCore"
         "-framework ScreenCaptureKit"
         "-framework Vision"
     )
@@ -298,6 +314,7 @@ add_library(sidescopes_app STATIC
     src/app/region_geometry.cpp
     src/app/region_motion.cpp
     src/app/region_picker.cpp
+    src/app/region_session.cpp
     src/app/scope_layout.cpp
     src/app/scope_order.cpp
     src/app/scope_registry.cpp
@@ -323,8 +340,6 @@ sidescopes_target_defaults(sidescopes_app)
 set(SIDESCOPES_APP_IMGUI_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/src/app/about_window.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/app/app.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/app/app_attach.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/app/app_region_pick.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/app/app_startup.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/app/color_picker_common.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/app/color_picker_deck.cpp
@@ -384,12 +399,12 @@ endfunction()
 if(APPLE OR WIN32 OR EMSCRIPTEN)
     # --- application ---
     include(FetchContent)
+    include(cmake/ThirdPartyNotices.cmake)
     if(EMSCRIPTEN)
         # GLFW comes from Emscripten's own contrib.glfw3 port rather than from
         # source: the port IS the browser implementation, mapping the same API
         # onto canvas events. Upstream Dear ImGui moved its web example to it
-        # for better high-DPI support, which this project cares about more
-        # than most - notes/windows-dpi-investigation.md.
+        # for better high-DPI support.
         #
         # An INTERFACE target so everything downstream links "glfw" exactly as
         # the desktop builds do, and the port flag - needed when compiling and
@@ -504,6 +519,7 @@ if(APPLE OR WIN32 OR EMSCRIPTEN)
             # sibling .wasm any more than it can import a module.
             "$<$<BOOL:${SIDESCOPES_WEB_SINGLE_FILE}>:-sSINGLE_FILE=1>")
         sidescopes_target_defaults(sidescopes_lab)
+        sidescopes_add_notices(sidescopes_lab)
     elseif(APPLE)
         add_executable(SideScopes MACOSX_BUNDLE
             src/app/main.cpp
@@ -534,6 +550,7 @@ if(APPLE OR WIN32 OR EMSCRIPTEN)
             "-framework QuartzCore"
         )
         sidescopes_target_defaults(SideScopes)
+        sidescopes_add_notices(SideScopes)
 
         # The screen-recording permission is bound to the bundle's code-signing
         # identity. An ad-hoc signature's identity is the binary hash, so it
@@ -585,6 +602,7 @@ if(APPLE OR WIN32 OR EMSCRIPTEN)
             opengl32
         )
         sidescopes_target_defaults(SideScopes)
+        sidescopes_add_notices(SideScopes)
     endif()
 
     if(SIDESCOPES_MODULES_DYNAMIC)

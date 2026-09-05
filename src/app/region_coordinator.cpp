@@ -28,9 +28,8 @@ RegionBinding regionBinding(uint64_t activeWindowIdentity, bool faceLocked)
     return faceLocked ? RegionBinding::Face : RegionBinding::Window;
 }
 
-RegionCoordinator::RegionCoordinator(AttachController& attach, const CaptureController& capture,
-                                     const RegionPicker& picker, const FaceLockController& faceLock,
-                                     const std::optional<RegionOfInterest>& region)
+RegionCoordinator::RegionCoordinator(AttachController& attach, const CaptureController& capture, RegionPicker& picker,
+                                     FaceLockController& faceLock, const std::optional<RegionOfInterest>& region)
     : m_attach(attach),
       m_capture(capture),
       m_picker(picker),
@@ -66,7 +65,13 @@ RegionOutcome RegionCoordinator::clearRegion()
 {
     // Drops all selection: a pending pick, every attached window, and the
     // global region alike. The border sync rides the analysis-dirty path.
-    cancelRegionPick();
+    m_picker.cancel();
+    m_faceLock.clear();
+    if (m_borderEditing) {
+        hideAttachedEditDim();
+    }
+    m_borderEditing = false;
+    m_borderEditIdentity = 0;
     RegionOutcome outcome;
     if (m_attach.attached()) {
         m_attach.detachAll();
@@ -115,6 +120,9 @@ RegionBorderEditOutcome RegionCoordinator::pollBorderEdit(uint64_t activeWindowI
     // adjusts the region it currently outlines - the attached region of the
     // focused attached window, or the global one - with the scopes following.
     if (m_picker.active()) {
+        if (m_borderEditing) {
+            hideAttachedEditDim();
+        }
         m_borderEditing = false;
 
         return {};

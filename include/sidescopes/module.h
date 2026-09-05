@@ -38,10 +38,9 @@
 extern "C" {
 #endif
 
-/* The host accepts a module when the majors are equal; the minor may
- * differ, since a newer minor only adds optional, backward-compatible
- * extensions. Until 1.0 the layout itself may still change under a minor
- * bump; rebuild modules against the current header. */
+/* Before 1.0, both version numbers must match: a minor bump may change the
+ * layout, so rebuild modules against the current header. From 1.0 onward,
+ * equal majors are compatible; minors add only optional extensions. */
 #define SS_ABI_MAJOR 0u
 #define SS_ABI_MINOR 5u
 

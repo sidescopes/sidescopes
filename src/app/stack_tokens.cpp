@@ -30,7 +30,12 @@ std::vector<std::string> parseStackTokens(const ScopeRegistry& registry, const s
     std::vector<std::string> stack = parseScopeTokens(registry, text);
     if (stack.empty()) {
         for (const std::string_view id : DefaultScopeStack) {
-            stack.emplace_back(id);
+            if (registry.byId(id) != nullptr) {
+                stack.emplace_back(id);
+            }
+        }
+        if (stack.empty()) {
+            stack.emplace_back(ColorPickerScopeId);
         }
     }
 

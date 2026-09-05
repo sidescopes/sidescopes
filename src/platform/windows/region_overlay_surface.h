@@ -61,6 +61,9 @@ public:
         info.bmiHeader.biBitCount = 32;
         info.bmiHeader.biCompression = BI_RGB;
         m_dc = CreateCompatibleDC(nullptr);
+        if (!m_dc) {
+            return;
+        }
         m_bitmap = CreateDIBSection(m_dc, &info, DIB_RGB_COLORS, &m_bits, nullptr, 0);
         if (m_bitmap) {
             m_previous = SelectObject(m_dc, m_bitmap);

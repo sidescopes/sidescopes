@@ -107,6 +107,18 @@ void RegionPicker::clearRequest()
     m_want.reset();
 }
 
+void RegionPicker::cancel()
+{
+    m_want.reset();
+    m_nextTool.reset();
+    cancelRegionPick();
+    // Native cancellation marks the overlay finished; polling performs its
+    // teardown. Drain it before becoming inactive, since poll() skips idle tools.
+    (void)pollRegionPick();
+    m_picking = false;
+    m_swallowCancel = false;
+}
+
 std::optional<RegionPickerMode> RegionPicker::pendingRequest() const
 {
     return m_want;
@@ -115,6 +127,12 @@ std::optional<RegionPickerMode> RegionPicker::pendingRequest() const
 RegionPickOutcome RegionPicker::openIfRequested(bool regionSelected)
 {
     RegionPickOutcome outcome;
+    if (!m_picking && m_nextTool) {
+        if (!m_want) {
+            m_want = m_nextTool;
+        }
+        m_nextTool.reset();
+    }
     if (m_picking && m_want) {
         const bool targetPin = *m_want == RegionPickerMode::PinColor;
         if (targetPin || m_isPin) {
@@ -122,6 +140,8 @@ RegionPickOutcome RegionPicker::openIfRequested(bool regionSelected)
             // morphs across that boundary. The active pick closes with no effect
             // on the region, and the requested tool opens fresh once it is gone.
             m_swallowCancel = true;
+            m_nextTool = m_want;
+            m_want.reset();
             cancelRegionPick();
         } else {
             // The toolbar keeps working mid-pick: choosing a region tool

@@ -98,7 +98,7 @@ TEST_CASE("A letter names nothing: identity is the id alone")
     // order modules register in would silently re-point every token already
     // written - an arrangement quietly becoming a different set of scopes.
     REQUIRE(registry().byLetter('V') != nullptr);
-    CHECK(parseStackTokens(registry(), "VW") == std::vector<std::string>{VectorscopeScopeId, WaveformScopeId});
+    CHECK(parseStackTokens(registry(), "VW") == std::vector<std::string>{ColorPickerScopeId});
 }
 
 TEST_CASE("A token the registry does not know is dropped")
@@ -118,9 +118,9 @@ TEST_CASE("Repeated tokens collapse to one scope")
 
 TEST_CASE("A token string naming nothing valid falls back")
 {
-    // The fallback is the app's default stack rather than a registry lookup, so
-    // it holds even here, where the registry has neither built-in at all.
-    const std::vector<std::string> defaults{VectorscopeScopeId, WaveformScopeId};
+    // Neither built-in is registered here, so the host color picker is the
+    // safe fallback: every restored id must name something this build draws.
+    const std::vector<std::string> defaults{ColorPickerScopeId};
     CHECK(parseStackTokens(registry(), "") == defaults);
     CHECK(parseStackTokens(registry(), "zzz") == defaults);
     // An unterminated bracket ends the parse where it stands.

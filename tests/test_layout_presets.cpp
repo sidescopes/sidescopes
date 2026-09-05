@@ -150,6 +150,8 @@ TEST_CASE("A slot named before it is filled loads under its own name")
     REQUIRE(renamed.preferencesSaveDue);
 
     const LayoutPresetOutcome outcome = fixture.presets.load(3);
+    CHECK(outcome.analysisDirty);
+    CHECK(outcome.preferencesSaveDue);
     CHECK(outcome.status == "Loaded \"Skin tones\"");
 }
 

@@ -405,7 +405,8 @@ if (location.protocol === 'file:' && !window.__STANDALONE) {
   throw new Error('file:// - build the standalone copy or serve this directory');
 }
 
-const build = new URL(import.meta.url).searchParams.get('b') || '';
+const engineScript = document.querySelector('script[src^="sidescopes-lab.js"]');
+const build = engineScript ? new URL(engineScript.src).searchParams.get('b') || '' : '';
 const mod = await SideScopesLab({
   canvas: document.getElementById('canvas'),
   locateFile: (path) => (build ? `${path}?b=${build}` : path),
@@ -528,7 +529,7 @@ sliders.forEach((slider) => {
   slider.addEventListener('input', sendAdjustments);
 
   const row = slider.closest('label');
-  let lastTapAt = 0;
+  let lastTapAt = null;
   let downX = 0;
   let downY = 0;
 
@@ -538,14 +539,14 @@ sliders.forEach((slider) => {
   });
   row.addEventListener('pointerup', (event) => {
     if (Math.hypot(event.clientX - downX, event.clientY - downY) > TapSlopPx) {
-      lastTapAt = 0;
+      lastTapAt = null;
 
       return;
     }
-    if (event.timeStamp - lastTapAt <= DoubleTapMs) {
+    if (lastTapAt !== null && event.timeStamp - lastTapAt <= DoubleTapMs) {
       slider.value = '0';
       sendAdjustments();
-      lastTapAt = 0;
+      lastTapAt = null;
 
       return;
     }
@@ -587,9 +588,13 @@ const strip = document.getElementById('strip');
 
 function push(bitmap, limit = 1400) {
   const scale = Math.min(1, limit / Math.max(bitmap.width, bitmap.height));
-  const width = Math.round(bitmap.width * scale);
-  const height = Math.round(bitmap.height * scale);
+  const width = Math.max(1, Math.round(bitmap.width * scale));
+  const height = Math.max(1, Math.round(bitmap.height * scale));
   work.width = width; work.height = height;
+  // The virtual desktop is opaque black. Composite transparent images before
+  // sharing pixels with the scopes, which intentionally ignore alpha.
+  wctx.fillStyle = "#000";
+  wctx.fillRect(0, 0, width, height);
   wctx.drawImage(bitmap, 0, 0, width, height);
   const image = wctx.getImageData(0, 0, width, height);
   const ptr = mod.ccall('labFrameBuffer', 'number', ['number', 'number'], [width, height]);
@@ -610,16 +615,33 @@ function markCurrent(button) {
   if (button) { button.setAttribute('aria-current', 'true'); }
 }
 
+let imageSelection = 0;
+
 async function useSample(name, line, button, focusAfter = true) {
+  const selection = ++imageSelection;
   // A data: URI in the standalone file, a sibling JPEG when served. fetch
   // reads a data: URI from a file:// page quite happily; it will not read a
   // sibling file, which is why the standalone one carries its pictures
   // inside it.
-  const bitmap = await createImageBitmap(await (await fetch(sampleSource(name))).blob());
-  push(bitmap);
-  credit.textContent = line ? `Image: ${line}. Public domain.` : '';
-  markCurrent(button);
-  if (focusAfter) { returnFocus(); }
+  let bitmap;
+  try {
+    const response = await fetch(sampleSource(name));
+    if (!response.ok) { throw new Error('Sample unavailable'); }
+    bitmap = await createImageBitmap(await response.blob());
+    if (selection !== imageSelection) { return false; }
+    push(bitmap);
+    credit.textContent = line ? `Image: ${line}. Public domain.` : '';
+    markCurrent(button);
+    if (focusAfter) { returnFocus(); }
+    return true;
+  } catch (error) {
+    if (selection === imageSelection) {
+      credit.textContent = 'Could not load this sample. Choose another image or load your own.';
+    }
+    return false;
+  } finally {
+    bitmap?.close();
+  }
 }
 
 // Where a photograph comes from: a data: URI in the standalone file, a
@@ -642,7 +664,7 @@ for (const [name, title, line] of SAMPLES) {
   img.alt = title;
   img.addEventListener('error', () => button.remove());
   button.appendChild(img);
-  button.addEventListener('click', () => useSample(name, line, button));
+  button.addEventListener('click', () => { void useSample(name, line, button); });
   strip.appendChild(button);
   tiles.push(button);
 }
@@ -680,32 +702,63 @@ requestAnimationFrame(syncPageAnchors);
 
 document.getElementById('file').addEventListener('change', async (event) => {
   const file = event.target.files && event.target.files[0];
-  if (!file) { return; }
-  const bitmap = await createImageBitmap(file);
-
-  // Your photograph joins the strip, before the add tile, so it can be
-  // returned to like any other. The thumbnail is drawn from the bitmap
-  // already in memory; the file itself never leaves this page.
-  const thumb = document.createElement('canvas');
-  thumb.width = 208; thumb.height = 140;
-  thumb.getContext('2d').drawImage(bitmap, 0, 0, 208, 140);
-  const button = document.createElement('button');
-  button.title = file.name;
-  const img = document.createElement('img');
-  img.src = thumb.toDataURL('image/jpeg', 0.8);
-  img.alt = file.name;
-  button.appendChild(img);
-  const show = () => {
-    push(bitmap);
-    credit.textContent = 'Your image. Processed locally in this browser.';
-    markCurrent(button);
-    returnFocus();
-  };
-  button.addEventListener('click', show);
-  strip.insertBefore(button, addButton);
-  show();
   event.target.value = '';
+  if (!file) { return; }
+  const selection = ++imageSelection;
+  let bitmap;
+  try {
+    bitmap = await createImageBitmap(file);
+    if (selection !== imageSelection) { return; }
+    // Retain only the fitted opaque image, not a full-resolution decode for
+    // every local tile. This is also the exact image handed to the scopes.
+    push(bitmap);
+    const retained = document.createElement('canvas');
+    retained.width = work.width; retained.height = work.height;
+    retained.getContext('2d').drawImage(work, 0, 0);
+    const thumb = document.createElement('canvas');
+    thumb.width = 208; thumb.height = 140;
+    thumb.getContext('2d').drawImage(retained, 0, 0, 208, 140);
+    const button = document.createElement('button');
+    button.title = file.name;
+    const img = document.createElement('img');
+    img.src = thumb.toDataURL('image/jpeg', 0.8);
+    img.alt = file.name;
+    button.appendChild(img);
+    const show = () => {
+      ++imageSelection;
+      push(retained);
+      credit.textContent = 'Your image. Processed locally in this browser.';
+      markCurrent(button);
+      returnFocus();
+    };
+    button.addEventListener('click', show);
+    strip.insertBefore(button, addButton);
+    show();
+  } catch (error) {
+    if (selection === imageSelection) {
+      credit.textContent = 'Could not read this image. Try a supported image file.';
+    }
+  } finally {
+    bitmap?.close();
+  }
 });
+
+function showGeneratedSample() {
+  const generated = document.createElement('canvas');
+  generated.width = 640; generated.height = 480;
+  const pen = generated.getContext('2d');
+  const colors = ['#fff', '#ff0', '#0ff', '#0f0', '#f0f', '#f00', '#00f', '#000'];
+  colors.forEach((color, at) => {
+    pen.fillStyle = color;
+    pen.fillRect(at * 80, 0, 80, 320);
+  });
+  const ramp = pen.createLinearGradient(0, 0, 640, 0);
+  ramp.addColorStop(0, '#000'); ramp.addColorStop(1, '#fff');
+  pen.fillStyle = ramp; pen.fillRect(0, 320, 640, 160);
+  push(generated);
+  credit.textContent = 'Generated color bars. Sample photographs are unavailable; you can load your own image.';
+  markCurrent(null);
+}
 
 // Something to look at immediately: a picture beneath a global region,
 // rather than an empty scope and an instruction to draw one.
@@ -713,7 +766,10 @@ document.getElementById('file').addEventListener('change', async (event) => {
 // wait for a deliberate interaction: focusing anything in a cross-origin
 // frame can make a mobile browser scroll the parent page to reveal the frame,
 // even when the focus call itself requests preventScroll.
-await useSample(SAMPLES[0][0], SAMPLES[0][2], tiles[0], window.parent === window);
+const loaded = await useSample(SAMPLES[0][0], SAMPLES[0][2], tiles[0], window.parent === window);
+// A failed initial download must not prevent the instrument or the embedding
+// ready signal from working. A deliberate choice made while it loaded wins.
+if (!loaded && imageSelection === 1) { showGeneratedSample(); }
 // The embedding website records only this immutable build's successful ready
 // state. It can then open the same build directly on a later visit instead of
 // asking permission for a download the browser normally serves from cache.

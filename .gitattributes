@@ -1,1 +1,4 @@
 *.ppm binary
+
+# Preserve the upstream font notice byte for byte, including its line endings.
+src/web/fonts/RobotoMono-OFL.txt whitespace=-blank-at-eol

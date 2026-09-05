@@ -616,6 +616,31 @@ TEST_CASE("Clearing and removing forget the locks they are given")
     CHECK_FALSE(fix.controller.locked());
 }
 
+TEST_CASE("Removing or switching from a hunted face restores ordinary borders")
+{
+    ControllerFixture fix;
+    fix.controller.addLock(1, foreheadLock(), 0.0);
+    fix.controller.addLock(2, foreheadLock(), 5.0);
+    fix.controller.onActivated(1, 5.0);
+    REQUIRE(fix.controller.hunting());
+
+    SECTION("remove active lock")
+    {
+        fix.controller.removeLock(1);
+        CHECK(fix.controller.contains(2));
+    }
+    SECTION("activate recently verified lock")
+    {
+        fix.controller.onActivated(2, 5.1);
+    }
+    SECTION("activate ordinary window")
+    {
+        fix.controller.onActivated(99, 5.1);
+    }
+
+    CHECK_FALSE(fix.controller.hunting());
+}
+
 TEST_CASE("A border edit re-teaches the crop the face carries")
 {
     ControllerFixture fix;
@@ -695,6 +720,34 @@ TEST_CASE("An adopted anchor maps to nothing while the window is out of reach")
         fix.controller.ingestProbeResult({moved}, IntRect{0, 0, 1000, 800}, 1, decisionFor(1), 1, frameSize, 2.0);
     CHECK_FALSE(minimized.applyRegion.has_value());
     CHECK_FALSE(fix.controller.hunting());  // the anchor was still confirmed
+}
+
+TEST_CASE("A completed probe cannot change a replacement lock on the same window")
+{
+    ControllerFixture fix;
+    fix.startCapture();
+    fix.worker.start();
+    const AttachWindowRect window{0.0, 0.0, 1000.0, 500.0};
+    desktopStubs().displayGeometry = DisplayGeometry{0.0, 0.0, 1000.0, 500.0};
+    fix.attachWindow(1, window);
+    fix.controller.addLock(1, foreheadLock(), 0.0, window);
+    publishAndAwait(fix, makeSolidFrameBuffer(1000, 500, Color{10, 10, 10}, 1), 1);
+    const auto decision = attachedDecision(1, window);
+    (void)fix.controller.update(decision, std::nullopt, 1, std::nullopt, false, 1.0);
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (fix.controller.probeRunning() && std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    REQUIRE_FALSE(fix.controller.probeRunning());
+    REQUIRE(desktopStubs().detectorCall().calls == 1);
+    // The old search found no face. A newly confirmed pick on that same
+    // window is already verified and must not inherit the old miss.
+    fix.controller.addLock(1, foreheadLock(), 1.1, window);
+    const auto stale = fix.controller.update(decision, std::nullopt, 1, std::nullopt, true, 1.2);
+    CHECK_FALSE(stale.applyRegion);
+    CHECK_FALSE(stale.lostLock);
+    CHECK_FALSE(fix.controller.hunting());
+    fix.worker.stop();
 }
 
 }  // namespace sidescopes

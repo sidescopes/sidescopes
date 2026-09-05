@@ -28,8 +28,8 @@ std::vector<TourStep> labTourSteps(const ShortcutResolver& shortcuts)
                  "available pixels on a virtual display.",
                  /*halo=*/0.0f},
         TourStep{"region", "Move the global region",
-                 "The region stays fixed when you change images and can extend beyond one. Only its overlap with the "
-                 "image reaches the scopes. Drag the band to move it, or a handle to resize it.",
+                 "The region stays fixed when you change images and can extend beyond one. The scopes include the "
+                 "black desktop outside the image. Drag the band to move it, or a handle to resize it.",
                  // Clear of what the region already wears outside itself: a
                  // twelve-point band, and a close badge beyond that again.
                  /*halo=*/26.0f},

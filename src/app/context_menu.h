@@ -84,6 +84,8 @@ struct ContextMenuModel
     /// Whether a region has been selected at all; without one there is nothing
     /// for Clear Region to clear.
     bool regionSelected;
+    /// Whether this shell offers application settings, quality and diagnostics.
+    bool applicationControlsAvailable = true;
 };
 
 /// A preset slot's menu label: what the slot is called, marked "(empty)" while

@@ -30,7 +30,7 @@ struct SyntheticFrame
     }
 };
 
-constexpr uint8_t ToByte(int value)
+constexpr uint8_t toByte(int value)
 {
     return static_cast<uint8_t>(value < 0 ? 0 : (value > 255 ? 255 : value));
 }
@@ -39,7 +39,7 @@ constexpr uint8_t ToByte(int value)
 // the whole scope, and the fixed-seed jitter populates the fine bin structure
 // the density-correction paths work on. Built from a fixed seed so runs on the
 // same machine are comparable; no clock or environment enters the pixels.
-SyntheticFrame MakeGradientNoiseFrame(int width, int height)
+SyntheticFrame makeGradientNoiseFrame(int width, int height)
 {
     SyntheticFrame frame;
     frame.width = width;
@@ -55,9 +55,9 @@ SyntheticFrame MakeGradientNoiseFrame(int width, int height)
             const int rampG = y * 255 / (height - 1);
             const int rampB = (x + y) * 255 / spanBase;
             uint8_t* pixel = frame.pixels.data() + (static_cast<std::size_t>(y) * width + x) * 4;
-            pixel[0] = ToByte(rampB + jitter(rng));
-            pixel[1] = ToByte(rampG + jitter(rng));
-            pixel[2] = ToByte(rampR + jitter(rng));
+            pixel[0] = toByte(rampB + jitter(rng));
+            pixel[1] = toByte(rampG + jitter(rng));
+            pixel[2] = toByte(rampR + jitter(rng));
             pixel[3] = 255;
         }
     }
@@ -69,8 +69,8 @@ SyntheticFrame MakeGradientNoiseFrame(int width, int height)
 
 TEST_CASE("scope engines accumulate synthetic frames", "[bench]")
 {
-    const SyntheticFrame frame1080 = MakeGradientNoiseFrame(1920, 1080);
-    const SyntheticFrame frame2160 = MakeGradientNoiseFrame(3840, 2160);
+    const SyntheticFrame frame1080 = makeGradientNoiseFrame(1920, 1080);
+    const SyntheticFrame frame2160 = makeGradientNoiseFrame(3840, 2160);
 
     Vectorscope vectorscope;
     Waveform waveform;

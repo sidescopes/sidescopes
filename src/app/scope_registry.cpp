@@ -12,6 +12,10 @@ ScopeRegistry::ScopeRegistry(const ModuleRegistry& modules)
     std::string assigned;
     for (const RegisteredScope& scope : modules.scopes()) {
         const SsScopeDescriptor* descriptor = scope.descriptor;
+        if (std::string_view(descriptor->id) == ColorPickerScopeId) {
+            std::fprintf(stderr, "sidescopes module: scope id %s is reserved for the host\n", descriptor->id);
+            continue;
+        }
         char letter = descriptor->letter;
         if (letter != 0) {
             const bool reserved = letter == ColorPickerLetter;

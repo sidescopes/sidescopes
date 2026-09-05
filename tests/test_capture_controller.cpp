@@ -213,7 +213,7 @@ TEST_CASE("A stale mark restarts the stream after a one-second backoff")
 TEST_CASE("a stream that stays unreachable is retried less and less often")
 {
     // What a locked screen or a sleeping display looks like from here: every
-    // restart fails, for hours. A fixed two-second retry would run seven
+    // restart fails, for hours. A fixed two-second retry would run eighteen
     // hundred times an hour for a window nobody can see.
     FakeCaptureSource source;
     source.targets = {makeTarget(1, "main")};

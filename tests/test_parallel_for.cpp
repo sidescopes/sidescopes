@@ -1,6 +1,8 @@
+#include <atomic>
 #include <catch2/catch_test_macros.hpp>
 #include <cstddef>
 #include <cstdint>
+#include <stdexcept>
 #include <vector>
 
 #include "core/parallel_for.h"
@@ -99,6 +101,20 @@ TEST_CASE("mergeBins over a large grid matches a serial reduction")
         matches = matches && out[bin] == expected;
     }
     CHECK(matches);
+}
+
+TEST_CASE("Parallel chunks finish before a caller exception leaves the pass")
+{
+    std::atomic<int> completed{0};
+    CHECK_THROWS_AS(runParallelChunks(4, 8,
+                                      [&](int chunk, int, int) {
+                                          if (chunk == 3) {
+                                              throw std::runtime_error("caller failed");
+                                          }
+                                          completed.fetch_add(1, std::memory_order_relaxed);
+                                      }),
+                    std::runtime_error);
+    CHECK(completed.load() == 3);
 }
 
 }  // namespace sidescopes

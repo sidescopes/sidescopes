@@ -46,7 +46,7 @@ Download the current macOS or Windows build from the
 [releases page](https://github.com/sidescopes/sidescopes/releases). Both builds
 are portable zip archives.
 
-- **macOS 12 or later**, Apple silicon or Intel. Screen capture requires the
+- **macOS 14 or later**, Apple silicon or Intel. Screen capture requires the
   Screen Recording permission.
 - **Windows 10 or later**, 64-bit. Extract the archive and run the executable;
   no separate runtime is required.
@@ -92,5 +92,7 @@ SideScopes is free software licensed under the
 by that license and may not identify a modified version; see
 [assets/brand](assets/brand).
 
-Bundled components: Dear ImGui (MIT), GLFW (zlib), Catch2 (BSL-1.0),
-nlohmann/json (MIT), NanoSVG (zlib), and Lucide icons (ISC).
+Bundled components include Dear ImGui (MIT), GLFW (zlib), NanoSVG (zlib),
+and Lucide icons (ISC). The Lab also includes Inter and Roboto Mono (OFL).
+Distributions carry the applicable notices; see [licenses](licenses).
+Catch2 (BSL-1.0) is used for tests and benchmarks.

@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstdint>
 #include <cstdio>
 #include <ctime>
 #include <filesystem>
@@ -21,6 +22,34 @@
 
 namespace sidescopes {
 
+// A snapshot keeps this gate alive, not the subsystem the function captures.
+// Disarming takes the same gate as invocation, so it also joins a running
+// report before the captured state can be destroyed.
+struct DiagReportState
+{
+    explicit DiagReportState(DiagStateReport callback)
+        : report(std::move(callback))
+    {
+    }
+
+    void invoke()
+    {
+        const std::lock_guard lock(mutex);
+        if (report) {
+            report();
+        }
+    }
+
+    void disarm()
+    {
+        const std::lock_guard lock(mutex);
+        report = {};
+    }
+
+    std::mutex mutex;
+    DiagStateReport report;
+};
+
 namespace {
 
 // The bounded-interval flush cadence: short enough that a live tail and a
@@ -36,14 +65,19 @@ static_assert(std::size(ChannelNames) == static_cast<std::size_t>(DiagChannel::C
 // warnings-as-errors, so file access goes through the annex Microsoft
 // accepts. Environment reads go through core/environment.h for the same
 // reason.
-std::FILE* openFile(const char* path, const char* mode)
+std::filesystem::path utf8Path(const std::string& path)
 {
-#ifdef _MSC_VER
+    return std::u8string(path.begin(), path.end());
+}
+
+std::FILE* openFile(const std::filesystem::path& path)
+{
+#ifdef _WIN32
     // Not fopen_s: that denies all sharing, and a live tail of the log
     // while the application runs is the point of the sink.
-    return _fsopen(path, mode, _SH_DENYWR);
+    return _wfsopen(path.c_str(), L"w", _SH_DENYWR);
 #else
-    return std::fopen(path, mode);
+    return std::fopen(path.c_str(), "w");
 #endif
 }
 
@@ -60,14 +94,12 @@ struct DiagState
     bool reported = false;
 };
 
-// The registered state reports, held weakly: a registration going away is
-// what removes one, and holding it weakly means that removal costs the
-// subsystem's destructor nothing but a refcount - no lock, and nothing that
-// can throw out of a destructor.
+// The registry does not retain dead registrations; snapshots retain only
+// their invocation gates and must still pass those gates before reporting.
 struct StateReports
 {
     std::mutex mutex;
-    std::vector<std::weak_ptr<DiagStateReport>> reports;
+    std::vector<std::weak_ptr<DiagReportState>> reports;
 };
 
 StateReports& stateReports()
@@ -177,11 +209,12 @@ void applyConfig(DiagState& state, const DiagConfig& config)
     // A custom path may name a directory that does not exist yet, like
     // the default location's own subfolder.
     std::error_code ignored;
-    std::filesystem::create_directories(std::filesystem::path(path).parent_path(), ignored);
-    const std::string previous = previousLogPath(path);
-    std::remove(previous.c_str());
-    std::rename(path.c_str(), previous.c_str());
-    state.sink = openFile(path.c_str(), "w");
+    const std::filesystem::path file = utf8Path(path);
+    std::filesystem::create_directories(file.parent_path(), ignored);
+    const std::filesystem::path previous = utf8Path(previousLogPath(path));
+    std::filesystem::remove(previous, ignored);
+    std::filesystem::rename(file, previous, ignored);
+    state.sink = openFile(file);
     if (!state.sink) {
         state = DiagState{};
 
@@ -200,32 +233,66 @@ void applyConfig(DiagState& state, const DiagConfig& config)
     }
 }
 
-DiagState& diagState()
+struct Diagnostics
 {
-    static DiagState state = []() {
-        DiagState fresh;
-        applyConfig(fresh, DiagConfig{environmentValue("SIDESCOPES_DIAG"), environmentValue("SIDESCOPES_DIAG_FILE"),
-                                      flushFromEnv(environmentValue("SIDESCOPES_DIAG_FLUSH"))});
+    Diagnostics()
+    {
+        configure({environmentValue("SIDESCOPES_DIAG"), environmentValue("SIDESCOPES_DIAG_FILE"),
+                   flushFromEnv(environmentValue("SIDESCOPES_DIAG_FLUSH"))});
+    }
 
-        return fresh;
-    }();
+    ~Diagnostics()
+    {
+        if (state.sink) {
+            std::fclose(state.sink);
+        }
+    }
 
-    return state;
+    // Called under sinkMutex once construction has published this object.
+    void configure(const DiagConfig& config)
+    {
+        enabled.store(0, std::memory_order_relaxed);
+        applyConfig(state, config);
+        std::uint32_t mask = 0;
+        if (state.sink) {
+            for (std::size_t index = 0; index < std::size(ChannelNames); ++index) {
+                if (state.channels[index]) {
+                    mask |= std::uint32_t{1} << index;
+                }
+            }
+        }
+        enabled.store(mask, std::memory_order_relaxed);
+    }
+
+    // Only configure/init take controlMutex. Emitters and report teardown
+    // never need it, so callbacks may take subsystem locks and emit lines.
+    std::mutex controlMutex;
+    std::mutex sinkMutex;
+    std::atomic<std::uint32_t> enabled{0};
+    DiagState state;
+};
+
+Diagnostics& diagnostics()
+{
+    static Diagnostics instance;
+    return instance;
 }
 
 /// Runs every registered state report against a freshly opened sink, once per
 /// opening, so a recording starts with what is already true rather than only
 /// with what changes next.
-void reportState()
+void reportState(Diagnostics& service)
 {
-    DiagState& state = diagState();
+    // The caller serializes recording changes with controlMutex.
+    std::unique_lock sinkLock(service.sinkMutex);
+    DiagState& state = service.state;
     if (!state.sink || state.reported) {
         return;
     }
     // Marked before the reports run: a report logs, and logging must not lead
     // back in here.
     state.reported = true;
-    std::vector<std::shared_ptr<DiagStateReport>> live;
+    std::vector<std::shared_ptr<DiagReportState>> live;
     {
         StateReports& registered = stateReports();
         const std::lock_guard lock(registered.mutex);
@@ -233,9 +300,9 @@ void reportState()
         // prunes little and stays short; doing it here keeps the registration
         // itself free of any bookkeeping.
         std::erase_if(registered.reports,
-                      [](const std::weak_ptr<DiagStateReport>& report) { return report.expired(); });
-        for (const std::weak_ptr<DiagStateReport>& report : registered.reports) {
-            if (std::shared_ptr<DiagStateReport> held = report.lock()) {
+                      [](const std::weak_ptr<DiagReportState>& report) { return report.expired(); });
+        for (const std::weak_ptr<DiagReportState>& report : registered.reports) {
+            if (std::shared_ptr<DiagReportState> held = report.lock()) {
                 live.push_back(std::move(held));
             }
         }
@@ -247,11 +314,14 @@ void reportState()
     // the timestamps are honest about when they were written, not about when
     // the state they carry came about.
     std::fprintf(state.sink, "# state when this recording opened\n");
-    // Outside the lock: a report is arbitrary subsystem code, and holding a
-    // diagnostics lock across it would put this facility inside their lock
-    // order.
-    for (const std::shared_ptr<DiagStateReport>& report : live) {
-        (*report)();
+    // A producer can hold a subsystem lock while emitting. Never retain the
+    // sink lock while a report acquires that subsystem lock.
+    sinkLock.unlock();
+    for (const std::shared_ptr<DiagReportState>& report : live) {
+        try {
+            report->invoke();
+        } catch (...) {  // NOLINT(bugprone-empty-catch): reporting must not disrupt recording
+        }
     }
 }
 
@@ -259,28 +329,54 @@ void reportState()
 
 bool diagEnabled(DiagChannel channel)
 {
-    return diagState().channels[static_cast<std::size_t>(channel)];
+    const auto index = static_cast<std::size_t>(channel);
+    return index < std::size(ChannelNames) &&
+           (diagnostics().enabled.load(std::memory_order_relaxed) & (std::uint32_t{1} << index)) != 0;
 }
 
 void diagInit()
 {
-    (void)diagState();
+    Diagnostics& service = diagnostics();
+    const std::lock_guard controlLock(service.controlMutex);
     // A run enabled from the environment opens its sink at whichever line
     // logs first, which can be before the application reaches here. The
     // reporting waits for this call regardless, so the subsystems built during
     // startup are all registered by the time it runs.
-    reportState();
+    reportState(service);
 }
 
 void diagConfigure(const DiagConfig& config)
 {
-    applyConfig(diagState(), config);
-    reportState();
+    Diagnostics& service = diagnostics();
+    const std::lock_guard controlLock(service.controlMutex);
+    {
+        const std::lock_guard sinkLock(service.sinkMutex);
+        service.configure(config);
+    }
+    reportState(service);
+}
+
+DiagRegistration::~DiagRegistration()
+{
+    if (m_report) {
+        m_report->disarm();
+    }
+}
+
+DiagRegistration& DiagRegistration::operator=(DiagRegistration&& other) noexcept
+{
+    if (this != &other) {
+        if (m_report) {
+            m_report->disarm();
+        }
+        m_report = std::move(other.m_report);
+    }
+    return *this;
 }
 
 DiagRegistration diagAddStateReport(DiagStateReport report)
 {
-    auto held = std::make_shared<DiagStateReport>(std::move(report));
+    auto held = std::make_shared<DiagReportState>(std::move(report));
     StateReports& registered = stateReports();
     const std::lock_guard lock(registered.mutex);
     registered.reports.push_back(held);
@@ -290,12 +386,16 @@ DiagRegistration diagAddStateReport(DiagStateReport report)
 
 bool diagRecording()
 {
-    return diagState().sink != nullptr;
+    Diagnostics& service = diagnostics();
+    const std::lock_guard lock(service.sinkMutex);
+    return service.state.sink != nullptr;
 }
 
 std::string diagLogPath()
 {
-    const DiagState& state = diagState();
+    Diagnostics& service = diagnostics();
+    const std::lock_guard lock(service.sinkMutex);
+    const DiagState& state = service.state;
     if (!state.path.empty()) {
         return state.path;
     }
@@ -315,7 +415,7 @@ std::string diagDirectory()
     }
     const std::string directory = base + "/sidescopes";
     std::error_code ignored;
-    std::filesystem::create_directories(directory, ignored);
+    std::filesystem::create_directories(utf8Path(directory), ignored);
 
     return directory;
 }
@@ -326,7 +426,12 @@ void diagEmit(DiagChannel channel, const char* message) noexcept
     // one-time setup, which always runs before any emit, but a logging failure
     // must never disturb the caller regardless - so the whole path is contained.
     try {
-        DiagState& state = diagState();
+        if (!diagEnabled(channel)) {
+            return;
+        }
+        Diagnostics& service = diagnostics();
+        const std::lock_guard lock(service.sinkMutex);
+        DiagState& state = service.state;
         if (!state.sink || !state.channels[static_cast<std::size_t>(channel)]) {
             return;
         }

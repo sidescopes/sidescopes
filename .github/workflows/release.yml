@@ -53,13 +53,18 @@ jobs:
       - uses: actions/checkout@v7
 
       - name: Configure
-        run: cmake -B build -DSIDESCOPES_WERROR=ON -DSIDESCOPES_CODESIGN_IDENTITY=-
+        run: >
+          cmake -B build -DSIDESCOPES_WERROR=ON -DSIDESCOPES_CODESIGN_IDENTITY=-
+          '-DCMAKE_OSX_ARCHITECTURES=arm64;x86_64' -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0
 
       - name: Build
         run: cmake --build build --config Release
 
       - name: Test
         run: ctest --test-dir build -C Release --output-on-failure
+
+      - name: Verify both Mac architectures
+        run: lipo build/SideScopes.app/Contents/MacOS/SideScopes -verify_arch arm64 x86_64
 
       - name: Re-sign the bundle so the signature seals every resource
         # The CMake post-build sign can run before the app icon is placed in
@@ -140,7 +145,7 @@ jobs:
         shell: pwsh
         run: |
           $zip = "SideScopes-$env:GITHUB_REF_NAME-windows.zip"
-          Compress-Archive -Path build/Release/SideScopes.exe -DestinationPath $zip
+          Compress-Archive -Path build/Release/SideScopes.exe, build/Release/licenses -DestinationPath $zip
           $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()
           [IO.File]::WriteAllText("$zip.sha256", "$hash  $zip`n", [Text.Encoding]::ASCII)
 

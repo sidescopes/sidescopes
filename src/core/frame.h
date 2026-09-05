@@ -42,7 +42,8 @@ struct IntRect
     /// rectangle as half-open so adjacent rectangles never both claim a point.
     [[nodiscard]] bool contains(int pointX, int pointY) const
     {
-        return pointX >= x && pointY >= y && pointX < x + width && pointY < y + height;
+        return pointX >= x && pointY >= y && pointX < static_cast<int64_t>(x) + width &&
+               pointY < static_cast<int64_t>(y) + height;
     }
 };
 
@@ -205,10 +206,7 @@ struct FrameView
 
     /// Moves @p rect from display pixels into this frame's own pixels. The
     /// identity for an uncropped frame.
-    [[nodiscard]] IntRect fromDisplay(IntRect rect) const
-    {
-        return IntRect{rect.x - sourceX, rect.y - sourceY, rect.width, rect.height};
-    }
+    [[nodiscard]] IntRect fromDisplay(IntRect rect) const;
 
     /// Whether every pixel of @p displayRect, stated in display pixels, is in
     /// this frame. Always true of an uncropped frame for anything inside its

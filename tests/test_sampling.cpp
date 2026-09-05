@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <catch2/catch_test_macros.hpp>
+#include <limits>
 #include <vector>
 
 #include "core/frame.h"
@@ -151,9 +152,8 @@ TEST_CASE("A phase that would leave the region falls back inside it")
 
 TEST_CASE("The budgets are the ones the measurements were taken at")
 {
-    // Every number here was chosen from measured accuracy, recorded in
-    // notes/perf-findings.md, so moving any of them is a decision rather than a
-    // tweak. The ceiling sits just above half a 4K frame, which is what keeps
+    // These budgets preserve the measured sampling policy. Changing one
+    // requires an accuracy and performance comparison. The ceiling sits just above half a 4K frame, which is what keeps
     // every display up to 1440p sampled row for row.
     CHECK(SampleBudget == 4'200'000);
     CHECK(SampleBudget > static_cast<long long>(1920) * 1080);
@@ -214,6 +214,15 @@ TEST_CASE("An empty region asks for no samples")
     const SampleGrid grid = sampleGridFor(1, IntRect{10, 10, 0, 0}, SampleBudget);
     CHECK(grid.rows == 0);
     CHECK(grid.columnsPerRow == 0);
+}
+
+TEST_CASE("Sampling an integer-limit extent does not overflow its row count")
+{
+    const IntRect region{0, 0, std::numeric_limits<int>::max(), std::numeric_limits<int>::max()};
+    const SampleGrid grid = sampleGridFor(8, region, UnlimitedSamples);
+    CHECK(grid.rows == 268435456);
+    CHECK(grid.columnsPerRow == grid.rows);
+    CHECK(sampleRowOf(grid, region, grid.rows - 1) == 2147483640);
 }
 
 }  // namespace sidescopes

@@ -1,7 +1,15 @@
 #include <catch2/catch_test_macros.hpp>
 #include <fstream>
 #include <iterator>
+#include <locale>
 #include <string>
+
+#if defined(__unix__) || defined(__APPLE__)
+#include <signal.h>
+#include <sys/resource.h>
+
+#include <cerrno>
+#endif
 
 #include "core/preferences.h"
 #include "support/scope_tokens.h"
@@ -32,6 +40,88 @@ double param(const Preferences& preferences, const char* id, const char* key, do
     return value != scope->second.end() ? value->second : missing;
 }
 
+std::string contentsOf(const std::filesystem::path& file)
+{
+    std::ifstream input(file);
+    return {std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>()};
+}
+
+class CommaDecimal : public std::numpunct<char>
+{
+protected:
+    char do_decimal_point() const override
+    {
+        return ',';
+    }
+};
+
+class GlobalLocale
+{
+public:
+    explicit GlobalLocale(const std::locale& locale)
+        : m_previous(std::locale::global(locale))
+    {
+    }
+
+    ~GlobalLocale()
+    {
+        std::locale::global(m_previous);
+    }
+
+    GlobalLocale(const GlobalLocale&) = delete;
+    GlobalLocale& operator=(const GlobalLocale&) = delete;
+
+private:
+    std::locale m_previous;
+};
+
+#if defined(__unix__) || defined(__APPLE__)
+// A real buffered write failure, confined to this test process and restored
+// before Catch writes any result. The hard limit never changes.
+class FileSizeLimit
+{
+public:
+    explicit FileSizeLimit(rlim_t bytes)
+    {
+        if (getrlimit(RLIMIT_FSIZE, &m_previousLimit) != 0) {
+            throw std::system_error(errno, std::generic_category());
+        }
+
+        struct sigaction ignored
+        {
+        };
+
+        ignored.sa_handler = SIG_IGN;
+        sigemptyset(&ignored.sa_mask);
+        if (sigaction(SIGXFSZ, &ignored, &m_previousSignal) != 0) {
+            throw std::system_error(errno, std::generic_category());
+        }
+        const rlimit limit{bytes, m_previousLimit.rlim_max};
+        if (setrlimit(RLIMIT_FSIZE, &limit) != 0) {
+            const int error = errno;
+            sigaction(SIGXFSZ, &m_previousSignal, nullptr);
+            throw std::system_error(error, std::generic_category());
+        }
+    }
+
+    ~FileSizeLimit()
+    {
+        setrlimit(RLIMIT_FSIZE, &m_previousLimit);
+        sigaction(SIGXFSZ, &m_previousSignal, nullptr);
+    }
+
+    FileSizeLimit(const FileSizeLimit&) = delete;
+    FileSizeLimit& operator=(const FileSizeLimit&) = delete;
+
+private:
+    rlimit m_previousLimit{};
+
+    struct sigaction m_previousSignal
+    {
+    };
+};
+#endif
+
 }  // namespace
 
 TEST_CASE("Preferences round-trip through a file")
@@ -47,7 +137,7 @@ TEST_CASE("Preferences round-trip through a file")
     saved.tourSettled = 1;
     saved.scopeStack = testing::idTokens("HWV");  // stacking order is part of the setting
     saved.graticuleStrength = 0.5f;
-    saved.windowX = 120;
+    saved.windowPosition = WindowPosition{120, -50};
     saved.windowWidth = 640;
     saved.quality = "high";
 
@@ -68,9 +158,110 @@ TEST_CASE("Preferences round-trip through a file")
     CHECK(loaded.tourSettled == 1);
     CHECK(loaded.scopeStack == testing::idTokens("HWV"));
     CHECK(loaded.graticuleStrength == 0.5f);
-    CHECK(loaded.windowX == 120);
+    REQUIRE(loaded.windowPosition);
+    CHECK(loaded.windowPosition->x == 120);
+    CHECK(loaded.windowPosition->y == -50);
     CHECK(loaded.windowWidth == 640);
     CHECK(loaded.quality == "high");
+}
+
+TEST_CASE("Temporary files with the same name coexist independently")
+{
+    const TempFile first("shared-name.txt");
+    first.write("first");
+    std::filesystem::path secondPath;
+    {
+        const TempFile second("shared-name.txt");
+        secondPath = second.path();
+        REQUIRE(first.path() != second.path());
+        second.write("second");
+        CHECK(contentsOf(first.path()) == "first");
+        CHECK(contentsOf(second.path()) == "second");
+    }
+    CHECK_FALSE(std::filesystem::exists(secondPath));
+    CHECK(contentsOf(first.path()) == "first");
+}
+
+TEST_CASE("Preferences create missing parents and replace complete files")
+{
+    const TempDir directory("preferences-replacement");
+    const auto file = directory.file("nested/settings.conf");
+    Preferences saved;
+    saved.quality = "high";
+    REQUIRE(savePreferences(saved, file));
+    CHECK(loadPreferences(file).quality == "high");
+
+    saved.quality = "standard";
+    REQUIRE(savePreferences(saved, file));
+    CHECK(loadPreferences(file).quality == "standard");
+    CHECK(std::distance(std::filesystem::directory_iterator(file.parent_path()),
+                        std::filesystem::directory_iterator{}) == 1);
+}
+
+TEST_CASE("Preferences leave the destination intact when replacement fails")
+{
+    const TempDir directory("preferences-failed-replacement");
+    const auto destination = directory.file("settings.conf");
+    REQUIRE(std::filesystem::create_directory(destination));
+    std::ofstream(destination / "existing") << "preserved";
+
+    CHECK_FALSE(savePreferences(Preferences{}, destination));
+    CHECK(contentsOf(destination / "existing") == "preserved");
+    CHECK(std::distance(std::filesystem::directory_iterator(directory.path()), std::filesystem::directory_iterator{}) ==
+          1);
+}
+
+#if defined(__unix__) || defined(__APPLE__)
+TEST_CASE("Preferences preserve the previous file after a buffered write fails")
+{
+    const TempFile file("preferences-write-failure.conf");
+    const std::string previous = "quality=high\n";
+    file.write(previous);
+    bool saved = true;
+    {
+        const FileSizeLimit limit(64);
+        saved = savePreferences(Preferences{}, file.path());
+    }
+    CHECK_FALSE(saved);
+    CHECK(contentsOf(file.path()) == previous);
+    CHECK(std::distance(std::filesystem::directory_iterator(file.path().parent_path()),
+                        std::filesystem::directory_iterator{}) == 1);
+}
+#endif
+
+TEST_CASE("Preferences round-trip module settings from arbitrary reverse-DNS domains")
+{
+    Preferences saved;
+    for (const char* id : {"com.example.scope", "net.example.custom.scope", "dev.example.another"}) {
+        saved.scopeParams[id]["gain"] = 2.5;
+        saved.scopeShortcuts[id] = "K";
+    }
+    const TempFile file("third-party-domains.conf");
+    REQUIRE(savePreferences(saved, file.path()));
+    const Preferences loaded = loadPreferences(file.path());
+    for (const char* id : {"com.example.scope", "net.example.custom.scope", "dev.example.another"}) {
+        CHECK(param(loaded, id, "gain") == 2.5);
+        CHECK(loaded.scopeShortcuts.at(id) == "K");
+    }
+}
+
+TEST_CASE("Generic module parameters do not consume reserved or malformed keys")
+{
+    const TempFile file("scope-param-namespaces.conf");
+    file.write(
+        "layout.preset1.orientation=2\n"
+        "shortcut_com.example.scope=7\n"
+        "com..example.scope.gain=3\n"
+        ".com.example.scope.gain=3\n"
+        "com.example.scope.=3\n"
+        "scope.gain=3\n"
+        "shortcut_com..example.scope=K\n");
+    const Preferences loaded = loadPreferences(file.path());
+    Preferences defaults;
+    defaults.scopeParams[ParadeId] = {{"gain", 0.05}, {"stride", 1.0}};
+    CHECK(loaded.scopeParams == defaults.scopeParams);
+    CHECK(loaded.scopeShortcuts.empty());
+    CHECK(loaded.layoutPresets[0].orientation == 2);
 }
 
 TEST_CASE("Preferences default when the file is missing")
@@ -101,33 +292,20 @@ TEST_CASE("Pointer marker visibility accepts only explicit boolean values")
     CHECK(loadPreferences(invalid.path()).showCursorMarkers);
 }
 
-TEST_CASE("Preferences read a legacy per-scope gain")
+TEST_CASE("Preferences ignore retired per-scope keys")
 {
-    // A file from before the generic key scheme: the old vectorscope_gain key
-    // still lands as the vectorscope's gain parameter.
-    const TempFile file("legacy-gain.txt");
-    file.write("vectorscope_gain=4.5\n");
+    const TempFile file("retired-scope-keys.txt");
+    file.write(
+        "vectorscope_gain=4.5\nvectorscope_stride=3\nvectorscope_smoothing_ms=90\n"
+        "waveform_gain=4.5\nwaveform_stride=3\nwaveform_smoothing_ms=90\n"
+        "waveform_mode=2\nhistogram_stride=3\nhistogram_per_channel=0\n"
+        "matrix=0\ntrace_response=1\n");
 
     const Preferences loaded = loadPreferences(file.path());
-    CHECK(param(loaded, VectorscopeId, "gain") == 4.5);
-}
-
-TEST_CASE("Preferences drop the legacy matrix and trace response")
-{
-    // BT.601 and the linear trace response are both gone, so neither legacy
-    // key is translated into anything and neither leaves anything behind. The
-    // file loads and the vectorscope keeps its shipped gamma: a file is never
-    // refused, and a retired setting never quietly becomes a live one.
-    const TempFile file("legacy-enum.txt");
-    file.write("matrix=0\ntrace_response=1\nvectorscope_gain=4.5\n");
-
-    const Preferences loaded = loadPreferences(file.path());
-    const auto& vectorscope = loaded.scopeParams.at(VectorscopeId);
-    CHECK(vectorscope.find("matrix") == vectorscope.end());
-    CHECK(vectorscope.find("response") == vectorscope.end());
-    CHECK(param(loaded, VectorscopeId, "gamma") == 0.65);
-    // Every other key in the same file is still read.
-    CHECK(param(loaded, VectorscopeId, "gain") == 4.5);
+    const Preferences defaults;
+    for (const char* id : {VectorscopeId, WaveformId, HistogramId}) {
+        CHECK(loaded.scopeParams.at(id) == defaults.scopeParams.at(id));
+    }
 }
 
 TEST_CASE("Preferences keep a generic retired key without acting on it")
@@ -148,19 +326,17 @@ TEST_CASE("Preferences keep a generic retired key without acting on it")
 TEST_CASE("Preferences seed the parade from the waveform")
 {
     // The parade persists nothing of its own; its gain and stride mirror the
-    // waveform, whether the waveform came from a legacy or a generic key.
+    // waveform.
     const TempFile file("parade-seed.txt");
-    file.write("waveform_gain=4.5\nwaveform_stride=3\n");
+    file.write("org.sidescopes.waveform.gain=4.5\norg.sidescopes.waveform.stride=3\n");
 
     const Preferences loaded = loadPreferences(file.path());
     CHECK(param(loaded, ParadeId, "gain") == 4.5);
     CHECK(param(loaded, ParadeId, "stride") == 3.0);
 }
 
-TEST_CASE("Preferences let a generic key win over its legacy key")
+TEST_CASE("Preferences read current keys beside retired ones")
 {
-    // Both a legacy and a new key name the same parameter; the new
-    // scopeId.paramKey form supersedes the legacy one.
     const TempFile file("supersede.txt");
     file.write("vectorscope_gain=2.0\norg.sidescopes.vectorscope.gain=7.0\n");
 
@@ -242,7 +418,7 @@ TEST_CASE("Preferences tolerate unknown keys and malformed lines")
     file.write(
         "future_feature=42\n"
         "no separator here\n"
-        "waveform_gain=0.2\n");
+        "org.sidescopes.waveform.gain=0.2\n");
 
     const Preferences loaded = loadPreferences(file.path());
     CHECK(param(loaded, WaveformId, "gain") == 0.2);
@@ -260,7 +436,7 @@ TEST_CASE("Preferences tell an unset interface size from a chosen 100%")
     CHECK(loadPreferences(named.path()).uiScaleFactor == 1.0f);
 
     const TempFile silent("ui-scale-silent.txt");
-    silent.write("waveform_gain=0.2\n");
+    silent.write("org.sidescopes.waveform.gain=0.2\n");
     CHECK(loadPreferences(silent.path()).uiScaleFactor == 0.0f);
 
     // A file that has never existed says nothing either.
@@ -286,25 +462,18 @@ TEST_CASE("Preferences reject a malformed action shortcut binding")
     CHECK(loaded.shortcuts.drawRegion == "D");
 }
 
-TEST_CASE("Preferences rekey a legacy scope shortcut to its id")
+TEST_CASE("Preferences ignore retired scope shortcuts")
 {
-    // The retired shortcut_<name> key folds onto the scope id, so a hand-set
-    // binding survives the move to id-keyed bindings.
-    const TempFile file("legacy-shortcut.txt");
-    file.write("shortcut_waveform=X\n");
+    const TempFile file("retired-shortcuts.txt");
+    file.write(
+        "shortcut_waveform=X\nshortcut_vectorscope=Y\nshortcut_parade=Z\n"
+        "shortcut_histogram=J\nshortcut_color_picker=K\n");
 
-    const Preferences loaded = loadPreferences(file.path());
-    const auto binding = loaded.scopeShortcuts.find(WaveformId);
-    REQUIRE(binding != loaded.scopeShortcuts.end());
-    CHECK(binding->second == "X");
-    // A malformed legacy binding is rejected, leaving the scope unbound so the
-    // host falls back to its letter.
-    CHECK(loaded.scopeShortcuts.find(VectorscopeId) == loaded.scopeShortcuts.end());
+    CHECK(loadPreferences(file.path()).scopeShortcuts.empty());
 }
 
-TEST_CASE("Preferences let a new scope shortcut win over its legacy name")
+TEST_CASE("Preferences read scope ids beside retired shortcuts")
 {
-    // Both keys name the waveform's binding; the id-keyed key supersedes.
     const TempFile file("shortcut-supersede.txt");
     file.write("shortcut_waveform=X\nshortcut_org.sidescopes.waveform=Y\n");
 
@@ -357,29 +526,150 @@ TEST_CASE("Preferences round-trip the colored-luma style")
     CHECK(param(loaded, LumaWaveformId, "style") == 1.0);
 }
 
-TEST_CASE("Preferences round-trip a non-round gain within serializer precision")
+TEST_CASE("Preferences preserve fractional parameters and layout values exactly")
 {
-    // The serializer writes at the stream's default six significant digits;
-    // 3.14159 already fits that, so it round-trips to the same double.
     Preferences saved;
-    saved.scopeParams[VectorscopeId]["gain"] = 3.14159;
+    saved.scopeParams[VectorscopeId]["gain"] = 3.141592653589793;
+    saved.graticuleStrength = 0.7324567f;
+    saved.uiScaleFactor = 1.2345678f;
+    saved.layoutWeights[VectorscopeId] = 1.2345678901234567;
+    saved.layoutPresets[0].stack = testing::idTokens("V");
+    saved.layoutPresets[0].weights[VectorscopeId] = static_cast<double>(0.8765432f);
+    saved.layoutPresets[0].styles[VectorscopeId]["style"] = 0.12345678901234568;
 
     const TempFile file("odd-gain.txt");
     REQUIRE(savePreferences(saved, file.path()));
 
     const Preferences loaded = loadPreferences(file.path());
-    CHECK(param(loaded, VectorscopeId, "gain") == 3.14159);
+    CHECK(param(loaded, VectorscopeId, "gain") == saved.scopeParams.at(VectorscopeId).at("gain"));
+    CHECK(loaded.graticuleStrength == saved.graticuleStrength);
+    CHECK(loaded.uiScaleFactor == saved.uiScaleFactor);
+    CHECK(loaded.layoutWeights == saved.layoutWeights);
+    CHECK(loaded.layoutPresets[0].weights == saved.layoutPresets[0].weights);
+    CHECK(loaded.layoutPresets[0].styles == saved.layoutPresets[0].styles);
 }
 
-TEST_CASE("Preferences read a non-numeric gain as zero")
+TEST_CASE("Preferences use a stable decimal separator regardless of the global locale")
 {
-    // The loader does not validate numeric fields: strtod yields 0 on text
-    // it cannot parse, and that is the value that lands in the setting.
-    const TempFile file("junk-gain.txt");
-    file.write("waveform_gain=abc\n");
-
+    const TempFile file("comma-locale.conf");
+    Preferences saved;
+    saved.scopeParams[VectorscopeId]["gain"] = 2.75;
+    saved.uiScaleFactor = 1.25f;
+    saved.layoutWeights[VectorscopeId] = 1.5;
+    saved.layoutPresets[0].stack = testing::idTokens("V");
+    saved.layoutPresets[0].weights[VectorscopeId] = 2.5;
+    saved.layoutPresets[0].styles[VectorscopeId]["style"] = 0.75;
+    bool written = false;
+    {
+        const GlobalLocale locale(std::locale(std::locale::classic(), new CommaDecimal));
+        written = savePreferences(saved, file.path());
+    }
+    REQUIRE(written);
     const Preferences loaded = loadPreferences(file.path());
-    CHECK(param(loaded, WaveformId, "gain") == 0.0);
+    CHECK(param(loaded, VectorscopeId, "gain") == 2.75);
+    CHECK(loaded.uiScaleFactor == 1.25f);
+    CHECK(loaded.layoutWeights == saved.layoutWeights);
+    CHECK(loaded.layoutPresets[0].weights == saved.layoutPresets[0].weights);
+    CHECK(loaded.layoutPresets[0].styles == saved.layoutPresets[0].styles);
+}
+
+TEST_CASE("Preferences ignore malformed numeric values")
+{
+    const TempFile file("invalid-numbers.txt");
+    for (const std::string value : {"abc", "", "2junk", "nan", "inf", "-inf", "1e9999", "+2", " 2", "2 "}) {
+        INFO(value);
+        std::string contents;
+        for (const char* key : {"org.sidescopes.waveform.gain", "ui_scale_factor", "graticule_strength", "window_width",
+                                "layout_active_slot"}) {
+            contents += key;
+            contents += '=';
+            contents += value;
+            contents += '\n';
+        }
+        file.write(contents);
+        const Preferences loaded = loadPreferences(file.path());
+        CHECK(param(loaded, WaveformId, "gain") == 0.05);
+        CHECK(loaded.uiScaleFactor == 0.0f);
+        CHECK(loaded.graticuleStrength == 1.0f);
+        CHECK(loaded.windowWidth == 340);
+        CHECK(loaded.layoutActiveSlot == 1);
+    }
+}
+
+TEST_CASE("Preferences ignore integers beyond the supported range")
+{
+    const TempFile file("integer-overflow.txt");
+    file.write("window_width=4294967297\nwindow_height=-4294967297\nwindow_x=999999999999999999999\nwindow_y=1\n");
+    const Preferences loaded = loadPreferences(file.path());
+    CHECK(loaded.windowWidth == 340);
+    CHECK(loaded.windowHeight == 500);
+    CHECK_FALSE(loaded.windowPosition);
+}
+
+TEST_CASE("Preferences keep the default size for non-positive dimensions")
+{
+    const TempFile file("invalid-window-size.txt");
+    file.write("window_width=0\nwindow_height=-1\n");
+    const Preferences loaded = loadPreferences(file.path());
+    CHECK(loaded.windowWidth == 340);
+    CHECK(loaded.windowHeight == 500);
+}
+
+TEST_CASE("Preferences distinguish negative desktop coordinates from no position")
+{
+    const TempFile file("negative-window-position.txt");
+    file.write("window_x=-1440\nwindow_y=-1\n");
+    const Preferences loaded = loadPreferences(file.path());
+    REQUIRE(loaded.windowPosition);
+    CHECK(loaded.windowPosition->x == -1440);
+    CHECK(loaded.windowPosition->y == -1);
+
+    REQUIRE(savePreferences(loaded, file.path()));
+    const Preferences reloaded = loadPreferences(file.path());
+    REQUIRE(reloaded.windowPosition);
+    CHECK(reloaded.windowPosition->x == -1440);
+    CHECK(reloaded.windowPosition->y == -1);
+}
+
+TEST_CASE("Preferences require both saved window coordinates")
+{
+    const TempFile file("incomplete-window-position.txt");
+    for (const std::string content : {"", "window_x=-1\n", "window_y=50\n", "window_x=bad\nwindow_y=50\n"}) {
+        file.write(content);
+        const Preferences loaded = loadPreferences(file.path());
+        CHECK_FALSE(loaded.windowPosition);
+        REQUIRE(savePreferences(loaded, file.path()));
+        CHECK_FALSE(loadPreferences(file.path()).windowPosition);
+    }
+}
+
+TEST_CASE("Preferences accept Windows line endings on every platform")
+{
+    const TempFile file("windows-line-endings.txt");
+    file.write("org.sidescopes.waveform.gain=0.2\r\nshortcut_draw_region=X\r\nwindow_x=-10\r\nwindow_y=20\r\n");
+    const Preferences loaded = loadPreferences(file.path());
+    CHECK(param(loaded, WaveformId, "gain") == 0.2);
+    CHECK(loaded.shortcuts.drawRegion == "X");
+    REQUIRE(loaded.windowPosition);
+    CHECK(loaded.windowPosition->x == -10);
+    CHECK(loaded.windowPosition->y == 20);
+}
+
+TEST_CASE("Preferences reject invalid layout numbers without losing valid entries")
+{
+    const TempFile file("invalid-layout-numbers.txt");
+    file.write(
+        "layout_weights=org.example.valid:2,org.example.infinite:inf,org.example.overflow:1e300\n"
+        "layout.preset1.styles=org.example.valid.style:1,org.example.invalid.style:nan,org.example.junk.style:1x\n"
+        "layout.preset1.weights=org.example.valid:3,org.example.invalid:nan\n");
+    const Preferences loaded = loadPreferences(file.path());
+    REQUIRE(loaded.layoutWeights.size() == 1);
+    CHECK(loaded.layoutWeights.at("org.example.valid") == 2.0);
+    const LayoutPreset& preset = loaded.layoutPresets[0];
+    REQUIRE(preset.styles.size() == 1);
+    CHECK(preset.styles.at("org.example.valid").at("style") == 1.0);
+    REQUIRE(preset.weights.size() == 1);
+    CHECK(preset.weights.at("org.example.valid") == 3.0);
 }
 
 TEST_CASE("Preferences round-trip the live layout orientation and weights")

@@ -50,10 +50,10 @@ extern RegionOfInterest g_borderEditRegion;
 // The interactive region border. The band outside the region is muted
 // hazard tape; grabbing it MOVES the region - moving is the frequent
 // operation, so it owns the long edges - while the corners resize, and
-// Shift-dragging an edge resizes just that edge. The interior is truly
+// edge midpoints resize just that edge. The interior is truly
 // transparent, so the editor underneath keeps receiving clicks. Cursors
 // come from an always-active tracking area: cursor rects only work in
-// the key window, and this window never takes key.
+// the key window.
 // Borderless panels refuse key status unless overridden; the border takes
 // the keyboard on click - without activating the application - so Escape
 // and the letter shortcuts work right after a border interaction.

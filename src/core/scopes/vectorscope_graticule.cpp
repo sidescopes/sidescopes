@@ -34,7 +34,7 @@ constexpr BarColor BarColors[6] = {
 
 }  // namespace
 
-VectorscopeGraticule buildVectorscopeGraticule(const Vectorscope& scope)
+VectorscopeGraticule buildVectorscopeGraticule()
 {
     VectorscopeGraticule graticule;
 
@@ -55,15 +55,15 @@ VectorscopeGraticule buildVectorscopeGraticule(const Vectorscope& scope)
 
     // Color targets at 75% (primary, labeled) and 100% (secondary).
     for (const BarColor& bar : BarColors) {
-        graticule.targets.push_back({scope.project(bar.color), true, bar.label});
+        graticule.targets.push_back({Vectorscope::project(bar.color), true, bar.label});
         const FloatColor full{bar.color.r > 0.0f ? 255.0f : 0.0f, bar.color.g > 0.0f ? 255.0f : 0.0f,
                               bar.color.b > 0.0f ? 255.0f : 0.0f};
-        graticule.targets.push_back({scope.project(full), false, ""});
+        graticule.targets.push_back({Vectorscope::project(full), false, ""});
     }
 
     // Skin-tone line: from the center through the reference skin color's
     // projection, extended to the ring.
-    const NormalizedPoint skin = scope.project(SkinToneReference);
+    const NormalizedPoint skin = Vectorscope::project(SkinToneReference);
     const float dx = skin.x - Center.x;
     const float dy = skin.y - Center.y;
     const float length = std::sqrt(dx * dx + dy * dy);

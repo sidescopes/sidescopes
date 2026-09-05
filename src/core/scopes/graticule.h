@@ -7,8 +7,6 @@
 
 namespace sidescopes {
 
-class Vectorscope;
-
 // Graticule geometry as plain data in normalized scope coordinates, built
 // from the same projection the engines use — which is what makes it
 // impossible for the overlay to disagree with the trace. The UI decides
@@ -63,7 +61,7 @@ struct WaveformScaleLine
 /// Builds the classic vectorscope graticule:
 /// crosshair, two rings with hour ticks, primary/secondary color targets, and
 /// the skin-tone line.
-[[nodiscard]] VectorscopeGraticule buildVectorscopeGraticule(const Vectorscope& scope);
+[[nodiscard]] VectorscopeGraticule buildVectorscopeGraticule();
 
 /// Horizontal scale lines every 10%, majors at 0/50/100.
 [[nodiscard]] std::vector<WaveformScaleLine> buildWaveformScale();

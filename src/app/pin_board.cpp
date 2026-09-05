@@ -25,7 +25,7 @@ const std::vector<FloatColor>& PinBoard::colors() const
 void PinBoard::pin(const FloatColor& color)
 {
     if (m_colors.size() >= Maximum) {
-        m_colors.erase(m_colors.begin());
+        removeAt(0);
     }
     m_colors.push_back(color);
     // A fresh pin is the reference the user wants to compare against.
@@ -38,8 +38,8 @@ void PinBoard::restore(const std::vector<FloatColor>& colors, int comparator)
     if (m_colors.size() > Maximum) {
         m_colors.resize(Maximum);
     }
-    const bool selects = comparator >= 0 && comparator < static_cast<int>(m_colors.size());
-    m_comparator = selects ? comparator : -1;
+    selectComparator(comparator);
+    m_managed = -1;
 }
 
 void PinBoard::removeAt(std::size_t index)
@@ -54,12 +54,18 @@ void PinBoard::removeAt(std::size_t index)
     } else if (m_comparator > removed) {
         --m_comparator;
     }
+    if (m_managed == removed) {
+        m_managed = -1;
+    } else if (m_managed > removed) {
+        --m_managed;
+    }
 }
 
 void PinBoard::clear()
 {
     m_colors.clear();
     m_comparator = -1;
+    m_managed = -1;
 }
 
 int PinBoard::comparator() const
@@ -79,7 +85,7 @@ const FloatColor& PinBoard::comparatorColor() const
 
 void PinBoard::selectComparator(int index)
 {
-    m_comparator = index;
+    m_comparator = index >= 0 && index < static_cast<int>(m_colors.size()) ? index : -1;
 }
 
 int PinBoard::managed() const
@@ -89,7 +95,7 @@ int PinBoard::managed() const
 
 void PinBoard::manage(int index)
 {
-    m_managed = index;
+    m_managed = index >= 0 && index < static_cast<int>(m_colors.size()) ? index : -1;
 }
 
 }  // namespace sidescopes

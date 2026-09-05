@@ -83,7 +83,7 @@ void appendScopeChoiceMenus(const SsScopeDescriptor& descriptor, const std::map<
         if (stored != params.end()) {
             value = stored->second;
         }
-        const int current = static_cast<int>(std::lround(value));
+        const double current = std::round(value);
 
         if (!bareChoice) {
             items.push_back({Kind::SubmenuBegin, strippedMenuLabel(descriptor, param), -1, false, ""});

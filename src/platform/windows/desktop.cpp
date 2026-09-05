@@ -1,6 +1,5 @@
-// Windows desktop services. Compiles on every push via CI; runtime behavior
-// awaits the Windows port proper. Coordinates are virtual-screen pixels with
-// a top-left origin, the platform's own device-independent convention.
+// Windows desktop services. Coordinates are virtual-screen pixels with a
+// top-left origin under the application's per-monitor DPI awareness.
 
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
@@ -91,7 +90,7 @@ std::string applicationNameOfWindow(HWND window)
 
 struct WindowCollector
 {
-    HMONITOR monitor = nullptr;
+    RECT bounds{};
     DWORD ownProcess = 0;
     std::vector<DesktopWindow>* windows = nullptr;
 };
@@ -109,10 +108,7 @@ std::wstring windowClassName(HWND window)
 BOOL CALLBACK collectWindow(HWND window, LPARAM context)
 {
     auto* collector = reinterpret_cast<WindowCollector*>(context);
-    if (!IsWindowVisible(window)) {
-        return TRUE;
-    }
-    if (GetWindowTextLengthW(window) == 0) {
+    if (!IsWindowVisible(window) || IsIconic(window) || GetWindowTextLengthW(window) == 0) {
         return TRUE;
     }
     const LONG_PTR exStyle = GetWindowLongPtrW(window, GWL_EXSTYLE);
@@ -141,13 +137,14 @@ BOOL CALLBACK collectWindow(HWND window, LPARAM context)
         return TRUE;
     }
 
-    if (MonitorFromWindow(window, MONITOR_DEFAULTTONULL) != collector->monitor) {
+    RECT frame{};
+    if (FAILED(DwmGetWindowAttribute(window, DWMWA_EXTENDED_FRAME_BOUNDS, &frame, sizeof(frame))) &&
+        !GetWindowRect(window, &frame)) {
         return TRUE;
     }
-
-    RECT frame{};
-    if (FAILED(DwmGetWindowAttribute(window, DWMWA_EXTENDED_FRAME_BOUNDS, &frame, sizeof(frame)))) {
-        GetWindowRect(window, &frame);
+    RECT overlap{};
+    if (!IntersectRect(&overlap, &frame, &collector->bounds)) {
+        return TRUE;
     }
     const double width = static_cast<double>(frame.right) - frame.left;
     const double height = static_cast<double>(frame.bottom) - frame.top;
@@ -203,7 +200,7 @@ std::vector<DesktopWindow> onScreenWindows(uint32_t displayId)
     }
 
     WindowCollector collector;
-    collector.monitor = monitor->monitor;
+    collector.bounds = monitor->rect;
     collector.ownProcess = GetCurrentProcessId();
     collector.windows = &windows;
     // EnumWindows walks top-level windows in z-order, frontmost first,
@@ -674,8 +671,7 @@ void observeSystemSleep(std::function<void()>)
     // procedure, which belongs to GLFW here, so this stays unobserved for now.
     // The cost it exists to avoid - a restart every couple of seconds for the
     // whole of a lock - is met from the other side instead: the controller's
-    // retry backoff widens to half a minute while a stream stays unreachable,
-    // which is exactly the shape of a locked screen.
+    // retry backoff limits how often an unreachable stream is restarted.
 }
 
 // NOLINTNEXTLINE(performance-unnecessary-value-param): by-value matches the sink interface
@@ -684,6 +680,10 @@ void observeEscapeWithoutKeyWindow(std::function<void()>)
     // The border window carries WS_EX_NOACTIVATE: interacting with it
     // never activates the application, so the active-but-focusless state
     // this seam exists for cannot occur here.
+}
+
+void unobserveSystemEvents()
+{
 }
 
 // NOLINTNEXTLINE(performance-unnecessary-value-param): by-value matches the sink interface

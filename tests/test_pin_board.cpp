@@ -186,4 +186,45 @@ TEST_CASE("The managed pin index is tracked independently")
     CHECK(board.managed() == -1);
 }
 
+TEST_CASE("A managed pin follows its color when earlier pins leave")
+{
+    PinBoard board;
+    for (std::size_t index = 0; index < PinBoard::Maximum; ++index) {
+        board.pin(gray(static_cast<float>(index)));
+    }
+    board.manage(2);
+    SECTION("Explicit removal")
+    {
+        board.removeAt(0);
+    }
+    SECTION("Ring eviction")
+    {
+        board.pin(gray(99.0f));
+    }
+    REQUIRE(board.managed() == 1);
+    CHECK(board.color(static_cast<std::size_t>(board.managed())).r == 2.0f);
+    board.removeAt(1);
+    CHECK(board.managed() == -1);
+}
+
+TEST_CASE("Pin selection never points outside the board")
+{
+    PinBoard board;
+    board.pin(gray(10.0f));
+    board.selectComparator(8);
+    board.manage(8);
+    CHECK_FALSE(board.hasComparator());
+    CHECK(board.managed() == -1);
+    board.manage(0);
+    SECTION("Clear")
+    {
+        board.clear();
+    }
+    SECTION("Restore")
+    {
+        board.restore({gray(20.0f)}, 0);
+    }
+    CHECK(board.managed() == -1);
+}
+
 }  // namespace sidescopes

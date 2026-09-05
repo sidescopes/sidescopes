@@ -46,7 +46,7 @@ def power_state():
     return {
         "source": source.group(1) if source else "unknown",
         "battery_percent": int(percent.group(1)) if percent else None,
-        "charging": "AC attached; charging" in report,
+        "charging": re.search(r";\s*charging(?:;|\s|$)", report) is not None,
         "cpu_speed_limit": int(thermal.group(1)) if thermal else None,
     }
 

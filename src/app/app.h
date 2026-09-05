@@ -12,11 +12,9 @@
 
 #include "app/about_window.h"
 #include "app/adaptive_detail.h"
-#include "app/attach_controller.h"
 #include "app/capture_controller.h"
 #include "app/capture_supervisor.h"
 #include "app/cursor_sampler.h"
-#include "app/face_lock_controller.h"
 #include "app/frame_pacing.h"
 #include "app/frame_timer.h"
 #include "app/layout_preset_picker.h"
@@ -24,9 +22,8 @@
 #include "app/param_menu.h"
 #include "app/pin_board.h"
 #include "app/quality.h"
-#include "app/region_coordinator.h"
 #include "app/region_motion.h"
-#include "app/region_picker.h"
+#include "app/region_session.h"
 #include "app/scope_pane_renderer.h"
 #include "app/scope_registry.h"
 #include "app/scope_view.h"
@@ -131,43 +128,9 @@ private:
     void refreshActivatedScope(std::string_view id);
     void toggleScope(std::string_view id);
     void chooseScope(std::string_view id, bool stack);
-    /// The shell state a border sync reads, gathered fresh per call.
-    [[nodiscard]] RegionBorderState borderState() const;
-    /// Applies a region decision to host state: the region the coordinator
-    /// settled on becomes the analysis region, a wholesale detach drops the
-    /// active window along with its motion watch, and interaction stamps the
-    /// activity clock.
-    void applyRegionOutcome(const RegionOutcome& outcome);
+    /// Publishes region lifecycle changes to analysis, pins and UI status.
+    void applyRegionSessionOutcome(const RegionSessionOutcome& outcome);
 
-    // --- attached regions ---
-    void followAttachedWindow();
-    [[nodiscard]] std::vector<AttachedWindowObservation> gatherAttachedObservations() const;
-    [[nodiscard]] bool activeWindowMoved(const AttachDecision& decision) const;
-    void captureActiveDisplay(const AttachDecision& decision);
-    void applyAttachDecision(const AttachDecision& decision);
-    void refreshAttachedLabel(const AttachDecision& decision);
-    [[nodiscard]] std::optional<uint64_t> resolveFocusedWindow() const;
-    void onWindowMotion(WindowMotionSignal signal);
-    void idleWaitWatchingAttachedWindow();
-    void detachActiveWindow();
-    /// Attaches or draws a region the picker confirmed: a window click, an
-    /// in-attach-mode draw, a face suggestion, or a freehand global draw. Fed
-    /// from a RegionPickOutcome by applyRegionPickOutcome.
-    void confirmPickedRegion(const ConfirmedPick& pick);
-    void adoptAttachedPick(uint64_t identity, int64_t ownerPid, const RegionOfInterest& region);
-    void dismissEditedBorder();
-    void toggleRegionBinding();
-    void attachGlobalRegionToWindow();
-    void applyBorderEdit(const RegionOfInterest& edited);
-
-    // --- face locks ---
-    /// Applies a controller outcome to host state: an adopted region becomes
-    /// the analysis region; a lost lock detaches its window and falls back to
-    /// the global region. The controller has already updated its own state.
-    void applyFaceLockOutcome(const FaceLockOutcome& outcome);
-    bool adoptFacePick(uint32_t displayId, const RegionOfInterest& confirmed);
-
-    static void logAttachMapping(const RegionPicker::WindowCandidate& picked, const RegionOfInterest& start);
     void persistPreferences();
 
     /// Notes that the worker published a pass, and ends whatever wait the
@@ -246,15 +209,6 @@ private:
     void applyQuality(QualityLevel level);
 
     // --- post-render region handling ---
-    /// Applies a RegionPickOutcome to host state: a live preview becomes the
-    /// analysis region (its own no-op check deciding whether anything moved), a
-    /// sampled colour joins the pin board, a confirmed pick is attached or
-    /// drawn, an Esc cancel clears the region, and the pick's end re-syncs the
-    /// region border.
-    void applyRegionPickOutcome(const RegionPickOutcome& outcome);
-    /// Carries out the region border's live edit: its close affordances, its
-    /// attach toggle, or the drag that moved or resized the region.
-    void applyBorderEditOutcome(const RegionBorderEditOutcome& outcome);
     void commitAnalysisChanges(bool drewThisPass);
 
     /// Notes what is moving the region right now and puts the answer in force -
@@ -286,38 +240,7 @@ private:
     AnalysisSettings m_analysis;
     bool m_analysisDirty = true;
 
-    // Attached regions: the attached-window set, beside which the coordinator
-    // holds the single global region the analysis falls back to whenever the
-    // focused window has no region of its own. The border hides the instant
-    // the active window moves - a polled border trails a fast drag - and
-    // returns once the window has sat still for the settle time; the motion
-    // watch delivers the grab itself, so the hide precedes the first stale
-    // composite at any frame rate.
-    AttachController m_attach;
-    bool m_attachedWindowMoving = false;
-    bool m_attachGripActive = false;
-    double m_attachRegionMovedAt = -1.0;
-    // The active window the motion watch is bound to (0 = none), its last
-    // seen rectangle, and the label its border wears.
-    uint64_t m_activeWindowIdentity = 0;
-    std::optional<AttachWindowRect> m_attachLastSeenRect;
-    std::string m_attachActiveLabel;
-
-    /// Owns the face locks, the detection probe thread, and the content
-    /// stability watch; the host applies the outcomes it returns.
-    FaceLockController m_faceLock;
-
-    /// Owns the region-picker lifecycle - the overlay, the background display
-    /// face scans, and the confirm/pin/preview polling; the host applies the
-    /// RegionPickOutcome it returns.
-    RegionPicker m_regionPicker;
-
-    /// Owns the global region, the border on screen and its labels, and the
-    /// latch a border drag in flight runs on; the host applies the
-    /// RegionOutcome it returns.
-    RegionCoordinator m_regions;
-
-    int64_t m_ownPid = 0;
+    RegionSession m_regionSession;
 
     ScopeRegistry m_scopeRegistry;
     ScopeView m_view;

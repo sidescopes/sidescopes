@@ -176,7 +176,7 @@ TEST_CASE("The ten-bit conversion agrees with the eight-bit one where they meet"
     // ten-bit code by 255 rather than 1023 would leave every colour four times
     // too bright and no test would have noticed.
     //
-    // The two depths share exactly two codes - the ends - and there they must
+    // The endpoints are two of the four shared code values, and there they must
     // agree to the bit, because both are the same physical intensity.
     const LabColor black8 = labFromCodes8(Sample{0, 0, 0});
     const LabColor black10 = labFromCodes10(Sample{0, 0, 0});

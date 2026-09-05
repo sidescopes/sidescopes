@@ -31,9 +31,8 @@ public:
 
     /// The scope selector: an icon button whose popup checklists every scope
     /// in the user's own order, which a row can be dragged to change and a
-    /// toggle never disturbs. @p stackModifier is unused - the menu always
-    /// toggles.
-    [[nodiscard]] PaneRenderOutcome drawScopeToggles(bool stackModifier);
+    /// toggle never disturbs.
+    [[nodiscard]] PaneRenderOutcome drawScopeToggles();
 
     /// The region toolbox: draw, attach to a window, attach to a face, and the
     /// clear, which stands down while there is no region to clear

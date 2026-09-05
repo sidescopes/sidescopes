@@ -67,6 +67,19 @@ const SsModuleEntry CollideWModuleEntry{
     SS_ABI_MAJOR, SS_ABI_MINOR, trueInit, noopDeinit, oneScope, collideWDescriptor, nullCreate,
 };
 
+const SsScopeDescriptor ReservedHostDescriptor{
+    ColorPickerScopeId, "External picker", 'X', 0, 0, 0u, nullptr, 0u, 0.0f,
+};
+
+const SsScopeDescriptor* reservedHostDescriptor(uint32_t index)
+{
+    return index == 0 ? &ReservedHostDescriptor : nullptr;
+}
+
+const SsModuleEntry ReservedHostModuleEntry{
+    SS_ABI_MAJOR, SS_ABI_MINOR, trueInit, noopDeinit, oneScope, reservedHostDescriptor, nullCreate,
+};
+
 }  // namespace
 
 TEST_CASE("The module registry orders the built-ins canonically in every build")
@@ -271,6 +284,19 @@ TEST_CASE("Pins mark the scopes that declare themselves targets")
     CHECK(anyPinTarget(registry, {std::string{WaveformScopeId}, std::string{VectorscopeScopeId}}));
     // A scope the registry has never heard of cannot take a pin.
     CHECK_FALSE(anyPinTarget(registry, {std::string{"org.example.unknown"}}));
+}
+
+TEST_CASE("A module cannot replace the host color picker identity")
+{
+    ModuleRegistry modules;
+    REQUIRE(modules.registerModule(ReservedHostModuleEntry));
+    const ScopeRegistry registry{modules};
+    REQUIRE(registry.scopes().size() == 1);
+    const HostScope* picker = registry.byId(ColorPickerScopeId);
+    REQUIRE(picker != nullptr);
+    CHECK(picker->host);
+    CHECK(picker->descriptor == nullptr);
+    CHECK(picker->letter == ColorPickerLetter);
 }
 
 }  // namespace sidescopes

@@ -5,16 +5,20 @@ $buildDir = Join-Path $repoRoot "build-bench"
 
 $machine = if ($env:BENCH_MACHINE) { $env:BENCH_MACHINE } else { $env:COMPUTERNAME }
 $commit = (git -C $repoRoot rev-parse --short HEAD).Trim()
+if ($LASTEXITCODE -ne 0) { throw "Cannot identify the measured revision" }
 $os = "$([System.Environment]::OSVersion.Platform) $([System.Environment]::OSVersion.Version)"
 
 cmake -S $repoRoot -B $buildDir -G Ninja `
     -DSIDESCOPES_BENCH=ON -DSIDESCOPES_BUILD_TESTS=OFF | Out-Null
+if ($LASTEXITCODE -ne 0) { throw "Benchmark configuration failed" }
 cmake --build $buildDir --target sidescopes_bench | Out-Null
+if ($LASTEXITCODE -ne 0) { throw "Benchmark build failed" }
 
 $resultsDir = Join-Path $repoRoot "bench-results"
 New-Item -ItemType Directory -Force -Path $resultsDir | Out-Null
 $xmlOut = Join-Path $buildDir "bench.xml"
 & (Join-Path $buildDir "bench/sidescopes_bench.exe") --reporter XML --out $xmlOut | Out-Null
+if ($LASTEXITCODE -ne 0) { throw "Benchmark run failed" }
 
 $outJson = Join-Path $resultsDir "$machine-$commit.json"
 python3 - $xmlOut $machine $os $commit $outJson @'
@@ -38,5 +42,6 @@ with open(out_path, "w") as handle:
     json.dump(rows, handle, indent=2)
     handle.write("\n")
 '@
+if ($LASTEXITCODE -ne 0) { throw "Benchmark result conversion failed" }
 
 Write-Output $outJson

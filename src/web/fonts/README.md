@@ -10,8 +10,8 @@ with. That is what takes them from 325 KB and 79 KB to 17 KB and 20 KB.
 
 | File | Face | Licence |
 | --- | --- | --- |
-| `ui.ttf` | Inter Regular | SIL Open Font License 1.1 |
-| `mono.ttf` | Roboto Mono Regular | SIL Open Font License 1.1 |
+| `ui.ttf` | Inter Regular | [SIL Open Font License 1.1](Inter-OFL.txt) |
+| `mono.ttf` | Roboto Mono Regular | [SIL Open Font License 1.1](RobotoMono-OFL.txt) |
 
 Inter is chosen because it is a screen UI face and reads close to both SF
 Pro and Segoe UI, so the lab looks like the application on either
@@ -24,3 +24,7 @@ Regenerate with:
     subset.main(['Inter-Regular.ttf', '--output-file=ui.ttf',
                  '--unicodes=U+0020-00FF,U+0394', '--layout-features=',
                  '--no-hinting', '--desubroutinize'])"
+
+The copyright and license notices accompany both the served browser bundle
+and the self-contained download. The subset font names and version records
+are retained from their upstream files.

@@ -140,10 +140,7 @@ LayoutPreset LayoutPresetController::defaultLayout() const
     // hands out unasked, and the styles the descriptor declares. Anything less
     // exact and a slot loaded from this would be written back to at once.
     LayoutPreset preset;
-    std::vector<std::string> defaultIds;
-    for (const std::string_view id : DefaultScopeStack) {
-        defaultIds.emplace_back(id);
-    }
+    const std::vector<std::string> defaultIds = parseStackTokens(m_registry, {});
     preset.stack = formatStackTokens(m_registry, defaultIds);
     // Every registered scope once, as the modules register them - written out
     // rather than left empty so that a slot restored from this reads back
@@ -197,7 +194,7 @@ LayoutPresetOutcome LayoutPresetController::load(int slot)
     m_store.markLoaded(slot);
     m_analysis.enabledScopes = m_view.stack().enabledScopeIds();
 
-    return LayoutPresetOutcome{"Loaded " + quotedPresetName(slot, preset), true, false};
+    return LayoutPresetOutcome{"Loaded " + quotedPresetName(slot, preset), true, true};
 }
 
 LayoutPresetOutcome LayoutPresetController::rename(int slot, std::string_view typed)

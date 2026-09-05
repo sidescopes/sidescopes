@@ -48,8 +48,8 @@ void restorePreferences(const Preferences& saved, ScopeView& view, PinBoard& pin
             }
         }
     }
-    analysis.scopeParams[ParadeScopeId]["gain"] = analysis.scopeParams[WaveformScopeId]["gain"];
-    analysis.scopeParams[ParadeScopeId]["stride"] = analysis.scopeParams[WaveformScopeId]["stride"];
+    analysis.scopeParams[ParadeScopeId]["gain"] = scopeParam(analysis, WaveformScopeId, "gain", 0.05);
+    analysis.scopeParams[ParadeScopeId]["stride"] = scopeParam(analysis, WaveformScopeId, "stride", 1.0);
 
     pins.restore(saved.pins, saved.pinComparator);
     // The order first: the stack seats its scopes by it as it restores them.

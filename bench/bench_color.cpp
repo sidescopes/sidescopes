@@ -13,7 +13,7 @@ namespace {
 
 // A deterministic batch of sRGB colours spread across the cube, enough to keep
 // the transfer function and XYZ->Lab path honest without any external data.
-std::vector<FloatColor> MakeSrgbBatch(std::size_t count, uint32_t seed)
+std::vector<FloatColor> makeSrgbBatch(std::size_t count, uint32_t seed)
 {
     std::mt19937 rng(seed);
     std::uniform_real_distribution<float> channel(0.0f, 255.0f);
@@ -25,9 +25,9 @@ std::vector<FloatColor> MakeSrgbBatch(std::size_t count, uint32_t seed)
     return colors;
 }
 
-std::vector<LabColor> MakeLabBatch(std::size_t count, uint32_t seed)
+std::vector<LabColor> makeLabBatch(std::size_t count, uint32_t seed)
 {
-    const std::vector<FloatColor> srgb = MakeSrgbBatch(count, seed);
+    const std::vector<FloatColor> srgb = makeSrgbBatch(count, seed);
     std::vector<LabColor> lab(count);
     for (std::size_t i = 0; i < count; ++i) {
         lab[i] = labFromSrgb(srgb[i]);
@@ -40,9 +40,9 @@ std::vector<LabColor> MakeLabBatch(std::size_t count, uint32_t seed)
 
 TEST_CASE("color_lab conversions and differences", "[bench]")
 {
-    const std::vector<FloatColor> srgbBatch = MakeSrgbBatch(256, 0x1A2B3Cu);
-    const std::vector<LabColor> firstBatch = MakeLabBatch(1000, 0x4D5E6Fu);
-    const std::vector<LabColor> secondBatch = MakeLabBatch(1000, 0x708192u);
+    const std::vector<FloatColor> srgbBatch = makeSrgbBatch(256, 0x1A2B3Cu);
+    const std::vector<LabColor> firstBatch = makeLabBatch(1000, 0x4D5E6Fu);
+    const std::vector<LabColor> secondBatch = makeLabBatch(1000, 0x708192u);
 
     BENCHMARK("color_lab labFromSrgb 256")
     {

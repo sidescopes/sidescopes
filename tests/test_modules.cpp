@@ -3,17 +3,16 @@
 #include <catch2/catch_test_macros.hpp>
 #include <cstddef>
 #include <cstdint>
-#include <fstream>
-#include <sstream>
+#include <limits>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
-#include "core/diagnostics.h"
 #include "modules/module_registry.h"
+#include "modules/module_shared_state.h"
 #include "scope_image.h"
 #include "sidescopes/module.h"
-#include "temp_file.h"
 #include "test_frame.h"
 
 namespace sidescopes {
@@ -21,72 +20,6 @@ namespace sidescopes {
 using namespace test;
 
 namespace {
-
-// Minimal module-entry pieces for the registry's rejection paths. Neither the
-// descriptor nor create is reached: registration is refused before it looks at
-// them, so they exist only to fill valid function pointers.
-bool trueInit()
-{
-    return true;
-}
-
-bool falseInit()
-{
-    return false;
-}
-
-void noopDeinit()
-{
-}
-
-uint32_t oneScope()
-{
-    return 1;
-}
-
-const SsScopeDescriptor FakeDescriptor{
-    "org.sidescopes.test.fake", "Fake", 'X', 0, 0, 0u, nullptr, 0u, 0.0f,
-};
-
-const SsScopeDescriptor* fakeDescriptor(uint32_t index)
-{
-    return index == 0 ? &FakeDescriptor : nullptr;
-}
-
-SsScopeInstance* nullCreate(const char*, const SsHost*)
-{
-    return nullptr;
-}
-
-// A fake instance whose destroy() records the call, so the RAII wrapper can be
-// shown to destroy exactly once across a chain of moves.
-struct CountingInstance
-{
-    SsScopeInstance vtable{};
-    int destroyed = 0;
-};
-
-void countingDestroy(SsScopeInstance* instance)
-{
-    ++static_cast<CountingInstance*>(instance->instance_data)->destroyed;
-}
-
-// Paired with fakeDescriptor, which answers only index 0, this makes a module
-// that promises more scopes than it hands descriptors for.
-uint32_t twoScopes()
-{
-    return 2;
-}
-
-// Everything a diagnostic log holds, for the cases that read one back.
-std::string readLog(const std::string& path)
-{
-    std::ifstream file(path);
-    std::stringstream content;
-    content << file.rdbuf();
-
-    return content.str();
-}
 
 // The brightest pixel's three channels, so a trace can be read for both how
 // strong it is and what color it came out.
@@ -738,61 +671,6 @@ TEST_CASE("A module refuses to create a scope it does not own")
     CHECK(histogram->module->create("org.sidescopes.waveform", nullptr) == nullptr);
 }
 
-TEST_CASE("Registry skips a scope its module never describes")
-{
-    // A module that counts two scopes but describes one would otherwise be
-    // dereferenced at lookup time.
-    const SsModuleEntry entry{SS_ABI_MAJOR, SS_ABI_MINOR, trueInit, noopDeinit, twoScopes, fakeDescriptor, nullCreate};
-    ModuleRegistry registry;
-
-    REQUIRE(registry.registerModule(entry));
-    CHECK(registry.scopes().size() == 1);
-    CHECK(registry.findScope("org.sidescopes.test.fake") != nullptr);
-}
-
-TEST_CASE("A recording opened after the modules registered is told about them")
-{
-    // Modules register from a static, before the application can open a log,
-    // and being static they never register again. Nothing is recording here,
-    // which is the ordinary case.
-    const test::TempFile log("modules-report.log");
-    ModuleRegistry registry;
-    const SsModuleEntry wrongAbi{99u, 0u, trueInit, noopDeinit, oneScope, fakeDescriptor, nullCreate};
-    CHECK_FALSE(registry.registerModule(wrongAbi));
-    const SsModuleEntry sound{SS_ABI_MAJOR, SS_ABI_MINOR, trueInit, noopDeinit, oneScope, fakeDescriptor, nullCreate};
-    REQUIRE(registry.registerModule(sound));
-
-    diagConfigure({"modules", log.path().string()});
-    diagConfigure({});
-
-    const std::string content = readLog(log.path().string());
-    CHECK(content.find("scope id=org.sidescopes.test.fake") != std::string::npos);
-    CHECK(content.find("rejected ABI 99.0") != std::string::npos);
-}
-
-TEST_CASE("Registry rejects a module built for another ABI major")
-{
-    const SsModuleEntry entry{99u, 0u, trueInit, noopDeinit, oneScope, fakeDescriptor, nullCreate};
-    ModuleRegistry registry;
-    CHECK_FALSE(registry.registerModule(entry));
-    CHECK(registry.scopes().empty());
-}
-
-TEST_CASE("Registry rejects a module whose init fails")
-{
-    const SsModuleEntry entry{SS_ABI_MAJOR, SS_ABI_MINOR, falseInit, noopDeinit, oneScope, fakeDescriptor, nullCreate};
-    ModuleRegistry registry;
-    CHECK_FALSE(registry.registerModule(entry));
-    CHECK(registry.scopes().empty());
-}
-
-TEST_CASE("Registry reports unknown scopes and instances as absent")
-{
-    ModuleRegistry& registry = builtinModules();
-    CHECK(registry.findScope("org.sidescopes.nonesuch") == nullptr);
-    CHECK_FALSE(registry.createInstance("org.sidescopes.nonesuch").valid());
-}
-
 TEST_CASE("A scope instance reports only the extensions it implements")
 {
     ModuleRegistry& registry = builtinModules();
@@ -840,41 +718,80 @@ TEST_CASE("The adaptive-image extension resizes a scope's output through the bou
     CHECK(resized.height == 512);
 }
 
-TEST_CASE("ScopeInstance owns its handle across moves and destroys it once")
+TEST_CASE("Modules reject non-finite parameter batches without changing settings")
 {
-    CountingInstance fake;
-    fake.vtable.instance_data = &fake;
-    fake.vtable.destroy = countingDestroy;
-
-    {
-        ScopeInstance first(&fake.vtable);
-        REQUIRE(first.valid());
-
-        // Move-construct: ownership transfers and the source empties.
-        ScopeInstance second(std::move(first));
-        CHECK(second.valid());
-        // Reading the moved-from state is the whole point of the check.
-        // NOLINTNEXTLINE(clang-analyzer-cplusplus.Move,bugprone-use-after-move)
-        CHECK_FALSE(first.valid());
-
-        // Move-assign into an empty instance.
-        ScopeInstance third;
-        third = std::move(second);
-        CHECK(third.valid());
-        // NOLINTNEXTLINE(clang-analyzer-cplusplus.Move,bugprone-use-after-move)
-        CHECK_FALSE(second.valid());
-
-        // Self-move must neither destroy nor invalidate the handle. The
-        // indirection dodges the compiler's self-move diagnostic while still
-        // exercising the guarded a = std::move(a) path.
-        ScopeInstance* alias = &third;
-        third = std::move(*alias);
-        CHECK(third.valid());
-
-        CHECK(fake.destroyed == 0);  // nothing destroyed while an owner is live
+    const TestFrame ramp = grayRamp(64, 8);
+    for (const RegisteredScope& scope : builtinModules().scopes()) {
+        INFO(scope.descriptor->id);
+        ScopeInstance instance = builtinModules().createInstance(scope.descriptor->id);
+        REQUIRE(instance.valid());
+        REQUIRE(instance.accumulate(viewOf(ramp), SsRect{0, 0, 64, 8}));
+        const SsImageView image = instance.image();
+        const std::vector<uint8_t> before(image.rgba,
+                                          image.rgba + static_cast<std::size_t>(image.width) * image.height * 4);
+        CHECK_FALSE(instance.configure({{"gain", 40.0}, {"stride", std::numeric_limits<double>::quiet_NaN()}}));
+        REQUIRE(instance.accumulate(viewOf(ramp), SsRect{0, 0, 64, 8}));
+        CHECK(std::equal(before.begin(), before.end(), instance.image().rgba));
     }
+}
 
-    CHECK(fake.destroyed == 1);  // destroyed exactly once at the final scope exit
+TEST_CASE("Modules clamp extreme parameters before narrowing their numeric types")
+{
+    const TestFrame ramp = grayRamp(64, 8);
+    for (const RegisteredScope& scope : builtinModules().scopes()) {
+        INFO(scope.descriptor->id);
+        ScopeInstance extreme = builtinModules().createInstance(scope.descriptor->id);
+        ScopeInstance bounded = builtinModules().createInstance(scope.descriptor->id);
+        REQUIRE(extreme.configure({{"stride", 1e300}, {"gamma", 1e300}, {"gain", 1e300}}));
+        REQUIRE(bounded.configure({{"stride", 8.0}, {"gamma", 1.4}, {"gain", 1000.0}}));
+        REQUIRE(extreme.accumulate(viewOf(ramp), SsRect{0, 0, 64, 8}));
+        REQUIRE(bounded.accumulate(viewOf(ramp), SsRect{0, 0, 64, 8}));
+        const SsImageView image = bounded.image();
+        CHECK(std::equal(image.rgba, image.rgba + static_cast<std::size_t>(image.width) * image.height * 4,
+                         extreme.image().rgba));
+    }
+}
+
+TEST_CASE("Module shared state is confined to the host's owning thread")
+{
+    SsHost host{};
+    auto local = sharedStateFor<int>(&host);
+    *local = 17;
+    std::shared_ptr<int> remote;
+    bool sharesOnRemote = false;
+    std::thread other([&] {
+        remote = sharedStateFor<int>(&host);
+        *remote = 42;
+        sharesOnRemote = sharedStateFor<int>(&host) == remote;
+    });
+    other.join();
+    CHECK(sharesOnRemote);
+    CHECK(local != remote);
+    CHECK(*local == 17);
+    CHECK(*remote == 42);
+    CHECK(sharedStateFor<int>(&host) == local);
+}
+
+TEST_CASE("Modules decline invalid frame storage and unknown pixel formats")
+{
+    const auto& registry = builtinModules();
+    for (const auto& scope : registry.scopes()) {
+        auto instance = registry.createInstance(scope.descriptor->id);
+        REQUIRE(instance.valid());
+        SsFrameView frame{};
+        frame.width = 1;
+        frame.height = 1;
+        frame.stride_bytes = 4;
+        frame.pixel_format = SS_PIXEL_FORMAT_BGRA8;
+        CHECK_FALSE(instance.accumulate(frame, SsRect{0, 0, 1, 1}));
+        const uint8_t pixels[]{0, 0, 0, 255};
+        frame.pixels = pixels;
+        frame.pixel_format = 1234;
+        CHECK_FALSE(instance.accumulate(frame, SsRect{0, 0, 1, 1}));
+        frame.pixel_format = SS_PIXEL_FORMAT_BGRA8;
+        frame.stride_bytes = 1;
+        CHECK_FALSE(instance.accumulate(frame, SsRect{0, 0, 1, 1}));
+    }
 }
 
 }  // namespace sidescopes

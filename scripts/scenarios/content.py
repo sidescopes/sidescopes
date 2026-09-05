@@ -20,6 +20,7 @@ import hashlib
 import json
 import os
 import pathlib
+import selectors
 import shutil
 import subprocess
 import sys
@@ -36,6 +37,7 @@ DEFAULT_PATTERNS = ("photoish", "bars", "skin", "noise")
 
 _FETCH_TIMEOUT_SECONDS = 30
 _FETCH_ATTEMPTS = 4
+_HEADER_TIMEOUT_SECONDS = 20.0
 
 
 class ContentSet:
@@ -97,6 +99,9 @@ def _fetch(entry, cache_dir):
     target = cache_dir / entry["name"]
     if target.exists() and _digest_of(target) == entry["sha256"]:
         return (target, entry["sha256"])
+    # Never leave an invalid cached image available to a caller after a
+    # failed replacement download.
+    target.unlink(missing_ok=True)
     partial = target.with_suffix(target.suffix + ".part")
     _download(entry["url"], partial)
     actual = _digest_of(partial)
@@ -176,7 +181,7 @@ class ContentWindow:
             arguments += ["--image", ",".join(str(path) for path in content_set.files)]
         else:
             arguments += ["--pattern", ",".join(content_set.patterns)]
-        self._process = subprocess.Popen(arguments, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        self._process = subprocess.Popen(arguments, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
         self.rect = rect
         self.pid = self._process.pid
         # How far the video mode moves the content between frames, and over what
@@ -184,22 +189,38 @@ class ContentWindow:
         # a pixel a frame would leave frames the application is entitled to skip,
         # which is the one thing a video measurement must not contain.
         self.pan = None
-        self._read_header()
+        try:
+            self._read_header()
+        except Exception:
+            self.stop()
+            raise
 
     def _read_header(self):
-        deadline = time.monotonic() + 20.0
-        while time.monotonic() < deadline:
-            line = self._process.stdout.readline()
-            if line == "":
-                raise RuntimeError(f"the content window exited: {self._process.stderr.read()}")
-            line = line.strip()
-            if line.startswith("content_rect "):
-                self.rect = tuple(float(part) for part in line.split(" ", 1)[1].split(","))
-            elif line.startswith("pan "):
-                step, travel, fps = (float(part) for part in line.split(" ", 1)[1].split(","))
-                self.pan = {"pixels_per_frame": step, "travel_pixels": travel, "frames_per_second": fps}
-            elif line == "ready":
-                return
+        deadline = time.monotonic() + _HEADER_TIMEOUT_SECONDS
+        pending = b""
+        output = []
+        # readline() can block forever, defeating the startup deadline. Read
+        # only bytes the pipe has made available, including partial lines.
+        with selectors.DefaultSelector() as selector:
+            selector.register(self._process.stdout, selectors.EVENT_READ)
+            while time.monotonic() < deadline:
+                if not selector.select(max(0.0, deadline - time.monotonic())):
+                    break
+                block = os.read(self._process.stdout.fileno(), 4096)
+                if not block:
+                    raise RuntimeError("the content window exited: " + "\n".join(output))
+                pending += block
+                while b"\n" in pending:
+                    raw, pending = pending.split(b"\n", 1)
+                    line = raw.decode(errors="replace").strip()
+                    output.append(line)
+                    if line.startswith("content_rect "):
+                        self.rect = tuple(float(part) for part in line.split(" ", 1)[1].split(","))
+                    elif line.startswith("pan "):
+                        step, travel, fps = (float(part) for part in line.split(" ", 1)[1].split(","))
+                        self.pan = {"pixels_per_frame": step, "travel_pixels": travel, "frames_per_second": fps}
+                    elif line == "ready":
+                        return
         raise RuntimeError("the content window never reported itself ready")
 
     def centre(self):
@@ -217,6 +238,7 @@ class ContentWindow:
                 self._process.wait(timeout=5)
             except subprocess.TimeoutExpired:
                 self._process.kill()
+                self._process.wait()
         for stream in (self._process.stdout, self._process.stderr):
             if stream is not None:
                 stream.close()

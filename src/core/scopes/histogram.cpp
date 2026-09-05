@@ -90,11 +90,12 @@ void Histogram::ensureBuffers()
 
 void Histogram::resize(int width, int height)
 {
+    // Allocation can fail; publish the new geometry only once it has storage.
+    m_image.rgba.assign(static_cast<std::size_t>(width) * height * 4, 0);
     m_width = width;
     m_height = height;
     m_image.width = m_width;
     m_image.height = m_height;
-    m_image.rgba.assign(static_cast<std::size_t>(m_width) * m_height * 4, 0);
 }
 
 void Histogram::configure(const HistogramSettings& settings)

@@ -170,7 +170,6 @@ public:
 private:
     [[nodiscard]] std::vector<ShortcutAction> resolvePlainKeys(const ShortcutContext& context, bool shift,
                                                                const ShortcutKeyPressed& pressed) const;
-    void appendScopeKeys(bool shift, const ShortcutKeyPressed& pressed, std::vector<ShortcutAction>& actions) const;
     /// Settles which key each scope answers to, once, so no key reaches two of
     /// them.
     void resolveScopeBindings();

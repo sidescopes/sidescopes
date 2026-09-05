@@ -24,14 +24,16 @@ the code.
 ## Architecture
 
 ```
-src/core       portable: frame types, frame handoff, scope engines
-src/platform   interfaces + per-OS backends (capture, menus, region overlay)
-src/app        UI shell (Dear ImGui), preferences, wiring
-tests          mirrors src, one test file per module
+src/core       portable: frames, analysis, scope engines, preferences, diagnostics
+src/modules    scope implementations behind the public C ABI
+src/platform   interfaces and native/browser backends
+src/app        application state, interaction controllers, Dear ImGui rendering
+src/web        browser host, image loading, adjustments, and page integration
+tests          unit, native-platform, interface, browser, and script tests
 ```
 
 Data flow: the capture backend delivers frames into a latest-frame slot (the
-producer never blocks, stale frames are dropped); an analysis thread crops to
+producer never waits for analysis, and stale frames are dropped); an analysis thread crops to
 the region of interest, skips identical content via a sparse hash, runs the
 scope engines, and publishes double-buffered images; the UI thread uploads
 changed images to textures and draws.
@@ -42,6 +44,18 @@ display it covers so a pass that needs pixels outside it is refused rather
 than answered from the wrong rectangle; but correctness never depends on the
 narrowing — the least capable backend defines the contract.
 
+The main application owns startup, the event loop, and shutdown. `RegionSession`
+owns region picking, window attachments, face tracking, and border state; it
+returns changes for the application to apply to capture and analysis. Scope
+layout, presets, color pins, and rendering have separate owners. Platform
+interfaces supply capture and desktop operations to these controllers.
+
+The analysis worker accepts its module registry from the host. It owns scope
+instances on its analysis thread, while the interface owns separate instances
+for overlays. Failed module passes clear their images and retry on a subsequent
+frame. Diagnostic registrations disarm before the state they describe is torn
+down; log replacement is synchronized with writes from capture and analysis.
+
 ## Scopes
 
 SideScopes ships five scopes and a color picker; any subset can be shown at
@@ -50,17 +64,15 @@ one shows and how to read it is [docs/SCOPES.md](docs/SCOPES.md).
 
 - **Vectorscope** — a chroma density plot in BT.709, with the classic
   graticule: primary and secondary targets at 75% and 100%, and a skin-tone
-  line. It magnifies 1×/2×/4× to inspect the neutral core. BT.709 is the only
-  matrix offered, and that is a correctness decision rather than an omission:
-  sRGB's primaries are Rec. 709's, so a BT.601 plot would put its targets
-  where nothing on the display is.
+  line. It magnifies 1×/2×/4× to inspect the neutral core. The fixed full-range projection
+  assumes sRGB/Rec.709-like rendered pixels. It is not a source-profile or
+  gamut measurement.
 - **Waveform** — per-channel levels across the image width, the three traces
   overlaid in their own colors, because separated colored traces make a color
   cast readable at a glance.
-- **Luma waveform** — brightness alone, in a plain style or carrying each
-  column's average color. One reads exposure and the other balance, so it is
-  a scope of its own rather than a style on the waveform, and both stand on
-  screen at once.
+- **Luma waveform** — encoded Rec.709-style Y′ levels, in a plain style or
+  tinted by the contributing pixels. It measures rendered code values rather
+  than physical luminance or source exposure. It can stand beside Waveform.
 - **RGB parade** — the waveform engine with the three channels laid side by
   side.
 - **Histogram** — the classic distribution, the channels stacked in bands by
@@ -70,8 +82,9 @@ one shows and how to read it is [docs/SCOPES.md](docs/SCOPES.md).
 - **Color picker** — not a plot but a comparison pane: the color under the
   cursor held against a pinned reference, with readouts you can copy.
 
-Two scopes sharing an engine share one accumulation pass over the region, so
-a family costs what one member costs.
+Compatible scopes in one module share accumulated bins when their frame,
+region, sampling, and bin geometry agree. Each still composes its own image;
+shared state belongs to one host and owning thread.
 
 The density scopes accumulate samples into integer bins and build a display
 image per frame, normalized to the densest bin so sparse traces stay visible
@@ -106,8 +119,8 @@ detect faces, click a face to scope the skin around it. Once confirmed, the
 region carries a live border on the desktop, drawn like a macOS screenshot
 selection, that moves and resizes in place without reopening the picker.
 
-Escape clears the region rather than falling back to a default one. There is
-no full-screen default: with nothing selected the scopes are empty by design,
+Each launch creates a moderate square global region near the application.
+Escape clears it rather than restoring the starter selection: with nothing selected the scopes are empty by design,
 keeping their graticules while the marker and the color readout go on
 following the pointer, and the application captures and analyzes nothing at
 all. An empty scope is a state, not a fault.
@@ -118,16 +131,15 @@ that an unreliable guess is worse than an honest selection.
 
 Reference colors can be pinned on the vectorscope and the color picker for
 matching tones across photos. A dedicated pin tool turns the cursor into a
-live swatch: a click pins a cursor-sized sample and a drag pins the average of
-a rectangle — photographs are textured, so a useful sample comes from a patch,
-not a single pixel — while holding Shift keeps pinning without closing the
-tool.
+live swatch: a click pins the pointer sample and a drag pins the average of a
+rectangle. Holding Shift keeps the tool open for more samples.
 
 ## Multiple displays
 
 The picker opens on the display under the cursor, and confirming a region
-there switches capture to that display. A region is a rectangle on one
-display, so it is cleared when the display changes. If a display disconnects,
+there switches capture to that display. A global region belongs to one
+display and is cleared when that display's configuration changes. A region
+attached to a window follows it across displays. If a display disconnects,
 capture pauses and the scopes say so; it resumes automatically when the
 display returns.
 
@@ -178,7 +190,8 @@ intensity and follow different marker-smoothing rhythms.
 - Capture uses DXGI Desktop Duplication. `DuplicateOutput1` requests a BGRA
   format so HDR (scRGB) displays still deliver ordinary 8-bit color, falling
   back to `DuplicateOutput` on older systems; the staging texture is recreated
-  when the display mode changes.
+  when the acquired texture format or dimensions change. The acquired format
+  is checked before its bytes are interpreted.
 - Self-capture is excluded at the window level: the scope window and its
   overlays set `SetWindowDisplayAffinity(WDA_EXCLUDEFROMCAPTURE)`, the Windows
   analog of the macOS capture exclusion, so the app's own pixels never feed

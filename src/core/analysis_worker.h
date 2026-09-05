@@ -20,11 +20,13 @@
 
 namespace sidescopes {
 
+class ModuleRegistry;
+
 /// Assembles the parameter list a scope instance is configured with, from its
 /// stored values. Each SsParamValue borrows its key pointer from the
 /// descriptor - module-owned and stable to module deinit - never from the
-/// settings map, so the values never dangle. Only keys the descriptor declares
-/// are forwarded. The worker's analysis instances and the host's projection
+/// settings map, so the values never dangle. Every declared key is forwarded,
+/// using its default when absent or non-finite. The worker's analysis instances and the host's projection
 /// instances both build their parameters this way, so the two can never drift.
 [[nodiscard]] std::vector<SsParamValue> assembleScopeParams(const std::map<std::string, double>& values,
                                                             const SsScopeDescriptor& descriptor);
@@ -61,7 +63,7 @@ struct AnalysisSettings
     /// The part of the screen the scopes read, or nothing at all when none has
     /// been selected. A distribution is a reading of somewhere in particular,
     /// so without a region there is nothing to compute and no scope holds an
-    /// instance; the application starts in exactly that state.
+    /// instance.
     std::optional<RegionOfInterest> region;
     /// How thinly scopes that offer the sample-thinning extension may sample,
     /// as a divisor on the samples per bin they would otherwise take. One is
@@ -120,6 +122,8 @@ public:
     };
 
     explicit AnalysisWorker(FrameMailbox& mailbox);
+    /// Uses a registry owned by the caller, which must outlive this worker.
+    AnalysisWorker(FrameMailbox& mailbox, const ModuleRegistry& registry);
     ~AnalysisWorker();
 
     AnalysisWorker(const AnalysisWorker&) = delete;
@@ -208,6 +212,8 @@ public:
     /// the application is idling and the trace would not move until the tick
     /// came round. With it the wait can be as slow as nothing-is-happening
     /// deserves, because something happening ends it immediately.
+    /// Set before starting analysis; the callback may fetch output and must not
+    /// stop or destroy the worker from its own analysis thread.
     void setOutputCallback(std::function<void()> callback);
 
     /// Runs @p reader on the most recent frame under the frame lock; returns
@@ -221,8 +227,8 @@ public:
     [[nodiscard]] bool withLatestFrame(const std::function<void(const FrameView&)>& reader) const;
 
     /// The sequence number of the most recent frame the worker has taken from
-    /// the mailbox and stored. Lets tests await the moment a published frame
-    /// has been consumed, so a negative assertion need not sleep on a wall
+    /// the mailbox and finished processing (including a skipped pass). Lets tests
+    /// await the moment a published frame has been consumed, so a negative assertion need not sleep on a wall
     /// clock to be sure the worker has caught up.
     [[nodiscard]] uint64_t consumedFrameSequence() const;
 
@@ -239,6 +245,12 @@ private:
     /// is anything to analyse. @p wait is how long to block for a frame -
     /// a timeout on the worker thread, zero when pumped inline.
     void runPass(Pass& pass, std::chrono::milliseconds wait);
+
+    void analyzeLatestFrame(Pass& pass, bool newFrame);
+
+    /// Publishes a completed pass, withdrawing partial copies on allocation
+    /// failure and allowing failed scopes to retry unchanged content.
+    void publishOutput(Pass& pass, double elapsedMs);
 
     /// Takes the newest frame from the mailbox into m_latestFrame, returning
     /// whether a frame arrived this pass. Runs only on the thread running the
@@ -257,6 +269,7 @@ private:
     [[nodiscard]] bool hasWork(bool newFrame, bool settingsChanged) const;
 
     FrameMailbox& m_mailbox;
+    const ModuleRegistry& m_registry;
     std::thread m_thread;
     /// Open only in inline mode, where the caller's thread runs the passes.
     std::unique_ptr<Pass> m_inlinePass;
