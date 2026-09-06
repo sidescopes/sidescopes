@@ -2,7 +2,7 @@
 measure what it cost.
 
 Everything here is deliberately per-scenario. The application is launched fresh
-for each one and killed afterwards, which costs a few seconds but means no
+for each one and stopped afterwards, which costs a few seconds but means no
 scenario inherits another's state - and it is the only way to drive two builds
 that disagree about what a fresh launch even means.
 
@@ -73,6 +73,7 @@ class ScenarioResult:
         self.measurement = measurement
         self.absent_reason = absent_reason
         self.warnings = list(warnings)
+        self.teardown = None
 
 
 # --- Preferences ------------------------------------------------------------
@@ -92,14 +93,18 @@ HARNESS_MARKER = "scenario_harness=1"
 QUALITY_VARIABLE = "SIDESCOPES_SCENARIO_QUALITY"
 
 
-def measurement_method(diagnostics_enabled):
-    return {
+def measurement_method(diagnostics_enabled, *, graceful=None):
+    method = {
         "version": "observed-window/2",
+        "teardown": "pid-quit-confirmed/1; legacy-signal-first",
         "diagnostics": {"enabled": diagnostics_enabled,
                         "flush": "every-line" if diagnostics_enabled else "disabled"},
         # Empty means the build's default; do not guess the resolved quality.
         "quality_override": {QUALITY_VARIABLE: os.environ.get(QUALITY_VARIABLE, "")},
     }
+    if graceful is not None:
+        method["teardown_mode"] = "appkit-pid" if graceful else "legacy-signal"
+    return method
 
 
 def preferences_text(stack, window_rect):
@@ -173,25 +178,82 @@ def launch(bundle, environment):
     raise RuntimeError(f"{bundle} did not start")
 
 
-def quit_application(pid):
-    """Stop a measured launch.
+def graceful_teardown(bundle):
+    """Legacy builds must not save over the real file and strip its marker."""
+    return b"SIDESCOPES_PREFS_FILE" in catalog.strings_in(_executable(bundle))
 
-    A signal rather than the quit shortcut, so that the application never
-    writes its own state over the harness's preferences file on the way out.
-    """
-    try:
-        os.kill(pid, signal.SIGTERM)
-    except ProcessLookupError:
-        return
+
+def _owned_process_exists(pid, identity):
+    current = quartz.process_identity(pid)
+    if current is None:
+        return False
+    if current != identity:
+        raise RuntimeError(f"process {pid} identity changed; refusing to signal it")
+    return True
+
+
+def _await_exit(pid, identity):
     deadline = time.monotonic() + _QUIT_TIMEOUT_SECONDS
-    while time.monotonic() < deadline:
-        if quartz.process_sample(pid) is None:
-            return
+    while _owned_process_exists(pid, identity):
+        if time.monotonic() >= deadline:
+            return False
         time.sleep(0.2)
+    return True
+
+
+def quit_application(pid, *, identity=None, graceful=True):
+    """Stop an owned launch, confirming exit after each bounded stage.
+
+    The outcome records every fallback. Inspection failures propagate; a
+    failed counter sample must never be mistaken for process termination.
+    """
+    outcome = {"method": "appkit-pid" if graceful else "legacy-signal",
+               "request_sent": False, "signals": [], "exit": "unconfirmed"}
+    current = quartz.process_identity(pid)
+    if current is None:
+        outcome["exit"] = "already-exited"
+        return outcome
+    identity = current if identity is None else identity
+    if not _owned_process_exists(pid, identity):
+        outcome["exit"] = "already-exited"
+        return outcome
     try:
-        os.kill(pid, signal.SIGKILL)
-    except ProcessLookupError:
-        pass
+        if graceful:
+            try:
+                outcome["request_sent"] = quartz.request_quit(pid)
+            except Exception as failure:  # request failure still needs bounded cleanup
+                outcome["request_error"] = str(failure)
+            if _await_exit(pid, identity):
+                outcome["exit"] = "graceful" if outcome["request_sent"] else "before-fallback"
+                return outcome
+        return _signal_exit(pid, identity, outcome)
+    except (KeyboardInterrupt, SystemExit) as interruption:
+        # One interrupted request/wait must still reap the owned launch. Keep
+        # the interruption visible after cleanup; never report it as graceful.
+        outcome["interrupted"] = type(interruption).__name__
+        try:
+            _signal_exit(pid, identity, outcome)
+        except BaseException as failure:
+            raise RuntimeError(f"interrupted teardown could not confirm exit: {outcome}") from failure
+        interruption.teardown = outcome
+        raise
+    except Exception as failure:
+        failure.teardown = outcome
+        raise
+
+
+def _signal_exit(pid, identity, outcome):
+    for sig in (signal.SIGTERM, signal.SIGKILL):
+        if _owned_process_exists(pid, identity):
+            try:
+                os.kill(pid, sig)
+                outcome["signals"].append(sig.name)
+            except ProcessLookupError:
+                pass
+        if _await_exit(pid, identity):
+            outcome["exit"] = "signal" if outcome["signals"] else "before-fallback"
+            return outcome
+    raise RuntimeError(f"process {pid} did not exit after bounded teardown: {outcome}")
 
 
 # --- The diagnostic stream --------------------------------------------------
@@ -272,15 +334,26 @@ class Action:
     def __init__(self):
         self._stop = threading.Event()
         self._thread = None
+        self._failure = None
 
     def start(self):
-        self._thread = threading.Thread(target=self._loop, daemon=True)
+        self._thread = threading.Thread(target=self._run, daemon=True)
         self._thread.start()
+
+    def _run(self):
+        try:
+            self._loop()
+        except BaseException as failure:
+            self._failure = failure
 
     def stop(self):
         self._stop.set()
         if self._thread is not None:
             self._thread.join(timeout=10.0)
+            if self._thread.is_alive():
+                raise RuntimeError("scenario input thread did not stop")
+        if self._failure is not None:
+            raise RuntimeError("scenario input thread failed") from self._failure
 
     def complaints(self):
         """What went wrong while acting, so a scenario that did not really run

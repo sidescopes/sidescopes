@@ -97,6 +97,8 @@ class PreferencesGuard:
 
     def __init__(self, scratch):
         self.override = scratch / "preferences.conf"
+        self.active_pid = None
+        self.pending_launch = False
         self._backup = scratch / "preferences.user.conf"
         self._existed = PREFERENCES.exists()
         if self._existed and session.HARNESS_MARKER in PREFERENCES.read_text(errors="replace"):
@@ -109,11 +111,21 @@ class PreferencesGuard:
             shutil.copy2(PREFERENCES, self._backup)
 
     def write(self, text):
+        self._require_stopped()
         for path in (self.override, PREFERENCES):
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(text)
 
+    def _require_stopped(self):
+        # A surviving measured app can save again after restoration. Keep the
+        # original backup intact and fail visibly instead of racing that write.
+        if self.pending_launch:
+            raise RuntimeError("launch ended before its PID was known; preference backup retained for recovery")
+        if self.active_pid is not None and quartz.process_exists(self.active_pid):
+            raise RuntimeError(f"process {self.active_pid} may still write preferences; backup retained")
+
     def restore(self):
+        self._require_stopped()
         if self._existed:
             shutil.copy2(self._backup, PREFERENCES)
         elif PREFERENCES.exists():
@@ -133,9 +145,12 @@ def _environment(guard, diagnostics_path):
 def _run_one(scenario, stack, bundle, plan, guard, helper, content_set, diagnostics_path, seconds):
     """Drive one scenario once and return its result."""
     warnings = []
+    graceful = session.graceful_teardown(bundle)
     guard.write(session.preferences_text(stack, plan.application_rect))
     window = None
     application = None
+    identity = None
+    result = None
     tail = session.DiagnosticTail(diagnostics_path) if diagnostics_path else None
     if diagnostics_path is not None:
         # A from-launch window can begin before the new logger opens. Never
@@ -150,7 +165,14 @@ def _run_one(scenario, stack, bundle, plan, guard, helper, content_set, diagnost
         # Park the pointer clear of both windows, so that a scenario which does
         # not move it starts from the same place every time.
         quartz.move_pointer((plan.content_rect[0] - 40.0, plan.content_rect[1] - 60.0))
+        guard.pending_launch = True
         application = session.launch(bundle, _environment(guard, diagnostics_path))
+        guard.active_pid = application
+        guard.pending_launch = False
+        identity = quartz.process_identity(application)
+        if identity is None or pathlib.Path(identity[0]) != session._executable(bundle):
+            identity = None
+            raise RuntimeError("cannot establish the launched application's identity")
         content_rect = window.rect if window else plan.content_rect
         if not scenario.from_launch:
             if not session.await_window(application, plan.application_rect[2:]):
@@ -161,8 +183,8 @@ def _run_one(scenario, stack, bundle, plan, guard, helper, content_set, diagnost
                                 f"{scenario.region} region rather than the scenario asked for")
         target = session.Target(application, bundle, BINDINGS)
         action = session.action_for(scenario.action, region, content_rect, target)
-        action.start()
         try:
+            action.start()
             if not scenario.from_launch:
                 time.sleep(1.0)
             measurement = session.measure(application, window.pid if window else None, seconds, tail, action=action)
@@ -173,17 +195,40 @@ def _run_one(scenario, stack, bundle, plan, guard, helper, content_set, diagnost
                             "permission may be missing")
         warnings.extend(action.complaints())
 
-        return session.ScenarioResult(scenario, stack, measurement, warnings=warnings)
+        result = session.ScenarioResult(scenario, stack, measurement, warnings=warnings)
+        return result
     finally:
-        # Each teardown step guards its own failure: an exception raised in a
-        # finally block abandons the rest of it, and the step left undone was
-        # the one that takes the content window off the user's screen.
-        for teardown in (lambda: session.quit_application(application) if application else None,
-                         lambda: window.stop() if window else None):
+        failures = []
+        try:
+            if application is not None:
+                if identity is None and quartz.process_exists(application):
+                    raise RuntimeError("application identity unknown; refusing teardown")
+                outcome = session.quit_application(application, identity=identity, graceful=graceful)
+                outcome["expected"] = (outcome["exit"] == "graceful" if graceful else
+                                       outcome["exit"] == "signal" and outcome["signals"] == ["SIGTERM"])
+                print("    teardown: " + json.dumps(outcome, sort_keys=True), flush=True)
+                guard.active_pid = None
+                if result is not None:
+                    result.teardown = outcome
+                    result.measurement.measurement_method["teardown_mode"] = outcome["method"]
+                    if not outcome["expected"]:
+                        result.warnings.append("application did not complete the requested teardown: "
+                                               + json.dumps(outcome, sort_keys=True))
+        except BaseException as failure:  # still remove the content window on interruption
+            if hasattr(failure, "teardown"):
+                print("    teardown: " + json.dumps(failure.teardown, sort_keys=True), flush=True)
+            failures.append(failure)
+        finally:
             try:
-                teardown()
-            except Exception as failure:  # noqa: BLE001 - cleanup must not mask the original failure
-                print(f"    cleanup: {failure}", file=sys.stderr)
+                if window is not None:
+                    window.stop()
+            except BaseException as failure:
+                failures.append(failure)
+        if failures:
+            if len(failures) == 1 and isinstance(failures[0], (KeyboardInterrupt, SystemExit)):
+                raise failures[0]
+            detail = "; ".join(str(item) for item in failures)
+            raise RuntimeError(f"scenario cleanup failed: {detail}") from failures[0]
 
 
 def _motion_complaints(scenario, window):
@@ -228,6 +273,7 @@ def _rows(result, build):
         "stack": result.stack,
         "comparable": comparable,
         "measurement_method": measurement.measurement_method,
+        "teardown": result.teardown,
     }
     if not comparable:
         common["incomparable_reason"] = ("; ".join(result.warnings) if result.warnings
@@ -328,6 +374,8 @@ def _measure_all(scenarios, stacks, setup):
             for warning in result.warnings:
                 warnings.append(f"{scenario.id}/{stack}: {warning}")
                 print(f"    warning: {warning}")
+            if result.teardown is not None and not result.teardown["expected"]:
+                raise RuntimeError("unexpected application teardown; refusing the next scenario")
             measurement = result.measurement
             tracked = measurement.tracking
             print(f"    {measurement.cores:.3f} cores, {measurement.footprint_mb:.0f} MB, "
@@ -403,7 +451,8 @@ def main(argv=None):
 
     document = {
         "schema": "sidescopes-app-scenarios/1",
-        "measurement_method": session.measurement_method(diagnostics_path is not None),
+        "measurement_method": session.measurement_method(diagnostics_path is not None,
+                                                          graceful=session.graceful_teardown(bundle)),
         "conditions": facts,
         "layout": plan.describe(),
         "profile": {"name": profile.name, "behaviour": profile.summary, "scopes": setup["scopes"],

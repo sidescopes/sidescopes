@@ -57,6 +57,391 @@ class ScenarioPreferencesTests(unittest.TestCase):
             catalog.scenario_named('region-redraw'), 'V', old_profile, 'V'))
 
 
+class ApplicationTeardownTests(unittest.TestCase):
+    def setUp(self):
+        self.scope = contextlib.ExitStack()
+        self.addCleanup(self.scope.close)
+        self.identity = ('/owned/SideScopes.app/Contents/MacOS/SideScopes', 1234)
+        self.alive = True
+        self.clock = 0.0
+        self.lookup = self.scope.enter_context(mock.patch.object(
+            session.quartz, 'process_identity', side_effect=lambda pid: self.identity if self.alive else None,
+            create=True))
+        self.request = self.scope.enter_context(mock.patch.object(
+            session.quartz, 'request_quit', return_value=True, create=True))
+        self.signal = self.scope.enter_context(mock.patch.object(session.os, 'kill'))
+        self.scope.enter_context(mock.patch.object(session.time, 'monotonic', side_effect=lambda: self.clock))
+        self.scope.enter_context(mock.patch.object(session.time, 'sleep', side_effect=self.advance))
+        self.scope.enter_context(mock.patch.object(session, '_QUIT_TIMEOUT_SECONDS', 0.4))
+
+    def advance(self, seconds):
+        self.clock += seconds
+
+    def exit(self, *_):
+        self.alive = False
+        return True
+
+    def test_normal_request_confirms_exit_without_signals(self):
+        self.request.side_effect = self.exit
+        outcome = session.quit_application(42, identity=self.identity)
+        self.assertEqual(outcome['exit'], 'graceful')
+        self.request.assert_called_once_with(42)
+        self.signal.assert_not_called()
+
+    def test_already_exited_needs_no_request_or_signal(self):
+        self.alive = False
+        self.assertEqual(session.quit_application(42)['exit'], 'already-exited')
+        self.request.assert_not_called()
+        self.signal.assert_not_called()
+
+    def test_unknown_or_reused_target_is_never_signalled(self):
+        for failure in (PermissionError('denied'), None):
+            with self.subTest(failure=failure):
+                self.lookup.side_effect = failure
+                self.lookup.return_value = ('/other', 999)
+                with self.assertRaises((PermissionError, RuntimeError)):
+                    session.quit_application(42, identity=self.identity)
+                self.request.assert_not_called()
+                self.signal.assert_not_called()
+
+    def test_rejected_or_failed_request_records_term_fallback(self):
+        for failure in (False, RuntimeError('request unavailable')):
+            with self.subTest(failure=failure):
+                self.alive = True
+                self.request.side_effect = failure if isinstance(failure, Exception) else None
+                self.request.return_value = False
+                self.signal.side_effect = self.exit
+                outcome = session.quit_application(42, identity=self.identity)
+                self.assertEqual(outcome['exit'], 'signal')
+                self.assertEqual(outcome['signals'], ['SIGTERM'])
+                self.assertFalse(outcome['request_sent'])
+                self.assertEqual('request_error' in outcome, isinstance(failure, Exception))
+
+    def test_timeouts_reach_kill_and_confirm_its_exit(self):
+        def kill(pid, sig):
+            if sig == session.signal.SIGKILL:
+                self.exit()
+        self.signal.side_effect = kill
+        outcome = session.quit_application(42, identity=self.identity)
+        self.assertEqual(outcome['signals'], ['SIGTERM', 'SIGKILL'])
+        self.assertEqual(outcome['exit'], 'signal')
+        self.assertFalse(self.alive)
+
+    def test_surviving_kill_fails_after_a_bounded_wait(self):
+        with self.assertRaisesRegex(RuntimeError, 'did not exit'):
+            session.quit_application(42, identity=self.identity)
+        self.assertEqual([call.args[1] for call in self.signal.call_args_list],
+                         [session.signal.SIGTERM, session.signal.SIGKILL])
+        self.assertLess(self.clock, 2)
+
+    def test_identity_change_before_fallback_does_not_signal_replacement(self):
+        def request(pid):
+            self.identity = ('/replacement', 999)
+            return True
+        self.request.side_effect = request
+        with self.assertRaisesRegex(RuntimeError, 'identity changed'):
+            session.quit_application(42, identity=self.identity)
+        self.signal.assert_not_called()
+
+    def test_interrupted_request_or_wait_cleans_up_before_propagating(self):
+        for stage in ('request', 'graceful-wait', 'term-wait'):
+            with self.subTest(stage=stage):
+                self.alive = True
+                self.request.side_effect = KeyboardInterrupt() if stage == 'request' else None
+                self.signal.reset_mock()
+                if stage == 'term-wait':
+                    self.signal.side_effect = lambda pid, sig: self.exit() if sig == session.signal.SIGKILL else None
+                else:
+                    self.signal.side_effect = self.exit
+                interrupted = False
+
+                def sleep(seconds):
+                    nonlocal interrupted
+                    ready = stage == 'graceful-wait' or (stage == 'term-wait' and self.signal.called)
+                    if ready and not interrupted:
+                        interrupted = True
+                        raise KeyboardInterrupt()
+                    self.advance(seconds)
+
+                with mock.patch.object(session.time, 'sleep', side_effect=sleep):
+                    with self.assertRaises(KeyboardInterrupt) as raised:
+                        session.quit_application(42, identity=self.identity)
+                self.assertFalse(self.alive)
+                self.assertEqual(raised.exception.teardown['interrupted'], 'KeyboardInterrupt')
+                self.assertEqual(raised.exception.teardown['exit'], 'signal')
+                self.assertTrue(self.signal.called)
+
+    def test_legacy_build_uses_signals_without_a_normal_request(self):
+        self.signal.side_effect = self.exit
+        outcome = session.quit_application(42, identity=self.identity, graceful=False)
+        self.assertEqual(outcome['method'], 'legacy-signal')
+        self.assertEqual(outcome['signals'], ['SIGTERM'])
+        self.request.assert_not_called()
+
+
+class ApplicationQuitBindingTests(unittest.TestCase):
+    def setUp(self):
+        with mock.patch('ctypes.CDLL', return_value=mock.MagicMock()):
+            self.bindings = load_script('quit_bindings', 'scripts/scenarios/quartz.py')
+
+    def test_pid_request_releases_pool_for_success_nil_and_exception(self):
+        for target, failure in ((99, None), (None, None), (99, RuntimeError('request'))):
+            with self.subTest(target=target, failure=failure):
+                objects, lookup, request, release = (mock.Mock(return_value=42), mock.Mock(return_value=target),
+                                                     mock.Mock(return_value=True, side_effect=failure), mock.Mock())
+                api = (lambda name: name, lambda name: name, objects, lookup, request, release)
+                with mock.patch.object(self.bindings, '_quit_bindings', return_value=api):
+                    if failure:
+                        with self.assertRaises(RuntimeError):
+                            self.bindings.request_quit(123)
+                    else:
+                        self.assertEqual(self.bindings.request_quit(123), bool(target))
+                lookup.assert_called_once_with(b'NSRunningApplication',
+                                               b'runningApplicationWithProcessIdentifier:', 123)
+                release.assert_called_once_with(42, b'drain')
+                if target:
+                    request.assert_called_once_with(99, b'terminate')
+                else:
+                    request.assert_not_called()
+
+    def test_identity_reads_kernel_start_time_and_path_without_hiding_native_errors(self):
+        def usage(pid, version, buffer):
+            buffer._obj[80:88] = (987654321).to_bytes(8, 'little')
+            return 0
+
+        def path(pid, buffer, size):
+            buffer.value = b'/owned/SideScopes.app/Contents/MacOS/SideScopes'
+            return len(buffer.value)
+
+        with mock.patch.object(self.bindings, 'process_exists', return_value=True) as exists, \
+                mock.patch.object(self.bindings._libc, 'proc_pid_rusage', side_effect=usage) as sample, \
+                mock.patch.object(self.bindings._libc, 'proc_pidpath', side_effect=path) as executable:
+            self.assertEqual(self.bindings.process_identity(42),
+                             ('/owned/SideScopes.app/Contents/MacOS/SideScopes', 987654321))
+            self.assertEqual(sample.call_args.args[:2], (42, 0))
+            self.assertEqual(executable.call_args.args[0], 42)
+            for failing_call in (sample, executable):
+                with self.subTest(failing_call=failing_call):
+                    previous = failing_call.side_effect
+                    failing_call.side_effect = None
+                    failing_call.return_value = -1
+                    with self.assertRaisesRegex(RuntimeError, 'cannot establish identity'):
+                        self.bindings.process_identity(42)
+                    exists.side_effect = [True, False]
+                    self.assertIsNone(self.bindings.process_identity(42))
+                    exists.side_effect = None
+                    failing_call.side_effect = previous
+
+    def test_liveness_distinguishes_exit_from_inspection_error(self):
+        with mock.patch.object(self.bindings.os, 'kill') as probe:
+            self.assertTrue(self.bindings.process_exists(42))
+            probe.side_effect = ProcessLookupError()
+            self.assertFalse(self.bindings.process_exists(42))
+            probe.side_effect = PermissionError()
+            with self.assertRaises(PermissionError):
+                self.bindings.process_exists(42)
+        with mock.patch.object(self.bindings.os, 'kill') as probe:
+            for pid in (0, -1, '42'):
+                with self.assertRaises(ValueError):
+                    self.bindings.process_exists(pid)
+                with self.assertRaises(ValueError):
+                    self.bindings.request_quit(pid)
+            probe.assert_not_called()
+
+
+class ScenarioCleanupTests(unittest.TestCase):
+    def exercise(self, action_failure=None, quit_failure=None, outcome=None):
+        bundle = pathlib.Path('/owned/SideScopes.app')
+        scenario = types.SimpleNamespace(content='still', content_fps=0, from_launch=True,
+                                         action='still', expects_analysis=False)
+        rect = (10, 20, 300, 400)
+        plan = types.SimpleNamespace(application_rect=rect, content_rect=rect, region_in=lambda _: rect)
+        guard, window, action = mock.Mock(), mock.Mock(pid=43, rect=rect), mock.Mock()
+        action.stop.side_effect = action_failure
+        action.complaints.return_value = []
+        measurement = session.Measurement(1, 2, 3, 4, 5, 6, measurement_method=session.measurement_method(False))
+        default = dict(method='appkit-pid', request_sent=True, signals=[], exit='graceful')
+        with contextlib.ExitStack() as scope:
+            for owner, name, values in (
+                    (content, 'ContentWindow', dict(return_value=window)),
+                    (run, '_motion_complaints', dict(return_value=[])),
+                    (session, 'graceful_teardown', dict(return_value=True)),
+                    (session, 'launch', dict(return_value=42)),
+                    (session, 'action_for', dict(return_value=action)),
+                    (session, 'measure', dict(return_value=measurement)),
+                    (session, 'quit_application', dict(return_value=outcome or default, side_effect=quit_failure)),
+                    (session.quartz, 'process_identity', dict(return_value=(str(session._executable(bundle)), 123))),
+                    (session.quartz, 'move_pointer', {})):
+                scope.enter_context(mock.patch.object(owner, name, create=True, **values))
+            scope.enter_context(contextlib.redirect_stdout(io.StringIO()))
+            try:
+                result = run._run_one(scenario, 'V', bundle, plan, guard, None, None, None, 1)
+            finally:
+                window.stop.assert_called_once()
+                self.assertEqual(guard.write.call_count, 1)
+        return result
+
+    def test_unresolved_actor_or_application_still_cleans_content_and_raises(self):
+        for actor, app in ((RuntimeError('actor alive'), None), (None, RuntimeError('app alive'))):
+            with self.subTest(actor=actor, app=app), self.assertRaises(RuntimeError):
+                self.exercise(actor, app)
+
+    def test_fallback_is_exported_and_marks_all_rows_incomparable(self):
+        outcome = dict(method='appkit-pid', request_sent=True, signals=['SIGTERM'], exit='signal')
+        result = self.exercise(outcome=outcome)
+        result.scenario = catalog.scenario_named('idle-region')
+        rows = run._rows(result, dict(machine='m', os='o', build='b', version='v'))
+        self.assertTrue(result.warnings)
+        self.assertTrue(all(not row['comparable'] and row['teardown'] == outcome for row in rows))
+        self.assertEqual(rows[0]['measurement_method']['teardown_mode'], 'appkit-pid')
+
+    def test_cleanup_failure_prevents_the_next_scenario(self):
+        setup = dict(profile=None, scopes='V', seconds=1, bundle=None, plan=None, guard=None,
+                     helper=None, content=None, diagnostics=None, build=None)
+        with mock.patch.object(catalog, 'unavailable', return_value=''), \
+                mock.patch.object(run, '_run_one', side_effect=RuntimeError('cleanup failed')) as launch, \
+                contextlib.redirect_stdout(io.StringIO()):
+            with self.assertRaises(RuntimeError):
+                run._measure_all([catalog.scenario_named('idle-region')] * 2, ['V'], setup)
+            self.assertEqual(launch.call_count, 1)
+
+    def test_public_cohort_stops_after_a_retained_fallback_result(self):
+        result = self.exercise(outcome=dict(method='appkit-pid', request_sent=True,
+                                           signals=['SIGTERM'], exit='signal'))
+        result.scenario = catalog.scenario_named('idle-region')
+        setup = dict(profile=None, scopes='V', seconds=1, bundle=None, plan=None, guard=None,
+                     helper=None, content=None, diagnostics=None,
+                     build=dict(machine='m', os='o', build='b', version='v'))
+        with mock.patch.object(catalog, 'unavailable', return_value=''), \
+                mock.patch.object(run, '_run_one', return_value=result) as launch, \
+                contextlib.redirect_stdout(io.StringIO()):
+            with self.assertRaisesRegex(RuntimeError, 'refusing the next scenario'):
+                run._measure_all([result.scenario] * 2, ['V'], setup)
+            self.assertEqual(launch.call_count, 1)
+
+    def test_content_kill_wait_is_bounded_and_streams_close_on_failure(self):
+        window = content.ContentWindow.__new__(content.ContentWindow)
+        window._process = mock.Mock()
+        window._process.poll.return_value = None
+        window._process.wait.side_effect = subprocess.TimeoutExpired('helper', 5)
+        with self.assertRaises(subprocess.TimeoutExpired):
+            window.stop()
+        window._process.kill.assert_called_once()
+        self.assertEqual(window._process.wait.call_args_list, [mock.call(timeout=5), mock.call(timeout=5)])
+        window._process.stdout.close.assert_called_once()
+        window._process.stderr.close.assert_called_once()
+
+    def test_actor_exception_is_rethrown_after_join(self):
+        for failure in (RuntimeError('input failed'), KeyboardInterrupt()):
+            with self.subTest(failure=failure):
+                action = session.Action()
+                action._loop = mock.Mock(side_effect=failure)
+                action.start()
+                with self.assertRaisesRegex(RuntimeError, 'thread failed') as raised:
+                    action.stop()
+                self.assertIs(raised.exception.__cause__, failure)
+                self.assertFalse(action._thread.is_alive())
+
+    def test_interrupted_content_start_still_cleans_its_owned_process(self):
+        process = mock.Mock()
+        process.poll.return_value = None
+        with mock.patch.object(content.subprocess, 'Popen', return_value=process), \
+                mock.patch.object(content.ContentWindow, '_read_header', side_effect=KeyboardInterrupt()):
+            with self.assertRaises(KeyboardInterrupt):
+                content.ContentWindow('unused', (0, 0, 10, 10), content.ContentSet('synthetic'))
+        process.terminate.assert_called_once()
+        process.wait.assert_called_once_with(timeout=5)
+        process.stdout.close.assert_called_once()
+
+    def test_actor_stop_detects_an_unjoined_thread(self):
+        action = session.Action()
+        action._thread = mock.Mock()
+        action._thread.is_alive.return_value = True
+        with self.assertRaisesRegex(RuntimeError, 'thread did not stop'):
+            action.stop()
+        self.assertTrue(action._stop.is_set())
+        action._thread.join.assert_called_once_with(timeout=10.0)
+
+
+class PreferenceRecoveryTests(unittest.TestCase):
+    def test_override_saves_do_not_carry_over_and_original_is_restored(self):
+        for originally_present in (True, False):
+            with self.subTest(originally_present=originally_present), tempfile.TemporaryDirectory() as directory:
+                root = pathlib.Path(directory)
+                user = root / 'user.conf'
+                original = b'owner preferences\n'
+                if originally_present:
+                    user.write_bytes(original)
+                with mock.patch.object(run, 'PREFERENCES', user):
+                    guard = run.PreferencesGuard(root)
+                    guard.write(session.preferences_text('V', (1, 2, 3, 4)))
+                    guard.override.write_text('app saved a changed window and stack\n')
+                    next_text = session.preferences_text('W', (1, 2, 3, 4))
+                    guard.write(next_text)
+                    self.assertEqual(guard.override.read_text(), next_text)
+                    guard.restore()
+                self.assertEqual(user.read_bytes() if user.exists() else None,
+                                 original if originally_present else None)
+
+    def test_live_application_defers_restore_without_losing_backup(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            user = root / 'user.conf'
+            user.write_text('original')
+            with mock.patch.object(run, 'PREFERENCES', user), \
+                    mock.patch.object(run.quartz, 'process_exists', return_value=True, create=True) as alive:
+                guard = run.PreferencesGuard(root)
+                guard.write(session.preferences_text('V', (1, 2, 3, 4)))
+                guard.active_pid = 42
+                with self.assertRaisesRegex(RuntimeError, 'backup retained'):
+                    guard.restore()
+                self.assertEqual(guard._backup.read_text(), 'original')
+                with self.assertRaises(RuntimeError):
+                    guard.write('next scenario')
+                alive.return_value = False
+                guard.restore()
+                self.assertEqual(user.read_text(), 'original')
+
+    def test_unidentified_launch_preserves_backup_and_refuses_reuse(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            user = root / 'user.conf'
+            user.write_text('original')
+            with mock.patch.object(run, 'PREFERENCES', user):
+                guard = run.PreferencesGuard(root)
+                guard.write(session.preferences_text('V', (1, 2, 3, 4)))
+                before = user.read_bytes()
+                guard.pending_launch = True
+                with self.assertRaisesRegex(RuntimeError, 'before its PID was known'):
+                    guard.restore()
+                with self.assertRaises(RuntimeError):
+                    guard.write('next scenario')
+                self.assertEqual(user.read_bytes(), before)
+                self.assertEqual(guard._backup.read_text(), 'original')
+
+    def test_legacy_signal_disposition_preserves_interrupted_recovery_marker(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            user = root / 'user.conf'
+            user.write_text('original')
+            bundle = root / 'SideScopes.app'
+            executable = session._executable(bundle)
+            executable.parent.mkdir(parents=True)
+            executable.write_bytes(b'old build without override')
+            self.assertFalse(session.graceful_teardown(bundle))
+            with mock.patch.object(run, 'PREFERENCES', user):
+                guard = run.PreferencesGuard(root)
+                guard.write(session.preferences_text('V', (1, 2, 3, 4)))
+                # Signal-first shutdown does not save and strip the marker.
+                recovered = run.PreferencesGuard(root)
+                recovered.restore()
+                self.assertEqual(user.read_text(), 'original')
+            executable.write_bytes(b'SIDESCOPES_PREFS_FILE')
+            self.assertTrue(session.graceful_teardown(bundle))
+            self.assertNotEqual(session.measurement_method(True, graceful=True),
+                                session.measurement_method(True, graceful=False))
+
+
 class KeyboardCleanupTests(unittest.TestCase):
     def test_interrupted_chords_release_every_pressed_key(self):
         # Load the real binding with inert framework functions. No test input

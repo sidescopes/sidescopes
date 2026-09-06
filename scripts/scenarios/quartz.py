@@ -1,8 +1,7 @@
 """The macOS system calls the scenario harness makes for itself.
 
-Three things live here, all of them thin bindings rather than logic: the display
-layout a run must discover instead of assume, the pointer and keyboard events
-that drive the application, and the per-process counters a measurement reports.
+These are thin system bindings: display layout, pointer and keyboard events,
+process counters and identity, and a PID-addressed application quit request.
 
 They are bound with ctypes rather than a compiled helper so that the harness
 needs no build step of its own. A Windows harness would replace this module
@@ -18,6 +17,7 @@ it the calls succeed silently and nothing moves, so callers should check
 
 import ctypes
 import ctypes.util
+import os
 import struct
 import time
 
@@ -27,6 +27,76 @@ _CORE_FOUNDATION = "/System/Library/Frameworks/CoreFoundation.framework/CoreFoun
 _cg = ctypes.CDLL(_APPLICATION_SERVICES)
 _cf = ctypes.CDLL(_CORE_FOUNDATION)
 _libc = ctypes.CDLL(ctypes.util.find_library("c"))
+_libc.proc_pid_rusage.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.c_void_p]
+_libc.proc_pid_rusage.restype = ctypes.c_int
+_libc.proc_pidpath.argtypes = [ctypes.c_int, ctypes.c_void_p, ctypes.c_uint32]
+_libc.proc_pidpath.restype = ctypes.c_int
+
+
+def process_exists(pid):
+    """Explicit process liveness; inspection errors must not mean exit."""
+    if not isinstance(pid, int) or pid <= 0:
+        raise ValueError("a positive process id is required")
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    return True
+
+
+def process_identity(pid):
+    """The live executable path and kernel start time, or None after exit."""
+    if not process_exists(pid):
+        return None
+    buffer = (ctypes.c_uint8 * 512)()
+    path = ctypes.create_string_buffer(4096)
+    if (_libc.proc_pid_rusage(pid, 0, ctypes.byref(buffer)) != 0
+            or _libc.proc_pidpath(pid, path, len(path)) <= 0):
+        if not process_exists(pid):
+            return None
+        raise RuntimeError(f"cannot establish identity of process {pid}")
+    # rusage_info_v0: UUID, eight counters, then ri_proc_start_abstime.
+    started = struct.unpack_from("<Q", bytes(buffer), 16 + 8 * 8)[0]
+    if not started:
+        raise RuntimeError(f"no start time for process {pid}")
+    return (os.fsdecode(path.value), started)
+
+
+def _quit_bindings():
+    """Load only the Objective-C signatures needed for a normal PID quit."""
+    ctypes.CDLL("/System/Library/Frameworks/AppKit.framework/AppKit")
+    objc = ctypes.CDLL(ctypes.util.find_library("objc"))
+    objc.objc_getClass.argtypes = [ctypes.c_char_p]
+    objc.objc_getClass.restype = ctypes.c_void_p
+    objc.sel_registerName.argtypes = [ctypes.c_char_p]
+    objc.sel_registerName.restype = ctypes.c_void_p
+    receiver = (ctypes.c_void_p, ctypes.c_void_p)
+    # Separate fixed signatures, including pid_t and BOOL, on both Mac ABIs.
+    def message(result, *args):
+        return ctypes.CFUNCTYPE(result, *receiver, *args)(("objc_msgSend", objc))
+
+    return (objc.objc_getClass, objc.sel_registerName, message(ctypes.c_void_p),
+            message(ctypes.c_void_p, ctypes.c_int), message(ctypes.c_bool), message(None))
+
+
+def request_quit(pid):
+    """Request ordinary quit from this PID without focus, keys or relaunch.
+
+    True means the request was sent, not that the application exited. Do not
+    poll AppKit's run-loop-cached isTerminated property from a blocking loop.
+    """
+    if not isinstance(pid, int) or pid <= 0:
+        raise ValueError("a positive process id is required")
+    get_class, selector, object_message, pid_message, bool_message, void_message = _quit_bindings()
+    pool = object_message(get_class(b"NSAutoreleasePool"), selector(b"new"))
+    if not pool:
+        raise RuntimeError("cannot create application quit autorelease pool")
+    try:
+        app = pid_message(get_class(b"NSRunningApplication"),
+                          selector(b"runningApplicationWithProcessIdentifier:"), pid)
+        return bool(app and bool_message(app, selector(b"terminate")))
+    finally:
+        void_message(pool, selector(b"drain"))
 
 
 class CGPoint(ctypes.Structure):

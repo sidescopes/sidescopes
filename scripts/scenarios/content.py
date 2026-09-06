@@ -191,7 +191,7 @@ class ContentWindow:
         self.pan = None
         try:
             self._read_header()
-        except Exception:
+        except BaseException:
             self.stop()
             raise
 
@@ -232,16 +232,18 @@ class ContentWindow:
                 max(self.rect[2] - (2 * margin), 1.0), max(self.rect[3] - (2 * margin), 1.0))
 
     def stop(self):
-        if self._process.poll() is None:
-            self._process.terminate()
-            try:
-                self._process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                self._process.kill()
-                self._process.wait()
-        for stream in (self._process.stdout, self._process.stderr):
-            if stream is not None:
-                stream.close()
+        try:
+            if self._process.poll() is None:
+                self._process.terminate()
+                try:
+                    self._process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    self._process.kill()
+                    self._process.wait(timeout=5)
+        finally:
+            for stream in (self._process.stdout, self._process.stderr):
+                if stream is not None:
+                    stream.close()
 
     def __enter__(self):
         return self
