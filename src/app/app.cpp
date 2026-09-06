@@ -957,20 +957,16 @@ void App::commitAnalysisChanges(bool drewThisPass)
     }
 }
 
-// What is moving the region decides what analysis does about it, and the causes
-// want different things. A region SCANNED across a picture - a border dragged by
-// its band, a rectangle still being drawn - is being read while it moves, so the
-// pass goes on at a coarser image. A region THROWN from one face to another is
-// not: for the second it is in the air the user is watching the border and
-// nothing else, so analysis is held exactly as it is for a window carrying one
-// across the desktop. Both releases restore the sharp trace by the same route,
-// the settle bumping the settings version.
+// What is moving the region decides what analysis does about it. A border
+// dragged by its band or a rectangle still being drawn stays live under the
+// active drag detail policy, however quickly the hand moves. An attached window
+// carrying a region across the desktop holds analysis until it lands. The
+// settle restores the sharp trace after direct manipulation by bumping the
+// settings version.
 RegionMotion App::trackRegionMotion(double now)
 {
     bool regionChanged = false;
-    double travel = 0.0;
     if (m_analysisDirty && m_analysis.region != m_lastSentRegion) {
-        travel = regionTravelPercent(m_lastSentRegion, m_analysis.region);
         m_lastSentRegion = m_analysis.region;
         regionChanged = true;
     }
@@ -980,9 +976,9 @@ RegionMotion App::trackRegionMotion(double now)
     // clear while the picker is up, because the follow step that clears it is
     // suppressed for the picker's whole duration.
     const bool carried = m_regionSession.carried();
-    const RegionMotionStep step = m_motion.update({regionChanged, carried, now, travel});
+    const RegionMotionStep step = m_motion.update({regionChanged, carried, now});
     if (step.changed) {
-        m_worker.hold(step.motion == RegionMotion::Carried || step.thrown);
+        m_worker.hold(step.holdAnalysis);
         m_analysisDirty = true;
     }
 
