@@ -200,8 +200,12 @@ TEST_CASE("A bin-bound scope reads a ten-bit frame as the level it rounds to")
     TenBitTestFrame deep(32, 16);
     deep.fill(514, 514, 514);  // 128.1 of 255, so level 128
     Waveform waveform;
+    WaveformSettings settings;
+    settings.gain = 0.005f;  // Keep the dense trace unsaturated when locating its peak.
+    waveform.configure(settings);
     waveform.accumulate(deep.view(), IntRect{0, 0, 32, 16});
     const ScopeImage& trace = waveform.image();
+    CHECK(channelAt(trace, 0, WaveformLevels - 1 - 128, 0) < 255);
     CHECK(brightestRow(trace.rgba.data(), trace.width, trace.height, 0) == WaveformLevels - 1 - 128);
 
     Histogram histogram;
@@ -260,6 +264,7 @@ TEST_CASE("The pixel format survives the crossing into a scope")
         settings.region = RegionOfInterest{0.0, 0.0, 100.0, 100.0};
         settings.enabledScopes = {WaveformId};
         settings.imageSizes[WaveformId] = {Columns, WaveformLevels};
+        settings.scopeParams[WaveformId]["gain"] = 0.005;
         worker.updateSettings(settings);
         worker.start();
 
@@ -271,8 +276,10 @@ TEST_CASE("The pixel format survives the crossing into a scope")
         AnalysisWorker::Output output;
         REQUIRE(waitForOutput([&] { return worker.fetchOutput(seen, output); }));
         const ScopeImage& trace = output.images.at(WaveformId);
+        const int peak = brightestRow(trace.rgba.data(), trace.width, trace.height, 0);
+        CHECK(channelAt(trace, 0, peak, 0) < 255);
 
-        return brightestRow(trace.rgba.data(), trace.width, trace.height, 0);
+        return peak;
     };
 
     // The waveform draws level 0 at the bottom row.

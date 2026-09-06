@@ -174,10 +174,10 @@ TEST_CASE("Waveform renderings match their goldens")
     const WaveformMode modes[4] = {WaveformMode::Luma, WaveformMode::Rgb, WaveformMode::RgbParade,
                                    WaveformMode::ColoredLuma};
     const char* names[4] = {"luma", "rgb", "parade", "colored-luma"};
-    const uint64_t barsGoldens[4] = {0xafbeeac5152c37e6ULL, 0xe503f5b178151966ULL, 0x8a2dc7eb9d5d8d8eULL,
-                                     0xf5f9aee8b1f746e6ULL};
-    const uint64_t rampGoldens[4] = {0x1d315bd5ae7643e4ULL, 0xc47afc9dfbe3587aULL, 0xdb1e8fae9e04b440ULL,
-                                     0xed0c8ba87946479bULL};
+    const uint64_t barsGoldens[4] = {0x1a05fc3e383ca8fbULL, 0xb1f61d61017a717bULL, 0x33b82dbeb4575136ULL,
+                                     0x29fedbc4579c397bULL};
+    const uint64_t rampGoldens[4] = {0xed9a923f6a4a2153ULL, 0x6fee693f0b671ac7ULL, 0xc497b08bb92809a2ULL,
+                                     0x3a1cea61ee4f9158ULL};
 
     for (int mode = 0; mode < 4; ++mode) {
         WaveformSettings settings;

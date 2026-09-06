@@ -159,6 +159,9 @@ TEST_CASE("Registry serves the waveform through the module boundary")
 
     ScopeInstance instance = registry.createInstance("org.sidescopes.waveform");
     REQUIRE(instance.valid());
+    // This boundary test measures position; low gain keeps the fixed response's
+    // smoothed neighbors below one unsaturated center row.
+    REQUIRE(instance.configure(std::vector<SsParamValue>{{"gain", 0.005}}));
 
     // Mid gray reaches every channel plane at level 128, which the engine
     // plots on image row 255 - 128 = 127.
@@ -167,6 +170,7 @@ TEST_CASE("Registry serves the waveform through the module boundary")
     REQUIRE(instance.accumulate(frame, SsRect{0, 0, 32, 16}));
     const SsImageView image = instance.image();
     REQUIRE(image.height == 256);
+    REQUIRE(image.rgba[(static_cast<std::size_t>(127) * image.width) * 4] < 255);
     CHECK(brightestRow(image, 0) == 127);
 
     // The overlaid channels return one level marker each.
@@ -190,6 +194,9 @@ TEST_CASE("Registry serves the luma waveform through the module boundary")
 
     ScopeInstance instance = registry.createInstance("org.sidescopes.waveform.luma");
     REQUIRE(instance.valid());
+    // This boundary test measures position; low gain keeps the fixed response's
+    // smoothed neighbors below one unsaturated center row.
+    REQUIRE(instance.configure(std::vector<SsParamValue>{{"gain", 0.005}}));
 
     // Mid gray sits at luma 128, on image row 255 - 128 = 127.
     TestFrame gray(32, 16, 128);
@@ -197,6 +204,7 @@ TEST_CASE("Registry serves the luma waveform through the module boundary")
     REQUIRE(instance.accumulate(frame, SsRect{0, 0, 32, 16}));
     const SsImageView image = instance.image();
     REQUIRE(image.height == 256);
+    REQUIRE(image.rgba[(static_cast<std::size_t>(127) * image.width) * 4] < 255);
     CHECK(brightestRow(image, 0) == 127);
 
     // One trace, so one full-width level marker.

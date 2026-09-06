@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <type_traits>
 
 #include "core/parallel_for.h"
 #include "core/scopes/sampling.h"
@@ -22,10 +23,9 @@ inline float luma709(float r, float g, float b)
     return (54.0f * r + 183.0f * g + 19.0f * b) / 256.0f;
 }
 
-// A waveform column is populated by one sample per sampled row, so densities
-// are normalized per sampled row: column brightness is then invariant to the
-// sampling stride and to the region size.
-constexpr double ReferenceRowCount = 1'000.0;
+// Density at full brightness with the default gain, independent of frame content.
+constexpr double ReferenceDensity = 0.075;
+constexpr double DensityScale = 1'000.0;
 
 // In the combined mode the luma trace rides over the RGB traces dimmed to
 // this fraction, so it reads as a distinct overlay rather than a fourth channel.
@@ -249,122 +249,6 @@ void smoothPlane(const uint32_t* corrected, std::size_t rowPitch, int columns, u
     }
 }
 
-// A column is one flat tone when its densest bin holds at least this share of
-// the column's own mass. Held as a fraction so the test is integer arithmetic:
-// the goldens are exact and shared across three platforms, and a float
-// comparison here would decide the whole image's brightness.
-//
-// The vertical 1-4-1 fixes what the share means. A column whose samples all
-// land on one level keeps 4/6 of its mass there; two adjacent levels give
-// 5/12, and from three levels up it is simply one over the level count. So
-// three tenths reads as "fewer than about three and a third levels" - a flat
-// tone, plus however far the display's dithering spreads it. Measured over
-// four photographs at five modes, four column counts and three region sizes,
-// the highest a photographic column reached was a quarter: 240 of 240 of those
-// renderings are bit-identical at this share, and the first of them moves at
-// 0.22.
-constexpr uint64_t FlatToneNumerator = 3;
-constexpr uint64_t FlatToneDenominator = 10;
-
-// Each column's densest bin, the level it sits at, and the column's total
-// mass, over the bins the plane really holds: the space between planes is
-// padding, never written, and reading it would let a stale word from an
-// earlier size decide the normalization ceiling.
-void measureColumns(const uint32_t* bins, std::size_t rowPitch, int columns, ColumnDensity* densities)
-{
-    std::fill_n(densities, columns, ColumnDensity{});
-    for (int level = 0; level < WaveformLevels; ++level) {
-        const uint32_t* line = bins + static_cast<std::size_t>(level) * rowPitch;
-        for (int column = 0; column < columns; ++column) {
-            ColumnDensity& measured = densities[static_cast<std::size_t>(column)];
-            measured.mass += line[column];
-            if (line[column] > measured.peak) {
-                measured.peak = line[column];
-                measured.level = level;
-            }
-        }
-    }
-}
-
-// The levels some column of this plane holds as one flat tone.
-//
-// Only the level each such column peaks on, with no allowance for the vertical
-// 1-4-1 spreading the pile onto its neighbours: the columns that carry a
-// diluted copy of the same pile are weighted level by level exactly as this one
-// is, so they peak wherever it peaks. Widening by one either side was measured
-// over a flat tone at all 256 levels, three strip widths and two modes - it
-// moved six of those 1536 traces, none of them by a measurable change in
-// brightness.
-void markFlatToneLevels(const ColumnDensity* densities, int columns, bool* flatTone)
-{
-    std::fill_n(flatTone, WaveformLevels, false);
-    for (int column = 0; column < columns; ++column) {
-        const ColumnDensity& measured = densities[static_cast<std::size_t>(column)];
-        if (measured.mass > 0 &&
-            static_cast<uint64_t>(measured.peak) * FlatToneDenominator > FlatToneNumerator * measured.mass) {
-            flatTone[measured.level] = true;
-        }
-    }
-}
-
-// The ceiling a plane offers: the densest bin among its columns that peak on a
-// level no flat tone holds, and - as the fallback - the densest of all of them.
-struct TraceCeiling
-{
-    uint32_t distributed = 0;
-    uint32_t overall = 0;
-};
-
-void gatherCeiling(const ColumnDensity* densities, int columns, const bool* flatTone, TraceCeiling& ceiling)
-{
-    for (int column = 0; column < columns; ++column) {
-        const ColumnDensity& measured = densities[static_cast<std::size_t>(column)];
-        ceiling.overall = std::max(ceiling.overall, measured.peak);
-        // A flat tone does not end at the edge of the strip that carries it:
-        // the fractional splat and the horizontal 1-2-1 taper its pile over the
-        // columns beside it, several times the surrounding content but too
-        // diluted to read as one tone. What gives those columns away is that
-        // they still peak on the tone's own level.
-        if (!flatTone[measured.level]) {
-            ceiling.distributed = std::max(ceiling.distributed, measured.peak);
-        }
-    }
-}
-
-// The bin the log normalization maps to full brightness, across the planes the
-// active mode draws.
-//
-// Not simply the densest bin. A column that is one flat tone - the editor's
-// chrome beside the photograph, a letterboxed bar - puts every sample it has
-// into a single bin, several times over what the densest photographic column
-// reaches, and the ceiling is close to linear in that at the calibrated gain.
-// Sliding a region five pixels off the picture cost the rest of the trace a
-// quarter of its brightness. Such a column is passed over instead, and its
-// bins clip. When every column is one flat tone there is no distribution to
-// measure and the plain maximum stands, which is what keeps a frame of colour
-// bars or a ramp rendering exactly as before.
-uint32_t peakDensity(const std::vector<uint32_t>& traces, std::size_t planeSize, std::size_t rowPitch, int columns,
-                     bool wantsRgb, bool wantsLuma, ColumnDensity* densities)
-{
-    TraceCeiling ceiling;
-    bool flatTone[WaveformLevels];
-    const auto scan = [&](int plane) {
-        measureColumns(traces.data() + (static_cast<std::size_t>(plane) * planeSize), rowPitch, columns, densities);
-        markFlatToneLevels(densities, columns, flatTone);
-        gatherCeiling(densities, columns, flatTone, ceiling);
-    };
-    if (wantsRgb) {
-        for (int plane = 0; plane < 3; ++plane) {
-            scan(plane);
-        }
-    }
-    if (wantsLuma) {
-        scan(3);
-    }
-
-    return ceiling.distributed > 0 ? ceiling.distributed : ceiling.overall;
-}
-
 // Map a bin count to display brightness through the log-and-gamma
 // response shared with the vectorscope.
 float waveformBrightness(float count, double gain, double intensityScale)
@@ -372,27 +256,26 @@ float waveformBrightness(float count, double gain, double intensityScale)
     if (count <= 0.0f) {
         return 0.0f;
     }
-    // The gamma lifts the mid-density body of the trace, exactly as
-    // on the vectorscope: normalizing to the densest bin pushes
-    // everything else down, and a linear ramp reads dim at any gain.
+    // Gamma keeps sparse traces visible on the fixed density scale.
     const double normalized = std::log1p(static_cast<double>(count) * gain) * intensityScale / 255.0;
     return static_cast<float>(255.0 * applyMidDensityGamma(normalized));
 }
 
 // The four smoothed planes the composer reads, in draw order.
+template <typename Density>
 struct WaveformPlanes
 {
-    const uint32_t* red;
-    const uint32_t* green;
-    const uint32_t* blue;
-    const uint32_t* luma;
+    const Density* red;
+    const Density* green;
+    const Density* blue;
+    const Density* luma;
 };
 
 // Resolve one output pixel from the planes at a column, applying the
 // active mode's color rules. sample() reads a plane at the output row's
 // level tap and is invoked only for the planes the mode draws.
-template <typename SampleFn>
-void emitWaveformPixel(uint8_t* out, const SampleFn& sample, int column, const WaveformPlanes& planes,
+template <typename SampleFn, typename Density>
+void emitWaveformPixel(uint8_t* out, const SampleFn& sample, int column, const WaveformPlanes<Density>& planes,
                        const WaveformModeFlags& flags, double gain, double intensityScale)
 {
     float r = 0.0f;
@@ -489,9 +372,9 @@ void Waveform::resize(int columns, int imageHeight)
     const std::size_t imageBytes = columnCount * imageHeight * 4;
     // Both allocations must succeed before either buffer changes its logical
     // size, so a failed resize cannot leave the old geometry over new storage.
-    m_columnDensities.reserve(columnCount);
+    m_columnScales.reserve(columnCount);
     m_image.rgba.reserve(imageBytes);
-    m_columnDensities.assign(columnCount, ColumnDensity{});
+    m_columnScales.assign(columnCount, 0.0);
     m_image.rgba.assign(imageBytes, 0);
     m_columns = columns;
     m_imageHeight = imageHeight;
@@ -508,10 +391,8 @@ void Waveform::accumulate(const FrameView& frame, IntRect region)
                                           budgetForBins(static_cast<long long>(m_columns) * Levels, perBin));
     bins().scatter(frame, region, grid, m_settings.mode, m_columns);
 
-    // A column receives one sample per sampled row, so the sampled-row count
-    // that normalizes column brightness is a plain quotient - identical
-    // however the rows split across threads.
-    mapBinsToImage(static_cast<uint64_t>(grid.rows));
+    normalizeColumns(region.width, grid);
+    mapBinsToImage();
 }
 
 NormalizedPoint Waveform::project(const FloatColor& color)
@@ -520,23 +401,33 @@ NormalizedPoint Waveform::project(const FloatColor& color)
     return NormalizedPoint{-1.0f, (255.0f - luma) / 255.0f};
 }
 
-void Waveform::mapBinsToImage(uint64_t sampledRows)
+void Waveform::normalizeColumns(int regionWidth, const SampleGrid& grid)
+{
+    std::fill(m_columnScales.begin(), m_columnScales.end(), 0.0);
+    // Match the scatter's sixteenth-column splat, counting geometry only.
+    for (int x = 0; x < regionWidth; x += grid.columnStride) {
+        const auto position = static_cast<std::size_t>(static_cast<int64_t>(x) * m_columns * 16 / regionWidth);
+        const std::size_t column = position >> 4;
+        const std::size_t next = std::min(column + 1, m_columnScales.size() - 1);
+        m_columnScales[column] += static_cast<double>(16 - (position & 15u)) * grid.rows;
+        m_columnScales[next] += static_cast<double>(position & 15u) * grid.rows;
+    }
+    // The horizontal smoothing kernel spreads exposure along with the counts.
+    double previous = 0.0;
+    for (std::size_t column = 0; column < m_columnScales.size(); ++column) {
+        const double current = m_columnScales[column];
+        const double next = column + 1 < m_columnScales.size() ? m_columnScales[column + 1] : 0.0;
+        const double exposure = (previous + 2 * current + next) / 4;
+        m_columnScales[column] = exposure > 0.0 ? DensityScale / exposure : 0.0;
+        previous = current;
+    }
+}
+
+void Waveform::mapBinsToImage()
 {
     correctBinDensities();
     const std::vector<uint32_t>& traces = m_smoothed;
     const std::size_t planeSize = this->planeSize();
-
-    const WaveformModeFlags flags = waveformModeFlags(m_settings.mode);
-    const uint32_t densest =
-        peakDensity(traces, planeSize, rowPitch(), m_columns, flags.rgb, flags.luma, m_columnDensities.data());
-
-    // Each sample contributes sixteen weight units (the splat's
-    // sixteenths), so the per-row normalization divides them back out and
-    // the gain setting keeps its calibrated feel.
-    const double perRowScale = sampledRows > 0 ? ReferenceRowCount / (static_cast<double>(sampledRows) * 16.0) : 0.0;
-    const double gain = static_cast<double>(m_settings.gain) * perRowScale;
-    const double logCeiling = densest > 0 ? std::log1p(static_cast<double>(densest) * gain) : 0.0;
-    const double intensityScale = logCeiling > 0.0 ? 255.0 / logCeiling : 0.0;
 
     const uint32_t* redPlane = traces.data();
     const uint32_t* greenPlane = traces.data() + planeSize;
@@ -545,12 +436,11 @@ void Waveform::mapBinsToImage(uint64_t sampledRows)
 
     if (m_settings.mode == WaveformMode::RgbParade) {
         buildParade(redPlane, greenPlane, bluePlane);
-        redPlane = m_parade.data();
-        greenPlane = m_parade.data() + planeSize;
-        bluePlane = m_parade.data() + 2 * planeSize;
+        composeImage(m_parade.data(), m_parade.data() + planeSize, m_parade.data() + 2 * planeSize,
+                     static_cast<const float*>(nullptr));
+    } else {
+        composeImage(redPlane, greenPlane, bluePlane, lumaPlane);
     }
-
-    composeImage(redPlane, greenPlane, bluePlane, lumaPlane, gain, intensityScale);
     ++m_image.sequence;
 }
 
@@ -602,27 +492,29 @@ void Waveform::buildParade(const uint32_t* redPlane, const uint32_t* greenPlane,
     // traces stay visible. The result feeds the same composer as
     // the overlaid modes.
     const std::size_t planeSize = this->planeSize();
-    m_parade.assign(3 * planeSize, 0);
+    m_parade.assign(3 * planeSize, 0.0f);
     const int third = m_columns / 3;
     // A dark gutter separates the panes so each channel reads as its
     // own plot instead of three traces colliding at hard seams.
     const int gutter = std::max(2, m_columns / 256);
     const uint32_t* planes[3] = {redPlane, greenPlane, bluePlane};
     for (int channel = 0; channel < 3; ++channel) {
-        uint32_t* outPlane = m_parade.data() + static_cast<std::size_t>(channel) * planeSize;
+        float* outPlane = m_parade.data() + static_cast<std::size_t>(channel) * planeSize;
         const int first = channel * third + (channel > 0 ? gutter : 0);
         const int last = (channel == 2 ? m_columns : (channel + 1) * third) - (channel < 2 ? gutter : 0);
         const int span = last - first;
         for (int row = 0; row < Levels; ++row) {
             const uint32_t* sourceRow = planes[channel] + static_cast<std::size_t>(row) * rowPitch();
-            uint32_t* outRow = outPlane + static_cast<std::size_t>(row) * rowPitch();
+            float* outRow = outPlane + static_cast<std::size_t>(row) * rowPitch();
             for (int column = first; column < last; ++column) {
                 const int local = column - first;
                 const int begin = local * m_columns / span;
                 const int end = std::min((local + 1) * m_columns / span, m_columns);
-                uint32_t densestInWindow = 0;
+                float densestInWindow = 0.0f;
                 for (int source = begin; source < end; ++source) {
-                    densestInWindow = std::max(densestInWindow, sourceRow[source]);
+                    const float density = static_cast<float>(static_cast<double>(sourceRow[source]) *
+                                                             m_columnScales[static_cast<std::size_t>(source)]);
+                    densestInWindow = std::max(densestInWindow, density);
                 }
                 outRow[column] = densestInWindow;
             }
@@ -630,9 +522,13 @@ void Waveform::buildParade(const uint32_t* redPlane, const uint32_t* greenPlane,
     }
 }
 
-void Waveform::composeImage(const uint32_t* redPlane, const uint32_t* greenPlane, const uint32_t* bluePlane,
-                            const uint32_t* lumaPlane, double gain, double intensityScale)
+template <typename Density>
+void Waveform::composeImage(const Density* redPlane, const Density* greenPlane, const Density* bluePlane,
+                            const Density* lumaPlane)
 {
+    const double gain = static_cast<double>(m_settings.gain);
+    const double intensityScale =
+        255.0 / std::log1p(static_cast<double>(WaveformSettings{}.gain) * DensityScale * ReferenceDensity);
     const WaveformModeFlags flags = waveformModeFlags(m_settings.mode);
     const WaveformPlanes planes{redPlane, greenPlane, bluePlane, lumaPlane};
 
@@ -646,12 +542,18 @@ void Waveform::composeImage(const uint32_t* redPlane, const uint32_t* greenPlane
         uint8_t* out = m_image.rgba.data() + static_cast<std::size_t>(yBegin) * m_columns * 4;
         for (int y = yBegin; y < yEnd; ++y) {
             const LevelSample tap = levelSampleWeights(y, m_imageHeight, nativeHeight);
-            const auto sample = [&](const uint32_t* plane, int column) -> float {
+            const auto sample = [&](const Density* plane, int column) -> float {
                 const auto rowAt = [&](int level) -> float {
                     if (level < 0 || level >= Levels) {
                         return 0.0f;
                     }
-                    return static_cast<float>(plane[static_cast<std::size_t>(level) * rowPitch() + column]);
+                    const Density density = plane[static_cast<std::size_t>(level) * rowPitch() + column];
+                    if constexpr (std::is_same_v<Density, uint32_t>) {
+                        return static_cast<float>(static_cast<double>(density) *
+                                                  m_columnScales[static_cast<std::size_t>(column)]);
+                    } else {
+                        return density;
+                    }
                 };
                 if (nativeHeight) {
                     return rowAt(tap.base);

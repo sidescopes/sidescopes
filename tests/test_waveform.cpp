@@ -32,10 +32,13 @@ TEST_CASE("Waveform in luma mode plots mid gray on one level")
     frame.fill(Color{128, 128, 128});
 
     Waveform scope;
-    scope.configure(settingsFor(WaveformMode::Luma));
+    WaveformSettings settings = settingsFor(WaveformMode::Luma);
+    settings.gain = 0.005f;  // keep the smoothed neighbors below the coordinate peak
+    scope.configure(settings);
     scope.accumulate(frame.view(), IntRect{0, 0, 32, 16});
 
     for (int channel = 0; channel < 3; ++channel) {
+        REQUIRE(channelAt(scope.image(), 0, 127, channel) < 255);
         CHECK(peakRows(scope.image(), channel) == std::vector<int>{127});
     }
 }
@@ -46,8 +49,14 @@ TEST_CASE("Waveform in rgb mode plots each channel at its own level")
     frame.fill(Color{10, 150, 240});
 
     Waveform scope;
+    WaveformSettings settings;
+    settings.gain = 0.005f;  // position test: avoid a clipped three-row plateau
+    scope.configure(settings);
     scope.accumulate(frame.view(), IntRect{0, 0, 32, 16});  // RGB is the default
 
+    REQUIRE(channelAt(scope.image(), 0, 255 - 10, 0) < 255);
+    REQUIRE(channelAt(scope.image(), 0, 255 - 150, 1) < 255);
+    REQUIRE(channelAt(scope.image(), 0, 255 - 240, 2) < 255);
     CHECK(peakRows(scope.image(), 0) == std::vector<int>{255 - 10});
     CHECK(peakRows(scope.image(), 1) == std::vector<int>{255 - 150});
     CHECK(peakRows(scope.image(), 2) == std::vector<int>{255 - 240});
@@ -62,8 +71,14 @@ TEST_CASE("Waveform plots the same levels when a tall region splits across threa
     frame.fill(Color{10, 150, 240});
 
     Waveform scope;
+    WaveformSettings settings;
+    settings.gain = 0.005f;  // position test: avoid a clipped three-row plateau
+    scope.configure(settings);
     scope.accumulate(frame.view(), IntRect{0, 0, 32, 1024});  // RGB is the default
 
+    REQUIRE(channelAt(scope.image(), 0, 255 - 10, 0) < 255);
+    REQUIRE(channelAt(scope.image(), 0, 255 - 150, 1) < 255);
+    REQUIRE(channelAt(scope.image(), 0, 255 - 240, 2) < 255);
     CHECK(peakRows(scope.image(), 0) == std::vector<int>{255 - 10});
     CHECK(peakRows(scope.image(), 1) == std::vector<int>{255 - 150});
     CHECK(peakRows(scope.image(), 2) == std::vector<int>{255 - 240});
@@ -76,9 +91,14 @@ TEST_CASE("Waveform combined mode adds a white luma trace over rgb")
     frame.fill(Color{10, 150, 240});
 
     Waveform scope;
-    scope.configure(settingsFor(WaveformMode::RgbAndLuma));
+    WaveformSettings settings = settingsFor(WaveformMode::RgbAndLuma);
+    settings.gain = 0.005f;  // preserve unique RGB and luma coordinate peaks
+    scope.configure(settings);
     scope.accumulate(frame.view(), IntRect{0, 0, 32, 16});
 
+    REQUIRE(channelAt(scope.image(), 0, 255 - 10, 0) < 255);
+    REQUIRE(channelAt(scope.image(), 0, 255 - 150, 1) < 255);
+    REQUIRE(channelAt(scope.image(), 0, 255 - 240, 2) < 255);
     // Rows are reported top-down: the luma trace (row 128) precedes deeper
     // channel levels and follows shallower ones.
     CHECK(peakRows(scope.image(), 0) == std::vector<int>{255 - 127, 255 - 10});
@@ -319,41 +339,52 @@ TEST_CASE("Waveform respects a narrower column budget")
     Waveform scope;
     WaveformSettings settings;
     settings.columns = 512;
+    settings.gain = 0.005f;  // position test: avoid a clipped three-row plateau
     scope.configure(settings);
     scope.accumulate(frame.view(), IntRect{0, 0, 64, 64});
 
     CHECK(scope.image().width == 512);
+    REQUIRE(channelAt(scope.image(), 0, 255 - 127, 1) < 255);
     CHECK(peakRows(scope.image(), 1) == std::vector<int>{255 - 127});
 }
 
 TEST_CASE("Waveform column brightness is invariant to stride and region size")
 {
-    // Two gray levels stacked 3:1 vertically, so every sampled column sees
-    // the same 3:1 level mix at stride 1, stride 2, and in a half-size
-    // region. Per-row density normalization must then light the shared
-    // column zero identically in all three runs.
-    TestFrame frame(64, 64, 255);
-    frame.fillRows(0, 48, Color{191, 191, 191});
-    frame.fillRows(48, 64, Color{64, 64, 64});
+    // Twenty separated levels each occupy four rows. Staggered stride-two
+    // sampling visits two rows in every block, preserving the distribution.
+    // The shared columns receive different horizontal and vertical sample
+    // exposure, so geometry-normalized density must still light them
+    // identically in all three runs without relying on final saturation.
+    TestFrame frame(64, 80, 255);
+    for (int block = 0; block < 20; ++block) {
+        const auto shade = static_cast<uint8_t>(20 + block * 10);
+        frame.fillRows(block * 4, block * 4 + 4, Color{shade, shade, shade});
+    }
 
     Waveform reference;
-    reference.accumulate(frame.view(), IntRect{0, 0, 64, 64});
+    reference.accumulate(frame.view(), IntRect{0, 0, 64, 80});
 
     Waveform strided;
     WaveformSettings settings;
     settings.samplingStride = 2;
     strided.configure(settings);
-    strided.accumulate(frame.view(), IntRect{0, 0, 64, 64});
+    strided.accumulate(frame.view(), IntRect{0, 0, 64, 80});
 
     Waveform smaller;
-    // Half the width, full height: the level mix in each column stays 3:1.
-    smaller.accumulate(frame.view(), IntRect{0, 0, 32, 64});
+    // Half the width, full height: every level keeps the same share.
+    smaller.accumulate(frame.view(), IntRect{0, 0, 32, 80});
 
-    for (const int row : {255 - 191, 255 - 64}) {
-        const uint8_t expected = channelAt(reference.image(), 0, row, 1);
-        CHECK(expected > 0);
-        CHECK(channelAt(strided.image(), 0, row, 1) == expected);
-        CHECK(channelAt(smaller.image(), 0, row, 1) == expected);
+    // With 1024 output columns, these are the positions fed in every run:
+    // stride two and the narrower region both leave 32 columns between
+    // samples, while the reference additionally feeds the columns between.
+    for (int column = 0; column < reference.image().width; column += 32) {
+        for (const int row : {255 - 20, 255 - 210}) {
+            const uint8_t expected = channelAt(reference.image(), column, row, 1);
+            REQUIRE(expected > 0);
+            REQUIRE(expected < 255);
+            CHECK(channelAt(strided.image(), column, row, 1) == expected);
+            CHECK(channelAt(smaller.image(), column, row, 1) == expected);
+        }
     }
 }
 
@@ -563,9 +594,10 @@ TEST_CASE("A thinned waveform stops reading every row, through its accumulate")
 
 namespace {
 
-// Textured content standing in for a photograph: every column spans many
-// levels, which is what separates a picture from the editor's chrome.
-void paintTexture(TestFrame& frame, IntRect area)
+// Every column has a diffuse midtone body and a brighter diffuse header. The
+// header stays outside the body levels, so replacing it cannot change those
+// levels' raw counts; only a frame-wide display reference could move them.
+void paintToolbarFixture(TestFrame& frame, int headerRows)
 {
     uint32_t state = 0x9E3779B9u;
     const auto next = [&state] {
@@ -575,98 +607,84 @@ void paintTexture(TestFrame& frame, IntRect area)
 
         return state;
     };
-    for (int py = area.y; py < area.y + area.height; ++py) {
-        for (int px = area.x; px < area.x + area.width; ++px) {
-            const int shade = 40 + static_cast<int>(next() % 170u);
-            frame.setColor(px, py,
-                           Color{static_cast<uint8_t>(shade), static_cast<uint8_t>(shade * 4 / 5),
-                                 static_cast<uint8_t>(shade * 3 / 5)});
+    for (int py = 0; py < frame.height; ++py) {
+        for (int px = 0; px < frame.width; ++px) {
+            const int shade =
+                py < headerRows ? 200 + static_cast<int>(next() % 40u) : 64 + static_cast<int>(next() % 96u);
+            frame.setColor(
+                px, py, Color{static_cast<uint8_t>(shade), static_cast<uint8_t>(shade), static_cast<uint8_t>(shade)});
         }
     }
 }
 
-// The mean absolute difference over the columns both images built from the
-// same pixels, skipping the flat strip and the columns its mass smears into.
-double traceDifference(const ScopeImage& before, const ScopeImage& after, int firstColumn)
+int maximumChannel(const ScopeImage& image, int channel)
 {
-    double total = 0.0;
-    long long counted = 0;
-    for (int py = 0; py < before.height; ++py) {
-        for (int px = firstColumn; px < before.width; ++px) {
-            const auto base = (static_cast<std::size_t>(py) * before.width + px) * 4;
-            for (int channel = 0; channel < 3; ++channel) {
-                total += std::abs(static_cast<double>(before.rgba[base + channel]) -
-                                  static_cast<double>(after.rgba[base + channel]));
-                ++counted;
-            }
-        }
+    int brightest = 0;
+    for (std::size_t index = static_cast<std::size_t>(channel); index < image.rgba.size(); index += 4) {
+        brightest = std::max(brightest, static_cast<int>(image.rgba[index]));
     }
+    return brightest;
+}
 
-    return counted > 0 ? total / static_cast<double>(counted) : 0.0;
+TestFrame densitySteps()
+{
+    TestFrame frame(64, 400, 0);
+    for (int py = 0; py < frame.height; ++py) {
+        const auto shade = static_cast<uint8_t>(20 + (py % 20) * 10);
+        frame.fillRows(py, py + 1, Color{shade, shade, shade});
+    }
+    return frame;
 }
 
 }  // namespace
 
-TEST_CASE("A flat tone beside the picture leaves the rest of the trace alone")
+TEST_CASE("A toolbar at another level leaves unchanged trace levels byte exact")
 {
-    // The reported bug: sliding a region a few pixels off the photograph, onto
-    // the editor's flat chrome, dimmed the whole waveform. Those columns put
-    // every sample they have into one bin, and the ceiling the log
-    // normalization divides by was simply the densest bin, so the picture's own
-    // trace lost a quarter of its brightness for content beside it.
-    //
-    // Same region, same pixels, with a strip of one flat tone painted over the
-    // leading columns: the part of the trace built from the shared pixels must
-    // not move.
+    // The reported bug: a narrow horizontal toolbar changed the reference for
+    // the whole waveform, dimming or brightening midtone traces whose own raw
+    // counts had not moved. Replace a five-percent bright header with black or
+    // white. The toolbar's trace must change, while the untouched 80..140 body
+    // levels retain exactly the same output bytes.
     const IntRect region{0, 0, 480, 320};
-    const int strip = 12;  // Two and a half percent of the region's width.
+    constexpr int ToolbarRows = 16;
 
     TestFrame picture(480, 320, 0);
-    paintTexture(picture, region);
+    paintToolbarFixture(picture, ToolbarRows);
+    WaveformSettings settings = settingsFor(WaveformMode::Rgb);
+    settings.columns = 256;
+    Waveform baseline;
+    baseline.configure(settings);
+    baseline.accumulate(picture.view(), region);
+    const std::vector<uint8_t> baselineImage = baseline.image().rgba;
 
-    // One flat tone, and the same tone dithered over two levels: a window
-    // background is not always a single code, and the share that decides what
-    // counts as flat has to hold for both. Two levels put 5/12 of a column's
-    // mass on one bin against 4/6 for one level, and at most a quarter for a
-    // photographic column.
-    for (const int spread : {1, 2}) {
-        TestFrame withChrome(480, 320, 0);
-        withChrome.pixels = picture.pixels;
-        for (int py = region.y; py < region.y + region.height; ++py) {
-            for (int px = 0; px < strip; ++px) {
-                const auto shade = static_cast<uint8_t>(45 + (px + py) % spread);
-                withChrome.setColor(px, py, Color{shade, shade, static_cast<uint8_t>(shade + 2)});
-            }
+    for (const uint8_t tone : {uint8_t{0}, uint8_t{255}}) {
+        TestFrame withToolbar(480, 320, 0);
+        withToolbar.pixels = picture.pixels;
+        withToolbar.fillRows(0, ToolbarRows, Color{tone, tone, tone});
+        Waveform changed;
+        changed.configure(settings);
+        changed.accumulate(withToolbar.view(), region);
+
+        INFO("toolbar tone " << static_cast<int>(tone));
+        CHECK(changed.image().rgba != baselineImage);
+        bool bodyExact = true;
+        for (int level = 80; level <= 140; ++level) {
+            const int row = 255 - level;
+            const std::size_t first = static_cast<std::size_t>(row) * settings.columns * 4;
+            const std::size_t last = first + static_cast<std::size_t>(settings.columns) * 4;
+            bodyExact = bodyExact && std::equal(baselineImage.begin() + static_cast<std::ptrdiff_t>(first),
+                                                baselineImage.begin() + static_cast<std::ptrdiff_t>(last),
+                                                changed.image().rgba.begin() + static_cast<std::ptrdiff_t>(first));
         }
-
-        for (const WaveformMode mode :
-             {WaveformMode::Luma, WaveformMode::Rgb, WaveformMode::RgbParade, WaveformMode::ColoredLuma}) {
-            WaveformSettings settings = settingsFor(mode);
-            settings.columns = 256;
-
-            Waveform alone;
-            alone.configure(settings);
-            alone.accumulate(picture.view(), region);
-            Waveform beside;
-            beside.configure(settings);
-            beside.accumulate(withChrome.view(), region);
-
-            // The image columns the strip feeds, plus a guard for the
-            // horizontal kernel; everything past them comes from identical
-            // pixels.
-            const int shared = strip * settings.columns / region.width + 4;
-            INFO("waveform mode " << static_cast<int>(mode) << " over " << spread << " level(s)");
-            CHECK(traceDifference(alone.image(), beside.image(), shared) < 2.0);
-        }
+        CHECK(bodyExact);
     }
 }
 
-TEST_CASE("A frame of one flat tone still normalizes to its own peak")
+TEST_CASE("A fixed response keeps a dense flat tone visible at the final clip")
 {
-    // The ceiling passes over columns that are a single flat tone, so a frame
-    // with nothing else in it has no column left to measure. It falls back to
-    // the plain maximum rather than dividing by nothing and rendering black -
-    // and that fallback is what keeps the colour-bar and ramp goldens exact.
+    // A fixed reference has no empty adaptive fallback. A frame concentrated
+    // at one level is simply denser than the reference and reaches the existing
+    // final channel clamp rather than rendering black or wrapping around.
     TestFrame frame(320, 240, 0);
     frame.fill(Color{90, 140, 200});
 
@@ -676,6 +694,56 @@ TEST_CASE("A frame of one flat tone still normalizes to its own peak")
 
     const auto [litColumn, litRow] = brightestPixel(waveform.image());
     CHECK(channelAt(waveform.image(), litColumn, litRow, 2) == 255);
+}
+
+TEST_CASE("Waveform intensity increases a fixed-density trace")
+{
+    // Twenty equally populated, separated levels keep their correction neutral.
+    // Under the fixed denominator, user gain is exposure: the densest trace must
+    // rise with gain instead of every gain renormalizing that peak to white.
+    const TestFrame frame = densitySteps();
+    const auto peakAt = [&](float gain) {
+        WaveformSettings settings = settingsFor(WaveformMode::Rgb);
+        settings.columns = 256;
+        settings.gain = gain;
+        Waveform waveform;
+        waveform.configure(settings);
+        waveform.accumulate(frame.view(), IntRect{0, 0, frame.width, frame.height});
+        return maximumChannel(waveform.image(), 1);
+    };
+
+    const int low = peakAt(0.005f);
+    const int standard = peakAt(0.05f);
+    const int high = peakAt(0.5f);
+    REQUIRE(low > 0);
+    CHECK(low < standard);
+    CHECK(standard < high);
+    // Pin the fixed calibration on an unsaturated five-percent density.
+    CHECK(standard == 188);
+    CHECK(high == 255);
+}
+
+TEST_CASE("Combined waveform clips after adding rgb and luma")
+{
+    // At the default gain this diffuse trace leaves RGB below full scale. The
+    // combined mode adds its dimmed luma at the same gray level and only then
+    // clamps the final channel, so the sum reaches white without overflow.
+    const TestFrame frame = densitySteps();
+    WaveformSettings settings = settingsFor(WaveformMode::Rgb);
+    settings.columns = 256;
+    Waveform rgb;
+    rgb.configure(settings);
+    rgb.accumulate(frame.view(), IntRect{0, 0, frame.width, frame.height});
+
+    settings.mode = WaveformMode::RgbAndLuma;
+    Waveform combined;
+    combined.configure(settings);
+    combined.accumulate(frame.view(), IntRect{0, 0, frame.width, frame.height});
+
+    const int rgbPeak = maximumChannel(rgb.image(), 1);
+    REQUIRE(rgbPeak > 0);
+    CHECK(rgbPeak < 255);
+    CHECK(maximumChannel(combined.image(), 1) == 255);
 }
 
 TEST_CASE("Thinning cannot take a waveform below one sample a bin")

@@ -42,17 +42,6 @@ inline constexpr int MaximumWaveformHeight = 768;
 /// scopes pay, which is why it buys only the small-pane case.
 inline constexpr int WaveformMinSamplesPerBin = 32;
 
-/// What one column of one bin plane holds: its densest bin, the level that bin
-/// sits at, and the mass of the whole column. Together they say whether the
-/// column carries a distribution or a single flat tone, which is what decides
-/// the trace's normalization ceiling.
-struct ColumnDensity
-{
-    uint32_t peak = 0;
-    uint64_t mass = 0;
-    int level = 0;
-};
-
 struct WaveformSettings
 {
     /// Trace gain applied to normalized bin densities before log mapping.
@@ -80,10 +69,9 @@ struct WaveformSettings
 
 /// Waveform monitor: level (vertical) against image column (horizontal).
 /// Depending on the mode it plots Rec.709 luma, the three channels as
-/// colored overlaid traces, or both. Density mapping follows the same log
-/// rules as the vectorscope, but normalization is per sampled row: a column
-/// receives one sample per row, so this keeps column brightness invariant to
-/// both the sampling stride and the region size.
+/// colored overlaid traces, or both. Brightness uses a fixed log-and-gamma
+/// response to density per sampled column, including horizontal splat weights.
+/// Banding correction precedes that response and retains its global statistics.
 ///
 /// Not thread-safe; a single analysis thread owns each instance.
 class Waveform
@@ -140,11 +128,13 @@ private:
     /// never accumulated holds no image at all.
     void ensureBuffers();
     void resize(int columns, int imageHeight);
-    void mapBinsToImage(uint64_t sampledRows);
+    void normalizeColumns(int regionWidth, const SampleGrid& grid);
+    void mapBinsToImage();
     void correctBinDensities();
     void buildParade(const uint32_t* redPlane, const uint32_t* greenPlane, const uint32_t* bluePlane);
-    void composeImage(const uint32_t* redPlane, const uint32_t* greenPlane, const uint32_t* bluePlane,
-                      const uint32_t* lumaPlane, double gain, double intensityScale);
+    template <typename Density>
+    void composeImage(const Density* redPlane, const Density* greenPlane, const Density* bluePlane,
+                      const Density* lumaPlane);
 
     /// The bins this pass reads: the lent set when there is one, otherwise the
     /// engine's own.
@@ -177,13 +167,10 @@ private:
     // the set it was lent. Both are never in use at once.
     WaveformBins m_ownBins;
     WaveformBins* m_lentBins = nullptr;
-    // One plane's per-column densities, the evidence the normalization ceiling
-    // is chosen from. Sized with the planes and rewritten per plane, so
-    // choosing the ceiling allocates nothing.
-    std::vector<ColumnDensity> m_columnDensities;
-    // Parade scratch: per-channel window-maxed planes feeding the shared
-    // composer.
-    std::vector<uint32_t> m_parade;
+    // Geometry-only factors converting counts to normalized density.
+    std::vector<double> m_columnScales;
+    // Parade scratch: normalized densities, window-maxed before composition.
+    std::vector<float> m_parade;
     // Per-plane scratch for the code-density correction: dead-code
     // reconstruction happens here before smoothing.
     std::vector<uint32_t> m_corrected;

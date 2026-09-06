@@ -64,6 +64,11 @@ Each sampled pixel contributes at its actual channel level. A vertical slice
 therefore shows the values present in the corresponding image column; the
 scope does not fill every value between the lowest and highest samples.
 
+Trace brightness uses a fixed response to sample density, adjusted by the
+intensity control. Bright or dark areas entering the region do not reset a
+frame-wide brightness ceiling. Banding correction still uses statistics from
+the whole region and can change individual traces as its content changes.
+
 Channel separation is meaningful in context. Over a verified neutral, it can
 show a rendered color bias and the tonal range in which that bias occurs. Over
 a colored subject, the same separation may simply describe the subject.
