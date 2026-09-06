@@ -176,11 +176,10 @@ def _run_one(scenario, stack, bundle, plan, guard, helper, content_set, diagnost
         content_rect = window.rect if window else plan.content_rect
         if not scenario.from_launch:
             if not session.await_window(application, plan.application_rect[2:]):
-                warnings.append("the application window never appeared at its expected size")
+                raise RuntimeError("the application window never appeared at its expected size")
             time.sleep(session.SETTLE_SECONDS)
             if not session.establish_region(application, scenario.region, region, content_rect, BINDINGS, bundle):
-                warnings.append(f"no region border appeared, so this measures an application with no "
-                                f"{scenario.region} region rather than the scenario asked for")
+                raise RuntimeError(f"could not establish the requested {scenario.region} region")
         target = session.Target(application, bundle, BINDINGS)
         action = session.action_for(scenario.action, region, content_rect, target)
         try:

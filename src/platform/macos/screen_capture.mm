@@ -33,18 +33,10 @@
 #include <string>
 
 #include "platform/desktop.h"
+#include "platform/macos/capture_completion.h"
+#include "platform/macos/capture_frame.h"
 #include "platform/pixel_average.h"
 #include "platform/screen_capture.h"
-
-namespace sidescopes {
-class SckScreenCaptureSource;
-
-struct SckCallbackState
-{
-    std::mutex mutex;
-    SckScreenCaptureSource* owner = nullptr;
-};
-}  // namespace sidescopes
 
 @interface SidescopesStreamHandler : NSObject <SCStreamOutput, SCStreamDelegate> {
 @public
@@ -55,17 +47,54 @@ struct SckCallbackState
 namespace sidescopes {
 namespace {
 
+// The lock must be released even when the destination's page allocation fails.
+class PixelBufferReadLock
+{
+public:
+    explicit PixelBufferReadLock(CVPixelBufferRef image)
+        : m_image(image)
+    {
+        m_locked = CVPixelBufferLockBaseAddress(image, kCVPixelBufferLock_ReadOnly) == kCVReturnSuccess;
+    }
+
+    ~PixelBufferReadLock()
+    {
+        if (m_locked) {
+            CVPixelBufferUnlockBaseAddress(m_image, kCVPixelBufferLock_ReadOnly);
+        }
+    }
+
+    PixelBufferReadLock(const PixelBufferReadLock&) = delete;
+    PixelBufferReadLock& operator=(const PixelBufferReadLock&) = delete;
+
+    [[nodiscard]] bool locked() const
+    {
+        return m_locked;
+    }
+
+private:
+    CVPixelBufferRef m_image;
+    bool m_locked = false;
+};
+
 SCShareableContent* fetchShareableContent()
 {
-    dispatch_semaphore_t done = dispatch_semaphore_create(0);
-    __block SCShareableContent* result = nil;
-    [SCShareableContent getShareableContentWithCompletionHandler:^(SCShareableContent* content, NSError* error) {
-      (void)error;
-      result = content;
-      dispatch_semaphore_signal(done);
-    }];
-    dispatch_semaphore_wait(done, DISPATCH_TIME_FOREVER);
-    return result;
+    try {
+        const auto completion = std::make_shared<CaptureCompletion<SCShareableContent*>>();
+        [SCShareableContent getShareableContentWithCompletionHandler:^(SCShareableContent* content, NSError* error) {
+          try {
+              (void)completion->complete(error ? nil : content);
+          } catch (...) {  // Keep C++ bookkeeping failures inside the framework callback.
+          }
+        }];
+        auto result = completion->wait(CaptureCompletionTimeout);
+        if (!result) {
+            diagEmit(DiagChannel::Perf, "shareable content request timed out");
+        }
+        return result.value_or(nil);
+    } catch (...) {
+        return nil;
+    }
 }
 
 SCDisplay* findCaptureDisplay(SCShareableContent* content, const std::string& identifier)
@@ -185,6 +214,90 @@ std::optional<FloatColor> averageCapturedImage(CGImageRef image)
 
 }  // namespace
 
+bool deliverCapturePixels(CVPixelBufferRef image, FrameBuffer& buffer, FrameMailbox& mailbox) noexcept
+{
+    try {
+        {
+            const PixelBufferReadLock lock(image);
+            if (!lock.locked()) {
+                return false;
+            }
+            const auto* source = static_cast<const uint8_t*>(CVPixelBufferGetBaseAddress(image));
+            if (!source) {
+                return false;
+            }
+            const auto sourceStride = CVPixelBufferGetBytesPerRow(image);
+            buffer.sizeTo(static_cast<std::size_t>(buffer.strideBytes) * buffer.height);
+            for (int py = 0; py < buffer.height; ++py) {
+                std::memcpy(buffer.data.data() + static_cast<std::size_t>(py) * buffer.strideBytes,
+                            source + static_cast<std::size_t>(py) * sourceStride,
+                            static_cast<std::size_t>(buffer.width) * 4);
+            }
+        }  // Release the native surface before publishing the owned copy.
+        buffer = mailbox.publish(std::move(buffer));
+        return true;
+    } catch (...) {
+        // Drop this frame; a later delivery can allocate and publish normally.
+        return false;
+    }
+}
+
+CaptureStartResult startCaptureWithDeadline(SCStream* stream, const std::shared_ptr<SckCallbackState>& callbacks,
+                                            std::chrono::milliseconds timeout)
+{
+    std::optional<bool> result{false};
+    std::shared_ptr<CaptureCompletion<bool>> completion;
+    try {
+        completion = std::make_shared<CaptureCompletion<bool>>();
+        __weak SCStream* weakStream = stream;
+        [stream startCaptureWithCompletionHandler:^(NSError* error) {
+          try {
+              if (!completion->complete(error == nil) && completion->abandoned() && error == nil) {
+                  // Do not retain stream through its own completion, and never
+                  // wait on this callback queue when cancelling a late start.
+                  SCStream* lateStream = weakStream;
+                  [lateStream stopCaptureWithCompletionHandler:nil];
+              }
+          } catch (...) {
+              completion->abandon();
+              SCStream* lateStream = weakStream;
+              [lateStream stopCaptureWithCompletionHandler:nil];
+          }
+        }];
+        result = completion->wait(timeout);
+    } catch (...) {
+        // Allocation/submission failure follows the same retirement path.
+        if (completion) {
+            completion->abandon();
+        }
+    }
+    if (result.value_or(false)) {
+        return CaptureStartResult::Started;
+    }
+    callbacks->retire();
+    // A timed-out start has not set m_running. Cancel it regardless, without
+    // waiting again; its late completion independently cancels late success.
+    [stream stopCaptureWithCompletionHandler:nil];
+    return result ? CaptureStartResult::Failed : CaptureStartResult::TimedOut;
+}
+
+bool stopCaptureWithDeadline(SCStream* stream, std::chrono::milliseconds timeout)
+{
+    try {
+        const auto completion = std::make_shared<CaptureCompletion<bool>>();
+        [stream stopCaptureWithCompletionHandler:^(NSError* error) {
+          try {
+              (void)completion->complete(error == nil);
+          } catch (...) {  // A missing completion still has a bounded caller.
+          }
+        }];
+        return completion->wait(timeout).value_or(false);
+    } catch (...) {
+        [stream stopCaptureWithCompletionHandler:nil];
+        return false;
+    }
+}
+
 class SckScreenCaptureSource final : public ScreenCaptureSource
 {
 public:
@@ -266,15 +379,11 @@ public:
             return fail("adding the stream output failed");
         }
 
-        dispatch_semaphore_t done = dispatch_semaphore_create(0);
-        __block BOOL started = YES;
-        [m_stream startCaptureWithCompletionHandler:^(NSError* startError) {
-          started = startError == nil;
-          dispatch_semaphore_signal(done);
-        }];
-        dispatch_semaphore_wait(done, DISPATCH_TIME_FOREVER);
-        if (!started) {
-            return fail("starting the capture stream failed");
+        const CaptureStartResult started = startCaptureWithDeadline(m_stream, m_callbacks);
+        if (started != CaptureStartResult::Started) {
+            resetStreamState();
+            return fail(started == CaptureStartResult::TimedOut ? "starting the capture stream timed out"
+                                                                : "starting the capture stream failed");
         }
 
         m_running.store(true);
@@ -300,24 +409,26 @@ public:
         // nothing downstream depends on when that happens.
         [m_stream updateConfiguration:configuration
                     completionHandler:^(NSError* error) {
-                      const std::lock_guard lock(callbacks->mutex);
-                      if (callbacks->owner != nullptr) {
-                          callbacks->owner->handleConfigurationError(error);
+                      try {
+                          const std::lock_guard lock(callbacks->mutex);
+                          if (callbacks->owner != nullptr) {
+                              callbacks->owner->handleConfigurationError(error);
+                          }
+                      } catch (...) {
+                          // Reporting a capture error must not escape the SDK callback.
                       }
                     }];
     }
 
     void stop() override
     {
-        if (!m_running.exchange(false)) {
-            resetStreamState();
-            return;
+        m_running.store(false);
+        if (m_callbacks) {
+            m_callbacks->retire();
         }
-        dispatch_semaphore_t done = dispatch_semaphore_create(0);
-        [m_stream stopCaptureWithCompletionHandler:^(NSError*) {
-          dispatch_semaphore_signal(done);
-        }];
-        dispatch_semaphore_wait(done, DISPATCH_TIME_FOREVER);
+        if (m_stream && !stopCaptureWithDeadline(m_stream)) {
+            diagEmit(DiagChannel::Perf, "stopping the capture stream failed or timed out");
+        }
         resetStreamState();
     }
 
@@ -353,14 +464,8 @@ public:
         if (!format) {
             return;
         }
-        if (CVPixelBufferLockBaseAddress(image, kCVPixelBufferLock_ReadOnly) != kCVReturnSuccess) {
-            return;
-        }
-
         const int width = static_cast<int>(CVPixelBufferGetWidth(image));
         const int height = static_cast<int>(CVPixelBufferGetHeight(image));
-        const int sourceStride = static_cast<int>(CVPixelBufferGetBytesPerRow(image));
-        const auto* source = static_cast<const uint8_t*>(CVPixelBufferGetBaseAddress(image));
 
         // Which part of the display these pixels are is decided by the size
         // actually delivered, not by what was last asked for: a narrowing takes
@@ -370,21 +475,14 @@ public:
         // dropped rather than guessed at - one frame, thirty times a second.
         const std::optional<IntRect> stamp = geometryFor(width, height);
         if (!stamp) {
-            CVPixelBufferUnlockBaseAddress(image, kCVPixelBufferLock_ReadOnly);
             return;
         }
 
         stampBuffer(width, height, *format, *stamp);
-        for (int py = 0; py < height; ++py) {
-            std::memcpy(m_buffer.data.data() + static_cast<std::size_t>(py) * m_buffer.strideBytes,
-                        source + static_cast<std::size_t>(py) * sourceStride, static_cast<std::size_t>(width) * 4);
-        }
-        CVPixelBufferUnlockBaseAddress(image, kCVPixelBufferLock_ReadOnly);
-
-        m_buffer = m_mailbox->publish(std::move(m_buffer));
+        (void)deliverCapturePixels(image, m_buffer, *m_mailbox);
     }
 
-    // Describes the delivery in the recycled buffer and sizes its storage. Every
+    // Describes the delivery in the recycled buffer. Every
     // field is written on every frame, never only on the ones that changed: the
     // buffer comes back from the mailbox holding the previous delivery's
     // answers, and one left alone mislabels these pixels.
@@ -400,7 +498,6 @@ public:
         m_buffer.sourceY = stamp.y;
         m_buffer.sourceWidth = stamp.width;
         m_buffer.sourceHeight = stamp.height;
-        m_buffer.sizeTo(static_cast<std::size_t>(m_buffer.strideBytes) * height);
         // Logged when it changes rather than thirty times a second, and stated
         // afresh to every recording: capture settles its format in the first
         // second of a run, and a log switched on later still has to say what
@@ -451,14 +548,12 @@ public:
     }
 
 private:
-    // Drops the stream, its handler, and the mailbox link. Shared by both
-    // stop() paths - the already-stopped early return and the normal
-    // teardown after the stream has been asked to stop.
+    // Drops the stream, its handler, and the mailbox link after callback
+    // retirement. Shared by failed starts and normal teardown.
     void resetStreamState()
     {
         if (m_callbacks) {
-            const std::lock_guard lock(m_callbacks->mutex);
-            m_callbacks->owner = nullptr;
+            m_callbacks->retire();
         }
         m_callbacks.reset();
         m_stream = nil;
@@ -583,11 +678,15 @@ void sampleScreenColorAsync(DesktopPoint point, std::function<void(std::optional
     [SCScreenshotManager captureImageWithFilter:filter
                                   configuration:configuration
                               completionHandler:^(CGImageRef image, NSError* error) {
-                                if (!image || error) {
-                                    (*shared)(std::nullopt);
-                                    return;
+                                try {
+                                    if (!image || error) {
+                                        (*shared)(std::nullopt);
+                                        return;
+                                    }
+                                    (*shared)(averageCapturedImage(image));
+                                } catch (...) {
+                                    // Caller failures must not unwind the framework's completion queue.
                                 }
-                                (*shared)(averageCapturedImage(image));
                               }];
 }
 
@@ -623,43 +722,63 @@ std::optional<CapturedImage> imageToBgra(CGImageRef image)
 
 }  // namespace
 
+std::optional<CapturedImage> convertCaptureImage(CGImageRef image) noexcept
+{
+    if (!image) {
+        return std::nullopt;
+    }
+    try {
+        return imageToBgra(image);
+    } catch (...) {
+        return std::nullopt;
+    }
+}
+
 // A full-display one-shot for off-stream analysis: fresh shareable content
 // (this runs on a background thread, so it must not touch the main-thread
 // sampler cache), the same self-exclusion and sRGB request the stream uses,
-// captured synchronously through a semaphore like fetchShareableContent.
+// captured through the same bounded completion as fetchShareableContent.
 std::optional<CapturedImage> captureDisplayImage(uint32_t displayId)
 {
-    @autoreleasepool {
-        SCShareableContent* content = fetchShareableContent();
-        if (!content) {
-            return std::nullopt;
-        }
-        SCDisplay* display = findCaptureDisplay(content, std::to_string(displayId));
-        if (!display) {
-            return std::nullopt;
-        }
-        SCContentFilter* filter = buildContentFilter(content, display);
-        SCStreamConfiguration* configuration = [[SCStreamConfiguration alloc] init];
-        const CGFloat scale = filter.pointPixelScale > 0 ? filter.pointPixelScale : 2.0;
-        configuration.width = static_cast<size_t>(static_cast<CGFloat>(display.width) * scale);
-        configuration.height = static_cast<size_t>(static_cast<CGFloat>(display.height) * scale);
-        configuration.showsCursor = NO;
-        configuration.pixelFormat = kCVPixelFormatType_32BGRA;
-        configuration.colorSpaceName = kCGColorSpaceSRGB;
+    try {
+        @autoreleasepool {
+            SCShareableContent* content = fetchShareableContent();
+            if (!content) {
+                return std::nullopt;
+            }
+            SCDisplay* display = findCaptureDisplay(content, std::to_string(displayId));
+            if (!display) {
+                return std::nullopt;
+            }
+            SCContentFilter* filter = buildContentFilter(content, display);
+            SCStreamConfiguration* configuration = [[SCStreamConfiguration alloc] init];
+            const CGFloat scale = filter.pointPixelScale > 0 ? filter.pointPixelScale : 2.0;
+            configuration.width = static_cast<size_t>(static_cast<CGFloat>(display.width) * scale);
+            configuration.height = static_cast<size_t>(static_cast<CGFloat>(display.height) * scale);
+            configuration.showsCursor = NO;
+            configuration.pixelFormat = kCVPixelFormatType_32BGRA;
+            configuration.colorSpaceName = kCGColorSpaceSRGB;
 
-        dispatch_semaphore_t done = dispatch_semaphore_create(0);
-        __block std::optional<CapturedImage> result;
-        [SCScreenshotManager captureImageWithFilter:filter
-                                      configuration:configuration
-                                  completionHandler:^(CGImageRef image, NSError* error) {
-                                    if (image && !error) {
-                                        result = imageToBgra(image);
-                                    }
-                                    dispatch_semaphore_signal(done);
-                                  }];
-        dispatch_semaphore_wait(done, DISPATCH_TIME_FOREVER);
-
-        return result;
+            const auto completion = std::make_shared<CaptureCompletion<CaptureImageOwner>>();
+            [SCScreenshotManager captureImageWithFilter:filter
+                                          configuration:configuration
+                                      completionHandler:^(CGImageRef image, NSError* error) {
+                                        try {
+                                            (void)completion->complete(CaptureImageOwner(
+                                                image && !error ? CGImageRetain(image) : nullptr, CGImageRelease));
+                                        } catch (...) {
+                                        }
+                                      }];
+            auto image = completion->wait(CaptureCompletionTimeout);
+            if (!image || !*image) {
+                return std::nullopt;
+            }
+            // Conversion allocates. Keep it outside the framework callback and
+            // release the retained image even when allocation fails.
+            return convertCaptureImage(image->get());
+        }
+    } catch (...) {
+        return std::nullopt;
     }
 }
 
@@ -673,18 +792,26 @@ std::optional<CapturedImage> captureDisplayImage(uint32_t displayId)
     if (type != SCStreamOutputTypeScreen) {
         return;
     }
-    const std::lock_guard lock(callbacks->mutex);
-    if (auto* owner = callbacks->owner) {
-        owner->handleSample(sampleBuffer);
+    try {
+        const std::lock_guard lock(callbacks->mutex);
+        if (auto* owner = callbacks->owner) {
+            owner->handleSample(sampleBuffer);
+        }
+    } catch (...) {
+        // Never unwind C++ failures through the framework's delivery queue.
     }
 }
 
 - (void)stream:(SCStream*)stream didStopWithError:(NSError*)error
 {
     (void)stream;
-    const std::lock_guard lock(callbacks->mutex);
-    if (auto* owner = callbacks->owner) {
-        owner->handleStopped(error);
+    try {
+        const std::lock_guard lock(callbacks->mutex);
+        if (auto* owner = callbacks->owner) {
+            owner->handleStopped(error);
+        }
+    } catch (...) {
+        // handleStopped clears the running state before attempting notification.
     }
 }
 

@@ -38,7 +38,10 @@ from . import catalog, quartz
 _DIAG_LINE = re.compile(r"^t=([0-9.]+) perf (frame|pass) ")
 
 _LAUNCH_TIMEOUT_SECONDS = 25.0
-_QUIT_TIMEOUT_SECONDS = 8.0
+# An off-stream scan can await discovery and an image before stream shutdown
+# adds its own wait. Allow their 15-second budget plus scheduling margin.
+_GRACEFUL_QUIT_TIMEOUT_SECONDS = 20.0
+_SIGNAL_QUIT_TIMEOUT_SECONDS = 8.0
 # Long enough for the capture stream, the first analysis pass and the window
 # animation to be behind us, so a measurement sees the steady state.
 SETTLE_SECONDS = 3.0
@@ -97,6 +100,8 @@ def measurement_method(diagnostics_enabled, *, graceful=None):
     method = {
         "version": "observed-window/2",
         "teardown": "pid-quit-confirmed/1; legacy-signal-first",
+        "teardown_timeouts_seconds": {"graceful": _GRACEFUL_QUIT_TIMEOUT_SECONDS,
+                                      "signal": _SIGNAL_QUIT_TIMEOUT_SECONDS},
         "diagnostics": {"enabled": diagnostics_enabled,
                         "flush": "every-line" if diagnostics_enabled else "disabled"},
         # Empty means the build's default; do not guess the resolved quality.
@@ -192,8 +197,8 @@ def _owned_process_exists(pid, identity):
     return True
 
 
-def _await_exit(pid, identity):
-    deadline = time.monotonic() + _QUIT_TIMEOUT_SECONDS
+def _await_exit(pid, identity, timeout_seconds):
+    deadline = time.monotonic() + timeout_seconds
     while _owned_process_exists(pid, identity):
         if time.monotonic() >= deadline:
             return False
@@ -223,7 +228,7 @@ def quit_application(pid, *, identity=None, graceful=True):
                 outcome["request_sent"] = quartz.request_quit(pid)
             except Exception as failure:  # request failure still needs bounded cleanup
                 outcome["request_error"] = str(failure)
-            if _await_exit(pid, identity):
+            if _await_exit(pid, identity, _GRACEFUL_QUIT_TIMEOUT_SECONDS):
                 outcome["exit"] = "graceful" if outcome["request_sent"] else "before-fallback"
                 return outcome
         return _signal_exit(pid, identity, outcome)
@@ -250,7 +255,7 @@ def _signal_exit(pid, identity, outcome):
                 outcome["signals"].append(sig.name)
             except ProcessLookupError:
                 pass
-        if _await_exit(pid, identity):
+        if _await_exit(pid, identity, _SIGNAL_QUIT_TIMEOUT_SECONDS):
             outcome["exit"] = "signal" if outcome["signals"] else "before-fallback"
             return outcome
     raise RuntimeError(f"process {pid} did not exit after bounded teardown: {outcome}")

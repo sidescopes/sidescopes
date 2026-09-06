@@ -72,7 +72,8 @@ class ApplicationTeardownTests(unittest.TestCase):
         self.signal = self.scope.enter_context(mock.patch.object(session.os, 'kill'))
         self.scope.enter_context(mock.patch.object(session.time, 'monotonic', side_effect=lambda: self.clock))
         self.scope.enter_context(mock.patch.object(session.time, 'sleep', side_effect=self.advance))
-        self.scope.enter_context(mock.patch.object(session, '_QUIT_TIMEOUT_SECONDS', 0.4))
+        self.scope.enter_context(mock.patch.object(session, '_GRACEFUL_QUIT_TIMEOUT_SECONDS', 0.4))
+        self.scope.enter_context(mock.patch.object(session, '_SIGNAL_QUIT_TIMEOUT_SECONDS', 0.4))
 
     def advance(self, seconds):
         self.clock += seconds
@@ -93,6 +94,30 @@ class ApplicationTeardownTests(unittest.TestCase):
         self.assertEqual(session.quit_application(42)['exit'], 'already-exited')
         self.request.assert_not_called()
         self.signal.assert_not_called()
+
+    def test_slow_bounded_shutdown_has_time_to_finish_without_signals(self):
+        self.lookup.side_effect = lambda pid: self.identity if self.clock < 16 else None
+        with mock.patch.object(session, '_GRACEFUL_QUIT_TIMEOUT_SECONDS', 20), \
+                mock.patch.object(session, '_SIGNAL_QUIT_TIMEOUT_SECONDS', 8):
+            outcome = session.quit_application(42, identity=self.identity)
+            self.assertEqual(session.measurement_method(True)['teardown_timeouts_seconds'],
+                             {'graceful': 20, 'signal': 8})
+        self.assertEqual(outcome['exit'], 'graceful')
+        self.assertGreaterEqual(self.clock, 16)
+        self.assertLess(self.clock, 17)
+        self.signal.assert_not_called()
+
+    def test_each_signal_keeps_its_separate_bounded_wait(self):
+        sent = []
+        self.signal.side_effect = lambda pid, sig: sent.append((sig, self.clock))
+        with mock.patch.object(session, '_GRACEFUL_QUIT_TIMEOUT_SECONDS', 20), \
+                mock.patch.object(session, '_SIGNAL_QUIT_TIMEOUT_SECONDS', 8):
+            with self.assertRaisesRegex(RuntimeError, 'did not exit'):
+                session.quit_application(42, identity=self.identity)
+        self.assertEqual([sig for sig, _ in sent], [session.signal.SIGTERM, session.signal.SIGKILL])
+        self.assertAlmostEqual(sent[0][1], 20, delta=0.3)
+        self.assertAlmostEqual(sent[1][1] - sent[0][1], 8, delta=0.3)
+        self.assertAlmostEqual(self.clock - sent[1][1], 8, delta=0.3)
 
     def test_unknown_or_reused_target_is_never_signalled(self):
         for failure in (PermissionError('denied'), None):
@@ -250,10 +275,10 @@ class ApplicationQuitBindingTests(unittest.TestCase):
 
 
 class ScenarioCleanupTests(unittest.TestCase):
-    def exercise(self, action_failure=None, quit_failure=None, outcome=None):
+    def exercise(self, action_failure=None, quit_failure=None, outcome=None, setup_failure=None):
         bundle = pathlib.Path('/owned/SideScopes.app')
-        scenario = types.SimpleNamespace(content='still', content_fps=0, from_launch=True,
-                                         action='still', expects_analysis=False)
+        scenario = types.SimpleNamespace(content='still', content_fps=0, from_launch=setup_failure is None,
+                                         action='still', region='draw', expects_analysis=False)
         rect = (10, 20, 300, 400)
         plan = types.SimpleNamespace(application_rect=rect, content_rect=rect, region_in=lambda _: rect)
         guard, window, action = mock.Mock(), mock.Mock(pid=43, rect=rect), mock.Mock()
@@ -267,6 +292,9 @@ class ScenarioCleanupTests(unittest.TestCase):
                     (run, '_motion_complaints', dict(return_value=[])),
                     (session, 'graceful_teardown', dict(return_value=True)),
                     (session, 'launch', dict(return_value=42)),
+                    (session, 'await_window', dict(return_value=setup_failure != 'window')),
+                    (session, 'establish_region', dict(return_value=setup_failure != 'region')),
+                    (session.time, 'sleep', {}),
                     (session, 'action_for', dict(return_value=action)),
                     (session, 'measure', dict(return_value=measurement)),
                     (session, 'quit_application', dict(return_value=outcome or default, side_effect=quit_failure)),
@@ -279,7 +307,18 @@ class ScenarioCleanupTests(unittest.TestCase):
             finally:
                 window.stop.assert_called_once()
                 self.assertEqual(guard.write.call_count, 1)
+                if setup_failure:
+                    action.start.assert_not_called()
+                    session.measure.assert_not_called()
+                    session.quit_application.assert_called_once()
+                    if setup_failure == 'window':
+                        session.establish_region.assert_not_called()
         return result
+
+    def test_missing_window_or_region_stops_before_action_and_measurement(self):
+        for stage, message in (('window', 'window never appeared'), ('region', 'requested draw region')):
+            with self.subTest(stage=stage), self.assertRaisesRegex(RuntimeError, message):
+                self.exercise(setup_failure=stage)
 
     def test_unresolved_actor_or_application_still_cleans_content_and_raises(self):
         for actor, app in ((RuntimeError('actor alive'), None), (None, RuntimeError('app alive'))):
