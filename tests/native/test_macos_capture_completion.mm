@@ -19,9 +19,9 @@
 namespace {
 // PixelStorage bypasses operator new. This executable alone substitutes the
 // page-allocation syscall, failing one tiny owned conversion on this thread.
-std::atomic<bool> failImagePages{false};
-std::atomic<int> imagePageFailures{0};
-std::thread::id imageAllocationThread;
+std::atomic<bool> g_failImagePages{false};
+std::atomic<int> g_imagePageFailures{0};
+std::thread::id g_imageAllocationThread;
 using Map = void* (*)(void*, size_t, int, int, int, off_t);
 
 Map originalMap()
@@ -33,9 +33,9 @@ Map originalMap()
     return original;
 }
 
-CVPixelBufferRef countedPixelBuffer = nullptr;
-int pixelLocks = 0;
-int pixelUnlocks = 0;
+CVPixelBufferRef g_countedPixelBuffer = nullptr;
+int g_pixelLocks = 0;
+int g_pixelUnlocks = 0;
 using PixelLock = CVReturn (*)(CVPixelBufferRef, CVPixelBufferLockFlags);
 
 PixelLock originalPixelLock()
@@ -59,10 +59,10 @@ PixelLock originalPixelUnlock()
 
 extern "C" void* mmap(void* address, size_t size, int protection, int flags, int descriptor, off_t offset)
 {
-    if (failImagePages.load() && std::this_thread::get_id() == imageAllocationThread && size == 4 &&
+    if (g_failImagePages.load() && std::this_thread::get_id() == g_imageAllocationThread && size == 4 &&
         (flags & MAP_ANONYMOUS) != 0) {
-        failImagePages.store(false);
-        ++imagePageFailures;
+        g_failImagePages.store(false);
+        ++g_imagePageFailures;
         errno = ENOMEM;
         return MAP_FAILED;
     }
@@ -72,8 +72,8 @@ extern "C" void* mmap(void* address, size_t size, int protection, int flags, int
 extern "C" CVReturn CVPixelBufferLockBaseAddress(CVPixelBufferRef image, CVPixelBufferLockFlags flags)
 {
     const auto result = originalPixelLock()(image, flags);
-    if (image == countedPixelBuffer && result == kCVReturnSuccess) {
-        ++pixelLocks;
+    if (image == g_countedPixelBuffer && result == kCVReturnSuccess) {
+        ++g_pixelLocks;
     }
     return result;
 }
@@ -81,8 +81,8 @@ extern "C" CVReturn CVPixelBufferLockBaseAddress(CVPixelBufferRef image, CVPixel
 extern "C" CVReturn CVPixelBufferUnlockBaseAddress(CVPixelBufferRef image, CVPixelBufferLockFlags flags)
 {
     const auto result = originalPixelUnlock()(image, flags);
-    if (image == countedPixelBuffer && result == kCVReturnSuccess) {
-        ++pixelUnlocks;
+    if (image == g_countedPixelBuffer && result == kCVReturnSuccess) {
+        ++g_pixelUnlocks;
     }
     return result;
 }
@@ -156,7 +156,7 @@ CaptureImageOwner makeImage(std::atomic<int>& releases)
     if (!provider) {
         return {nullptr, CGImageRelease};
     }
-    (void)pixels.release();
+    (void)pixels.release();  // NOLINT(bugprone-unused-return-value): the successful provider now owns these pixels
     CGColorSpaceRef space = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
     CGImageRef image = CGImageCreate(1, 1, 8, 32, 4, space,
                                      static_cast<CGBitmapInfo>(kCGImageAlphaPremultipliedFirst) |
@@ -267,12 +267,12 @@ TEST_CASE("Snapshot conversion allocation failure returns an empty image", "[nat
     auto image = makeImage(releases);
     REQUIRE(image);
     (void)originalMap();  // Resolve forwarding before the fault is armed.
-    imageAllocationThread = std::this_thread::get_id();
-    imagePageFailures.store(0);
-    failImagePages.store(true);
+    g_imageAllocationThread = std::this_thread::get_id();
+    g_imagePageFailures.store(0);
+    g_failImagePages.store(true);
     const auto result = convertCaptureImage(image.get());
-    failImagePages.store(false);
-    CHECK(imagePageFailures == 1);
+    g_failImagePages.store(false);
+    CHECK(g_imagePageFailures == 1);
     CHECK_FALSE(result);
     CHECK(convertCaptureImage(image.get()).has_value());
     image.reset();
@@ -296,27 +296,27 @@ TEST_CASE("Streaming allocation failure unlocks without publication and recovers
     (void)originalMap();
     (void)originalPixelLock();
     (void)originalPixelUnlock();
-    countedPixelBuffer = image.get();
-    pixelLocks = pixelUnlocks = 0;
-    imageAllocationThread = std::this_thread::get_id();
-    imagePageFailures.store(0);
-    failImagePages.store(true);
+    g_countedPixelBuffer = image.get();
+    g_pixelLocks = g_pixelUnlocks = 0;
+    g_imageAllocationThread = std::this_thread::get_id();
+    g_imagePageFailures.store(0);
+    g_failImagePages.store(true);
     const bool failedDelivery = deliverCapturePixels(image.get(), buffer, mailbox);
-    failImagePages.store(false);
-    countedPixelBuffer = nullptr;
+    g_failImagePages.store(false);
+    g_countedPixelBuffer = nullptr;
     CHECK_FALSE(failedDelivery);
-    CHECK(imagePageFailures == 1);
-    CHECK(pixelLocks == 1);
-    CHECK(pixelUnlocks == 1);
+    CHECK(g_imagePageFailures == 1);
+    CHECK(g_pixelLocks == 1);
+    CHECK(g_pixelUnlocks == 1);
     CHECK_FALSE(mailbox.takeLatest(0ms));
 
-    countedPixelBuffer = image.get();
-    pixelLocks = pixelUnlocks = 0;
+    g_countedPixelBuffer = image.get();
+    g_pixelLocks = g_pixelUnlocks = 0;
     const bool recovered = deliverCapturePixels(image.get(), buffer, mailbox);
-    countedPixelBuffer = nullptr;
+    g_countedPixelBuffer = nullptr;
     REQUIRE(recovered);
-    CHECK(pixelLocks == 1);
-    CHECK(pixelUnlocks == 1);
+    CHECK(g_pixelLocks == 1);
+    CHECK(g_pixelUnlocks == 1);
     const auto delivered = mailbox.takeLatest(0ms);
     REQUIRE(delivered);
     REQUIRE(delivered->data.size() == 4);

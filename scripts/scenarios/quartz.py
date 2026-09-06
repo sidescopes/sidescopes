@@ -44,6 +44,10 @@ def process_exists(pid):
     return True
 
 
+class ProcessIdentityUnavailable(RuntimeError):
+    """The PID is still present, but its native identity cannot be read yet."""
+
+
 def process_identity(pid):
     """The live executable path and kernel start time, or None after exit."""
     if not process_exists(pid):
@@ -54,11 +58,11 @@ def process_identity(pid):
             or _libc.proc_pidpath(pid, path, len(path)) <= 0):
         if not process_exists(pid):
             return None
-        raise RuntimeError(f"cannot establish identity of process {pid}")
+        raise ProcessIdentityUnavailable(f"cannot establish identity of process {pid}")
     # rusage_info_v0: UUID, eight counters, then ri_proc_start_abstime.
     started = struct.unpack_from("<Q", bytes(buffer), 16 + 8 * 8)[0]
     if not started:
-        raise RuntimeError(f"no start time for process {pid}")
+        raise ProcessIdentityUnavailable(f"no start time for process {pid}")
     return (os.fsdecode(path.value), started)
 
 

@@ -20,6 +20,8 @@ sys.path.insert(0, str(ROOT))
 # These tests exercise orchestration with an explicit fake platform. They run
 # on Linux and Windows too and never read or move the user's real pointer.
 sys.modules['scripts.scenarios.quartz'] = types.ModuleType('quartz')
+sys.modules['scripts.scenarios.quartz'].ProcessIdentityUnavailable = type(
+    'ProcessIdentityUnavailable', (RuntimeError,), {})
 from scripts.scenarios import catalog, conditions, content, run, session
 
 
@@ -86,6 +88,9 @@ class ApplicationTeardownTests(unittest.TestCase):
         self.request.side_effect = self.exit
         outcome = session.quit_application(42, identity=self.identity)
         self.assertEqual(outcome['exit'], 'graceful')
+        self.assertEqual(outcome['identity_retries'], 0)
+        self.assertEqual(session.measurement_method(True)['teardown'],
+                         'pid-quit-confirmed/2; legacy-signal-first')
         self.request.assert_called_once_with(42)
         self.signal.assert_not_called()
 
@@ -128,6 +133,165 @@ class ApplicationTeardownTests(unittest.TestCase):
                     session.quit_application(42, identity=self.identity)
                 self.request.assert_not_called()
                 self.signal.assert_not_called()
+
+    def test_unavailable_identity_then_confirmed_exit_without_signals(self):
+        for initial in (False, True):
+            with self.subTest(initial=initial):
+                self.clock = 0.0
+                self.request.reset_mock()
+                self.lookup.side_effect = ([session.quartz.ProcessIdentityUnavailable('exiting'), None]
+                                          if initial else [self.identity,
+                                          session.quartz.ProcessIdentityUnavailable('exiting'), None])
+                outcome = session.quit_application(42, identity=self.identity)
+                self.assertEqual(outcome['exit'], 'already-exited' if initial else 'graceful')
+                self.assertEqual(outcome['identity_retries'], 1)
+                self.assertAlmostEqual(self.clock, 0.2)
+                self.assertEqual(self.request.call_count, 0 if initial else 1)
+                self.signal.assert_not_called()
+
+    def test_unavailable_identity_then_same_live_target_exits_normally(self):
+        self.lookup.side_effect = [self.identity, session.quartz.ProcessIdentityUnavailable('exiting'),
+                                  self.identity, None]
+        outcome = session.quit_application(42, identity=self.identity)
+        self.assertEqual(outcome['exit'], 'graceful')
+        self.assertEqual(outcome['identity_retries'], 1)
+        self.assertAlmostEqual(self.clock, 0.4)
+        self.signal.assert_not_called()
+
+    def test_persistent_unavailable_identity_exhausts_shared_budget_without_signals(self):
+        for stage in ('initial', 'graceful-wait', 'legacy-initial'):
+            with self.subTest(stage=stage):
+                self.clock = 0.0
+                self.request.reset_mock()
+                calls = 0
+
+                def identity(pid):
+                    nonlocal calls
+                    calls += 1
+                    if stage == 'graceful-wait' and calls == 1:
+                        return self.identity
+                    raise session.quartz.ProcessIdentityUnavailable('unavailable')
+
+                self.lookup.side_effect = identity
+                with self.assertRaises(session.quartz.ProcessIdentityUnavailable) as raised:
+                    session.quit_application(42, identity=self.identity, graceful=stage != 'legacy-initial')
+                self.assertEqual(raised.exception.teardown['exit'], 'unconfirmed')
+                self.assertEqual(raised.exception.teardown['identity_retries'], 2)
+                self.assertAlmostEqual(self.clock, 0.4)
+                self.signal.assert_not_called()
+
+    def test_initial_retry_does_not_extend_graceful_stage(self):
+        calls = 0
+
+        def identity(pid):
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                raise session.quartz.ProcessIdentityUnavailable('transient')
+            return self.identity if self.alive else None
+
+        self.lookup.side_effect = identity
+        signals = []
+
+        def terminate(pid, sig):
+            signals.append(self.clock)
+            self.exit()
+
+        self.signal.side_effect = terminate
+        outcome = session.quit_application(42, identity=self.identity)
+        self.assertEqual(outcome['exit'], 'signal')
+        self.assertEqual(signals, [0.4])
+
+    def test_replacement_after_unavailable_identity_fails_immediately(self):
+        self.lookup.side_effect = [self.identity, session.quartz.ProcessIdentityUnavailable('transient'),
+                                  ('/replacement', 999)]
+        with self.assertRaisesRegex(RuntimeError, 'identity changed'):
+            session.quit_application(42, identity=self.identity)
+        self.assertAlmostEqual(self.clock, 0.2)
+        self.signal.assert_not_called()
+
+    def test_unspecified_identity_is_adopted_only_after_successful_inspection(self):
+        self.lookup.side_effect = [session.quartz.ProcessIdentityUnavailable('transient'), self.identity, None]
+        outcome = session.quit_application(42)
+        self.assertEqual(outcome['exit'], 'graceful')
+        self.assertEqual(outcome['identity_retries'], 1)
+        self.request.assert_called_once_with(42)
+        self.signal.assert_not_called()
+
+    def test_signal_stage_unavailable_identity_never_signals_an_unknown_target(self):
+        calls = 0
+
+        def identity(pid):
+            nonlocal calls
+            calls += 1
+            # Initial lookup, then known live at 0, .2 and .4; ambiguity
+            # starts precisely at the new TERM stage's safety check.
+            if calls <= 4:
+                return self.identity
+            raise session.quartz.ProcessIdentityUnavailable('unavailable')
+
+        self.lookup.side_effect = identity
+        with self.assertRaises(session.quartz.ProcessIdentityUnavailable):
+            session.quit_application(42, identity=self.identity)
+        self.assertAlmostEqual(self.clock, 0.8)
+        self.signal.assert_not_called()
+
+    def test_identity_recovered_at_signal_deadline_does_not_send_a_signal(self):
+        calls = 0
+
+        def identity(pid):
+            nonlocal calls
+            calls += 1
+            if calls in (5, 6):
+                raise session.quartz.ProcessIdentityUnavailable('transient')
+            return self.identity
+
+        self.lookup.side_effect = identity
+        with self.assertRaisesRegex(RuntimeError, 'exhausted the SIGTERM budget'):
+            session.quit_application(42, identity=self.identity)
+        self.assertAlmostEqual(self.clock, 0.8)
+        self.signal.assert_not_called()
+
+    def test_initial_identity_recovered_at_deadline_does_not_request_quit(self):
+        self.lookup.side_effect = [session.quartz.ProcessIdentityUnavailable('transient'),
+                                  session.quartz.ProcessIdentityUnavailable('transient'), self.identity]
+        with self.assertRaisesRegex(RuntimeError, 'exhausted the initial quit budget'):
+            session.quit_application(42, identity=self.identity)
+        self.assertAlmostEqual(self.clock, 0.4)
+        self.request.assert_not_called()
+        self.signal.assert_not_called()
+
+    def test_unavailable_identity_after_signals_stops_at_current_stage_deadline(self):
+        for after in (session.signal.SIGTERM, session.signal.SIGKILL):
+            with self.subTest(after=after):
+                self.clock = 0.0
+                self.signal.reset_mock()
+                uncertain = False
+
+                def identity(pid):
+                    if uncertain:
+                        raise session.quartz.ProcessIdentityUnavailable('unavailable')
+                    return self.identity
+
+                def signal(pid, sig):
+                    nonlocal uncertain
+                    uncertain = sig == after
+
+                self.lookup.side_effect = identity
+                self.signal.side_effect = signal
+                with self.assertRaises(session.quartz.ProcessIdentityUnavailable) as raised:
+                    session.quit_application(42, identity=self.identity)
+                expected = ['SIGTERM'] if after == session.signal.SIGTERM else ['SIGTERM', 'SIGKILL']
+                self.assertEqual(raised.exception.teardown['signals'], expected)
+                self.assertEqual(raised.exception.teardown['exit'], 'unconfirmed')
+                self.assertAlmostEqual(self.clock, 0.8 if after == session.signal.SIGTERM else 1.2)
+
+    def test_programming_error_is_not_retried(self):
+        self.lookup.side_effect = [self.identity, ValueError('broken inspection')]
+        with self.assertRaisesRegex(ValueError, 'broken inspection'):
+            session.quit_application(42, identity=self.identity)
+        self.assertEqual(self.clock, 0.0)
+        self.signal.assert_not_called()
 
     def test_rejected_or_failed_request_records_term_fallback(self):
         for failure in (False, RuntimeError('request unavailable')):
@@ -250,7 +414,7 @@ class ApplicationQuitBindingTests(unittest.TestCase):
                     previous = failing_call.side_effect
                     failing_call.side_effect = None
                     failing_call.return_value = -1
-                    with self.assertRaisesRegex(RuntimeError, 'cannot establish identity'):
+                    with self.assertRaisesRegex(self.bindings.ProcessIdentityUnavailable, 'cannot establish identity'):
                         self.bindings.process_identity(42)
                     exists.side_effect = [True, False]
                     self.assertIsNone(self.bindings.process_identity(42))

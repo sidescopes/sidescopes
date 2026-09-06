@@ -99,7 +99,7 @@ QUALITY_VARIABLE = "SIDESCOPES_SCENARIO_QUALITY"
 def measurement_method(diagnostics_enabled, *, graceful=None):
     method = {
         "version": "observed-window/2",
-        "teardown": "pid-quit-confirmed/1; legacy-signal-first",
+        "teardown": "pid-quit-confirmed/2; legacy-signal-first",
         "teardown_timeouts_seconds": {"graceful": _GRACEFUL_QUIT_TIMEOUT_SECONDS,
                                       "signal": _SIGNAL_QUIT_TIMEOUT_SECONDS},
         "diagnostics": {"enabled": diagnostics_enabled,
@@ -188,55 +188,66 @@ def graceful_teardown(bundle):
     return b"SIDESCOPES_PREFS_FILE" in catalog.strings_in(_executable(bundle))
 
 
-def _owned_process_exists(pid, identity):
-    current = quartz.process_identity(pid)
-    if current is None:
-        return False
-    if current != identity:
-        raise RuntimeError(f"process {pid} identity changed; refusing to signal it")
-    return True
+def _identity_until(pid, identity, deadline, outcome):
+    while True:
+        try:
+            current = quartz.process_identity(pid)
+        except quartz.ProcessIdentityUnavailable:
+            # A live but uninspectable PID is neither confirmed exit nor a
+            # safe signal target. Retry only this native race, within budget.
+            if time.monotonic() >= deadline:
+                raise
+            outcome["identity_retries"] += 1
+            time.sleep(min(0.2, max(0.0, deadline - time.monotonic())))
+            continue
+        if current is not None and identity is not None and current != identity:
+            raise RuntimeError(f"process {pid} identity changed; refusing to signal it")
+        return current
 
 
-def _await_exit(pid, identity, timeout_seconds):
-    deadline = time.monotonic() + timeout_seconds
-    while _owned_process_exists(pid, identity):
-        if time.monotonic() >= deadline:
+def _await_exit(pid, identity, deadline, outcome):
+    while _identity_until(pid, identity, deadline, outcome) is not None:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
             return False
-        time.sleep(0.2)
+        time.sleep(min(0.2, remaining))
     return True
 
 
 def quit_application(pid, *, identity=None, graceful=True):
     """Stop an owned launch, confirming exit after each bounded stage.
 
-    The outcome records every fallback. Inspection failures propagate; a
-    failed counter sample must never be mistaken for process termination.
+    The outcome records every fallback and transient identity retry. Native
+    inspection uncertainty is retried within each stage, never treated as exit.
     """
     outcome = {"method": "appkit-pid" if graceful else "legacy-signal",
-               "request_sent": False, "signals": [], "exit": "unconfirmed"}
-    current = quartz.process_identity(pid)
-    if current is None:
-        outcome["exit"] = "already-exited"
-        return outcome
-    identity = current if identity is None else identity
-    if not _owned_process_exists(pid, identity):
-        outcome["exit"] = "already-exited"
-        return outcome
+               "request_sent": False, "signals": [], "exit": "unconfirmed", "identity_retries": 0}
+    initial_budget = _GRACEFUL_QUIT_TIMEOUT_SECONDS if graceful else _SIGNAL_QUIT_TIMEOUT_SECONDS
+    deadline = time.monotonic() + initial_budget
     try:
+        current = _identity_until(pid, identity, deadline, outcome)
+        if current is None:
+            outcome["exit"] = "already-exited"
+            return outcome
+        identity = current if identity is None else identity
+        if time.monotonic() >= deadline:
+            raise RuntimeError(f"process {pid} identity inspection exhausted the initial quit budget")
         if graceful:
             try:
                 outcome["request_sent"] = quartz.request_quit(pid)
             except Exception as failure:  # request failure still needs bounded cleanup
                 outcome["request_error"] = str(failure)
-            if _await_exit(pid, identity, _GRACEFUL_QUIT_TIMEOUT_SECONDS):
+            if _await_exit(pid, identity, deadline, outcome):
                 outcome["exit"] = "graceful" if outcome["request_sent"] else "before-fallback"
                 return outcome
-        return _signal_exit(pid, identity, outcome)
+        return _signal_exit(pid, identity, outcome, deadline=None if graceful else deadline)
     except (KeyboardInterrupt, SystemExit) as interruption:
         # One interrupted request/wait must still reap the owned launch. Keep
         # the interruption visible after cleanup; never report it as graceful.
         outcome["interrupted"] = type(interruption).__name__
         try:
+            if identity is None:
+                raise RuntimeError("interrupted before target identity was established")
             _signal_exit(pid, identity, outcome)
         except BaseException as failure:
             raise RuntimeError(f"interrupted teardown could not confirm exit: {outcome}") from failure
@@ -247,17 +258,22 @@ def quit_application(pid, *, identity=None, graceful=True):
         raise
 
 
-def _signal_exit(pid, identity, outcome):
+def _signal_exit(pid, identity, outcome, *, deadline=None):
     for sig in (signal.SIGTERM, signal.SIGKILL):
-        if _owned_process_exists(pid, identity):
+        if deadline is None:
+            deadline = time.monotonic() + _SIGNAL_QUIT_TIMEOUT_SECONDS
+        if _identity_until(pid, identity, deadline, outcome) is not None:
+            if time.monotonic() >= deadline:
+                raise RuntimeError(f"process {pid} identity inspection exhausted the {sig.name} budget")
             try:
                 os.kill(pid, sig)
                 outcome["signals"].append(sig.name)
             except ProcessLookupError:
                 pass
-        if _await_exit(pid, identity, _SIGNAL_QUIT_TIMEOUT_SECONDS):
+        if _await_exit(pid, identity, deadline, outcome):
             outcome["exit"] = "signal" if outcome["signals"] else "before-fallback"
             return outcome
+        deadline = None
     raise RuntimeError(f"process {pid} did not exit after bounded teardown: {outcome}")
 
 

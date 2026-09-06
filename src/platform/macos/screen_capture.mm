@@ -85,6 +85,7 @@ SCShareableContent* fetchShareableContent()
           try {
               (void)completion->complete(error ? nil : content);
           } catch (...) {  // Keep C++ bookkeeping failures inside the framework callback.
+              diagEmit(DiagChannel::Perf, "shareable content callback failed");
           }
         }];
         auto result = completion->wait(CaptureCompletionTimeout);
@@ -289,6 +290,7 @@ bool stopCaptureWithDeadline(SCStream* stream, std::chrono::milliseconds timeout
           try {
               (void)completion->complete(error == nil);
           } catch (...) {  // A missing completion still has a bounded caller.
+              diagEmit(DiagChannel::Perf, "capture stop callback failed");
           }
         }];
         return completion->wait(timeout).value_or(false);
@@ -416,6 +418,7 @@ public:
                           }
                       } catch (...) {
                           // Reporting a capture error must not escape the SDK callback.
+                          diagEmit(DiagChannel::Perf, "capture configuration callback failed");
                       }
                     }];
     }
@@ -686,6 +689,7 @@ void sampleScreenColorAsync(DesktopPoint point, std::function<void(std::optional
                                     (*shared)(averageCapturedImage(image));
                                 } catch (...) {
                                     // Caller failures must not unwind the framework's completion queue.
+                                    diagEmit(DiagChannel::Perf, "color sample callback failed");
                                 }
                               }];
 }
@@ -767,6 +771,7 @@ std::optional<CapturedImage> captureDisplayImage(uint32_t displayId)
                                             (void)completion->complete(CaptureImageOwner(
                                                 image && !error ? CGImageRetain(image) : nullptr, CGImageRelease));
                                         } catch (...) {
+                                            diagEmit(DiagChannel::Perf, "display image callback failed");
                                         }
                                       }];
             auto image = completion->wait(CaptureCompletionTimeout);
@@ -799,6 +804,7 @@ std::optional<CapturedImage> captureDisplayImage(uint32_t displayId)
         }
     } catch (...) {
         // Never unwind C++ failures through the framework's delivery queue.
+        sidescopes::diagEmit(sidescopes::DiagChannel::Perf, "capture frame callback failed");
     }
 }
 
@@ -812,6 +818,7 @@ std::optional<CapturedImage> captureDisplayImage(uint32_t displayId)
         }
     } catch (...) {
         // handleStopped clears the running state before attempting notification.
+        sidescopes::diagEmit(sidescopes::DiagChannel::Perf, "capture failure callback failed");
     }
 }
 
