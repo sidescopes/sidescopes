@@ -69,6 +69,9 @@ std::vector<AttachedWindowObservation> RegionSession::gatherAttachedObservations
                 }
             }
         }
+        if (!windowGeom) {
+            observation.closed = windowPresence(identity) == WindowPresence::Closed;
+        }
         observations.push_back(observation);
     }
 
@@ -112,9 +115,22 @@ void RegionSession::captureActiveDisplay(const AttachDecision& decision)
 // blank the border.
 void RegionSession::applyAttachDecision(const AttachDecision& decision)
 {
+    if (decision.region) {
+        if (!m_region) {
+            setStatus("attached window available");
+        }
+        m_regions.setGlobalRegion(std::nullopt);
+        if (!decision.windowMoving) {
+            rememberAttachedRegion(decision.activeIdentity, decision.activeDisplayId, *decision.region);
+        }
+    } else if (decision.closedCount > 0 && m_lastAttachedSelection &&
+               !m_attach.isAttached(m_lastAttachedSelection->identity)) {
+        keepLastRegionGlobal();
+        setStatus("window closed - region kept on its display");
+    }
     applyRegionOutcome(m_regions.useRegion(decision.region ? decision.region : m_regions.globalRegion()));
-    if (decision.closedCount > 0) {
-        setStatus(decision.detachedAll ? "window closed - detached" : "window closed - still attached");
+    if (!decision.region && m_attach.attached() && !m_regions.globalRegion()) {
+        setStatus("paused - waiting for the attached window");
     }
     if (decision.detachedAll) {
         releaseActiveWindow();
@@ -176,7 +192,10 @@ std::optional<uint64_t> RegionSession::resolveFocusedWindow() const
         return m_activeWindowIdentity;
     }
     const int64_t foreground = foregroundApplicationPid();
-    const uint64_t held = m_activeWindowIdentity != 0 ? m_activeWindowIdentity : m_attach.activeIdentity();
+    uint64_t held = m_activeWindowIdentity != 0 ? m_activeWindowIdentity : m_attach.activeIdentity();
+    if (held == 0 && m_lastAttachedSelection && m_attach.isAttached(m_lastAttachedSelection->identity)) {
+        held = m_lastAttachedSelection->identity;
+    }
     if ((foreground == m_ownPid || foreground == 0) && held != 0) {
         // Straight after a pick the held window is the picked one - the
         // watch has not bound yet, and a window owned by a helper process
@@ -203,7 +222,8 @@ void RegionSession::followAttachedWindow()
         return;
     }
 
-    const AttachDecision decision = m_attach.observe(gatherAttachedObservations(), resolveFocusedWindow());
+    const AttachDecision decision =
+        m_attach.observe(gatherAttachedObservations(), resolveFocusedWindow(), glfwGetTime());
     if (activeWindowMoved(decision)) {
         onWindowMotion(WindowMotionSignal::Moved);
     }
@@ -219,8 +239,13 @@ void RegionSession::followAttachedWindow()
             watchWindowMotion(m_activeWindowIdentity, decision.activeOwnerPid,
                               [this](WindowMotionSignal signal) { onWindowMotion(signal); });
         }
-        m_faceLock.onActivated(m_activeWindowIdentity, glfwGetTime());
+        m_faceLock.activationChanged();
         m_pending.activity = true;
+    }
+    if (decision.windowMoving && !m_attachedWindowMoving) {
+        // Focus can return during an existing motion transaction, including
+        // one interrupted by unavailable geometry. Its border is still stale.
+        onWindowMotion(WindowMotionSignal::Moved);
     }
     m_attachLastSeenRect = decision.activeRect;
     applyAttachDecision(decision);
@@ -229,9 +254,9 @@ void RegionSession::followAttachedWindow()
             static_cast<long long>(foregroundApplicationPid()),
             static_cast<unsigned long long>(decision.activeIdentity), m_capture.capturedDisplay(),
             regionDiagText(m_region).c_str(), m_attachActiveLabel.c_str(), m_attachedWindowMoving ? 1 : 0);
-    const FaceLockOutcome faceLockOutcome =
-        m_faceLock.update(decision, m_frameSize, m_activeWindowIdentity, m_region,
-                          m_regions.borderEditing() || m_attachedWindowMoving || m_attachGripActive, glfwGetTime());
+    const FaceLockOutcome faceLockOutcome = m_faceLock.update(
+        decision, m_frameSize, m_regions.borderEditing() || m_attachedWindowMoving || m_attachGripActive,
+        frameClockSeconds());
     applyFaceLockOutcome(faceLockOutcome);
     if (decision.closedCount > 0) {
         m_pending.activity = true;
@@ -245,25 +270,20 @@ void RegionSession::followAttachedWindow()
     m_regions.syncBorder(borderState());
 }
 
-// Applies the face-lock controller's per-frame outcome to host state. An
-// adopted region becomes the analysis region; a lost lock detaches its window
-// and falls back to the global region - exactly what a give-up did to host
-// state before. The controller has already dropped its own lock and reset its
-// hunting and content watch.
+// A lost face stops only face following. Its window still carries the most
+// recently accepted or manually edited rectangle.
 void RegionSession::applyFaceLockOutcome(const FaceLockOutcome& outcome)
 {
     if (outcome.applyRegion) {
+        if (!m_pending.regionChanged) {
+            m_pending.trackedRegion = true;
+        }
         m_region = *outcome.applyRegion;
+        rememberAttachedRegion(m_activeWindowIdentity, m_capture.desiredDisplay(), *m_region);
         m_pending.regionChanged = true;
     }
     if (outcome.lostLock) {
-        const uint64_t identity = *outcome.lostLock;
-        m_attach.remove(identity);
-        if (m_activeWindowIdentity == identity) {
-            releaseActiveWindow();
-        }
-        setStatus("face lost - region removed");
-        applyRegionOutcome(m_regions.useRegion(m_regions.globalRegion()));
+        setStatus("face lost - region still follows the window");
         m_regions.syncBorder(borderState());
         m_pending.activity = true;
     }
@@ -293,7 +313,7 @@ void RegionSession::idleWaitWatchingAttachedWindow()
         }
         const auto rect = windowGeometry(m_activeWindowIdentity);
         if (!rect) {
-            return;  // closed: the frame body prunes it
+            return;  // the frame body checks availability and closure
         }
         if (rect->x != m_attachLastSeenRect->x || rect->y != m_attachLastSeenRect->y ||
             rect->width != m_attachLastSeenRect->width || rect->height != m_attachLastSeenRect->height) {
@@ -301,28 +321,43 @@ void RegionSession::idleWaitWatchingAttachedWindow()
 
             return;
         }
-        // A face-locked region's content churn - a pan under an idle loop -
-        // takes the border down within a slice, not a whole tick.
-        if (m_faceLock.contains(m_activeWindowIdentity)) {
-            m_faceLock.probeContentChange(m_region, glfwGetTime());
-            if (m_faceLock.contentUnsettled(glfwGetTime())) {
-                hideRegionBorder();
-            }
-        }
     }
 }
 
-// Sheds only the front attached window; the last one's detach clears the
-// selection outright.
+// Stopping window following preserves its last usable rectangle on the same display.
 void RegionSession::detachActiveWindow()
 {
-    if (m_attach.attachedCount() > 1 && m_attach.activeIdentity() != 0) {
-        m_faceLock.removeLock(m_attach.activeIdentity());
-        m_attach.remove(m_attach.activeIdentity());
-        releaseActiveWindow();
-    } else {
-        applyRegionOutcome(m_regions.clearRegion());
+    if (!m_lastAttachedSelection) {
+        return;
     }
+    const uint64_t identity = m_lastAttachedSelection->identity;
+    m_faceLock.removeLock(identity);
+    m_attach.remove(identity);
+    keepLastRegionGlobal();
+}
+
+void RegionSession::rememberAttachedRegion(uint64_t identity, uint32_t displayId, const RegionOfInterest& region)
+{
+    if (identity != 0 && displayId != 0 && region.leftPercent < region.rightPercent &&
+        region.topPercent < region.bottomPercent) {
+        m_lastAttachedSelection = AttachedSelection{identity, displayId, region};
+    }
+}
+
+void RegionSession::keepLastRegionGlobal()
+{
+    if (!m_lastAttachedSelection) {
+        return;
+    }
+    const AttachedSelection saved = *m_lastAttachedSelection;
+    m_lastAttachedSelection.reset();
+    releaseActiveWindow();
+    m_regions.setGlobalRegion(saved.region);
+    if (m_capture.desiredDisplay() != saved.displayId) {
+        m_capture.requestDisplay(saved.displayId);
+        m_capture.start();
+    }
+    applyRegionOutcome(m_regions.useRegion(saved.region));
 }
 
 /// The quick start a window click hands back: the window rectangle pulled
@@ -406,6 +441,7 @@ void RegionSession::confirmPickedRegion(const ConfirmedPick& pick)
         m_faceLock.clear();
         releaseActiveWindow();
     }
+    m_lastAttachedSelection.reset();
     m_regions.setGlobalRegion(confirmed);
     applyRegionOutcome(m_regions.useRegion(confirmed));
 }
@@ -433,8 +469,8 @@ bool RegionSession::adoptFacePick(uint32_t displayId, const RegionOfInterest& co
     const FaceAnchor anchor{face->box.x + face->box.width / 2.0, face->box.y + face->box.height / 2.0,
                             static_cast<double>(face->box.width)};
     m_faceLock.addLock(host->identity,
-                       face_lock::makeLock(anchor, lockRectFromPercent(confirmed, face->frameWidth, face->frameHeight)),
-                       glfwGetTime(), host->windowRect);
+                       face_lock::makeLock(anchor, lockRectFromPercent(mapped, face->frameWidth, face->frameHeight)),
+                       host->windowRect, std::pair{face->frameWidth, face->frameHeight});
     SS_DIAG(FaceLock, "locked to '%s' anchor=%.1f,%.1f width=%.1f", host->application.c_str(), anchor.centerX,
             anchor.centerY, anchor.width);
 
@@ -443,11 +479,34 @@ bool RegionSession::adoptFacePick(uint32_t displayId, const RegionOfInterest& co
 
 // Applies a RegionPickOutcome to host state. The picker owns its own state and
 // returns only intent; every host-visible effect of a pick - the live preview,
-// a pinned colour, a confirmed attachment or draw, an Esc clear, the border
+// a pinned colour, a confirmed attachment or draw, cancellation, the border
 // re-sync - lands here.
+void RegionSession::confirmPickerSelection(const ConfirmedPick& pick)
+{
+    const auto* face = m_regionPicker.matchFaceCandidate(pick.displayId, pick.region);
+    const auto* host = m_regionPicker.windowContaining(pick.displayId, pick.region);
+    if (face && (!host || !m_regionPicker.faceSourceCurrent(*face, *host))) {
+        restorePickerRegion();
+        followAttachedWindow();
+        setStatus("selection source changed - previous region kept");
+        return;
+    }
+    // Validate the source before replacing its capture stream; replacement
+    // itself advances the epoch and must not invalidate a valid confirmation.
+    if (pick.displayId != 0 && pick.displayId != m_capture.capturedDisplay()) {
+        m_capture.requestDisplay(pick.displayId);
+        m_capture.start();
+    }
+    confirmPickedRegion(pick);
+    m_pickerRestore.reset();
+}
+
 void RegionSession::applyRegionPickOutcome(const RegionPickOutcome& outcome)
 {
     if (outcome.previewRegion) {
+        if (!m_pickerRestore) {
+            m_pickerRestore = SavedRegion{m_region, m_capture.desiredDisplay()};
+        }
         // The coordinator's no-op check keeps a hover that indicates the same
         // region from nudging the worker or the activity clock every frame.
         applyRegionOutcome(m_regions.useRegion(outcome.previewRegion));
@@ -456,19 +515,13 @@ void RegionSession::applyRegionPickOutcome(const RegionPickOutcome& outcome)
         m_pending.pinColor = outcome.pinColor;
     }
     if (outcome.confirmed) {
-        const ConfirmedPick& pick = *outcome.confirmed;
-        // A pick confirmed on another display switches the capture stream to it
-        // before the region is applied.
-        if (pick.displayId != 0 && pick.displayId != m_capture.capturedDisplay()) {
-            m_capture.requestDisplay(pick.displayId);
-            m_capture.start();
-        }
-        confirmPickedRegion(pick);
-    }
-    if (outcome.cancelled) {
-        applyRegionOutcome(m_regions.clearRegion());
+        confirmPickerSelection(*outcome.confirmed);
     }
     if (outcome.ended) {
+        if (!outcome.confirmed) {
+            restorePickerRegion();
+            followAttachedWindow();
+        }
         m_regions.syncBorder(borderState());
     }
     if (outcome.activity) {
@@ -476,14 +529,26 @@ void RegionSession::applyRegionPickOutcome(const RegionPickOutcome& outcome)
     }
 }
 
+void RegionSession::restorePickerRegion()
+{
+    if (!m_pickerRestore) {
+        return;
+    }
+    const SavedRegion saved = *m_pickerRestore;
+    m_pickerRestore.reset();
+    if (saved.displayId != 0 && m_capture.desiredDisplay() != saved.displayId) {
+        m_capture.requestDisplay(saved.displayId);
+        m_capture.start();
+    }
+    applyRegionOutcome(m_regions.useRegion(saved.region));
+}
+
 // Carries out what the border's live edit decided. The coordinator has
 // already latched which region the drag began on and dressed the screen for
 // it; what is left is the region work only the host can do.
 void RegionSession::applyBorderEditOutcome(const RegionBorderEditOutcome& outcome)
 {
-    if (outcome.dismissed) {
-        dismissEditedBorder();
-    } else if (outcome.bindingToggled) {
+    if (outcome.bindingToggled) {
         toggleRegionBinding();
     } else if (outcome.edited) {
         applyBorderEdit(*outcome.edited);
@@ -501,12 +566,9 @@ void RegionSession::toggleRegionBinding()
     const RegionBinding binding = regionBinding(m_activeWindowIdentity, m_faceLock.contains(m_activeWindowIdentity));
     if (binding == RegionBinding::Face) {
         const auto geometry = geometryOfDisplay(m_capture.capturedDisplay());
-        const auto windowGeom = windowGeometry(m_activeWindowIdentity);
+        const auto windowGeom = editableWindowGeometry();
         if (m_region && geometry && windowGeom) {
-            // The attach controller still holds the rectangle from the face's
-            // original pick. Re-anchor it to the face's current position
-            // before dropping the lock, or the next follow step would snap
-            // back to that original rectangle.
+            // Preserve the current accepted or edited crop before ending face following.
             const RegionOfInterest frozen = m_attach.editRegion(
                 *m_region, AttachWindowRect{windowGeom->x, windowGeom->y, windowGeom->width, windowGeom->height},
                 AttachDisplayRect{geometry->originX, geometry->originY, geometry->widthPoints, geometry->heightPoints});
@@ -514,12 +576,9 @@ void RegionSession::toggleRegionBinding()
             applyRegionOutcome(m_regions.useRegion(frozen));
         }
     } else if (binding == RegionBinding::Window) {
-        const std::optional<RegionOfInterest> region = m_region;
         m_attach.detachAll();
         m_faceLock.clear();
-        releaseActiveWindow();
-        m_regions.setGlobalRegion(region);
-        applyRegionOutcome(m_regions.useRegion(region));
+        keepLastRegionGlobal();
     } else {
         attachGlobalRegionToWindow();
     }
@@ -559,20 +618,20 @@ void RegionSession::attachGlobalRegionToWindow()
     }
 }
 
-// The border's close affordances dismiss the region it outlines: the
-// attached one detaches from its window only, the global one goes away
-// entirely; the other attached windows keep their regions either way.
-void RegionSession::dismissEditedBorder()
+// A queued border event can outlive the border being hidden. Apply it only
+// while its parent still agrees with the last usable followed geometry.
+std::optional<WindowGeometry> RegionSession::editableWindowGeometry() const
 {
-    if (regionKind(m_activeWindowIdentity) == RegionKind::Attached) {
-        m_faceLock.removeLock(m_activeWindowIdentity);
-        m_attach.remove(m_activeWindowIdentity);
-        releaseActiveWindow();
-    } else {
-        m_regions.setGlobalRegion(std::nullopt);
+    if (m_activeWindowIdentity == 0 || m_attachedWindowMoving || m_attachGripActive || !m_attachLastSeenRect) {
+        return {};
     }
-    applyRegionOutcome(m_regions.useRegion(m_regions.globalRegion()));
-    m_pending.activity = true;
+    auto geometry = windowGeometry(m_activeWindowIdentity);
+    if (!geometry || geometry->minimized || geometry->x != m_attachLastSeenRect->x ||
+        geometry->y != m_attachLastSeenRect->y || geometry->width != m_attachLastSeenRect->width ||
+        geometry->height != m_attachLastSeenRect->height) {
+        return {};
+    }
+    return geometry;
 }
 
 // Routes a border drag to the region kind it began on. An edit that began
@@ -587,7 +646,7 @@ void RegionSession::applyBorderEdit(const RegionOfInterest& edited)
             return;
         }
         const auto geometry = geometryOfDisplay(m_capture.capturedDisplay());
-        const auto windowGeom = windowGeometry(m_activeWindowIdentity);
+        const auto windowGeom = editableWindowGeometry();
         if (!geometry || !windowGeom) {
             return;
         }
@@ -605,8 +664,10 @@ void RegionSession::applyBorderEdit(const RegionOfInterest& edited)
         m_regions.setGlobalRegion(edited);
     }
     m_region = applied;
+    rememberAttachedRegion(m_activeWindowIdentity, m_capture.desiredDisplay(), applied);
     // The analysis-dirty path syncs the border this same iteration.
     m_pending.regionChanged = true;
+    m_pending.trackedRegion = false;
     m_pending.activity = true;
 }
 
@@ -621,13 +682,13 @@ void RegionSession::adoptAttachedPick(uint64_t identity, int64_t ownerPid, const
     m_faceLock.removeLock(identity);
     releaseActiveWindow();
     raiseWindow(identity, ownerPid);
+    rememberAttachedRegion(identity, m_capture.desiredDisplay(), region);
     applyRegionOutcome(m_regions.useRegion(region));
 }
 
 RegionBorderState RegionSession::borderState() const
 {
-    return RegionBorderState{m_attachActiveLabel, m_activeWindowIdentity, m_attachedWindowMoving, m_windowMinimized,
-                             glfwGetTime()};
+    return RegionBorderState{m_attachActiveLabel, m_activeWindowIdentity, m_attachedWindowMoving, m_windowMinimized};
 }
 
 void RegionSession::releaseActiveWindow()
@@ -649,6 +710,7 @@ void RegionSession::applyRegionOutcome(const RegionOutcome& outcome)
     if (outcome.regionChanged) {
         m_region = outcome.region;
         m_pending.regionChanged = true;
+        m_pending.trackedRegion = false;
     }
     if (outcome.activity) {
         m_pending.activity = true;
@@ -675,6 +737,7 @@ void RegionSession::shutdown()
         return;
     }
     m_stopped = true;
+    m_faceLock.clear();
     unwatchWindowMotion();
     if (m_regionPicker.active()) {
         m_regionPicker.cancel();
@@ -711,11 +774,15 @@ bool RegionSession::faceLocked() const
 
 bool RegionSession::backgroundWorkRunning() const
 {
-    return m_faceLock.probeRunning() || m_regionPicker.scansRunning();
+    return m_regionPicker.scansRunning();
 }
 
 RegionSessionOutcome RegionSession::takeOutcome()
 {
+    if (m_pending.regionChanged && !m_pending.trackedRegion) {
+        m_faceLock.invalidate();
+    }
+    m_pending.selectionRevision = m_faceLock.selectionRevision();
     m_pending.region = m_region;
     return std::exchange(m_pending, {});
 }
@@ -745,27 +812,47 @@ RegionSessionOutcome RegionSession::poll(bool windowMinimized, std::optional<Ana
 {
     m_windowMinimized = windowMinimized;
     m_frameSize = frameSize;
+    if (!m_regionPicker.active()) {
+        restorePickerRegion();
+    }
+    const bool pickerWasActive = m_regionPicker.active();
     applyRegionPickOutcome(m_regionPicker.openIfRequested(m_region.has_value()));
+    if (m_regionPicker.active() && !pickerWasActive) {
+        m_faceLock.invalidate();
+    }
     applyBorderEditOutcome(m_regions.pollBorderEdit(m_activeWindowIdentity));
     applyRegionPickOutcome(m_regionPicker.poll(frameSize, screenSampleColor));
     return takeOutcome();
 }
 
-RegionSessionOutcome RegionSession::clear()
+RegionSessionOutcome RegionSession::cancel()
 {
-    applyRegionOutcome(m_regions.clearRegion());
+    m_regionPicker.cancel();
+    restorePickerRegion();
+    followAttachedWindow();
+    m_regions.syncBorder(borderState());
     return takeOutcome();
 }
 
-RegionSessionOutcome RegionSession::dismiss()
+RegionSessionOutcome RegionSession::clear()
 {
-    dismissEditedBorder();
+    m_pickerRestore.reset();
+    m_lastAttachedSelection.reset();
+    applyRegionOutcome(m_regions.clearRegion());
     return takeOutcome();
 }
 
 RegionSessionOutcome RegionSession::detach()
 {
     detachActiveWindow();
+    return takeOutcome();
+}
+
+RegionSessionOutcome RegionSession::detachAll()
+{
+    m_attach.detachAll();
+    m_faceLock.clear();
+    keepLastRegionGlobal();
     return takeOutcome();
 }
 

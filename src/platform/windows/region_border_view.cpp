@@ -22,7 +22,6 @@ BorderState g_border;
 // Shared edit state the application polls once per frame.
 bool g_borderEditing = false;
 bool g_borderEditChanged = false;
-bool g_borderDismissed = false;
 bool g_borderBindingToggled = false;
 RegionOfInterest g_borderEditRegion;
 
@@ -87,22 +86,6 @@ Gdiplus::RectF borderRegionLocal(double scale)
 // Eight handles, no modifier: the corners resize both axes, the edge
 // midpoints resize their edge, and the rest of the band moves. The
 // visible handles say which is which - a modifier key never could.
-// Visible throughout a drag so it travels with the border. A narrow region
-// still yields its corner to the resize zones.
-bool closeVisible(double scale)
-{
-    const Gdiplus::RectF region = borderRegionLocal(scale);
-    return regionCloseAvailable(region.Width, scale);
-}
-
-// On the band's outer corner, at forty-five degrees off the top-right
-// handle dot - anchored to the corner rather than parked beside it.
-Gdiplus::PointF closeCenter(double scale)
-{
-    const Gdiplus::RectF region = borderRegionLocal(scale);
-    return {static_cast<Gdiplus::REAL>(region.GetRight() + (BorderPad - CloseCornerInset) * scale),
-            static_cast<Gdiplus::REAL>(region.Y - (BorderPad - CloseCornerInset + EdgeRing) * scale)};
-}
 
 // The attach toggle lives at the label tab's fixed left end: the same
 // spot whatever the label says, clear of every handle.
@@ -119,20 +102,12 @@ unsigned borderZoneAtPoint(double x, double y, double scale)
     if (region.Contains(static_cast<Gdiplus::REAL>(x), static_cast<Gdiplus::REAL>(y))) {
         return ZoneNone;  // click-through anyway
     }
-    if (closeVisible(scale)) {
-        const Gdiplus::PointF center = closeCenter(scale);
-        const double dx = x - center.X;
-        const double dy = y - center.Y;
-        const double hit = CloseHitRadius * scale;
-        if (dx * dx + dy * dy <= hit * hit) {
-            return ZoneClose;
-        }
-    }
+
     {
         const Gdiplus::PointF center = bindingButtonCenter(scale);
         const double dx = x - center.X;
         const double dy = y - center.Y;
-        const double hit = CloseHitRadius * scale;
+        const double hit = BindingHitRadius * scale;
         if (dx * dx + dy * dy <= hit * hit) {
             return ZoneBinding;
         }
@@ -151,7 +126,7 @@ void applyBorderCursor(unsigned zone)
         SetCursor(LoadCursorW(nullptr, IDC_ARROW));
         return;
     }
-    if ((zone & (ZoneClose | ZoneBinding)) != 0) {
+    if ((zone & ZoneBinding) != 0) {
         SetCursor(LoadCursorW(nullptr, IDC_HAND));
         return;
     }
@@ -247,9 +222,6 @@ void paintBorderHandles(Gdiplus::Graphics& canvas, const Gdiplus::RectF& region,
     paintHandleDot(canvas, region.GetRight(), region.GetBottom(), scale);
 }
 
-// The close button, in the handles' own visual
-// language: a dark disc where the dots are light, so it reads as an
-// action rather than a grip, with the same bright ring and an x.
 // The attached window's name rides the band above the top edge: the attached
 // region carries its own identification instead of the main window's toolbar
 // doing it at a distance.
@@ -297,26 +269,6 @@ void paintBorderLabel(Gdiplus::Graphics& canvas, const Gdiplus::RectF& region, d
     Gdiplus::SolidBrush ink(Gdiplus::Color(242, 247, 247, 247));
     const Gdiplus::RectF textRect(tab.X + triangleZone + padX, tab.Y + padY, textWidth, measured.Height);
     canvas.DrawString(g_border.borderLabel.c_str(), -1, &font, textRect, &format, &ink);
-}
-
-void paintBorderCloseButton(Gdiplus::Graphics& canvas, double scale)
-{
-    if (!closeVisible(scale)) {
-        return;
-    }
-    const Gdiplus::PointF center = closeCenter(scale);
-    const auto closeRadius = static_cast<Gdiplus::REAL>(CloseRadius * scale);
-    const Gdiplus::RectF disc(center.X - closeRadius, center.Y - closeRadius, closeRadius * 2, closeRadius * 2);
-    Gdiplus::SolidBrush discBrush(Gdiplus::Color(217, 26, 26, 26));
-    canvas.FillEllipse(&discBrush, disc);
-    Gdiplus::Pen discRing(Gdiplus::Color(242, 247, 247, 247), static_cast<Gdiplus::REAL>(1.0 * scale));
-    canvas.DrawEllipse(&discRing, disc);
-    const auto arm = static_cast<Gdiplus::REAL>((CloseRadius - 3.7) * scale);
-    Gdiplus::Pen cross(Gdiplus::Color(242, 247, 247, 247), static_cast<Gdiplus::REAL>(1.3 * scale));
-    cross.SetStartCap(Gdiplus::LineCapRound);
-    cross.SetEndCap(Gdiplus::LineCapRound);
-    canvas.DrawLine(&cross, center.X - arm, center.Y - arm, center.X + arm, center.Y + arm);
-    canvas.DrawLine(&cross, center.X - arm, center.Y + arm, center.X + arm, center.Y - arm);
 }
 
 // The binding state at the tab's fixed left end: face tracking, window pin,
@@ -397,7 +349,6 @@ void paintBorder()
     paintBorderEdgeRing(canvas, region, scale);
     paintBorderHandles(canvas, region, scale);
     paintBorderLabel(canvas, region, scale);
-    paintBorderCloseButton(canvas, scale);
     paintBorderBindingButton(canvas, scale);
     g_border.paintedLabel = g_border.borderLabel;
     g_border.paintedBinding = g_border.binding;
@@ -499,13 +450,9 @@ LRESULT borderOnLButtonDown(HWND window, LPARAM lParam)
     if (zone == ZoneNone) {
         return 0;
     }
-    g_border.closePressed = false;
     g_border.bindingPressed = false;
     SetCapture(window);
-    if ((zone & ZoneClose) != 0) {
-        g_border.closePressed = true;
-        return 0;
-    }
+
     if ((zone & ZoneBinding) != 0) {
         g_border.bindingPressed = true;
         return 0;
@@ -547,17 +494,6 @@ LRESULT borderOnMouseMove(HWND window)
 
 LRESULT borderOnLButtonUp(HWND window, LPARAM lParam)
 {
-    if (g_border.closePressed) {
-        g_border.closePressed = false;
-        const double scale = uiScale(window);
-        const double x = static_cast<short>(LOWORD(lParam));
-        const double y = static_cast<short>(HIWORD(lParam));
-        if ((borderZoneAtPoint(x, y, scale) & ZoneClose) != 0) {
-            g_borderDismissed = true;
-        }
-        ReleaseCapture();
-        return 0;
-    }
     if (g_border.bindingPressed) {
         g_border.bindingPressed = false;
         const double scale = uiScale(window);
@@ -603,7 +539,6 @@ LRESULT CALLBACK borderProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
     case WM_CAPTURECHANGED:
         g_border.dragZone = ZoneNone;
         g_borderEditing = false;
-        g_border.closePressed = false;
         g_border.bindingPressed = false;
         return 0;
     case WM_TIMER:

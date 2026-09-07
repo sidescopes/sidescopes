@@ -218,7 +218,7 @@
             withAttributes:labelAttributes];
     }
     if (self.facesMode) {
-        NSString* secondary = @"[A] select a window    [D] draw    [Esc] clear region";
+        NSString* secondary = @"[A] select a window    [D] draw    [Esc] cancel";
         if (!m_suggestions.empty()) {
             [self drawBanner:@"Select a face" secondary:secondary preferCenter:NO];
         } else if (self.facesScanned) {
@@ -228,8 +228,8 @@
         }
     } else {
         [self drawBanner:@"Click a window or drag a region inside it"
-               secondary:sidescopes::supportsFaceDetection() ? @"[F] select a face    [D] draw    [Esc] clear region"
-                                                             : @"[D] draw    [Esc] clear region"
+               secondary:sidescopes::supportsFaceDetection() ? @"[F] select a face    [D] draw    [Esc] cancel"
+                                                             : @"[D] draw    [Esc] cancel"
             preferCenter:NO];
     }
 }
@@ -280,11 +280,11 @@
 
         return;
     }
-    NSString* secondary = @"[Esc] clear region";
+    NSString* secondary = @"[Esc] cancel";
     if (!m_windows.empty() && sidescopes::supportsFaceDetection()) {
-        secondary = @"[A] select a window    [F] select a face    [Esc] clear region";
+        secondary = @"[A] select a window    [F] select a face    [Esc] cancel";
     } else if (!m_windows.empty()) {
-        secondary = @"[A] select a window    [Esc] clear region";
+        secondary = @"[A] select a window    [Esc] cancel";
     }
     [self drawBanner:@"Drag to draw a region" secondary:secondary preferCenter:NO];
 }

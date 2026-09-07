@@ -239,6 +239,7 @@ if(APPLE)
 endif()
 
 if(WIN32)
+    include(cmake/FaceDetection.cmake)
     # The Windows platform layer builds on every push so the port meets a
     # compiler continuously; the application target follows with the port
     # itself.
@@ -268,7 +269,8 @@ if(WIN32)
         dwmapi
         gdiplus
         shell32  # ShellExecuteW for opening URLs
-        WindowsApp  # C++/WinRT (the in-box face detector)
+        PRIVATE
+        sidescopes_face_network
     )
     sidescopes_target_defaults(sidescopes_platform)
 endif()
@@ -315,6 +317,8 @@ add_library(sidescopes_app STATIC
     src/app/context_menu.cpp
     src/app/cursor_sampler.cpp
     src/app/face_lock.cpp
+    src/app/face_tracking.cpp
+    src/app/face_tracking_worker.cpp
     src/app/face_lock_controller.cpp
     src/app/frame_pacing.cpp
     src/app/guided_tour.cpp

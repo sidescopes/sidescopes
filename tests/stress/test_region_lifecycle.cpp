@@ -33,17 +33,19 @@ public:
         ThreadedCapture::stop();
     }
 
-    bool start(const CaptureTarget& target, int framesPerSecond, FrameMailbox& mailbox) override
+    bool start(const CaptureTarget& target, int framesPerSecond, FrameMailbox& mailbox, uint64_t captureEpoch) override
     {
-        if (!test::FakeCaptureSource::start(target, framesPerSecond, mailbox)) {
+        if (!test::FakeCaptureSource::start(target, framesPerSecond, mailbox, captureEpoch)) {
             return false;
         }
         m_stop.store(false);
-        m_thread = std::thread([this, &mailbox] {
+        m_thread = std::thread([this, &mailbox, captureEpoch, displayId = target.displayId] {
             while (!m_stop.load()) {
                 const uint64_t sequence = ++published;
                 const uint8_t code = static_cast<uint8_t>(sequence % 200 + 30);
-                mailbox.publish(test::makeSolidFrameBuffer(128, 96, Color{code, 80, 140}, sequence));
+                auto frame = test::makeSolidFrameBuffer(128, 96, Color{code, 80, 140}, sequence);
+                frame.stamp = FrameStamp{captureEpoch, displayId, frameClockSeconds()};
+                mailbox.publish(std::move(frame));
                 std::this_thread::sleep_for(5ms);
             }
         });
@@ -131,8 +133,12 @@ struct SessionFixture : ResetDesktop
 
     void apply(const RegionSessionOutcome& outcome)
     {
+        const bool revisionChanged = settings.selectionRevision != outcome.selectionRevision;
+        settings.selectionRevision = outcome.selectionRevision;
         if (outcome.regionChanged) {
             settings.region = outcome.region;
+        }
+        if (outcome.regionChanged || revisionChanged) {
             worker.updateSettings(settings);
         }
     }
@@ -185,6 +191,7 @@ void exerciseAttachment(SessionFixture& fix, std::mt19937& random)
 
     if (random() % 2 == 0) {
         desktop.windowGeometry.reset();
+        desktop.windowPresence = WindowPresence::Closed;
         fix.apply(fix.session.follow(false, fix.worker.latestFrameSize()));
     } else {
         fix.apply(fix.session.detach());

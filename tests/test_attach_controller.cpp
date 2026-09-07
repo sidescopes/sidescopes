@@ -64,6 +64,7 @@ AttachedWindowObservation closedWindow(uint64_t identity)
 {
     AttachedWindowObservation observation;
     observation.identity = identity;
+    observation.closed = true;
 
     return observation;
 }
@@ -91,7 +92,7 @@ TEST_CASE("A moved window carries the region")
     controller.attach(42, EditorPid, "Editor", EditorWindow, PrimaryDisplay, WholeEditor);
 
     const AttachWindowRect moved{200.0, 100.0, 400.0, 400.0};
-    const AttachDecision decision = controller.observe({visibleWindow(42, moved)}, 42);
+    const AttachDecision decision = controller.observe({visibleWindow(42, moved)}, 42, 0.0);
 
     CHECK(decision.activeIdentity == 42);
     CHECK(decision.activeOwnerPid == EditorPid);
@@ -107,7 +108,7 @@ TEST_CASE("A resized window leaves the region glued to the screen")
     // The window doubles in width: the region does not budge - a resize is
     // not a move, and no edge reached it.
     const AttachWindowRect wider{100.0, 100.0, 800.0, 400.0};
-    const AttachDecision decision = controller.observe({visibleWindow(42, wider)}, 42);
+    const AttachDecision decision = controller.observe({visibleWindow(42, wider)}, 42, 0.0);
 
     REQUIRE(decision.region.has_value());
     checkRegion(*decision.region, 10.0, 10.0, 50.0, 50.0);
@@ -125,13 +126,13 @@ TEST_CASE("A face-sized region ignores a resize that never reaches it")
     // The window grows to the right by 400: the face on screen did not
     // move, and neither does the region.
     const AttachWindowRect wider{100.0, 100.0, 800.0, 400.0};
-    const AttachDecision grown = controller.observe({visibleWindow(42, wider)}, 42);
+    const AttachDecision grown = controller.observe({visibleWindow(42, wider)}, 42, 0.0);
     REQUIRE(grown.region.has_value());
     checkRegion(*grown.region, 20.0, 20.0, 30.0, 30.0);
 
     // Moving the grown window still carries the region exactly.
     const AttachWindowRect movedWider{200.0, 100.0, 800.0, 400.0};
-    const AttachDecision moved = controller.observe({visibleWindow(42, movedWider)}, 42);
+    const AttachDecision moved = controller.observe({visibleWindow(42, movedWider)}, 42, 0.0);
     REQUIRE(moved.region.has_value());
     checkRegion(*moved.region, 30.0, 20.0, 40.0, 30.0);
 }
@@ -146,13 +147,13 @@ TEST_CASE("An arriving window edge pushes the region, permanently")
     // The left edge drags right past the region's place: the region gets
     // pushed along, keeping its size.
     const AttachWindowRect narrowed{250.0, 100.0, 250.0, 400.0};
-    const AttachDecision pushed = controller.observe({visibleWindow(42, narrowed)}, 42);
+    const AttachDecision pushed = controller.observe({visibleWindow(42, narrowed)}, 42, 0.0);
     REQUIRE(pushed.region.has_value());
     checkRegion(*pushed.region, 25.0, 20.0, 35.0, 30.0);
 
     // The edge retreats: pushed means pushed - the region stays where the
     // edge left it, like an object on glass.
-    const AttachDecision retreated = controller.observe({visibleWindow(42, EditorWindow)}, 42);
+    const AttachDecision retreated = controller.observe({visibleWindow(42, EditorWindow)}, 42, 0.0);
     REQUIRE(retreated.region.has_value());
     checkRegion(*retreated.region, 25.0, 20.0, 35.0, 30.0);
 }
@@ -167,13 +168,13 @@ TEST_CASE("Walls smaller than the region squeeze it elastically")
     // The window shrinks below the region's size: the region is pushed to
     // the surviving corner and the emitted mapping clips.
     const AttachWindowRect tiny{100.0, 100.0, 80.0, 80.0};
-    const AttachDecision squeezed = controller.observe({visibleWindow(42, tiny)}, 42);
+    const AttachDecision squeezed = controller.observe({visibleWindow(42, tiny)}, 42, 0.0);
     REQUIRE(squeezed.region.has_value());
     checkRegion(*squeezed.region, 10.0, 10.0, 18.0, 18.0);
 
     // The walls part: the size re-expands (the clip was elastic), from the
     // pushed position (the push was not).
-    const AttachDecision expanded = controller.observe({visibleWindow(42, EditorWindow)}, 42);
+    const AttachDecision expanded = controller.observe({visibleWindow(42, EditorWindow)}, 42, 0.0);
     REQUIRE(expanded.region.has_value());
     checkRegion(*expanded.region, 10.0, 10.0, 20.0, 20.0);
 }
@@ -185,7 +186,7 @@ TEST_CASE("A focused attached window always carries its mapping")
 
     // The mapping is re-emitted every frame - deduplication is the host's
     // job - so a missed edge can never strand a stale region.
-    const AttachDecision decision = controller.observe({visibleWindow(42, EditorWindow)}, 42);
+    const AttachDecision decision = controller.observe({visibleWindow(42, EditorWindow)}, 42, 0.0);
 
     CHECK(decision.activeIdentity == 42);
     REQUIRE(decision.region.has_value());
@@ -200,11 +201,11 @@ TEST_CASE("Focus on an unattached window yields no attached region")
     // The focused window is an unattached sibling (a second Preview
     // document) or SideScopes itself: the attached region must neither show
     // nor be effective - the host falls back to the global region.
-    const AttachDecision sibling = controller.observe({visibleWindow(42, EditorWindow)}, 7);
+    const AttachDecision sibling = controller.observe({visibleWindow(42, EditorWindow)}, 7, 0.0);
     CHECK(sibling.activeIdentity == 0);
     CHECK_FALSE(sibling.region.has_value());
 
-    const AttachDecision unknown = controller.observe({visibleWindow(42, EditorWindow)}, std::nullopt);
+    const AttachDecision unknown = controller.observe({visibleWindow(42, EditorWindow)}, std::nullopt, 0.0);
     CHECK(unknown.activeIdentity == 0);
     CHECK_FALSE(unknown.region.has_value());
 }
@@ -215,7 +216,7 @@ TEST_CASE("A focused window that is minimized cannot be active")
     controller.attach(42, EditorPid, "Editor", EditorWindow, PrimaryDisplay, WholeEditor);
 
     // A race between the focus read and a minimize: the observation wins.
-    const AttachDecision decision = controller.observe({minimizedWindow(42, EditorWindow)}, 42);
+    const AttachDecision decision = controller.observe({minimizedWindow(42, EditorWindow)}, 42, 0.0);
 
     CHECK(decision.activeIdentity == 0);
     CHECK_FALSE(decision.region.has_value());
@@ -235,7 +236,7 @@ TEST_CASE("An in-window region edit re-anchors the stored rect without detaching
     // The window moves; the sub-rectangle moves with it (relative fraction
     // preserved), proving the edit updated the relative rect.
     const AttachWindowRect moved{300.0, 100.0, 400.0, 400.0};
-    const AttachDecision decision = controller.observe({visibleWindow(42, moved)}, 42);
+    const AttachDecision decision = controller.observe({visibleWindow(42, moved)}, 42, 0.0);
 
     REQUIRE(decision.region.has_value());
     checkRegion(*decision.region, 40.0, 20.0, 60.0, 40.0);
@@ -259,7 +260,7 @@ TEST_CASE("A hidden window keeps its region and stops being active")
 
     // Hidden or minimized: no attached region is emitted, the window stays
     // attached.
-    const AttachDecision decision = controller.observe({minimizedWindow(42, EditorWindow)}, std::nullopt);
+    const AttachDecision decision = controller.observe({minimizedWindow(42, EditorWindow)}, std::nullopt, 0.0);
 
     CHECK(decision.activeIdentity == 0);
     CHECK_FALSE(decision.region.has_value());
@@ -267,7 +268,8 @@ TEST_CASE("A hidden window keeps its region and stops being active")
 
     // The window returns to focus: its region comes back exactly where it
     // was.
-    const AttachDecision back = controller.observe({visibleWindow(42, EditorWindow)}, 42);
+    (void)controller.observe({visibleWindow(42, EditorWindow)}, 42, 1.0);
+    const AttachDecision back = controller.observe({visibleWindow(42, EditorWindow)}, 42, 1.3);
     CHECK(back.activeIdentity == 42);
     REQUIRE(back.region.has_value());
     checkRegion(*back.region, 10.0, 10.0, 50.0, 50.0);
@@ -284,12 +286,12 @@ TEST_CASE("Two attached windows keep independent regions and follow the front on
 
     // The second window is in front right after its pick; switching the
     // front window switches the analyzed region, both regions intact.
-    const AttachDecision toFirst = controller.observe(both, 42);
+    const AttachDecision toFirst = controller.observe(both, 42, 0.0);
     CHECK(toFirst.activeIdentity == 42);
     REQUIRE(toFirst.region.has_value());
     checkRegion(*toFirst.region, 10.0, 10.0, 50.0, 50.0);
 
-    const AttachDecision toSecond = controller.observe(both, 7);
+    const AttachDecision toSecond = controller.observe(both, 7, 0.0);
     CHECK(toSecond.activeIdentity == 7);
     REQUIRE(toSecond.region.has_value());
     checkRegion(*toSecond.region, 50.0, 50.0, 90.0, 90.0);
@@ -302,17 +304,17 @@ TEST_CASE("An edit binds to the active window only")
     controller.attach(7, EditorPid, "Editor", SecondWindow, PrimaryDisplay, WholeSecond);
 
     const std::vector<AttachedWindowObservation> both{visibleWindow(42, EditorWindow), visibleWindow(7, SecondWindow)};
-    controller.observe(both, 42);
+    controller.observe(both, 42, 0.0);
 
     // Editing while the first window is active narrows only its region.
     const RegionOfInterest drawn{20.0, 20.0, 40.0, 40.0};
     controller.editRegion(drawn, EditorWindow, PrimaryDisplay);
 
-    const AttachDecision toSecond = controller.observe(both, 7);
+    const AttachDecision toSecond = controller.observe(both, 7, 0.0);
     REQUIRE(toSecond.region.has_value());
     checkRegion(*toSecond.region, 50.0, 50.0, 90.0, 90.0);
 
-    const AttachDecision toFirst = controller.observe(both, 42);
+    const AttachDecision toFirst = controller.observe(both, 42, 0.0);
     REQUIRE(toFirst.region.has_value());
     checkRegion(*toFirst.region, 20.0, 20.0, 40.0, 40.0);
 }
@@ -335,7 +337,7 @@ TEST_CASE("With no attached window visible no region is emitted")
     controller.attach(7, EditorPid, "Editor", SecondWindow, PrimaryDisplay, WholeSecond);
 
     const AttachDecision decision =
-        controller.observe({minimizedWindow(42, EditorWindow), minimizedWindow(7, SecondWindow)}, std::nullopt);
+        controller.observe({minimizedWindow(42, EditorWindow), minimizedWindow(7, SecondWindow)}, std::nullopt, 0.0);
 
     CHECK(decision.activeIdentity == 0);
     CHECK_FALSE(decision.region.has_value());
@@ -348,7 +350,7 @@ TEST_CASE("One of two windows closing prunes it and keeps the other attached")
     controller.attach(42, EditorPid, "Editor", EditorWindow, PrimaryDisplay, WholeEditor);
     controller.attach(7, EditorPid, "Editor", SecondWindow, PrimaryDisplay, WholeSecond);
 
-    const AttachDecision decision = controller.observe({closedWindow(42), visibleWindow(7, SecondWindow)}, 7);
+    const AttachDecision decision = controller.observe({closedWindow(42), visibleWindow(7, SecondWindow)}, 7, 0.0);
 
     CHECK(decision.closedCount == 1);
     CHECK_FALSE(decision.detachedAll);
@@ -362,9 +364,9 @@ TEST_CASE("The last window closing detaches; the host falls back to the global r
     controller.attach(42, EditorPid, "Editor", EditorWindow, PrimaryDisplay, WholeEditor);
 
     const AttachWindowRect moved{200.0, 100.0, 400.0, 400.0};
-    controller.observe({visibleWindow(42, moved)}, 42);
+    controller.observe({visibleWindow(42, moved)}, 42, 0.0);
 
-    const AttachDecision decision = controller.observe({closedWindow(42)}, std::nullopt);
+    const AttachDecision decision = controller.observe({closedWindow(42)}, std::nullopt, 0.0);
 
     CHECK(decision.closedCount == 1);
     CHECK(decision.detachedAll);
@@ -383,7 +385,7 @@ TEST_CASE("Removing one window keeps the rest attached")
     CHECK(controller.attachedCount() == 1);
     CHECK(controller.activeIdentity() == 0);
 
-    const AttachDecision decision = controller.observe({visibleWindow(42, EditorWindow)}, 42);
+    const AttachDecision decision = controller.observe({visibleWindow(42, EditorWindow)}, 42, 0.0);
     CHECK(decision.activeIdentity == 42);
 }
 
@@ -407,7 +409,7 @@ TEST_CASE("The window moving to another display re-maps the region there")
 
     const AttachWindowRect onSecondary{1200.0, 200.0, 400.0, 400.0};
     const AttachDecision decision =
-        controller.observe({visibleWindow(42, onSecondary, SecondaryDisplayId, SecondaryDisplay)}, 42);
+        controller.observe({visibleWindow(42, onSecondary, SecondaryDisplayId, SecondaryDisplay)}, 42, 0.0);
 
     CHECK(decision.activeDisplayId == SecondaryDisplayId);
     REQUIRE(decision.region.has_value());
@@ -418,7 +420,7 @@ TEST_CASE("A detached controller ignores observations and edits")
 {
     AttachController controller;
 
-    const AttachDecision decision = controller.observe({visibleWindow(42, EditorWindow)}, 42);
+    const AttachDecision decision = controller.observe({visibleWindow(42, EditorWindow)}, 42, 0.0);
     CHECK(decision.activeIdentity == 0);
     CHECK_FALSE(decision.detachedAll);
 
@@ -437,11 +439,11 @@ TEST_CASE("A reopening animation never pushes the region")
 
     // Hidden, then animated back over several transitional rectangles -
     // Quick Look zooms its panel open - before landing where it was.
-    (void)controller.observe({minimizedWindow(1, {200.0, 100.0, 800.0, 600.0})}, 1);
-    (void)controller.observe({visibleWindow(1, {450.0, 300.0, 200.0, 150.0})}, 1);
-    (void)controller.observe({visibleWindow(1, {300.0, 180.0, 560.0, 420.0})}, 1);
-    (void)controller.observe({visibleWindow(1, {200.0, 100.0, 800.0, 600.0})}, 1);
-    const AttachDecision landed = controller.observe({visibleWindow(1, {200.0, 100.0, 800.0, 600.0})}, 1);
+    (void)controller.observe({minimizedWindow(1, {200.0, 100.0, 800.0, 600.0})}, 1, 0.0);
+    (void)controller.observe({visibleWindow(1, {450.0, 300.0, 200.0, 150.0})}, 1, 0.0);
+    (void)controller.observe({visibleWindow(1, {300.0, 180.0, 560.0, 420.0})}, 1, 0.0);
+    (void)controller.observe({visibleWindow(1, {200.0, 100.0, 800.0, 600.0})}, 1, 0.0);
+    const AttachDecision landed = controller.observe({visibleWindow(1, {200.0, 100.0, 800.0, 600.0})}, 1, 0.3);
 
     REQUIRE(landed.region.has_value());
     checkRegion(*landed.region, 25.0, 15.0, 45.0, 35.0);
@@ -453,14 +455,107 @@ TEST_CASE("A window moved while hidden leaves the region screen-glued")
     (void)controller.attach(1, 100, "Editor", {200.0, 100.0, 800.0, 600.0}, PrimaryDisplay,
                             RegionOfInterest{25.0, 15.0, 45.0, 35.0});
 
-    (void)controller.observe({minimizedWindow(1, {200.0, 100.0, 800.0, 600.0})}, 1);
-    (void)controller.observe({visibleWindow(1, {400.0, 100.0, 800.0, 600.0})}, 1);
-    const AttachDecision landed = controller.observe({visibleWindow(1, {400.0, 100.0, 800.0, 600.0})}, 1);
+    (void)controller.observe({minimizedWindow(1, {200.0, 100.0, 800.0, 600.0})}, 1, 0.0);
+    (void)controller.observe({visibleWindow(1, {400.0, 100.0, 800.0, 600.0})}, 1, 0.0);
+    const AttachDecision landed = controller.observe({visibleWindow(1, {400.0, 100.0, 800.0, 600.0})}, 1, 0.3);
 
     // The re-appearance is a baseline, not a move: the region held its
     // screen position and only the emitted mapping clips to the window.
     REQUIRE(landed.region.has_value());
     checkRegion(*landed.region, 40.0, 15.0, 45.0, 35.0);
+}
+
+TEST_CASE("Minimization rolls back animation pushes and waits for a timed restore")
+{
+    AttachController controller;
+    const AttachWindowRect original{100, 100, 400, 400};
+    controller.attach(1, 100, "Editor", original, PrimaryDisplay, {20, 20, 30, 30});
+    // Native geometry still says visible while the window shrinks toward
+    // the Dock. Those intermediate resizes push the mechanical crop.
+    const auto shrinking = controller.observe({visibleWindow(1, {600, 650, 200, 200})}, 1, 1.0);
+    REQUIRE(shrinking.region);
+    CHECK(shrinking.windowMoving);
+    CHECK(shrinking.region->leftPercent == Approx(60.0));
+    (void)controller.observe({visibleWindow(1, {800, 850, 80, 80})}, 1, 1.05);
+    (void)controller.observe({minimizedWindow(1, {800, 850, 80, 80})}, 1, 1.1);
+
+    const auto opening = controller.observe({visibleWindow(1, {800, 850, 80, 80})}, 1, 5.0);
+    CHECK_FALSE(opening.region);
+    // Multiple follow passes in the same UI frame cannot finish settling.
+    for (int repeat = 0; repeat != 4; ++repeat) {
+        CHECK_FALSE(controller.observe({visibleWindow(1, {800, 850, 80, 80})}, 1, 5.0).region);
+    }
+    CHECK_FALSE(controller.observe({visibleWindow(1, original)}, 1, 5.05).region);
+    CHECK_FALSE(controller.observe({visibleWindow(1, original)}, 1, 5.1).region);
+    const auto restored = controller.observe({visibleWindow(1, original)}, 1, 5.3);
+    REQUIRE(restored.region);
+    CHECK_FALSE(restored.windowMoving);
+    checkRegion(*restored.region, 20, 20, 30, 30);
+}
+
+TEST_CASE("A settled smaller resize remains committed across minimization")
+{
+    AttachController controller;
+    controller.attach(1, 100, "Editor", EditorWindow, PrimaryDisplay, {20, 20, 40, 40});
+    const AttachWindowRect smaller{300, 100, 100, 400};
+    (void)controller.observe({visibleWindow(1, smaller)}, 1, 1.0);
+    const auto committed = controller.observe({visibleWindow(1, smaller)}, 1, 1.3);
+    REQUIRE(committed.region);
+    CHECK_FALSE(committed.windowMoving);
+    checkRegion(*committed.region, 30, 20, 40, 40);
+    // Only this later animation is rolled back, not the genuine resize.
+    (void)controller.observe({visibleWindow(1, {800, 850, 80, 80})}, 1, 2.0);
+    (void)controller.observe({minimizedWindow(1, smaller)}, 1, 2.05);
+    (void)controller.observe({visibleWindow(1, smaller)}, 1, 3.0);
+    const auto restored = controller.observe({visibleWindow(1, smaller)}, 1, 3.3);
+    REQUIRE(restored.region);
+    checkRegion(*restored.region, 30, 20, 40, 40);
+    // Its clipped width still expands elastically after a genuine grow.
+    const auto expanded = controller.observe({visibleWindow(1, EditorWindow)}, 1, 4.0);
+    REQUIRE(expanded.region);
+    checkRegion(*expanded.region, 30, 20, 50, 40);
+}
+
+TEST_CASE("Unavailable geometry cannot settle an animation or imply closure")
+{
+    AttachController controller;
+    controller.attach(1, 100, "Editor", EditorWindow, PrimaryDisplay, {20, 20, 30, 30});
+    const AttachWindowRect animated{800, 850, 80, 80};
+    (void)controller.observe({visibleWindow(1, animated)}, 1, 1.0);
+    AttachedWindowObservation missing;
+    missing.identity = 1;
+    SECTION("Outgoing animation with unavailable bounds")
+    {
+        const auto unavailable = controller.observe({missing}, 1, 1.05);
+        CHECK_FALSE(unavailable.region);
+        CHECK_FALSE(unavailable.detachedAll);
+        CHECK(unavailable.closedCount == 0);
+        REQUIRE(controller.isAttached(1));
+        const auto returned = controller.observe({visibleWindow(1, animated)}, 1, 5.0);
+        CHECK(returned.windowMoving);
+        (void)controller.observe({minimizedWindow(1, animated)}, 1, 5.05);
+    }
+    SECTION("Minimized state reported without bounds")
+    {
+        missing.minimized = true;
+        const auto minimized = controller.observe({missing}, 1, 1.05);
+        CHECK_FALSE(minimized.region);
+        CHECK_FALSE(minimized.detachedAll);
+        REQUIRE(controller.isAttached(1));
+    }
+    SECTION("Returning animation interrupted by missing bounds")
+    {
+        (void)controller.observe({minimizedWindow(1, animated)}, 1, 1.05);
+        (void)controller.observe({visibleWindow(1, animated)}, 1, 2.0);
+        (void)controller.observe({missing}, 1, 2.05);
+        CHECK_FALSE(controller.observe({visibleWindow(1, animated)}, 1, 5.0).region);
+    }
+    CHECK_FALSE(controller.observe({visibleWindow(1, EditorWindow)}, 1, 6.0).region);
+    const auto restored = controller.observe({visibleWindow(1, EditorWindow)}, 1, 6.3);
+    REQUIRE(restored.region);
+    CHECK(restored.activeIdentity == 1);
+    CHECK_FALSE(restored.windowMoving);
+    checkRegion(*restored.region, 20, 20, 30, 30);
 }
 
 TEST_CASE("The attached set answers which windows it holds")
@@ -523,8 +618,31 @@ TEST_CASE("An unattached window's name is empty")
     CHECK(controller.activeApplicationName() == "Editor");
 
     // Focusing away from every attached window leaves no active name to wear.
-    (void)controller.observe({visibleWindow(42, EditorWindow)}, std::nullopt);
+    (void)controller.observe({visibleWindow(42, EditorWindow)}, std::nullopt, 0.0);
     CHECK(controller.activeApplicationName().empty());
+}
+
+TEST_CASE("Missing window geometry is not proof that a window closed")
+{
+    AttachController controller;
+    controller.attach(42, EditorPid, "Editor", EditorWindow, PrimaryDisplay, WholeEditor);
+    AttachedWindowObservation unknown;
+    unknown.identity = 42;
+    const auto waiting = controller.observe({unknown}, 42, 0.0);
+    CHECK_FALSE(waiting.region);
+    CHECK(waiting.closedCount == 0);
+    CHECK(controller.isAttached(42));
+    const auto resumed = controller.observe({visibleWindow(42, EditorWindow)}, 42, 0.0);
+    CHECK(resumed.region == WholeEditor);
+}
+
+TEST_CASE("Unavailable display geometry cannot publish an invented full-display crop")
+{
+    AttachController controller;
+    controller.attach(42, EditorPid, "Editor", EditorWindow, PrimaryDisplay, WholeEditor);
+    const auto waiting = controller.observe({visibleWindow(42, EditorWindow, 0, {})}, 42, 0.0);
+    CHECK_FALSE(waiting.region);
+    CHECK(controller.isAttached(42));
 }
 
 }  // namespace sidescopes

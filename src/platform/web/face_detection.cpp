@@ -16,6 +16,11 @@
 
 namespace sidescopes {
 
+std::unique_ptr<FaceDetectionSession> createFaceDetectionSession()
+{
+    return {};
+}
+
 std::vector<IntRect> detectFaces(const FrameView&, float)
 {
     return {};
@@ -24,13 +29,6 @@ std::vector<IntRect> detectFaces(const FrameView&, float)
 bool supportsFaceDetection()
 {
     return false;
-}
-
-void warmFaceDetection()
-{
-    // Nothing to warm. The Windows layer's own body is empty too, for a
-    // different reason - it measured the warm-up as pure cost - and both are
-    // answers rather than gaps.
 }
 
 }  // namespace sidescopes

@@ -193,7 +193,6 @@ bool App::init()
 
     m_worker.setOutputCallback([this] { noteWorkerOutput(); });
     m_worker.start();
-    warmFaceDetection();
 
     observeSystemEvents();
     rememberApplicationWindow(m_graphics->nativeWindowHandle());
@@ -313,8 +312,8 @@ void App::refreshActivatedScope(std::string_view id)
     m_worker.updateSettings(m_analysis);
     const double deadline = glfwGetTime() + 0.08;
     while (glfwGetTime() < deadline) {
-        if (m_worker.fetchOutput(m_outputVersion, m_output) && m_panes->imageFor(id).sequence != staleSequence &&
-            m_panes->imageFor(id).width > 0) {
+        if (m_worker.fetchOutput(m_outputVersion, m_output, m_analysis.selectionRevision) &&
+            m_panes->imageFor(id).sequence != staleSequence && m_panes->imageFor(id).width > 0) {
             m_panes->uploadVisibleScopes(/*traceLive=*/true);
 
             return;
@@ -346,9 +345,17 @@ void App::chooseScope(std::string_view id, bool stack)
 
 void App::applyRegionSessionOutcome(const RegionSessionOutcome& outcome)
 {
+    if (m_analysis.selectionRevision != outcome.selectionRevision) {
+        m_analysis.selectionRevision = outcome.selectionRevision;
+        m_analysisDirty = true;
+    }
     if (outcome.regionChanged) {
         m_analysis.region = outcome.region;
-        m_analysisDirty = true;
+        if (outcome.trackedRegion) {
+            m_lastSentRegion = outcome.region;
+        } else {
+            m_analysisDirty = true;
+        }
         if (!m_analysis.region && m_panes) {
             m_panes->releaseTraces();
         }
@@ -446,9 +453,15 @@ void App::drawFrame(int framebufferWidth, int framebufferHeight)
     }
 
     m_clocks.noteFrameBegun(glfwGetTime());
-    if (m_worker.fetchOutput(m_outputVersion, m_output)) {
+    if (m_worker.fetchOutput(m_outputVersion, m_output, m_analysis.selectionRevision)) {
         m_panes->uploadVisibleScopes(m_analysis.region.has_value());
-        SS_DIAG(Perf, "pass analysis_ms=%.1f", m_output.accumulateMilliseconds);
+        // This observes upload submission, not compositor presentation.
+        SS_DIAG(Perf,
+                "pass analysis_ms=%.1f frame=%llu epoch=%llu display=%u revision=%llu received=%.9f observed=%.9f",
+                m_output.accumulateMilliseconds, static_cast<unsigned long long>(m_output.frameSequence),
+                static_cast<unsigned long long>(m_output.frameStamp.captureEpoch), m_output.frameStamp.displayId,
+                static_cast<unsigned long long>(m_output.selectionRevision), m_output.frameStamp.receivedSeconds,
+                frameClockSeconds());
         m_clocks.noteActivity(glfwGetTime());
     }
     m_frameSize = m_worker.latestFrameSize();
@@ -561,16 +574,15 @@ void App::drainAsyncSignals()
         m_clocks.noteActivity(glfwGetTime());
     }
     if (m_orphanEscape.exchange(false)) {
-        applyRegionSessionOutcome(m_regionSession.clear());
+        applyRegionSessionOutcome(m_regionSession.cancel());
         m_clocks.noteActivity(glfwGetTime());
     }
     // Keys the border panel took while it held the keyboard: Escape and the
-    // shortcuts keep working right after a border interaction. Escape on the
-    // border dismisses only the region it outlines - like its close button -
-    // while Escape in the main window stays the full reset.
+    // shortcuts keep working right after a border interaction. Escape cancels
+    // an active picker and otherwise leaves the committed region alone.
     for (const BorderKeyPress& press : drainBorderKeyPresses()) {
         if (press.escape) {
-            applyRegionSessionOutcome(m_regionSession.dismiss());
+            applyRegionSessionOutcome(m_regionSession.cancel());
         } else {
             applyShortcutAction(m_shortcuts.resolveNamed(press.key, press.shift, shortcutContext()));
         }
@@ -723,15 +735,12 @@ void App::beginHostWindow()
 
 // Applies a pane-render outcome to host state. The renderer drives the view,
 // the picker, and the pin board itself; what lands here is what only the host
-// can carry out - bringing a scope on screen, dropping every region, and the
+// can carry out - bringing a scope on screen and the
 // clocks the whole shell shares.
 void App::applyPaneRenderOutcome(const PaneRenderOutcome& outcome)
 {
     if (outcome.chosenScope) {
         chooseScope(outcome.chosenScope->id, outcome.chosenScope->stack);
-    }
-    if (outcome.clearRegion) {
-        applyRegionSessionOutcome(m_regionSession.clear());
     }
     if (outcome.analysisDirty) {
         m_analysisDirty = true;
@@ -767,8 +776,11 @@ void App::applyShortcutAction(const ShortcutAction& action)
     case ShortcutAction::Kind::CloseSettings:
         m_showSettings = false;
         break;
-    case ShortcutAction::Kind::ClearRegion:
-        applyRegionSessionOutcome(m_regionSession.clear());
+    case ShortcutAction::Kind::CancelInteraction:
+        applyRegionSessionOutcome(m_regionSession.cancel());
+        break;
+    case ShortcutAction::Kind::DetachAllWindows:
+        applyRegionSessionOutcome(m_regionSession.detachAll());
         break;
     case ShortcutAction::Kind::LoadPreset:
         applyPresetOutcome(m_presets.load(action.presetSlot));

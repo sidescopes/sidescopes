@@ -64,6 +64,26 @@ into `build-ide/` with both Debug and Release configurations. Pick
 configuration dropdown ever comes up empty, Project > Delete Cache and
 Reconfigure clears the IDE's stale state.
 
+### Face detection dependency
+
+Windows face detection uses the embedded YuNet model and a pinned static build
+of OpenCV 4.13.0. CMake fetches the verified source archive and builds only
+`core`, `imgproc`, and `dnn`, with bundled protobuf and zlib. The first Windows
+build therefore takes longer; later builds reuse the dependency. GUI, video,
+image codecs, GPU backends and runtime plugins are disabled. macOS uses Vision
+and does not build OpenCV.
+
+The dependency retains an SSE2 baseline and selects newer CPU instructions at
+runtime. Its C runtime follows `CMAKE_MSVC_RUNTIME_LIBRARY`, including the
+static runtime used by release builds. Face detection is the sole OpenCV
+consumer and configures its CPU work to one thread once; the scope analysis
+workers retain their own scheduling.
+
+The full-display face picker preserves up to 1280 pixels on the longer image
+edge. Live tracking searches a smaller crop with a 320-pixel limit. Both retain
+aspect ratio and filter face sizes in original capture pixels. The model and
+its source/license are documented in [assets/models](assets/models).
+
 ## Screen-recording permission for development builds (macOS)
 
 macOS binds the screen-recording permission to an application's code-signing

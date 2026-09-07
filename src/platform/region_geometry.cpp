@@ -85,11 +85,6 @@ double unoccludedArea(const LocalRect& target, const std::vector<LocalRect>& occ
 
 }  // namespace
 
-bool regionCloseAvailable(double width, double scale)
-{
-    return width >= MinimumRegionWidthForClose * scale;
-}
-
 RegionOfInterest regionFromLocalRect(const LocalRect& rect, double width, double height)
 {
     RegionOfInterest region;

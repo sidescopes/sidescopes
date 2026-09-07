@@ -36,7 +36,7 @@ TEST_CASE("A window out of sight and an empty selection pause for different reas
     REQUIRE(idle.update(empty, 0.0).pipeline == PipelineAction::Keep);
     const CaptureDecision noRegion = idle.update(empty, 10.0);
     REQUIRE(noRegion.pipeline == PipelineAction::Suspend);
-    CHECK(noRegion.pauseReason == "paused - no region selected");
+    CHECK(noRegion.pauseReason == "paused - waiting for a region source");
 }
 
 TEST_CASE("A running pipeline is left alone, and a suspended one resumes")

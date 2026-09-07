@@ -153,6 +153,32 @@ TEST_CASE("FrameMailbox nudge does not swallow a pending frame")
     CHECK(taken->sequence == 7);
 }
 
+TEST_CASE("A delivered frame retains its own stream identity and receipt time")
+{
+    FrameMailbox mailbox;
+    auto first = makeFrame(1);
+    first.stamp = FrameStamp{3, 7, 12.5};
+    mailbox.publish(std::move(first));
+    auto taken = mailbox.takeLatest(0ms);
+    REQUIRE(taken.has_value());
+    const FrameView view = taken->view();
+    CHECK(view.stamp.captureEpoch == 3);
+    CHECK(view.stamp.displayId == 7);
+    CHECK(view.stamp.receivedSeconds == 12.5);
+
+    auto replacement = makeFrame(1);
+    replacement.stamp = FrameStamp{4, 9, 13.5};
+    mailbox.publish(std::move(replacement));
+    const auto next = mailbox.takeLatest(0ms);
+    REQUIRE(next.has_value());
+    CHECK(next->view().stamp.captureEpoch == 4);
+    CHECK(next->view().stamp.displayId == 9);
+    CHECK(next->view().stamp.receivedSeconds == 13.5);
+    // A held frame must not acquire the identity of a newer stream.
+    CHECK(view.stamp.captureEpoch == 3);
+    CHECK(view.stamp.receivedSeconds == 12.5);
+}
+
 TEST_CASE("FrameBuffer holds no more pixels than the frame needs")
 {
     // The capture narrows to the region once it settles, so a buffer that

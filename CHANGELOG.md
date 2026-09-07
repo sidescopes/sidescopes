@@ -8,6 +8,12 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- Cancelling a region picker keeps the committed selection. Closed parent
+  windows and stopped following retain the last rectangle on its display;
+  region tools no longer offer an action that clears the selection.
+- Face regions follow position and size changes without waiting for video to
+  settle or hiding the border. Lost or ambiguous faces leave their last
+  rectangle attached to the window until another face is selected.
 - Mac downloads contain both Apple silicon and Intel code and require macOS
   14 or later, matching the screen-capture APIs used by the application.
 - Desktop archives and both Lab distributions include the notices for their
@@ -17,14 +23,16 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - Saved settings retain fractional values and negative monitor coordinates,
   reject malformed numbers, and preserve the previous file if saving fails.
-- Cancelling a region pick allows another pick immediately. Clearing a region
-  also clears its attachment and face-tracking state, and delayed native
-  callbacks cannot access a session after it closes.
+- Cancelling a region pick allows another pick immediately. Delayed native
+  callbacks cannot access a session after it closes, and stale face selections
+  cannot attach to a window whose source geometry has changed.
 - Scope analysis retries failed module operations without displaying stale or
   partially copied results. Changes to narrow regions and pixel formats now
   invalidate the content cache correctly.
-- Windows capture reads the acquired texture's pixel format, and repeated face
-  detection releases cached native factories before their apartment closes.
+- Windows capture reads the acquired texture's pixel format. Face detection
+  reuses its model while following video and releases it on the owning thread.
+- Converting an attached region between window and display coordinates no
+  longer loses a boundary pixel to floating-point rounding.
 - Diagnostic recording can be changed safely while capture and analysis emit
   messages, including when a reporting subsystem is shutting down.
 - The Lab keeps the latest image selection during overlapping loads, measures

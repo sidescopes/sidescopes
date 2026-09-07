@@ -1,10 +1,9 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
-#include <chrono>
 #include <cstdint>
 #include <optional>
 #include <string>
-#include <thread>
+#include <utility>
 
 #include "app/attach_controller.h"
 #include "app/capture_controller.h"
@@ -60,22 +59,11 @@ struct CoordinatorFixture
     // condition it is about.
     void sync(const std::string& windowLabel = "", uint64_t activeIdentity = 0)
     {
-        coordinator.syncBorder(RegionBorderState{windowLabel, activeIdentity, false, false, 0.0});
+        coordinator.syncBorder(RegionBorderState{windowLabel, activeIdentity, false, false});
     }
 
-    // Runs a pan under the face lock's content watch: two frames far enough
-    // apart that the region is unsettled as of t = 0.
-    void unsettleContent()
+    ~CoordinatorFixture()
     {
-        worker.start();
-        for (uint64_t sequence = 1; sequence <= 2; ++sequence) {
-            const Color shade = sequence == 1 ? Color{0, 0, 0} : Color{255, 255, 255};
-            mailbox.publish(test::makeSolidFrameBuffer(16, 16, shade, sequence));
-            while (worker.consumedFrameSequence() != sequence) {
-                std::this_thread::sleep_for(std::chrono::milliseconds(1));
-            }
-            faceLock.probeContentChange(RegionOfInterest{}, 0.0);
-        }
         worker.stop();
     }
 };
@@ -152,9 +140,8 @@ TEST_CASE("Clearing the region drops every kind of selection at once")
     fix.coordinator.setGlobalRegion(PartialRegion);
     (void)fix.attach.attach(42, 100, "Editor", AttachWindowRect{0.0, 0.0, 400.0, 400.0},
                             AttachDisplayRect{0.0, 0.0, 1000.0, 1000.0}, PartialRegion);
-    fix.faceLock.addLock(42, FaceLockState{}, 0.0);
-    fix.faceLock.onActivated(42, 5.0);
-    REQUIRE(fix.faceLock.hunting());
+    fix.faceLock.addLock(42, FaceLockState{});
+    fix.faceLock.activationChanged();
 
     const RegionOutcome outcome = fix.coordinator.clearRegion();
 
@@ -163,7 +150,6 @@ TEST_CASE("Clearing the region drops every kind of selection at once")
     CHECK(outcome.detachedAll);
     CHECK_FALSE(fix.attach.attached());
     CHECK_FALSE(fix.faceLock.locked());
-    CHECK_FALSE(fix.faceLock.hunting());
     // The pending pick goes too, so nothing lands after the clear.
     CHECK(regionOverlayStubs().pickCancels == 1);
     CHECK_FALSE(fix.coordinator.globalRegion().has_value());
@@ -185,16 +171,14 @@ TEST_CASE("Clearing with nothing attached reports no detach")
 
 TEST_CASE("Clearing when the scopes read nothing is not a change")
 {
-    // Escape in the empty state is the ordinary case - it is also how a pick is
-    // cancelled - and there is nothing to take away. Reported as a change it
-    // pushed the settings, re-synced the border and re-saved the preferences,
-    // every press.
+    // An internal reset with no selection must not push settings, resync
+    // the border or resave preferences as though a selection had changed.
     CoordinatorFixture fix;
     const RegionOutcome outcome = fix.coordinator.clearRegion();
 
     CHECK_FALSE(outcome.regionChanged);
     CHECK_FALSE(outcome.detachedAll);
-    // The pick is still cancelled: that is what Escape means with a picker up.
+    // An internal reset also cancels pending picker work.
     CHECK(regionOverlayStubs().pickCancels == 1);
 }
 
@@ -235,7 +219,7 @@ TEST_CASE("A face-tracked border keeps the window title and changes only its bin
 {
     CoordinatorFixture fix;
     fix.region = PartialRegion;
-    fix.faceLock.addLock(42, FaceLockState{}, 0.0);
+    fix.faceLock.addLock(42, FaceLockState{});
 
     fix.sync("Portrait, 1860", 42);
 
@@ -273,28 +257,68 @@ TEST_CASE("The border stays off screen while anything says it must")
     }
     SECTION("the watched window is moving")
     {
-        fix.coordinator.syncBorder(RegionBorderState{"", 0, true, false, 0.0});
+        fix.coordinator.syncBorder(RegionBorderState{"", 0, true, false});
     }
     SECTION("this application's own window is minimized")
     {
-        fix.coordinator.syncBorder(RegionBorderState{"", 0, false, true, 0.0});
-    }
-    SECTION("the locked face is not where the region sits")
-    {
-        fix.faceLock.addLock(42, FaceLockState{}, 0.0);
-        fix.faceLock.onActivated(42, 5.0);
-        REQUIRE(fix.faceLock.hunting());
-        fix.sync();
-    }
-    SECTION("the locked region's content has not settled")
-    {
-        fix.unsettleContent();
-        REQUIRE(fix.faceLock.contentUnsettled(0.1));
-        fix.coordinator.syncBorder(RegionBorderState{"", 0, false, false, 0.1});
+        fix.coordinator.syncBorder(RegionBorderState{"", 0, false, true});
     }
 
     CHECK_FALSE(regionOverlayStubs().border.has_value());
     CHECK(regionOverlayStubs().borderShows == shownBefore);
+}
+
+TEST_CASE("Video and transient face loss keep the visible border at the last accepted crop")
+{
+    CoordinatorFixture fix;
+    fix.region = PartialRegion;
+    const AttachWindowRect window{0, 0, 200, 100};
+    desktopStubs().displayGeometry = DisplayGeometry{0, 0, 200, 100};
+    desktopStubs().faceDetectionSupported = true;
+    desktopStubs().faces.assign(1, IntRect{30, 5, 80, 80});
+    (void)fix.attach.attach(42, 100, "Editor", window, {0, 0, 200, 100}, PartialRegion);
+    fix.faceLock.addLock(42, face_lock::makeLock({70, 45, 80}, {20, 20, 120, 70}), window);
+    AttachDecision decision;
+    decision.activeIdentity = 42;
+    decision.activeRect = window;
+    const AnalysisWorker::FrameSize size{200, 100, 200, 100};
+    (void)fix.faceLock.update(decision, size, false, frameClockSeconds());
+    AnalysisSettings settings;
+    settings.region = PartialRegion;
+    settings.selectionRevision = fix.faceLock.selectionRevision();
+    settings.enabledScopes = {"org.sidescopes.histogram"};
+    fix.worker.updateSettings(settings);
+    fix.worker.startInline();
+    for (uint64_t sequence = 1; sequence <= 3; ++sequence) {
+        if (sequence == 3) {
+            desktopStubs().faces.clear();
+        }
+        const Color shade = sequence == 2 ? Color{255, 255, 255} : Color{0, 0, 0};
+        auto frame = test::makeSolidFrameBuffer(200, 100, shade, sequence);
+        frame.stamp = {fix.capture.streamEpoch(), StreamedDisplay, frameClockSeconds()};
+        fix.mailbox.publish(std::move(frame));
+        fix.worker.pump();
+        REQUIRE(fix.worker.consumedFrameSequence() == sequence);
+        const auto update = fix.faceLock.update(decision, size, false, frameClockSeconds());
+        CHECK_FALSE(update.lostLock);
+        if (sequence < 3) {
+            REQUIRE(update.applyRegion);
+        } else {
+            CHECK_FALSE(update.applyRegion);
+        }
+        fix.sync("Editor", 42);
+        REQUIRE(regionOverlayStubs().border);
+        CHECK(regionOverlayStubs().border->binding == RegionBinding::Face);
+        CHECK(regionOverlayStubs().border->region == PartialRegion);
+    }
+    CHECK(desktopStubs().detectorCall().calls == 3);
+    const auto lost = fix.faceLock.update(decision, size, false, frameClockSeconds() + 0.5);
+    REQUIRE(lost.lostLock);
+    fix.sync("Editor", 42);
+    REQUIRE(regionOverlayStubs().border);
+    CHECK(regionOverlayStubs().border->binding == RegionBinding::Window);
+    CHECK(regionOverlayStubs().border->region == PartialRegion);
+    CHECK(regionOverlayStubs().borderHides == 0);
 }
 
 TEST_CASE("No border is drawn while nothing is being captured")
@@ -314,7 +338,7 @@ TEST_CASE("No border is drawn while nothing is being captured")
 
     // There is no display to draw on, so the border is neither shown nor
     // taken down - the platform side is not touched at all.
-    coordinator.syncBorder(RegionBorderState{"", 0, false, false, 0.0});
+    coordinator.syncBorder(RegionBorderState{"", 0, false, false});
 
     CHECK(regionOverlayStubs().borderShows == 0);
     CHECK(regionOverlayStubs().borderHides == 0);
@@ -325,7 +349,7 @@ TEST_CASE("A border drag stays on the region it began on")
     CoordinatorFixture fix;
     desktopStubs().displayGeometry = DisplayGeometry{0.0, 0.0, 1000.0, 500.0};
     desktopStubs().windowGeometry = WindowGeometry{100.0, 50.0, 400.0, 200.0, false, ""};
-    regionOverlayStubs().borderEdit = RegionBorderEdit{true, false, false, PartialRegion};
+    regionOverlayStubs().borderEdit = RegionBorderEdit{true, false, PartialRegion};
 
     // The drag begins while window 42 is focused, so the veil goes up over
     // that window's rectangle: the resize limit made visible.
@@ -355,7 +379,7 @@ TEST_CASE("A border drag stays on the region it began on")
 TEST_CASE("A global border drag raises no veil")
 {
     CoordinatorFixture fix;
-    regionOverlayStubs().borderEdit = RegionBorderEdit{true, false, false, PartialRegion};
+    regionOverlayStubs().borderEdit = RegionBorderEdit{true, false, PartialRegion};
 
     // Nothing is focused, so the drag is on the global region: there is no
     // window whose edges limit it and nothing to dim.
@@ -366,20 +390,17 @@ TEST_CASE("A global border drag raises no veil")
     CHECK_FALSE(regionOverlayStubs().editDim.has_value());
 }
 
-TEST_CASE("The border's own affordances travel back to the host")
+TEST_CASE("The border's binding control travels back to the host")
 {
     CoordinatorFixture fix;
-    regionOverlayStubs().borderEdit = RegionBorderEdit{false, true, false, std::nullopt};
-    CHECK(fix.coordinator.pollBorderEdit(0).dismissed);
-
-    regionOverlayStubs().borderEdit = RegionBorderEdit{false, false, true, std::nullopt};
+    regionOverlayStubs().borderEdit = RegionBorderEdit{false, true, std::nullopt};
     CHECK(fix.coordinator.pollBorderEdit(0).bindingToggled);
 }
 
 TEST_CASE("The border is not read while a pick is in flight")
 {
     CoordinatorFixture fix;
-    regionOverlayStubs().borderEdit = RegionBorderEdit{true, true, true, PartialRegion};
+    regionOverlayStubs().borderEdit = RegionBorderEdit{true, true, PartialRegion};
     fix.picker.request(RegionPickerMode::DrawGlobal);
     (void)fix.picker.openIfRequested(/*regionSelected=*/false);
     REQUIRE(fix.picker.active());
@@ -388,7 +409,6 @@ TEST_CASE("The border is not read while a pick is in flight")
     // still reports about it must not reach the host.
     const RegionBorderEditOutcome outcome = fix.coordinator.pollBorderEdit(42);
 
-    CHECK_FALSE(outcome.dismissed);
     CHECK_FALSE(outcome.bindingToggled);
     CHECK_FALSE(outcome.edited.has_value());
     CHECK_FALSE(fix.coordinator.borderEditing());
@@ -399,7 +419,7 @@ TEST_CASE("A pick or clear ends the attached border's editing veil")
     CoordinatorFixture fix;
     desktopStubs().displayGeometry = DisplayGeometry{0.0, 0.0, 1000.0, 500.0};
     desktopStubs().windowGeometry = WindowGeometry{100.0, 50.0, 400.0, 200.0, false, ""};
-    regionOverlayStubs().borderEdit = RegionBorderEdit{true, false, false, PartialRegion};
+    regionOverlayStubs().borderEdit = RegionBorderEdit{true, false, PartialRegion};
     (void)fix.coordinator.pollBorderEdit(42);
     REQUIRE(regionOverlayStubs().editDim.has_value());
 

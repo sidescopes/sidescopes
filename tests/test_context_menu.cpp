@@ -280,15 +280,11 @@ TEST_CASE("The region tools mean what their keys mean")
     CHECK(pin->pickMode == RegionPickerMode::PinColor);
 }
 
-TEST_CASE("Clear Region and Detach All both clear every region")
+TEST_CASE("Detach All stops following windows while preserving a region")
 {
-    const auto clear = menuShortcutAction(MenuClearRegion);
-    REQUIRE(clear);
-    CHECK(clear->kind == ShortcutAction::Kind::ClearRegion);
-
     const auto detachAll = menuShortcutAction(MenuDetachAll);
     REQUIRE(detachAll);
-    CHECK(detachAll->kind == ShortcutAction::Kind::ClearRegion);
+    CHECK(detachAll->kind == ShortcutAction::Kind::DetachAllWindows);
 }
 
 TEST_CASE("The zoom entries set their level outright")

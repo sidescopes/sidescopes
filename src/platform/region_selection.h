@@ -149,13 +149,9 @@ void showRegionBorder(uint32_t displayId, const RegionOfInterest& region, const 
 void hideRegionBorder();
 
 /// The border's in-progress or just-finished adjustment, if any.
-/// @c dismissed reports the border's own close affordances - the hover
-/// close button and a double-click on the band - and means "dismiss
-/// this region"; the application drops the region it outlines.
 struct RegionBorderEdit
 {
     bool editing = false;
-    bool dismissed = false;
     /// The border's binding control was clicked: a face-tracked region becomes
     /// window-attached at its current rectangle; a window-attached region
     /// becomes global; a global one attaches to the frontmost window under it.
@@ -169,8 +165,8 @@ RegionBorderEdit pollRegionBorderEdit();
 /// border panel can take key status WITHOUT activating the application
 /// (clicking it focuses the region, Spotlight-style), so its keys are
 /// forwarded here for the application to route through its own shortcut
-/// map - Escape and the letter shortcuts keep working right after a border
-/// interaction. Empty on Windows, whose border never takes the keyboard.
+/// map after a border interaction. Empty on Windows, whose border never
+/// takes the keyboard.
 struct BorderKeyPress
 {
     std::string key;

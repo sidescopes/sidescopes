@@ -61,9 +61,10 @@ public:
         return {target};
     }
 
-    bool start(const CaptureTarget&, int, FrameMailbox& mailbox) override
+    bool start(const CaptureTarget& target, int, FrameMailbox& mailbox, uint64_t captureEpoch) override
     {
         m_mailbox = &mailbox;
+        m_streamStamp = FrameStamp{captureEpoch, target.displayId, 0.0};
         g_running = this;
 
         return true;
@@ -89,6 +90,7 @@ public:
         }
         m_width = width;
         m_height = height;
+        const double receivedSeconds = frameClockSeconds();
 
         const auto stride = static_cast<std::size_t>(width) * 4u;
         const std::size_t bytes = stride * static_cast<std::size_t>(height);
@@ -100,6 +102,8 @@ public:
         m_buffer.format = PixelFormat::Bgra8;
         m_buffer.colorSpace = ColorSpaceHint::Srgb;
         m_buffer.sequence = ++m_sequence;
+        m_buffer.stamp = m_streamStamp;
+        m_buffer.stamp.receivedSeconds = receivedSeconds;
         // The picture IS the display here, so it covers all of it. Stamped on
         // every frame rather than left alone, because buffers are recycled and
         // a field not written carries the last delivery's answer forward.
@@ -116,6 +120,7 @@ public:
 private:
     FrameMailbox* m_mailbox = nullptr;
     FrameBuffer m_buffer;
+    FrameStamp m_streamStamp;
     uint64_t m_sequence = 0;
     int m_width = 0;
     int m_height = 0;

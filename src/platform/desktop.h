@@ -89,11 +89,21 @@ struct WindowGeometry
 [[nodiscard]] std::vector<DesktopWindow> onScreenWindows(uint32_t displayId);
 
 /// The current geometry of the window with @p identity (a DesktopWindow's
-/// windowIdentity), or nothing when it no longer exists - the caller reads
-/// that as the window having closed. A minimized window is still reported,
+/// windowIdentity), or nothing when geometry is unavailable. Absence alone
+/// does not establish closure. A minimized window is still reported,
 /// flagged, so the attach coupling can hide the scopes rather than crop the
 /// desktop behind it.
 [[nodiscard]] std::optional<WindowGeometry> windowGeometry(uint64_t identity);
+
+enum class WindowPresence
+{
+    Unknown,
+    Present,
+    Closed
+};
+/// Confirms existence independently of usable geometry. Query failures remain
+/// Unknown; only a successful absence check permits discarding an attachment.
+[[nodiscard]] WindowPresence windowPresence(uint64_t identity);
 
 /// Global cursor position in desktop points. Reading the position requires no
 /// special permission on any supported platform.

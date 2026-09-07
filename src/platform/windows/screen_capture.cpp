@@ -48,7 +48,7 @@ struct FrameCopyState
 {
     ComPtr<ID3D11Texture2D> staging;
     FrameBuffer buffer;
-    uint64_t sequence = 0;
+    FrameStamp stamp;
 };
 
 struct AcquiredFrame
@@ -136,7 +136,8 @@ public:
         return targets;
     }
 
-    bool start(const CaptureTarget& target, int maxFramesPerSecond, FrameMailbox& mailbox) override
+    bool start(const CaptureTarget& target, int maxFramesPerSecond, FrameMailbox& mailbox,
+               uint64_t captureEpoch) override
     {
         stop();
         UINT adapterIndex = 0;
@@ -150,8 +151,9 @@ public:
 
         m_stopRequested.store(false);
         try {
-            m_worker = std::thread([this, adapterIndex, outputIndex, maxFramesPerSecond, &mailbox] {
-                run(adapterIndex, outputIndex, maxFramesPerSecond, mailbox);
+            const FrameStamp stamp{captureEpoch, target.displayId, 0.0};
+            m_worker = std::thread([this, adapterIndex, outputIndex, maxFramesPerSecond, &mailbox, stamp] {
+                run(adapterIndex, outputIndex, maxFramesPerSecond, mailbox, stamp);
             });
             return true;
         } catch (const std::bad_alloc&) {
@@ -198,10 +200,10 @@ private:
         }
     }
 
-    void run(UINT adapterIndex, UINT outputIndex, int maxFramesPerSecond, FrameMailbox& mailbox)
+    void run(UINT adapterIndex, UINT outputIndex, int maxFramesPerSecond, FrameMailbox& mailbox, FrameStamp stamp)
     {
         try {
-            captureLoop(adapterIndex, outputIndex, maxFramesPerSecond, mailbox);
+            captureLoop(adapterIndex, outputIndex, maxFramesPerSecond, mailbox, stamp);
         } catch (const std::bad_alloc&) {
             reportStatus("capture frame allocation failed");
         } catch (const std::system_error&) {
@@ -210,7 +212,8 @@ private:
         m_stopRequested.store(true);
     }
 
-    void captureLoop(UINT adapterIndex, UINT outputIndex, int maxFramesPerSecond, FrameMailbox& mailbox)
+    void captureLoop(UINT adapterIndex, UINT outputIndex, int maxFramesPerSecond, FrameMailbox& mailbox,
+                     FrameStamp stamp)
     {
         DuplicationSetup setup;
         if (!openDuplication(adapterIndex, outputIndex, setup)) {
@@ -219,6 +222,7 @@ private:
         IDXGIOutputDuplication* duplication = setup.duplication.Get();
 
         FrameCopyState state;
+        state.stamp = stamp;
         const auto minimumInterval =
             std::chrono::microseconds(maxFramesPerSecond > 0 ? 1000000 / maxFramesPerSecond : 0);
         auto lastPublish = std::chrono::steady_clock::now() - minimumInterval;
@@ -245,6 +249,7 @@ private:
                 continue;
             }
             const AcquiredFrame acquiredFrame{*duplication};
+            state.stamp.receivedSeconds = frameClockSeconds();
 
             ComPtr<ID3D11Texture2D> texture;
             if (SUCCEEDED(resource.As(&texture))) {
@@ -410,12 +415,22 @@ private:
         state.buffer.width = width;
         state.buffer.height = height;
         state.buffer.colorSpace = ColorSpaceHint::Srgb;
-        state.buffer.sequence = ++state.sequence;
+        state.buffer.format = PixelFormat::Bgra8;
+        state.buffer.sourceX = 0;
+        state.buffer.sourceY = 0;
+        state.buffer.sourceWidth = width;
+        state.buffer.sourceHeight = height;
+        state.buffer.stamp = state.stamp;
+        // Reusing a sequence after restart can collide with a module's cached
+        // pixel pointer and return bins from the previous display. The producer
+        // counter spans every stream owned by this source.
+        state.buffer.sequence = ++m_sequence;
         state.buffer = mailbox.publish(std::move(state.buffer));
         return FrameOutcome::Published;
     }
 
     std::thread m_worker;
+    uint64_t m_sequence = 0;  // worker-owned; stop joins before the next start
     std::atomic<bool> m_stopRequested{false};
     StatusCallback m_statusCallback;
 };

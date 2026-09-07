@@ -33,7 +33,7 @@ struct AttachDisplayRect
 };
 
 /// One attached window's state this frame, gathered by the host from the
-/// desktop seams: its rectangle (nothing once it has closed), whether it is
+/// desktop seams: its rectangle when available, whether it is
 /// minimized or otherwise off screen, and the display it sits on. The display
 /// fields are only meaningful for a visible window.
 struct AttachedWindowObservation
@@ -45,6 +45,8 @@ struct AttachedWindowObservation
     AttachDisplayRect display;
     /// The window's current title, for the border's label; may be empty.
     std::string title;
+    /// Positive closure evidence, independent of unavailable geometry.
+    bool closed = false;
 };
 
 /// The per-frame verdict: the active window's mapped region (present exactly
@@ -69,6 +71,9 @@ struct AttachDecision
     /// The closures emptied the attached set; the host tells the user and the
     /// analysis falls back to the global region.
     bool detachedAll = false;
+    /// Geometry changed within the settling interval. Native animation
+    /// rectangles may still disappear into a minimized window.
+    bool windowMoving = false;
 };
 
 /// The brain behind attached regions. Pure logic: it holds a set of
@@ -142,18 +147,19 @@ public:
     /// One frame of observation while attached. @p windows carries one entry
     /// per attached window (closed ones are pruned); @p focusedIdentity names
     /// the window the user is working in - the foreground application's
-    /// frontmost ordinary window - or nothing when that is unknown. Emits
+    /// frontmost ordinary window - or nothing when that is unknown.
+    /// @p now is a monotonic observation time in seconds; repeated reads at
+    /// one instant cannot settle a native window animation. Emits
     /// the active window's mapped region exactly when the focused window is
     /// a visible attached one, plus the closures. A no-op verdict when
     /// nothing is attached.
     AttachDecision observe(const std::vector<AttachedWindowObservation>& windows,
-                           std::optional<uint64_t> focusedIdentity);
+                           std::optional<uint64_t> focusedIdentity, double now);
 
     /// Detaches one window; the remaining set keeps working.
     void remove(uint64_t identity);
 
-    /// Detaches everything - the user pressed Escape - and the caller drops
-    /// the region with it.
+    /// Detaches every window. Region selection remains the caller's concern.
     void detachAll();
 
 private:
@@ -170,12 +176,25 @@ private:
         double top = 0.0;
         double right = 0.0;
         double bottom = 0.0;
+
+        struct MotionOrigin
+        {
+            double left, top, right, bottom;
+            AttachWindowRect rect;
+        };
+
+        // A native minimize animation reports visible, moving bounds before
+        // disappearing. Keep its uncommitted origin so that hiding can undo
+        // those mechanical pushes without undoing an earlier settled resize.
+        std::optional<MotionOrigin> motionOrigin;
+        std::optional<double> motionChangedAt;
         // Re-appearance settle: while set, rect changes rebaseline silently
         // instead of binding - the OS animates hidden windows back on
         // screen (Quick Look zooms its panel open), and those transitional
         // rectangles must never push the stored region. Binding resumes
-        // once the rectangle holds still for two consecutive observations.
+        // once the rectangle holds still for the settling interval.
         bool settling = false;
+        std::optional<AttachWindowRect> settlingRect;
         // The window rectangle at the last observation, telling a move (same
         // size: the region rides along) from a resize (the region stays
         // screen-glued and only edges push it).
@@ -197,9 +216,12 @@ private:
     /// position just enough to keep it inside (permanently), per axis.
     static void bindStoredToWindow(AttachedWindow& window, const AttachWindowRect& windowRect);
 
+    /// Hiding aborts an uncommitted animation and begins reappearance settling.
+    static void suspendWindow(AttachedWindow& window);
+
     /// Advances every attached window's stored rectangle from this frame's
     /// observations; minimized and closed windows are left untouched.
-    void updateAttached(const std::vector<AttachedWindowObservation>& windows);
+    void updateAttached(const std::vector<AttachedWindowObservation>& windows, double now);
 
     /// @p window's stored rectangle clipped to the window - elastically, the
     /// stored size survives - as display percentages on @p display.

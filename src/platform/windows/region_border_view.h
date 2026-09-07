@@ -38,10 +38,6 @@ constexpr double HandleMargin = HandleRadius + 2.0;
 constexpr double WindowPad = BorderPad + HandleMargin;
 // Regions cannot shrink beyond this many points per side.
 constexpr double MinimumRegionSize = 24.0;
-// The close button: a badge on the band's outer corner,
-// diagonally off the corner handle, so it visibly belongs to the region
-// as a whole. Pulled inward a touch so the disc mostly rides the band;
-// tiny regions still yield it to the resize zones.
 // Extra window height above the band when the attached label is worn, so
 // the name tab clears the handles instead of crowding the top-center one.
 constexpr double LabelBand = 20.0;
@@ -54,9 +50,7 @@ constexpr double LabelBand = 20.0;
 constexpr double BorderAppearSeconds = 0.12;
 constexpr double BorderSettlePoints = 16.0;
 constexpr UINT_PTR BorderAppearTimer = 1;
-constexpr double CloseRadius = 6.5;
-constexpr double CloseHitRadius = 11.0;
-constexpr double CloseCornerInset = 2.0;
+constexpr double BindingHitRadius = 11.0;
 constexpr double TabBindingZone = 18.0;
 
 struct BorderState
@@ -72,7 +66,6 @@ struct BorderState
     unsigned dragZone = ZoneNone;
     POINT dragStartMouse{};
     RECT dragStartRegion{};
-    bool closePressed = false;
     bool bindingPressed = false;
     // How the outlined region is bound: picks the face, pin, or pin-off glyph.
     RegionBinding binding = RegionBinding::Global;
@@ -102,7 +95,6 @@ extern BorderState g_border;
 
 extern bool g_borderEditing;
 extern bool g_borderEditChanged;
-extern bool g_borderDismissed;
 extern bool g_borderBindingToggled;
 extern RegionOfInterest g_borderEditRegion;
 

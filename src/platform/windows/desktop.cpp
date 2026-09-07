@@ -215,6 +215,11 @@ std::vector<DesktopWindow> attachCandidateWindows(uint32_t displayId)
     return onScreenWindows(displayId);
 }
 
+WindowPresence windowPresence(uint64_t identity)
+{
+    return IsWindow(windowFromIdentity(identity)) ? WindowPresence::Present : WindowPresence::Closed;
+}
+
 std::optional<WindowGeometry> windowGeometry(uint64_t identity)
 {
     HWND window = windowFromIdentity(identity);
@@ -228,7 +233,9 @@ std::optional<WindowGeometry> windowGeometry(uint64_t identity)
     // The extended frame bounds match onScreenWindows; the plain window rect is
     // the fallback where the compositor cannot answer.
     if (FAILED(DwmGetWindowAttribute(window, DWMWA_EXTENDED_FRAME_BOUNDS, &frame, sizeof(frame)))) {
-        GetWindowRect(window, &frame);
+        if (!GetWindowRect(window, &frame)) {
+            return std::nullopt;
+        }
     }
     geometry.x = static_cast<double>(frame.left);
     geometry.y = static_cast<double>(frame.top);

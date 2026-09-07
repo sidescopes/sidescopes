@@ -1,16 +1,8 @@
 #pragma once
 
-#include <string>
-#include <vector>
-
 namespace sidescopes {
 
-/// A rectangle in display pixels. The lock does all of its geometry in
-/// pixels because they are isotropic; display percentages are not, and
-/// distance gates would skew. The App converts at the boundary. Display
-/// rather than frame pixels because the probe searches the whole display -
-/// a capture narrowed to the analysis region cannot answer for the window
-/// the face sits in, so no lock is ever measured against a crop.
+/// A rectangle in isotropic display pixels, independent of a capture crop.
 struct LockRect
 {
     double left = 0.0;
@@ -19,10 +11,6 @@ struct LockRect
     double bottom = 0.0;
 };
 
-/// A detected face reduced to the anchor the lock follows: its centre and
-/// width, in display pixels. Both platforms anchor on the detector's box -
-/// deliberately no landmark refinement, so macOS and Windows behave the
-/// same.
 struct FaceAnchor
 {
     double centerX = 0.0;
@@ -30,82 +18,28 @@ struct FaceAnchor
     double width = 0.0;
 };
 
-/// What one probe decided, with the reason spelled out for the decision log
-/// the owner grades during the spike. While the lock is hunting - the face
-/// is not confirmed where the region sits - the border hides rather than
-/// outline stale content, and reappears on the next confirmed position.
-struct FaceLockDecision
-{
-    bool adopt = false;
-    bool hunting = false;
-    std::string reason;
-};
-
-/// A face-locked region's persistent state: the USER'S crop relative to the
-/// face anchor - never the detector box itself - plus the last adopted
-/// anchor and the stability bookkeeping. The crop is stored in units of the
-/// anchor width, so pan and zoom reproduce exactly the rectangle the user
-/// shaped (the forehead, not the face box).
+/// The user's crop relative to a face anchor. Width-relative coordinates
+/// preserve a forehead or cheek selection as the face moves and changes size.
+/// Detection and uncertainty policy live separately in face_tracking.
 struct FaceLockState
 {
-    double offsetX = 0.0;  ///< crop centre minus anchor centre, in anchor widths
+    double offsetX = 0.0;
     double offsetY = 0.0;
-    double sizeX = 1.0;  ///< crop size in anchor widths
+    double sizeX = 1.0;
     double sizeY = 1.0;
     FaceAnchor lastAnchor;
-    // The candidate awaiting a consecutive agreeing sighting.
-    FaceAnchor pendingAnchor;
-    int pendingCount = 0;
-    // Consecutive probes that found nothing near the anchor; past the
-    // recovery threshold the search widens to the whole attached window.
-    int missCount = 0;
 };
 
-/// The pure decision core of face-locked regions. The lock is deliberately
-/// calm: it adopts only positions confirmed by two consecutive agreeing
-/// probes, so a pan or zoom in progress freezes the region and one clean
-/// snap follows when the photo settles. A lock that has lost its face
-/// searches the whole attached window with the size gate relaxed - zoom
-/// legitimately resizes faces - but adoption still needs a unique, stable
-/// candidate.
 namespace face_lock {
 
-/// A fresh lock: the picked face box is both the anchor and the initial
-/// crop, and counts as the first sighting of itself.
 [[nodiscard]] FaceLockState makeLock(const FaceAnchor& anchor, const LockRect& crop);
-
-/// The user's crop mapped through @p anchor: the region the lock wants when
-/// the face is there.
 [[nodiscard]] LockRect mapRegion(const FaceLockState& state, const FaceAnchor& anchor);
-
-/// A border edit while locked: re-derives the crop against the last adopted
-/// anchor, so the lock follows the user's new rectangle from here on.
 void rebindCrop(FaceLockState& state, const LockRect& crop);
-
-/// A window translation carries the face with it: the anchors ride along so
-/// the probe keeps searching where the face actually is.
 void translate(FaceLockState& state, double dxPixels, double dyPixels);
 
-/// Whether the lock has lost its face and the probe should search the whole
-/// attached window instead of the patch around the anchor.
-[[nodiscard]] bool searchingWide(const FaceLockState& state);
-
-/// Whether the face has been missing long enough that the lock gives up:
-/// the region is removed instead of sitting somewhere wrong, and the user
-/// starts again with a fresh pick.
-[[nodiscard]] bool givenUp(const FaceLockState& state);
-
-/// Whether a detector box can be believed. Only a box flush against the
-/// probe's LEFT or RIGHT edge is rejected: a side clip corrupts the box's
-/// width - the anchor's one scale reference. A face nearing the top or
-/// bottom edge keeps its width and stays trackable; portraits often fill
-/// the window.
+/// Side clipping corrupts width, the crop's scale reference. Top or bottom
+/// clipping preserves that reference and does not alone disqualify a face.
 [[nodiscard]] bool trustworthyBox(const LockRect& box, const LockRect& bounds);
 
-/// One probe's verdict over the detected candidates. Adoption moves
-/// @p state's anchor; every hold leaves it untouched and names its reason.
-[[nodiscard]] FaceLockDecision decide(FaceLockState& state, const std::vector<FaceAnchor>& candidates);
-
 }  // namespace face_lock
-
 }  // namespace sidescopes

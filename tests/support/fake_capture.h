@@ -27,6 +27,7 @@ public:
     int startCount = 0;
     int stopCount = 0;
     uint32_t lastStartedDisplay = 0;
+    uint64_t lastCaptureEpoch = 0;
     int lastFramesPerSecond = 0;
     /// Every narrowing the controller passed through, in order, so a test can
     /// tell "asked for the whole display" from "was not asked at all".
@@ -49,10 +50,11 @@ public:
         narrowings.push_back(rect);
     }
 
-    bool start(const CaptureTarget& target, int maxFramesPerSecond, FrameMailbox&) override
+    bool start(const CaptureTarget& target, int maxFramesPerSecond, FrameMailbox&, uint64_t captureEpoch = 0) override
     {
         ++startCount;
         lastStartedDisplay = target.displayId;
+        lastCaptureEpoch = captureEpoch;
         lastFramesPerSecond = maxFramesPerSecond;
 
         return startSucceeds;

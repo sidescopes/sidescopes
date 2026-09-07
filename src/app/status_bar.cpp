@@ -55,7 +55,7 @@ void drawCursorReadout(float taken, const std::optional<FloatColor>& color)
     const ReadoutColumns columns = measureReadoutColumns();
     const float lineHeight = ImGui::GetTextLineHeight();
     const float swatch = std::max(1.0f, lineHeight - 2.0f);
-    // The clear-region glyph at the far end of the toolbar is inset from its
+    // The last region-tool glyph at the far end of the toolbar is inset from its
     // right-aligned button by iconButtonInset(). End the readout on that same
     // vertical line; RowSeparation is a neighbour gap, not an edge margin.
     const float channelsStart = ImGui::GetWindowContentRegionMax().x - iconButtonInset() - columns.width;

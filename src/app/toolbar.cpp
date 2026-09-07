@@ -41,7 +41,7 @@ constexpr const char* ScopeRowPayload = "ss_scope_row";
 // height for a second row; wide strips keep one row.
 void placeRegionToolbox()
 {
-    const int iconCount = 2 + (supportsWindowAttach() ? 1 : 0) + (supportsFaceDetection() ? 1 : 0);
+    const int iconCount = 1 + (supportsWindowAttach() ? 1 : 0) + (supportsFaceDetection() ? 1 : 0);
     const float chip = ImGui::GetTextLineHeight() + 12.0f;
     const float width = static_cast<float>(iconCount) * chip + static_cast<float>(iconCount - 1) * 2.0f;
     const float right = ImGui::GetWindowContentRegionMax().x;
@@ -168,7 +168,7 @@ const char* Toolbar::scopeName(std::string_view id) const
     return scope != nullptr ? scopeDisplayName(*scope) : "";
 }
 
-PaneRenderOutcome Toolbar::drawRegionToolIcons(bool regionSelected)
+PaneRenderOutcome Toolbar::drawRegionToolIcons()
 {
     PaneRenderOutcome outcome;
     char tooltip[96];
@@ -192,7 +192,7 @@ PaneRenderOutcome Toolbar::drawRegionToolIcons(bool regionSelected)
         }
         ImGui::SameLine(0.0f, 2.0f);
     }
-    // The face tool sits last among the region tools, before the reset. It
+    // The face tool sits last among the region tools. It
     // is always available where the platform detects faces: whether any
     // face is on screen is the picker overlay's answer to give, not the
     // toolbar's.
@@ -202,15 +202,6 @@ PaneRenderOutcome Toolbar::drawRegionToolIcons(bool regionSelected)
             m_picker.request(RegionPickerMode::AttachFace);
         }
         ImGui::SameLine(0.0f, 2.0f);
-    }
-    // Last among the region tools: the three before it choose what the scopes
-    // read, and this one takes that choice away again.
-    std::snprintf(tooltip, sizeof(tooltip), "Clear the region (%s)%s",
-                  shortcutLabel(m_shortcuts.bindings().clearRegion).c_str(),
-                  regionSelected ? "" : " - no region selected");
-    if (iconButton("##clear-region", m_icons.textureId(Icon::SquareOff, iconPx), tooltip, !regionSelected) &&
-        regionSelected) {
-        outcome.clearRegion = true;
     }
     ImGui::EndGroup();
     m_regionToolBounds = ImVec4{ImGui::GetItemRectMin().x, ImGui::GetItemRectMin().y, ImGui::GetItemRectMax().x,

@@ -1,8 +1,10 @@
 #include <algorithm>
 #include <catch2/catch_test_macros.hpp>
 #include <chrono>
+#include <cmath>
 #include <cstddef>
 #include <functional>
+#include <limits>
 #include <string>
 #include <thread>
 #include <utility>
@@ -65,6 +67,59 @@ TEST_CASE("Region edges round inward, never grabbing outside pixels")
     CHECK(rect.y == 101);
     CHECK(rect.x + rect.width == 899);
     CHECK(rect.y + rect.height == 899);
+}
+
+TEST_CASE("Region edge correction is limited to four representable pixel steps")
+{
+    // 64 exercises both sides of a power-of-two spacing boundary. At these
+    // extents percent and pixel values coincide; no display round trip is
+    // needed to introduce the representable perturbations deliberately.
+    for (double integer : {25.0, 64.0}) {
+        for (int steps : {1, 4, 5, 8}) {
+            CAPTURE(integer, steps);
+            double above = integer;
+            double below = integer;
+            for (int step = 0; step < steps; ++step) {
+                above = std::nextafter(above, 100.0);
+                below = std::nextafter(below, 0.0);
+            }
+            const int inward = steps <= 4 ? 0 : 1;
+            const int boundary = static_cast<int>(integer);
+            CHECK(RegionOfInterest{above, above, 100, 100}.toPixels(100, 100) ==
+                  IntRect{boundary + inward, boundary + inward, 100 - boundary - inward, 100 - boundary - inward});
+            CHECK(RegionOfInterest{0, 0, below, below}.toPixels(100, 100) ==
+                  IntRect{0, 0, boundary - inward, boundary - inward});
+            // Noise on the other side must not move an already-inward edge.
+            CHECK(RegionOfInterest{below, below, 100, 100}.toPixels(100, 100) ==
+                  IntRect{boundary, boundary, 100 - boundary, 100 - boundary});
+            CHECK(RegionOfInterest{0, 0, above, above}.toPixels(100, 100) == IntRect{0, 0, boundary, boundary});
+        }
+    }
+}
+
+TEST_CASE("Small geometric fractions stay inward at ordinary and large frame sizes")
+{
+    // Even a 1e-8-pixel fraction is much larger than round-off here.
+    CHECK(RegionOfInterest{25.0 + 1e-8, 25.0 + 1e-8, 75.0 - 1e-8, 75.0 - 1e-8}.toPixels(100, 100) ==
+          IntRect{26, 26, 48, 48});
+    constexpr int Extent = std::numeric_limits<int>::max();
+    const auto percent = [](double edge) { return edge / Extent * 100.0; };
+    const auto region = RegionOfInterest{percent(1000000000.01), percent(1000000000.01), percent(1000000100.99),
+                                         percent(1000000100.99)};
+    CHECK(region.toPixels(Extent, Extent) == IntRect{1000000001, 1000000001, 99, 99});
+    CHECK(RegionOfInterest{}.toPixels(Extent, Extent) == IntRect{0, 0, Extent, Extent});
+}
+
+TEST_CASE("Region edge correction preserves empty and invalid geometry")
+{
+    CHECK(RegionOfInterest{64, 64, 25, 25}.toPixels(100, 100).empty());
+    CHECK(RegionOfInterest{64, 64, 64, 64}.toPixels(100, 100).empty());
+    CHECK(RegionOfInterest{-100, -100, 200, 200}.toPixels(100, 100) == IntRect{0, 0, 100, 100});
+    CHECK(RegionOfInterest{}.toPixels(0, 100).empty());
+    CHECK(RegionOfInterest{std::numeric_limits<double>::quiet_NaN(), 0, 100, 100}.toPixels(100, 100).empty());
+    CHECK(RegionOfInterest{0, 0, 100, std::numeric_limits<double>::infinity()}.toPixels(100, 100).empty());
+    // A nonzero edge close to zero is not given a unit-sized epsilon.
+    CHECK(RegionOfInterest{1e-12, 1e-12, 100, 100}.toPixels(100, 100) == IntRect{1, 1, 99, 99});
 }
 
 TEST_CASE("AnalysisWorker produces scope images from published frames")

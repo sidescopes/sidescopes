@@ -10,6 +10,7 @@
 
 #include "core/frame.h"
 #include "platform/desktop.h"
+#include "platform/face_detection.h"
 
 namespace sidescopes::test {
 
@@ -22,14 +23,18 @@ namespace sidescopes::test {
 /// What one detector call was handed, so a caller that hands the detector a
 /// cropped region can be judged on the crop itself: its size, its density, and
 /// its first pixel, which over a frame whose pixels encode their coordinates
-/// says where in that frame the crop was taken from. Written from the probe
-/// threads the controllers detach, so it is read back under the same lock.
+/// says where in that frame the crop was taken from. Written by both picker
+/// and analysis threads, so it is read back under the same lock.
 struct DetectorCall
 {
     int calls = 0;
     int width = 0;
     int height = 0;
     float pixelsPerPoint = 0.0f;
+    double minimumPixels = 0.0;
+    uint64_t frameSequence = 0;
+    FrameStamp stamp;
+    PixelFormat format = PixelFormat::Bgra8;
     std::array<uint8_t, 4> firstPixel{};
 };
 
@@ -41,6 +46,7 @@ class DesktopStubs
 public:
     std::optional<DisplayGeometry> displayGeometry;
     std::optional<WindowGeometry> windowGeometry;
+    WindowPresence windowPresence = WindowPresence::Unknown;
     std::vector<DesktopWindow> onScreenWindows;
     std::optional<DesktopPoint> cursor;
     std::optional<uint32_t> cursorDisplay;
@@ -51,8 +57,13 @@ public:
 
     bool faceDetectionSupported = false;
     std::vector<IntRect> faces;
+    FaceDetectionStatus detectionStatus = FaceDetectionStatus::Completed;
+    /// Optional synchronous session behavior. Configure before starting work
+    /// or between inline passes; never mutate while a detector call is active.
+    std::function<FaceDetectionResult(const FrameView&, double)> sessionDetection;
+    std::function<void()> beforeSessionCreation;
     /// Optional stress-test gates, configured before work starts and kept
-    /// unchanged until every background probe has drained.
+    /// unchanged until every background operation has drained.
     std::function<void()> beforeDetection;
     std::function<double()> clock;
 
@@ -81,8 +92,8 @@ public:
     /// detector was handed.
     void reset();
 
-    /// Records one detector call; safe from a detached probe thread.
-    void recordDetection(const FrameView& view, float pixelsPerPoint);
+    /// Records one detector call; safe from a detector thread.
+    void recordDetection(const FrameView& view, float pixelsPerPoint, double minimumPixels = 0.0);
 
     /// What the detector was handed last, and how often it was called.
     [[nodiscard]] DetectorCall detectorCall() const;

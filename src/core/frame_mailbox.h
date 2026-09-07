@@ -36,6 +36,7 @@ struct FrameBuffer
     int sourceY = 0;
     int sourceWidth = 0;
     int sourceHeight = 0;
+    FrameStamp stamp;
 
     /// Sizes the pixel storage to @p bytes, holding no more than that.
     ///
@@ -59,7 +60,7 @@ struct FrameBuffer
     [[nodiscard]] FrameView view() const
     {
         return FrameView{data.data(), strideBytes, width,       height,       colorSpace, sequence,
-                         sourceX,     sourceY,     sourceWidth, sourceHeight, format};
+                         sourceX,     sourceY,     sourceWidth, sourceHeight, format,     stamp};
     }
 
     [[nodiscard]] int displayWidth() const

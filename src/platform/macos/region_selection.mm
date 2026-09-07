@@ -365,8 +365,7 @@ void refreshPickerExclusions()
 // window at all: AppKit promotes nothing in its place, and every keyboard
 // shortcut is dead until the scope window is clicked. Hand the keyboard back
 // explicitly, the way the border panel does after a click. The overlays and
-// the chrome windows are skipped by name - the border can take key status, and
-// it answers Escape differently from the scope window.
+// the chrome windows are skipped so the ordinary scope window receives focus.
 void handKeyboardToOwnWindow()
 {
     for (NSWindow* candidate in NSApp.orderedWindows) {
@@ -640,9 +639,9 @@ void showRegionBorder(uint32_t displayId, const RegionOfInterest& region, const 
     const NSRect rect = NSMakeRect(left - WindowPad, bottom - WindowPad, (right - left) + 2 * WindowPad,
                                    (top - bottom) + 2 * WindowPad);
     NSString* borderLabel = label.empty() ? @"" : [NSString stringWithUTF8String:label.c_str()];
-    // The strip row above the band is always present: the attached label
-    // rides its left, the close and attach buttons its right, and the
-    // window's height never changes when a label arrives.
+    // The strip row above the band is always present: the binding control
+    // and label share its tab, so the window's height never changes when a
+    // label arrives.
     NSRect labelled = rect;
     labelled.size.height += LabelBand;
 
@@ -766,8 +765,6 @@ RegionBorderEdit pollRegionBorderEdit()
 {
     RegionBorderEdit edit;
     edit.editing = g_borderEditing;
-    edit.dismissed = g_borderDismissed;
-    g_borderDismissed = false;
     edit.bindingToggled = g_borderBindingToggled;
     g_borderBindingToggled = false;
     if (g_borderEditChanged) {

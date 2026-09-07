@@ -121,7 +121,7 @@ void readShortcuts(const std::map<std::string, std::string, std::less<>>& values
     readShortcut(values, "shortcut_attach_face", shortcuts.attachFace);
     readShortcut(values, "shortcut_pin_color", shortcuts.pinColor);
     readShortcut(values, "shortcut_vectorscope_zoom", shortcuts.vectorscopeZoom);
-    readShortcut(values, "shortcut_clear_region", shortcuts.clearRegion);
+    readShortcut(values, "shortcut_cancel_interaction", shortcuts.cancelInteraction);
 }
 
 // Reverse-DNS ids have nonempty dot-separated components. The layout and
@@ -662,7 +662,7 @@ bool savePreferences(const Preferences& preferences, const std::filesystem::path
         << "shortcut_attach_face=" << preferences.shortcuts.attachFace << '\n'
         << "shortcut_pin_color=" << preferences.shortcuts.pinColor << '\n'
         << "shortcut_vectorscope_zoom=" << preferences.shortcuts.vectorscopeZoom << '\n'
-        << "shortcut_clear_region=" << preferences.shortcuts.clearRegion << '\n';
+        << "shortcut_cancel_interaction=" << preferences.shortcuts.cancelInteraction << '\n';
     if (preferences.windowPosition) {
         out << "window_x=" << preferences.windowPosition->x << '\n'
             << "window_y=" << preferences.windowPosition->y << '\n';

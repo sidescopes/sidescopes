@@ -55,6 +55,105 @@ TEST_CASE("start captures the first target when no display is desired")
     CHECK(controller.status() == "capturing primary");
 }
 
+TEST_CASE("Replacement streams cannot reuse a previous frame's identity")
+{
+    FakeCaptureSource source;
+    source.targets = {makeTarget(7, "primary"), makeTarget(9, "secondary")};
+    FrameMailbox mailbox;
+    CaptureController controller(source, mailbox);
+    REQUIRE(controller.requestPermission());
+    REQUIRE(controller.start());
+    const uint64_t first = source.lastCaptureEpoch;
+    REQUIRE(first != 0);
+    CHECK(controller.streamEpoch() == first);
+
+    REQUIRE(controller.start());
+    const uint64_t restarted = source.lastCaptureEpoch;
+    CHECK(restarted > first);
+    CHECK(source.lastStartedDisplay == 7);
+
+    source.startSucceeds = false;
+    controller.requestDisplay(9);
+    CHECK_FALSE(controller.start());
+    const uint64_t failed = source.lastCaptureEpoch;
+    CHECK(failed > restarted);
+    CHECK(controller.streamEpoch() == failed);
+
+    source.startSucceeds = true;
+    REQUIRE(controller.start());
+    CHECK(source.lastCaptureEpoch > failed);
+    CHECK(source.lastStartedDisplay == 9);
+}
+
+TEST_CASE("Healthy visibility pauses preserve source continuity across fresh stream epochs")
+{
+    FakeCaptureSource source;
+    source.targets = {makeTarget(7, "primary")};
+    FrameMailbox mailbox;
+    CaptureController controller(source, mailbox);
+    REQUIRE(controller.requestPermission());
+    REQUIRE(controller.start());
+    const auto continuity = controller.continuityGeneration();
+    REQUIRE(continuity != 0);
+    auto epoch = controller.streamEpoch();
+    for (int pause = 0; pause != 2; ++pause) {
+        controller.suspend("waiting for the attached window");
+        controller.resume();
+        REQUIRE_FALSE(controller.dead());
+        CHECK(controller.streamEpoch() > epoch);
+        CHECK(controller.continuityGeneration() == continuity);
+        epoch = controller.streamEpoch();
+    }
+    REQUIRE(controller.start());
+    CHECK(controller.continuityGeneration() != continuity);
+}
+
+TEST_CASE("A changed or failed source cannot inherit suspended continuity")
+{
+    FakeCaptureSource source;
+    source.targets = {makeTarget(7, "primary")};
+    FrameMailbox mailbox;
+    CaptureController controller(source, mailbox);
+    REQUIRE(controller.requestPermission());
+    REQUIRE(controller.start());
+    const auto continuity = controller.continuityGeneration();
+    SECTION("The stream was already unhealthy when suspended")
+    {
+        source.fireStatus("lost source");
+    }
+    SECTION("Wake or display change during suspension")
+    {
+        controller.suspend("paused");
+        controller.markStale();
+    }
+    SECTION("Display identity changes")
+    {
+        source.targets = {makeTarget(9, "secondary")};
+        controller.requestDisplay(9);
+    }
+    SECTION("Native target is replaced under the same display number")
+    {
+        source.targets[0].identifier = "replacement";
+    }
+    SECTION("Display point geometry changes")
+    {
+        source.targets[0].widthPoints += 10;
+    }
+    SECTION("Resume fails before recovery succeeds")
+    {
+        source.startSucceeds = false;
+    }
+    controller.suspend("paused");
+    controller.resume();
+    CHECK(controller.continuityGeneration() != continuity);
+    if (controller.dead()) {
+        source.startSucceeds = true;
+        controller.service(1.0);
+        REQUIRE_FALSE(controller.dead());
+        CHECK(controller.continuityGeneration() != continuity);
+    }
+}
+
 TEST_CASE("A capture failure reported during startup survives startup completion")
 {
     class EarlyFailureSource : public FakeCaptureSource
@@ -62,9 +161,10 @@ TEST_CASE("A capture failure reported during startup survives startup completion
     public:
         bool failDuringStart = true;
 
-        bool start(const CaptureTarget& target, int framesPerSecond, FrameMailbox& mailbox) override
+        bool start(const CaptureTarget& target, int framesPerSecond, FrameMailbox& mailbox,
+                   uint64_t captureEpoch) override
         {
-            const bool started = FakeCaptureSource::start(target, framesPerSecond, mailbox);
+            const bool started = FakeCaptureSource::start(target, framesPerSecond, mailbox, captureEpoch);
             if (failDuringStart) {
                 fireStatus("capture target disappeared");
             }

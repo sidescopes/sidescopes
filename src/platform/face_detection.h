@@ -1,20 +1,40 @@
 #pragma once
 
+#include <memory>
 #include <vector>
 
 #include "core/frame.h"
 
 namespace sidescopes {
 
+enum class FaceDetectionStatus
+{
+    Completed,
+    Failed,
+    Unsupported
+};
+
+struct FaceDetectionResult
+{
+    FaceDetectionStatus status = FaceDetectionStatus::Failed;
+    std::vector<IntRect> faces;
+};
+
+/// A synchronous detector owned, called and destroyed by one analysis thread.
+/// Keeping the native model alive avoids recreating it for each video frame.
+/// An empty successful result remains distinct from a failed native call.
+class FaceDetectionSession
+{
+public:
+    virtual ~FaceDetectionSession() = default;
+    [[nodiscard]] virtual FaceDetectionResult detect(const FrameView& frame, double minimumPixels) = 0;
+};
+
+[[nodiscard]] std::unique_ptr<FaceDetectionSession> createFaceDetectionSession();
+
 /// Whether this platform ships a built-in face detector. Where it does
 /// not, the face-picking action is simply unavailable.
 [[nodiscard]] bool supportsFaceDetection();
-
-/// Called once at startup, where a platform wants its face-detection model
-/// loaded ahead of the first detection. Neither platform does: both measure
-/// the warm-up as memory charged to every session against a saving most
-/// never collect, so the model is loaded by the first real detection.
-void warmFaceDetection();
 
 /// Face rectangles in frame pixels, largest first: the detector's own
 /// boxes, unpadded. Faces smaller than a plausible scoping target

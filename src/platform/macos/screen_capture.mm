@@ -337,10 +337,12 @@ public:
         return targets;
     }
 
-    bool start(const CaptureTarget& target, int maxFramesPerSecond, FrameMailbox& mailbox) override
+    bool start(const CaptureTarget& target, int maxFramesPerSecond, FrameMailbox& mailbox,
+               uint64_t captureEpoch) override
     {
         stop();
         m_mailbox = &mailbox;
+        m_streamStamp = FrameStamp{captureEpoch, target.displayId, 0.0};
 
         SCShareableContent* content = fetchShareableContent();
         if (!content) {
@@ -497,6 +499,8 @@ public:
         m_buffer.colorSpace = ColorSpaceHint::Srgb;
         m_buffer.format = format;
         m_buffer.sequence = ++m_sequence;
+        m_buffer.stamp = m_streamStamp;
+        m_buffer.stamp.receivedSeconds = frameClockSeconds();
         m_buffer.sourceX = stamp.x;
         m_buffer.sourceY = stamp.y;
         m_buffer.sourceWidth = stamp.width;
@@ -585,6 +589,8 @@ private:
     std::shared_ptr<SckCallbackState> m_callbacks;
     FrameMailbox* m_mailbox = nullptr;
     FrameBuffer m_buffer;  // recycled storage, touched only on the capture queue
+    // Written only after the old callback owner is retired and drained.
+    FrameStamp m_streamStamp;
     // The layout this recording has been told about, read on the capture queue
     // and forgotten whenever a recording opens.
     DiagOnChange<PixelFormat> m_loggedFormat{DiagChannel::Perf};

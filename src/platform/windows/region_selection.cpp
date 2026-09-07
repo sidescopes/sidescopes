@@ -679,8 +679,6 @@ RegionBorderEdit pollRegionBorderEdit()
 {
     RegionBorderEdit edit;
     edit.editing = g_borderEditing;
-    edit.dismissed = g_borderDismissed;
-    g_borderDismissed = false;
     edit.bindingToggled = g_borderBindingToggled;
     g_borderBindingToggled = false;
     if (g_borderEditChanged) {

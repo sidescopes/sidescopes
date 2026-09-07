@@ -35,6 +35,22 @@ namespace {
 
 test::DesktopStubs g_stubs;
 
+class StubFaceDetectionSession final : public FaceDetectionSession
+{
+public:
+    FaceDetectionResult detect(const FrameView& view, double minimumPixels) override
+    {
+        g_stubs.recordDetection(view, 0.0f, minimumPixels);
+        if (g_stubs.beforeDetection) {
+            g_stubs.beforeDetection();
+        }
+        if (g_stubs.sessionDetection) {
+            return g_stubs.sessionDetection(view, minimumPixels);
+        }
+        return {g_stubs.detectionStatus, g_stubs.faces};
+    }
+};
+
 }  // namespace
 
 bool supportsWindowAttach()
@@ -82,6 +98,11 @@ std::vector<DesktopWindow> onScreenWindows(uint32_t)
 std::vector<DesktopWindow> attachCandidateWindows(uint32_t)
 {
     return g_stubs.onScreenWindows;
+}
+
+WindowPresence windowPresence(uint64_t)
+{
+    return g_stubs.windowPresence;
 }
 
 std::optional<WindowGeometry> windowGeometry(uint64_t)
@@ -135,6 +156,14 @@ std::string displayName(uint32_t)
 bool supportsFaceDetection()
 {
     return g_stubs.faceDetectionSupported;
+}
+
+std::unique_ptr<FaceDetectionSession> createFaceDetectionSession()
+{
+    if (g_stubs.beforeSessionCreation) {
+        g_stubs.beforeSessionCreation();
+    }
+    return std::make_unique<StubFaceDetectionSession>();
 }
 
 // The context menu reads and writes the capture's own visibility, and offers
@@ -194,6 +223,7 @@ void DesktopStubs::reset()
 {
     displayGeometry.reset();
     windowGeometry.reset();
+    windowPresence = WindowPresence::Unknown;
     onScreenWindows.clear();
     cursor.reset();
     cursorDisplay.reset();
@@ -201,6 +231,9 @@ void DesktopStubs::reset()
     displayImage.reset();
     faceDetectionSupported = false;
     faces.clear();
+    detectionStatus = FaceDetectionStatus::Completed;
+    sessionDetection = {};
+    beforeSessionCreation = {};
     beforeDetection = {};
     clock = {};
     applicationHidden = false;
@@ -221,13 +254,17 @@ void DesktopStubs::reset()
     m_detected = DetectorCall{};
 }
 
-void DesktopStubs::recordDetection(const FrameView& view, float pixelsPerPoint)
+void DesktopStubs::recordDetection(const FrameView& view, float pixelsPerPoint, double minimumPixels)
 {
     const std::lock_guard lock(m_mutex);
     ++m_detected.calls;
     m_detected.width = view.width;
     m_detected.height = view.height;
     m_detected.pixelsPerPoint = pixelsPerPoint;
+    m_detected.minimumPixels = minimumPixels;
+    m_detected.frameSequence = view.sequence;
+    m_detected.stamp = view.stamp;
+    m_detected.format = view.format;
     m_detected.firstPixel = {};
     if (view.pixels != nullptr && view.width > 0 && view.height > 0) {
         for (std::size_t byte = 0; byte < m_detected.firstPixel.size(); ++byte) {

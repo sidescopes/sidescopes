@@ -68,7 +68,7 @@ struct ShortcutBindings
     std::string attachFace = "F";
     std::string pinColor = "P";
     std::string vectorscopeZoom = "Z";
-    std::string clearRegion = "Escape";
+    std::string cancelInteraction = "Escape";
 };
 
 /// A saved desktop position; either coordinate may be negative.

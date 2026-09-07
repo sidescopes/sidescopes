@@ -261,9 +261,9 @@ ShortcutAction ShortcutResolver::resolveNamed(const std::string& key, bool shift
     if (key == m_bindings.vectorscopeZoom) {
         return zoomAction(cycledZoom(context.vectorscopeZoom));
     }
-    if (key == m_bindings.clearRegion) {
+    if (key == m_bindings.cancelInteraction) {
         return ShortcutAction::plain(context.settingsOpen ? ShortcutAction::Kind::CloseSettings
-                                                          : ShortcutAction::Kind::ClearRegion);
+                                                          : ShortcutAction::Kind::CancelInteraction);
     }
 
     return {};
@@ -294,7 +294,7 @@ std::vector<ShortcutAction> ShortcutResolver::resolvePlainKeys(const ShortcutCon
     // key whose action is unavailable resolves to nothing and lets the rest of
     // the scan run.
     for (const std::string& binding : {m_bindings.attachWindow, m_bindings.drawRegion, m_bindings.attachFace,
-                                       m_bindings.pinColor, m_bindings.vectorscopeZoom, m_bindings.clearRegion}) {
+                                       m_bindings.pinColor, m_bindings.vectorscopeZoom, m_bindings.cancelInteraction}) {
         appendKey(binding);
     }
     appendPresetDigits(shift, pressed, actions);

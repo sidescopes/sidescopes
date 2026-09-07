@@ -6,6 +6,7 @@
 #include <memory>
 #include <optional>
 #include <type_traits>
+#include <utility>
 
 #include "platform/face_detection.h"
 
@@ -24,11 +25,22 @@ bool readableByVision(const FrameView& frame)
 
 // Vision reports normalized rectangles from the bottom left. Convert one to
 // the frame's top-left pixel convention, rejecting thumbnail-sized results.
+bool validNormalizedBox(const CGRect box)
+{
+    return std::isfinite(box.origin.x) && std::isfinite(box.origin.y) && std::isfinite(box.size.width) &&
+           std::isfinite(box.size.height) && box.size.width > 0.0 && box.size.height > 0.0;
+}
+
 std::optional<IntRect> faceRect(const CGRect box, const FrameView& frame, double minimumSize)
 {
+    if (!validNormalizedBox(box)) {
+        return std::nullopt;
+    }
     const double width = box.size.width * frame.width;
     const double height = box.size.height * frame.height;
-    if (width < minimumSize || height < minimumSize) {
+    if (!std::isfinite(minimumSize) || minimumSize < 0.0 || width < minimumSize || height < minimumSize ||
+        box.origin.x > 1.0 || box.origin.y > 1.0 || box.origin.x + box.size.width <= 0.0 ||
+        box.origin.y + box.size.height <= 0.0) {
         return std::nullopt;
     }
 
@@ -52,22 +64,13 @@ bool supportsFaceDetection()
     return true;
 }
 
-void warmFaceDetection()
-{
-    // Nothing, deliberately. This used to run a throwaway request at startup
-    // so that Vision's model was loaded before the picker could ask for it.
-    // Measured, that saves nothing: the picker's first opening takes the same
-    // 250 ms either way, across four interleaved pairs. What the warm request
-    // does cost is 13.5 MB of the 44.5 MB an application with no region
-    // holds, and it charges that to every session including the many that
-    // never look for a face. The model is loaded by the first real request
-    // instead, which is the first time the picker opens.
-}
+namespace {
 
-std::vector<IntRect> detectFaces(const FrameView& frame, float pixelsPerPoint)
+std::vector<IntRect> detectWithRequest(const FrameView& frame, double minimumSize,
+                                       VNDetectFaceRectanglesRequest* request, bool& completed)
 {
     std::vector<IntRect> faces;
-    if (!readableByVision(frame)) {
+    if (!request || !readableByVision(frame)) {
         return faces;
     }
 
@@ -96,12 +99,11 @@ std::vector<IntRect> detectFaces(const FrameView& frame, float pixelsPerPoint)
     const std::unique_ptr<std::remove_pointer_t<CVPixelBufferRef>, decltype(&CVPixelBufferRelease)> ownedBuffer(
         buffer, CVPixelBufferRelease);
 
-    VNDetectFaceRectanglesRequest* request = [[VNDetectFaceRectanglesRequest alloc] init];
     VNImageRequestHandler* handler = [[VNImageRequestHandler alloc] initWithCVPixelBuffer:buffer options:@{}];
     NSError* error = nil;
     const BOOL performed = [handler performRequests:@[ request ] error:&error];
     if (performed && !error) {
-        const double minimumSize = MinimumFacePoints * pixelsPerPoint;
+        completed = true;
         for (VNFaceObservation* observation in request.results) {
             if (const std::optional<IntRect> rect = faceRect(observation.boundingBox, frame, minimumSize)) {
                 faces.push_back(*rect);
@@ -117,6 +119,37 @@ std::vector<IntRect> detectFaces(const FrameView& frame, float pixelsPerPoint)
         faces.resize(MaximumFaces);
     }
     return faces;
+}
+
+class VisionFaceSession final : public FaceDetectionSession
+{
+public:
+    FaceDetectionResult detect(const FrameView& frame, double minimumPixels) override
+    {
+        @autoreleasepool {
+            if (!m_request) {
+                m_request = [[VNDetectFaceRectanglesRequest alloc] init];
+            }
+            bool completed = false;
+            auto faces = detectWithRequest(frame, minimumPixels, m_request, completed);
+            return {completed ? FaceDetectionStatus::Completed : FaceDetectionStatus::Failed, std::move(faces)};
+        }
+    }
+
+private:
+    VNDetectFaceRectanglesRequest* m_request = nil;
+};
+
+}  // namespace
+
+std::unique_ptr<FaceDetectionSession> createFaceDetectionSession()
+{
+    return std::make_unique<VisionFaceSession>();
+}
+
+std::vector<IntRect> detectFaces(const FrameView& frame, float pixelsPerPoint)
+{
+    return createFaceDetectionSession()->detect(frame, MinimumFacePoints * pixelsPerPoint).faces;
 }
 
 }  // namespace sidescopes

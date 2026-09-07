@@ -278,7 +278,7 @@ void paintSuggestionScene(PickerState& picker, Gdiplus::Graphics& canvas, double
                           &text);
     }
     if (picker.facesMode) {
-        const wchar_t* secondary = L"[A] select a window    [D] draw    [Esc] clear region";
+        const wchar_t* secondary = L"[A] select a window    [D] draw    [Esc] cancel";
         if (!picker.suggestions.empty()) {
             drawBanner(canvas, picker, L"Select a face", secondary, false, scale);
         } else if (picker.facesScanned) {
@@ -287,10 +287,10 @@ void paintSuggestionScene(PickerState& picker, Gdiplus::Graphics& canvas, double
             drawBanner(canvas, picker, L"No faces found on this screen", secondary, true, scale);
         }
     } else {
-        drawBanner(canvas, picker, L"Click a window or drag a region inside it",
-                   supportsFaceDetection() ? L"[F] select a face    [D] draw    [Esc] clear region"
-                                           : L"[D] draw    [Esc] clear region",
-                   false, scale);
+        drawBanner(
+            canvas, picker, L"Click a window or drag a region inside it",
+            supportsFaceDetection() ? L"[F] select a face    [D] draw    [Esc] cancel" : L"[D] draw    [Esc] cancel",
+            false, scale);
     }
 }
 
@@ -324,11 +324,11 @@ void paintDrawScene(PickerState& picker, Gdiplus::Graphics& canvas, double scale
                                                                     : L"Draw a region in " + picker.constraintLabel;
         drawBanner(canvas, picker, primary.c_str(), L"[Esc] cancel", false, scale);
     } else {
-        const wchar_t* secondary = L"[Esc] clear region";
+        const wchar_t* secondary = L"[Esc] cancel";
         if (!picker.windows.empty() && supportsFaceDetection()) {
-            secondary = L"[A] select a window    [F] select a face    [Esc] clear region";
+            secondary = L"[A] select a window    [F] select a face    [Esc] cancel";
         } else if (!picker.windows.empty()) {
-            secondary = L"[A] select a window    [Esc] clear region";
+            secondary = L"[A] select a window    [Esc] cancel";
         }
         drawBanner(canvas, picker, L"Drag to draw a region", secondary, false, scale);
     }

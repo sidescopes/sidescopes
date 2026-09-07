@@ -27,6 +27,10 @@ struct FaceCandidate
     uint32_t displayId = 0;
     int frameWidth = 0;
     int frameHeight = 0;
+    /// Present only for streamed pixels. Snapshot captures have no stream
+    /// epoch/sequence; their dimensions are still retained above.
+    std::optional<FrameStamp> sourceStamp = std::nullopt;
+    uint64_t sourceSequence = 0;
 };
 
 /// A window rectangle in percent of the display, with its owning application.

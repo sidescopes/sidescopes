@@ -76,7 +76,7 @@ RegionOfInterest AttachController::editRegion(const RegionOfInterest& newAbsolut
 }
 
 AttachDecision AttachController::observe(const std::vector<AttachedWindowObservation>& windows,
-                                         std::optional<uint64_t> focusedIdentity)
+                                         std::optional<uint64_t> focusedIdentity, double now)
 {
     AttachDecision decision;
     if (m_windows.empty()) {
@@ -91,7 +91,7 @@ AttachDecision AttachController::observe(const std::vector<AttachedWindowObserva
         return decision;
     }
 
-    updateAttached(windows);
+    updateAttached(windows, now);
     m_activeIdentity = focusedIdentity && find(*focusedIdentity) ? *focusedIdentity : 0;
     updateRegion(windows, decision);
 
@@ -140,6 +140,10 @@ void AttachController::setStoredFromAbsolute(AttachedWindow& window, const Regio
 {
     window.lastWindowRect = windowRect;
     window.observedOnce = true;
+    window.motionOrigin.reset();
+    window.motionChangedAt.reset();
+    window.settlingRect.reset();
+    window.settling = false;
     if (windowRect.width <= 0.0 || windowRect.height <= 0.0 || display.width <= 0.0 || display.height <= 0.0) {
         window.left = windowRect.x;
         window.top = windowRect.y;
@@ -200,6 +204,8 @@ void AttachController::bindStoredToWindow(AttachedWindow& window, const AttachWi
 
 namespace {
 
+constexpr double GeometrySettleSeconds = 0.2;
+
 bool sameRect(const AttachWindowRect& a, const AttachWindowRect& b)
 {
     return std::abs(a.x - b.x) < 0.5 && std::abs(a.y - b.y) < 0.5 && std::abs(a.width - b.width) < 0.5 &&
@@ -208,28 +214,66 @@ bool sameRect(const AttachWindowRect& a, const AttachWindowRect& b)
 
 }  // namespace
 
-void AttachController::updateAttached(const std::vector<AttachedWindowObservation>& windows)
+void AttachController::suspendWindow(AttachedWindow& window)
+{
+    if (window.motionOrigin) {
+        const auto& origin = *window.motionOrigin;
+        window.left = origin.left;
+        window.top = origin.top;
+        window.right = origin.right;
+        window.bottom = origin.bottom;
+        window.lastWindowRect = origin.rect;
+        window.motionOrigin.reset();
+    }
+    window.settling = true;
+    window.settlingRect.reset();
+    window.motionChangedAt.reset();
+}
+
+void AttachController::updateAttached(const std::vector<AttachedWindowObservation>& windows, double now)
 {
     for (const AttachedWindowObservation& observation : windows) {
         AttachedWindow* window = find(observation.identity);
-        if (window == nullptr || !observation.windowRect) {
+        if (window == nullptr) {
             continue;
         }
         if (observation.minimized) {
-            window->settling = true;
-
+            suspendWindow(*window);
+            continue;
+        }
+        if (!observation.windowRect) {
+            // Unavailable geometry supplies no evidence that a previous
+            // animation rectangle stayed still. Preserve its rollback
+            // origin and require fresh observed time when it returns.
+            window->motionChangedAt.reset();
+            window->settlingRect.reset();
             continue;
         }
         if (window->settling) {
-            // The re-entry animation's rectangles rebaseline silently;
-            // two identical observations mean the window has landed.
-            if (sameRect(window->lastWindowRect, *observation.windowRect)) {
+            // Follow runs twice per UI frame. Repeated reads of the same
+            // animation frame do not establish that the window has landed.
+            if (!window->settlingRect || !window->motionChangedAt ||
+                !sameRect(*window->settlingRect, *observation.windowRect)) {
+                window->settlingRect = *observation.windowRect;
+                window->motionChangedAt = now;
+            } else if (now - *window->motionChangedAt >= GeometrySettleSeconds) {
+                window->lastWindowRect = *window->settlingRect;
+                window->settlingRect.reset();
                 window->settling = false;
-            } else {
-                window->lastWindowRect = *observation.windowRect;
             }
 
             continue;
+        }
+        if (!sameRect(window->lastWindowRect, *observation.windowRect)) {
+            if (!window->motionOrigin) {
+                window->motionOrigin = AttachedWindow::MotionOrigin{window->left, window->top, window->right,
+                                                                    window->bottom, window->lastWindowRect};
+            }
+            window->motionChangedAt = now;
+        } else if (!window->motionChangedAt) {
+            window->motionChangedAt = now;
+        } else if (window->motionOrigin && now - *window->motionChangedAt >= GeometrySettleSeconds) {
+            window->motionOrigin.reset();
         }
         bindStoredToWindow(*window, *observation.windowRect);
     }
@@ -261,7 +305,7 @@ RegionOfInterest AttachController::toAbsolute(const AttachedWindow& window, cons
 void AttachController::pruneClosed(const std::vector<AttachedWindowObservation>& windows, AttachDecision& decision)
 {
     for (const AttachedWindowObservation& observation : windows) {
-        if (observation.windowRect.has_value()) {
+        if (!observation.closed) {
             continue;
         }
         const auto matches = [&](const AttachedWindow& window) { return window.identity == observation.identity; };
@@ -279,9 +323,18 @@ void AttachController::updateRegion(const std::vector<AttachedWindowObservation>
     if (!active) {
         return;
     }
+    if (active->settling) {
+        m_activeIdentity = 0;
+        return;
+    }
 
     for (const AttachedWindowObservation& observation : windows) {
-        if (observation.identity != m_activeIdentity || !observation.windowRect || observation.minimized) {
+        if (observation.identity != m_activeIdentity || !observation.windowRect || observation.minimized ||
+            observation.displayId == 0 || observation.display.width <= 0 || observation.display.height <= 0) {
+            continue;
+        }
+        const RegionOfInterest region = toAbsolute(*active, *observation.windowRect, observation.display);
+        if (region.rightPercent <= region.leftPercent || region.bottomPercent <= region.topPercent) {
             continue;
         }
         decision.activeIdentity = m_activeIdentity;
@@ -289,7 +342,8 @@ void AttachController::updateRegion(const std::vector<AttachedWindowObservation>
         decision.activeDisplayId = observation.displayId;
         decision.activeRect = observation.windowRect;
         decision.activeTitle = observation.title;
-        decision.region = toAbsolute(*active, *observation.windowRect, observation.display);
+        decision.windowMoving = active->motionOrigin.has_value();
+        decision.region = region;
 
         return;
     }

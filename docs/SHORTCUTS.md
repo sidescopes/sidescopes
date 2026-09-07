@@ -29,12 +29,12 @@ the shortcuts were pressed.
 | A | Select or draw a window-attached region |
 | D | Draw or replace the global region |
 | F | Select a detected face |
-| Escape | Clear the region |
+| Escape | Cancel the picker or close Settings |
 
 While a region picker is open, A, D, and F switch its mode without closing it.
 Escape closes the Settings window first when that window is open; otherwise it
-clears every attached and unattached region. It does not restore a previous
-selection.
+cancels the active picker and restores the committed selection. Outside a
+picker it leaves the region unchanged.
 
 On the desktop border, drag the striped band to move the region, drag a corner
 to resize it, or drag an edge midpoint to move one edge.
@@ -115,7 +115,7 @@ The keys are:
 - `shortcut_attach_face`
 - `shortcut_pin_color`
 - `shortcut_vectorscope_zoom`
-- `shortcut_clear_region`
+- `shortcut_cancel_interaction`
 - `shortcut_<scope id>` for each scope
 
 The preferences file is located at:

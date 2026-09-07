@@ -78,10 +78,7 @@ RegionOutcome RegionCoordinator::clearRegion()
         outcome.detachedAll = true;
     }
     m_globalRegion.reset();
-    // Only a clear that takes something away is a change, the same no-op test
-    // useRegion makes. Escape in the empty state is the ordinary case - it is
-    // also how a pick is cancelled - and reporting it as a change pushed the
-    // settings, re-synced the border and re-saved the preferences for nothing.
+    // Repeating the emergency reset does not dirty an already empty state.
     outcome.regionChanged = m_region.has_value();
 
     return outcome;
@@ -99,8 +96,7 @@ void RegionCoordinator::syncBorder(const RegionBorderState& state)
     // into the analysis region: the attached region on the focused attached
     // window (label and warm dress), else the plain global one. Called every
     // frame; the platform side makes the unchanged case free.
-    if (m_picker.active() || !m_region || applicationHidden() || state.windowMoving || m_faceLock.hunting() ||
-        m_faceLock.contentUnsettled(state.now) || state.windowMinimized) {
+    if (m_picker.active() || !m_region || applicationHidden() || state.windowMoving || state.windowMinimized) {
         hideRegionBorder();
     } else {
         const RegionBinding binding =
@@ -146,7 +142,7 @@ RegionBorderEditOutcome RegionCoordinator::pollBorderEdit(uint64_t activeWindowI
     }
     m_borderEditing = edit.editing;
 
-    return RegionBorderEditOutcome{edit.dismissed, edit.bindingToggled, edit.region};
+    return RegionBorderEditOutcome{edit.bindingToggled, edit.region};
 }
 
 bool RegionCoordinator::borderEditing() const

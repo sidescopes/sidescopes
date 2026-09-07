@@ -25,23 +25,16 @@ constexpr double WindowPad = BorderPad + HandleMargin;
 // edge-midpoint grab-zone sizes live with the shared geometry that reads
 // them.
 constexpr double MinimumRegionSize = 24.0;
-// The close button: a badge on the band's outer corner,
-// diagonally off the corner handle, so it visibly belongs to the region
-// as a whole. Pulled inward a touch so the disc mostly rides the band;
-// tiny regions still yield it to the resize zones.
 // Extra window height above the band when the attached label is worn, so
 // the name tab clears the handles instead of crowding the top-center one.
 constexpr double LabelBand = 20.0;
-constexpr double CloseRadius = 6.5;
-constexpr double CloseHitRadius = 11.0;
-constexpr double CloseCornerInset = 2.0;
+constexpr double BindingHitRadius = 11.0;
 constexpr double TabBindingZone = 18.0;
 
 // Shared edit state the application polls once per frame.
 extern std::vector<BorderKeyPress> g_borderKeyPresses;
 extern bool g_borderEditing;
 extern bool g_borderEditChanged;
-extern bool g_borderDismissed;
 extern bool g_borderBindingToggled;
 extern RegionOfInterest g_borderEditRegion;
 
@@ -55,8 +48,8 @@ extern RegionOfInterest g_borderEditRegion;
 // come from an always-active tracking area: cursor rects only work in
 // the key window.
 // Borderless panels refuse key status unless overridden; the border takes
-// the keyboard on click - without activating the application - so Escape
-// and the letter shortcuts work right after a border interaction.
+// the keyboard on click - without activating the application - so the
+// application's shortcuts work right after a border interaction.
 @interface SidescopesBorderPanel : NSPanel
 @end
 
@@ -64,7 +57,6 @@ extern RegionOfInterest g_borderEditRegion;
 @property(nonatomic, assign) unsigned dragZone;       // a mask of sidescopes::ZoneBits
 @property(nonatomic, assign) NSPoint dragStartMouse;  // global screen coords
 @property(nonatomic, assign) NSRect dragStartRegion;  // global screen coords
-@property(nonatomic, assign) BOOL closePressed;
 @property(nonatomic, assign) BOOL bindingPressed;
 // How the outlined region is bound: picks the control's face, pin, or pin-off
 // glyph without putting mode text into the title.

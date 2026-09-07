@@ -18,15 +18,10 @@ constexpr float HandleRadius = 3.5f;   // one handle dot
 constexpr float EdgeRing = 1.0f;       // the measured edge's thickness
 constexpr int MinimumRegionSize = 24;  // per side, in display units
 
-// The close badge, again the desktop's numbers.
-constexpr float CrossThickness = 1.3f;
-constexpr float CloseRadius = 6.5f;
-constexpr float CloseHitRadius = 11.0f;
-constexpr float CloseCornerInset = 2.0f;
 // Dear ImGui picks a circle's segment count from its radius in ITS units and
 // knows nothing of the device scale, so a 6.5-point disc is tessellated for
 // 6.5 pixels and drawn into thirteen - a visible polygon where AppKit strokes
-// a true oval. Pinned high enough that neither the badge nor a handle shows a
+// a true oval. Pinned high enough that no handle shows a
 // facet at any scale a browser hands us; it costs a few vertices.
 constexpr int CircleSegments = 48;
 
@@ -55,6 +50,8 @@ void RegionEditor::reset(const RegionOfInterest& region, int displayWidth, int d
                     std::max(MinimumRegionSize, static_cast<int>(std::lround(fitted.width))),
                     std::max(MinimumRegionSize, static_cast<int>(std::lround(fitted.height)))};
     m_grab = ZoneNone;
+    m_arming = false;
+    m_drawing = false;
 }
 
 void RegionEditor::clear()
@@ -67,14 +64,24 @@ void RegionEditor::clear()
 
 void RegionEditor::armDraw()
 {
-    // The old region goes at once. The desktop picker dims the screen and
-    // takes the border down with it, so leaving the previous rectangle on
-    // screen while a new one is being drawn would be a rectangle nothing is
-    // measuring.
-    m_rect = SsRect{0, 0, 0, 0};
+    if (!m_arming) {
+        m_beforeDraw = m_rect;
+    }
     m_arming = true;
     m_drawing = false;
     m_grab = ZoneNone;
+}
+
+bool RegionEditor::cancelDraw()
+{
+    if (!m_arming) {
+        return false;
+    }
+    m_rect = m_beforeDraw;
+    m_arming = false;
+    m_drawing = false;
+    m_grab = ZoneNone;
+    return true;
 }
 
 RegionEditor::Handles RegionEditor::handlesFor(const ImVec2& topLeft, const ImVec2& bottomRight)
@@ -137,7 +144,7 @@ namespace {
 ///
 /// The fringe is measured in Dear ImGui's own units, so on a 2x canvas a
 /// one-point stroke is spread across two device pixels and lands washed out -
-/// which is why the handle rims and the close badge's ring read fainter here
+/// which is why the handle rims read fainter here
 /// than on the desktop, where AppKit strokes one point into two crisp pixels
 /// at full strength.
 ///
@@ -258,9 +265,7 @@ void drawMeasuredEdge(ImDrawList* draw, const ImVec2& topLeft, const ImVec2& bot
     // The dashes ride the MIDDLE of that ring, which is where the desktop puts
     // them: it strokes a rectangle inset by half the ring with a pen exactly
     // the ring wide. Filled rectangles rather than lines, because AddLine
-    // shifts both endpoints half a pixel to land a hairline on a pixel centre
-    // - the same offset already corrected in the close badge's cross - and
-    // half a pixel is half this ring.
+    // shifts both endpoints half a pixel, which is half this ring.
     constexpr float Dash = 4.0f;
     const ImU32 dashInk = grey(0.97f, 0.95f);
     for (float x = topLeft.x; x < bottomRight.x; x += Dash * 2.0f) {
@@ -277,14 +282,6 @@ void drawMeasuredEdge(ImDrawList* draw, const ImVec2& topLeft, const ImVec2& bot
 
 }  // namespace
 
-bool RegionEditor::takeDismissed()
-{
-    const bool dismissed = m_dismissed;
-    m_dismissed = false;
-
-    return dismissed;
-}
-
 std::pair<ImVec2, ImVec2> RegionEditor::screenRect(const Placement& placement) const
 {
     const ImVec2 topLeft{std::round(placement.origin.x + static_cast<float>(m_rect.x) * placement.scale),
@@ -292,72 +289,6 @@ std::pair<ImVec2, ImVec2> RegionEditor::screenRect(const Placement& placement) c
 
     return {topLeft, ImVec2{std::round(topLeft.x + static_cast<float>(m_rect.width) * placement.scale),
                             std::round(topLeft.y + static_cast<float>(m_rect.height) * placement.scale)}};
-}
-
-ImVec2 RegionEditor::closeCentre(const ImVec2& topLeft, const ImVec2& bottomRight)
-{
-    // The band's outer top corner, pulled in a touch so the disc mostly
-    // rides the band - the desktop's own placement, mirrored for a
-    // downward y.
-    // Mirrored for a downward y, and EdgeRing mirrors WITH it: on the desktop
-    // the badge sits BorderPad - CloseCornerInset + EdgeRing above the
-    // region's top, and adding EdgeRing here instead of subtracting it put the
-    // badge two points low - which on a thirteen-point disc against a
-    // twelve-point band is the difference between riding the band and sitting
-    // off its corner.
-    return ImVec2{bottomRight.x + BorderPad - CloseCornerInset, topLeft.y - BorderPad + CloseCornerInset - EdgeRing};
-}
-
-bool RegionEditor::closeOffered(const Placement& placement) const
-{
-    // A narrow region keeps its corner for resizing; the badge would sit on
-    // top of the grab zones and win a press meant for them.
-    return regionCloseAvailable(static_cast<float>(m_rect.width) * placement.scale);
-}
-
-/// Visible throughout a drag so it travels with the border. A region too
-/// narrow to hold it still yields its corner to the resize zones.
-bool RegionEditor::closeVisible(const Placement& placement) const
-{
-    return !m_arming && closeOffered(placement);
-}
-
-void RegionEditor::drawCloseBadge(const ImVec2& centre) const
-{
-    // A DARK disc where the handles are light, so it reads as an action
-    // rather than a grip, with the same bright ring and an x.
-    ImDrawList* draw = ImGui::GetWindowDrawList();
-    draw->AddCircleFilled(centre, CloseRadius, grey(0.1f, 0.85f), CircleSegments);
-    draw->AddCircle(centre, CloseRadius, grey(0.97f, 0.95f), CircleSegments, 1.0f);
-
-    // The cross goes through the PATH api rather than AddLine, which offsets
-    // both its endpoints by half a pixel to make axis-aligned hairlines land
-    // on a pixel centre. AddCircle does no such thing, so the two disagree:
-    // measured on a 2x display, the cross sat a whole device pixel down and
-    // right of the disc it is centred in. On a badge thirteen points across
-    // the uneven dark margin is the first thing the eye finds. Nothing here
-    // is axis-aligned, so the offset buys no crispness to trade away.
-    const float arm = CloseRadius - 3.7f;
-    const ImU32 ink = grey(0.97f, 0.95f);
-    const ImVec2 topLeftTip{centre.x - arm, centre.y - arm};
-    const ImVec2 bottomRightTip{centre.x + arm, centre.y + arm};
-    const ImVec2 bottomLeftTip{centre.x - arm, centre.y + arm};
-    const ImVec2 topRightTip{centre.x + arm, centre.y - arm};
-    const ImVec2 tip[4] = {topLeftTip, bottomRightTip, bottomLeftTip, topRightTip};
-
-    draw->PathLineTo(topLeftTip);
-    draw->PathLineTo(bottomRightTip);
-    draw->PathStroke(ink, 0, CrossThickness);
-    draw->PathLineTo(bottomLeftTip);
-    draw->PathLineTo(topRightTip);
-    draw->PathStroke(ink, 0, CrossThickness);
-    // The desktop strokes this with ROUND caps and Dear ImGui offers no cap
-    // style, so the four ends are capped by hand. Without them the diagonals
-    // stop in square corners, which at this size read as burrs and make the
-    // arms look unequal.
-    for (const ImVec2& end : tip) {
-        draw->AddCircleFilled(end, CrossThickness * 0.5f, ink, CircleSegments);
-    }
 }
 
 void RegionEditor::drawBorder(const Placement& placement, int displayWidth, int displayHeight) const
@@ -387,13 +318,6 @@ void RegionEditor::drawBorder(const Placement& placement, int displayWidth, int 
     }
 
     draw->PopClipRect();
-
-    // Last, as the desktop draws it last: the badge sits ON the band and a
-    // band painted afterwards would bury it. The outer ImGui window still
-    // clips the badge at the virtual display edge.
-    if (closeVisible(placement)) {
-        drawCloseBadge(closeCentre(topLeft, bottomRight));
-    }
 }
 
 /// A rectangle in the live drag's own language: a solid dark line under a
@@ -504,10 +428,9 @@ bool RegionEditor::updateDrawing(const Placement& placement, int displayWidth, i
     if (m_drawing && ImGui::IsMouseReleased(ImGuiMouseButton_Left)) {
         m_drawing = false;
         m_arming = false;
-        // A click rather than a drag lays down nothing, which is the
-        // desktop's answer too: a region is a rectangle you meant.
+        // A click or tiny drag keeps the selection from before the picker.
         if (m_rect.width < MinimumRegionSize || m_rect.height < MinimumRegionSize) {
-            m_rect = SsRect{0, 0, 0, 0};
+            m_rect = m_beforeDraw;
         }
         changed = true;
     }
@@ -553,33 +476,6 @@ bool RegionEditor::updateEditing(const Placement& placement, int displayWidth, i
     return changed;
 }
 
-/// The close badge: taken when it is clicked. Hit-testing only - the badge
-/// is DRAWN by drawBorder, last, so nothing paints over it.
-bool RegionEditor::updateClose(const Placement& placement)
-{
-    if (!closeVisible(placement) || !ImGui::IsWindowHovered()) {
-        return false;
-    }
-    const auto [topLeft, bottomRight] = screenRect(placement);
-    const ImVec2 centre = closeCentre(topLeft, bottomRight);
-    const ImVec2 mouse = ImGui::GetMousePos();
-
-    const float dx = mouse.x - centre.x;
-    const float dy = mouse.y - centre.y;
-    if (dx * dx + dy * dy > CloseHitRadius * CloseHitRadius) {
-        return false;
-    }
-    ImGui::SetMouseCursor(ImGuiMouseCursor_Arrow);
-    if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
-        m_dismissed = true;
-        m_grab = ZoneNone;
-
-        return true;
-    }
-
-    return true;
-}
-
 bool RegionEditor::update(const Placement& placement, int displayWidth, int displayHeight)
 {
     // A browser resize may make the virtual display smaller. Keep the region
@@ -596,15 +492,12 @@ bool RegionEditor::update(const Placement& placement, int displayWidth, int disp
             changed = true;
         }
     }
-    // The badge is offered first: it sits on the band, and a press meant
-    // for it must not become a drag of the region under it.
-    const bool onClose = !m_arming && hasRegion() && updateClose(placement);
     changed = (m_arming ? updateDrawing(placement, displayWidth, displayHeight)
-                        : (hasRegion() && !onClose ? updateEditing(placement, displayWidth, displayHeight) : false)) ||
+                        : (hasRegion() ? updateEditing(placement, displayWidth, displayHeight) : false)) ||
               changed;
     // One or the other, never both. While the picker is up the drag owns the
-    // display and wears a dashed rectangle; the band, the handles and the
-    // badge are what a SETTLED region looks like, and drawing them over a
+    // display and wears a dashed rectangle; the band and handles are what a
+    // settled region looks like, and drawing them over a
     // live drag was the whole difference from the desktop.
     if (m_arming) {
         drawPickerOverlay(placement, displayWidth, displayHeight);

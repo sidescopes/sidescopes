@@ -30,7 +30,6 @@ enum MenuAction
     MenuZoom2,
     MenuZoom4,
     MenuAttachWindow = 30,
-    MenuClearRegion,
     MenuDetachWindow,
     MenuDetachAll,
     MenuClearPinnedMarkers = 41,
@@ -81,8 +80,7 @@ struct ContextMenuModel
     float userUiScaleFactor;
     /// How much of the machine the analysis may spend.
     QualityLevel quality;
-    /// Whether a region has been selected at all; without one there is nothing
-    /// for Clear Region to clear.
+    /// Whether the current source provides a region.
     bool regionSelected;
     /// Whether this shell offers application settings, quality and diagnostics.
     bool applicationControlsAvailable = true;

@@ -56,6 +56,12 @@ class Profile:
 # Probed in order; the first marker found in the binary wins.
 PROFILES = (
     Profile(
+        "region-continuity",
+        "shortcut_cancel_interaction",
+        {"draw-region", "attach-window", "retain-region"},
+        "starts with a default region; Escape cancels an interaction and keeps the previous region",
+    ),
+    Profile(
         "region-optional",
         "shortcut_clear_region",
         {"clear-region", "draw-region", "attach-window"},
@@ -153,6 +159,10 @@ SCENARIOS = (
     Scenario(
         "region-redraw", "a region drawn roughly in a fifth of a second, cleared, and drawn again",
         "still", "none", "region-redraw", needs=("draw-region", "clear-region"),
+    ),
+    Scenario(
+        "region-replace", "an existing region repeatedly replaced by a quick freehand draw",
+        "still", "draw", "region-replace", needs=("draw-region",),
     ),
     Scenario(
         "attached-window-drag", "attached to a window, and that window dragged about",

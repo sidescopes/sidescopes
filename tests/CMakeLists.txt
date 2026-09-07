@@ -61,6 +61,9 @@ add_executable(sidescopes_tests
     test_cursor_sampler.cpp
     test_attach_controller.cpp
     test_face_lock.cpp
+    test_face_tracking.cpp
+    test_face_tracking_worker.cpp
+    test_analysis_worker_resolver.cpp
     test_face_lock_controller.cpp
     test_region_picker.cpp
     test_region_coordinator.cpp
@@ -121,7 +124,7 @@ target_include_directories(sidescopes_tests PRIVATE ${nanosvg_SOURCE_DIR}/src)
 
 # The rest of the Windows platform layer's pure logic - UTF-8/UTF-16
 # conversion and display-id parsing - is unit-tested on the Windows runner.
-# The remainder of that layer (DXGI capture, GDI+ overlays, WinRT faces,
+# The remainder of that layer (DXGI capture, GDI+ overlays, face detection,
 # enumeration) needs a live desktop and is verified by running the app.
 if(WIN32)
     target_sources(sidescopes_tests PRIVATE test_windows_platform.cpp)

@@ -18,6 +18,9 @@ namespace sidescopes {
 struct RegionSessionOutcome
 {
     bool regionChanged = false;
+    /// A worker-confirmed face movement already applied to that frame's scopes.
+    bool trackedRegion = false;
+    uint64_t selectionRevision = 0;
     std::optional<RegionOfInterest> region;
     std::optional<FloatColor> pinColor;
     std::optional<std::string> status;
@@ -52,8 +55,9 @@ public:
     [[nodiscard]] RegionSessionOutcome poll(bool windowMinimized, std::optional<AnalysisWorker::FrameSize> frameSize,
                                             std::optional<FloatColor> screenSampleColor);
     [[nodiscard]] RegionSessionOutcome clear();
-    [[nodiscard]] RegionSessionOutcome dismiss();
+    [[nodiscard]] RegionSessionOutcome cancel();
     [[nodiscard]] RegionSessionOutcome detach();
+    [[nodiscard]] RegionSessionOutcome detachAll();
     void syncBorder(bool windowMinimized);
     void idleWaitWatchingAttachedWindow();
 
@@ -67,16 +71,20 @@ private:
     [[nodiscard]] bool activeWindowMoved(const AttachDecision& decision) const;
     void captureActiveDisplay(const AttachDecision& decision);
     void applyAttachDecision(const AttachDecision& decision);
+    void rememberAttachedRegion(uint64_t identity, uint32_t displayId, const RegionOfInterest& region);
+    void keepLastRegionGlobal();
+    void restorePickerRegion();
     void refreshAttachedLabel(const AttachDecision& decision);
     [[nodiscard]] std::optional<uint64_t> resolveFocusedWindow() const;
     void onWindowMotion(WindowMotionSignal signal);
     void detachActiveWindow();
     void releaseActiveWindow();
     void confirmPickedRegion(const ConfirmedPick& pick);
+    void confirmPickerSelection(const ConfirmedPick& pick);
     void adoptAttachedPick(uint64_t identity, int64_t ownerPid, const RegionOfInterest& region);
-    void dismissEditedBorder();
     void toggleRegionBinding();
     void attachGlobalRegionToWindow();
+    [[nodiscard]] std::optional<WindowGeometry> editableWindowGeometry() const;
     void applyBorderEdit(const RegionOfInterest& edited);
     void applyFaceLockOutcome(const FaceLockOutcome& outcome);
     bool adoptFacePick(uint32_t displayId, const RegionOfInterest& confirmed);
@@ -102,6 +110,23 @@ private:
     std::optional<AnalysisWorker::FrameSize> m_frameSize;
     RegionSessionOutcome m_pending;
     bool m_stopped = false;
+
+    struct SavedRegion
+    {
+        std::optional<RegionOfInterest> region;
+        uint32_t displayId = 0;
+    };
+
+    std::optional<SavedRegion> m_pickerRestore;
+
+    struct AttachedSelection
+    {
+        uint64_t identity;
+        uint32_t displayId;
+        RegionOfInterest region;
+    };
+
+    std::optional<AttachedSelection> m_lastAttachedSelection;
 };
 
 }  // namespace sidescopes

@@ -45,6 +45,25 @@ struct ScanResult
     double elapsedMs = 0.0;
 };
 
+bool sameCoordinate(double a, double b)
+{
+    return std::isfinite(a) && std::isfinite(b) && std::abs(a - b) < 0.5;
+}
+
+bool sameDisplayGeometry(const DisplayGeometry& current, const AttachDisplayRect& saved)
+{
+    return saved.width > 0.0 && saved.height > 0.0 && sameCoordinate(current.originX, saved.originX) &&
+           sameCoordinate(current.originY, saved.originY) && sameCoordinate(current.widthPoints, saved.width) &&
+           sameCoordinate(current.heightPoints, saved.height);
+}
+
+bool sameWindowGeometry(const WindowGeometry& current, const AttachWindowRect& saved)
+{
+    return saved.width > 0.0 && saved.height > 0.0 && sameCoordinate(current.x, saved.x) &&
+           sameCoordinate(current.y, saved.y) && sameCoordinate(current.width, saved.width) &&
+           sameCoordinate(current.height, saved.height);
+}
+
 // Grabs one display off the capture stream and runs the face detector on it.
 // Pure of application state: it takes only the display and its point width
 // (for the detector's density floor), so it is safe to run on a detached
@@ -233,6 +252,7 @@ std::vector<PickerDisplay> RegionPicker::buildPickerDisplays()
     const uint32_t streamed = m_capture.capturedDisplay();
     std::vector<SuggestedRegion> faceSuggestions;
     m_faceCandidates.clear();
+    m_faceSourceGeometry.clear();
     if (supportsFaceDetection()) {
         (void)m_worker.withLatestFrame([&](const FrameView& view) {
             // A frame narrowed to the analysis region holds neither the faces
@@ -277,12 +297,23 @@ std::vector<PickerDisplay> RegionPicker::buildPickerDisplays()
 std::vector<SuggestedRegion> RegionPicker::scanStreamedDisplayFaces(const FrameView& view, uint32_t streamed)
 {
     const auto geometry = geometryOfDisplay(streamed);
-    const float pixelsPerPoint = geometry ? static_cast<float>(view.width / geometry->widthPoints) : 1.0f;
+    if (!geometry || !std::isfinite(geometry->widthPoints) || geometry->widthPoints <= 0.0 ||
+        view.stamp.captureEpoch != m_capture.streamEpoch() || view.stamp.displayId != streamed || view.sequence == 0 ||
+        !std::isfinite(view.stamp.receivedSeconds)) {
+        return {};
+    }
+    const float pixelsPerPoint = static_cast<float>(view.width / geometry->widthPoints);
     const std::vector<IntRect> faces = detectFaces(view, pixelsPerPoint);
     std::vector<SuggestedRegion> faceSuggestions = buildFaceSuggestions(faces, view.width, view.height);
     // The raw boxes are remembered too, one candidate each: a confirmed
     // face pick anchors its lock on the detector's box, not the inset.
-    const std::vector<FaceCandidate> candidates = buildFaceCandidates(faces, streamed, view.width, view.height);
+    auto candidates = buildFaceCandidates(faces, streamed, view.width, view.height);
+    for (auto& candidate : candidates) {
+        candidate.sourceStamp = view.stamp;
+        candidate.sourceSequence = view.sequence;
+    }
+    m_faceSourceGeometry[streamed] = {geometry->originX, geometry->originY, geometry->widthPoints,
+                                      geometry->heightPoints};
     m_faceCandidates.insert(m_faceCandidates.end(), candidates.begin(), candidates.end());
     SS_DIAG(Suggestions, "display %u faces=%zu (streamed)", streamed, faceSuggestions.size());
 
@@ -316,6 +347,10 @@ void RegionPicker::launchDisplayFaceScans(const std::vector<PickerDisplay>& pick
         DisplayFaceScan* scan = m_displayFaceScans.back().get();
         scan->displayId = entry.displayId;
         scan->generation = m_facePickGeneration;
+        if (geometry) {
+            scan->displayGeometry = {geometry->originX, geometry->originY, geometry->widthPoints,
+                                     geometry->heightPoints};
+        }
         startDisplayFaceScan(*scan, widthPoints);
     }
 }
@@ -406,6 +441,7 @@ void RegionPicker::consumeDisplayFaceScan(DisplayFaceScan& scan)
     }
     const std::vector<SuggestedRegion> suggestions = buildFaceSuggestions(boxes, frameWidth, frameHeight);
     const std::vector<FaceCandidate> candidates = buildFaceCandidates(boxes, scan.displayId, frameWidth, frameHeight);
+    m_faceSourceGeometry[scan.displayId] = scan.displayGeometry;
     m_faceCandidates.insert(m_faceCandidates.end(), candidates.begin(), candidates.end());
     // Delivering the suggestions marks this display scanned: an empty list now
     // reads as "none found", and a failed grab (empty too) shows no boxes.
@@ -480,6 +516,41 @@ const FaceCandidate* RegionPicker::matchFaceCandidate(uint32_t displayId, const 
     }
 
     return nullptr;
+}
+
+bool RegionPicker::faceSourceCurrent(const FaceCandidate& face, const WindowCandidate& host) const
+{
+    const auto saved = m_faceSourceGeometry.find(face.displayId);
+    const auto display = geometryOfDisplay(face.displayId);
+    const auto window = windowGeometry(host.identity);
+    if (saved == m_faceSourceGeometry.end() || !display || !window || window->minimized ||
+        host.displayId != face.displayId || face.frameWidth <= 0 || face.frameHeight <= 0) {
+        return false;
+    }
+    if (!sameDisplayGeometry(*display, saved->second) || !sameWindowGeometry(*window, host.windowRect)) {
+        return false;
+    }
+    if (!face.sourceStamp) {
+        // A snapshot has real pixel dimensions but no stream stamp. Its
+        // nomination must be scaled to the eventual stream before following.
+        return true;
+    }
+    return streamedFaceSourceCurrent(face);
+}
+
+bool RegionPicker::streamedFaceSourceCurrent(const FaceCandidate& face) const
+{
+    if (!face.sourceStamp || m_capture.dead() || m_capture.suspended() ||
+        m_capture.capturedDisplay() != face.displayId || m_capture.streamEpoch() != face.sourceStamp->captureEpoch) {
+        return false;
+    }
+    bool current = false;
+    (void)m_worker.withLatestFrame([&](const FrameView& view) {
+        current = coversWholeDisplay(view) && view.width == face.frameWidth && view.height == face.frameHeight &&
+                  view.stamp.captureEpoch == face.sourceStamp->captureEpoch && view.stamp.displayId == face.displayId &&
+                  view.sequence >= face.sourceSequence;
+    });
+    return current;
 }
 
 void RegionPicker::logPickerSuggestions(const std::vector<PickerDisplay>& pickerDisplays)
@@ -602,10 +673,7 @@ RegionPickOutcome RegionPicker::processRegionPoll(const RegionPickPoll& poll)
         if (poll.confirmed) {
             outcome.confirmed = ConfirmedPick{*poll.confirmed, poll.displayId, poll.attachesToWindow};
         } else if (!m_swallowCancel) {
-            // Cancelled with Esc: detach every attached window and drop the
-            // global region, leaving the scopes reading nothing. A cancel
-            // ordered by a tool switch is not the user's Esc and drops
-            // nothing.
+            // The host restores the previously committed selection.
             outcome.cancelled = true;
         }
         m_swallowCancel = false;

@@ -2,190 +2,139 @@
 
 #include <algorithm>
 #include <cmath>
-#include <cstddef>
-#include <cstdint>
-#include <cstring>
-#include <exception>
-#include <mutex>
-#include <thread>
 #include <utility>
-#include <vector>
 
 #include "app/capture_controller.h"
-#include "app/capture_crop.h"
 #include "app/region_geometry.h"
-#include "core/diagnostics.h"
 #include "platform/desktop.h"
 #include "platform/face_detection.h"
 
-// Waking the main loop's idle wait so a finished probe is drained the moment
-// it lands, not at the next timeout. Declared rather than pulling in the whole
-// GLFW header: this unit compiles into the test binary too, which links no
-// windowing library and provides its own stub.
 extern "C" void glfwPostEmptyEvent(void);
 
 namespace sidescopes {
 namespace {
 
-/// The face-lock probe cadence. The lock adopts only positions two
-/// consecutive probes agree on, so this bounds how long the settle snap
-/// trails the end of a pan or zoom; the ROI stays small enough that the
-/// reference laptop shrugs it off.
-constexpr double FaceLockProbeSeconds = 0.3;
-
-/// The probe's reach around the last adopted anchor, in anchor widths:
-/// covers the decision gates' proximity radius plus the face's own extent.
-constexpr double FaceLockRoiWidths = 2.5;
-
-/// The content-stability probe: mean absolute per-byte difference of the
-/// region's sample grid that counts as "the content changed", and how long
-/// the content must sit still before the border may show again. The
-/// threshold sits just above capture noise: a pan over smooth skin moves
-/// pixels only a little, and the border must hide on it instantly too.
-constexpr double ContentChangeThreshold = 2.5;
-constexpr double ContentSettleSeconds = 0.45;
-
-bool sameRegionRect(const RegionOfInterest& a, const RegionOfInterest& b)
+bool sameSource(const FaceTrackingCommand& a, const FaceTrackingCommand& b)
 {
-    return std::abs(a.leftPercent - b.leftPercent) < 0.01 && std::abs(a.topPercent - b.topPercent) < 0.01 &&
-           std::abs(a.rightPercent - b.rightPercent) < 0.01 && std::abs(a.bottomPercent - b.bottomPercent) < 0.01;
+    return a.identity == b.identity && a.captureEpoch == b.captureEpoch && a.captureContinuity == b.captureContinuity &&
+           a.displayId == b.displayId && a.displayWidth == b.displayWidth && a.displayHeight == b.displayHeight &&
+           a.window == b.window && a.enabled == b.enabled;
 }
 
-// The probe's region of interest, in display pixels: FaceLockRoiWidths anchor
-// widths around the last adopted anchor, clipped to the attached window and
-// the frame - a neighbouring window's faces are structurally out of reach.
-// The caller has already refused a narrowed frame, so the frame IS the
-// display here.
-// A lock that has lost its face searches the whole attached window instead.
-IntRect faceLockRoi(const FaceLockState& lock, const AttachWindowRect& window, const DisplayGeometry& geometry,
-                    int frameWidth, int frameHeight)
+IntRect clippedWindow(const AttachWindowRect& rect, const DisplayGeometry& display, AnalysisWorker::FrameSize frame)
 {
-    const double scale = frameWidth / geometry.widthPoints;
-    double left = (window.x - geometry.originX) * scale;
-    double top = (window.y - geometry.originY) * scale;
-    double right = left + window.width * scale;
-    double bottom = top + window.height * scale;
-    if (!face_lock::searchingWide(lock)) {
-        const double reach = FaceLockRoiWidths * lock.lastAnchor.width;
-        left = std::max(left, lock.lastAnchor.centerX - reach);
-        top = std::max(top, lock.lastAnchor.centerY - reach);
-        right = std::min(right, lock.lastAnchor.centerX + reach);
-        bottom = std::min(bottom, lock.lastAnchor.centerY + reach);
+    const double sx = frame.displayWidth / display.widthPoints;
+    const double sy = frame.displayHeight / display.heightPoints;
+    const double edges[] = {(rect.x - display.originX) * sx, (rect.y - display.originY) * sy,
+                            (rect.x + rect.width - display.originX) * sx,
+                            (rect.y + rect.height - display.originY) * sy};
+    if (!std::all_of(std::begin(edges), std::end(edges), [](double value) { return std::isfinite(value); })) {
+        return {};
     }
-    left = std::max(left, 0.0);
-    top = std::max(top, 0.0);
-    right = std::min(right, static_cast<double>(frameWidth));
-    bottom = std::min(bottom, static_cast<double>(frameHeight));
-
-    return IntRect{static_cast<int>(left), static_cast<int>(top), static_cast<int>(right - left),
-                   static_cast<int>(bottom - top)};
+    const int left = static_cast<int>(std::ceil(std::clamp(edges[0], 0.0, double(frame.displayWidth))));
+    const int top = static_cast<int>(std::ceil(std::clamp(edges[1], 0.0, double(frame.displayHeight))));
+    const int right = static_cast<int>(std::floor(std::clamp(edges[2], 0.0, double(frame.displayWidth))));
+    const int bottom = static_cast<int>(std::floor(std::clamp(edges[3], 0.0, double(frame.displayHeight))));
+    return {left, top, std::max(0, right - left), std::max(0, bottom - top)};
 }
 
-/// One probe's input, lifted out of a frame: the searched rectangle, the
-/// frame's pixel density for the detector's density floor, and the rectangle's
-/// pixels. The pixels are empty when the rectangle has no area.
-struct ProbeCrop
+FaceLockState onFrameGrid(FaceLockState state, std::optional<std::pair<int, int>> original,
+                          AnalysisWorker::FrameSize frame)
 {
-    IntRect roi;
-    float pixelsPerPoint = 1.0f;
-    std::vector<uint8_t> pixels;
-};
+    if (!original || original->first <= 0 || original->second <= 0) {
+        return state;
+    }
+    const double sx = double(frame.displayWidth) / original->first;
+    const double sy = double(frame.displayHeight) / original->second;
+    state.lastAnchor.centerX *= sx;
+    state.lastAnchor.centerY *= sy;
+    state.lastAnchor.width *= sx;
+    state.offsetY *= sy / sx;
+    state.sizeY *= sy / sx;
+    return state;
+}
 
-// Copies the lock's search rectangle out of the frame, tightly packed, so the
-// detection thread reads pixels nothing else is writing.
-ProbeCrop cropProbeRoi(const FrameView& view, const FaceLockState& lock, const AttachWindowRect& windowRect,
-                       const DisplayGeometry& geometry)
+bool validTrackedSelection(const FaceTrackingCommand& command)
 {
-    ProbeCrop crop;
-    // The search rectangle is the locked window's, which a capture narrowed to
-    // the analysis region does not carry; the probe waits for a whole one
-    // rather than searching whatever pixels happen to be in hand.
-    if (!coversWholeDisplay(view)) {
-        return crop;
-    }
-    crop.roi = faceLockRoi(lock, windowRect, geometry, view.width, view.height);
-    if (crop.roi.width <= 0 || crop.roi.height <= 0) {
-        return crop;
-    }
-    crop.pixelsPerPoint = static_cast<float>(view.width / geometry.widthPoints);
-    const std::size_t rowBytes = static_cast<std::size_t>(crop.roi.width) * 4;
-    crop.pixels.resize(rowBytes * static_cast<std::size_t>(crop.roi.height));
-    // The detectors take eight-bit BGRA and nothing else - on macOS the buffer
-    // goes to Vision uncopied - so a deeper frame is narrowed here, where the
-    // copy this crop already makes absorbs it. A face is found from shape, so
-    // the lost bits cost the search nothing.
-    const bool packed = view.format == PixelFormat::Bgra8;
-    for (int row = 0; row < crop.roi.height; ++row) {
-        uint8_t* target = crop.pixels.data() + rowBytes * static_cast<std::size_t>(row);
-        if (packed) {
-            std::memcpy(target, view.rawPixelAt(crop.roi.x, crop.roi.y + row), rowBytes);
-            continue;
-        }
-        for (int column = 0; column < crop.roi.width; ++column) {
-            const Sample sample = view.sampleAt(crop.roi.x + column, crop.roi.y + row);
-            uint8_t* pixel = target + static_cast<std::size_t>(column) * 4;
-            pixel[0] = static_cast<uint8_t>(sample.b >> 2);
-            pixel[1] = static_cast<uint8_t>(sample.g >> 2);
-            pixel[2] = static_cast<uint8_t>(sample.r >> 2);
-            pixel[3] = 0xFF;
-        }
-    }
-
-    return crop;
+    const auto& bounds = command.window;
+    return std::isfinite(command.minimumFacePixels) && command.minimumFacePixels >= 1.0 &&
+           command.minimumFacePixels <= std::max(command.displayWidth, command.displayHeight) &&
+           face_tracking::validSelection(
+               {command.revision, command.captureEpoch, command.displayId}, command.crop,
+               {double(bounds.x), double(bounds.y), double(bounds.x) + bounds.width, double(bounds.y) + bounds.height});
 }
 
 }  // namespace
 
-FaceLockController::FaceLockController(AttachController& attach, AnalysisWorker& worker, CaptureController& capture)
+FaceLockController::FaceLockController(AttachController& attach, AnalysisWorker& worker, CaptureController& capture,
+                                       std::function<double()> clock)
     : m_attach(attach),
-      m_worker(worker),
-      m_capture(capture)
+      m_capture(capture),
+      m_exchange(std::make_shared<FaceTrackingExchange>([] { glfwPostEmptyEvent(); }))
 {
+    const auto exchange = m_exchange;
+    worker.setFrameRegionResolverFactory([exchange, clock = std::move(clock)] {
+        const auto tracker = std::make_shared<FaceTrackingWorker>(exchange, createFaceDetectionSession, clock);
+        return [tracker](const FrameRegionRequest& request) { return tracker->resolve(request); };
+    });
 }
 
-void FaceLockController::addLock(uint64_t identity, FaceLockState state, double verifiedAt,
-                                 std::optional<AttachWindowRect> windowRect)
+void FaceLockController::invalidate()
 {
-    m_locks[identity] = Lock{state, windowRect, verifiedAt, ++m_nextLockGeneration};
+    m_command.activeLocks = m_activeLocks;
+    m_command.revision = ++m_revision;
+    m_command.enabled = false;
+    m_exchange->select(m_command);
+}
+
+void FaceLockController::refreshInventory()
+{
+    try {
+        auto active = std::make_shared<std::map<uint64_t, uint64_t>>();
+        for (const auto& [identity, lock] : m_locks) {
+            active->emplace(identity, lock.generation);
+        }
+        m_activeLocks = std::move(active);
+        m_inventoryDirty = false;
+    } catch (const std::bad_alloc&) {
+        // Keep the attached crop usable and retry the small control snapshot
+        // later; an incomplete inventory must not enable stale face work.
+        m_inventoryDirty = true;
+    }
+}
+
+uint64_t FaceLockController::selectionRevision() const
+{
+    return m_revision;
+}
+
+void FaceLockController::addLock(uint64_t identity, FaceLockState state, std::optional<AttachWindowRect> windowRect,
+                                 std::optional<std::pair<int, int>> coordinateSize)
+{
+    m_locks[identity] = Lock{state, windowRect, ++m_nextGeneration, {}, coordinateSize};
+    refreshInventory();
+    invalidate();
 }
 
 void FaceLockController::removeLock(uint64_t identity)
 {
-    m_locks.erase(identity);
-    if (identity == m_trackingIdentity) {
-        resetTracking();
+    if (m_locks.erase(identity) != 0) {
+        refreshInventory();
+        invalidate();
     }
 }
 
 void FaceLockController::clear()
 {
     m_locks.clear();
-    resetTracking();
+    m_activeLocks = m_emptyLocks;
+    m_inventoryDirty = false;
+    invalidate();
 }
 
-void FaceLockController::resetTracking()
+void FaceLockController::activationChanged()
 {
-    m_trackingIdentity = 0;
-    m_hunting = false;
-    m_contentChangedAt = -1.0;
-    m_contentSamples.clear();
-}
-
-void FaceLockController::onActivated(uint64_t identity, double now)
-{
-    resetTracking();
-    m_trackingIdentity = identity;
-    // A face lock's anchor goes stale across a focus gap: dressing the border
-    // from it flashes a wrong region for one probe's latency - invisible on a
-    // fast detector, half a second on a slow one. Hold the border until this
-    // activation's first verdict, probing now rather than waiting out the
-    // cadence. A recently verified anchor (a fresh pick, a quick focus flip)
-    // keeps its instant border.
-    const auto activated = m_locks.find(identity);
-    if (activated != m_locks.end() && now - activated->second.anchorVerifiedAt > FaceLockProbeSeconds) {
-        m_hunting = true;
-        m_nextProbe = 0.0;
-    }
+    invalidate();
 }
 
 void FaceLockController::rebindCrop(uint64_t identity, const RegionOfInterest& region,
@@ -195,210 +144,146 @@ void FaceLockController::rebindCrop(uint64_t identity, const RegionOfInterest& r
     if (lock == m_locks.end()) {
         return;
     }
-    // Display pixels: the lock's rectangle is stated against the display, which
-    // is what the probe searches and what a narrowed frame's own extents are not.
+    lock->second.state = onFrameGrid(lock->second.state, lock->second.coordinateSize, frameSize);
+    lock->second.coordinateSize = {frameSize.displayWidth, frameSize.displayHeight};
     face_lock::rebindCrop(lock->second.state,
                           lockRectFromPercent(region, frameSize.displayWidth, frameSize.displayHeight));
+    invalidate();
 }
 
-// The per-frame face-lock step: prunes locks whose windows are gone, drains
-// a finished probe, and starts the next one when the active window's lock
-// is due. All adopt-or-hold judgement lives in face_lock::decide; this only
-// moves data between the threads.
-FaceLockOutcome FaceLockController::update(const AttachDecision& decision,
-                                           std::optional<AnalysisWorker::FrameSize> frameSize,
-                                           uint64_t activeWindowIdentity,
-                                           const std::optional<RegionOfInterest>& analysisRegion, bool gestureActive,
-                                           double now)
-{
-    std::erase_if(m_locks, [this](const auto& entry) { return !m_attach.isAttached(entry.first); });
-    FaceLockOutcome outcome;
-    if (m_probe.ready.load()) {
-        std::vector<IntRect> boxes;
-        {
-            std::lock_guard guard(m_probe.mutex);
-            boxes = std::move(m_probe.faces);
-            m_probe.faces.clear();
-        }
-        m_probe.ready.store(false);
-        const auto probed = m_locks.find(m_probe.forWindowIdentity);
-        if (probed != m_locks.end() && probed->second.generation == m_probeLockGeneration) {
-            outcome = ingestProbeResult(boxes, m_probe.roi, m_probe.forWindowIdentity, decision, activeWindowIdentity,
-                                        frameSize, now);
-        }
-    }
-    const auto locked = m_locks.find(decision.activeIdentity);
-    if (decision.activeIdentity == 0 || locked == m_locks.end()) {
-        m_hunting = false;
-        m_contentChangedAt = -1.0;
-
-        return outcome;
-    }
-    if (decision.activeRect) {
-        carryLockWithWindow(locked->second, *decision.activeRect, frameSize);
-    }
-    probeContentChange(analysisRegion, now);
-    // The probe never runs against a mid-gesture window: the user's drag
-    // wins, and the lock catches up once things settle.
-    if (gestureActive) {
-        return outcome;
-    }
-    if (m_probe.running.load() || now < m_nextProbe) {
-        return outcome;
-    }
-    m_nextProbe = now + FaceLockProbeSeconds;
-    m_probeLockGeneration = locked->second.generation;
-    launchProbe(decision, locked->second.state);
-
-    return outcome;
-}
-
-// Drains the finished probe and lets the pure core judge it against the
-// gates. Every verdict is logged for grading; only an adoption returns a
-// region, only a give-up returns a lost lock.
-FaceLockOutcome FaceLockController::ingestProbeResult(const std::vector<IntRect>& boxes, IntRect roi,
-                                                      uint64_t forIdentity, const AttachDecision& decision,
-                                                      uint64_t activeWindowIdentity,
-                                                      std::optional<AnalysisWorker::FrameSize> frameSize, double now)
-{
-    FaceLockOutcome outcome;
-    const auto locked = m_locks.find(forIdentity);
-    if (locked == m_locks.end() || forIdentity != decision.activeIdentity) {
-        return outcome;
-    }
-    m_trackingIdentity = forIdentity;
-    const LockRect roiRect{static_cast<double>(roi.x), static_cast<double>(roi.y),
-                           static_cast<double>(roi.x + roi.width), static_cast<double>(roi.y + roi.height)};
-    std::vector<FaceAnchor> candidates;
-    candidates.reserve(boxes.size());
-    std::size_t edgeDropped = 0;
-    for (const IntRect& box : boxes) {
-        const LockRect boxRect{static_cast<double>(box.x), static_cast<double>(box.y),
-                               static_cast<double>(box.x + box.width), static_cast<double>(box.y + box.height)};
-        if (!face_lock::trustworthyBox(boxRect, roiRect)) {
-            ++edgeDropped;
-
-            continue;
-        }
-        candidates.push_back(
-            FaceAnchor{box.x + box.width / 2.0, box.y + box.height / 2.0, static_cast<double>(box.width)});
-    }
-    const bool wide = face_lock::searchingWide(locked->second.state);
-    const FaceLockDecision verdict = face_lock::decide(locked->second.state, candidates);
-    SS_DIAG(FaceLock, "%s reason='%s' wide=%d candidates=%zu edge-dropped=%zu anchor=%.1f,%.1f",
-            verdict.adopt ? "adopt" : "hold", verdict.reason.c_str(), wide ? 1 : 0, candidates.size(), edgeDropped,
-            locked->second.state.lastAnchor.centerX, locked->second.state.lastAnchor.centerY);
-    m_hunting = verdict.hunting;
-    if (!verdict.hunting) {
-        locked->second.anchorVerifiedAt = now;
-    }
-    if (face_lock::givenUp(locked->second.state)) {
-        SS_DIAG(FaceLock, "gave up - removing region");
-        m_locks.erase(forIdentity);
-        m_hunting = false;
-        m_contentChangedAt = -1.0;
-        outcome.lostLock = forIdentity;
-
-        return outcome;
-    }
-    if (verdict.adopt) {
-        outcome.applyRegion = mappedRegion(locked->second.state, frameSize, activeWindowIdentity);
-    }
-
-    return outcome;
-}
-
-// A window translation carries the face with it, so the anchors ride along
-// and the probe keeps searching where the face actually is. A resize
-// re-lays the content out unpredictably, so the anchors stay put and the
-// probes re-find the face instead.
 void FaceLockController::carryLockWithWindow(Lock& lock, const AttachWindowRect& rect,
                                              std::optional<AnalysisWorker::FrameSize> frameSize)
 {
-    if (!lock.windowRect) {
-        lock.windowRect = rect;
-
-        return;
-    }
-    const bool sameSize =
-        std::abs(rect.width - lock.windowRect->width) < 0.5 && std::abs(rect.height - lock.windowRect->height) < 0.5;
-    const double dx = rect.x - lock.windowRect->x;
-    const double dy = rect.y - lock.windowRect->y;
-    if (sameSize && (dx != 0.0 || dy != 0.0) && frameSize && frameSize->coversDisplay()) {
-        if (const auto geometry = geometryOfDisplay(m_capture.capturedDisplay())) {
-            const double scale = frameSize->width / geometry->widthPoints;
-            face_lock::translate(lock.state, dx * scale, dy * scale);
+    if (lock.windowRect && frameSize && frameSize->coversDisplay()) {
+        const bool sameSize = std::abs(rect.width - lock.windowRect->width) < 0.5 &&
+                              std::abs(rect.height - lock.windowRect->height) < 0.5;
+        if (sameSize) {
+            if (const auto geometry = geometryOfDisplay(m_capture.capturedDisplay())) {
+                const auto grid =
+                    lock.coordinateSize.value_or(std::pair{frameSize->displayWidth, frameSize->displayHeight});
+                const double dx = (rect.x - lock.windowRect->x) * grid.first / geometry->widthPoints;
+                const double dy = (rect.y - lock.windowRect->y) * grid.second / geometry->heightPoints;
+                if (std::isfinite(dx) && std::isfinite(dy)) {
+                    face_lock::translate(lock.state, dx, dy);
+                }
+            }
         }
     }
     lock.windowRect = rect;
 }
 
-// The grid the stability comparison runs on: three bytes per tap, taken at the
-// centre of each cell of an even grid over the region.
-std::vector<uint8_t> FaceLockController::sampleContentGrid(const FrameView& view, const RegionOfInterest& region)
+FaceTrackingCommand FaceLockController::makeCommand(const AttachDecision& decision,
+                                                    std::optional<AnalysisWorker::FrameSize> frameSize,
+                                                    bool gestureActive) const
 {
-    constexpr int GridSide = 16;
-
-    std::vector<uint8_t> samples;
-    samples.reserve(static_cast<std::size_t>(GridSide) * GridSide * 3);
-    const double left = region.leftPercent / 100.0 * view.width;
-    const double top = region.topPercent / 100.0 * view.height;
-    const double width = (region.rightPercent - region.leftPercent) / 100.0 * view.width;
-    const double height = (region.bottomPercent - region.topPercent) / 100.0 * view.height;
-    for (int gridY = 0; gridY < GridSide; ++gridY) {
-        for (int gridX = 0; gridX < GridSide; ++gridX) {
-            const int px = std::clamp(static_cast<int>(left + (gridX + 0.5) * width / GridSide), 0, view.width - 1);
-            const int py = std::clamp(static_cast<int>(top + (gridY + 0.5) * height / GridSide), 0, view.height - 1);
-            // Taken on the 0..255 scale rather than as raw bytes: two grids are
-            // compared against each other, and the capture can change depth
-            // between them, which would read as the whole region moving.
-            const Sample sample = view.sampleAt(px, py);
-            const int shift = view.maxCode() == Argb2101010Pixels::MaxCode ? 2 : 0;
-            samples.push_back(static_cast<uint8_t>(sample.b >> shift));
-            samples.push_back(static_cast<uint8_t>(sample.g >> shift));
-            samples.push_back(static_cast<uint8_t>(sample.r >> shift));
-        }
+    FaceTrackingCommand command;
+    command.revision = m_revision;
+    command.activeLocks = m_activeLocks;
+    const auto lock = m_locks.find(decision.activeIdentity);
+    if (lock == m_locks.end() || !decision.activeRect || !frameSize || !frameSize->coversDisplay() || gestureActive ||
+        m_capture.dead() || m_capture.suspended() || m_inventoryDirty) {
+        return command;
     }
-
-    return samples;
+    const auto geometry = geometryOfDisplay(m_capture.capturedDisplay());
+    if (!geometry || geometry->widthPoints <= 0.0 || geometry->heightPoints <= 0.0) {
+        return command;
+    }
+    const double sx = frameSize->displayWidth / geometry->widthPoints;
+    command.window = clippedWindow(*decision.activeRect, *geometry, *frameSize);
+    command.identity = decision.activeIdentity;
+    command.lockGeneration = lock->second.generation;
+    command.captureEpoch = m_capture.streamEpoch();
+    command.captureContinuity = m_capture.continuityGeneration();
+    command.displayId = m_capture.capturedDisplay();
+    command.displayWidth = frameSize->displayWidth;
+    command.displayHeight = frameSize->displayHeight;
+    command.crop = onFrameGrid(lock->second.state, lock->second.coordinateSize, *frameSize);
+    command.minimumFacePixels = 36.0 * sx;
+    command.enabled = !command.window.empty();
+    return command;
 }
 
-// A cheap content-stability probe over the face-locked region: a sparse grid
-// of pixels compared frame to frame. Any considerable change - a pan, a zoom,
-// even a develop-slider drag - hides the border until the content settles;
-// the scopes keep analyzing the region throughout. A region rectangle we
-// moved ourselves only refreshes the baseline.
-void FaceLockController::probeContentChange(const std::optional<RegionOfInterest>& region, double now)
+std::optional<RegionOfInterest> FaceLockController::acceptRegion(const FaceTrackingUpdate& update,
+                                                                 const AttachDecision& decision)
 {
-    // With no region there is nothing to sample.
-    if (!region) {
-        return;
+    const auto geometry = geometryOfDisplay(update.stamp.displayId);
+    if (!geometry || !decision.activeRect) {
+        return {};
     }
-    std::vector<uint8_t> samples;
-    // The grid is measured against the frame's own extents, so a capture
-    // narrowed to part of the display would sample somewhere else entirely. The
-    // question is asked of the frame being read, not of a summary of some
-    // earlier one: the idle watch drives this between frame bodies, where such
-    // a summary can be seconds old.
-    const bool sampled = m_worker.withLatestFrame([&](const FrameView& view) {
-        if (coversWholeDisplay(view)) {
-            samples = sampleContentGrid(view, *region);
+    return m_attach.editRegion(
+        update.region, *decision.activeRect,
+        AttachDisplayRect{geometry->originX, geometry->originY, geometry->widthPoints, geometry->heightPoints});
+}
+
+FaceLockOutcome FaceLockController::consume(const AttachDecision& decision, double now)
+{
+    FaceLockOutcome outcome;
+    const auto update = m_exchange->fetch(m_lastSeen);
+    if (update && update->identity == decision.activeIdentity && m_locks.contains(update->identity)) {
+        auto& lock = m_locks.at(update->identity);
+        const auto action = update->decision.action;
+        if (action == face_tracking::Action::Accepted) {
+            lock.uncertainSince.reset();
+            lock.state = onFrameGrid(
+                lock.state, lock.coordinateSize,
+                {m_command.displayWidth, m_command.displayHeight, m_command.displayWidth, m_command.displayHeight});
+            lock.state.lastAnchor = update->decision.anchor;
+            lock.coordinateSize = {m_command.displayWidth, m_command.displayHeight};
+            outcome.applyRegion = acceptRegion(*update, decision);
+        } else if (action == face_tracking::Action::OrdinaryAttached) {
+            outcome.lostLock = update->identity;
+        } else if (action == face_tracking::Action::Held && update->decision.reason != face_tracking::Reason::Waiting) {
+            if (!lock.uncertainSince) {
+                lock.uncertainSince = now;
+            }
         }
-    });
-    if (!sampled || samples.empty()) {
-        return;
     }
-    if (sameRegionRect(*region, m_contentRect) && samples.size() == m_contentSamples.size()) {
-        long long total = 0;
-        for (std::size_t index = 0; index < samples.size(); ++index) {
-            total += std::abs(static_cast<int>(samples[index]) - static_cast<int>(m_contentSamples[index]));
-        }
-        if (static_cast<double>(total) / static_cast<double>(samples.size()) > ContentChangeThreshold) {
-            m_contentChangedAt = now;
-        }
+    // A failed fresh frame can be followed by a static occluded image, for
+    // which capture withholds further frames. Its uncertainty still expires.
+    const auto active = m_locks.find(m_command.identity);
+    if (m_command.enabled && active != m_locks.end() && active->second.uncertainSince &&
+        now - *active->second.uncertainSince >= 0.4) {
+        outcome.lostLock = m_command.identity;
     }
-    m_contentRect = *region;
-    m_contentSamples = std::move(samples);
+    if (outcome.lostLock) {
+        removeLock(*outcome.lostLock);
+    }
+    return outcome;
+}
+
+FaceLockOutcome FaceLockController::update(const AttachDecision& decision,
+                                           std::optional<AnalysisWorker::FrameSize> frameSize, bool gestureActive,
+                                           double now)
+{
+    if (m_inventoryDirty) {
+        refreshInventory();
+    }
+    const auto before = m_locks.size();
+    std::erase_if(m_locks, [this](const auto& entry) { return !m_attach.isAttached(entry.first); });
+    if (m_locks.size() != before) {
+        refreshInventory();
+        invalidate();
+    }
+    const auto lock = m_locks.find(decision.activeIdentity);
+    if (lock != m_locks.end() && decision.activeRect && !decision.windowMoving && !gestureActive) {
+        carryLockWithWindow(lock->second, *decision.activeRect, frameSize);
+    }
+    auto command = makeCommand(decision, frameSize, gestureActive || decision.windowMoving);
+    if (command.enabled && !validTrackedSelection(command)) {
+        removeLock(command.identity);
+        return {{}, command.identity};
+    }
+    if (!sameSource(command, m_command)) {
+        command.revision = ++m_revision;
+    } else if (command.revision == m_command.revision) {
+        // Accepted worker anchors update the saved attachment, not its control
+        // revision. Only explicit edits and window/source changes send a new
+        // prior; ordinary video frames keep the worker's own live state.
+        command.crop = m_command.crop;
+    }
+    m_command = command;
+    m_exchange->select(m_command);
+    return consume(decision, now);
 }
 
 bool FaceLockController::contains(uint64_t identity) const
@@ -409,116 +294,6 @@ bool FaceLockController::contains(uint64_t identity) const
 bool FaceLockController::locked() const
 {
     return !m_locks.empty();
-}
-
-bool FaceLockController::hunting() const
-{
-    return m_hunting;
-}
-
-bool FaceLockController::contentUnsettled(double now) const
-{
-    return m_contentChangedAt >= 0.0 && now - m_contentChangedAt < ContentSettleSeconds;
-}
-
-bool FaceLockController::probeRunning() const
-{
-    return m_probe.running.load();
-}
-
-// Copies the probe's region of interest out of the latest frame and hands
-// it to a detached detection thread, so detection never hitches a frame.
-void FaceLockController::launchProbe(const AttachDecision& decision, const FaceLockState& lock)
-{
-    const auto geometry = geometryOfDisplay(m_capture.capturedDisplay());
-    if (!geometry || !decision.activeRect) {
-        return;
-    }
-    ProbeCrop crop;
-    const bool copied = m_worker.withLatestFrame(
-        [&](const FrameView& view) { crop = cropProbeRoi(view, lock, *decision.activeRect, *geometry); });
-    if (!copied || crop.pixels.empty()) {
-        return;
-    }
-    auto pixels = std::make_shared<std::vector<uint8_t>>(std::move(crop.pixels));
-    const IntRect roi = crop.roi;
-    const float pixelsPerPoint = crop.pixelsPerPoint;
-    m_probe.forWindowIdentity = decision.activeIdentity;
-    m_probe.roi = roi;
-    m_probe.running.store(true);
-    Probe* probe = &m_probe;
-    std::thread thread;
-    try {
-        thread = std::thread([probe, pixels, roi, pixelsPerPoint] { runProbe(*probe, *pixels, roi, pixelsPerPoint); });
-        thread.detach();
-    } catch (const std::exception&) {
-        // Do not leave a phantom running probe if construction failed, or
-        // release a started thread's target if detaching it failed.
-        if (thread.joinable()) {
-            thread.join();
-        } else {
-            {
-                std::lock_guard guard(m_probe.mutex);
-                m_probe.faces.clear();
-            }
-            m_probe.ready.store(true);
-            m_probe.running.store(false);
-        }
-        diagEmit(DiagChannel::FaceLock, "face probe launch failed; retrying at the next probe");
-    }
-}
-
-void FaceLockController::runProbe(Probe& probe, const std::vector<uint8_t>& pixels, IntRect roi, float pixelsPerPoint)
-{
-    try {
-        FrameView view;
-        // Eight-bit by construction: cropProbeRoi narrows a deeper frame while
-        // it copies, which is what the detectors require.
-        view.pixels = pixels.data();
-        view.strideBytes = roi.width * 4;
-        view.width = roi.width;
-        view.height = roi.height;
-        std::vector<IntRect> faces = detectFaces(view, pixelsPerPoint);
-        for (IntRect& box : faces) {
-            box.x += roi.x;
-            box.y += roi.y;
-        }
-        std::lock_guard lock(probe.mutex);
-        probe.faces = std::move(faces);
-    } catch (const std::bad_alloc&) {
-        std::lock_guard lock(probe.mutex);
-        probe.faces.clear();
-        diagEmit(DiagChannel::FaceLock, "face probe allocation failed; retrying at the next probe");
-    }
-    probe.ready.store(true);
-    // The shutdown drain may release this target once running clears. The
-    // wake must have finished before it can tear down the event loop too.
-    glfwPostEmptyEvent();
-    probe.running.store(false);
-}
-
-// The adopted anchor's region, mapped through the same path as a border
-// edit: the stored screen-glued rectangle re-derived so the analysis region
-// follows. Nothing to apply when the frame, display, or window geometry is
-// missing, or the window is minimized.
-std::optional<RegionOfInterest> FaceLockController::mappedRegion(const FaceLockState& lock,
-                                                                 std::optional<AnalysisWorker::FrameSize> frameSize,
-                                                                 uint64_t activeWindowIdentity)
-{
-    if (!frameSize || frameSize->displayWidth <= 0 || frameSize->displayHeight <= 0) {
-        return std::nullopt;
-    }
-    const auto geometry = geometryOfDisplay(m_capture.capturedDisplay());
-    const auto windowGeom = windowGeometry(activeWindowIdentity);
-    if (!geometry || !windowGeom || windowGeom->minimized) {
-        return std::nullopt;
-    }
-    const LockRect target = face_lock::mapRegion(lock, lock.lastAnchor);
-    const RegionOfInterest edited = percentFromLockRect(target, frameSize->displayWidth, frameSize->displayHeight);
-
-    return m_attach.editRegion(
-        edited, AttachWindowRect{windowGeom->x, windowGeom->y, windowGeom->width, windowGeom->height},
-        AttachDisplayRect{geometry->originX, geometry->originY, geometry->widthPoints, geometry->heightPoints});
 }
 
 }  // namespace sidescopes

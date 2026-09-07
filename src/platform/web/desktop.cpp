@@ -96,6 +96,11 @@ std::vector<DesktopWindow> onScreenWindows(uint32_t)
     return {};
 }
 
+WindowPresence windowPresence(uint64_t)
+{
+    return WindowPresence::Unknown;
+}
+
 std::optional<WindowGeometry> windowGeometry(uint64_t)
 {
     return std::nullopt;

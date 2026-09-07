@@ -1,753 +1,589 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
-#include <chrono>
 #include <cstdint>
 #include <optional>
-#include <thread>
 #include <utility>
-#include <vector>
 
 #include "app/attach_controller.h"
 #include "app/capture_controller.h"
-#include "app/face_lock.h"
 #include "app/face_lock_controller.h"
 #include "core/analysis_worker.h"
-#include "core/frame.h"
-#include "core/frame_mailbox.h"
 #include "desktop_stubs.h"
 #include "fake_capture.h"
-#include "platform/desktop.h"
 #include "test_frame.h"
 
 namespace sidescopes {
 namespace {
 
 using Catch::Matchers::WithinAbs;
+using Catch::Matchers::WithinULP;
 using test::desktopStubs;
-using test::FakeCaptureSource;
-using test::makeSolidFrameBuffer;
-using test::makeTarget;
-using test::makeTenBitFrameBuffer;
-
 constexpr uint32_t StreamedDisplay = 3;
+constexpr AttachWindowRect FullWindow{0.0, 0.0, 1000.0, 500.0};
+constexpr FaceAnchor InitialAnchor{500.0, 250.0, 100.0};
+constexpr RegionOfInterest InitialRegion{47.5, 45.0, 52.5, 55.0};
 
-// The controller plus everything it is constructed with, in declaration order
-// so the refs it stores outlive nothing. The scripted desktop is reset here,
-// since one serves the whole binary.
+void checkSameCrop(const RegionOfInterest& actual, const RegionOfInterest& expected, int width, int height)
+{
+    // The attachment stores desktop points, so its percentages can differ
+    // by round-off. The crop must still select precisely the same pixels.
+    CHECK_THAT(actual.leftPercent, WithinULP(expected.leftPercent, 4));
+    CHECK_THAT(actual.topPercent, WithinULP(expected.topPercent, 4));
+    CHECK_THAT(actual.rightPercent, WithinULP(expected.rightPercent, 4));
+    CHECK_THAT(actual.bottomPercent, WithinULP(expected.bottomPercent, 4));
+    const auto actualPixels = actual.toPixels(width, height);
+    const auto expectedPixels = expected.toPixels(width, height);
+    CAPTURE(actualPixels.x, actualPixels.y, actualPixels.width, actualPixels.height);
+    CAPTURE(expectedPixels.x, expectedPixels.y, expectedPixels.width, expectedPixels.height);
+    CHECK(actualPixels == expectedPixels);
+}
+
+FaceLockState foreheadLock(FaceAnchor anchor = InitialAnchor)
+{
+    const double quarter = anchor.width / 4.0;
+    return face_lock::makeLock(anchor, {anchor.centerX - quarter, anchor.centerY - quarter, anchor.centerX + quarter,
+                                        anchor.centerY + quarter});
+}
+
 struct ControllerFixture
 {
-    FakeCaptureSource source;
+    double clock = 1000.0;
+    test::FakeCaptureSource source;
     FrameMailbox mailbox;
     AnalysisWorker worker{mailbox};
     CaptureController capture{source, mailbox};
     AttachController attach;
-    FaceLockController controller{attach, worker, capture};
+    FaceLockController controller{attach, worker, capture, [this] { return clock; }};
+    AttachDecision decision;
+    AnalysisWorker::FrameSize frameSize{1000, 500, 1000, 500};
+    AnalysisSettings settings;
+    std::optional<RegionOfInterest> region = InitialRegion;
+    bool gesture = false;
+    AnalysisWorker::Output output;
+    uint64_t seen = 0;
 
     ControllerFixture()
     {
         desktopStubs().reset();
+        desktopStubs().faceDetectionSupported = true;
+        desktopStubs().displayGeometry = DisplayGeometry{0.0, 0.0, 1000.0, 500.0};
+        source.targets = {test::makeTarget(StreamedDisplay, "Test display")};
+        REQUIRE(capture.requestPermission());
+        capture.requestDisplay(StreamedDisplay);
+        REQUIRE(capture.start());
+        settings.region = region;
+        settings.enabledScopes = {"org.sidescopes.histogram"};
+        worker.updateSettings(settings);
+        worker.startInline();
+        setFace(InitialAnchor);
     }
 
     ~ControllerFixture()
     {
-        // The detection probe holds a pointer into the controller, so it must
-        // not outlive it.
-        while (controller.probeRunning()) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        worker.stop();
+        desktopStubs().beforeDetection = {};
+        desktopStubs().sessionDetection = {};
+    }
+
+    static void setFace(FaceAnchor face)
+    {
+        desktopStubs().sessionDetection = [face](const FrameView& crop, double) {
+            return FaceDetectionResult{FaceDetectionStatus::Completed,
+                                       {{static_cast<int>(face.centerX - face.width / 2.0) - crop.sourceX,
+                                         static_cast<int>(face.centerY - face.width / 2.0) - crop.sourceY,
+                                         static_cast<int>(face.width), static_cast<int>(face.width)}}};
+        };
+    }
+
+    void select(FaceLockState state = foreheadLock(), AttachWindowRect rect = FullWindow,
+                std::optional<AttachWindowRect> previous = std::nullopt)
+    {
+        (void)attach.attach(1, 1, "Editor", rect, AttachDisplayRect{0, 0, 1000, 500}, *region);
+        controller.addLock(1, state, previous.value_or(rect));
+        decision.activeIdentity = 1;
+        decision.activeRect = rect;
+        (void)tick();
+    }
+
+    FaceLockOutcome tick(std::optional<double> now = std::nullopt)
+    {
+        auto result = controller.update(decision, frameSize, gesture, now.value_or(clock));
+        if (result.applyRegion) {
+            region = result.applyRegion;
         }
+        if (settings.selectionRevision != controller.selectionRevision()) {
+            settings.selectionRevision = controller.selectionRevision();
+            settings.region = region;
+            worker.updateSettings(settings);
+        }
+        return result;
     }
 
-    ControllerFixture(const ControllerFixture&) = delete;
-    ControllerFixture& operator=(const ControllerFixture&) = delete;
-
-    // Starts the capture stream on StreamedDisplay, which the probe and the
-    // region mapping read the display geometry against.
-    void startCapture()
+    FrameBuffer frame(uint64_t sequence, Color color = {50, 100, 150}) const
     {
-        source.targets = {makeTarget(StreamedDisplay, "Test display")};
-        REQUIRE(capture.requestPermission());
-        capture.requestDisplay(StreamedDisplay);
-        REQUIRE(capture.start());
+        auto result = test::makeSolidFrameBuffer(frameSize.width, frameSize.height, color, sequence);
+        result.stamp = {capture.streamEpoch(), StreamedDisplay, clock};
+        return result;
     }
 
-    // Makes @p identity an attached window: a lock on a window nothing holds
-    // is pruned at the top of every step.
-    void attachWindow(uint64_t identity, AttachWindowRect rect)
+    void submit(FrameBuffer frame)
     {
-        (void)attach.attach(identity, 1, "Editor", rect, AttachDisplayRect{0.0, 0.0, 1000.0, 500.0},
-                            RegionOfInterest{});
+        // Pixel construction and sanitizer overhead are not source time.
+        // Advance one deterministic video interval for each submitted frame.
+        clock += 0.04;
+        frame.stamp.receivedSeconds = clock;
+        const uint64_t sequence = frame.sequence;
+        mailbox.publish(std::move(frame));
+        worker.pump();
+        REQUIRE(worker.consumedFrameSequence() == sequence);
+    }
+
+    FaceLockOutcome advance(uint64_t sequence, Color color = {50, 100, 150})
+    {
+        (void)tick();
+        submit(frame(sequence, color));
+        return tick();
+    }
+
+    bool fetch()
+    {
+        return worker.fetchOutput(seen, output, controller.selectionRevision());
     }
 };
 
-// A per-frame verdict naming @p identity as the active window.
-AttachDecision decisionFor(uint64_t identity)
+FrameBuffer coordinateFrame(const ControllerFixture& fixture, uint64_t sequence)
 {
-    AttachDecision decision;
-    decision.activeIdentity = identity;
-
-    return decision;
-}
-
-// The same verdict with the window's rectangle, which is what a probe needs
-// to know where it may search.
-AttachDecision attachedDecision(uint64_t identity, AttachWindowRect rect)
-{
-    AttachDecision decision = decisionFor(identity);
-    decision.activeRect = rect;
-
-    return decision;
-}
-
-// A forehead-style lock on a face at 500,300 sized 200: the crop is half the
-// anchor width, centred on it.
-FaceLockState foreheadLock()
-{
-    return face_lock::makeLock(FaceAnchor{500.0, 300.0, 200.0}, LockRect{450.0, 250.0, 550.0, 350.0});
-}
-
-// Publishes @p frame and waits for the worker to consume it, so the next
-// content probe reads the frame just published rather than the previous one.
-void publishAndAwait(ControllerFixture& fix, FrameBuffer&& frame, uint64_t sequence)
-{
-    fix.mailbox.publish(std::move(frame));
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
-    while (fix.worker.consumedFrameSequence() != sequence && std::chrono::steady_clock::now() < deadline) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(2));
-    }
-    REQUIRE(fix.worker.consumedFrameSequence() == sequence);
-}
-
-// A square frame whose top-left quarter is @p inside and the rest @p outside,
-// so a region watch can be shown to read one and not the other.
-FrameBuffer makeQuarteredFrameBuffer(int side, Color inside, Color outside, uint64_t sequence)
-{
-    FrameBuffer frame = test::makeSolidFrameBuffer(side, side, outside, sequence);
-    for (int py = 0; py < side / 2; ++py) {
-        for (int px = 0; px < side / 2; ++px) {
-            uint8_t* pixel =
-                frame.data.data() + static_cast<std::size_t>(py) * frame.strideBytes + static_cast<std::size_t>(px) * 4;
-            pixel[0] = inside.b;
-            pixel[1] = inside.g;
-            pixel[2] = inside.r;
+    auto frame = fixture.frame(sequence);
+    for (int y = 0; y < frame.height; ++y) {
+        for (int x = 0; x < frame.width; ++x) {
+            auto* pixel =
+                frame.data.data() + static_cast<std::size_t>(y) * frame.strideBytes + static_cast<std::size_t>(x) * 4;
+            pixel[0] = static_cast<uint8_t>(x & 255);
+            pixel[1] = static_cast<uint8_t>((x >> 8) & 255);
+            pixel[2] = static_cast<uint8_t>(y & 255);
         }
     }
-
+    frame.stamp.receivedSeconds = fixture.clock;
     return frame;
 }
 
-// A frame whose every pixel spells its own coordinates: blue and green carry
-// the column, red the row. The crop a probe copies out then says exactly which
-// pixels it took, not only how many.
-FrameBuffer makeCoordinateFrameBuffer(int width, int height, uint64_t sequence)
+std::pair<int, int> cropOrigin(const test::DetectorCall& call)
 {
-    FrameBuffer frame = test::makeSolidFrameBuffer(width, height, Color{0, 0, 0}, sequence);
-    for (int py = 0; py < height; ++py) {
-        for (int px = 0; px < width; ++px) {
-            uint8_t* pixel =
-                frame.data.data() + static_cast<std::size_t>(py) * frame.strideBytes + static_cast<std::size_t>(px) * 4;
-            pixel[0] = static_cast<uint8_t>(px & 0xFF);
-            pixel[1] = static_cast<uint8_t>((px >> 8) & 0xFF);
-            pixel[2] = static_cast<uint8_t>(py & 0xFF);
-        }
-    }
-
-    return frame;
-}
-
-// The frame coordinate a recorded crop started at, read back out of its first
-// pixel. Rows are read modulo 256, which every case below stays inside.
-std::pair<int, int> cropOrigin(const test::DetectorCall& detected)
-{
-    return {detected.firstPixel[0] + (detected.firstPixel[1] << 8), detected.firstPixel[2]};
-}
-
-// Waits out the detached detection probe, so the crop it was handed can be
-// read back.
-void awaitProbe(const ControllerFixture& fix)
-{
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
-    while (fix.controller.probeRunning() && std::chrono::steady_clock::now() < deadline) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
-    }
-    REQUIRE_FALSE(fix.controller.probeRunning());
+    return {call.firstPixel[0] + (call.firstPixel[1] << 8), call.firstPixel[2]};
 }
 
 }  // namespace
 
-TEST_CASE("A probe on the anchor holds the region and is not hunting")
+TEST_CASE("An attachment coordinate round trip preserves the exact face crop pixels")
 {
-    ControllerFixture fix;
-    fix.controller.addLock(1, foreheadLock(), 0.0);
-
-    // A detector box centred exactly on the anchor: 400,200 sized 200x200.
-    const FaceLockOutcome outcome = fix.controller.ingestProbeResult(
-        {IntRect{400, 200, 200, 200}}, IntRect{0, 0, 1000, 800}, 1, decisionFor(1), 1, std::nullopt, 1.0);
-
-    CHECK_FALSE(fix.controller.hunting());
-    // A candidate on the anchor is a micro-move: it holds, it does not adopt.
-    CHECK_FALSE(outcome.applyRegion.has_value());
-    CHECK_FALSE(outcome.lostLock.has_value());
-    CHECK(fix.controller.contains(1));
-}
-
-TEST_CASE("A settled move adopts and maps the region through the window")
-{
-    ControllerFixture fix;
-    // A frame twice the display's point size, with a full-window display and
-    // window so the mapping is easy to read back.
-    desktopStubs().displayGeometry = DisplayGeometry{0.0, 0.0, 1000.0, 500.0};
-    desktopStubs().windowGeometry = WindowGeometry{0.0, 0.0, 1000.0, 500.0, false, ""};
-    const AnalysisWorker::FrameSize frameSize{2000, 1000, 2000, 1000};
-    fix.controller.addLock(1, foreheadLock(), 0.0);
-
-    // The first probe at the moved position is unsettled: hunting, no region.
-    const FaceLockOutcome first = fix.controller.ingestProbeResult(
-        {IntRect{460, 200, 200, 200}}, IntRect{0, 0, 1000, 800}, 1, decisionFor(1), 1, frameSize, 1.0);
-    CHECK(fix.controller.hunting());
-    CHECK_FALSE(first.applyRegion.has_value());
-
-    // The second agreeing probe adopts, and the mapped region comes back.
-    const FaceLockOutcome second = fix.controller.ingestProbeResult(
-        {IntRect{460, 200, 200, 200}}, IntRect{0, 0, 1000, 800}, 1, decisionFor(1), 1, frameSize, 2.0);
-    CHECK_FALSE(fix.controller.hunting());
-    REQUIRE(second.applyRegion.has_value());
-    // The forehead crop (0.5 anchor widths, centred) at anchor 560,300 width
-    // 200 is 510,250..610,350 in frame pixels; over a 2000x1000 frame that is
-    // 25.5,25..30.5,35 percent, and no attachment reshapes it.
-    CHECK_THAT(second.applyRegion->leftPercent, WithinAbs(25.5, 1e-6));
-    CHECK_THAT(second.applyRegion->topPercent, WithinAbs(25.0, 1e-6));
-    CHECK_THAT(second.applyRegion->rightPercent, WithinAbs(30.5, 1e-6));
-    CHECK_THAT(second.applyRegion->bottomPercent, WithinAbs(35.0, 1e-6));
-    CHECK_FALSE(second.lostLock.has_value());
-}
-
-TEST_CASE("Persistent absence gives the lock up and reports it lost")
-{
-    ControllerFixture fix;
-    fix.controller.addLock(7, foreheadLock(), 0.0);
-
-    // A box flush against the ROI's left edge is never trusted, so every probe
-    // is an empty sighting and the give-up clock runs to the end.
-    const IntRect roi{0, 0, 1000, 800};
-    const IntRect edgeClipped{0, 300, 100, 200};
-    FaceLockOutcome outcome;
-    for (int probe = 0; probe < 16; ++probe) {
-        CHECK(fix.controller.contains(7));
-        CHECK_FALSE(outcome.lostLock.has_value());
-        outcome = fix.controller.ingestProbeResult({edgeClipped}, roi, 7, decisionFor(7), 7, std::nullopt, 1.0);
+    AttachController attachment;
+    const AttachDisplayRect display{0, 0, 1000, 500};
+    (void)attachment.attach(1, 1, "Editor", FullWindow, display, InitialRegion);
+    // These positions exercise the formerly lost rightmost pixel after
+    // percentages were converted to stored points and emitted again.
+    for (int movement : {8, 24, 40}) {
+        CAPTURE(movement);
+        const RegionOfInterest selected{(475.0 + movement) / 10.0, 45, (525.0 + movement) / 10.0, 55};
+        const auto restored = attachment.editRegion(selected, FullWindow, display);
+        checkSameCrop(selected, restored, 1000, 500);
+        CHECK(selected.toPixels(1000, 500) == IntRect{475 + movement, 225, 50, 50});
+        CHECK(restored.toPixels(1000, 500) == IntRect{475 + movement, 225, 50, 50});
+        // The same source region must stay equivalent on a Retina capture.
+        checkSameCrop(selected, restored, 2000, 1000);
+        CHECK(restored.toPixels(2000, 1000) == IntRect{950 + movement * 2, 450, 100, 100});
     }
-    REQUIRE(outcome.lostLock.has_value());
-    CHECK(*outcome.lostLock == 7);
-    CHECK_FALSE(outcome.applyRegion.has_value());
-    CHECK_FALSE(fix.controller.contains(7));
-    CHECK_FALSE(fix.controller.hunting());
 }
 
-TEST_CASE("A probe for a window that is no longer active is ignored")
+TEST_CASE("A face moves on every video frame without waiting for content to settle")
 {
-    ControllerFixture fix;
-    fix.controller.addLock(1, foreheadLock(), 0.0);
-
-    // The probe searched window 1, but the active window is now 2.
-    AttachDecision decision;
-    decision.activeIdentity = 2;
-    const FaceLockOutcome outcome = fix.controller.ingestProbeResult(
-        {IntRect{400, 200, 200, 200}}, IntRect{0, 0, 1000, 800}, 1, decision, 2, std::nullopt, 1.0);
-
-    CHECK_FALSE(outcome.applyRegion.has_value());
-    CHECK_FALSE(outcome.lostLock.has_value());
-    CHECK(fix.controller.contains(1));      // the lock is untouched
-    CHECK_FALSE(fix.controller.hunting());  // and no verdict was recorded
+    ControllerFixture fixture;
+    fixture.select();
+    for (uint64_t sequence = 1; sequence <= 5; ++sequence) {
+        fixture.setFace({500.0 + 8.0 * static_cast<double>(sequence), 250.0, 100.0});
+        const auto result = fixture.advance(sequence, sequence % 2 ? Color{0, 0, 0} : Color{255, 255, 255});
+        REQUIRE(result.applyRegion);
+        CHECK_FALSE(result.lostLock);
+        CHECK_THAT(result.applyRegion->leftPercent, WithinAbs(47.5 + 0.8 * static_cast<double>(sequence), 1e-6));
+        REQUIRE(fixture.fetch());
+        REQUIRE(fixture.output.images.contains("org.sidescopes.histogram"));
+        CHECK_FALSE(fixture.output.images.at("org.sidescopes.histogram").rgba.empty());
+        REQUIRE(fixture.output.region);
+        INFO("source sequence=" << sequence);
+        checkSameCrop(*fixture.output.region, *result.applyRegion, fixture.frameSize.width, fixture.frameSize.height);
+        CHECK(fixture.output.frameSequence == sequence);
+        CHECK(fixture.output.frameStamp.captureEpoch == fixture.capture.streamEpoch());
+        CHECK(fixture.output.selectionRevision == fixture.controller.selectionRevision());
+    }
+    CHECK(desktopStubs().detectorCall().calls == 5);
 }
 
-TEST_CASE("The content watch flags a change and clears after the settle time")
+TEST_CASE("Scope changes reuse a still photo and the first later frame is detected")
 {
-    ControllerFixture fix;
-    fix.worker.start();
-
-    const RegionOfInterest region;  // the whole frame
-
-    // A baseline on a black frame: nothing has changed yet.
-    publishAndAwait(fix, makeSolidFrameBuffer(64, 64, Color{0, 0, 0}, 1), 1);
-    fix.controller.probeContentChange(region, 0.0);
-    CHECK_FALSE(fix.controller.contentUnsettled(0.0));
-
-    // A second identical frame stays settled: the threshold ignores noise.
-    publishAndAwait(fix, makeSolidFrameBuffer(64, 64, Color{0, 0, 0}, 2), 2);
-    fix.controller.probeContentChange(region, 1.0);
-    CHECK_FALSE(fix.controller.contentUnsettled(1.0));
-
-    // A very different frame is a change, stamped at t = 2.0.
-    publishAndAwait(fix, makeSolidFrameBuffer(64, 64, Color{255, 255, 255}, 3), 3);
-    fix.controller.probeContentChange(region, 2.0);
-    CHECK(fix.controller.contentUnsettled(2.0));
-    CHECK(fix.controller.contentUnsettled(2.44));        // within the 0.45s settle
-    CHECK_FALSE(fix.controller.contentUnsettled(2.45));  // at the edge, settled again
-    CHECK_FALSE(fix.controller.contentUnsettled(2.5));
-
-    fix.worker.stop();
-}
-
-TEST_CASE("The content watch reads the locked region and nothing outside it")
-{
-    ControllerFixture fix;
-    fix.worker.start();
-
-    // The locked region is the frame's top-left quarter.
-    const RegionOfInterest region{0.0, 0.0, 50.0, 50.0};
-
-    publishAndAwait(fix, makeSolidFrameBuffer(64, 64, Color{0, 0, 0}, 1), 1);
-    fix.controller.probeContentChange(region, 0.0);
-    CHECK_FALSE(fix.controller.contentUnsettled(0.0));
-
-    // Repainting the rest of the frame is somebody else's window moving; the
-    // locked content did not change and the border stays up.
-    publishAndAwait(fix, makeQuarteredFrameBuffer(64, Color{0, 0, 0}, Color{255, 255, 255}, 2), 2);
-    fix.controller.probeContentChange(region, 1.0);
-    CHECK_FALSE(fix.controller.contentUnsettled(1.0));
-
-    // Repainting inside it is the pan the border must hide for.
-    publishAndAwait(fix, makeQuarteredFrameBuffer(64, Color{255, 255, 255}, Color{255, 255, 255}, 3), 3);
-    fix.controller.probeContentChange(region, 2.0);
-    CHECK(fix.controller.contentUnsettled(2.0));
-
-    fix.worker.stop();
-}
-
-TEST_CASE("A capture that changes depth is not a change of content")
-{
-    // The grid is taken on the 0..255 scale precisely so that this holds. The
-    // capture can change depth between two probes - it narrows and widens with
-    // the region, and a reconfigured stream can come back at the other depth -
-    // and the samples either side must still describe the same picture.
-    //
-    // Without the downshift a ten-bit code truncates into the byte rather than
-    // scaling into it: 616 becomes 104 against the eight-bit 154, on every one
-    // of the 256 taps at once, and the watch reads a still screen as a pan and
-    // hides the border for it.
-    ControllerFixture fix;
-    fix.worker.start();
-
-    const RegionOfInterest region;  // the whole frame
-
-    // Level 154 as eight-bit codes, then the same colour as ten-bit ones:
-    // (616 * 255 + 511) / 1023 is 154.
-    publishAndAwait(fix, makeSolidFrameBuffer(64, 64, Color{154, 154, 154}, 1), 1);
-    fix.controller.probeContentChange(region, 0.0);
-    CHECK_FALSE(fix.controller.contentUnsettled(0.0));
-
-    publishAndAwait(fix, makeTenBitFrameBuffer(64, 64, 616, 616, 616, 2), 2);
-    fix.controller.probeContentChange(region, 1.0);
-    CHECK_FALSE(fix.controller.contentUnsettled(1.0));
-
-    // The guard is not vacuous: a real repaint at the same depth still reads
-    // as a change.
-    publishAndAwait(fix, makeTenBitFrameBuffer(64, 64, 1023, 1023, 1023, 3), 3);
-    fix.controller.probeContentChange(region, 2.0);
-    CHECK(fix.controller.contentUnsettled(2.0));
-
-    fix.worker.stop();
-}
-
-TEST_CASE("A region the host itself moved only rebaselines the content watch")
-{
-    ControllerFixture fix;
-    fix.worker.start();
-
-    publishAndAwait(fix, makeQuarteredFrameBuffer(64, Color{0, 0, 0}, Color{255, 255, 255}, 1), 1);
-    fix.controller.probeContentChange(RegionOfInterest{0.0, 0.0, 50.0, 50.0}, 0.0);
-
-    // The same frame read through a different rectangle samples wholly
-    // different pixels; that is the region moving, not the content changing.
-    fix.controller.probeContentChange(RegionOfInterest{50.0, 50.0, 100.0, 100.0}, 1.0);
-    CHECK_FALSE(fix.controller.contentUnsettled(1.0));
-
-    fix.worker.stop();
-}
-
-TEST_CASE("The probe searches the patch around the anchor")
-{
-    ControllerFixture fix;
-    fix.startCapture();
-    fix.worker.start();
-    // The display is 1000 points wide against a 2000 pixel frame, so a point
-    // is two pixels and the window covers the whole frame.
-    desktopStubs().displayGeometry = DisplayGeometry{0.0, 0.0, 1000.0, 500.0};
-    publishAndAwait(fix, makeCoordinateFrameBuffer(2000, 1000, 1), 1);
-    fix.attachWindow(1, AttachWindowRect{0.0, 0.0, 1000.0, 500.0});
-
-    // A 100-wide anchor at 500,400 reaches 2.5 anchor widths each way.
-    fix.controller.addLock(
-        1, face_lock::makeLock(FaceAnchor{500.0, 400.0, 100.0}, LockRect{450.0, 350.0, 550.0, 450.0}), 0.0);
-    const FaceLockOutcome outcome = fix.controller.update(
-        attachedDecision(1, AttachWindowRect{0.0, 0.0, 1000.0, 500.0}),
-        AnalysisWorker::FrameSize{2000, 1000, 2000, 1000}, 1, RegionOfInterest{}, /*gestureActive=*/false, 1.0);
-    CHECK_FALSE(outcome.applyRegion.has_value());
-    awaitProbe(fix);
-
-    const test::DetectorCall detected = desktopStubs().detectorCall();
-    CHECK(detected.calls == 1);
-    CHECK(cropOrigin(detected) == std::pair<int, int>{250, 150});
-    CHECK(detected.width == 500);   // 250..750 across
-    CHECK(detected.height == 500);  // 150..650 down
-    CHECK_THAT(detected.pixelsPerPoint, WithinAbs(2.0f, 1e-6f));
-
-    fix.worker.stop();
-}
-
-TEST_CASE("Nothing is probed or watched from a narrowed capture")
-{
-    // The probe searches the locked window's rectangle and the content watch
-    // measures the region against the frame's own extents. A capture narrowed to
-    // the analysis region carries neither, so both sit out until a whole frame
-    // arrives rather than reading whatever pixels are in hand.
-    ControllerFixture fix;
-    fix.startCapture();
-    fix.worker.start();
-    desktopStubs().displayGeometry = DisplayGeometry{0.0, 0.0, 1000.0, 500.0};
-
-    FrameBuffer narrowed = makeCoordinateFrameBuffer(500, 500, 1);
-    narrowed.sourceX = 250;
-    narrowed.sourceY = 150;
-    narrowed.sourceWidth = 2000;
-    narrowed.sourceHeight = 1000;
-    publishAndAwait(fix, std::move(narrowed), 1);
-    fix.attachWindow(1, AttachWindowRect{0.0, 0.0, 1000.0, 500.0});
-    fix.controller.addLock(
-        1, face_lock::makeLock(FaceAnchor{500.0, 400.0, 100.0}, LockRect{450.0, 350.0, 550.0, 450.0}), 0.0);
-
-    const AnalysisWorker::FrameSize narrowedSize{500, 500, 2000, 1000};
-    (void)fix.controller.update(attachedDecision(1, AttachWindowRect{0.0, 0.0, 1000.0, 500.0}), narrowedSize, 1,
-                                RegionOfInterest{}, /*gestureActive=*/false, 1.0);
-    awaitProbe(fix);
-    CHECK(desktopStubs().detectorCall().calls == 0);
-
-    // The watch has no baseline either, so a second narrowed frame with wholly
-    // different content is not read as a pan.
-    FrameBuffer second = test::makeSolidFrameBuffer(500, 500, Color{255, 255, 255}, 2);
-    second.sourceX = 250;
-    second.sourceY = 150;
-    second.sourceWidth = 2000;
-    second.sourceHeight = 1000;
-    publishAndAwait(fix, std::move(second), 2);
-    fix.controller.probeContentChange(RegionOfInterest{}, 2.0);
-    CHECK_FALSE(fix.controller.contentUnsettled(2.0));
-
-    fix.worker.stop();
-}
-
-TEST_CASE("A landed probe is drained on the next step at its own cadence")
-{
-    ControllerFixture fix;
-    fix.startCapture();
-    fix.worker.start();
-    desktopStubs().displayGeometry = DisplayGeometry{0.0, 0.0, 1000.0, 500.0};
-    // The detector's box is in the crop's own coordinates: 450,350 once the
-    // searched patch's origin at 250,150 is added back, which is exactly the
-    // anchor. A box that never had that origin added would land nowhere near
-    // it, and the lock would go hunting instead of holding.
-    desktopStubs().faces.clear();
-    desktopStubs().faces.push_back(IntRect{200, 200, 100, 100});
-    publishAndAwait(fix, makeCoordinateFrameBuffer(2000, 1000, 1), 1);
-    fix.attachWindow(1, AttachWindowRect{0.0, 0.0, 1000.0, 500.0});
-    fix.controller.addLock(
-        1, face_lock::makeLock(FaceAnchor{500.0, 400.0, 100.0}, LockRect{450.0, 350.0, 550.0, 450.0}), 0.0);
-
-    const AttachDecision decision = attachedDecision(1, AttachWindowRect{0.0, 0.0, 1000.0, 500.0});
-    constexpr AnalysisWorker::FrameSize FrameSize{2000, 1000, 2000, 1000};
-    (void)fix.controller.update(decision, FrameSize, 1, RegionOfInterest{}, false, 1.0);
-    awaitProbe(fix);
-
-    // Still inside the probe period: the landed result is taken in, and no
-    // second probe is started on top of it.
-    (void)fix.controller.update(decision, FrameSize, 1, RegionOfInterest{}, false, 1.1);
-    awaitProbe(fix);
+    ControllerFixture fixture;
+    fixture.select();
+    (void)fixture.advance(1);
+    fixture.settings.sampleThinning = 2;
+    fixture.worker.updateSettings(fixture.settings);
+    fixture.worker.pump();
+    const auto quiet = fixture.tick(fixture.clock + 60.0);
+    CHECK_FALSE(quiet.lostLock);
+    CHECK(fixture.controller.contains(1));
     CHECK(desktopStubs().detectorCall().calls == 1);
-    CHECK_FALSE(fix.controller.hunting());
-    CHECK(fix.controller.contains(1));
-
-    // Past the period the next probe goes out.
-    (void)fix.controller.update(decision, FrameSize, 1, RegionOfInterest{}, false, 1.5);
-    awaitProbe(fix);
+    fixture.setFace({508, 250, 100});
+    REQUIRE(fixture.advance(2).applyRegion);
     CHECK(desktopStubs().detectorCall().calls == 2);
-
-    fix.worker.stop();
 }
 
-TEST_CASE("The probe never searches past the attached window")
+TEST_CASE("A transient uncertain frame keeps the last accepted crop and can recover immediately")
 {
-    ControllerFixture fix;
-    fix.startCapture();
-    fix.worker.start();
-    desktopStubs().displayGeometry = DisplayGeometry{0.0, 0.0, 1000.0, 500.0};
-    publishAndAwait(fix, makeCoordinateFrameBuffer(2000, 1000, 1), 1);
-    fix.attachWindow(1, AttachWindowRect{0.0, 0.0, 200.0, 500.0});
-
-    // The window occupies the left 200 points - 400 pixels - so the anchor's
-    // own reach runs past it and a neighbouring window's faces stay out of
-    // range.
-    fix.controller.addLock(
-        1, face_lock::makeLock(FaceAnchor{300.0, 400.0, 100.0}, LockRect{250.0, 350.0, 350.0, 450.0}), 0.0);
-    (void)fix.controller.update(attachedDecision(1, AttachWindowRect{0.0, 0.0, 200.0, 500.0}),
-                                AnalysisWorker::FrameSize{2000, 1000, 2000, 1000}, 1, RegionOfInterest{}, false, 1.0);
-    awaitProbe(fix);
-
-    const test::DetectorCall detected = desktopStubs().detectorCall();
-    CHECK(detected.calls == 1);
-    CHECK(cropOrigin(detected) == std::pair<int, int>{50, 150});
-    CHECK(detected.width == 350);   // 50..400, the window's own right edge
-    CHECK(detected.height == 500);  // 150..650, well inside the frame
-
-    fix.worker.stop();
-}
-
-TEST_CASE("A same-size window move carries the lock's search with it")
-{
-    ControllerFixture fix;
-    fix.startCapture();
-    fix.worker.start();
-    desktopStubs().displayGeometry = DisplayGeometry{0.0, 0.0, 1000.0, 500.0};
-    publishAndAwait(fix, makeCoordinateFrameBuffer(2000, 1000, 1), 1);
-
-    const AnalysisWorker::FrameSize frameSize{2000, 1000, 2000, 1000};
-    fix.attachWindow(1, AttachWindowRect{100.0, 0.0, 400.0, 500.0});
-    fix.controller.addLock(1,
-                           face_lock::makeLock(FaceAnchor{500.0, 400.0, 100.0}, LockRect{450.0, 350.0, 550.0, 450.0}),
-                           0.0, AttachWindowRect{0.0, 0.0, 400.0, 500.0});
-
-    // The window slides 100 points right, which is 200 frame pixels: the
-    // anchor rides along, so the searched patch does too. It stays the same
-    // size, which a lock that had not moved could not manage - the window's
-    // right edge would have clipped it.
-    (void)fix.controller.update(attachedDecision(1, AttachWindowRect{100.0, 0.0, 400.0, 500.0}), frameSize, 1,
-                                RegionOfInterest{}, false, 1.0);
-    awaitProbe(fix);
-
-    const test::DetectorCall detected = desktopStubs().detectorCall();
-    CHECK(detected.calls == 1);
-    CHECK(cropOrigin(detected) == std::pair<int, int>{450, 150});
-    CHECK(detected.width == 500);   // 450..950, 2.5 anchor widths around 700
-    CHECK(detected.height == 500);  // 150..650, the anchor's row did not move
-
-    fix.worker.stop();
-}
-
-TEST_CASE("No probe runs while the user is dragging the window")
-{
-    ControllerFixture fix;
-    fix.startCapture();
-    fix.worker.start();
-    desktopStubs().displayGeometry = DisplayGeometry{0.0, 0.0, 1000.0, 500.0};
-    publishAndAwait(fix, makeCoordinateFrameBuffer(2000, 1000, 1), 1);
-    fix.attachWindow(1, AttachWindowRect{0.0, 0.0, 1000.0, 500.0});
-    fix.controller.addLock(1, foreheadLock(), 0.0);
-
-    // The drag wins; the lock catches up once things settle.
-    (void)fix.controller.update(attachedDecision(1, AttachWindowRect{0.0, 0.0, 1000.0, 500.0}),
-                                AnalysisWorker::FrameSize{2000, 1000, 2000, 1000}, 1, RegionOfInterest{},
-                                /*gestureActive=*/true, 1.0);
-
-    CHECK_FALSE(fix.controller.probeRunning());
-    CHECK(desktopStubs().detectorCall().calls == 0);
-
-    fix.worker.stop();
-}
-
-TEST_CASE("A lock whose window is no longer attached is dropped")
-{
-    ControllerFixture fix;
-    fix.controller.addLock(1, foreheadLock(), 0.0);
-    REQUIRE(fix.controller.contains(1));
-
-    // Nothing was ever attached, so the step prunes the lock and the hunting
-    // state with it.
-    AttachDecision decision;
-    const FaceLockOutcome outcome = fix.controller.update(decision, std::nullopt, 0, RegionOfInterest{}, false, 1.0);
-
-    CHECK_FALSE(fix.controller.contains(1));
-    CHECK_FALSE(fix.controller.hunting());
-    // A pruned lock is not a lost one: the host already knows the window went.
-    CHECK_FALSE(outcome.lostLock.has_value());
-}
-
-TEST_CASE("Activating a window whose anchor went stale starts a hunt")
-{
-    ControllerFixture fix;
-    fix.controller.addLock(1, foreheadLock(), /*verifiedAt=*/1.0);
-
-    // Verified within the probe period: the border keeps its region through a
-    // quick focus flip.
-    fix.controller.onActivated(1, 1.2);
-    CHECK_FALSE(fix.controller.hunting());
-
-    // Older than a probe period: the border holds until the first fresh
-    // verdict rather than flashing a stale rectangle.
-    fix.controller.onActivated(1, 2.0);
-    CHECK(fix.controller.hunting());
-
-    // A window that holds no lock changes nothing.
-    fix.controller.clear();
-    fix.controller.onActivated(99, 9.0);
-    CHECK_FALSE(fix.controller.hunting());
-}
-
-TEST_CASE("Clearing and removing forget the locks they are given")
-{
-    ControllerFixture fix;
-    CHECK_FALSE(fix.controller.locked());
-    fix.controller.addLock(1, foreheadLock(), 0.0);
-    fix.controller.addLock(2, foreheadLock(), 0.0);
-    // A held lock is what keeps the capture on the whole display: the probe
-    // searches the window's rectangle, which the analysis region does not
-    // contain.
-    CHECK(fix.controller.locked());
-
-    fix.controller.removeLock(1);
-    CHECK_FALSE(fix.controller.contains(1));
-    CHECK(fix.controller.contains(2));
-    CHECK(fix.controller.locked());
-
-    // Clearing the region drops everything, the hunting state included.
-    fix.controller.onActivated(2, 5.0);
-    REQUIRE(fix.controller.hunting());
-    fix.controller.clear();
-    CHECK_FALSE(fix.controller.contains(2));
-    CHECK_FALSE(fix.controller.hunting());
-    CHECK_FALSE(fix.controller.locked());
-}
-
-TEST_CASE("Removing or switching from a hunted face restores ordinary borders")
-{
-    ControllerFixture fix;
-    fix.controller.addLock(1, foreheadLock(), 0.0);
-    fix.controller.addLock(2, foreheadLock(), 5.0);
-    fix.controller.onActivated(1, 5.0);
-    REQUIRE(fix.controller.hunting());
-
-    SECTION("remove active lock")
+    ControllerFixture fixture;
+    fixture.select();
+    fixture.setFace({520, 250, 100});
+    REQUIRE(fixture.advance(1).applyRegion);
+    const auto last = fixture.region;
+    desktopStubs().sessionDetection = {};
+    desktopStubs().faces.clear();
+    SECTION("successful absence")
     {
-        fix.controller.removeLock(1);
-        CHECK(fix.controller.contains(2));
+        desktopStubs().detectionStatus = FaceDetectionStatus::Completed;
     }
-    SECTION("activate recently verified lock")
+    SECTION("native failure")
     {
-        fix.controller.onActivated(2, 5.1);
+        desktopStubs().detectionStatus = FaceDetectionStatus::Failed;
     }
-    SECTION("activate ordinary window")
+    const auto uncertain = fixture.advance(2, {200, 100, 50});
+    CHECK_FALSE(uncertain.applyRegion);
+    CHECK_FALSE(uncertain.lostLock);
+    CHECK(fixture.region == last);
+    CHECK(fixture.controller.contains(1));
+    REQUIRE(fixture.fetch());
+    REQUIRE(fixture.output.region);
+    REQUIRE(last);
+    checkSameCrop(*fixture.output.region, *last, fixture.frameSize.width, fixture.frameSize.height);
+    CHECK(fixture.output.frameSequence == 2u);
+    fixture.setFace({530, 250, 100});
+    const auto recovered = fixture.advance(3);
+    REQUIRE(recovered.applyRegion);
+    CHECK_THAT(recovered.applyRegion->leftPercent, WithinAbs(50.5, 1e-6));
+    CHECK_FALSE(recovered.lostLock);
+}
+
+TEST_CASE("Uncertainty followed by capture silence ends following without changing the attached crop")
+{
+    ControllerFixture fixture;
+    fixture.select();
+    fixture.setFace({508, 250, 100});
+    REQUIRE(fixture.advance(1).applyRegion);
+    const auto last = fixture.region;
+    desktopStubs().sessionDetection = {};
+    desktopStubs().faces.clear();
+    (void)fixture.advance(2);
+    const auto lost = fixture.tick(fixture.clock + 0.5);
+    REQUIRE(lost.lostLock);
+    CHECK(*lost.lostLock == 1u);
+    CHECK_FALSE(lost.applyRegion);
+    CHECK_FALSE(fixture.controller.contains(1));
+    CHECK(fixture.attach.isAttached(1));
+    CHECK(fixture.region == last);
+    fixture.setFace({530, 250, 100});
+    (void)fixture.advance(3);
+    CHECK(desktopStubs().detectorCall().calls == 2);
+}
+
+TEST_CASE("An unsupported native detector returns to the ordinary attachment immediately")
+{
+    ControllerFixture fixture;
+    fixture.select();
+    REQUIRE(fixture.advance(1).applyRegion);
+    const auto last = fixture.region;
+    desktopStubs().sessionDetection = {};
+    desktopStubs().detectionStatus = FaceDetectionStatus::Unsupported;
+    const auto unsupported = fixture.advance(2);
+    REQUIRE(unsupported.lostLock);
+    CHECK(*unsupported.lostLock == 1u);
+    CHECK(fixture.attach.isAttached(1));
+    CHECK(fixture.region == last);
+    CHECK_FALSE(fixture.controller.contains(1));
+}
+
+TEST_CASE("A manual crop edit remaps held pixels without a second detection")
+{
+    ControllerFixture fixture;
+    fixture.select();
+    (void)fixture.advance(1);
+    const RegionOfInterest edited{46, 42, 54, 58};
+    SECTION("whole display dimensions")
     {
-        fix.controller.onActivated(99, 5.1);
+        fixture.controller.rebindCrop(1, edited, fixture.frameSize);
     }
-
-    CHECK_FALSE(fix.controller.hunting());
-}
-
-TEST_CASE("A border edit re-teaches the crop the face carries")
-{
-    ControllerFixture fix;
-    desktopStubs().displayGeometry = DisplayGeometry{0.0, 0.0, 1000.0, 500.0};
-    desktopStubs().windowGeometry = WindowGeometry{0.0, 0.0, 1000.0, 500.0, false, ""};
-    const AnalysisWorker::FrameSize frameSize{2000, 1000, 2000, 1000};
-    fix.controller.addLock(1, foreheadLock(), 0.0);
-
-    // The user drags the border to a different rectangle over the same face:
-    // 400,200..600,400 in frame pixels, which is 20,20..30,40 percent.
-    fix.controller.rebindCrop(1, RegionOfInterest{20.0, 20.0, 30.0, 40.0}, frameSize);
-
-    // Two agreeing probes at a moved anchor adopt, and the region that comes
-    // back is the new crop carried to the new position - 60 pixels right of
-    // where it was taught.
-    const IntRect moved{460, 200, 200, 200};
-    (void)fix.controller.ingestProbeResult({moved}, IntRect{0, 0, 1000, 800}, 1, decisionFor(1), 1, frameSize, 1.0);
-    const FaceLockOutcome adopted =
-        fix.controller.ingestProbeResult({moved}, IntRect{0, 0, 1000, 800}, 1, decisionFor(1), 1, frameSize, 2.0);
-
-    REQUIRE(adopted.applyRegion.has_value());
-    CHECK_THAT(adopted.applyRegion->leftPercent, WithinAbs(23.0, 1e-6));
-    CHECK_THAT(adopted.applyRegion->rightPercent, WithinAbs(33.0, 1e-6));
-    CHECK_THAT(adopted.applyRegion->topPercent, WithinAbs(20.0, 1e-6));
-    CHECK_THAT(adopted.applyRegion->bottomPercent, WithinAbs(40.0, 1e-6));
-
-    // An edit aimed at a window that holds no lock is simply ignored.
-    fix.controller.rebindCrop(99, RegionOfInterest{0.0, 0.0, 1.0, 1.0}, frameSize);
-    CHECK(fix.controller.contains(1));
-}
-
-TEST_CASE("A lock's rectangle is stated in display pixels")
-{
-    // Everything a lock holds - the anchor, the crop it carries - is measured
-    // where the probe searched, which is the whole display. A frame narrowed to
-    // the analysis region reports its own extents alongside the display's, and
-    // reading the lock against the wrong pair of them puts the region somewhere
-    // else entirely. The crop policy keeps the two apart today by refusing to
-    // narrow while any window holds a lock; this pins the units so that policy
-    // is what makes the probe possible rather than what makes it correct.
-    ControllerFixture fix;
-    desktopStubs().displayGeometry = DisplayGeometry{0.0, 0.0, 1000.0, 500.0};
-    desktopStubs().windowGeometry = WindowGeometry{0.0, 0.0, 1000.0, 500.0, false, ""};
-    // A 500x500 crop of a 2000x1000 display: four times too narrow to read as
-    // the display, which is exactly what makes the assertion below sharp.
-    const AnalysisWorker::FrameSize narrowed{500, 500, 2000, 1000};
-    fix.controller.addLock(1, foreheadLock(), 0.0);
-
-    fix.controller.rebindCrop(1, RegionOfInterest{20.0, 20.0, 30.0, 40.0}, narrowed);
-    const IntRect moved{460, 200, 200, 200};
-    (void)fix.controller.ingestProbeResult({moved}, IntRect{0, 0, 1000, 800}, 1, decisionFor(1), 1, narrowed, 1.0);
-    const FaceLockOutcome adopted =
-        fix.controller.ingestProbeResult({moved}, IntRect{0, 0, 1000, 800}, 1, decisionFor(1), 1, narrowed, 2.0);
-
-    // The same answer the whole-display frame gives above: the crop's extents
-    // never enter the arithmetic.
-    REQUIRE(adopted.applyRegion.has_value());
-    CHECK_THAT(adopted.applyRegion->leftPercent, WithinAbs(23.0, 1e-6));
-    CHECK_THAT(adopted.applyRegion->rightPercent, WithinAbs(33.0, 1e-6));
-    CHECK_THAT(adopted.applyRegion->topPercent, WithinAbs(20.0, 1e-6));
-    CHECK_THAT(adopted.applyRegion->bottomPercent, WithinAbs(40.0, 1e-6));
-}
-
-TEST_CASE("An adopted anchor maps to nothing while the window is out of reach")
-{
-    ControllerFixture fix;
-    const AnalysisWorker::FrameSize frameSize{2000, 1000, 2000, 1000};
-    fix.controller.addLock(1, foreheadLock(), 0.0);
-    const IntRect moved{460, 200, 200, 200};
-    (void)fix.controller.ingestProbeResult({moved}, IntRect{0, 0, 1000, 800}, 1, decisionFor(1), 1, frameSize, 1.0);
-
-    // A minimized window has no rectangle to map through, so the adoption
-    // stands in the lock and nothing is asked of the host.
-    desktopStubs().displayGeometry = DisplayGeometry{0.0, 0.0, 1000.0, 500.0};
-    desktopStubs().windowGeometry = WindowGeometry{0.0, 0.0, 1000.0, 500.0, true, ""};
-    const FaceLockOutcome minimized =
-        fix.controller.ingestProbeResult({moved}, IntRect{0, 0, 1000, 800}, 1, decisionFor(1), 1, frameSize, 2.0);
-    CHECK_FALSE(minimized.applyRegion.has_value());
-    CHECK_FALSE(fix.controller.hunting());  // the anchor was still confirmed
-}
-
-TEST_CASE("A completed probe cannot change a replacement lock on the same window")
-{
-    ControllerFixture fix;
-    fix.startCapture();
-    fix.worker.start();
-    const AttachWindowRect window{0.0, 0.0, 1000.0, 500.0};
-    desktopStubs().displayGeometry = DisplayGeometry{0.0, 0.0, 1000.0, 500.0};
-    fix.attachWindow(1, window);
-    fix.controller.addLock(1, foreheadLock(), 0.0, window);
-    publishAndAwait(fix, makeSolidFrameBuffer(1000, 500, Color{10, 10, 10}, 1), 1);
-    const auto decision = attachedDecision(1, window);
-    (void)fix.controller.update(decision, std::nullopt, 1, std::nullopt, false, 1.0);
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
-    while (fix.controller.probeRunning() && std::chrono::steady_clock::now() < deadline) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    SECTION("display dimensions remain authoritative for a narrowed size")
+    {
+        fixture.controller.rebindCrop(1, edited, {200, 100, 1000, 500});
     }
-    REQUIRE_FALSE(fix.controller.probeRunning());
-    REQUIRE(desktopStubs().detectorCall().calls == 1);
-    // The old search found no face. A newly confirmed pick on that same
-    // window is already verified and must not inherit the old miss.
-    fix.controller.addLock(1, foreheadLock(), 1.1, window);
-    const auto stale = fix.controller.update(decision, std::nullopt, 1, std::nullopt, true, 1.2);
+    fixture.region = edited;
+    (void)fixture.tick();
+    fixture.worker.pump();
+    REQUIRE(fixture.fetch());
+    CHECK(fixture.output.region == edited);
+    CHECK(desktopStubs().detectorCall().calls == 1);
+    fixture.setFace({508, 250, 100});
+    const auto moved = fixture.advance(2);
+    REQUIRE(moved.applyRegion);
+    CHECK_THAT(moved.applyRegion->leftPercent, WithinAbs(46.8, 1e-6));
+    CHECK_THAT(moved.applyRegion->rightPercent, WithinAbs(54.8, 1e-6));
+    CHECK_THAT(moved.applyRegion->topPercent, WithinAbs(42, 1e-6));
+}
+
+TEST_CASE("A same-window replacement selection rejects already completed tracking")
+{
+    ControllerFixture fixture;
+    fixture.select();
+    fixture.setFace({530, 250, 100});
+    fixture.submit(fixture.frame(1));
+    fixture.controller.addLock(1, foreheadLock(), FullWindow);
+    const auto result = fixture.tick();
+    CHECK_FALSE(result.applyRegion);
+    CHECK_FALSE(result.lostLock);
+    CHECK(fixture.region == InitialRegion);
+    CHECK_FALSE(fixture.fetch());
+}
+
+TEST_CASE("A selection changed inside detection cannot publish its old crop")
+{
+    ControllerFixture fixture;
+    fixture.select();
+    const RegionOfInterest edited{46, 42, 54, 58};
+    desktopStubs().beforeDetection = [&] { fixture.controller.rebindCrop(1, edited, fixture.frameSize); };
+    fixture.submit(fixture.frame(1));
+    desktopStubs().beforeDetection = {};
+    fixture.region = edited;
+    const auto stale = fixture.tick();
     CHECK_FALSE(stale.applyRegion);
     CHECK_FALSE(stale.lostLock);
-    CHECK_FALSE(fix.controller.hunting());
-    fix.worker.stop();
+    CHECK_FALSE(fixture.fetch());
+    fixture.worker.pump();
+    REQUIRE(fixture.fetch());
+    CHECK(fixture.output.region == edited);
+    CHECK(desktopStubs().detectorCall().calls == 1);
+}
+
+TEST_CASE("A completed result cannot move another active window")
+{
+    ControllerFixture fixture;
+    fixture.select();
+    fixture.setFace({530, 250, 100});
+    fixture.submit(fixture.frame(1));
+    fixture.decision = {};
+    fixture.controller.activationChanged();
+    const auto stale = fixture.tick();
+    CHECK_FALSE(stale.applyRegion);
+    CHECK_FALSE(stale.lostLock);
+    CHECK(fixture.controller.contains(1));
+    CHECK(fixture.region == InitialRegion);
+}
+
+TEST_CASE("One face's uncertainty survives focus changes without expiring another face")
+{
+    ControllerFixture fixture;
+    fixture.select();
+    (void)fixture.advance(1);
+    desktopStubs().sessionDetection = {};
+    (void)fixture.advance(2);
+    const double later = fixture.clock + 0.5;
+    (void)fixture.attach.attach(2, 2, "Viewer", FullWindow, {0, 0, 1000, 500}, InitialRegion);
+    fixture.controller.addLock(2, foreheadLock(), FullWindow);
+    fixture.decision.activeIdentity = 2;
+    fixture.controller.activationChanged();
+    fixture.setFace(InitialAnchor);
+    REQUIRE(fixture.advance(3).applyRegion);
+    CHECK_FALSE(fixture.tick(later).lostLock);
+    CHECK(fixture.controller.contains(1));
+    CHECK(fixture.controller.contains(2));
+    fixture.decision.activeIdentity = 1;
+    fixture.controller.activationChanged();
+    const auto expired = fixture.tick(later);
+    REQUIRE(expired.lostLock);
+    CHECK(*expired.lostLock == 1u);
+    CHECK(fixture.controller.contains(2));
+    CHECK(fixture.attach.isAttached(1));
+}
+
+TEST_CASE("Tracking rejects an old capture identity before calling the detector")
+{
+    ControllerFixture fixture;
+    fixture.select();
+    auto frame = fixture.frame(1);
+    SECTION("capture epoch")
+    {
+        ++frame.stamp.captureEpoch;
+    }
+    SECTION("display identity")
+    {
+        ++frame.stamp.displayId;
+    }
+    fixture.submit(std::move(frame));
+    CHECK(desktopStubs().detectorCall().calls == 0);
+    CHECK_FALSE(fixture.fetch());
+    REQUIRE(fixture.advance(2).applyRegion);
+}
+
+TEST_CASE("A narrowed capture cannot be mistaken for the full tracking source")
+{
+    ControllerFixture fixture;
+    fixture.select();
+    auto narrowed = test::makeSolidFrameBuffer(200, 100, Color{50, 50, 50}, 1);
+    narrowed.sourceX = 400;
+    narrowed.sourceY = 200;
+    narrowed.sourceWidth = 1000;
+    narrowed.sourceHeight = 500;
+    narrowed.stamp = {fixture.capture.streamEpoch(), StreamedDisplay, fixture.clock};
+    fixture.submit(std::move(narrowed));
+    CHECK(desktopStubs().detectorCall().calls == 0);
+    CHECK_FALSE(fixture.fetch());
+    REQUIRE(fixture.advance(2).applyRegion);
+}
+
+TEST_CASE("The tracking search uses source pixels and the continuation size floor")
+{
+    ControllerFixture fixture;
+    fixture.frameSize = {2000, 1000, 2000, 1000};
+    fixture.select(foreheadLock({500, 400, 100}));
+    fixture.setFace({500, 400, 100});
+    fixture.submit(coordinateFrame(fixture, 1));
+    const auto detected = desktopStubs().detectorCall();
+    CHECK(detected.calls == 1);
+    CHECK(cropOrigin(detected) == std::pair<int, int>{250, 150});
+    CHECK(detected.width == 500);
+    CHECK(detected.height == 500);
+    CHECK_THAT(detected.minimumPixels, WithinAbs(72.0, 1e-6));
+    CHECK(detected.frameSequence == 1u);
+    CHECK(detected.stamp.displayId == StreamedDisplay);
+}
+
+TEST_CASE("A tracking search never crosses the attached window boundary")
+{
+    ControllerFixture fixture;
+    fixture.frameSize = {2000, 1000, 2000, 1000};
+    fixture.select(foreheadLock({300, 400, 100}), {0, 0, 200, 500});
+    fixture.submit(coordinateFrame(fixture, 1));
+    const auto detected = desktopStubs().detectorCall();
+    CHECK(cropOrigin(detected) == std::pair<int, int>{50, 150});
+    CHECK(detected.width == 350);
+    CHECK(detected.height == 500);
+}
+
+TEST_CASE("A same-size window move carries the face search in display pixels")
+{
+    ControllerFixture fixture;
+    fixture.frameSize = {2000, 1000, 2000, 1000};
+    fixture.select(foreheadLock({500, 400, 100}), {100, 0, 400, 500}, AttachWindowRect{0, 0, 400, 500});
+    fixture.submit(coordinateFrame(fixture, 1));
+    const auto detected = desktopStubs().detectorCall();
+    CHECK(cropOrigin(detected) == std::pair<int, int>{450, 150});
+    CHECK(detected.width == 500);
+    CHECK(detected.height == 500);
+}
+
+TEST_CASE("Window motion and missing geometry pause tracking without removing the face selection")
+{
+    ControllerFixture fixture;
+    fixture.select();
+    SECTION("a native window gesture")
+    {
+        fixture.gesture = true;
+    }
+    SECTION("a minimized or inaccessible window")
+    {
+        fixture.decision.activeRect.reset();
+    }
+    SECTION("missing display geometry")
+    {
+        desktopStubs().displayGeometry.reset();
+    }
+    (void)fixture.advance(1);
+    CHECK(desktopStubs().detectorCall().calls == 0);
+    CHECK(fixture.controller.contains(1));
+}
+
+TEST_CASE("Minimize and restore animations preserve the face anchor and accepted crop")
+{
+    ControllerFixture fixture;
+    fixture.select();
+    REQUIRE(fixture.advance(1).applyRegion);
+    const auto accepted = fixture.region;
+    const int detections = desktopStubs().detectorCall().calls;
+    auto observe = [&](AttachWindowRect rect, bool minimized, double now) {
+        AttachedWindowObservation observation;
+        observation.identity = 1;
+        observation.windowRect = rect;
+        observation.minimized = minimized;
+        observation.displayId = StreamedDisplay;
+        observation.display = {0, 0, 1000, 500};
+        fixture.decision = fixture.attach.observe({observation}, 1, now);
+        (void)fixture.tick();
+        CHECK(fixture.controller.contains(1));
+    };
+    // First a same-size translation, then a tiny window: neither may
+    // translate the saved anchor or cause validation to retire the face.
+    observe({300, 200, 1000, 500}, false, 1.0);
+    (void)fixture.advance(2);
+    observe({850, 430, 80, 60}, false, 1.05);
+    (void)fixture.advance(3);
+    observe({850, 430, 80, 60}, true, 1.1);
+    (void)fixture.advance(4);
+    fixture.controller.invalidate();  // picker open/cancel invalidates work
+    observe({850, 430, 80, 60}, false, 5.0);
+    observe({850, 430, 80, 60}, false, 5.0);
+    CHECK_FALSE(fixture.decision.region);
+    observe(FullWindow, false, 5.05);
+    CHECK_FALSE(fixture.decision.region);
+    CHECK(desktopStubs().detectorCall().calls == detections);
+    observe(FullWindow, false, 5.3);
+    REQUIRE(fixture.decision.region);
+    checkSameCrop(*fixture.decision.region, *accepted, 1000, 500);
+    const auto resumed = fixture.advance(5);
+    REQUIRE(resumed.applyRegion);
+    checkSameCrop(*resumed.applyRegion, *accepted, 1000, 500);
+    CHECK(fixture.controller.contains(1));
+    CHECK(desktopStubs().detectorCall().calls == detections + 1);
+}
+
+TEST_CASE("A depth change reaches the detector as native pixels without a content hiding stage")
+{
+    ControllerFixture fixture;
+    fixture.select();
+    (void)fixture.advance(1);
+    auto frame = test::makeTenBitFrameBuffer(1000, 500, 616, 616, 616, 2);
+    frame.stamp = {fixture.capture.streamEpoch(), StreamedDisplay, fixture.clock};
+    fixture.submit(std::move(frame));
+    REQUIRE(fixture.tick().applyRegion);
+    CHECK(desktopStubs().detectorCall().calls == 2);
+    CHECK(desktopStubs().detectorCall().format == PixelFormat::Argb2101010);
+}
+
+TEST_CASE("Face selections can be removed cleared or pruned")
+{
+    ControllerFixture fixture;
+    fixture.select();
+    fixture.controller.addLock(2, foreheadLock());
+    SECTION("remove")
+    {
+        fixture.controller.removeLock(1);
+        CHECK(fixture.attach.isAttached(1));
+    }
+    SECTION("clear")
+    {
+        fixture.controller.clear();
+        CHECK(fixture.attach.isAttached(1));
+    }
+    SECTION("prune an attachment already removed")
+    {
+        fixture.attach.detachAll();
+        (void)fixture.tick();
+    }
+    CHECK_FALSE(fixture.controller.contains(1));
+    fixture.controller.clear();
+    CHECK_FALSE(fixture.controller.locked());
 }
 
 }  // namespace sidescopes

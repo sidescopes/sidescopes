@@ -82,6 +82,7 @@ bool CaptureController::start()
     if (!m_permissionGranted || m_suspended) {
         return false;
     }
+    m_continuityGeneration = 0;
 
     // Every exit below leaves the controller wanting a stream and holding none,
     // which is the state service() retries out of. Nothing has to be marked on
@@ -124,11 +125,12 @@ bool CaptureController::start()
 bool CaptureController::startTarget(const CaptureTarget& target)
 {
     std::string startedStatus = "capturing " + target.description;
+    m_lastTarget = target;
     // A backend can report failure before start returns. Its verdict must
     // survive the caller finishing startup, including its status message.
     m_streamAlive.store(true);
     try {
-        if (!m_source.start(target, m_frameRate, m_mailbox)) {
+        if (!m_source.start(target, m_frameRate, m_mailbox, ++m_streamEpoch)) {
             m_streamAlive.store(false);
             return false;
         }
@@ -139,6 +141,7 @@ bool CaptureController::startTarget(const CaptureTarget& target)
 
     m_capturedDisplay = target.displayId;
     m_desiredDisplay = target.displayId;
+    m_continuityGeneration = m_streamEpoch;
     {
         std::lock_guard lock(m_statusMutex);
         if (m_streamAlive.load()) {
@@ -153,6 +156,16 @@ bool CaptureController::startTarget(const CaptureTarget& target)
 uint32_t CaptureController::capturedDisplay() const
 {
     return m_capturedDisplay;
+}
+
+uint64_t CaptureController::streamEpoch() const
+{
+    return m_streamEpoch;
+}
+
+uint64_t CaptureController::continuityGeneration() const
+{
+    return m_continuityGeneration;
 }
 
 uint32_t CaptureController::desiredDisplay() const
@@ -201,6 +214,7 @@ void CaptureController::suspend(const std::string& reason)
     if (m_suspended) {
         return;
     }
+    m_suspendedContinuity = m_running && m_streamAlive.load() && !m_stale.load() ? m_continuityGeneration : 0;
     m_suspended = true;
     m_pauseReason = reason;
     if (m_running) {
@@ -220,15 +234,23 @@ void CaptureController::resume()
     if (!m_suspended) {
         return;
     }
+    const auto previousTarget = m_lastTarget;
+    const uint64_t previousContinuity = std::exchange(m_suspendedContinuity, 0);
+    const bool stale = m_stale.exchange(false);
     m_suspended = false;
-    m_stale.store(false);
     // Frames are wanted again from a clean sheet: whatever failures the last
     // stream earned belong to conditions that have had every chance to change,
     // and a start that fails here leaves the controller wanting a stream with
     // none - which is the state service() retries out of, with no mark to set.
     m_failedRestarts = 0;
     m_nextRetry = 0.0;
-    (void)start();
+    if (start() && !dead() && !stale && !m_stale.load() && previousContinuity != 0 && previousTarget && m_lastTarget &&
+        previousTarget->identifier == m_lastTarget->identifier &&
+        previousTarget->displayId == m_lastTarget->displayId &&
+        previousTarget->widthPoints == m_lastTarget->widthPoints &&
+        previousTarget->heightPoints == m_lastTarget->heightPoints) {
+        m_continuityGeneration = previousContinuity;
+    }
 }
 
 void CaptureController::narrowTo(const std::optional<IntRect>& rect)

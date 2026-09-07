@@ -73,6 +73,7 @@ struct PickerFixture
 // reads the frame just published rather than the previous one.
 void publishAndAwait(PickerFixture& fix, FrameBuffer&& frame, uint64_t sequence)
 {
+    frame.stamp = {fix.capture.streamEpoch(), StreamedDisplay, frameClockSeconds()};
     fix.mailbox.publish(std::move(frame));
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
     while (fix.worker.consumedFrameSequence() != sequence && std::chrono::steady_clock::now() < deadline) {
@@ -190,12 +191,12 @@ TEST_CASE("A confirmed draw poll returns the confirmed region and mode")
     CHECK_FALSE(fix.picker.active());
 }
 
-TEST_CASE("A cancelled poll clears the region")
+TEST_CASE("A cancelled poll reports cancellation without confirming a preview")
 {
     PickerFixture fix;
 
     // Finished with nothing confirmed and no tool-switch swallow in effect: the
-    // user's Esc, which the host turns into a region clear.
+    // user's Esc, which restores the committed region.
     RegionPickPoll poll;
     poll.finished = true;
     poll.displayId = StreamedDisplay;
@@ -545,6 +546,94 @@ TEST_CASE("The streamed display's faces open with the picker as candidates")
     fix.worker.stop();
 }
 
+TEST_CASE("A streamed face nomination rejects source or parent changes but not human selection time")
+{
+    PickerFixture fix;
+    fix.worker.startInline();
+    desktopStubs().displayGeometry = DisplayGeometry{0, 0, 320, 320};
+    desktopStubs().windowGeometry = WindowGeometry{0, 0, 320, 320, false, {}};
+    desktopStubs().faceDetectionSupported = true;
+    desktopStubs().faces = {{160, 80, 80, 80}};
+    auto frame = makeSolidFrameBuffer(640, 640, Color{10, 10, 10}, 1);
+    frame.stamp = {fix.capture.streamEpoch(), StreamedDisplay, 1.0};
+    fix.mailbox.publish(std::move(frame));
+    fix.worker.pump();
+    openPick(fix, RegionPickerMode::AttachFace);
+    REQUIRE(regionOverlayStubs().lastDisplays[0].faces.size() == 1);
+    const auto* face =
+        fix.picker.matchFaceCandidate(StreamedDisplay, regionOverlayStubs().lastDisplays[0].faces[0].region);
+    REQUIRE(face);
+    REQUIRE(face->sourceStamp);
+    CHECK(face->sourceSequence == 1);
+    RegionPicker::WindowCandidate host{42, 420, "Editor", {0, 0, 320, 320}, {}, StreamedDisplay};
+    REQUIRE(fix.picker.faceSourceCurrent(*face, host));
+    SECTION("Later pixels do not turn a human click into an expired result")
+    {
+        auto newer = makeSolidFrameBuffer(640, 640, Color{20, 20, 20}, 2);
+        newer.stamp = {fix.capture.streamEpoch(), StreamedDisplay, 100.0};
+        fix.mailbox.publish(std::move(newer));
+        fix.worker.pump();
+        CHECK(fix.picker.faceSourceCurrent(*face, host));
+    }
+    SECTION("Display dimensions changed")
+    {
+        desktopStubs().displayGeometry->widthPoints = 321;
+        CHECK_FALSE(fix.picker.faceSourceCurrent(*face, host));
+    }
+    SECTION("Parent moved")
+    {
+        desktopStubs().windowGeometry->x = 1;
+        CHECK_FALSE(fix.picker.faceSourceCurrent(*face, host));
+    }
+    SECTION("Parent unavailable")
+    {
+        desktopStubs().windowGeometry.reset();
+        CHECK_FALSE(fix.picker.faceSourceCurrent(*face, host));
+    }
+    SECTION("Parent minimized")
+    {
+        desktopStubs().windowGeometry->minimized = true;
+        CHECK_FALSE(fix.picker.faceSourceCurrent(*face, host));
+    }
+    SECTION("Stream replaced")
+    {
+        REQUIRE(fix.capture.start());
+        CHECK_FALSE(fix.picker.faceSourceCurrent(*face, host));
+    }
+    SECTION("Pixel dimensions changed without point dimensions changing")
+    {
+        auto resized = makeSolidFrameBuffer(320, 320, Color{10, 10, 10}, 2);
+        resized.stamp = {fix.capture.streamEpoch(), StreamedDisplay, 2.0};
+        fix.mailbox.publish(std::move(resized));
+        fix.worker.pump();
+        CHECK_FALSE(fix.picker.faceSourceCurrent(*face, host));
+    }
+}
+
+TEST_CASE("A stale stream frame cannot seed picker face suggestions")
+{
+    PickerFixture fix;
+    fix.worker.startInline();
+    desktopStubs().displayGeometry = DisplayGeometry{0, 0, 320, 320};
+    desktopStubs().faceDetectionSupported = true;
+    desktopStubs().faces = {{160, 80, 80, 80}};
+    auto frame = makeSolidFrameBuffer(640, 640, Color{10, 10, 10}, 1);
+    frame.stamp = {fix.capture.streamEpoch(), StreamedDisplay, 1.0};
+    SECTION("Old epoch")
+    {
+        ++frame.stamp.captureEpoch;
+    }
+    SECTION("Other display")
+    {
+        ++frame.stamp.displayId;
+    }
+    fix.mailbox.publish(std::move(frame));
+    fix.worker.pump();
+    openPick(fix, RegionPickerMode::AttachFace);
+    CHECK(regionOverlayStubs().lastDisplays[0].faces.empty());
+    CHECK(desktopStubs().detectorCall().calls == 0);
+}
+
 TEST_CASE("A pick asks for the whole display before it reads a frame")
 {
     // Everything a pick reads off the stream - the suggestions, a pinned colour
@@ -636,6 +725,13 @@ TEST_CASE("A display off the capture stream is scanned in the background")
     REQUIRE(candidate != nullptr);
     CHECK(candidate->displayId == StreamedDisplay + 1);
     CHECK(candidate->frameWidth == ScannedSide);
+    CHECK_FALSE(candidate->sourceStamp);
+    CHECK(candidate->sourceSequence == 0);
+    RegionPicker::WindowCandidate host{42, 420, "Editor", {0, 0, 320, 320}, {}, StreamedDisplay + 1};
+    desktopStubs().windowGeometry = WindowGeometry{0, 0, 320, 320, false, {}};
+    CHECK(fix.picker.faceSourceCurrent(*candidate, host));
+    desktopStubs().displayGeometry->heightPoints = 321;
+    CHECK_FALSE(fix.picker.faceSourceCurrent(*candidate, host));
 
     // A second drain has nothing left to deliver.
     regionOverlayStubs().deliveredFaces.clear();

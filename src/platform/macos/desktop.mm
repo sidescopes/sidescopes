@@ -92,6 +92,26 @@ std::vector<DesktopWindow> attachCandidateWindows(uint32_t displayId)
     return onScreenWindowsUpToLayer(displayId, 8);
 }
 
+WindowPresence windowPresence(uint64_t identity)
+{
+    if (!CGPreflightScreenCaptureAccess()) {
+        return WindowPresence::Unknown;
+    }
+    const void* ids[1] = {reinterpret_cast<const void*>(static_cast<uintptr_t>(identity))};
+    CFArrayRef requested = CFArrayCreate(kCFAllocatorDefault, ids, 1, nullptr);
+    if (!requested) {
+        return WindowPresence::Unknown;
+    }
+    CFArrayRef windows = CGWindowListCreateDescriptionFromArray(requested);
+    CFRelease(requested);
+    if (!windows) {
+        return WindowPresence::Unknown;
+    }
+    const WindowPresence presence = CFArrayGetCount(windows) == 0 ? WindowPresence::Closed : WindowPresence::Present;
+    CFRelease(windows);
+    return presence;
+}
+
 std::optional<WindowGeometry> windowGeometry(uint64_t identity)
 {
     const CGWindowID windowId = static_cast<CGWindowID>(identity);

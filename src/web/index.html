@@ -495,8 +495,7 @@ function refreshReadouts() {
     readouts[at].textContent = (moved && value > 0 ? '+' : '') + shownValue(ADJUSTMENTS[at], value);
     slider.closest('label').dataset.moved = moved ? '1' : '0';
   });
-  // Only when there is something to undo, the same rule the application's own
-  // region-clearing controls follow.
+  // Show reset only when an adjustment has changed.
   resetButton.hidden = sliders.every((slider) => parseFloat(slider.value) === 0);
 }
 

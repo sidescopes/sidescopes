@@ -52,7 +52,10 @@ public:
     virtual std::vector<CaptureTarget> listTargets() = 0;
 
     /// Starts delivering @p target's frames into the mailbox; false on failure.
-    [[nodiscard]] virtual bool start(const CaptureTarget& target, int maxFramesPerSecond, FrameMailbox& mailbox) = 0;
+    /// Each delivery retains @p captureEpoch from this call, including callbacks
+    /// already in flight when a replacement stream starts.
+    [[nodiscard]] virtual bool start(const CaptureTarget& target, int maxFramesPerSecond, FrameMailbox& mailbox,
+                                     uint64_t captureEpoch = 0) = 0;
 
     virtual void stop() = 0;
 

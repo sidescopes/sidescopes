@@ -54,7 +54,6 @@ struct PaneRenderOutcome
     /// worker to fill its image.
     std::optional<ScopeChoice> chosenScope;
     /// The clear tool: the host drops every region and attachment.
-    bool clearRegion = false;
     /// A scope parameter changed: the host pushes the settings to the worker.
     bool analysisDirty = false;
     /// Interaction happened worth marking: the host stamps its activity clock.

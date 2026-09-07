@@ -58,25 +58,19 @@ std::string readLog(const test::TempFile& log)
 
 void exerciseFaceStartup(const test::TempFile& log)
 {
-    // This executable owns a fresh support-query cache. Failing the first
-    // thread allocation must leave the next call able to launch the query.
-    CHECK_FALSE(withFailedAllocation([] { return supportsFaceDetection(); }));
-    REQUIRE(waitUntil([&] {
-        (void)supportsFaceDetection();
-        return readLog(log).find("face_support completed supported=") != std::string::npos;
-    }));
-    if (!supportsFaceDetection()) {
-        WARN("Support-query retry passed; this Windows installation has no face detector");
-        return;
-    }
+    REQUIRE(supportsFaceDetection());
 
     constexpr int Edge = 128;
     const std::vector<uint8_t> pixels(static_cast<std::size_t>(Edge) * Edge * 4, 0);
     const FrameView frame{pixels.data(), Edge * 4, Edge, Edge};
     CHECK(withFailedAllocation([&] { return detectFaces(frame, 1.0f).empty(); }));
-    CHECK(readLog(log).find("face_detection worker allocation failed") != std::string::npos);
+    CHECK(readLog(log).find("face_detection failed") != std::string::npos);
     CHECK(detectFaces(frame, 1.0f).empty());
     CHECK(readLog(log).find("face_detection completed faces=0") != std::string::npos);
+
+    auto session = createFaceDetectionSession();
+    CHECK(withFailedAllocation([&] { return session->detect(frame, 36).status == FaceDetectionStatus::Failed; }));
+    CHECK(session->detect(frame, 36).status == FaceDetectionStatus::Completed);
 }
 
 void exerciseCaptureStartup()

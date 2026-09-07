@@ -31,7 +31,7 @@ std::vector<TourStep> labTourSteps(const ShortcutResolver& shortcuts)
                  "The region stays fixed when you change images and can extend beyond one. The scopes include the "
                  "black desktop outside the image. Drag the band to move it, or a handle to resize it.",
                  // Clear of what the region already wears outside itself: a
-                 // twelve-point band, and a close badge beyond that again.
+                 // twelve-point band and its resize handles.
                  /*halo=*/26.0f},
         TourStep{"scopes", "Read the same pixels in different ways",
                  "Every visible scope follows the region. Use the selector to combine instruments; a scope's letter "

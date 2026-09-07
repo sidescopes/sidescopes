@@ -42,14 +42,13 @@ public:
     /// Sets a display-relative region and clamps it to the virtual display.
     void reset(const RegionOfInterest& region, int displayWidth, int displayHeight);
 
-    /// Drops the region entirely. The scopes then read nothing, which is the
-    /// desktop's own answer to Escape: an empty scope is a state, not a
-    /// failure.
+    /// Internal fallback when no valid display region is available.
     void clear();
 
     /// Arms the draw gesture, as the desktop's picker does: the next drag on
     /// the display lays down a new region instead of moving the old one.
     void armDraw();
+    [[nodiscard]] bool cancelDraw();
 
     [[nodiscard]] bool armed() const
     {
@@ -65,11 +64,6 @@ public:
     /// border. @return Whether the region changed and the scopes are due a
     /// new pass.
     [[nodiscard]] bool update(const Placement& placement, int displayWidth, int displayHeight);
-
-    /// Whether the close badge was clicked since the last ask, and clears
-    /// the flag. The host does the dismissing, because clearing a region is
-    /// more than the rectangle: the traces are released with it.
-    [[nodiscard]] bool takeDismissed();
 
     [[nodiscard]] SsRect rect() const
     {
@@ -96,8 +90,6 @@ private:
     /// Says what a press would do, as the desktop border's zones do.
     void announceCursor(const Placement& placement) const;
     void drawBorder(const Placement& placement, int displayWidth, int displayHeight) const;
-    /// The close badge's centre, on the band's outer top
-    /// corner at forty-five degrees off the corner handle.
     /// The region's rectangle on screen, SNAPPED to whole points.
     ///
     /// Everything the border draws is built from this - the measured ring, the
@@ -111,15 +103,6 @@ private:
     /// the region MEASURES is untouched: that is m_rect, in display units.
     [[nodiscard]] std::pair<ImVec2, ImVec2> screenRect(const Placement& placement) const;
 
-    [[nodiscard]] static ImVec2 closeCentre(const ImVec2& topLeft, const ImVec2& bottomRight);
-    /// @return Whether the badge is offered at all: a region too narrow
-    ///         yields the corner to its resize zones instead.
-    [[nodiscard]] bool closeOffered(const Placement& placement) const;
-    [[nodiscard]] bool closeVisible(const Placement& placement) const;
-    void drawCloseBadge(const ImVec2& centre) const;
-    /// @return Whether the pointer is on the badge, so the gesture below it
-    ///         is left alone this frame.
-    [[nodiscard]] bool updateClose(const Placement& placement);
     /// The picker's dimmed workspace and its instruction banner.
     static void dashedRect(ImDrawList* draw, const ImVec2& topLeft, const ImVec2& bottomRight);
     void drawPickerOverlay(const Placement& placement, int displayWidth, int displayHeight) const;
@@ -132,7 +115,7 @@ private:
     /// That drag, in progress.
     bool m_drawing = false;
     ImVec2 m_drawFrom{0.0f, 0.0f};
-    bool m_dismissed = false;
+    SsRect m_beforeDraw{0, 0, 0, 0};
 };
 
 }  // namespace sidescopes

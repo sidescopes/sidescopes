@@ -58,6 +58,16 @@ class ScenarioPreferencesTests(unittest.TestCase):
         self.assertIn('clear-region', catalog.unavailable(
             catalog.scenario_named('region-redraw'), 'V', old_profile, 'V'))
 
+    def test_continuity_profile_never_prices_cancellation_as_clearing(self):
+        with mock.patch.object(catalog, 'strings_in', return_value=b'shortcut_cancel_interaction'):
+            profile = catalog.detect_profile('candidate')
+        self.assertEqual(profile.name, 'region-continuity')
+        for identifier in ('idle-no-region', 'region-redraw'):
+            self.assertIn('clear-region', catalog.unavailable(
+                catalog.scenario_named(identifier), 'V', profile, 'V'))
+        self.assertEqual(catalog.unavailable(
+            catalog.scenario_named('region-replace'), 'V', profile, 'V'), '')
+
 
 class ApplicationTeardownTests(unittest.TestCase):
     def setUp(self):

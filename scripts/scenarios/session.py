@@ -587,23 +587,25 @@ class BorderFlick(Action):
 
 
 class RegionRedraw(Action):
-    """Draws a region roughly and quickly, clears it, and draws it again.
+    """Repeatedly draws a region, optionally clearing it between draws.
 
     The other half of what the owner does: "the region is often drawn within a
     second". Nothing here is a careful selection - the picker is opened, a
-    rectangle is thrown across the content in a fifth of a second, and Escape
-    takes it away again. What it exercises is the picker's own rubber band,
+    rectangle is thrown across the content in a fifth of a second. The legacy
+    clear scenario then presses Escape; the replacement scenario keeps it.
+    What it exercises is the picker's own rubber band,
     which is drawn by the overlay rather than by the application's frame, and
     the settings churn a growing region pushes at the worker.
     """
 
-    def __init__(self, target, region, rest=0.5):
+    def __init__(self, target, region, rest=0.5, clear_between=True):
         super().__init__()
         self._target = target
         self._region = region
         self._rest = rest
         self._drawn = 0
         self._attempts = 0
+        self._clear_between = clear_between
 
     def complaints(self):
         if self._attempts and not self._drawn:
@@ -627,7 +629,8 @@ class RegionRedraw(Action):
             self._stop.wait(self._rest)
             if border_window(self._target.pid, (width, height)) is not None:
                 self._drawn += 1
-            quartz.press_key("escape")
+            if self._clear_between:
+                quartz.press_key("escape")
             self._stop.wait(self._rest)
 
 
@@ -666,6 +669,8 @@ def action_for(name, region, content_rect, target=None):
         return BorderFlick(target, region, distance=min(300.0, content_rect[2] * 0.3))
     if name == "region-redraw":
         return RegionRedraw(target, region)
+    if name == "region-replace":
+        return RegionRedraw(target, region, clear_between=False)
     if name == "window-drag":
         return WindowDrag(content_rect, distance=min(200.0, content_rect[2] * 0.15))
 

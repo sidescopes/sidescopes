@@ -46,28 +46,23 @@ struct RegionOutcome
     bool activity = false;
 };
 
-/// What the region border's live edit asks of the host - at most one of them,
-/// applied in this order: the border's close affordances, its binding control,
-/// then a drag that moved or resized the region it outlines.
+/// What the region border's live edit asks of the host: its binding control
+/// takes priority over a drag that moved or resized the outlined region.
 struct RegionBorderEditOutcome
 {
-    bool dismissed = false;
     bool bindingToggled = false;
     std::optional<RegionOfInterest> edited;
 };
 
 /// The shell state one border sync reads, gathered fresh per call: the label
 /// an attached border wears, which window the region is routed to, whether
-/// the active window is moving or this application's own window is
-/// minimized, and the frame clock the face-lock content watch settles
-/// against.
+/// the active window is moving or this application's own window is minimized.
 struct RegionBorderState
 {
     const std::string& windowLabel;
     uint64_t activeWindowIdentity;
     bool windowMoving;
     bool windowMinimized;
-    double now;
 };
 
 /// Owns the region truth the whole shell shares: the global region the
@@ -106,7 +101,7 @@ public:
     ///         no-op nudges neither the worker nor the border.
     [[nodiscard]] RegionOutcome useRegion(const std::optional<RegionOfInterest>& region) const;
 
-    /// Drops all selection - a pending pick, every attached window, and the
+    /// Internal emergency reset. Drops a pending pick, every attached window, and the
     /// global region alike - leaving the scopes reading nothing.
     [[nodiscard]] RegionOutcome clearRegion();
 

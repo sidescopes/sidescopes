@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <fstream>
 #include <iterator>
+#include <limits>
 #include <string>
 #include <thread>
 #include <vector>
@@ -11,6 +12,7 @@
 #include "core/diagnostics.h"
 #include "platform/face_detection.h"
 #include "platform/region_selection.h"
+#include "platform/windows/face_network_geometry.h"
 #include "platform/windows/region_border_view.h"
 #include "platform/windows/region_picker_view.h"
 #include "temp_file.h"
@@ -74,27 +76,34 @@ TEST_CASE("An attached drag owns the preview across displays", "[native]")
 TEST_CASE("Losing border mouse capture cancels pending interactions", "[native]")
 {
     g_border.dragZone = ZoneLeft;
-    g_border.closePressed = true;
     g_border.bindingPressed = true;
     g_borderEditing = true;
 
     borderProc(nullptr, WM_CAPTURECHANGED, 0, 0);
 
     CHECK(g_border.dragZone == ZoneNone);
-    CHECK_FALSE(g_border.closePressed);
     CHECK_FALSE(g_border.bindingPressed);
     CHECK_FALSE(g_borderEditing);
 }
 
-TEST_CASE("Face detection survives repeated independent COM apartments", "[native]")
+TEST_CASE("Decoded face boxes cannot overflow pairwise integer NMS areas", "[native]")
 {
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
-    while (!supportsFaceDetection() && std::chrono::steady_clock::now() < deadline) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
-    }
-    if (!supportsFaceDetection()) {
-        SKIP("The system face detector is unavailable");
-    }
+    // Each 40000-square box fits an int area by itself, but NMS adds the
+    // two areas in int. Reject both before that native overlap operation.
+    CHECK_FALSE(face_network::validNmsBounds(0, 0, 40000, 40000));
+    CHECK_FALSE(face_network::validNmsBounds(1, 1, 40000, 40000));
+    CHECK(face_network::validNmsBounds(0, 0, 32767, 32767));
+    CHECK(face_network::validNmsBounds(0, 0, 1280, 1280));
+    CHECK(face_network::validNmsBounds(-20, -20, 80, 80));
+    CHECK_FALSE(face_network::validNmsBounds(0, 0, 0, 100));
+    CHECK_FALSE(face_network::validNmsBounds(0, 0, 100, -1));
+    CHECK_FALSE(face_network::validNmsBounds(std::numeric_limits<double>::quiet_NaN(), 0, 100, 100));
+    CHECK_FALSE(face_network::validNmsBounds(0, 0, std::numeric_limits<double>::infinity(), 100));
+}
+
+TEST_CASE("Face detection survives repeated independent sessions", "[native]")
+{
+    REQUIRE(supportsFaceDetection());
 
     const test::TempFile log("native-face-detection.log");
 
@@ -108,8 +117,8 @@ TEST_CASE("Face detection survives repeated independent COM apartments", "[nativ
 
     diagConfigure({"facelock", log.path().string()});
 
-    // Each call activates the real Windows detector on a fresh worker and
-    // tears its apartment down. A stale cached factory can fail on re-entry.
+    // Repeated picker calls own independent models and release their native
+    // state. A blank image must complete successfully each time.
     constexpr int Edge = 128;
     const std::vector<uint8_t> pixels(static_cast<std::size_t>(Edge) * Edge * 4, 0);
     const FrameView frame{pixels.data(), Edge * 4, Edge, Edge};
@@ -128,6 +137,31 @@ TEST_CASE("Face detection survives repeated independent COM apartments", "[nativ
     }
     CHECK(completed == 3);
     CHECK(content.find("face_detection failed") == std::string::npos);
+}
+
+TEST_CASE("Face sessions reject invalid frames and preserve reuse", "[native]")
+{
+    auto session = createFaceDetectionSession();
+    REQUIRE(session);
+    CHECK(session->detect({}, 36).status == FaceDetectionStatus::Failed);
+
+    constexpr int Width = 128;
+    constexpr int Height = 96;
+    constexpr int Stride = Width * 4 + 16;
+    const std::vector<uint8_t> pixels(static_cast<std::size_t>(Stride) * Height, 0);
+    FrameView frame{pixels.data(), Stride, Width, Height};
+    CHECK(session->detect(frame, -1).status == FaceDetectionStatus::Failed);
+    CHECK(session->detect(frame, std::numeric_limits<double>::infinity()).status == FaceDetectionStatus::Failed);
+    CHECK(session->detect(frame, std::numeric_limits<double>::quiet_NaN()).status == FaceDetectionStatus::Failed);
+    frame.strideBytes = Width * 4 - 1;
+    CHECK(session->detect(frame, 36).status == FaceDetectionStatus::Failed);
+    frame.strideBytes = Stride;
+    for (const PixelFormat format : {PixelFormat::Bgra8, PixelFormat::Argb2101010, PixelFormat::Bgra8}) {
+        frame.format = format;
+        const auto result = session->detect(frame, 36);
+        CHECK(result.status == FaceDetectionStatus::Completed);
+        CHECK(result.faces.empty());
+    }
 }
 
 }  // namespace sidescopes

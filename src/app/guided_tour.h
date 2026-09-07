@@ -21,7 +21,7 @@ struct TourStep
     /// Per stop rather than one number for all of them, because the things a
     /// tour points at differ by more than any single value can cover: an icon
     /// is a couple of dozen points across and wants a snug ring, a region
-    /// already carries a band and a close badge OUTSIDE itself that the ring
+    /// already carries a band outside itself that the ring
     /// has to clear, and something filling its container wants none at all or
     /// the ring falls off the edge.
     float halo = 8.0f;

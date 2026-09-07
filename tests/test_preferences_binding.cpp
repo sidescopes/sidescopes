@@ -53,7 +53,7 @@ Preferences savedSession()
     saved.layoutOrientation = 2;
     saved.layoutWeights["org.sidescopes.waveform"] = 2.0;
     saved.shortcuts.drawRegion = "G";
-    saved.shortcuts.clearRegion = "Escape";
+    saved.shortcuts.cancelInteraction = "Escape";
     saved.scopeShortcuts["org.sidescopes.histogram"] = "K";
     saved.pins.clear();
     saved.pins.push_back(FloatColor{0.1f, 0.2f, 0.3f});

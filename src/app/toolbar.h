@@ -34,10 +34,8 @@ public:
     /// toggle never disturbs.
     [[nodiscard]] PaneRenderOutcome drawScopeToggles();
 
-    /// The region toolbox: draw, attach to a window, attach to a face, and the
-    /// clear, which stands down while there is no region to clear
-    /// (@p regionSelected).
-    [[nodiscard]] PaneRenderOutcome drawRegionToolIcons(bool regionSelected);
+    /// The region toolbox: draw, select a window, or select a face.
+    [[nodiscard]] PaneRenderOutcome drawRegionToolIcons();
 
     /// Where the region tools were last drawn, in screen coordinates, or
     /// nothing before the first draw.

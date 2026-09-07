@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -45,9 +46,7 @@ struct RegionPickOutcome
     std::optional<FloatColor> pinColor;
     /// A confirmed region pick: the host attaches or draws it.
     std::optional<ConfirmedPick> confirmed;
-    /// Cancelled with Esc, and not by a tool switch: the host clears the
-    /// selection. A cancel ordered by a tool switch is not the user's Esc and
-    /// resets nothing.
+    /// Cancelled with Esc rather than replaced by another tool.
     bool cancelled = false;
     /// The pick ended (confirm or cancel): the host re-syncs the region border.
     bool ended = false;
@@ -58,7 +57,7 @@ struct RegionPickOutcome
 /// Owns the region-picker lifecycle: opening the screenshot-style overlay, the
 /// background per-display face scans, and the confirm/pin/preview polling. The
 /// host coordination a pick resolves to - attaching a window, drawing the
-/// global region, pinning a colour, clearing the region - stays with the
+/// global region, pinning a colour, restoring a cancelled preview - stays with the
 /// host, fed by the RegionPickOutcome this returns. It reads the capture
 /// controller, worker, and capture source it is constructed with, and drives
 /// the platform picker seams directly, so a poll can be judged end to end
@@ -146,6 +145,11 @@ public:
     /// near-exact comparison the window match uses.
     [[nodiscard]] const FaceCandidate* matchFaceCandidate(uint32_t displayId, const RegionOfInterest& region) const;
 
+    /// Checks source and parent geometry before a face confirmation changes
+    /// capture or attachment. Elapsed picker time is not fresh face evidence;
+    /// following still begins with a new detector observation.
+    [[nodiscard]] bool faceSourceCurrent(const FaceCandidate& face, const WindowCandidate& host) const;
+
 private:
     /// One non-streamed display's background face scan for an open picker: a
     /// detached thread grabs that display off the capture stream, detects, and
@@ -163,6 +167,7 @@ private:
         int frameWidth = 0;          ///< the grabbed frame's size, guarded by mutex
         int frameHeight = 0;
         double elapsedMs = 0.0;  ///< grab plus detect, for the diagnostics line
+        AttachDisplayRect displayGeometry;
     };
 
     void openRegionPicker(RegionPickerMode mode, bool regionSelected);
@@ -173,6 +178,7 @@ private:
     static void startDisplayFaceScan(DisplayFaceScan& scan, double widthPoints);
     static void runDisplayFaceScan(DisplayFaceScan& scan, double widthPoints);
     void consumeDisplayFaceScan(DisplayFaceScan& scan);
+    [[nodiscard]] bool streamedFaceSourceCurrent(const FaceCandidate& face) const;
     static void logPickerSuggestions(const std::vector<PickerDisplay>& pickerDisplays);
     [[nodiscard]] RegionPickOutcome processPinPoll(const RegionPickPoll& poll,
                                                    std::optional<AnalysisWorker::FrameSize> frameSize,
@@ -198,6 +204,7 @@ private:
 
     std::vector<WindowCandidate> m_windowCandidates;
     std::vector<FaceCandidate> m_faceCandidates;
+    std::map<uint32_t, AttachDisplayRect> m_faceSourceGeometry;
 
     std::vector<std::unique_ptr<DisplayFaceScan>> m_displayFaceScans;
     /// Bumped every time the picker opens, stamped on each scan it spawns: a

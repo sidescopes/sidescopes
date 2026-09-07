@@ -1,5 +1,6 @@
 #pragma once
 
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <vector>
@@ -151,6 +152,22 @@ struct FloatColor
     float b = 0.0f;
 };
 
+/// Identity and receipt time of the native stream that produced these pixels.
+/// A restart gets a new epoch even when it captures the same display. The time
+/// is measured before the CPU copy, on the steady clock; it is not the display
+/// presentation timestamp. Zero fields mean an unstamped synthetic frame.
+struct FrameStamp
+{
+    uint64_t captureEpoch = 0;
+    uint32_t displayId = 0;
+    double receivedSeconds = 0.0;
+};
+
+[[nodiscard]] inline double frameClockSeconds()
+{
+    return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
+}
+
 /// Non-owning view of one captured frame, four bytes per pixel in whichever
 /// layout @c format names, rows top-down. The producer guarantees the pixels
 /// stay valid for the duration of the call that received the view.
@@ -186,6 +203,7 @@ struct FrameView
     /// Defaulting to Bgra8 is what makes that safe: a producer that says
     /// nothing produces exactly the frame it always did.
     PixelFormat format = PixelFormat::Bgra8;
+    FrameStamp stamp{};
 
     /// The display's pixel extents, which for an uncropped frame are its own.
     [[nodiscard]] int displayWidth() const

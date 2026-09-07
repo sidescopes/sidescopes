@@ -4,6 +4,7 @@
 #include <chrono>
 #include <cmath>
 #include <set>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -26,6 +27,10 @@ void clearOutput(AnalysisWorker::Output& output, uint64_t framesProcessed, uint6
     output.accumulateMilliseconds = 0.0;
     output.framesProcessed = framesProcessed;
     output.version = version;
+    output.region.reset();
+    output.selectionRevision = 0;
+    output.frameStamp = {};
+    output.frameSequence = 0;
 }
 }  // namespace
 
@@ -40,16 +45,20 @@ IntRect RegionOfInterest::toPixels(int frameWidth, int frameHeight) const
     // border's own bright ring lives exactly there - it flickered into
     // the waveform as a phantom line near the top. A boundary pixel
     // belongs to the sample only when it is entirely inside.
-    const auto floorEdge = [](double percent, int extent) {
-        return static_cast<int>(std::floor(std::clamp(percent, 0.0, 100.0) * extent / 100.0));
+    const auto pixelEdge = [](double percent, int extent) {
+        const double edge = std::clamp(percent, 0.0, 100.0) * extent / 100.0;
+        const double integer = std::round(edge);
+        // Percent/point round trips can leave an integer edge a few double
+        // steps away. Limit correction to four representable steps toward
+        // that edge, not a geometric epsilon: about 4.5e-13 pixels at 533.
+        // Direction matters because spacing differs across powers of two.
+        const double spacing = std::abs(std::nextafter(integer, edge) - integer);
+        return std::abs(edge - integer) <= 4.0 * spacing ? integer : edge;
     };
-    const auto ceilEdge = [](double percent, int extent) {
-        return static_cast<int>(std::ceil(std::clamp(percent, 0.0, 100.0) * extent / 100.0));
-    };
-    const int left = ceilEdge(leftPercent, frameWidth);
-    const int top = ceilEdge(topPercent, frameHeight);
-    const int right = std::max(left, floorEdge(rightPercent, frameWidth));
-    const int bottom = std::max(top, floorEdge(bottomPercent, frameHeight));
+    const int left = static_cast<int>(std::ceil(pixelEdge(leftPercent, frameWidth)));
+    const int top = static_cast<int>(std::ceil(pixelEdge(topPercent, frameHeight)));
+    const int right = std::max(left, static_cast<int>(std::floor(pixelEdge(rightPercent, frameWidth))));
+    const int bottom = std::max(top, static_cast<int>(std::floor(pixelEdge(bottomPercent, frameHeight))));
     return IntRect{left, top, right - left, bottom - top};
 }
 
@@ -116,10 +125,12 @@ void AnalysisWorker::updateSettings(const AnalysisSettings& settings)
     m_mailbox.nudge();
 }
 
-bool AnalysisWorker::fetchOutput(uint64_t& lastSeenVersion, Output& output) const
+bool AnalysisWorker::fetchOutput(uint64_t& lastSeenVersion, Output& output,
+                                 std::optional<uint64_t> expectedSelectionRevision) const
 {
     std::lock_guard lock(m_outputMutex);
-    if (m_output.version == lastSeenVersion) {
+    if (m_output.version == lastSeenVersion ||
+        (expectedSelectionRevision && m_output.selectionRevision != *expectedSelectionRevision)) {
         return false;
     }
     try {
@@ -543,7 +554,83 @@ struct AnalysisWorker::Pass
     uint64_t seenSettingsVersion = 0;
     std::optional<uint64_t> lastContentHash;
     uint64_t framesProcessed = 0;
+    FrameRegionResolver regionResolver;
+    std::optional<FrameRegionResolution> resolution;
+    FrameStamp resolvedStamp;
+    uint64_t resolvedSequence = 0;
+    uint64_t resolvedRevision = 0;
+    std::optional<RegionOfInterest> analyzedRegion;
+    FrameStamp analyzedStamp;
+    uint64_t analyzedSequence = 0;
 };
+
+void AnalysisWorker::setFrameRegionResolverFactory(FrameRegionResolverFactory factory)
+{
+    if (m_thread.joinable() || m_inlinePass) {
+        throw std::logic_error("Set the frame region resolver before starting analysis");
+    }
+    m_regionResolverFactory = std::move(factory);
+}
+
+bool AnalysisWorker::selectionCurrent(uint64_t revision) const
+{
+    std::lock_guard lock(m_settingsMutex);
+    return m_settings.selectionRevision == revision;
+}
+
+std::optional<RegionOfInterest> AnalysisWorker::resolveFrameRegion(Pass& pass, const FrameView& view, bool newFrame)
+{
+    if (!m_regionResolverFactory) {
+        return pass.settings.region;
+    }
+    const uint64_t revision = pass.settings.selectionRevision;
+    const bool sameFrame = pass.resolution && pass.resolvedSequence == view.sequence &&
+                           pass.resolvedStamp.captureEpoch == view.stamp.captureEpoch &&
+                           pass.resolvedStamp.displayId == view.stamp.displayId;
+    if (!sameFrame || pass.resolvedRevision != revision) {
+        refreshFrameResolution(pass, {view, pass.settings.region, revision, newFrame && !sameFrame});
+    }
+    if (!pass.resolution || pass.resolution->selectionRevision != revision) {
+        return std::nullopt;
+    }
+    const auto& resolution = *pass.resolution;
+    switch (resolution.mode) {
+    case FrameRegionResolution::Mode::Configured:
+        return pass.settings.region;
+    case FrameRegionResolution::Mode::Override:
+        return resolution.region;
+    case FrameRegionResolution::Mode::Skip:
+        return std::nullopt;
+    }
+    return std::nullopt;
+}
+
+void AnalysisWorker::refreshFrameResolution(Pass& pass, const FrameRegionRequest& request)
+{
+    // Cache even a failure/skip, so a settings-only recompute cannot turn
+    // the same pixels into a second independent observation.
+    pass.resolvedStamp = request.frame.stamp;
+    pass.resolvedSequence = request.frame.sequence;
+    pass.resolvedRevision = request.selectionRevision;
+    pass.resolution = FrameRegionResolution{FrameRegionResolution::Mode::Skip, {}, request.selectionRevision};
+    try {
+        if (!pass.regionResolver) {
+            pass.regionResolver = m_regionResolverFactory();
+        }
+        if (pass.regionResolver) {
+            pass.resolution = pass.regionResolver(request);
+        }
+    } catch (const std::bad_alloc&) {
+        // Allocation failure must preserve identity/retirement evidence held
+        // by the resolver. The cached skip still consumes this observation.
+        diagEmit(DiagChannel::Perf, "analysis region allocation failed; waiting for fresh work");
+    } catch (...) {
+        // A partially advanced resolver is discarded on its owning
+        // thread. The next fresh frame may construct a healthy one.
+        pass.regionResolver = {};
+        diagEmit(DiagChannel::Perf, "analysis region resolution failed; waiting for fresh work");
+    }
+}
 
 void AnalysisWorker::run()
 {
@@ -590,6 +677,9 @@ void AnalysisWorker::pump()
 void AnalysisWorker::runPass(Pass& pass, std::chrono::milliseconds wait)
 {
     const bool newFrame = takeLatestFrame(wait);
+    if (!m_hasFrame) {
+        pass.resolution.reset();
+    }
     try {
         if (!pass.scopesInitialized) {
             pass.scopes = makeWorkerScopes(m_registry);
@@ -636,7 +726,12 @@ void AnalysisWorker::analyzeLatestFrame(Pass& pass, bool newFrame)
     // the brief sampling reads that tolerate the previous frame.
     const FrameView view = m_latestFrame.view();
     // The last images stand while the frame cannot answer for the region.
-    const std::optional<IntRect> region = regionInFrame(view, *settings.region);
+    const auto resolved = resolveFrameRegion(pass, view, newFrame);
+    if (!resolved || !selectionCurrent(settings.selectionRevision) || m_held.load(std::memory_order_relaxed) ||
+        m_releaseFrame.load(std::memory_order_relaxed)) {
+        return;
+    }
+    const std::optional<IntRect> region = regionInFrame(view, *resolved);
     if (!region) {
         return;
     }
@@ -646,7 +741,7 @@ void AnalysisWorker::analyzeLatestFrame(Pass& pass, bool newFrame)
     // it on any path leaves a stale value that defeats the next
     // unchanged-content comparison.
     const uint64_t contentHash = hashRegion(view, *region, view.fromDisplay(settings.maskedWindow));
-    if (!settingsChanged && contentHash == pass.lastContentHash) {
+    if (!settingsChanged && resolved == pass.analyzedRegion && contentHash == pass.lastContentHash) {
         return;
     }
     pass.lastContentHash = contentHash;
@@ -658,22 +753,37 @@ void AnalysisWorker::analyzeLatestFrame(Pass& pass, bool newFrame)
     if (newFrame) {
         ++pass.framesProcessed;
     }
-
+    pass.analyzedRegion = resolved;
+    pass.analyzedStamp = view.stamp;
+    pass.analyzedSequence = view.sequence;
     publishOutput(pass, elapsedMs);
 }
 
 void AnalysisWorker::publishOutput(Pass& pass, double elapsedMs)
 {
+    // Never nest settings and output locks, and never notify under either.
+    // The host still checks its active revision when consuming output: a
+    // concurrent selection can change immediately after this final check.
+    if (!selectionCurrent(pass.settings.selectionRevision) || m_held.load(std::memory_order_relaxed) ||
+        m_releaseFrame.load(std::memory_order_relaxed)) {
+        pass.lastContentHash.reset();
+        return;
+    }
     std::vector<WorkerScope>& scopes = pass.scopes;
     const std::set<std::string>& enabledScopes = pass.enabledScopes;
     {
         std::lock_guard lock(m_outputMutex);
         try {
             writeOutput(m_output, scopes, enabledScopes, elapsedMs, pass.framesProcessed);
+            m_output.region = pass.analyzedRegion;
+            m_output.selectionRevision = pass.settings.selectionRevision;
+            m_output.frameStamp = pass.analyzedStamp;
+            m_output.frameSequence = pass.analyzedSequence;
         } catch (const std::bad_alloc&) {
             // Some images may already have been copied. Withdraw the whole
             // partial result before releasing the lock, then retry next frame.
             clearOutput(m_output, pass.framesProcessed, m_output.version + 1);
+            m_output.selectionRevision = pass.settings.selectionRevision;
             pass.lastContentHash.reset();
             diagEmit(DiagChannel::Perf, "analysis output allocation failed; retrying on the next frame");
         }
@@ -701,9 +811,15 @@ void AnalysisWorker::notifyOutput() const
 
 void AnalysisWorker::publishAllocationFailure(uint64_t framesProcessed)
 {
+    uint64_t selectionRevision;
+    {
+        std::lock_guard lock(m_settingsMutex);
+        selectionRevision = m_settings.selectionRevision;
+    }
     {
         std::lock_guard lock(m_outputMutex);
         clearOutput(m_output, framesProcessed, m_output.version + 1);
+        m_output.selectionRevision = selectionRevision;
     }
     diagEmit(DiagChannel::Perf, "analysis allocation failed; retrying on the next frame");
     notifyOutput();

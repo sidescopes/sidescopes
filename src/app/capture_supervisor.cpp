@@ -16,7 +16,8 @@ CaptureDecision CaptureSupervisor::update(const CaptureConditions& conditions, d
     switch (decision.pipeline) {
     case PipelineAction::Suspend:
         SS_DIAG(Perf, "pipeline suspended - %s", outOfSight ? "out of sight" : "no region");
-        decision.pauseReason = outOfSight ? "paused - the window is out of sight" : "paused - no region selected";
+        decision.pauseReason =
+            outOfSight ? "paused - the window is out of sight" : "paused - waiting for a region source";
         break;
     case PipelineAction::Resume:
         SS_DIAG(Perf, "pipeline resumed");

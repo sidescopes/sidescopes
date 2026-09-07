@@ -9,7 +9,7 @@
 namespace sidescopes {
 
 /// Which edges a border drag adjusts; Move relocates the whole region,
-/// Close dismisses it. Shared by the geometry helpers below and each
+/// shared by the geometry helpers below and each
 /// platform's border overlay.
 enum ZoneBits : unsigned
 {
@@ -19,7 +19,6 @@ enum ZoneBits : unsigned
     ZoneTop = 1u << 2,
     ZoneBottom = 1u << 3,
     ZoneMove = 1u << 4,
-    ZoneClose = 1u << 5,
     ZoneBinding = 1u << 6,
 };
 
@@ -34,14 +33,6 @@ struct LocalRect
     double width = 0.0;
     double height = 0.0;
 };
-
-/// The close control needs enough horizontal room to stay clear of the corner
-/// resize zones. It remains available throughout a drag.
-inline constexpr double MinimumRegionWidthForClose = 48.0;
-
-/// @return Whether a region of @p width has room for its close control at the
-///         current platform @p scale.
-[[nodiscard]] bool regionCloseAvailable(double width, double scale = 1.0);
 
 /// Overlay-local points to display-relative percentages, and back. The
 /// percentages let a selection survive capture-resolution changes.

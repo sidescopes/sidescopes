@@ -249,9 +249,6 @@ void appendRegionAndAppSection(const ContextMenuModel& model, std::vector<Native
     if (supportsFaceDetection()) {
         menuAction(menu, "Select Face...", MenuAttachFace, false, shortcutLabel(model.shortcuts.bindings().attachFace));
     }
-    if (model.regionSelected) {
-        menuAction(menu, "Clear Region", MenuClearRegion, false, shortcutLabel(model.shortcuts.bindings().clearRegion));
-    }
     if (model.attach.attachedCount() > 1) {
         if (model.attach.activeIdentity() != 0) {
             menuAction(menu, "Stop Following Front Window", MenuDetachWindow, false);
@@ -392,11 +389,8 @@ std::optional<ShortcutAction> menuShortcutAction(int chosen)
         return ShortcutAction::pick(RegionPickerMode::AttachFace);
     case MenuPinColor:
         return ShortcutAction::pick(RegionPickerMode::PinColor);
-    // Detach All clears every region, which is what clearing does now that
-    // there is no whole-display state left to fall back to.
-    case MenuClearRegion:
     case MenuDetachAll:
-        return ShortcutAction::plain(ShortcutAction::Kind::ClearRegion);
+        return ShortcutAction::plain(ShortcutAction::Kind::DetachAllWindows);
     case MenuOpenSettings:
         return ShortcutAction::plain(ShortcutAction::Kind::OpenSettings);
     case MenuQuit:

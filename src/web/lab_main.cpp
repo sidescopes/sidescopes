@@ -362,15 +362,7 @@ void applyOutcome(const PaneRenderOutcome& outcome)
         g_lab.analysis.enabledScopes = g_lab.view->stack().ids();
         g_lab.settingsDirty = true;
     }
-    if (outcome.clearRegion) {
-        // The desktop's own answer: the region goes, and the scopes read
-        // nothing. An empty scope is a state rather than a failure, and a
-        // lab that quietly selected the whole picture instead would be
-        // teaching something the application does not do.
-        g_lab.region.clear();
-        g_lab.panes->releaseTraces();
-        g_lab.settingsDirty = true;
-    }
+
     if (outcome.analysisDirty) {
         g_lab.panes->configureProjections();
         g_lab.settingsDirty = true;
@@ -403,9 +395,14 @@ void cancelRegionInteraction()
         g_lab.panes->setStatus("Pinning cancelled");
         return;
     }
-    PaneRenderOutcome outcome;
-    outcome.clearRegion = true;
-    applyOutcome(outcome);
+    g_lab.settingsDirty = g_lab.region.cancelDraw() || g_lab.settingsDirty;
+}
+
+void savePresetShortcut(const ShortcutAction& action)
+{
+    const int slot =
+        action.kind == ShortcutAction::Kind::CopyPresetTo ? action.presetSlot : g_lab.presetController->activeSlot();
+    applyPreset(g_lab.presetController->saveInto(slot));
 }
 
 void applyShortcut(const ShortcutAction& action)
@@ -421,7 +418,7 @@ void applyShortcut(const ShortcutAction& action)
         g_lab.settingsDirty = true;
         g_lab.saveDue = true;
         break;
-    case ShortcutAction::Kind::ClearRegion:
+    case ShortcutAction::Kind::CancelInteraction:
         cancelRegionInteraction();
         break;
     case ShortcutAction::Kind::RequestPick:
@@ -435,12 +432,11 @@ void applyShortcut(const ShortcutAction& action)
         break;
     case ShortcutAction::Kind::CopyPresetTo:
     case ShortcutAction::Kind::SaveActivePreset:
-        applyPreset(g_lab.presetController->saveInto(action.kind == ShortcutAction::Kind::CopyPresetTo
-                                                         ? action.presetSlot
-                                                         : g_lab.presetController->activeSlot()));
+        savePresetShortcut(action);
         break;
     // Exhaustive so newly resolved actions cannot be silently dropped.
     // Window chords belong to the browser and are disabled by its platform.
+    case ShortcutAction::Kind::DetachAllWindows:
     case ShortcutAction::Kind::HideApplication:
     case ShortcutAction::Kind::MinimizeWindow:
     case ShortcutAction::Kind::QuitWindow:
@@ -616,7 +612,7 @@ void answerPickRequest()
         // Pinning needs no desktop: it samples the picture, which is right
         // here. Refusing it was simply wrong.
         if (g_lab.region.armed()) {
-            g_lab.region.clear();
+            (void)g_lab.region.cancelDraw();
             g_lab.settingsDirty = true;
         }
         g_lab.pinning = false;
@@ -716,13 +712,7 @@ void drawShell()
         g_lab.settingsDirty = true;
     }
     notePictureAnchors();
-    // The border's own close badge dismisses the region, and it means the
-    // same thing the toolbar's clear does - so it goes through the same path.
-    if (g_lab.region.takeDismissed()) {
-        PaneRenderOutcome dismissed;
-        dismissed.clearRegion = true;
-        applyOutcome(dismissed);
-    }
+
     analyse();
     g_lab.panes->uploadVisibleScopes(g_lab.region.hasRegion());
 
