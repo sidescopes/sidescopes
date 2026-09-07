@@ -721,7 +721,7 @@ RegionSession::RegionSession(CaptureController& capture, AnalysisWorker& worker,
     : m_capture(capture),
       m_faceLock(m_attach, worker, capture),
       m_regionPicker(capture, worker, source),
-      m_regions(m_attach, capture, m_regionPicker, m_faceLock, m_region),
+      m_regions(m_attach, capture, m_regionPicker, m_faceLock, m_region, glfwGetTime),
       m_ownPid(ownApplicationPid())
 {
 }
@@ -770,6 +770,11 @@ bool RegionSession::carried() const
 bool RegionSession::faceLocked() const
 {
     return m_faceLock.locked();
+}
+
+bool RegionSession::borderAnimating() const
+{
+    return m_regions.borderAnimating();
 }
 
 bool RegionSession::backgroundWorkRunning() const
@@ -822,6 +827,12 @@ RegionSessionOutcome RegionSession::poll(bool windowMinimized, std::optional<Ana
     }
     applyBorderEditOutcome(m_regions.pollBorderEdit(m_activeWindowIdentity));
     applyRegionPickOutcome(m_regionPicker.poll(frameSize, screenSampleColor));
+    return takeOutcome();
+}
+
+RegionSessionOutcome RegionSession::pollBorder()
+{
+    applyBorderEditOutcome(m_regions.pollBorderEdit(m_activeWindowIdentity));
     return takeOutcome();
 }
 

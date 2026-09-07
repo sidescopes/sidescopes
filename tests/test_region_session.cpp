@@ -229,12 +229,18 @@ TEST_CASE("Snapshot face selection is mapped to live pixels and automatic motion
     CHECK(moved.trackedRegion);
     CHECK(moved.selectionRevision == revision);
     REQUIRE(moved.region);
-    CHECK(moved.region->leftPercent == Catch::Approx(picked.region->leftPercent + 0.5));
+    CHECK(moved.region->leftPercent > picked.region->leftPercent);
+    CHECK(moved.region->leftPercent <= picked.region->leftPercent + 0.5);
+    CHECK(moved.region->leftPercent >= picked.region->leftPercent + 0.3 - 1e-9);
     AnalysisWorker::Output output;
     uint64_t seen = 0;
     REQUIRE(fix.worker.fetchOutput(seen, output, revision));
     CHECK(output.frameSequence == 3);
-    CHECK(output.region == moved.region);
+    REQUIRE(output.region);
+    // Window-relative storage can round fractional percentages by a few
+    // double steps; the sampled pixels must remain identical at both scales.
+    CHECK(output.region->toPixels(1000, 500) == moved.region->toPixels(1000, 500));
+    CHECK(output.region->toPixels(2000, 1000) == moved.region->toPixels(2000, 1000));
     CHECK(output.frameStamp.displayId == SecondDisplay);
     CHECK(output.frameStamp.captureEpoch == selectedEpoch);
 }
@@ -733,6 +739,57 @@ TEST_CASE("An explicit cancel restores a preview even before the overlay finishe
     CHECK_FALSE(fix.session.picker().active());
     REQUIRE(regionOverlayStubs().border);
     CHECK(regionOverlayStubs().border->region == committed);
+}
+
+TEST_CASE("An animated face border grab is applied before tracking follows again")
+{
+    FaceSessionFixture fix;
+    double now = 1.0;
+    int faceX = 200;
+    desktopStubs().clock = [&] { return now; };
+    desktopStubs().sessionDetection = [&](const FrameView& crop, double) {
+        return FaceDetectionResult{FaceDetectionStatus::Completed,
+                                   {{faceX - crop.sourceX, 100 - crop.sourceY, 100, 100}}};
+    };
+    fix.open();
+    const auto picked = fix.confirm(Display, regionOverlayStubs().lastDisplays[0].faces[0].region);
+    REQUIRE(picked.region);
+    (void)fix.follow();
+    fix.publish(2);
+    (void)fix.follow();
+    now += 0.1;
+    // Capture evidence uses its own steady clock. Keep this deterministic
+    // displacement within its short-interval identity gate; only UI time is advanced.
+    faceX = 205;
+    fix.publish(3);
+    const auto target = fix.follow();
+    REQUIRE(target.region);
+    INFO("picked=" << picked.region->leftPercent << " target=" << target.region->leftPercent
+                   << " revision=" << target.selectionRevision << " changed=" << target.regionChanged
+                   << " tracked=" << target.trackedRegion << " locked=" << fix.session.faceLocked()
+                   << " shown=" << regionOverlayStubs().border->region.leftPercent);
+    REQUIRE(fix.session.borderAnimating());
+    const auto calls = desktopStubs().detectorCall().calls;
+    now += 1.0 / 60.0;
+    fix.session.syncBorder(false);
+    const auto grabbed = regionOverlayStubs().border->region;
+    REQUIRE(grabbed.toPixels(1000, 500) != target.region->toPixels(1000, 500));
+    regionOverlayStubs().borderEdit.editing = true;
+    const auto edit = fix.session.pollBorder();
+    REQUIRE(edit.regionChanged);
+    REQUIRE(edit.region);
+    CHECK(edit.region->toPixels(1000, 500) == grabbed.toPixels(1000, 500));
+    CHECK(edit.selectionRevision > target.selectionRevision);
+    CHECK_FALSE(edit.trackedRegion);
+    const auto held = fix.follow();
+    REQUIRE(held.region);
+    CHECK(held.region->toPixels(1000, 500) == grabbed.toPixels(1000, 500));
+    CHECK(regionOverlayStubs().border->region.toPixels(1000, 500) == grabbed.toPixels(1000, 500));
+    CHECK_FALSE(fix.session.borderAnimating());
+    fix.worker.pump();
+    CHECK(desktopStubs().detectorCall().calls == calls);
+    CHECK(fix.worker.consumedFrameSequence() == 3);
+    desktopStubs().clock = {};
 }
 
 }  // namespace sidescopes

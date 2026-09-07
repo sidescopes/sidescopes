@@ -62,6 +62,8 @@ add_executable(sidescopes_tests
     test_cursor_sampler.cpp
     test_attach_controller.cpp
     test_face_lock.cpp
+    test_face_motion.cpp
+    test_region_border_motion.cpp
     test_face_tracking.cpp
     test_face_tracking_worker.cpp
     test_analysis_worker_resolver.cpp

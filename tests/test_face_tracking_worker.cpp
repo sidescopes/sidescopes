@@ -15,6 +15,17 @@ using Mode = FrameRegionResolution::Mode;
 
 namespace {
 
+void checkTrackedCrop(const FaceTrackingUpdate& update, LockRect detectedCrop, double faceWidth)
+{
+    const auto close = [faceWidth](double edge) {
+        return Catch::Approx(edge).epsilon(0).margin(faceWidth * 0.02 + 1e-9);
+    };
+    CHECK(update.decision.crop.left == close(detectedCrop.left));
+    CHECK(update.decision.crop.top == close(detectedCrop.top));
+    CHECK(update.decision.crop.right == close(detectedCrop.right));
+    CHECK(update.decision.crop.bottom == close(detectedCrop.bottom));
+}
+
 struct DetectorState
 {
     int calls = 0;
@@ -258,6 +269,75 @@ TEST_CASE("Settings-only resolution retains clean still-photo tracking without d
     fix.next(60.01);
     CHECK(fix.run().mode == Mode::Override);
     CHECK(fix.update().decision.action == Action::Accepted);
+}
+
+TEST_CASE("Face stabilization publishes the same crop to scopes and the border")
+{
+    SearchFixture fix;
+    const auto first = fix.follow(10.04);
+    ++fix.face.x;
+    const auto moved = fix.follow(10.08);
+    CHECK(moved.decision.anchor.centerX > first.decision.anchor.centerX);
+    CHECK(moved.decision.anchor.centerX < 321.0);
+    const auto mapped = face_lock::mapRegion(fix.command.crop, moved.decision.anchor);
+    CHECK(moved.region.leftPercent == Catch::Approx(mapped.left / 640.0 * 100));
+    CHECK(moved.region.rightPercent == Catch::Approx(mapped.right / 640.0 * 100));
+    fix.now = 20.0;
+    const auto resolution = fix.run(false);
+    REQUIRE(resolution.region);
+    CHECK(*resolution.region == moved.region);
+    const auto held = fix.update();
+    CHECK(held.region == moved.region);
+    CHECK(held.decision.action == Action::Held);
+    CHECK(held.decision.reason == Reason::Waiting);
+    CHECK(held.decision.evidenceSourceSeconds == moved.decision.evidenceSourceSeconds);
+    CHECK(fix.detector.calls == 2);
+}
+
+TEST_CASE("A detector search follows raw evidence rather than the stabilized border")
+{
+    SearchFixture fix;
+    (void)fix.follow(10.04);
+    fix.face.x += 20;
+    (void)fix.follow(10.14);
+    fix.face.x += 2;
+    const auto smoothed = fix.follow(10.18);
+    REQUIRE(smoothed.decision.anchor.centerX < 342.0);
+    (void)fix.follow(10.22);
+    // The raw anchor is342; recentering from the filtered value would start
+    // one pixel earlier and change the detector's input sampling grid.
+    CHECK(fix.searches.back().x == 242);
+}
+
+TEST_CASE("Lost-face resolution keeps the last stabilized crop and recovery discards old easing")
+{
+    SearchFixture fix;
+    (void)fix.follow(10.04);
+    ++fix.face.x;
+    const auto moved = fix.follow(10.08);
+    fix.response = [](IntRect) { return IntRect{}; };
+    fix.next(10.12);
+    REQUIRE(fix.run().mode == Mode::Override);
+    const auto held = fix.update();
+    CHECK(held.decision.action == Action::Held);
+    CHECK(held.region == moved.region);
+    SECTION("retirement")
+    {
+        fix.now = 10.53;
+        const auto resolution = fix.run(false);
+        REQUIRE(resolution.region);
+        CHECK(*resolution.region == moved.region);
+        const auto retired = fix.update();
+        CHECK(retired.decision.action == Action::OrdinaryAttached);
+        CHECK(retired.region == moved.region);
+    }
+    SECTION("brief recovery")
+    {
+        fix.response = {};
+        ++fix.face.x;
+        const auto recovered = fix.follow(10.16);
+        CHECK(recovered.decision.anchor.centerX == 322.0);
+    }
 }
 
 TEST_CASE("In-flight command changes cannot publish stale tracking updates")
@@ -760,15 +840,13 @@ TEST_CASE("A fixed detector search still applies current movement and scale on t
     const auto original = fix.follow(10.0);
     fix.face = {305, 223, 40, 40};
     const auto moved = fix.follow(10.04);
-    CHECK(moved.decision.crop.left == original.decision.crop.left + 5);
-    CHECK(moved.decision.crop.top == original.decision.crop.top + 3);
+    CHECK(moved.decision.crop.left > original.decision.crop.left);
+    CHECK(moved.decision.crop.top > original.decision.crop.top);
+    checkTrackedCrop(moved, {315, 233, 335, 253}, 40);
     CHECK(moved.frameSequence == fix.frame.sequence);
     fix.face = {303, 221, 44, 44};
     const auto scaled = fix.follow(10.08);
-    CHECK(scaled.decision.crop.left == 314.0);
-    CHECK(scaled.decision.crop.top == 232.0);
-    CHECK(scaled.decision.crop.right == 336.0);
-    CHECK(scaled.decision.crop.bottom == 254.0);
+    checkTrackedCrop(scaled, {314, 232, 336, 254}, 44);
     CHECK(fix.searches[1] == fix.searches[0]);
     CHECK(fix.searches[2] == fix.searches[0]);
 }
@@ -780,8 +858,7 @@ TEST_CASE("Approaching the detector search margin recenters coverage without del
     for (int i = 1; i <= 4; ++i) {
         fix.face.x = 300 + i * 8;
         const auto moved = fix.follow(10.0 + i * 0.04);
-        CHECK(moved.decision.crop.left == 310 + i * 8);
-        CHECK(moved.decision.crop.right == 330 + i * 8);
+        checkTrackedCrop(moved, {310.0 + i * 8, 230, 330.0 + i * 8, 250}, 40);
         if (i <= 3) {
             CHECK(fix.searches.back() == fix.searches.front());
         }
@@ -812,7 +889,8 @@ TEST_CASE("Detector search scale hysteresis refreshes both growth and shrinking"
         const int width = widths[i];
         fix.face = {320 - width / 2, 240 - width / 2, width, width};
         const auto scaled = fix.follow(10.04 + static_cast<double>(i) * 0.04);
-        CHECK(scaled.decision.crop.right - scaled.decision.crop.left == width * 0.5);
+        const double half = width * 0.25;
+        checkTrackedCrop(scaled, {320 - half, 240 - half, 320 + half, 240 + half}, width);
         CHECK(fix.searches.back() == fix.searches.front());
     }
     (void)fix.follow(10.16);
@@ -849,7 +927,9 @@ TEST_CASE("Parent translation carries the detector grid and parent resizing inva
     ++fix.command.revision;
     fix.exchange->select(fix.command);
     (void)fix.follow(10.12);
-    CHECK(fix.searches.back() == IntRect{233, 145, 200, 200});
+    // Resizing resets from the saved, stabilized anchor at332.2. Enclose its
+    // fractional search edges outward; later raw evidence drives reuse again.
+    CHECK(fix.searches.back() == IntRect{232, 145, 201, 200});
 }
 
 TEST_CASE("Crop edits and proven source resumes retain a safe detector grid")
@@ -927,8 +1007,7 @@ TEST_CASE("A saved crop resumes without rebinding around an unconsumed animation
     CHECK(fix.searches.back() == originalSearch);
     fix.face.x += 3;
     const auto moved = fix.follow(10.16);
-    CHECK(moved.decision.crop.left == 313);
-    CHECK(moved.decision.crop.right == 333);
+    checkTrackedCrop(moved, {313, 230, 333, 250}, 40);
     CHECK(fix.searches.back() == originalSearch);
 }
 
@@ -979,7 +1058,8 @@ TEST_CASE("A parent edge does not force detector search changes for small face m
     CHECK(fix.searches.front() == IntRect{20, 140, 144, 200});
     fix.face.x += 2;
     const auto moved = fix.follow(10.04);
-    CHECK(moved.decision.crop.left == first.decision.crop.left + 2);
+    CHECK(moved.decision.crop.left > first.decision.crop.left);
+    CHECK(moved.decision.crop.left <= first.decision.crop.left + 2);
     (void)fix.follow(10.08);
     CHECK(fix.searches[1] == fix.searches[0]);
     CHECK(fix.searches[2] == fix.searches[0]);

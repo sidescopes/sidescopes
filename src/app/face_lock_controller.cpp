@@ -222,17 +222,26 @@ FaceLockOutcome FaceLockController::consume(const AttachDecision& decision, doub
     if (update && update->identity == decision.activeIdentity && m_locks.contains(update->identity)) {
         auto& lock = m_locks.at(update->identity);
         const auto action = update->decision.action;
-        if (action == face_tracking::Action::Accepted) {
-            lock.uncertainSince.reset();
+        const auto applyCrop = [&] {
             lock.state = onFrameGrid(
                 lock.state, lock.coordinateSize,
                 {m_command.displayWidth, m_command.displayHeight, m_command.displayWidth, m_command.displayHeight});
             lock.state.lastAnchor = update->decision.anchor;
             lock.coordinateSize = {m_command.displayWidth, m_command.displayHeight};
             outcome.applyRegion = acceptRegion(*update, decision);
+        };
+        if (action == face_tracking::Action::Accepted) {
+            lock.uncertainSince.reset();
+            applyCrop();
         } else if (action == face_tracking::Action::OrdinaryAttached) {
+            // Retirement may replace an accepted update before the UI sees
+            // it. Preserve the worker's final crop in the ordinary attachment.
+            applyCrop();
             outcome.lostLock = update->identity;
         } else if (action == face_tracking::Action::Held && update->decision.reason != face_tracking::Reason::Waiting) {
+            // A held update can replace that accepted crop too. Carry its
+            // geometry without treating uncertainty as fresh face evidence.
+            applyCrop();
             if (!lock.uncertainSince) {
                 lock.uncertainSince = now;
             }

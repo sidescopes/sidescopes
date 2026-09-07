@@ -1,9 +1,12 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <optional>
 #include <string>
+#include <tuple>
 
+#include "app/region_border_motion.h"
 #include "core/analysis_worker.h"
 #include "core/region_kind.h"
 
@@ -84,7 +87,8 @@ public:
     /// scopes are reading right now, empty for none. All must outlive the
     /// coordinator.
     RegionCoordinator(AttachController& attach, const CaptureController& capture, RegionPicker& picker,
-                      FaceLockController& faceLock, const std::optional<RegionOfInterest>& region);
+                      FaceLockController& faceLock, const std::optional<RegionOfInterest>& region,
+                      std::function<double()> clock = frameClockSeconds);
 
     /// @return The global region - the one bound to no window, which the
     ///         analysis falls back to whenever no attached window is active -
@@ -105,9 +109,10 @@ public:
     /// global region alike - leaving the scopes reading nothing.
     [[nodiscard]] RegionOutcome clearRegion();
 
-    /// Reconciles the region border with what the scopes read. Called every
-    /// frame; the platform side makes the unchanged case free.
+    /// Reconciles the border with the selection. Face motion animates only
+    /// its presentation; analysis keeps the latest accepted crop immediately.
     void syncBorder(const RegionBorderState& state);
+    [[nodiscard]] bool borderAnimating() const;
 
     /// One poll of the live region border, whose edges, corners, and move tab
     /// adjust the region it outlines. @p activeWindowIdentity is the focused
@@ -128,6 +133,12 @@ private:
     RegionPicker& m_picker;
     FaceLockController& m_faceLock;
     const std::optional<RegionOfInterest>& m_region;
+    std::function<double()> m_clock;
+    RegionBorderMotion m_borderMotion;
+    std::optional<RegionOfInterest> m_presentedRegion;
+    // Display, physical stream, window and selection: never interpolate
+    // across a different coordinate system or a manual selection.
+    std::tuple<uint32_t, uint64_t, uint64_t, uint64_t, RegionBinding> m_motionContext{};
 
     std::optional<RegionOfInterest> m_globalRegion;
 

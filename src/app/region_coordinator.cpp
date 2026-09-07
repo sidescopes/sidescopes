@@ -29,12 +29,14 @@ RegionBinding regionBinding(uint64_t activeWindowIdentity, bool faceLocked)
 }
 
 RegionCoordinator::RegionCoordinator(AttachController& attach, const CaptureController& capture, RegionPicker& picker,
-                                     FaceLockController& faceLock, const std::optional<RegionOfInterest>& region)
+                                     FaceLockController& faceLock, const std::optional<RegionOfInterest>& region,
+                                     std::function<double()> clock)
     : m_attach(attach),
       m_capture(capture),
       m_picker(picker),
       m_faceLock(faceLock),
-      m_region(region)
+      m_region(region),
+      m_clock(std::move(clock))
 {
 }
 
@@ -67,6 +69,8 @@ RegionOutcome RegionCoordinator::clearRegion()
     // global region alike. The border sync rides the analysis-dirty path.
     m_picker.cancel();
     m_faceLock.clear();
+    m_borderMotion.reset();
+    m_presentedRegion.reset();
     if (m_borderEditing) {
         hideAttachedEditDim();
     }
@@ -87,6 +91,8 @@ RegionOutcome RegionCoordinator::clearRegion()
 void RegionCoordinator::syncBorder(const RegionBorderState& state)
 {
     if (m_capture.capturedDisplay() == 0) {
+        m_borderMotion.reset();
+        m_presentedRegion.reset();
         return;
     }
     // The border shows only while this application is itself visible - a
@@ -97,6 +103,8 @@ void RegionCoordinator::syncBorder(const RegionBorderState& state)
     // window (label and warm dress), else the plain global one. Called every
     // frame; the platform side makes the unchanged case free.
     if (m_picker.active() || !m_region || applicationHidden() || state.windowMoving || state.windowMinimized) {
+        m_borderMotion.reset();
+        m_presentedRegion.reset();
         hideRegionBorder();
     } else {
         const RegionBinding binding =
@@ -105,9 +113,20 @@ void RegionCoordinator::syncBorder(const RegionBorderState& state)
             m_displayLabelId = m_capture.capturedDisplay();
             m_displayLabel = borderLabelFrom(displayName(m_displayLabelId), "Display");
         }
-        showRegionBorder(m_capture.capturedDisplay(), *m_region,
+        const auto context = std::tuple(m_capture.capturedDisplay(), m_capture.streamEpoch(),
+                                        state.activeWindowIdentity, m_faceLock.selectionRevision(), binding);
+        const bool animate = binding == RegionBinding::Face && !m_borderEditing && context == m_motionContext;
+        m_motionContext = context;
+        const auto presented = m_borderMotion.update(*m_region, m_clock(), animate);
+        m_presentedRegion = presented;
+        showRegionBorder(m_capture.capturedDisplay(), presented,
                          binding == RegionBinding::Global ? m_displayLabel : state.windowLabel, binding);
     }
+}
+
+bool RegionCoordinator::borderAnimating() const
+{
+    return m_borderMotion.active();
 }
 
 RegionBorderEditOutcome RegionCoordinator::pollBorderEdit(uint64_t activeWindowIdentity)
@@ -123,11 +142,18 @@ RegionBorderEditOutcome RegionCoordinator::pollBorderEdit(uint64_t activeWindowI
 
         return {};
     }
-    const RegionBorderEdit edit = pollRegionBorderEdit();
+    RegionBorderEdit edit = pollRegionBorderEdit();
     if (edit.editing && !m_borderEditing) {
         // Latch what the border showed when the drag began: no focus race
         // can reroute the edit to the other region kind.
         m_borderEditIdentity = activeWindowIdentity;
+        // The native grab starts at the visible rectangle, which may still
+        // be approaching the detected crop. Adopt exactly that selection
+        // before tracking or another presentation tick can move it again.
+        if (!edit.region && m_borderMotion.active()) {
+            edit.region = m_presentedRegion;
+        }
+        m_borderMotion.reset();
     }
     // While an attached border is dragged, a click-through veil dims
     // everything outside its window - the resize limit made visible.

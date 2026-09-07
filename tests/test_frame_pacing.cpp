@@ -516,4 +516,52 @@ TEST_CASE("Following a hand waits no longer than the frame it is holding up")
     CHECK(clocks.interactionWait(0.0) == InteractionWaitSeconds);
 }
 
+TEST_CASE("Face border animation services sixty ticks without demanding sixty scope draws")
+{
+    FrameClocks clocks;
+    clocks.noteActivity(10.0);
+    clocks.notePumpReturned(10.0);
+    clocks.noteFrameBegun(10.0);
+    auto inputs = clocks.pacingInputs(10.0, true, false, false, true);
+    CHECK(frameWaitFor(inputs).kind == FrameWait::None);
+    CHECK(frameWaitFor(inputs).redrawFloorSeconds == Catch::Approx(1.0 / 60.0));
+    inputs.now = 10.0 + BorderAnimationSeconds * 0.5;
+    CHECK(frameWaitFor(inputs).redrawFloorSeconds == Catch::Approx(BorderAnimationSeconds * 0.5));
+    inputs.regionInteracting = true;
+    CHECK(frameWaitFor(inputs).kind == FrameWait::FollowInteraction);
+    CHECK(frameWaitFor(inputs).redrawFloorSeconds == 0.0);
+    RedrawSignals signals;
+    signals.borderAnimating = true;
+    clocks.noteOutputPublished();
+    CHECK_FALSE(frameWorthDrawing(clocks.redrawInputs(signals, 10.0 + BorderAnimationSeconds)));
+    CHECK_FALSE(frameWorthDrawing(clocks.redrawInputs(signals, 10.0 + 2 * BorderAnimationSeconds)));
+    CHECK(frameWorthDrawing(clocks.redrawInputs(signals, 10.0 + ContentRedrawSeconds + 1e-6)));
+    // Settled borders relinquish the high-rate service budget immediately.
+    inputs.borderAnimating = false;
+    inputs.regionInteracting = false;
+    inputs.now = 12.0;
+    CHECK(frameWaitFor(inputs).kind == FrameWait::WatchAttachedWindow);
+    signals.borderAnimating = false;
+    clocks.noteFrameBegun(12.0);
+    CHECK_FALSE(frameWorthDrawing(clocks.redrawInputs(signals, 12.0)));
+}
+
+TEST_CASE("Settling or cancelling during a fast border tick keeps the scope redraw budget")
+{
+    FrameClocks clocks;
+    clocks.noteActivity(10.0);
+    clocks.notePumpReturned(10.0, true);
+    clocks.noteFrameBegun(10.0);
+    clocks.noteOutputPublished();
+    const bool animationAtPump = true;
+    CHECK(frameWaitFor(clocks.pacingInputs(10.0, true, false, false, animationAtPump)).redrawFloorSeconds ==
+          Catch::Approx(BorderAnimationSeconds));
+    // Follow can settle, hide or replace the animated selection before drawing.
+    RedrawSignals signals;
+    signals.borderAnimating = false;
+    CHECK_FALSE(frameWorthDrawing(clocks.redrawInputs(signals, 10.0 + BorderAnimationSeconds)));
+    CHECK_FALSE(frameWorthDrawing(clocks.redrawInputs(signals, 10.0 + 2 * BorderAnimationSeconds)));
+    CHECK(frameWorthDrawing(clocks.redrawInputs(signals, 10.0 + ContentRedrawSeconds + 1e-6)));
+}
+
 }  // namespace sidescopes

@@ -317,6 +317,8 @@ add_library(sidescopes_app STATIC
     src/app/context_menu.cpp
     src/app/cursor_sampler.cpp
     src/app/face_lock.cpp
+    src/app/face_motion.cpp
+    src/app/region_border_motion.cpp
     src/app/face_tracking.cpp
     src/app/face_tracking_worker.cpp
     src/app/face_lock_controller.cpp

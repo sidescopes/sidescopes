@@ -43,7 +43,8 @@ struct CoordinatorFixture
     RegionPicker picker{capture, worker, source};
     FaceLockController faceLock{attach, worker, capture};
     std::optional<RegionOfInterest> region;
-    RegionCoordinator coordinator{attach, capture, picker, faceLock, region};
+    double now = 0.0;
+    RegionCoordinator coordinator{attach, capture, picker, faceLock, region, [this] { return now; }};
 
     CoordinatorFixture()
     {
@@ -301,11 +302,8 @@ TEST_CASE("Video and transient face loss keep the visible border at the last acc
         REQUIRE(fix.worker.consumedFrameSequence() == sequence);
         const auto update = fix.faceLock.update(decision, size, false, frameClockSeconds());
         CHECK_FALSE(update.lostLock);
-        if (sequence < 3) {
-            REQUIRE(update.applyRegion);
-        } else {
-            CHECK_FALSE(update.applyRegion);
-        }
+        REQUIRE(update.applyRegion);
+        CHECK(*update.applyRegion == PartialRegion);
         fix.sync("Editor", 42);
         REQUIRE(regionOverlayStubs().border);
         CHECK(regionOverlayStubs().border->binding == RegionBinding::Face);
@@ -436,6 +434,140 @@ TEST_CASE("A pick or clear ends the attached border's editing veil")
 
     CHECK_FALSE(fix.coordinator.borderEditing());
     CHECK_FALSE(regionOverlayStubs().editDim.has_value());
+}
+
+TEST_CASE("Face border animation advances without changing the analyzed selection")
+{
+    CoordinatorFixture fix;
+    fix.region = PartialRegion;
+    fix.faceLock.addLock(42, FaceLockState{});
+    fix.sync("Editor", 42);
+    const auto revision = fix.faceLock.selectionRevision();
+    const RegionOfInterest target{20, 25, 70, 75};
+    fix.region = target;
+    fix.now = 0.1;
+    fix.sync("Editor", 42);
+    REQUIRE(fix.coordinator.borderAnimating());
+    CHECK(regionOverlayStubs().border->region == PartialRegion);
+    double previous = PartialRegion.leftPercent;
+    for (int tick = 1; tick <= 30; ++tick) {
+        fix.now = 0.1 + tick / 60.0;
+        fix.sync("Editor", 42);
+        const auto shown = regionOverlayStubs().border->region;
+        CHECK(shown.leftPercent >= previous);
+        if (tick <= 6) {
+            CHECK(shown.leftPercent > previous);
+            CHECK(shown.leftPercent < target.leftPercent);
+        }
+        fix.sync("Editor", 42);  // Multiple follows in one frame owe no extra motion.
+        CHECK(regionOverlayStubs().border->region == shown);
+        CHECK(fix.region == target);
+        CHECK(fix.faceLock.selectionRevision() == revision);
+        previous = shown.leftPercent;
+    }
+    CHECK(regionOverlayStubs().border->region == target);
+    CHECK_FALSE(fix.coordinator.borderAnimating());
+    CHECK(desktopStubs().detectorCall().calls == 0);
+    CHECK(fix.worker.consumedFrameSequence() == 0);
+}
+
+TEST_CASE("Face border animation never crosses a selection or binding boundary")
+{
+    CoordinatorFixture fix;
+    fix.region = PartialRegion;
+    fix.faceLock.addLock(42, FaceLockState{});
+    fix.sync("Editor", 42);
+    fix.region = RegionOfInterest{20, 25, 70, 75};
+    fix.now = 0.1;
+    fix.sync("Editor", 42);
+    REQUIRE(fix.coordinator.borderAnimating());
+    uint64_t identity = 42;
+    SECTION("Manual selection revision")
+    {
+        fix.faceLock.invalidate();
+    }
+    SECTION("Face loss leaves the canonical attached crop")
+    {
+        fix.faceLock.removeLock(42);
+    }
+    SECTION("Switch to another face window")
+    {
+        identity = 43;
+        fix.faceLock.addLock(43, FaceLockState{});
+    }
+    SECTION("A restarted capture is a new coordinate context")
+    {
+        REQUIRE(fix.capture.start());
+    }
+    fix.now += 0.01;
+    fix.sync("Editor", identity);
+    CHECK(regionOverlayStubs().border->region == fix.region);
+    CHECK_FALSE(fix.coordinator.borderAnimating());
+}
+
+TEST_CASE("A hidden face border discards its unfinished presentation motion")
+{
+    CoordinatorFixture fix;
+    fix.region = PartialRegion;
+    fix.faceLock.addLock(42, FaceLockState{});
+    fix.sync("Editor", 42);
+    fix.region = RegionOfInterest{20, 25, 70, 75};
+    fix.now = 0.1;
+    fix.sync("Editor", 42);
+    REQUIRE(fix.coordinator.borderAnimating());
+    SECTION("Application hidden")
+    {
+        desktopStubs().applicationHidden = true;
+        fix.sync("Editor", 42);
+        desktopStubs().applicationHidden = false;
+    }
+    SECTION("Window movement")
+    {
+        fix.coordinator.syncBorder({"Editor", 42, true, false});
+    }
+    SECTION("Minimized application")
+    {
+        fix.coordinator.syncBorder({"Editor", 42, false, true});
+    }
+    SECTION("No selected region")
+    {
+        const auto selected = fix.region;
+        fix.region.reset();
+        fix.sync("Editor", 42);
+        fix.region = selected;
+    }
+    CHECK_FALSE(fix.coordinator.borderAnimating());
+    CHECK_FALSE(regionOverlayStubs().border);
+    fix.now += 0.01;
+    fix.sync("Editor", 42);
+    CHECK(regionOverlayStubs().border->region == fix.region);
+    CHECK_FALSE(fix.coordinator.borderAnimating());
+}
+
+TEST_CASE("Grabbing an animated face border adopts the visible rectangle immediately")
+{
+    CoordinatorFixture fix;
+    fix.region = PartialRegion;
+    fix.faceLock.addLock(42, FaceLockState{});
+    fix.sync("Editor", 42);
+    fix.region = RegionOfInterest{20, 25, 70, 75};
+    fix.now = 0.1;
+    fix.sync("Editor", 42);
+    fix.now += 1.0 / 60.0;
+    fix.sync("Editor", 42);
+    const auto grabbed = regionOverlayStubs().border->region;
+    REQUIRE(grabbed != fix.region);
+    regionOverlayStubs().borderEdit.editing = true;
+    const auto edit = fix.coordinator.pollBorderEdit(42);
+    REQUIRE(edit.edited);
+    CHECK(edit.edited == grabbed);
+    CHECK_FALSE(fix.coordinator.borderAnimating());
+    fix.region = *edit.edited;  // The session applies this before its next follow.
+    fix.now += 1.0 / 60.0;
+    fix.sync("Editor", 42);
+    CHECK(regionOverlayStubs().border->region == grabbed);
+    CHECK_FALSE(fix.coordinator.borderAnimating());
+    CHECK_FALSE(fix.coordinator.pollBorderEdit(42).edited);
 }
 
 }  // namespace sidescopes

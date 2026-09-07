@@ -430,7 +430,8 @@ void App::runFrame()
                                 regionInteracting(),
                                 framebufferWidth,
                                 framebufferHeight,
-                                captureStatus};
+                                captureStatus,
+                                m_regionSession.borderAnimating()};
     const bool drawing = frameWorthDrawing(m_clocks.redrawInputs(signals, glfwGetTime()));
     if (drawing) {
         drawFrame(framebufferWidth, framebufferHeight);
@@ -529,8 +530,10 @@ void App::serviceCapture(bool framebufferEmpty, double now)
 void App::pumpEvents()
 {
     const double now = glfwGetTime();
-    const FrameWaitDecision wait = frameWaitFor(m_clocks.pacingInputs(
-        now, m_regionSession.attachments().attached(), m_regionSession.picker().active(), regionInteracting()));
+    const bool borderAnimationTick = m_regionSession.borderAnimating();
+    const FrameWaitDecision wait = frameWaitFor(m_clocks.pacingInputs(now, m_regionSession.attachments().attached(),
+                                                                      m_regionSession.picker().active(),
+                                                                      regionInteracting(), borderAnimationTick));
     switch (wait.kind) {
     case FrameWait::FollowInteraction:
         // Ends on the pointer event that moved the region, so the border is
@@ -551,11 +554,14 @@ void App::pumpEvents()
     // Whatever ended that wait, the frame period is a floor: a wait that ends
     // on the first event redraws at the event rate otherwise.
     waitOutFramePeriod(now + wait.redrawFloorSeconds);
-    m_clocks.notePumpReturned(glfwGetTime());
+    m_clocks.notePumpReturned(glfwGetTime(), borderAnimationTick);
 }
 
 void App::drainAsyncSignals()
 {
+    // A native mouse-down latches the presented rectangle. Apply it before
+    // any follow/sync can advance an in-flight face animation underneath it.
+    applyRegionSessionOutcome(m_regionSession.pollBorder());
     // First of the drains, and ahead of the capture service below: the focus
     // routing is what takes a stale border down, and everything after this
     // point can stall the tick - a capture restart most of all.

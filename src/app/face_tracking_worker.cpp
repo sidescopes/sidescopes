@@ -242,6 +242,7 @@ bool FaceTrackingWorker::preparePolicy(const FaceTrackingCommand& command, Polic
     if (!state.policy || command.lockGeneration != previous->lockGeneration) {
         state.policy.emplace(contextOf(command), command.crop, lockRect(command.window));
         state.search.reset();
+        state.motion.reset(command.crop);
     }
     if (command.lockGeneration == previous->lockGeneration && !sameCommand(command, *previous)) {
         if (command.revision <= previous->revision) {
@@ -250,6 +251,7 @@ bool FaceTrackingWorker::preparePolicy(const FaceTrackingCommand& command, Polic
         if (!remapPolicy(command, state)) {
             return false;
         }
+        state.motion.reset(command.crop);
     }
     state.command = command;
     return true;
@@ -380,11 +382,31 @@ FrameRegionResolution FaceTrackingWorker::resolve(const FrameRegionRequest& requ
     } else {
         decision = policy.tick(contextOf(command), now);
     }
-    const auto resolution = publishResolution(request, command, decision);
+    const auto resolution = publishResolution(request, command, stabilize(command, decision, candidate));
     if (resolution.mode == Mode::Override) {
         current = std::move(candidate);
     }
     return resolution;
+}
+
+face_tracking::Decision FaceTrackingWorker::stabilize(const FaceTrackingCommand& command,
+                                                      face_tracking::Decision decision, PolicyState& state)
+{
+    if (decision.action == Action::Ignored) {
+        return decision;
+    }
+    if (decision.action == Action::Accepted) {
+        decision.anchor = state.motion.follow(decision.anchor, decision.evidenceSourceSeconds);
+    } else {
+        if (decision.reason != Reason::Waiting) {
+            state.motion.pause();
+        }
+        decision.anchor = state.motion.current();
+    }
+    // Raw policy geometry still drives matching and search. The border and
+    // scope pass receive the same stabilized crop and evidence timestamp.
+    decision.crop = face_lock::mapRegion(command.crop, decision.anchor);
+    return decision;
 }
 
 FrameRegionResolution FaceTrackingWorker::publishResolution(const FrameRegionRequest& request,

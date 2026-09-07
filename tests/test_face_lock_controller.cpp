@@ -198,12 +198,18 @@ TEST_CASE("A face moves on every video frame without waiting for content to sett
 {
     ControllerFixture fixture;
     fixture.select();
+    double previousLeft = InitialRegion.leftPercent;
     for (uint64_t sequence = 1; sequence <= 5; ++sequence) {
         fixture.setFace({500.0 + 8.0 * static_cast<double>(sequence), 250.0, 100.0});
         const auto result = fixture.advance(sequence, sequence % 2 ? Color{0, 0, 0} : Color{255, 255, 255});
         REQUIRE(result.applyRegion);
         CHECK_FALSE(result.lostLock);
-        CHECK_THAT(result.applyRegion->leftPercent, WithinAbs(47.5 + 0.8 * static_cast<double>(sequence), 1e-6));
+        const double detectedLeft = 47.5 + 0.8 * static_cast<double>(sequence);
+        CHECK(result.applyRegion->leftPercent > previousLeft);
+        CHECK(result.applyRegion->leftPercent <= detectedLeft + 1e-9);
+        // Each mapped edge stays within2% of the100-pixel face width.
+        CHECK_THAT(result.applyRegion->leftPercent, WithinAbs(detectedLeft, 0.200001));
+        previousLeft = result.applyRegion->leftPercent;
         REQUIRE(fixture.fetch());
         REQUIRE(fixture.output.images.contains("org.sidescopes.histogram"));
         CHECK_FALSE(fixture.output.images.at("org.sidescopes.histogram").rgba.empty());
@@ -252,7 +258,7 @@ TEST_CASE("A transient uncertain frame keeps the last accepted crop and can reco
         desktopStubs().detectionStatus = FaceDetectionStatus::Failed;
     }
     const auto uncertain = fixture.advance(2, {200, 100, 50});
-    CHECK_FALSE(uncertain.applyRegion);
+    REQUIRE(uncertain.applyRegion);
     CHECK_FALSE(uncertain.lostLock);
     CHECK(fixture.region == last);
     CHECK(fixture.controller.contains(1));
@@ -290,6 +296,71 @@ TEST_CASE("Uncertainty followed by capture silence ends following without changi
     CHECK(desktopStubs().detectorCall().calls == 2);
 }
 
+TEST_CASE("A held crop reaches the interface before capture silence expires face following")
+{
+    ControllerFixture fixture;
+    fixture.select();
+    fixture.setFace({520, 250, 100});
+    fixture.submit(fixture.frame(1));
+    REQUIRE(fixture.fetch());
+    REQUIRE(fixture.output.region);
+    const RegionOfInterest accepted = *fixture.output.region;
+    REQUIRE(accepted.toPixels(1000, 500) != InitialRegion.toPixels(1000, 500));
+    CHECK(fixture.region == InitialRegion);
+
+    desktopStubs().sessionDetection = {};
+    desktopStubs().faces.clear();
+    SECTION("successful absence")
+    {
+        desktopStubs().detectionStatus = FaceDetectionStatus::Completed;
+    }
+    SECTION("native failure")
+    {
+        desktopStubs().detectionStatus = FaceDetectionStatus::Failed;
+    }
+    fixture.submit(fixture.frame(2, {200, 100, 50}));
+    REQUIRE(fixture.fetch());
+    REQUIRE(fixture.output.region);
+    checkSameCrop(*fixture.output.region, accepted, 1000, 500);
+    const auto held = fixture.tick();
+    REQUIRE(held.applyRegion);
+    checkSameCrop(*held.applyRegion, accepted, 1000, 500);
+    CHECK_FALSE(held.lostLock);
+    CHECK(fixture.controller.contains(1));
+
+    // A control revision must restore the anchor paired with that crop,
+    // without re-detecting the held pixels or renewing their evidence.
+    fixture.controller.invalidate();
+    (void)fixture.tick();
+    fixture.worker.pump();
+    REQUIRE(fixture.fetch());
+    REQUIRE(fixture.output.region);
+    checkSameCrop(*fixture.output.region, accepted, 1000, 500);
+    const auto remapped = fixture.tick();
+    REQUIRE(remapped.applyRegion);
+    checkSameCrop(*remapped.applyRegion, accepted, 1000, 500);
+
+    // No new source image arrives, so the controller must expire the held
+    // evidence itself while preserving the actual worker crop.
+    fixture.clock += 0.5;
+    const auto retired = fixture.tick();
+    REQUIRE(retired.lostLock);
+    CHECK(*retired.lostLock == 1u);
+    CHECK_FALSE(retired.applyRegion);
+    REQUIRE(fixture.region);
+    checkSameCrop(*fixture.region, accepted, 1000, 500);
+    CHECK_FALSE(fixture.controller.contains(1));
+    CHECK(fixture.attach.isAttached(1));
+    CHECK(desktopStubs().detectorCall().calls == 2);
+
+    fixture.setFace({530, 250, 100});
+    (void)fixture.advance(3);
+    CHECK(desktopStubs().detectorCall().calls == 2);
+    REQUIRE(fixture.fetch());
+    REQUIRE(fixture.output.region);
+    checkSameCrop(*fixture.output.region, accepted, 1000, 500);
+}
+
 TEST_CASE("An unsupported native detector returns to the ordinary attachment immediately")
 {
     ControllerFixture fixture;
@@ -304,6 +375,57 @@ TEST_CASE("An unsupported native detector returns to the ordinary attachment imm
     CHECK(fixture.attach.isAttached(1));
     CHECK(fixture.region == last);
     CHECK_FALSE(fixture.controller.contains(1));
+}
+
+TEST_CASE("Retirement preserves a face crop whose accepted update the interface has not consumed")
+{
+    ControllerFixture fixture;
+    fixture.select();
+    fixture.setFace({520, 250, 100});
+    // Publish real scope output without letting the controller consume the
+    // matching accepted update. Retirement will replace that latest-value slot.
+    fixture.submit(fixture.frame(1));
+    REQUIRE(fixture.fetch());
+    REQUIRE(fixture.output.region);
+    const RegionOfInterest accepted = *fixture.output.region;
+    REQUIRE(accepted.toPixels(1000, 500) != InitialRegion.toPixels(1000, 500));
+    CHECK(fixture.region == InitialRegion);
+
+    desktopStubs().sessionDetection = {};
+    desktopStubs().faces.clear();
+    SECTION("unsupported detector")
+    {
+        desktopStubs().detectionStatus = FaceDetectionStatus::Unsupported;
+        fixture.submit(fixture.frame(2, {200, 100, 50}));
+    }
+    SECTION("sustained successful absence")
+    {
+        desktopStubs().detectionStatus = FaceDetectionStatus::Completed;
+        fixture.submit(fixture.frame(2, {200, 100, 50}));
+        fixture.clock += 0.5;
+        fixture.submit(fixture.frame(3, {100, 50, 200}));
+    }
+    REQUIRE(fixture.fetch());
+    REQUIRE(fixture.output.region);
+    checkSameCrop(*fixture.output.region, accepted, 1000, 500);
+    REQUIRE(fixture.output.images.contains("org.sidescopes.histogram"));
+    CHECK_FALSE(fixture.output.images.at("org.sidescopes.histogram").rgba.empty());
+
+    const auto retired = fixture.tick();
+    REQUIRE(retired.lostLock);
+    CHECK(*retired.lostLock == 1u);
+    REQUIRE(retired.applyRegion);
+    checkSameCrop(*retired.applyRegion, accepted, 1000, 500);
+    CHECK_FALSE(fixture.controller.contains(1));
+    CHECK(fixture.attach.isAttached(1));
+
+    const int detections = desktopStubs().detectorCall().calls;
+    fixture.setFace({530, 250, 100});
+    (void)fixture.advance(4);
+    CHECK(desktopStubs().detectorCall().calls == detections);
+    REQUIRE(fixture.fetch());
+    REQUIRE(fixture.output.region);
+    checkSameCrop(*fixture.output.region, accepted, 1000, 500);
 }
 
 TEST_CASE("A manual crop edit remaps held pixels without a second detection")

@@ -48,12 +48,15 @@ public:
     [[nodiscard]] bool interacting() const;
     [[nodiscard]] bool carried() const;
     [[nodiscard]] bool faceLocked() const;
+    [[nodiscard]] bool borderAnimating() const;
     [[nodiscard]] bool backgroundWorkRunning() const;
 
     [[nodiscard]] RegionSessionOutcome initializeGlobalRegion(const RegionOfInterest& region);
     [[nodiscard]] RegionSessionOutcome follow(bool windowMinimized, std::optional<AnalysisWorker::FrameSize> frameSize);
     [[nodiscard]] RegionSessionOutcome poll(bool windowMinimized, std::optional<AnalysisWorker::FrameSize> frameSize,
                                             std::optional<FloatColor> screenSampleColor);
+    /// Consume native grabs before following a face can move its border again.
+    [[nodiscard]] RegionSessionOutcome pollBorder();
     [[nodiscard]] RegionSessionOutcome clear();
     [[nodiscard]] RegionSessionOutcome cancel();
     [[nodiscard]] RegionSessionOutcome detach();

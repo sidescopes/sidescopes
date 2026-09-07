@@ -6,6 +6,7 @@
 #include <mutex>
 #include <optional>
 
+#include "app/face_motion.h"
 #include "app/face_tracking.h"
 #include "core/analysis_worker.h"
 #include "platform/face_detection.h"
@@ -86,6 +87,7 @@ private:
         FaceTrackingCommand command;
         std::optional<face_tracking::Association> policy;
         std::optional<SearchArea> search;
+        FaceMotion motion;
     };
 
     void prunePolicies(const FaceTrackingCommand& command);
@@ -94,6 +96,8 @@ private:
                                                           const FaceTrackingCommand& command,
                                                           const face_tracking::Decision& decision);
     [[nodiscard]] static bool preparePolicy(const FaceTrackingCommand& command, PolicyState& state);
+    [[nodiscard]] static face_tracking::Decision stabilize(const FaceTrackingCommand& command,
+                                                           face_tracking::Decision decision, PolicyState& state);
     [[nodiscard]] FaceDetectionResult runDetector(const FrameView& crop, double minimumPixels);
     [[nodiscard]] face_tracking::Decision detect(const FrameView& frame, const FaceTrackingCommand& command,
                                                  PolicyState& state);
