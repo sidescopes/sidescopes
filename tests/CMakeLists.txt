@@ -25,6 +25,7 @@ add_executable(sidescopes_tests
     test_trace_intensity.cpp
     test_marker_smoother.cpp
     test_analysis_worker.cpp
+    test_worker_interval.cpp
     test_analysis_failures.cpp
     test_analysis_inline.cpp
     test_graticule.cpp

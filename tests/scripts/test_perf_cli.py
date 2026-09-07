@@ -55,13 +55,23 @@ class PerformanceCliTests(unittest.TestCase):
                     self.assertNotIn('perf: hash tier', result.stderr)
                     self.assertEqual(output.read_text(encoding='utf-8'), 'previous result')
 
-    def test_more_processed_frames_are_reported_as_an_improvement(self):
-        result = self.run_harness('--tiers', 'worker')
+    def test_worker_rows_identify_the_joined_envelope_and_last_pass(self):
+        result = self.run_harness('--tiers', 'hash,worker')
         self.assertEqual(result.returncode, 0, result.stderr)
         rows = json.loads(result.stdout)
         throughput = [row for row in rows if row['metric'].startswith('worker-processed ')]
         self.assertEqual(len(throughput), 18)
         self.assertTrue(all(row['direction'] == 'higher' for row in throughput))
+        worker = [row for row in rows if row['metric'].startswith('worker-')]
+        self.assertEqual(len(worker), 72)
+        self.assertTrue(all(row['measurement_method'] == 'worker-start-stop-join-v1' for row in worker))
+        diagnostics = [row for row in worker if row['metric'].startswith('worker-accumulate-ms ')]
+        self.assertEqual(len(diagnostics), 18)
+        self.assertTrue(all(row['statistic'] == 'last-pass' and row['direction'] == 'none'
+                            for row in diagnostics))
+        unchanged = [row for row in rows if row['metric'].startswith('hash')]
+        self.assertEqual(len(unchanged), 6)
+        self.assertTrue(all('measurement_method' not in row for row in unchanged))
 
     def test_finite_duration_bounds_and_scientific_notation_are_accepted(self):
         for duration in ['0.5', '3.6e3']:

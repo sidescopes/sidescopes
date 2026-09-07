@@ -1,6 +1,7 @@
 """Regression checks for measurement and browser-packaging tools; no desktop input."""
 
 import contextlib
+import enum
 import hashlib
 import importlib.util
 import io
@@ -33,6 +34,11 @@ def load_script(name, path):
 
 
 compare = load_script('bench_compare', 'scripts/bench-compare.py')
+
+
+class MacSignal(enum.IntEnum):
+    SIGTERM = 15
+    SIGKILL = 9
 
 
 class ScenarioPreferencesTests(unittest.TestCase):
@@ -82,6 +88,9 @@ class ApplicationTeardownTests(unittest.TestCase):
         self.request = self.scope.enter_context(mock.patch.object(
             session.quartz, 'request_quit', return_value=True, create=True))
         self.signal = self.scope.enter_context(mock.patch.object(session.os, 'kill'))
+        # The simulated macOS process uses macOS signals even when its tests
+        # run on Windows, whose native signal module has no SIGKILL.
+        self.scope.enter_context(mock.patch.object(session, 'signal', MacSignal))
         self.scope.enter_context(mock.patch.object(session.time, 'monotonic', side_effect=lambda: self.clock))
         self.scope.enter_context(mock.patch.object(session.time, 'sleep', side_effect=self.advance))
         self.scope.enter_context(mock.patch.object(session, '_GRACEFUL_QUIT_TIMEOUT_SECONDS', 0.4))
@@ -746,6 +755,23 @@ class ComparisonTests(unittest.TestCase):
         regression, output = self.compare({'value': 1}, {'value': 2}, condition_reason='different machines')
         self.assertFalse(regression)
         self.assertIn('NOT COMPARABLE: different machines', output)
+
+    def test_worker_joined_envelope_is_not_compared_with_legacy_rows(self):
+        legacy = {'value': 1, 'unit': 'cores'}
+        joined = dict(legacy, value=2, measurement_method='worker-start-stop-join-v1')
+        regression, output = self.compare(legacy, joined)
+        self.assertFalse(regression)
+        self.assertIn('NOT COMPARABLE: measurement methods differ', output)
+        regression, output = self.compare(dict(joined, value=1), joined)
+        self.assertTrue(regression)
+        self.assertNotIn('NOT COMPARABLE', output)
+
+    def test_last_pass_diagnostic_does_not_gate_a_regression(self):
+        last = {'value': 1, 'unit': 'ms', 'measurement_method': 'worker-start-stop-join-v1',
+                'statistic': 'last-pass', 'direction': 'none'}
+        regression, output = self.compare(last, dict(last, value=100))
+        self.assertFalse(regression)
+        self.assertIn('(informational)', output)
 
     def test_method_quality_and_diagnostics_mismatches_are_not_compared(self):
         with mock.patch.dict(os.environ, {session.QUALITY_VARIABLE: 'standard'}):

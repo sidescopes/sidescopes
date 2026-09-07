@@ -7,7 +7,7 @@
 //             so it isolates the per-pass cost that no amount of sampling can
 //             reduce; the difference against the full region is the scatter.
 //   hash    - what change detection costs on its own, per region size.
-//   worker  - what the whole analysis thread costs in CPU seconds while frames
+//   worker  - what the analysis process costs in CPU seconds while frames
 //             arrive at the capture cadence, with static and with moving
 //             content. This is the number the idle machine feels.
 //
@@ -22,6 +22,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <exception>
 #include <filesystem>
 #include <fstream>
 #include <locale>
@@ -53,6 +54,7 @@
 #include "core/scopes/histogram.h"
 #include "core/scopes/vectorscope.h"
 #include "core/scopes/waveform.h"
+#include "worker_interval.h"
 
 namespace sidescopes {
 namespace {
@@ -428,9 +430,9 @@ struct WorkerResult
     double accumulateMilliseconds = 0.0;
 };
 
-// Feeds the mailbox at the capture cadence for WorkerSeconds and reports what
-// the run cost. The producer only ever memcpys into recycled storage, so the
-// CPU it adds is the same in every scenario and cancels out of comparisons.
+// The process envelope includes startup, producer copies and disturbances,
+// completed analysis, and stop/join. Joining finishes in-flight work; it does
+// not flush every pending mailbox frame. Output copying follows the endpoint.
 WorkerResult runWorkerScenario(const WorkerScenario& scenario, const AnalysisSettings& settings,
                                const std::vector<uint8_t>& sourcePixels, IntRect region, double seconds)
 {
@@ -438,13 +440,12 @@ WorkerResult runWorkerScenario(const WorkerScenario& scenario, const AnalysisSet
     FrameMailbox mailbox;
     AnalysisWorker worker(mailbox);
     worker.updateSettings(settings);
-    worker.start();
-
     FrameBuffer storage;
     WorkerResult result;
     const auto interval = std::chrono::nanoseconds(1'000'000'000 / CaptureFramesPerSecond);
     const auto started = std::chrono::steady_clock::now();
     const double cpuBefore = processCpuSeconds();
+    worker.start();
     for (uint64_t tick = 0;; ++tick) {
         std::this_thread::sleep_until(started + interval * static_cast<int64_t>(tick));
         if (std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count() >= seconds) {
@@ -462,16 +463,16 @@ WorkerResult runWorkerScenario(const WorkerScenario& scenario, const AnalysisSet
         storage = mailbox.publish(std::move(storage));
         ++result.delivered;
     }
-    result.cpuSeconds = processCpuSeconds() - cpuBefore;
-    result.wallSeconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
+    benchmark::stopAndMeasure(worker, [&] {
+        result.cpuSeconds = processCpuSeconds() - cpuBefore;
+        result.wallSeconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
+    });
 
     uint64_t seen = 0;
     AnalysisWorker::Output output;
     (void)worker.fetchOutput(seen, output);
     result.processed = output.framesProcessed;
     result.accumulateMilliseconds = output.accumulateMilliseconds;
-    worker.stop();
-
     return result;
 }
 
@@ -479,18 +480,27 @@ void recordWorker(std::vector<MetricRow>& rows, const WorkerScenario& scenario, 
                   const PaneCase& pane, const WorkerResult& result)
 {
     const std::string suffix = std::string(scenario.name) + "/" + region.name + "/" + pane.name;
-    const std::vector<std::pair<std::string, std::string>> tags{
-        {"scenario", scenario.name}, {"region", region.name}, {"pane", pane.name}};
+    const std::vector<std::pair<std::string, std::string>> tags{{"scenario", scenario.name},
+                                                                {"region", region.name},
+                                                                {"pane", pane.name},
+                                                                {"measurement_method", "worker-start-stop-join-v1"}};
     const double cores = result.wallSeconds > 0.0 ? result.cpuSeconds / result.wallSeconds : 0.0;
     record(rows, "worker-cores " + suffix, cores, "cores", tags);
     auto throughputTags = tags;
     throughputTags.emplace_back("direction", "higher");
     record(rows, "worker-processed " + suffix, static_cast<double>(result.processed), "frames", throughputTags);
+    // Includes unchanged inputs and pending shutdown work as well as mailbox
+    // replacement; this is not a count of capture frames dropped by the app.
     const double skipped = result.delivered > 0 ? 100.0 * static_cast<double>(result.delivered - result.processed) /
                                                       static_cast<double>(result.delivered)
                                                 : 0.0;
     record(rows, "worker-skipped " + suffix, skipped, "percent", tags);
-    record(rows, "worker-accumulate-ms " + suffix, result.accumulateMilliseconds, "ms", tags);
+    // This is the final pass, not a mean or a tail distribution. Retain it as
+    // a diagnostic without treating a different last frame as a regression.
+    auto diagnosticTags = tags;
+    diagnosticTags.emplace_back("statistic", "last-pass");
+    diagnosticTags.emplace_back("direction", "none");
+    record(rows, "worker-accumulate-ms " + suffix, result.accumulateMilliseconds, "ms", diagnosticTags);
 }
 
 std::vector<WorkerScenario> workerScenarios()
@@ -763,29 +773,37 @@ int run(const std::vector<std::string>& arguments)
 // The wide CRT entry point preserves paths and labels outside the process's
 // legacy code page. The harness carries UTF-8 internally on every platform.
 int wmain(int argc, wchar_t** argv)
-{
-    std::vector<std::string> arguments;
-    for (int i = 1; i < argc; ++i) {
-        const int length =
-            WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, argv[i], -1, nullptr, 0, nullptr, nullptr);
-        if (length <= 0) {
-            std::fprintf(stderr, "perf: invalid Unicode argument\n");
-            return 2;
-        }
-        std::string argument(static_cast<std::size_t>(length), '\0');
-        if (WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, argv[i], -1, argument.data(), length, nullptr,
-                                nullptr) != length) {
-            std::fprintf(stderr, "perf: cannot decode argument\n");
-            return 2;
-        }
-        argument.pop_back();
-        arguments.push_back(std::move(argument));
-    }
-    return run(arguments);
-}
 #else
 int main(int argc, char** argv)
-{
-    return run({argv + 1, argv + argc});
-}
 #endif
+{
+    try {
+#ifdef _WIN32
+        std::vector<std::string> arguments;
+        for (int i = 1; i < argc; ++i) {
+            const int length =
+                WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, argv[i], -1, nullptr, 0, nullptr, nullptr);
+            if (length <= 0) {
+                std::fprintf(stderr, "perf: invalid Unicode argument\n");
+                return 2;
+            }
+            std::string argument(static_cast<std::size_t>(length), '\0');
+            if (WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, argv[i], -1, argument.data(), length, nullptr,
+                                    nullptr) != length) {
+                std::fprintf(stderr, "perf: cannot decode argument\n");
+                return 2;
+            }
+            argument.pop_back();
+            arguments.push_back(std::move(argument));
+        }
+        return run(arguments);
+#else
+        return run({argv + 1, argv + argc});
+#endif
+    } catch (const std::exception& error) {
+        std::fprintf(stderr, "perf: %s\n", error.what());
+    } catch (...) {
+        std::fprintf(stderr, "perf: unexpected failure\n");
+    }
+    return 1;
+}
