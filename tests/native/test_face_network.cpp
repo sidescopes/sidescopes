@@ -2,9 +2,12 @@
 #include <catch2/catch_test_macros.hpp>
 #include <cstddef>
 #include <cstdint>
+#include <opencv2/dnn.hpp>
 #include <vector>
 
+#include "platform/windows/face_model_data.h"
 #include "platform/windows/face_network.h"
+#include "platform/windows/face_network_geometry.h"
 
 namespace sidescopes {
 namespace {
@@ -68,7 +71,7 @@ TEST_CASE("A face network reuses storage across input shapes", "[face-network]")
     const auto anchorPixels = texturedPixels(320, 240, 320 * 4, PixelFormat::Bgra8);
     const FrameView anchor{anchorPixels.data(), 320 * 4, 320, 240};
     const auto expected = network.detect(anchor, 24, 320);
-    const std::array<IntRect, 10> shapes{{{0, 0, 1, 1},
+    const std::array<IntRect, 14> shapes{{{0, 0, 1, 1},
                                           {0, 0, 31, 33},
                                           {0, 0, 32, 32},
                                           {0, 0, 33, 31},
@@ -76,6 +79,10 @@ TEST_CASE("A face network reuses storage across input shapes", "[face-network]")
                                           {0, 0, 321, 319},
                                           {0, 0, 17, 641},
                                           {0, 0, 641, 17},
+                                          {0, 0, 32, 641},
+                                          {0, 0, 641, 32},
+                                          {0, 0, 33, 641},
+                                          {0, 0, 641, 33},
                                           {0, 0, 1281, 721},
                                           {0, 0, 3840, 2160}}};
     for (const auto& shape : shapes) {
@@ -89,6 +96,37 @@ TEST_CASE("A face network reuses storage across input shapes", "[face-network]")
         }
     }
     CHECK(network.detect(anchor, 24, 320) == expected);
+}
+
+TEST_CASE("Face input padding avoids singleton convolution shapes", "[face-network]")
+{
+    const auto model = faceModelBytes();
+    const auto network = cv::dnn::readNetFromONNX(reinterpret_cast<const char*>(model.data()), model.size());
+    // Check the actual model through OpenCV's public shape API, so a model
+    // upgrade cannot silently invalidate the input padding requirement.
+    for (const int edge : {1, 31, 32, 33, 63, 64, 65}) {
+        CAPTURE(edge);
+        const int padded = face_network::paddedInputEdge(edge);
+        const cv::dnn::MatShape input{1, 3, padded, padded};
+        std::vector<int> ids;
+        std::vector<std::vector<cv::dnn::MatShape>> inputs, outputs;
+        network.getLayersShapes(input, ids, inputs, outputs);
+        REQUIRE(inputs.size() == ids.size());
+        std::size_t convolutions = 0;
+        for (std::size_t i = 0; i < ids.size(); ++i) {
+            if (network.getLayer(ids[i])->type != "Convolution") {
+                continue;
+            }
+            ++convolutions;
+            REQUIRE_FALSE(inputs[i].empty());
+            for (const auto& shape : inputs[i]) {
+                REQUIRE(shape.size() == 4);
+                CHECK(shape[2] >= 2);
+                CHECK(shape[3] >= 2);
+            }
+        }
+        REQUIRE(convolutions > 0);
+    }
 }
 
 TEST_CASE("Face inference preserves padded and ten-bit input", "[face-network]")

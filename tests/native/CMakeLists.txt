@@ -1,5 +1,5 @@
 if(TARGET sidescopes_face_network)
-    add_executable(sidescopes_face_network_tests test_face_network.cpp test_face_convolution.cpp)
+    add_executable(sidescopes_face_network_tests test_face_network.cpp)
     target_include_directories(sidescopes_face_network_tests PRIVATE "${PROJECT_SOURCE_DIR}/src")
     target_include_directories(sidescopes_face_network_tests SYSTEM PRIVATE
         "${SIDESCOPES_OPENCV_SOURCE}/modules/core/include"

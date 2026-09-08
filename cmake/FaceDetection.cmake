@@ -105,12 +105,6 @@ function(sidescopes_add_face_network)
     endif()
 
     set(model "${CMAKE_SOURCE_DIR}/assets/models/face_detection_yunet.onnx")
-    include("${CMAKE_CURRENT_FUNCTION_LIST_DIR}/OpenCVSources.cmake")
-    include("${CMAKE_CURRENT_FUNCTION_LIST_DIR}/TrimFaceLayers.cmake")
-    include("${CMAKE_CURRENT_FUNCTION_LIST_DIR}/FixFaceConvolution.cmake")
-    sidescopes_trim_face_layers("${opencv_SOURCE_DIR}" "${model}"
-        "${CMAKE_CURRENT_BINARY_DIR}/generated")
-    sidescopes_fix_face_convolution("${opencv_SOURCE_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/generated")
     set(model_source "${CMAKE_CURRENT_BINARY_DIR}/generated/face_model_data.cpp")
     add_custom_command(OUTPUT "${model_source}"
         COMMAND ${CMAKE_COMMAND}

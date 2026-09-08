@@ -203,8 +203,8 @@ std::vector<IntRect> FaceNetwork::detect(const FrameView& frame, double minimumP
     const cv::Mat bgra(frame.height, frame.width, CV_8UC4, const_cast<uint8_t*>(pixels), stride);
     cv::cvtColor(bgra, state.fullBgr, cv::COLOR_BGRA2BGR);
     cv::resize(state.fullBgr, state.input, inputSize, 0.0, 0.0, cv::INTER_AREA);
-    const int bottom = (32 - inputSize.height % 32) % 32;
-    const int right = (32 - inputSize.width % 32) % 32;
+    const int bottom = face_network::paddedInputEdge(inputSize.height) - inputSize.height;
+    const int right = face_network::paddedInputEdge(inputSize.width) - inputSize.width;
     cv::copyMakeBorder(state.input, state.padded, 0, bottom, 0, right, cv::BORDER_CONSTANT, 0);
     cv::dnn::blobFromImage(state.padded, state.blob);
     state.network.setInput(state.blob);

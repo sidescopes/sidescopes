@@ -73,17 +73,18 @@ build therefore takes longer; later builds reuse the dependency. GUI, video,
 image codecs, GPU backends and runtime plugins are disabled. macOS uses Vision
 and does not build OpenCV by default.
 
-The DNN layer registry includes only the operations required by the pinned
-YuNet model. CMake generates the reduced registry in the build directory;
-fetched sources remain unchanged. Updating OpenCV or
-the model requires reviewing the layer requirements in
-`cmake/TrimFaceLayers.cmake` before updating its hash guards.
+OpenCV is compiled without source patches or a custom layer registry. To
+upgrade it, update the archive URL and SHA-256 in `cmake/FaceDetection.cmake`,
+then run the face-network tests and the normal platform checks. No generated
+source transformations need to be rebased onto the new version.
 
-`cmake/FixFaceConvolution.cmake` also generates a narrow correction for
-one-pixel intermediate images, using OpenCV's existing general depthwise
-convolution path. Ordinary image dimensions retain their optimized path.
-Review this correction when upgrading OpenCV; scalar regression tests check
-the expected convolution values independently of the face model.
+After resizing, input is padded with black pixels on the bottom and right to
+multiples of 32, with a minimum of 64 pixels per axis. This keeps YuNet's
+coarsest convolution inputs at least 2x2 and avoids an OpenCV padding bug on
+singleton dimensions. The tests verify this requirement against the actual
+model through OpenCV's public shape API and exercise narrow images. Only
+resized axes of 32 pixels or less receive additional padding; these inputs
+can produce different detections because of the additional black context.
 
 To compile and exercise the same YuNet backend on Linux or macOS, configure
 with `-DSIDESCOPES_FACE_NETWORK_TESTS=ON`, build, and run
