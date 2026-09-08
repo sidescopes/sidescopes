@@ -46,7 +46,8 @@ bool sameCommand(const FaceTrackingCommand& a, const FaceTrackingCommand& b)
     return a.revision == b.revision && a.lockGeneration == b.lockGeneration && a.identity == b.identity &&
            a.captureEpoch == b.captureEpoch && a.displayId == b.displayId && a.displayWidth == b.displayWidth &&
            a.captureContinuity == b.captureContinuity && a.displayHeight == b.displayHeight && a.window == b.window &&
-           a.enabled == b.enabled && a.minimumFacePixels == b.minimumFacePixels && sameCrop(a.crop, b.crop);
+           a.parentOriginX == b.parentOriginX && a.parentOriginY == b.parentOriginY && a.enabled == b.enabled &&
+           a.minimumFacePixels == b.minimumFacePixels && sameCrop(a.crop, b.crop);
 }
 
 bool listed(const FaceTrackingCommand& command)
@@ -63,7 +64,8 @@ bool validCommand(const FaceTrackingCommand& command)
     const auto bounds = lockRect(command.window);
     return listed(command) && command.identity != 0 && command.lockGeneration != 0 && command.displayWidth > 0 &&
            command.displayHeight > 0 && bounds.right <= command.displayWidth &&
-           bounds.bottom <= command.displayHeight && std::isfinite(command.minimumFacePixels) &&
+           bounds.bottom <= command.displayHeight && std::isfinite(command.parentOriginX) &&
+           std::isfinite(command.parentOriginY) && std::isfinite(command.minimumFacePixels) &&
            command.minimumFacePixels >= 1.0 &&
            command.minimumFacePixels <= std::max(command.displayWidth, command.displayHeight) &&
            face_tracking::validSelection(contextOf(command), command.crop, bounds);
@@ -274,8 +276,11 @@ bool FaceTrackingWorker::remapPolicy(const FaceTrackingCommand& command, PolicyS
     } else {
         const bool translated =
             command.window.width == previous.window.width && command.window.height == previous.window.height;
-        if (policy.remap(contextOf(command), command.crop, lockRect(command.window), resumed).action ==
-            Action::Ignored) {
+        if (policy
+                .remap(contextOf(command), command.crop, lockRect(command.window),
+                       command.parentOriginX - previous.parentOriginX, command.parentOriginY - previous.parentOriginY,
+                       resumed)
+                .action == Action::Ignored) {
             state.search.reset();
             return policy.retire(contextOf(command), command.crop, lockRect(command.window)).action != Action::Ignored;
         }

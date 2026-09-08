@@ -52,7 +52,7 @@ private:
         FaceLockState state;
         std::optional<AttachWindowRect> windowRect;
         uint64_t generation = 0;
-        std::optional<double> uncertainSince;
+        std::optional<double> uncertaintyDeadline;
         std::optional<std::pair<int, int>> coordinateSize;
     };
 

@@ -1095,3 +1095,32 @@ TEST_CASE("A new live lock generation cannot inherit the previous detector searc
     CHECK(selected.decision.crop.left == 313);
     CHECK(fix.searches.back() == IntRect{223, 140, 200, 200});
 }
+
+TEST_CASE("Unclipped parent origin is part of the tracking command identity", "[clipped-parent]")
+{
+    Fixture fix;
+    REQUIRE(fix.run().mode == Mode::Override);
+    // A changed origin must discard the old update even if a producer has
+    // not advanced its revision yet. Crop and clipped bounds are identical.
+    fix.command.parentOriginX = -10;
+    fix.exchange->select(fix.command);
+    CHECK_FALSE(fix.exchange->fetch(fix.seen));
+    fix.next(10.04);
+    CHECK(fix.run().mode == Mode::Skip);
+    CHECK(fix.detector.calls == 1);
+}
+
+TEST_CASE("Nonfinite parent origins are rejected before detection", "[clipped-parent]")
+{
+    for (const double invalid : {std::numeric_limits<double>::quiet_NaN(), std::numeric_limits<double>::infinity()}) {
+        for (const bool horizontal : {false, true}) {
+            Fixture fix;
+            fix.command.parentOriginX = horizontal ? invalid : 0;
+            fix.command.parentOriginY = horizontal ? 0 : invalid;
+            fix.exchange->select(fix.command);
+            CHECK(fix.run().mode == Mode::Skip);
+            CHECK(fix.detector.calls == 0);
+            CHECK_FALSE(fix.exchange->fetch(fix.seen));
+        }
+    }
+}

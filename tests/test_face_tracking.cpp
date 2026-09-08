@@ -1,6 +1,9 @@
+#include <algorithm>
 #include <array>
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
+#include <cmath>
 #include <limits>
 #include <stdexcept>
 #include <vector>
@@ -168,12 +171,12 @@ TEST_CASE("Control remapping preserves uncertain and retired association state")
     REQUIRE(observe(policy, 2, 10.05, {face(490.0), face(520.0)}).reason == Reason::Ambiguous);
     const Context moved{2, Source.epoch, Source.display};
     const auto shifted = face_lock::makeLock({510, 500, 200}, {460, 380, 560, 440});
-    CHECK(policy.remap(moved, shifted, Bounds).action == Action::Held);
+    CHECK(policy.remap(moved, shifted, Bounds, 0, 0).action == Action::Held);
     CHECK(policy.current().anchor.centerX == 510);
     CHECK(policy.tick(moved, 10.10).reason == Reason::Ambiguous);
     CHECK(policy.tick(moved, 10.46).action == Action::OrdinaryAttached);
     const Context edited{3, Source.epoch, Source.display};
-    CHECK_FALSE(policy.remap(edited, shifted, Bounds).following);
+    CHECK_FALSE(policy.remap(edited, shifted, Bounds, 0, 0).following);
     const std::array boxes{face(520.0)};
     CHECK(policy.advance({edited, 3, 10.50}, 10.50, DetectionStatus::Completed, boxes).action ==
           Action::OrdinaryAttached);
@@ -186,7 +189,7 @@ TEST_CASE("A control snapshot keeps its normalized crop despite a newer worker a
     const Context next{2, Source.epoch, Source.display};
     const LockRect edited{470, 400, 530, 430};
     const auto saved = face_lock::makeLock({500, 500, 200}, edited);
-    const auto remapped = policy.remap(next, saved, Bounds);
+    const auto remapped = policy.remap(next, saved, Bounds, 0, 0);
     REQUIRE(remapped.action == Action::Held);
     checkCrop(remapped, edited);
     CHECK(remapped.anchor.centerX == saved.lastAnchor.centerX);
@@ -231,4 +234,340 @@ TEST_CASE("The first fresh detection can start at monotonic zero without a settl
     const std::array boxes{face(500)};
     CHECK(policy.advance({Source, 1, 0.0}, 0.0, DetectionStatus::Completed, boxes).action == Action::Accepted);
     CHECK(policy.advance({Source, 2, 0.0}, 0.0, DetectionStatus::Completed, boxes).action == Action::Ignored);
+}
+
+namespace {
+
+Association withRecentRival()
+{
+    auto policy = selected();
+    REQUIRE(observe(policy, 2, 10.04, {face(500), face(800)}).action == Action::Accepted);
+    return policy;
+}
+
+Decision afterMiss(Association& policy, Context context = Source)
+{
+    REQUIRE(policy.advance({context, 3, 10.08}, 10.08, DetectionStatus::Completed, {}).action == Action::Held);
+    const std::array boxes{face(700)};
+    return policy.advance({context, 4, 10.20}, 10.20, DetectionStatus::Completed, boxes);
+}
+
+LockRect xywh(double x, double y, double width, double height)
+{
+    return {x, y, x + width, y + height};
+}
+
+}  // namespace
+
+TEST_CASE("A recent rival cannot become the selected face as a miss widens the gate", "[recent-rival]")
+{
+    // Consecutive detector observations from an overlap: the selected face is
+    // the second box until frame 94 and is absent in frames 95 through 98.
+    const LockRect bounds{0, 0, 640, 480};
+    const auto seed = xywh(228, 157, 76, 121);
+    Association policy{{Source, 93, 92.0 / 25}, seed, xywh(240, 175, 48, 70), bounds, 92.0 / 25};
+    auto first = observe(policy, 94, 93.0 / 25, {xywh(313, 151, 90, 116), xywh(231, 156, 75, 124)});
+    REQUIRE(first.action == Action::Accepted);
+    REQUIRE(first.selectedBox == 1);
+    auto last = observe(policy, 95, 94.0 / 25, {xywh(307, 150, 90, 116), xywh(237, 145, 72, 134)});
+    REQUIRE(last.action == Action::Accepted);
+    REQUIRE(last.selectedBox == 1);
+    CHECK(observe(policy, 96, 95.0 / 25, {xywh(305, 150, 89, 114)}).reason == Reason::NoPlausibleMatch);
+    CHECK(observe(policy, 97, 96.0 / 25, {xywh(302, 150, 91, 117)}).reason == Reason::NoPlausibleMatch);
+    CHECK(observe(policy, 98, 97.0 / 25, {xywh(299, 150, 91, 119)}).reason == Reason::NoPlausibleMatch);
+    const auto guarded = observe(policy, 99, 98.0 / 25, {xywh(298, 146, 86, 117)});
+    REQUIRE(guarded.action == Action::Held);
+    CHECK(guarded.reason == Reason::Ambiguous);
+    CHECK_FALSE(guarded.selectedBox);
+    checkCrop(guarded, last.crop);
+    CHECK(guarded.evidenceSourceSeconds == 94.0 / 25);
+    CHECK(observe(policy, 100, 99.0 / 25, {xywh(294, 148, 89, 118)}).reason == Reason::Ambiguous);
+    CHECK(policy.tick(Source, 4.21).action == Action::OrdinaryAttached);
+}
+
+TEST_CASE("Single-face acceleration stop reversal and zoom retain immediate acceptance", "[recent-rival]")
+{
+    auto policy = selected();
+    const std::array positions{510., 540., 590., 640., 640., 600., 555., 570., 610.};
+    const std::array widths{200., 200., 210., 220., 220., 200., 185., 195., 215.};
+    for (std::size_t i = 0; i < positions.size(); ++i) {
+        const auto result = observe(policy, i + 2, 10.0 + (i + 1) * .05, {face(positions[i], 500, widths[i])});
+        REQUIRE(result.action == Action::Accepted);
+        CHECK(result.anchor.centerX == positions[i]);
+        CHECK(result.anchor.width == widths[i]);
+    }
+}
+
+TEST_CASE("A departed rival does not block a continuously followed face", "[recent-rival]")
+{
+    auto policy = withRecentRival();
+    for (int i = 1; i <= 9; ++i) {
+        const double position = 500 + i * 40;
+        const auto followed = observe(policy, i + 2, 10.04 + i * .04, {face(position)});
+        REQUIRE(followed.action == Action::Accepted);
+        CHECK(followed.anchor.centerX == position);
+    }
+}
+
+TEST_CASE("Brief selected misses keep negative evidence without renewing positive evidence", "[recent-rival]")
+{
+    auto policy = withRecentRival();
+    const auto decision = afterMiss(policy);
+    CHECK(decision.reason == Reason::Ambiguous);
+    CHECK(decision.action == Action::Held);
+    CHECK(decision.evidenceSourceSeconds == 10.04);
+    checkCrop(decision, Crop);
+    CHECK(policy.tick(Source, 10.49).action == Action::OrdinaryAttached);
+}
+
+TEST_CASE("A returning selected face can recover beside the same distant rival", "[recent-rival]")
+{
+    auto policy = withRecentRival();
+    REQUIRE(observe(policy, 3, 10.08, {}).action == Action::Held);
+    const auto result = observe(policy, 4, 10.12, {face(800), face(515)});
+    REQUIRE(result.action == Action::Accepted);
+    CHECK(result.selectedBox == 1);
+    CHECK(result.anchor.centerX == 515);
+}
+
+TEST_CASE("Rival evidence expires on source time after healthy following", "[recent-rival]")
+{
+    auto policy = withRecentRival();
+    for (int i = 1; i <= 11; ++i) {
+        REQUIRE(observe(policy, i + 2, 10.04 + i * .04, {face(500)}).action == Action::Accepted);
+    }
+    const auto result = observe(policy, 14, 10.64, {face(700)});
+    CHECK(result.action == Action::Accepted);
+    CHECK(result.anchor.centerX == 700);
+}
+
+TEST_CASE("Ignored observations cannot replace or expire recent rival evidence", "[recent-rival]")
+{
+    auto policy = withRecentRival();
+    const std::array unrelated{face(500), face(1000)};
+    SECTION("Foreign source")
+    {
+        CHECK(policy.advance({{1, 99, 3}, 10, 99}, 99, DetectionStatus::Completed, unrelated).reason ==
+              Reason::StaleContext);
+    }
+    SECTION("Foreign generation")
+    {
+        CHECK(policy.advance({{2, 9, 3}, 10, 99}, 99, DetectionStatus::Completed, unrelated).reason ==
+              Reason::StaleContext);
+    }
+    SECTION("Foreign display")
+    {
+        CHECK(policy.advance({{1, 9, 4}, 10, 99}, 99, DetectionStatus::Completed, unrelated).reason ==
+              Reason::StaleContext);
+    }
+    SECTION("Duplicate sequence")
+    {
+        CHECK(policy.advance({Source, 2, 99}, 99, DetectionStatus::Completed, unrelated).reason ==
+              Reason::DuplicateOrOlderFrame);
+    }
+    SECTION("Equal receipt time")
+    {
+        CHECK(policy.advance({Source, 3, 10.04}, 10.05, DetectionStatus::Completed, unrelated).reason ==
+              Reason::NonIncreasingSourceTime);
+    }
+    SECTION("Invalid clock")
+    {
+        CHECK(policy.advance({Source, 3, 10.05}, 10.03, DetectionStatus::Completed, unrelated).reason ==
+              Reason::InvalidClock);
+    }
+    CHECK(afterMiss(policy).reason == Reason::Ambiguous);
+}
+
+TEST_CASE("Unavailable and malformed detections do not erase negative evidence", "[recent-rival]")
+{
+    auto policy = withRecentRival();
+    SECTION("Native failure")
+    {
+        CHECK(policy.advance({Source, 3, 10.08}, 10.08, DetectionStatus::Failed, {}).reason == Reason::NativeFailure);
+    }
+    SECTION("Native status unavailable")
+    {
+        CHECK(policy.advance({Source, 3, 10.08}, 10.08, DetectionStatus::Unavailable, {}).reason ==
+              Reason::NativeStatusUnavailable);
+    }
+    SECTION("Malformed boxes")
+    {
+        const std::array invalid{LockRect{10, 10, 5, 5}};
+        CHECK(policy.advance({Source, 3, 10.08}, 10.08, DetectionStatus::Completed, invalid).reason ==
+              Reason::InvalidDetection);
+    }
+    CHECK(observe(policy, 4, 10.20, {face(700)}).reason == Reason::Ambiguous);
+}
+
+TEST_CASE("Manual crop edits preserve recent rival evidence and do not refresh its clock", "[recent-rival]")
+{
+    auto policy = withRecentRival();
+    const Context edited{2, Source.epoch, Source.display};
+    const LockRect crop{460, 390, 540, 430};
+    REQUIRE(policy.rebindCrop(edited, crop).action == Action::Held);
+    const auto result = afterMiss(policy, edited);
+    CHECK(result.reason == Reason::Ambiguous);
+    checkCrop(result, crop);
+    CHECK(result.evidenceSourceSeconds == 10.04);
+}
+
+TEST_CASE("Proven stream resume preserves recent rival memory and monotonic source time", "[recent-rival]")
+{
+    auto policy = withRecentRival();
+    const Context resumed{2, Source.epoch + 1, Source.display};
+    const auto crop = face_lock::makeLock(anchorOf(face(500)), Crop);
+    REQUIRE(policy.remap(resumed, crop, Bounds, 0, 0, true).action == Action::Held);
+    CHECK(policy.advance({resumed, 1, 10.04}, 10.05, DetectionStatus::Completed, {}).reason ==
+          Reason::NonIncreasingSourceTime);
+    REQUIRE(policy.advance({resumed, 1, 10.08}, 10.08, DetectionStatus::Completed, {}).action == Action::Held);
+    const std::array boxes{face(700)};
+    CHECK(policy.advance({resumed, 2, 10.20}, 10.20, DetectionStatus::Completed, boxes).reason == Reason::Ambiguous);
+}
+
+TEST_CASE("Parent translation carries rival positions independently of saved crop offsets", "[recent-rival]")
+{
+    auto policy = withRecentRival();
+    const Context moved{2, Source.epoch, Source.display};
+    const LockRect bounds{100, 50, 4196, 2210};
+    const auto crop = face_lock::makeLock(anchorOf(face(600, 550)), {550, 430, 650, 490});
+    REQUIRE(policy.remap(moved, crop, bounds, 100, 50).action == Action::Held);
+    REQUIRE(policy.advance({moved, 3, 10.08}, 10.08, DetectionStatus::Completed, {}).action == Action::Held);
+    const std::array boxes{face(800, 550)};
+    CHECK(policy.advance({moved, 4, 10.20}, 10.20, DetectionStatus::Completed, boxes).reason == Reason::Ambiguous);
+}
+
+TEST_CASE("A stale saved anchor does not translate rival evidence within unchanged bounds", "[recent-rival]")
+{
+    auto policy = selected();
+    REQUIRE(observe(policy, 2, 10.04, {face(520), face(700)}).action == Action::Accepted);
+    const Context edited{2, Source.epoch, Source.display};
+    const auto saved = face_lock::makeLock(anchorOf(face(500)), Crop);
+    REQUIRE(policy.remap(edited, saved, Bounds, 0, 0).action == Action::Held);
+    const std::array boxes{face(615)};
+    CHECK(policy.advance({edited, 3, 10.20}, 10.20, DetectionStatus::Completed, boxes).action == Action::Accepted);
+}
+
+TEST_CASE("Parent resize cannot erase recent rival evidence", "[recent-rival]")
+{
+    auto policy = withRecentRival();
+    const Context resized{2, Source.epoch, Source.display};
+    const auto crop = face_lock::makeLock(anchorOf(face(500)), Crop);
+    REQUIRE(policy.remap(resized, crop, {0, 0, 4000, 2100}, 0, 0).action == Action::Held);
+    CHECK(afterMiss(policy, resized).reason == Reason::Ambiguous);
+}
+
+TEST_CASE("Source retirement stays retired and a new explicit selection starts without rivals", "[recent-rival]")
+{
+    auto old = withRecentRival();
+    const Context next{2, Source.epoch + 1, 4};
+    const auto crop = face_lock::makeLock(anchorOf(face(500)), Crop);
+    REQUIRE(old.retire(next, crop, Bounds).action == Action::OrdinaryAttached);
+    const std::array boxes{face(700)};
+    CHECK(old.advance({next, 1, 10.20}, 10.20, DetectionStatus::Completed, boxes).action == Action::OrdinaryAttached);
+    Association fresh{{next, 1, 10.04}, face(500), Crop, Bounds, 10.04};
+    CHECK(fresh.advance({next, 2, 10.20}, 10.20, DetectionStatus::Completed, boxes).action == Action::Accepted);
+}
+
+TEST_CASE("Bounded rival capacity refuses crowding without dropping a known competitor", "[recent-rival]")
+{
+    Association policy{{Source, 1, 10}, face(1000, 1000), {950, 950, 1050, 1050}, Bounds, 10};
+    std::vector<LockRect> boxes{face(1000, 1000)};
+    for (int i = 0; i < 9; ++i) {
+        const double angle = i * 6.283185307179586 / 9;
+        boxes.push_back(face(1000 + 400 * std::cos(angle), 1000 + 400 * std::sin(angle)));
+    }
+    const auto decision = observe(policy, 2, 10.04, boxes);
+    CHECK(decision.action == Action::Held);
+    CHECK(decision.reason == Reason::Ambiguous);
+    CHECK(decision.evidenceSourceSeconds == 10);
+}
+
+TEST_CASE("A different visible rival cannot replace a recently missing rival", "[recent-rival]")
+{
+    auto policy = withRecentRival();
+    REQUIRE(observe(policy, 3, 10.08, {face(500), face(200)}).action == Action::Accepted);
+    REQUIRE(observe(policy, 4, 10.12, {}).action == Action::Held);
+    CHECK(observe(policy, 5, 10.24, {face(700)}).reason == Reason::Ambiguous);
+}
+
+TEST_CASE("Presentation ticks cannot renew or clear rival observations", "[recent-rival]")
+{
+    auto policy = withRecentRival();
+    REQUIRE(policy.tick(Source, 10.08).reason == Reason::Waiting);
+    REQUIRE(policy.tick(Source, 10.12).reason == Reason::Waiting);
+    REQUIRE(observe(policy, 3, 10.16, {}).action == Action::Held);
+    CHECK(observe(policy, 4, 10.20, {face(700)}).reason == Reason::Ambiguous);
+    CHECK(policy.current().evidenceSourceSeconds == 10.04);
+}
+
+TEST_CASE("An expired native result cannot replace recent rival observations", "[recent-rival]")
+{
+    auto policy = withRecentRival();
+    const std::array unrelated{face(500), face(1000)};
+    CHECK(policy.advance({Source, 3, 10.10}, 10.31, DetectionStatus::Completed, unrelated).reason ==
+          Reason::ExpiredResult);
+    CHECK(observe(policy, 4, 10.32, {face(700)}).reason == Reason::Ambiguous);
+}
+
+TEST_CASE("Visible departing rivals permit admitted lower-cadence face motion", "[recent-rival]")
+{
+    auto policy = withRecentRival();
+    const auto moved = observe(policy, 3, 10.20, {face(700), face(1000)});
+    REQUIRE(moved.action == Action::Accepted);
+    CHECK(moved.selectedBox == 0);
+    CHECK(moved.anchor.centerX == 700);
+    CHECK(observe(policy, 4, 10.36, {face(900), face(1200)}).action == Action::Accepted);
+}
+
+TEST_CASE("Distinct current rivals preserve recovery protection in either detector order", "[recent-rival]")
+{
+    const bool reversed = GENERATE(false, true);
+    Association policy{{Source, 1, 10}, face(200, 200, 80), {180, 180, 220, 220}, Bounds, 10};
+    std::vector<LockRect> boxes{face(200, 200, 80), face(320, 200, 80), face(360, 200, 80)};
+    if (reversed) {
+        std::swap(boxes[1], boxes[2]);
+    }
+    REQUIRE(observe(policy, 2, 10.04, boxes).action == Action::Accepted);
+    REQUIRE(observe(policy, 3, 10.08, {}).action == Action::Held);
+    const auto survivor = observe(policy, 4, 10.20, {face(280, 200, 80)});
+    CHECK(survivor.action == Action::Held);
+    CHECK(survivor.reason == Reason::Ambiguous);
+    CHECK(survivor.evidenceSourceSeconds == 10.04);
+    checkCrop(survivor, {180, 180, 220, 220});
+}
+
+TEST_CASE("Rival batches have identical recovery effects under every box permutation", "[recent-rival]")
+{
+    std::array<int, 3> order{0, 1, 2};
+    do {
+        for (int x = 255; x <= 280; x += 5) {
+            Association policy{{Source, 1, 10}, face(200, 200, 80), {180, 180, 220, 220}, Bounds, 10};
+            std::vector<LockRect> boxes{face(200, 200, 80)};
+            for (const int index : order) {
+                boxes.push_back(face(310 + index * 30, 200, 80));
+            }
+            REQUIRE(observe(policy, 2, 10.04, boxes).action == Action::Accepted);
+            REQUIRE(observe(policy, 3, 10.08, {}).action == Action::Held);
+            const auto result = observe(policy, 4, 10.20, {face(x, 200, 80)});
+            INFO(x);
+            // At 255/260 the selected prior still explains the return at
+            // least as well; 265..280 are substantially nearer a known rival.
+            const bool rivalExplainsReturn = x >= 265;
+            CHECK(result.action == (rivalExplainsReturn ? Action::Held : Action::Accepted));
+            CHECK(result.reason == (rivalExplainsReturn ? Reason::Ambiguous : Reason::Followed));
+            CHECK(result.evidenceSourceSeconds == (rivalExplainsReturn ? 10.04 : 10.20));
+        }
+    } while (std::next_permutation(order.begin(), order.end()));
+}
+
+TEST_CASE("Invalid parent translations cannot change rival memory", "[clipped-parent]")
+{
+    const double invalid = GENERATE(std::numeric_limits<double>::quiet_NaN(), std::numeric_limits<double>::infinity());
+    const bool horizontal = GENERATE(false, true);
+    auto policy = withRecentRival();
+    const Context moved{2, Source.epoch, Source.display};
+    const auto crop = face_lock::makeLock(anchorOf(face(500)), Crop);
+    REQUIRE(policy.remap(moved, crop, Bounds, horizontal ? invalid : 0, horizontal ? 0 : invalid).action ==
+            Action::Ignored);
+    CHECK(afterMiss(policy).reason == Reason::Ambiguous);
 }

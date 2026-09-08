@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -94,6 +95,8 @@ struct Decision
     std::optional<std::size_t> selectedBox;
     double evidenceSourceSeconds = 0.0;
     bool following = true;
+    // One worker-owned deadline also governs capture-silent UI expiry.
+    std::optional<double> uncertaintyDeadline;
 };
 
 // Coordinates stay in one fixed display-pixel space for this context. The
@@ -123,8 +126,9 @@ public:
     /// reset physical frame numbering, but never clears loss or ambiguity.
     /// The saved normalized crop and anchor form one control snapshot; a newer
     /// unconsumed detection must not change their relationship during remapping.
-    [[nodiscard]] Decision remap(Context nextContext, const FaceLockState& crop, LockRect bounds,
-                                 bool resumedStream = false);
+    /// Parent translation is explicit because display clipping changes bounds.
+    [[nodiscard]] Decision remap(Context nextContext, const FaceLockState& crop, LockRect bounds, double parentDx,
+                                 double parentDy, bool resumedStream = false);
     [[nodiscard]] Decision retire(Context context, const FaceLockState& crop, LockRect bounds);
 
 private:
@@ -146,6 +150,22 @@ private:
     [[nodiscard]] bool hasRival(std::span<const LockRect> boxes, const Ranking& ranking, std::size_t winner) const;
     [[nodiscard]] Decision accept(Stamp stamp, const LockRect& box, std::size_t index, double dt);
 
+    struct Rival
+    {
+        FaceAnchor anchor;
+        double sourceSeconds;
+    };
+
+    void forgetOldRivals(double sourceSeconds);
+    [[nodiscard]] bool matchesRecentRival(const FaceAnchor& candidate, double sourceSeconds) const;
+    [[nodiscard]] bool rememberRival(const FaceAnchor& rival, double sourceSeconds);
+    [[nodiscard]] bool rememberRivals(std::span<const LockRect> boxes, std::size_t winner, double sourceSeconds);
+    void translateRivals(double dx, double dy);
+
+    // Negative geometric evidence is bounded independently of detector output.
+    // It never supplies a selected face or renews that face's observation time.
+    static constexpr std::size_t MaximumRivals = 8;
+    std::array<std::optional<Rival>, MaximumRivals> rivals_;
     Parameters parameters_;
     Stamp lastSeen_;
     sidescopes::FaceLockState cropState_;

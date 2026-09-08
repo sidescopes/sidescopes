@@ -30,6 +30,9 @@ struct FaceTrackingCommand
     double minimumFacePixels = 36.0;
     bool enabled = false;
     std::shared_ptr<const std::map<uint64_t, uint64_t>> activeLocks;
+    // Unclipped parent origin in display pixels; negative values are valid.
+    double parentOriginX = 0.0;
+    double parentOriginY = 0.0;
 };
 
 struct FaceTrackingUpdate

@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <optional>
 #include <utility>
+#include <vector>
 
 #include "app/attach_controller.h"
 #include "app/capture_controller.h"
@@ -706,6 +707,111 @@ TEST_CASE("Face selections can be removed cleared or pruned")
     CHECK_FALSE(fixture.controller.contains(1));
     fixture.controller.clear();
     CHECK_FALSE(fixture.controller.locked());
+}
+
+TEST_CASE("Delayed interface consumption keeps the worker loss deadline", "[face-loss-clock]")
+{
+    ControllerFixture fixture;
+    fixture.select();
+    REQUIRE(fixture.advance(1).applyRegion);
+    desktopStubs().sessionDetection = {};
+    desktopStubs().faces.clear();
+    fixture.submit(fixture.frame(2));
+    const double loss = fixture.clock;
+
+    // The latest miss is first consumed near expiry. Reading it must not
+    // start another full grace period on the interface thread.
+    const auto held = fixture.tick(loss + 0.399);
+    REQUIRE(held.applyRegion);
+    CHECK_FALSE(held.lostLock);
+    const auto expired = fixture.tick(loss + 0.401);
+    REQUIRE(expired.lostLock);
+    CHECK(*expired.lostLock == 1u);
+    CHECK(fixture.attach.isAttached(1));
+}
+
+TEST_CASE("An overwritten recovery replaces the interface loss episode", "[face-loss-clock]")
+{
+    ControllerFixture fixture;
+    fixture.select();
+    REQUIRE(fixture.advance(1).applyRegion);
+    desktopStubs().sessionDetection = {};
+    desktopStubs().faces.clear();
+    (void)fixture.advance(2);
+    const double firstLoss = fixture.clock;
+
+    // Both updates complete before the interface next consumes the slot.
+    fixture.setFace({508, 250, 100});
+    fixture.submit(fixture.frame(3));
+    desktopStubs().sessionDetection = {};
+    fixture.submit(fixture.frame(4));
+    const double secondLoss = fixture.clock;
+    const auto held = fixture.tick(firstLoss + 0.401);
+    REQUIRE(held.applyRegion);
+    CHECK_FALSE(held.lostLock);
+    CHECK(fixture.controller.contains(1));
+    const auto expired = fixture.tick(secondLoss + 0.401);
+    REQUIRE(expired.lostLock);
+    CHECK(*expired.lostLock == 1u);
+    CHECK(fixture.attach.isAttached(1));
+}
+
+TEST_CASE("A clipped parent move preserves recent rival recovery protection", "[clipped-parent]")
+{
+    ControllerFixture fixture;
+    bool horizontal = true;
+    SECTION("Left display edge")
+    {
+    }
+    SECTION("Top display edge")
+    {
+        horizontal = false;
+    }
+    fixture.select();
+    const auto setFaces = [](std::vector<FaceAnchor> faces) {
+        desktopStubs().sessionDetection = [faces = std::move(faces)](const FrameView& crop, double) {
+            FaceDetectionResult result{FaceDetectionStatus::Completed, {}};
+            for (const auto& face : faces) {
+                result.faces.push_back({static_cast<int>(face.centerX - face.width / 2) - crop.sourceX,
+                                        static_cast<int>(face.centerY - face.width / 2) - crop.sourceY,
+                                        static_cast<int>(face.width), static_cast<int>(face.width)});
+            }
+            return result;
+        };
+    };
+    setFaces({InitialAnchor, {horizontal ? 650.0 : 500.0, horizontal ? 250.0 : 400.0, 100}});
+    REQUIRE(fixture.advance(1).applyRegion);
+    // The real parent moves by -50; its clipped left/top stays at zero.
+    fixture.decision.activeRect = AttachWindowRect{horizontal ? -50.0 : 0.0, horizontal ? 0.0 : -50.0, 1000, 500};
+    (void)fixture.tick();
+    setFaces({});
+    REQUIRE(fixture.advance(2).applyRegion);
+    const auto held = fixture.region;
+    const double loss = fixture.clock;
+    // A surviving rival approaches the last selected position. It is one
+    // selected width away, but only half a width from the translated rival.
+    fixture.clock += 0.08;
+    setFaces({{horizontal ? 550.0 : 500.0, horizontal ? 250.0 : 300.0, 100}});
+    const auto guarded = fixture.advance(3);
+    REQUIRE(guarded.applyRegion);
+    REQUIRE(held);
+    CHECK(guarded.applyRegion == held);
+    const auto expired = fixture.tick(loss + 0.401);
+    REQUIRE(expired.lostLock);
+    CHECK(fixture.attach.isAttached(1));
+}
+
+TEST_CASE("Unclipped parent motion invalidates an unchanged clipped source", "[clipped-parent]")
+{
+    ControllerFixture fixture;
+    fixture.select(foreheadLock(), {-100, -100, 1200, 700});
+    REQUIRE(fixture.advance(1).applyRegion);
+    const auto revision = fixture.controller.selectionRevision();
+    // Both rectangles cover the entire display, so the clipped command
+    // rectangle is identical even though the parent has moved.
+    fixture.decision.activeRect = AttachWindowRect{-90, -95, 1200, 700};
+    (void)fixture.tick();
+    CHECK(fixture.controller.selectionRevision() > revision);
 }
 
 }  // namespace sidescopes

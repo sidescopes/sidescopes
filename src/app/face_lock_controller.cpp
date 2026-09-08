@@ -18,7 +18,8 @@ bool sameSource(const FaceTrackingCommand& a, const FaceTrackingCommand& b)
 {
     return a.identity == b.identity && a.captureEpoch == b.captureEpoch && a.captureContinuity == b.captureContinuity &&
            a.displayId == b.displayId && a.displayWidth == b.displayWidth && a.displayHeight == b.displayHeight &&
-           a.window == b.window && a.enabled == b.enabled;
+           a.window == b.window && a.parentOriginX == b.parentOriginX && a.parentOriginY == b.parentOriginY &&
+           a.enabled == b.enabled;
 }
 
 IntRect clippedWindow(const AttachWindowRect& rect, const DisplayGeometry& display, AnalysisWorker::FrameSize frame)
@@ -57,7 +58,8 @@ FaceLockState onFrameGrid(FaceLockState state, std::optional<std::pair<int, int>
 bool validTrackedSelection(const FaceTrackingCommand& command)
 {
     const auto& bounds = command.window;
-    return std::isfinite(command.minimumFacePixels) && command.minimumFacePixels >= 1.0 &&
+    return std::isfinite(command.parentOriginX) && std::isfinite(command.parentOriginY) &&
+           std::isfinite(command.minimumFacePixels) && command.minimumFacePixels >= 1.0 &&
            command.minimumFacePixels <= std::max(command.displayWidth, command.displayHeight) &&
            face_tracking::validSelection(
                {command.revision, command.captureEpoch, command.displayId}, command.crop,
@@ -190,6 +192,9 @@ FaceTrackingCommand FaceLockController::makeCommand(const AttachDecision& decisi
     }
     const double sx = frameSize->displayWidth / geometry->widthPoints;
     command.window = clippedWindow(*decision.activeRect, *geometry, *frameSize);
+    command.parentOriginX = (decision.activeRect->x - geometry->originX) * sx;
+    command.parentOriginY =
+        (decision.activeRect->y - geometry->originY) * frameSize->displayHeight / geometry->heightPoints;
     command.identity = decision.activeIdentity;
     command.lockGeneration = lock->second.generation;
     command.captureEpoch = m_capture.streamEpoch();
@@ -222,6 +227,11 @@ FaceLockOutcome FaceLockController::consume(const AttachDecision& decision, doub
     if (update && update->identity == decision.activeIdentity && m_locks.contains(update->identity)) {
         auto& lock = m_locks.at(update->identity);
         const auto action = update->decision.action;
+        if (action != face_tracking::Action::Ignored) {
+            // A recovered observation can be replaced by a newer miss before
+            // this slot is consumed. Adopt that miss's actual loss episode.
+            lock.uncertaintyDeadline = update->decision.uncertaintyDeadline;
+        }
         const auto applyCrop = [&] {
             lock.state = onFrameGrid(
                 lock.state, lock.coordinateSize,
@@ -230,28 +240,23 @@ FaceLockOutcome FaceLockController::consume(const AttachDecision& decision, doub
             lock.coordinateSize = {m_command.displayWidth, m_command.displayHeight};
             outcome.applyRegion = acceptRegion(*update, decision);
         };
-        if (action == face_tracking::Action::Accepted) {
-            lock.uncertainSince.reset();
+        if (action == face_tracking::Action::Accepted ||
+            (action == face_tracking::Action::Held && update->decision.reason != face_tracking::Reason::Waiting)) {
+            // A held update can replace an accepted crop. Carry its geometry
+            // without treating uncertainty as fresh face evidence.
             applyCrop();
         } else if (action == face_tracking::Action::OrdinaryAttached) {
             // Retirement may replace an accepted update before the UI sees
             // it. Preserve the worker's final crop in the ordinary attachment.
             applyCrop();
             outcome.lostLock = update->identity;
-        } else if (action == face_tracking::Action::Held && update->decision.reason != face_tracking::Reason::Waiting) {
-            // A held update can replace that accepted crop too. Carry its
-            // geometry without treating uncertainty as fresh face evidence.
-            applyCrop();
-            if (!lock.uncertainSince) {
-                lock.uncertainSince = now;
-            }
         }
     }
     // A failed fresh frame can be followed by a static occluded image, for
     // which capture withholds further frames. Its uncertainty still expires.
     const auto active = m_locks.find(m_command.identity);
-    if (m_command.enabled && active != m_locks.end() && active->second.uncertainSince &&
-        now - *active->second.uncertainSince >= 0.4) {
+    if (m_command.enabled && active != m_locks.end() && active->second.uncertaintyDeadline &&
+        now >= *active->second.uncertaintyDeadline) {
         outcome.lostLock = m_command.identity;
     }
     if (outcome.lostLock) {

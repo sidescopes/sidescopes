@@ -21,6 +21,9 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Face tracking retains nearby-face evidence during brief losses and uses
+  the same loss deadline in analysis and the interface. Nearby-face positions
+  remain correct when a parent window moves partly off-screen.
 - Saved settings retain fractional values and negative monitor coordinates,
   reject malformed numbers, and preserve the previous file if saving fails.
 - Cancelling a region pick allows another pick immediately. Delayed native

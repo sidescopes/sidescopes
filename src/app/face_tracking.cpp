@@ -5,6 +5,7 @@
 #include <iterator>
 #include <limits>
 #include <stdexcept>
+#include <tuple>
 
 namespace sidescopes::face_tracking {
 namespace {
@@ -101,7 +102,8 @@ Association::Association(Context context, const FaceLockState& crop, LockRect bo
 
 Decision Association::result(Action action, Reason reason, std::optional<std::size_t> selected) const
 {
-    return {action, reason, crop_, cropState_.lastAnchor, selected, acceptedSourceSeconds_, following_};
+    const auto deadline = uncertainSince_ ? std::optional(*uncertainSince_ + parameters_.holdSeconds) : std::nullopt;
+    return {action, reason, crop_, cropState_.lastAnchor, selected, acceptedSourceSeconds_, following_, deadline};
 }
 
 Decision Association::current() const
@@ -112,7 +114,7 @@ Decision Association::current() const
 
 bool Association::expired(double observedSeconds) const
 {
-    return uncertainSince_ && observedSeconds - *uncertainSince_ >= parameters_.holdSeconds;
+    return uncertainSince_ && observedSeconds >= *uncertainSince_ + parameters_.holdSeconds;
 }
 
 Decision Association::uncertain(Reason reason, double observedSeconds)
@@ -244,6 +246,110 @@ bool Association::hasRival(std::span<const LockRect> boxes, const Ranking& ranki
                                               ranking.best > parameters_.maximumWinnerScoreRatio * ranking.second));
 }
 
+void Association::forgetOldRivals(double sourceSeconds)
+{
+    for (auto& rival : rivals_) {
+        if (rival && sourceSeconds - rival->sourceSeconds > parameters_.holdSeconds) {
+            rival.reset();
+        }
+    }
+}
+
+bool Association::matchesRecentRival(const FaceAnchor& candidate, double sourceSeconds) const
+{
+    const auto& previous = cropState_.lastAnchor;
+    const double selectedDistance = distance(candidate, previous) / previous.width;
+    for (const auto& rival : rivals_) {
+        if (!rival) {
+            continue;
+        }
+        const double age = std::min(sourceSeconds - rival->sourceSeconds, parameters_.shortRecoverySeconds);
+        const double gate =
+            std::min(parameters_.maximumDisplacementWidths,
+                     parameters_.displacementSlackWidths + parameters_.maximumSpeedWidthsPerSecond * age);
+        const double rivalDistance = distance(candidate, rival->anchor) / previous.width;
+        const double scale = std::abs(std::log(candidate.width / rival->anchor.width));
+        if (rivalDistance <= gate &&
+            scale <= parameters_.maximumLogScaleStep + parameters_.logScaleGrowthPerSecond * age &&
+            rivalDistance + parameters_.minimumScoreMargin < selectedDistance) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool Association::rememberRival(const FaceAnchor& anchor, double sourceSeconds)
+{
+    // Distinct boxes in this observation must retain distinct negative
+    // positions. A slot refreshed at this timestamp cannot be reused again.
+    std::optional<Rival>* nearest = nullptr;
+    double separation = parameters_.crossingSeparationWidths;
+    for (auto& rival : rivals_) {
+        if (rival && rival->sourceSeconds != sourceSeconds) {
+            const double current = distance(anchor, rival->anchor) / std::min(anchor.width, rival->anchor.width);
+            if (current < separation) {
+                nearest = &rival;
+                separation = current;
+            }
+        }
+    }
+    if (!nearest) {
+        const auto vacant = std::find(rivals_.begin(), rivals_.end(), std::nullopt);
+        if (vacant == rivals_.end()) {
+            return false;
+        }
+        nearest = &*vacant;
+    }
+    *nearest = Rival{anchor, sourceSeconds};
+    return true;
+}
+
+bool Association::rememberRivals(std::span<const LockRect> boxes, std::size_t winner, double sourceSeconds)
+{
+    const auto candidate = anchorOf(boxes[winner]);
+    std::array<FaceAnchor, MaximumRivals> current;
+    std::size_t count = 0;
+    for (std::size_t index = 0; index < boxes.size(); ++index) {
+        const auto rival = anchorOf(boxes[index]);
+        // A face outside today's winner gate can enter it after a miss. Keep
+        // competitors within the reach of both faces, not only eligible winners.
+        if (index != winner &&
+            distance(candidate, rival) <= parameters_.maximumDisplacementWidths * (candidate.width + rival.width)) {
+            if (count == current.size()) {
+                return false;
+            }
+            current[count++] = rival;
+        }
+    }
+    // Canonical batch order makes matching and bounded-capacity behavior
+    // independent of the detector's ordering, without naming rival identities.
+    const auto precedes = [](const FaceAnchor& a, const FaceAnchor& b) {
+        return std::tie(a.centerX, a.centerY, a.width) < std::tie(b.centerX, b.centerY, b.width);
+    };
+    for (std::size_t index = 1; index < count; ++index) {
+        const auto anchor = current[index];
+        std::size_t position = index;
+        while (position > 0 && precedes(anchor, current[position - 1])) {
+            current[position] = current[position - 1];
+            --position;
+        }
+        current[position] = anchor;
+    }
+    const std::span batch{current.data(), count};
+    return std::all_of(batch.begin(), batch.end(),
+                       [this, sourceSeconds](const FaceAnchor& rival) { return rememberRival(rival, sourceSeconds); });
+}
+
+void Association::translateRivals(double dx, double dy)
+{
+    for (auto& rival : rivals_) {
+        if (rival) {
+            rival->anchor.centerX += dx;
+            rival->anchor.centerY += dy;
+        }
+    }
+}
+
 Decision Association::accept(Stamp stamp, const LockRect& box, std::size_t index, double dt)
 {
     const auto candidate = anchorOf(box);
@@ -279,6 +385,7 @@ Decision Association::advance(Stamp stamp, double observedSeconds, DetectionStat
     if (const auto rejected = beginObservation(stamp, observedSeconds)) {
         return *rejected;
     }
+    forgetOldRivals(stamp.sourceSeconds);
     if (const auto rejected = checkDetection(status, boxes, observedSeconds)) {
         return *rejected;
     }
@@ -290,7 +397,11 @@ Decision Association::advance(Stamp stamp, double observedSeconds, DetectionStat
     if (!ranking.winner) {
         return uncertain(Reason::NoPlausibleMatch, observedSeconds);
     }
-    if (hasRival(boxes, ranking, *ranking.winner)) {
+    // Historical geometry constrains recovery after actual uncertainty. It
+    // must not veto ordinary lower-cadence motion from a stale rival position.
+    if (hasRival(boxes, ranking, *ranking.winner) ||
+        (uncertainSince_ && matchesRecentRival(anchorOf(boxes[*ranking.winner]), stamp.sourceSeconds)) ||
+        !rememberRivals(boxes, *ranking.winner, stamp.sourceSeconds)) {
         ambiguous_ = true;
         return uncertain(Reason::Ambiguous, observedSeconds);
     }
@@ -329,14 +440,19 @@ Decision Association::rebindCrop(Context nextContext, const LockRect& crop)
     return result(following_ ? Action::Held : Action::OrdinaryAttached, Reason::ManualCrop);
 }
 
-Decision Association::remap(Context nextContext, const FaceLockState& crop, LockRect bounds, bool resumedStream)
+Decision Association::remap(Context nextContext, const FaceLockState& crop, LockRect bounds, double parentDx,
+                            double parentDy, bool resumedStream)
 {
     if (nextContext.generation <= lastSeen_.context.generation ||
         (!resumedStream && nextContext.epoch != lastSeen_.context.epoch) ||
         (resumedStream && nextContext.epoch <= lastSeen_.context.epoch) ||
-        nextContext.display != lastSeen_.context.display || !validSelection(nextContext, crop, bounds)) {
+        nextContext.display != lastSeen_.context.display || !std::isfinite(parentDx) || !std::isfinite(parentDy) ||
+        !validSelection(nextContext, crop, bounds)) {
         return result(Action::Ignored, Reason::InvalidDetection);
     }
+    // Neither clipped bounds nor an older saved face anchor describes
+    // parent movement. The controller supplies the real origin delta.
+    translateRivals(parentDx, parentDy);
     cropState_ = crop;
     bounds_ = bounds;
     crop_ = face_lock::mapRegion(crop, crop.lastAnchor);
