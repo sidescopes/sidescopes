@@ -123,11 +123,16 @@ jobs:
       # someone tried to measure. Two small translation units; the suites
       # themselves still only run when asked.
       - name: Configure
-        run: cmake -B build -DSIDESCOPES_WERROR=ON -DSIDESCOPES_BENCH=ON -DSIDESCOPES_STRESS_TESTS=ON
+        run: >-
+          cmake -B build -DSIDESCOPES_WERROR=ON -DSIDESCOPES_BENCH=ON -DSIDESCOPES_STRESS_TESTS=ON
+          -DSIDESCOPES_FACE_NETWORK_TESTS=${{ matrix.os == 'ubuntu-latest' && 'ON' || 'OFF' }}
       - name: Build
         run: cmake --build build --config Release
       - name: Test
         run: ctest --test-dir build -C Release --output-on-failure --timeout 120
+      - name: Verify Linux face inference
+        if: matrix.os == 'ubuntu-latest'
+        run: ctest --test-dir build -C Release -L face-network --no-tests=error --output-on-failure
       # Compiling the performance harness is not the same as knowing it still
       # runs: it drives a real analysis worker across threads and reports the
       # process's own CPU time, which is platform code that only fails when

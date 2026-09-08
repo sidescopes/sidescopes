@@ -33,6 +33,7 @@ if(NOT CMAKE_BUILD_TYPE)
 endif()
 
 option(SIDESCOPES_BUILD_TESTS "Build the test suite" ON)
+option(SIDESCOPES_FACE_NETWORK_TESTS "Build the YuNet backend for portable testing" OFF)
 option(SIDESCOPES_BENCH "Build the opt-in benchmark suite" OFF)
 option(SIDESCOPES_WERROR "Treat compiler warnings as errors" OFF)
 option(SIDESCOPES_MODULES_DYNAMIC "Load built-in scope modules dynamically" OFF)
@@ -42,6 +43,9 @@ option(SIDESCOPES_FUZZ_TESTS "Build the opt-in libFuzzer boundary tests" OFF)
 option(SIDESCOPES_WEB_SINGLE_FILE "Emit the browser lab as one self-contained file" OFF)
 if(EMSCRIPTEN AND SIDESCOPES_MODULES_DYNAMIC)
     message(FATAL_ERROR "The browser build requires statically linked scope modules")
+endif()
+if(SIDESCOPES_FACE_NETWORK_TESTS AND (NOT SIDESCOPES_BUILD_TESTS OR EMSCRIPTEN))
+    message(FATAL_ERROR "Face network tests require native SIDESCOPES_BUILD_TESTS")
 endif()
 set(SIDESCOPES_SANITIZE "" CACHE STRING
     "Comma-separated sanitizers to build and link with (e.g. address,undefined or thread)")
@@ -238,8 +242,11 @@ if(APPLE)
     sidescopes_target_defaults(sidescopes_platform)
 endif()
 
-if(WIN32)
+if(WIN32 OR SIDESCOPES_FACE_NETWORK_TESTS)
     include(cmake/FaceDetection.cmake)
+endif()
+
+if(WIN32)
     # The Windows platform layer builds on every push so the port meets a
     # compiler continuously; the application target follows with the port
     # itself.

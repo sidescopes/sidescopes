@@ -1,3 +1,17 @@
+if(TARGET sidescopes_face_network)
+    add_executable(sidescopes_face_network_tests test_face_network.cpp test_face_convolution.cpp)
+    target_include_directories(sidescopes_face_network_tests PRIVATE "${PROJECT_SOURCE_DIR}/src")
+    target_include_directories(sidescopes_face_network_tests SYSTEM PRIVATE
+        "${SIDESCOPES_OPENCV_SOURCE}/modules/core/include"
+        "${SIDESCOPES_OPENCV_SOURCE}/modules/dnn/include"
+        "${PROJECT_BINARY_DIR}")
+    target_link_libraries(sidescopes_face_network_tests PRIVATE
+        sidescopes_face_network Catch2::Catch2WithMain)
+    sidescopes_target_defaults(sidescopes_face_network_tests)
+    catch_discover_tests(sidescopes_face_network_tests
+        TEST_PREFIX "Face network: " PROPERTIES LABELS face-network TIMEOUT 60)
+endif()
+
 if(APPLE)
     add_executable(sidescopes_native_tests test_macos_platform.mm)
     target_compile_options(sidescopes_native_tests PRIVATE -fobjc-arc)

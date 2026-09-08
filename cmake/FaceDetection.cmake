@@ -54,8 +54,19 @@ function(sidescopes_add_face_network)
     # Preserve the application's runtime choice, including the static CRT
     # used by portable release archives. Do not let OpenCV override it.
     set(BUILD_WITH_STATIC_CRT OFF)
-    set(CPU_BASELINE SSE2)
-    set(CPU_DISPATCH "SSE4_1;SSE4_2;AVX;FP16;AVX2")
+    # Query the compiler's target, not the host running a cross build. Other
+    # architectures retain OpenCV's own baseline and dispatch defaults.
+    include(CheckCXXSourceCompiles)
+    check_cxx_source_compiles("
+        #if defined(_M_ARM64EC) || (!defined(_M_IX86) && !defined(_M_X64) && !defined(__i386__) && !defined(__x86_64__))
+        #error Not an x86 target
+        #endif
+        int main() { return 0; }
+    " SIDESCOPES_FACE_TARGET_X86)
+    if(SIDESCOPES_FACE_TARGET_X86)
+        set(CPU_BASELINE SSE2)
+        set(CPU_DISPATCH "SSE4_1;SSE4_2;AVX;FP16;AVX2")
+    endif()
     # These legacy cache settings escape directory and function scopes.
     # Keep the application's executable/package paths and install prefix.
     foreach(setting IN ITEMS EXECUTABLE_OUTPUT_PATH CMAKE_INSTALL_PREFIX)
@@ -94,6 +105,12 @@ function(sidescopes_add_face_network)
     endif()
 
     set(model "${CMAKE_SOURCE_DIR}/assets/models/face_detection_yunet.onnx")
+    include("${CMAKE_CURRENT_FUNCTION_LIST_DIR}/OpenCVSources.cmake")
+    include("${CMAKE_CURRENT_FUNCTION_LIST_DIR}/TrimFaceLayers.cmake")
+    include("${CMAKE_CURRENT_FUNCTION_LIST_DIR}/FixFaceConvolution.cmake")
+    sidescopes_trim_face_layers("${opencv_SOURCE_DIR}" "${model}"
+        "${CMAKE_CURRENT_BINARY_DIR}/generated")
+    sidescopes_fix_face_convolution("${opencv_SOURCE_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/generated")
     set(model_source "${CMAKE_CURRENT_BINARY_DIR}/generated/face_model_data.cpp")
     add_custom_command(OUTPUT "${model_source}"
         COMMAND ${CMAKE_COMMAND}

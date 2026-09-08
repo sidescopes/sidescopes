@@ -71,10 +71,29 @@ of OpenCV 4.13.0. CMake fetches the verified source archive and builds only
 `core`, `imgproc`, and `dnn`, with bundled protobuf and zlib. The first Windows
 build therefore takes longer; later builds reuse the dependency. GUI, video,
 image codecs, GPU backends and runtime plugins are disabled. macOS uses Vision
-and does not build OpenCV.
+and does not build OpenCV by default.
 
-The dependency retains an SSE2 baseline and selects newer CPU instructions at
-runtime. Its C runtime follows `CMAKE_MSVC_RUNTIME_LIBRARY`, including the
+The DNN layer registry includes only the operations required by the pinned
+YuNet model. CMake generates the reduced registry in the build directory;
+fetched sources remain unchanged. Updating OpenCV or
+the model requires reviewing the layer requirements in
+`cmake/TrimFaceLayers.cmake` before updating its hash guards.
+
+`cmake/FixFaceConvolution.cmake` also generates a narrow correction for
+one-pixel intermediate images, using OpenCV's existing general depthwise
+convolution path. Ordinary image dimensions retain their optimized path.
+Review this correction when upgrading OpenCV; scalar regression tests check
+the expected convolution values independently of the face model.
+
+To compile and exercise the same YuNet backend on Linux or macOS, configure
+with `-DSIDESCOPES_FACE_NETWORK_TESTS=ON`, build, and run
+`ctest --test-dir build -L face-network --no-tests=error`. Windows includes
+these tests by default. This tests model loading and inference with procedural
+inputs; it does not provide a Linux desktop application or measure accuracy.
+
+On x86, the dependency retains an SSE2 baseline and selects newer CPU
+instructions at runtime; other architectures use OpenCV's defaults. Its C
+runtime follows `CMAKE_MSVC_RUNTIME_LIBRARY`, including the
 static runtime used by release builds. Face detection is the sole OpenCV
 consumer and configures its CPU work to one thread once; the scope analysis
 workers retain their own scheduling.

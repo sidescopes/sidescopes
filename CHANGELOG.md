@@ -9,11 +9,12 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Changed
 
 - Cancelling a region picker keeps the committed selection. Closed parent
-  windows and stopped following retain the last rectangle on its display;
+  windows retain the last rectangle on its display;
   region tools no longer offer an action that clears the selection.
 - Face regions follow position and size changes without waiting for video to
-  settle or hiding the border. Lost or ambiguous faces leave their last
-  rectangle attached to the window until another face is selected.
+  settle or hiding the border. Lost or ambiguous faces keep their last region
+  monitored for one second, then hide the border and scope traces together
+  while showing a searching status.
 - Mac downloads contain both Apple silicon and Intel code and require macOS
   14 or later, matching the screen-capture APIs used by the application.
 - Desktop archives and both Lab distributions include the notices for their
@@ -21,6 +22,8 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Windows face detection handles images with a very narrow dimension without
+  producing invalid coordinates in intermediate calculations.
 - Face tracking retains nearby-face evidence during brief losses and uses
   the same loss deadline in analysis and the interface. Nearby-face positions
   remain correct when a parent window moves partly off-screen.
