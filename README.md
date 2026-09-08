@@ -96,5 +96,8 @@ Bundled components include Dear ImGui (MIT), GLFW (zlib), NanoSVG (zlib),
 and Lucide icons (ISC). Windows face detection includes OpenCV (Apache 2.0),
 YuNet (MIT), protobuf (BSD), and zlib. The Lab also includes Inter and Roboto
 Mono (OFL).
-Distributions carry the applicable notices; see [licenses](licenses).
+Desktop builds embed the complete notices, available offline under
+**About → Licenses**. The Windows download contains a single executable;
+the Mac download contains one application bundle. The Lab includes its
+notices alongside the web files; see also [licenses](licenses).
 Catch2 (BSL-1.0) is used for tests and benchmarks.

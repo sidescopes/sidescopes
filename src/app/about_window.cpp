@@ -33,6 +33,7 @@ void AboutWindow::open()
 
 void AboutWindow::draw(const VersionInfo& version)
 {
+    m_licenses.draw();
     if (!m_open) {
         return;
     }
@@ -49,6 +50,10 @@ void AboutWindow::draw(const VersionInfo& version)
     drawLink("github.com/sidescopes/sidescopes", "https://github.com/sidescopes/sidescopes");
     ImGui::Separator();
     ImGui::TextDisabled("GPL-3.0-or-later");
+    ImGui::TextDisabled("Distributed without warranty.");
+    if (ImGui::Button("Licenses")) {
+        m_licenses.open();
+    }
     ImGui::End();
 }
 

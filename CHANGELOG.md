@@ -17,8 +17,9 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   while showing a searching status.
 - Mac downloads contain both Apple silicon and Intel code and require macOS
   14 or later, matching the screen-capture APIs used by the application.
-- Desktop archives and both Lab distributions include the notices for their
-  bundled libraries and fonts.
+- Desktop builds embed their complete license notices in an offline
+  About → Licenses reader. Windows archives contain only `SideScopes.exe`.
+  Both Lab distributions include notices for their bundled libraries and fonts.
 
 ### Fixed
 

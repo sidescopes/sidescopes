@@ -24,7 +24,9 @@ function(sidescopes_generate_face_registry source_dir model output)
     # Eight imported model types, plus constant inputs and named outputs.
     set(required Convolution Pooling ReLU Reshape Resize Sigmoid NaryEltwise Permute Const Identity)
     file(STRINGS "${source_dir}/modules/dnn/src/init.cpp" lines)
-    set(registry "")
+    set(registry [=[// Modified by SideScopes: retain only layers used by its face model.
+
+]=])
     set(found "")
     set(registrations 0)
     foreach(line IN LISTS lines)

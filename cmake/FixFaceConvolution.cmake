@@ -29,8 +29,11 @@ function(sidescopes_fix_face_convolution source_dir output_dir)
     if(NOT candidate_hash STREQUAL "0798b18b4108ebcc858f34f284ac127c370dd7714cd62f809524557736bec817")
         message(FATAL_ERROR "Unexpected singleton depthwise source transformation")
     endif()
+    set(notice [=[// Modified by SideScopes: route singleton depthwise inputs to the generic path.
+
+]=])
     file(MAKE_DIRECTORY "${output_dir}")
     set(generated "${output_dir}/face_convolution.cpp")
-    file(CONFIGURE OUTPUT "${generated}" CONTENT "${candidate}" @ONLY NEWLINE_STYLE UNIX)
+    file(CONFIGURE OUTPUT "${generated}" CONTENT "${notice}${candidate}" @ONLY NEWLINE_STYLE UNIX)
     sidescopes_replace_dnn_source("${original}" "${generated}")
 endfunction()

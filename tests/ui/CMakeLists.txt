@@ -165,6 +165,22 @@ target_link_libraries(sidescopes_ui_scale_tests PRIVATE
 sidescopes_target_defaults(sidescopes_ui_scale_tests)
 add_test(NAME sidescopes_ui_scale COMMAND sidescopes_ui_scale_tests)
 
+# The actual About and license reader use the compiled shipping catalog. Keep
+# the executable and its working directory separate from build-side notices;
+# no license files or native desktop services are supplied at runtime.
+add_executable(sidescopes_ui_about_tests
+    test_about_ui.cpp
+    ui_test_harness.cpp)
+target_include_directories(sidescopes_ui_about_tests PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(sidescopes_ui_about_tests PRIVATE
+    sidescopes_imgui_test_engine sidescopes_app_imgui_te)
+set_target_properties(sidescopes_ui_about_tests PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/about")
+sidescopes_target_defaults(sidescopes_ui_about_tests)
+add_test(NAME sidescopes_ui_about COMMAND sidescopes_ui_about_tests)
+set_tests_properties(sidescopes_ui_about PROPERTIES
+    WORKING_DIRECTORY "$<TARGET_FILE_DIR:sidescopes_ui_about_tests>")
+
 # In the dynamic module configuration the engines live only in the loaded
 # MODULE bundles, so - as in tests/CMakeLists.txt - compile their sources in to
 # supply the symbols core's shared graticule references, and wait for the

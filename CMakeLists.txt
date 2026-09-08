@@ -383,6 +383,7 @@ set(SIDESCOPES_APP_IMGUI_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/src/app/imgui_ui.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/app/interface_style.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/app/layout_preset_picker.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/app/license_window.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/app/menu_rows.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/app/overlay_render.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/app/pane_area.cpp

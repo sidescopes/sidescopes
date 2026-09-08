@@ -118,6 +118,12 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
+      # Notice serialization differs across hosts; check it before building
+      # the native dependencies.
+      - name: Test embedded license notices
+        env:
+          PYTHONPATH: tests/scripts
+        run: python3 -m unittest test_tools.NoticeCollectionTests -v
       # The benchmark and performance-harness targets are opt-in, so nothing
       # compiled them and a Windows-only break in either went unseen until
       # someone tried to measure. Two small translation units; the suites

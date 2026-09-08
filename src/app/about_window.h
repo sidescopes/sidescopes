@@ -1,5 +1,6 @@
 #pragma once
 
+#include "app/license_window.h"
 #include "app/version.h"
 
 namespace sidescopes {
@@ -18,6 +19,7 @@ public:
 
 private:
     bool m_open = false;
+    LicenseWindow m_licenses;
 };
 
 }  // namespace sidescopes

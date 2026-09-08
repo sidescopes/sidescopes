@@ -24,6 +24,16 @@ C runtime statically, so it needs no Visual C++ redistributable. Verify a
 Windows build on a clean machine before relying on it; a `v*-rc` pre-release
 tag is a safe way to exercise the full pipeline first.
 
+The Windows archive contains only `SideScopes.exe`; the Mac archive contains
+one `SideScopes.app` bundle. Both embed their complete distribution notices,
+readable and copyable offline under **About → Licenses**. Check this reader
+when testing a release artifact independently of the source checkout.
+
+Each release's tag identifies its matching application source, available in
+GitHub's source archives on the release page. `CONTRIBUTING.md` describes how
+to build it; CMake fetches the pinned dependency sources and applies the
+included patches.
+
 ## Signing and notarization
 
 The workflow signs and notarizes automatically when these repository

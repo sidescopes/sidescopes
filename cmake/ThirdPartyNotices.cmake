@@ -1,42 +1,62 @@
 # Collect notices from the same dependency sources that produce the binary.
-# Called after linking so Emscripten's port is present even on a cold build.
+# Native apps embed their notices. The browser copies them after linking so
+# Emscripten's port is present even on a cold build.
 function(sidescopes_add_notices target)
-    set(output "$<TARGET_FILE_DIR:${target}>/licenses")
-    if(APPLE AND NOT EMSCRIPTEN)
-        set(output "$<TARGET_BUNDLE_CONTENT_DIR:${target}>/Resources/Licenses")
+    set(output "")
+    if(EMSCRIPTEN)
+        set(output "$<TARGET_FILE_DIR:${target}>/licenses")
     endif()
-    add_custom_command(TARGET ${target} POST_BUILD
-        COMMAND ${CMAKE_COMMAND}
-            "-DNOTICE_OUTPUT=${output}"
-            "-DNOTICE_SOURCE=${CMAKE_SOURCE_DIR}"
-            "-DNOTICE_IMGUI=${imgui_SOURCE_DIR}"
-            "-DNOTICE_NANOSVG=${nanosvg_SOURCE_DIR}"
-            "-DNOTICE_GLFW=${glfw_SOURCE_DIR}"
-            "-DNOTICE_OPENCV=${SIDESCOPES_OPENCV_SOURCE}"
-            "-DNOTICE_EMSCRIPTEN=${EMSCRIPTEN_ROOT_PATH}"
-            "-DNOTICE_PORTS=${EMSCRIPTEN_SYSROOT}/../ports"
-            -P "${CMAKE_CURRENT_FUNCTION_LIST_FILE}"
-        VERBATIM)
+    set(opencv "")
+    if(WIN32)
+        set(opencv "${SIDESCOPES_OPENCV_SOURCE}")
+    endif()
+    set(arguments
+        "-DNOTICE_OUTPUT=${output}"
+        "-DNOTICE_SOURCE=${CMAKE_SOURCE_DIR}"
+        "-DNOTICE_IMGUI=${imgui_SOURCE_DIR}"
+        "-DNOTICE_NANOSVG=${nanosvg_SOURCE_DIR}"
+        "-DNOTICE_GLFW=${glfw_SOURCE_DIR}"
+        "-DNOTICE_OPENCV=${opencv}"
+        "-DNOTICE_EMSCRIPTEN=${EMSCRIPTEN_ROOT_PATH}"
+        "-DNOTICE_PORTS=${EMSCRIPTEN_SYSROOT}/../ports")
     file(GLOB notices CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/licenses/*.txt")
-    set_property(TARGET ${target} APPEND PROPERTY LINK_DEPENDS
+    set(inputs
         "${CMAKE_CURRENT_FUNCTION_LIST_FILE}"
+        "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/EmbedNotices.cmake"
         "${CMAKE_SOURCE_DIR}/LICENSE"
         "${imgui_SOURCE_DIR}/LICENSE.txt"
+        "${imgui_SOURCE_DIR}/imstb_rectpack.h"
+        "${imgui_SOURCE_DIR}/imstb_textedit.h"
+        "${imgui_SOURCE_DIR}/imstb_truetype.h"
         "${nanosvg_SOURCE_DIR}/LICENSE.txt"
         ${notices})
     if(EMSCRIPTEN)
-        set_property(TARGET ${target} APPEND PROPERTY LINK_DEPENDS
+        list(APPEND inputs
             "${CMAKE_SOURCE_DIR}/src/web/fonts/Inter-OFL.txt"
             "${CMAKE_SOURCE_DIR}/src/web/fonts/RobotoMono-OFL.txt")
     else()
-        set_property(TARGET ${target} APPEND PROPERTY LINK_DEPENDS "${glfw_SOURCE_DIR}/LICENSE.md")
+        list(APPEND inputs "${glfw_SOURCE_DIR}/LICENSE.md")
     endif()
-    if(SIDESCOPES_OPENCV_SOURCE)
-        set_property(TARGET ${target} APPEND PROPERTY LINK_DEPENDS
-            "${SIDESCOPES_OPENCV_SOURCE}/LICENSE"
-            "${SIDESCOPES_OPENCV_SOURCE}/3rdparty/protobuf/LICENSE"
-            "${SIDESCOPES_OPENCV_SOURCE}/3rdparty/zlib/LICENSE"
-            "${SIDESCOPES_OPENCV_SOURCE}/modules/core/src/softfloat.cpp")
+    if(opencv)
+        list(APPEND inputs
+            "${opencv}/LICENSE"
+            "${opencv}/3rdparty/protobuf/LICENSE"
+            "${opencv}/3rdparty/zlib/LICENSE"
+            "${opencv}/modules/core/src/softfloat.cpp")
+    endif()
+    if(EMSCRIPTEN)
+        add_custom_command(TARGET ${target} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} ${arguments} -P "${CMAKE_CURRENT_FUNCTION_LIST_FILE}"
+            VERBATIM)
+        set_property(TARGET ${target} APPEND PROPERTY LINK_DEPENDS ${inputs})
+    else()
+        set(cpp "${CMAKE_CURRENT_BINARY_DIR}/generated/${target}_notices.cpp")
+        add_custom_command(OUTPUT "${cpp}"
+            COMMAND ${CMAKE_COMMAND} ${arguments} "-DNOTICE_CPP=${cpp}"
+                -P "${CMAKE_CURRENT_FUNCTION_LIST_FILE}"
+            DEPENDS ${inputs}
+            VERBATIM)
+        target_sources(sidescopes_app PRIVATE "${cpp}")
     endif()
 endfunction()
 
@@ -48,10 +68,32 @@ function(copy_notice source name)
     if(NOT EXISTS "${source}")
         message(FATAL_ERROR "Missing distribution notice: ${source}")
     endif()
-    configure_file("${source}" "${NOTICE_OUTPUT}/${name}.txt" COPYONLY)
+    if(NOTICE_CPP)
+        file(READ "${source}" hex HEX)
+        embed_notice("${name}" "${hex}")
+    else()
+        configure_file("${source}" "${NOTICE_OUTPUT}/${name}.txt" COPYONLY)
+    endif()
 endfunction()
 
-file(MAKE_DIRECTORY "${NOTICE_OUTPUT}")
+function(write_notice name content)
+    if(NOTICE_CPP)
+        # Preserve file(WRITE)'s host line endings, as in the text packages.
+        set(temporary "${NOTICE_CPP}.notice")
+        file(WRITE "${temporary}" "${content}")
+        copy_notice("${temporary}" "${name}")
+        file(REMOVE "${temporary}")
+    else()
+        file(WRITE "${NOTICE_OUTPUT}/${name}.txt" "${content}")
+    endif()
+endfunction()
+
+if(NOTICE_CPP)
+    include("${CMAKE_CURRENT_LIST_DIR}/EmbedNotices.cmake")
+    begin_embedded_notices()
+else()
+    file(MAKE_DIRECTORY "${NOTICE_OUTPUT}")
+endif()
 copy_notice("${NOTICE_SOURCE}/LICENSE" SideScopes-GPL)
 copy_notice("${NOTICE_IMGUI}/LICENSE.txt" Dear-ImGui)
 copy_notice("${NOTICE_NANOSVG}/LICENSE.txt" NanoSVG)
@@ -77,7 +119,7 @@ if(NOTICE_OPENCV)
        NOT softfloat_notice MATCHES "Copyright \\(C\\) 2004 by Sun Microsystems")
         message(FATAL_ERROR "OpenCV SoftFloat/FDLIBM notices changed; review the distribution notice")
     endif()
-    file(WRITE "${NOTICE_OUTPUT}/OpenCV-SoftFloat-FDLIBM.txt" "${softfloat_notice}")
+    write_notice(OpenCV-SoftFloat-FDLIBM "${softfloat_notice}")
 endif()
 
 # All three stb headers currently carry the same text, but keep each one's
@@ -94,11 +136,14 @@ foreach(component rectpack textedit truetype)
         message(FATAL_ERROR "Unterminated stb notice in imstb_${component}.h")
     endif()
     string(SUBSTRING "${notice}" 0 ${end} notice)
-    file(WRITE "${NOTICE_OUTPUT}/stb-${component}.txt" "${notice}")
+    write_notice("stb-${component}" "${notice}")
 endforeach()
 
 if(NOT NOTICE_EMSCRIPTEN)
     copy_notice("${NOTICE_GLFW}/LICENSE.md" GLFW)
+    if(NOTICE_CPP)
+        finish_embedded_notices()
+    endif()
     return()
 endif()
 
