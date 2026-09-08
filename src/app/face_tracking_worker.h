@@ -27,7 +27,7 @@ struct FaceTrackingCommand
     int displayHeight = 0;
     IntRect window;
     FaceLockState crop;
-    double minimumFacePixels = 36.0;
+    double minimumFacePixels = 24.0;
     bool enabled = false;
     std::shared_ptr<const std::map<uint64_t, uint64_t>> activeLocks;
     // Unclipped parent origin in display pixels; negative values are valid.

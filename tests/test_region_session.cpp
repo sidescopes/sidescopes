@@ -1,7 +1,9 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <chrono>
+#include <functional>
 #include <thread>
+#include <utility>
 
 #include "app/capture_controller.h"
 #include "app/region_session.h"
@@ -31,11 +33,19 @@ struct ResetDesktop
 
 struct SessionFixture : ResetDesktop
 {
+    double trackingSeconds = 1000.0;
+    std::function<void()> afterTrackingClockSample;
     test::FakeCaptureSource source;
     FrameMailbox mailbox;
     AnalysisWorker worker{mailbox};
     CaptureController capture{source, mailbox};
-    RegionSession session{capture, worker, source};
+    RegionSession session{capture, worker, source, [this] {
+                              const double sampled = trackingSeconds;
+                              if (auto callback = std::exchange(afterTrackingClockSample, {})) {
+                                  callback();
+                              }
+                              return sampled;
+                          }};
 
     SessionFixture()
     {
@@ -90,10 +100,11 @@ struct FaceSessionFixture : SessionFixture
         publish(1);
     }
 
-    void publish(uint64_t sequence)
+    void publish(uint64_t sequence, Color color = {40, 80, 120})
     {
-        auto frame = test::makeSolidFrameBuffer(1000, 500, Color{40, 80, 120}, sequence);
-        frame.stamp = {capture.streamEpoch(), capture.capturedDisplay(), frameClockSeconds()};
+        trackingSeconds += 0.04;
+        auto frame = test::makeSolidFrameBuffer(1000, 500, color, sequence);
+        frame.stamp = {capture.streamEpoch(), capture.capturedDisplay(), trackingSeconds};
         mailbox.publish(std::move(frame));
         worker.pump();
     }
@@ -123,9 +134,260 @@ struct FaceSessionFixture : SessionFixture
         worker.updateSettings(settings);
         return result;
     }
+
+    void selectFace()
+    {
+        desktopStubs().sessionDetection = [](const FrameView& crop, double) {
+            return FaceDetectionResult{FaceDetectionStatus::Completed,
+                                       {{200 - crop.sourceX, 100 - crop.sourceY, 100, 100}}};
+        };
+        open();
+        REQUIRE(regionOverlayStubs().lastDisplays[0].faces.size() == 1);
+        REQUIRE(confirm(Display, regionOverlayStubs().lastDisplays[0].faces[0].region).region);
+        (void)follow();
+        publish(2);
+        REQUIRE(follow().region);
+        REQUIRE(session.faceLocked());
+    }
 };
 
 }  // namespace
+
+TEST_CASE("Face loss keeps sampling during grace and hides the border and scopes together", "[face-loss-reading]")
+{
+    FaceSessionFixture fix;
+    fix.selectFace();
+    AnalysisWorker::Output output;
+    uint64_t seen = 0;
+    REQUIRE(fix.worker.fetchOutput(seen, output, fix.settings.selectionRevision));
+    const auto acceptedPixels = output.images.at("org.sidescopes.histogram").rgba;
+    const auto acceptedRegion = output.region;
+    desktopStubs().sessionDetection = {};
+    desktopStubs().faces.clear();
+    fix.publish(3, {210, 20, 30});
+    (void)fix.follow();
+    const double loss = fix.trackingSeconds;
+    REQUIRE(fix.worker.fetchOutput(seen, output, fix.settings.selectionRevision));
+    CHECK_FALSE(output.suppressed);
+    CHECK(output.region == acceptedRegion);
+    CHECK(output.frameSequence == 3);
+    CHECK(output.images.at("org.sidescopes.histogram").rgba != acceptedPixels);
+    CHECK(fix.session.traceLive());
+    CHECK_FALSE(fix.session.searchingForFace());
+    REQUIRE(regionOverlayStubs().border);
+    CHECK(regionOverlayStubs().border->binding == RegionBinding::Face);
+
+    fix.trackingSeconds = loss + 0.999;
+    (void)fix.follow();
+    CHECK(fix.session.traceLive());
+    REQUIRE(regionOverlayStubs().border);
+    fix.trackingSeconds = loss + 1.0;
+    (void)fix.follow();
+    CHECK_FALSE(fix.session.traceLive());
+    CHECK(fix.session.searchingForFace());
+    CHECK(fix.session.faceLocked());
+    CHECK(fix.session.attachments().isAttached(Window));
+    CHECK_FALSE(regionOverlayStubs().border);
+    fix.worker.pump();
+    REQUIRE(fix.worker.fetchOutput(seen, output, fix.settings.selectionRevision));
+    CHECK(output.suppressed);
+    CHECK_FALSE(output.region);
+    CHECK(output.images.empty());
+    CHECK_FALSE(fix.session.acceptReading(output, fix.settings.enabledScopes));
+    CHECK_FALSE(fix.session.traceLive());
+}
+
+TEST_CASE("A delayed admissible face reading restores visibility only after complete scope output",
+          "[face-loss-reading]")
+{
+    FaceSessionFixture fix;
+    fix.selectFace();
+    desktopStubs().sessionDetection = {};
+    desktopStubs().faces.clear();
+    fix.publish(3);
+    (void)fix.follow();
+    const double loss = fix.trackingSeconds;
+    bool sampledRecovery = false;
+    desktopStubs().sessionDetection = [&](const FrameView& crop, double) {
+        // The worker samples an admissible short recovery time, then is
+        // descheduled while the interface expires the old held update.
+        // Resuming the same observation does not admit a later return.
+        fix.afterTrackingClockSample = [&] {
+            sampledRecovery = true;
+            fix.trackingSeconds = loss + 1.0;
+            (void)fix.follow();
+            REQUIRE(fix.session.searchingForFace());
+            REQUIRE_FALSE(fix.session.traceLive());
+            REQUIRE_FALSE(regionOverlayStubs().border);
+        };
+        return FaceDetectionResult{FaceDetectionStatus::Completed,
+                                   {{205 - crop.sourceX, 100 - crop.sourceY, 100, 100}}};
+    };
+    fix.publish(4);
+    REQUIRE(sampledRecovery);
+    AnalysisWorker::Output output;
+    uint64_t seen = 0;
+    REQUIRE(fix.worker.fetchOutput(seen, output, fix.settings.selectionRevision));
+    REQUIRE_FALSE(output.suppressed);
+    REQUIRE(output.region);
+    REQUIRE(output.frameSequence == 4);
+    REQUIRE(output.readingGeneration != 0);
+    // A completed image cannot restore an unconsumed tracking decision.
+    CHECK_FALSE(fix.session.acceptReading(output, fix.settings.enabledScopes));
+    (void)fix.follow();
+    REQUIRE(fix.session.searchingForFace());
+    REQUIRE_FALSE(fix.session.traceLive());
+    REQUIRE_FALSE(regionOverlayStubs().border);
+
+    auto stale = output;
+    SECTION("Older suppressed output")
+    {
+        REQUIRE(stale.readingGeneration > 1);
+        --stale.readingGeneration;
+        stale.suppressed = true;
+    }
+    SECTION("Wrong selection revision")
+    {
+        ++stale.selectionRevision;
+    }
+    SECTION("Wrong reading generation")
+    {
+        ++stale.readingGeneration;
+    }
+    SECTION("Wrong capture epoch")
+    {
+        ++stale.frameStamp.captureEpoch;
+    }
+    SECTION("Wrong display")
+    {
+        ++stale.frameStamp.displayId;
+    }
+    SECTION("Missing region")
+    {
+        stale.region.reset();
+    }
+    SECTION("Unpublished output")
+    {
+        stale.version = 0;
+    }
+    SECTION("Missing enabled scope")
+    {
+        stale.images.clear();
+    }
+    SECTION("Incomplete enabled scope")
+    {
+        stale.images.at("org.sidescopes.histogram").rgba.clear();
+    }
+    CHECK_FALSE(fix.session.acceptReading(stale, fix.settings.enabledScopes));
+    CHECK(fix.session.searchingForFace());
+    CHECK_FALSE(fix.session.traceLive());
+    CHECK_FALSE(regionOverlayStubs().border);
+    REQUIRE(fix.session.acceptReading(output, fix.settings.enabledScopes));
+    CHECK_FALSE(fix.session.searchingForFace());
+    CHECK(fix.session.traceLive());
+    fix.session.syncBorder(false);
+    REQUIRE(regionOverlayStubs().border);
+    CHECK(regionOverlayStubs().border->binding == RegionBinding::Face);
+    CHECK(regionOverlayStubs().border->region == output.region);
+    CHECK_FALSE(fix.session.acceptReading(output, fix.settings.enabledScopes));
+}
+
+TEST_CASE("Suppressed scope output hides the border before its tracking update is consumed", "[face-loss-reading]")
+{
+    FaceSessionFixture fix;
+    fix.selectFace();
+    AnalysisWorker::Output accepted;
+    uint64_t acceptedVersion = 0;
+    REQUIRE(fix.worker.fetchOutput(acceptedVersion, accepted, fix.settings.selectionRevision));
+    REQUIRE_FALSE(accepted.suppressed);
+    REQUIRE(accepted.region);
+    desktopStubs().sessionDetection = {};
+    desktopStubs().faces.clear();
+    fix.publish(3);
+    (void)fix.follow();
+    REQUIRE(fix.session.traceLive());
+    REQUIRE(regionOverlayStubs().border);
+    fix.trackingSeconds += 1.0;
+    fix.publish(4);
+    AnalysisWorker::Output output;
+    uint64_t seen = 0;
+    REQUIRE(fix.worker.fetchOutput(seen, output, fix.settings.selectionRevision));
+    REQUIRE(output.suppressed);
+    REQUIRE(output.readingGeneration == accepted.readingGeneration);
+    // The scope slot and tracking slot are consumed independently. The
+    // application checks reading visibility as soon as it gets scope output.
+    REQUIRE(fix.session.traceLive());
+    (void)fix.session.acceptReading(output, fix.settings.enabledScopes);
+    CHECK_FALSE(fix.session.traceLive());
+    CHECK(fix.session.searchingForFace());
+    fix.session.syncBorder(false);
+    CHECK_FALSE(regionOverlayStubs().border);
+    // Progress still describes the earlier complete reading. The completed
+    // suppression itself must make that generation ineligible for restoration.
+    CHECK_FALSE(fix.session.acceptReading(accepted, fix.settings.enabledScopes));
+    CHECK_FALSE(fix.session.traceLive());
+    fix.session.syncBorder(false);
+    CHECK_FALSE(regionOverlayStubs().border);
+    (void)fix.follow();
+    CHECK_FALSE(fix.session.traceLive());
+    CHECK(fix.session.faceLocked());
+    CHECK(fix.session.attachments().isAttached(Window));
+}
+
+TEST_CASE("A new face preview remains live while the previous face is searching", "[face-loss-reading]")
+{
+    FaceSessionFixture fix;
+    fix.selectFace();
+    desktopStubs().sessionDetection = {};
+    desktopStubs().faces.clear();
+    fix.publish(3);
+    const auto held = fix.follow();
+    REQUIRE(held.region);
+    fix.trackingSeconds += 1.0;
+    (void)fix.follow();
+    REQUIRE(fix.session.searchingForFace());
+    REQUIRE_FALSE(fix.session.traceLive());
+    fix.worker.pump();
+    AnalysisWorker::Output output;
+    uint64_t seen = 0;
+    REQUIRE(fix.worker.fetchOutput(seen, output, fix.settings.selectionRevision));
+    REQUIRE(output.suppressed);
+
+    desktopStubs().faces = {{300, 100, 100, 100}};
+    fix.open();
+    REQUIRE(regionOverlayStubs().lastDisplays[0].faces.size() == 1);
+    const auto preview = regionOverlayStubs().lastDisplays[0].faces[0].region;
+    REQUIRE(preview != held.region);
+    regionOverlayStubs().poll.active = true;
+    regionOverlayStubs().poll.displayId = Display;
+    regionOverlayStubs().poll.preview = preview;
+    const auto outcome = fix.session.poll(false, fix.frameSize, {});
+    REQUIRE(outcome.region == preview);
+    REQUIRE(fix.session.picker().active());
+    CHECK(fix.session.traceLive());
+    fix.settings.region = outcome.region;
+    fix.settings.selectionRevision = outcome.selectionRevision;
+    fix.worker.updateSettings(fix.settings);
+    fix.worker.pump();
+    REQUIRE(fix.worker.fetchOutput(seen, output, fix.settings.selectionRevision));
+    CHECK_FALSE(output.suppressed);
+    CHECK(output.region == preview);
+    REQUIRE(output.images.contains("org.sidescopes.histogram"));
+    CHECK_FALSE(output.images.at("org.sidescopes.histogram").rgba.empty());
+    (void)fix.session.acceptReading(output, fix.settings.enabledScopes);
+    CHECK(fix.session.traceLive());
+
+    regionOverlayStubs().poll = {};
+    const auto cancelled = fix.session.cancel();
+    CHECK(cancelled.region == held.region);
+    CHECK(fix.session.faceLocked());
+    CHECK(fix.session.attachments().isAttached(Window));
+    CHECK(fix.session.searchingForFace());
+    CHECK_FALSE(fix.session.traceLive());
+    CHECK_FALSE(regionOverlayStubs().border);
+    CHECK_FALSE(fix.session.acceptReading(output, fix.settings.enabledScopes));
+    CHECK_FALSE(fix.session.traceLive());
+}
 
 TEST_CASE("A stale face confirmation restores the committed crop before replacing capture")
 {

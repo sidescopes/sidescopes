@@ -144,6 +144,7 @@ private:
     /// graphics driver's per-process render arena resident, and it releases
     /// most of it about a second after the last one.
     void drawFrame(int framebufferWidth, int framebufferHeight);
+    void syncRegionReading();
     /// Whether the user is drawing or dragging the region itself, which takes
     /// the loop off its frame period so the border can follow their hand.
     [[nodiscard]] bool regionInteracting() const;
@@ -166,7 +167,9 @@ private:
     /// still picture in another application's window without changing the
     /// screen or sending this window an event.
     void notePointerMovement();
+    [[nodiscard]] bool sampleSearchingReadout();
     void sampleCursorColor();
+    void applyCursorSample(const CursorSample& sample, double now);
     /// Puts the resolutions the adaptive detail settled on in force, so the
     /// worker recomputes each scope's image at the size its pane now wants.
     /// The decision itself is the controller's; only the settings are ours.
@@ -287,6 +290,7 @@ private:
     /// frame on screen was drawn from; the loop asks it how long to block and
     /// whether to draw.
     FrameClocks m_clocks;
+    bool m_readingVisible = false;
     /// The region the worker was last told about: a region that differs from it
     /// is a region something is moving, and what is moving it decides whether
     /// the scopes go coarse or stop altogether.
@@ -313,6 +317,7 @@ private:
     std::optional<FloatColor> m_waveformColor;
     std::optional<FloatColor> m_readoutColor;
     std::optional<AnalysisWorker::FrameSize> m_frameSize;
+    bool m_cursorSampledBeforeDraw = false;
 };
 
 }  // namespace sidescopes

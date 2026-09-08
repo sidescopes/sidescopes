@@ -302,7 +302,7 @@ void App::refreshActivatedScope(std::string_view id)
     // what is enabled, so a newly shown scope's image is stale. Turning it on
     // pushes the settings immediately and waits briefly for the recompute; on
     // timeout the stale image stands in until the recompute lands a frame later.
-    if (!m_panes->hasTexture(id) || !m_analysis.region) {
+    if (!m_panes->hasTexture(id) || !m_regionSession.traceLive()) {
         // The color picker asks nothing of the worker, and neither does a
         // scope with no region to read: waiting for an image that cannot
         // arrive would stall every toggle for the whole timeout.
@@ -312,15 +312,20 @@ void App::refreshActivatedScope(std::string_view id)
     m_worker.updateSettings(m_analysis);
     const double deadline = glfwGetTime() + 0.08;
     while (glfwGetTime() < deadline) {
-        if (m_worker.fetchOutput(m_outputVersion, m_output, m_analysis.selectionRevision) &&
-            m_panes->imageFor(id).sequence != staleSequence && m_panes->imageFor(id).width > 0) {
-            m_panes->uploadVisibleScopes(/*traceLive=*/true);
-
-            return;
+        if (m_worker.fetchOutput(m_outputVersion, m_output, m_analysis.selectionRevision,
+                                 m_regionSession.minimumReadingGeneration())) {
+            syncRegionReading();
+            if (!m_regionSession.traceLive()) {
+                return;
+            }
+            if (m_panes->imageFor(id).sequence != staleSequence && m_panes->imageFor(id).width > 0) {
+                m_panes->uploadVisibleScopes(true);
+                return;
+            }
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(2));
     }
-    m_panes->uploadVisibleScopes(/*traceLive=*/true);  // timeout: a stale image beats none
+    m_panes->uploadVisibleScopes(m_regionSession.traceLive());
 }
 
 void App::toggleScope(std::string_view id)
@@ -367,6 +372,25 @@ void App::applyRegionSessionOutcome(const RegionSessionOutcome& outcome)
         setStatus(*outcome.status);
     }
     if (outcome.activity) {
+        m_clocks.noteActivity(glfwGetTime());
+    }
+    syncRegionReading();
+}
+
+void App::syncRegionReading()
+{
+    const bool restored = m_regionSession.acceptReading(m_output, m_analysis.enabledScopes);
+    const bool visible = m_regionSession.traceLive();
+    if (visible != m_readingVisible || restored) {
+        m_readingVisible = visible;
+        if (m_panes) {
+            if (restored) {
+                m_panes->uploadVisibleScopes(visible);
+            } else if (!visible) {
+                m_panes->releaseTraces();
+            }
+        }
+        m_regionSession.syncBorder(glfwGetWindowAttrib(m_window, GLFW_ICONIFIED) != 0);
         m_clocks.noteActivity(glfwGetTime());
     }
 }
@@ -419,6 +443,7 @@ void App::runFrame()
     if (nothingToDrawInto) {
         return;
     }
+    m_cursorSampledBeforeDraw = sampleSearchingReadout();
     // The redraw decision is taken before any of the frame is built: everything
     // it rests on is either a clock the loop already keeps or a cheap read, and
     // the expensive part of a frame is the frame.
@@ -454,8 +479,10 @@ void App::drawFrame(int framebufferWidth, int framebufferHeight)
     }
 
     m_clocks.noteFrameBegun(glfwGetTime());
-    if (m_worker.fetchOutput(m_outputVersion, m_output, m_analysis.selectionRevision)) {
-        m_panes->uploadVisibleScopes(m_analysis.region.has_value());
+    if (m_worker.fetchOutput(m_outputVersion, m_output, m_analysis.selectionRevision,
+                             m_regionSession.minimumReadingGeneration())) {
+        syncRegionReading();
+        m_panes->uploadVisibleScopes(m_regionSession.traceLive());
         // This observes upload submission, not compositor presentation.
         SS_DIAG(Perf,
                 "pass analysis_ms=%.1f frame=%llu epoch=%llu display=%u revision=%llu received=%.9f observed=%.9f",
@@ -467,7 +494,9 @@ void App::drawFrame(int framebufferWidth, int framebufferHeight)
     }
     m_frameSize = m_worker.latestFrameSize();
     publishSelfWindowMask();
-    sampleCursorColor();
+    if (!m_cursorSampledBeforeDraw) {
+        sampleCursorColor();
+    }
     updateAdaptiveDetail(framebufferWidth);
 
     drawFrameUi();
@@ -648,22 +677,49 @@ void App::notePointerMovement()
     m_pointerAt = pointer;
 }
 
-// Applies a cursor sample to host state: the smoothed colors flow on to this
-// frame's drawing, and a marker that moved counts as interaction.
+// Searching produces no scope output to wake drawing. A visible independent
+// readout still follows changing pixels, but unchanged probes leave it idle.
+bool App::sampleSearchingReadout()
+{
+    if (!m_regionSession.searchingForFace() || !m_view.stack().shows(ColorPickerScopeId) || m_sessionAsleep.load() ||
+        applicationHidden() || glfwGetWindowAttrib(m_window, GLFW_ICONIFIED) != 0 ||
+        glfwGetWindowAttrib(m_window, GLFW_VISIBLE) == 0) {
+        return false;
+    }
+    const CursorSmoothing smoothing{m_view.traces().smoothing(VectorscopeScopeId),
+                                    m_view.traces().smoothing(WaveformScopeId)};
+    const double now = glfwGetTime();
+    const auto sample = m_cursor.updateReadoutIfDue(smoothing, now);
+    if (!sample) {
+        return false;
+    }
+    applyCursorSample(*sample, now);
+    return true;
+}
+
 void App::sampleCursorColor()
 {
     const CursorSmoothing smoothing{m_view.traces().smoothing(VectorscopeScopeId),
                                     m_view.traces().smoothing(WaveformScopeId)};
+    const double now = glfwGetTime();
     const CursorSample sample =
-        m_cursor.update(m_frameSize, m_analysis.region, smoothing, glfwGetTime(), ImGui::GetIO().DeltaTime);
+        m_cursor.update(m_frameSize, m_regionSession.traceLive() ? m_analysis.region : std::nullopt, smoothing, now,
+                        ImGui::GetIO().DeltaTime);
+    applyCursorSample(sample, now);
+}
+
+// Applies a cursor sample to host state. Only visible readings request frames.
+void App::applyCursorSample(const CursorSample& sample, double now)
+{
     m_vectorscopeColor = sample.vectorscopeColor;
     m_waveformColor = sample.waveformColor;
     m_readoutColor = sample.readoutColor;
-    if (sample.changed) {
-        m_clocks.noteActivity(glfwGetTime());
+    const bool searching = m_regionSession.searchingForFace();
+    if (sample.changed && !searching) {
+        m_clocks.noteActivity(now);
     }
-    if (sample.readoutChanged) {
-        m_clocks.noteReadoutActivity(glfwGetTime());
+    if (sample.readoutChanged && (!searching || m_view.stack().shows(ColorPickerScopeId))) {
+        m_clocks.noteReadoutActivity(now);
     }
 }
 
@@ -707,7 +763,9 @@ void App::drawFrameUi()
                                 m_vectorscopeColor,
                                 m_waveformColor,
                                 m_readoutColor,
-                                m_callbackState.monospaceFont};
+                                m_callbackState.monospaceFont,
+                                m_regionSession.traceLive(),
+                                m_regionSession.searchingForFace() ? "Searching for face" : ""};
     applyPaneRenderOutcome(m_panes->drawRegionToolIcons(input));
     applyPaneRenderOutcome(m_panes->drawScopePanes(input));
     m_panes->drawStatusBar(input);

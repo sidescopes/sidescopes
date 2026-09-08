@@ -97,15 +97,20 @@ struct FrameRegionResolution
     /// Configured uses the submitted selection. Override supplies display
     /// percentages for these pixels. Skip keeps the last published reading;
     /// an Override without a region has the same explicit hold behavior.
+    /// Suppress withdraws the reading without accumulating any scopes.
     enum class Mode
     {
         Configured,
         Override,
-        Skip
+        Skip,
+        Suppress
     };
     Mode mode = Mode::Configured;
     std::optional<RegionOfInterest> region;
     uint64_t selectionRevision = 0;
+    /// Opaque identity of the reading this resolution permits. A change
+    /// requires a completed pass even when the region's pixels are unchanged.
+    uint64_t readingGeneration = 0;
 };
 
 using FrameRegionResolver = std::function<FrameRegionResolution(const FrameRegionRequest&)>;
@@ -129,7 +134,7 @@ using FrameRegionResolverFactory = std::function<FrameRegionResolver()>;
 /// them on the caller's thread, one per pump(), for a host with no threads to
 /// give. The passes themselves are identical either way.
 ///
-/// Threading: start, startInline, stop, updateSettings, hold, held,
+/// Threading: start, startInline, stop, updateSettings, requestRegionRefresh, hold, held,
 /// fetchOutput, sampleDisplayColor, latestFrameSize, withLatestFrame, and
 /// consumedFrameSequence make up the caller-thread surface and are safe to
 /// call while the worker runs. run() exclusively owns the worker thread and is
@@ -141,8 +146,8 @@ public:
     struct Output
     {
         /// Each computed scope's image, keyed by scope id. The map is kept
-        /// stable across frames: a disabled scope's entry simply stops
-        /// advancing rather than being cleared.
+        /// stable within a reading generation: a disabled scope's entry
+        /// simply stops advancing rather than being cleared.
         std::map<std::string, ScopeImage> images;
         /// Each outline-carrying scope's curve, keyed by scope id and stroked
         /// by the interface at display resolution (three channels of
@@ -153,12 +158,19 @@ public:
         double accumulateMilliseconds = 0.0;
         uint64_t framesProcessed = 0;
         uint64_t version = 0;
-        /// Provenance of these accumulated images, never advanced merely
-        /// because a newer frame had identical content and was skipped.
+        /// Provenance of a completed reading (including a resolved color
+        /// picker only pass), or an explicit suppression. Never advanced
+        /// merely because a newer frame had identical content and was skipped.
         std::optional<RegionOfInterest> region;
         uint64_t selectionRevision = 0;
         FrameStamp frameStamp;
         uint64_t frameSequence = 0;
+        /// The resolver's generation, published only with a complete reading
+        /// or an explicit suppression. Without a resolver this remains zero.
+        uint64_t readingGeneration = 0;
+        /// Explicit withdrawal by a current resolution, distinct from an
+        /// allocation/error withdrawal. Suppressed output has no region/images.
+        bool suppressed = false;
     };
 
     explicit AnalysisWorker(FrameMailbox& mailbox);
@@ -200,6 +212,13 @@ public:
     /// propagates without changing the accepted settings or their version.
     void updateSettings(const AnalysisSettings& settings);
 
+    /// Refreshes the resolver once on the owned frame without changing the
+    /// selection or repeating a detector observation. A capture-silent pass
+    /// carries freshFrame=false; a coincident new frame is resolved normally.
+    /// Requests coalesce, survive a hold, and are discarded if the selection
+    /// changes. Safe to call from any thread, including a resolver callback.
+    void requestRegionRefresh(uint64_t expectedSelectionRevision);
+
     /// Holds analysis without holding the pipeline behind it. Frames are still
     /// taken from the mailbox, so the colour readout and the pickers go on
     /// reading live pixels, but no pass runs and no output is published - which
@@ -221,9 +240,13 @@ public:
     /// another worker publication, until that copy succeeds.
     /// An expected selection rejects stale output without modifying the
     /// caller's output or version; a later matching publication remains
-    /// available to fetch.
+    /// available to fetch. A minimum reading generation likewise rejects an
+    /// older nonzero generation before copying. Generation-zero withdrawals
+    /// remain observable, including allocation failures; they are not completed
+    /// readings and must not restore a caller's presentation gate.
     [[nodiscard]] bool fetchOutput(uint64_t& lastSeenVersion, Output& output,
-                                   std::optional<uint64_t> expectedSelectionRevision = std::nullopt) const;
+                                   std::optional<uint64_t> expectedSelectionRevision = std::nullopt,
+                                   std::optional<uint64_t> minimumReadingGeneration = std::nullopt) const;
 
     /// Averaged color around a point of the most recent frame, if any. The
     /// point is in DISPLAY pixels: a capture narrowed to part of its display
@@ -280,7 +303,8 @@ public:
     /// settings, but must not stop, destroy, or recursively pump this worker.
     ///
     /// No factory keeps the ordinary configured-region path. A resolver can
-    /// use that region, override it for this frame, or skip analysis explicitly.
+    /// use that region, override it for this frame, skip analysis, or suppress
+    /// the reading explicitly.
     /// Results are cached for the same source frame and selection revision, so
     /// scope-settings changes do not repeat detection. Allocation exceptions
     /// skip that frame and retain the resolver's identity evidence; resolvers
@@ -319,14 +343,19 @@ private:
     void runPass(Pass& pass, std::chrono::milliseconds wait);
 
     void analyzeLatestFrame(Pass& pass, bool newFrame);
+    void accumulateFrameRegion(Pass& pass, const FrameView& view, const RegionOfInterest& resolved,
+                               bool settingsChanged, bool newFrame);
 
-    [[nodiscard]] std::optional<RegionOfInterest> resolveFrameRegion(Pass& pass, const FrameView& view, bool newFrame);
+    [[nodiscard]] std::optional<RegionOfInterest> resolveFrameRegion(Pass& pass, const FrameView& view, bool newFrame,
+                                                                     bool refreshRequested);
     void refreshFrameResolution(Pass& pass, const FrameRegionRequest& request);
     [[nodiscard]] bool selectionCurrent(uint64_t revision) const;
+    [[nodiscard]] uint64_t requestedRegionRefresh(uint64_t revision) const;
 
     /// Publishes a completed pass, withdrawing partial copies on allocation
     /// failure and allowing failed scopes to retry unchanged content.
     void publishOutput(Pass& pass, double elapsedMs);
+    void publishSuppression(Pass& pass, const FrameView& view, uint64_t generation);
 
     /// Announces a publication without letting a callback's allocation failure
     /// escape the worker or discard a result that is already available.
@@ -348,9 +377,8 @@ private:
     /// advancing @p seenSettingsVersion and returning whether they changed.
     [[nodiscard]] bool syncSettings(AnalysisSettings& settings, uint64_t& seenSettingsVersion);
 
-    /// Whether a frame is stored, analysis is not held, and either the frame
-    /// or the settings just changed, so this pass has analysis to do.
-    [[nodiscard]] bool hasWork(bool newFrame, bool settingsChanged) const;
+    /// Whether requested work can use a stored frame without a hold.
+    [[nodiscard]] bool hasWork(bool requested) const;
 
     FrameMailbox& m_mailbox;
     const ModuleRegistry& m_registry;
@@ -362,6 +390,8 @@ private:
     mutable std::mutex m_settingsMutex;
     AnalysisSettings m_settings;
     uint64_t m_settingsVersion = 1;
+    uint64_t m_regionRefreshVersion = 0;
+    std::optional<uint64_t> m_regionRefreshRevision;
     std::atomic<bool> m_held{false};
 
     std::function<void()> m_outputCallback;

@@ -84,7 +84,7 @@ add_test(NAME sidescopes_ui_smoke COMMAND sidescopes_ui_tests)
 # tests/CMakeLists.txt), plus the hooked Dear ImGui and Test Engine. The
 # sidescopes_app units have no Dear ImGui dependency, so they mix freely with
 # the hooked build. ui_test_harness.cpp is the shared null-backend runner.
-foreach(suite IN ITEMS pipeline view preset)
+foreach(suite IN ITEMS pipeline view preset reading)
     add_executable(sidescopes_ui_${suite}_tests
         test_${suite}_ui.cpp
         ui_test_harness.cpp)
@@ -103,6 +103,13 @@ endforeach()
 # so the pixels would be discarded unread).
 target_sources(sidescopes_ui_preset_tests PRIVATE
     ${CMAKE_SOURCE_DIR}/tests/support/desktop_stubs.cpp)
+
+# The reading suite runs the shipped pane renderer and status bar with the
+# existing capture, clock and picker seams; no native window is created.
+target_sources(sidescopes_ui_reading_tests PRIVATE
+    ${CMAKE_SOURCE_DIR}/src/platform/region_geometry.cpp
+    ${CMAKE_SOURCE_DIR}/tests/support/desktop_stubs.cpp
+    ${CMAKE_SOURCE_DIR}/tests/support/region_overlay_stubs.cpp)
 
 # The suites below compile Dear ImGui-dependent app translation units, which is
 # why those cannot live in sidescopes_app: linking the test engine gives them
@@ -163,7 +170,7 @@ add_test(NAME sidescopes_ui_scale COMMAND sidescopes_ui_scale_tests)
 # supply the symbols core's shared graticule references, and wait for the
 # bundles the worker loads at runtime.
 if(SIDESCOPES_MODULES_DYNAMIC)
-    foreach(suite IN ITEMS pipeline view preset)
+    foreach(suite IN ITEMS pipeline view preset reading)
         target_sources(sidescopes_ui_${suite}_tests PRIVATE
             ${CMAKE_SOURCE_DIR}/src/core/scopes/vectorscope.cpp
             ${CMAKE_SOURCE_DIR}/src/core/scopes/waveform.cpp

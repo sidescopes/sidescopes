@@ -106,6 +106,13 @@ public:
                                       const std::optional<RegionOfInterest>& region, CursorSmoothing smoothing,
                                       double now, float deltaSeconds);
 
+    /// Checks an independent readout before deciding whether to draw. A due
+    /// check uses elapsed time since the last update, so an idle reading can
+    /// settle normally. Empty means no check was due; even unavailable samples
+    /// are attempted at most once per readout interval. A returned sample also
+    /// serves a frame it wakes, without another update for that same frame.
+    [[nodiscard]] std::optional<CursorSample> updateReadoutIfDue(CursorSmoothing smoothing, double now);
+
     /// The throttled cross-display sample under its lock, passed to the
     /// picker's pin tool each poll.
     [[nodiscard]] std::optional<FloatColor> screenSampleColor() const;
@@ -216,6 +223,8 @@ private:
     double m_nextMarkerSample = 0.0;
     std::optional<FloatColor> m_readoutTarget;
     double m_nextReadoutSample = 0.0;
+    double m_nextReadoutCheck = 0.0;
+    std::optional<double> m_lastUpdateSeconds;
     bool m_markersFollowRegion = MarkersFollowRegion;
     /// The colours the previous frame drew, so a frame is only spent when one of
     /// them actually moves.

@@ -2,6 +2,7 @@
 
 #include <optional>
 #include <string>
+#include <string_view>
 
 #include "app/icon_textures.h"
 #include "app/shortcut_resolver.h"
@@ -32,7 +33,7 @@ public:
 
     /// Draws the strip: the pin tool, which stands down without a scope that
     /// takes pins (@p pinsAvailable), and the readout for @p cursorColor.
-    void draw(bool pinsAvailable, const std::optional<FloatColor>& cursorColor);
+    void draw(bool pinsAvailable, const std::optional<FloatColor>& cursorColor, std::string_view persistentStatus = {});
 
     /// Where the pin tool was last drawn, or nothing before the first draw.
     /// It sits at the far LEFT of the status bar while the region tools sit

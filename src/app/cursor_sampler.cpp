@@ -96,6 +96,7 @@ CursorSample CursorSampler::update(std::optional<AnalysisWorker::FrameSize> fram
                                    const std::optional<RegionOfInterest>& region, CursorSmoothing smoothing, double now,
                                    float deltaSeconds)
 {
+    m_lastUpdateSeconds = now;
     // Cursor color, smoothed per scope with its own rhythm. On the captured
     // display it reads the capture stream's frame; on every other display a
     // throttled one-shot sample keeps the readout alive even while capture is
@@ -128,6 +129,17 @@ CursorSample CursorSampler::update(std::optional<AnalysisWorker::FrameSize> fram
     advanceMarkers(markerTarget(probed, markersLive, now), smoothing, now, deltaSeconds, sample);
 
     return sample;
+}
+
+std::optional<CursorSample> CursorSampler::updateReadoutIfDue(CursorSmoothing smoothing, double now)
+{
+    if (!std::isfinite(now) || now < m_nextReadoutCheck || now < m_nextReadoutSample ||
+        (m_lastUpdateSeconds && now < *m_lastUpdateSeconds)) {
+        return {};
+    }
+    const double elapsed = m_lastUpdateSeconds ? now - *m_lastUpdateSeconds : ReadoutSampleSeconds;
+    m_nextReadoutCheck = now + ReadoutSampleSeconds;
+    return update(m_worker.latestFrameSize(), std::nullopt, smoothing, now, static_cast<float>(elapsed));
 }
 
 std::optional<FloatColor> CursorSampler::probeColor(DesktopPoint cursor, const std::optional<DisplayPixel>& pixel,

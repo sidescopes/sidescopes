@@ -388,7 +388,7 @@ FrameRegionResolution FaceTrackingWorker::resolve(const FrameRegionRequest& requ
         decision = policy.tick(contextOf(command), now);
     }
     const auto resolution = publishResolution(request, command, stabilize(command, decision, candidate));
-    if (resolution.mode == Mode::Override) {
+    if (resolution.mode == Mode::Override || resolution.mode == Mode::Suppress) {
         current = std::move(candidate);
     }
     return resolution;
@@ -438,7 +438,8 @@ FrameRegionResolution FaceTrackingWorker::publishResolution(const FrameRegionReq
             static_cast<unsigned long long>(command.revision), request.frame.stamp.receivedSeconds, m_clock(),
             request.freshFrame ? 1 : 0, region.leftPercent, region.topPercent, region.rightPercent,
             region.bottomPercent);
-    return {Mode::Override, region, request.selectionRevision};
+    return {decision.action == Action::Searching ? Mode::Suppress : Mode::Override, region, request.selectionRevision,
+            decision.readingGeneration};
 }
 
 }  // namespace sidescopes

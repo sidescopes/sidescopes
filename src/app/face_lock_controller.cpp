@@ -71,6 +71,7 @@ bool validTrackedSelection(const FaceTrackingCommand& command)
 FaceLockController::FaceLockController(AttachController& attach, AnalysisWorker& worker, CaptureController& capture,
                                        std::function<double()> clock)
     : m_attach(attach),
+      m_worker(worker),
       m_capture(capture),
       m_exchange(std::make_shared<FaceTrackingExchange>([] { glfwPostEmptyEvent(); }))
 {
@@ -113,7 +114,7 @@ uint64_t FaceLockController::selectionRevision() const
 void FaceLockController::addLock(uint64_t identity, FaceLockState state, std::optional<AttachWindowRect> windowRect,
                                  std::optional<std::pair<int, int>> coordinateSize)
 {
-    m_locks[identity] = Lock{state, windowRect, ++m_nextGeneration, {}, coordinateSize};
+    m_locks[identity] = Lock{state, windowRect, ++m_nextGeneration, {}, coordinateSize, 0, false, {}};
     refreshInventory();
     invalidate();
 }
@@ -203,7 +204,7 @@ FaceTrackingCommand FaceLockController::makeCommand(const AttachDecision& decisi
     command.displayWidth = frameSize->displayWidth;
     command.displayHeight = frameSize->displayHeight;
     command.crop = onFrameGrid(lock->second.state, lock->second.coordinateSize, *frameSize);
-    command.minimumFacePixels = 36.0 * sx;
+    command.minimumFacePixels = 24.0 * sx;
     command.enabled = !command.window.empty();
     return command;
 }
@@ -231,6 +232,8 @@ FaceLockOutcome FaceLockController::consume(const AttachDecision& decision, doub
             // A recovered observation can be replaced by a newer miss before
             // this slot is consumed. Adopt that miss's actual loss episode.
             lock.uncertaintyDeadline = update->decision.uncertaintyDeadline;
+            lock.readingGeneration = update->decision.readingGeneration;
+            lock.searching = action == face_tracking::Action::Searching;
         }
         const auto applyCrop = [&] {
             lock.state = onFrameGrid(
@@ -240,7 +243,7 @@ FaceLockOutcome FaceLockController::consume(const AttachDecision& decision, doub
             lock.coordinateSize = {m_command.displayWidth, m_command.displayHeight};
             outcome.applyRegion = acceptRegion(*update, decision);
         };
-        if (action == face_tracking::Action::Accepted ||
+        if (action == face_tracking::Action::Accepted || action == face_tracking::Action::Searching ||
             (action == face_tracking::Action::Held && update->decision.reason != face_tracking::Reason::Waiting)) {
             // A held update can replace an accepted crop. Carry its geometry
             // without treating uncertainty as fresh face evidence.
@@ -252,17 +255,31 @@ FaceLockOutcome FaceLockController::consume(const AttachDecision& decision, doub
             outcome.lostLock = update->identity;
         }
     }
-    // A failed fresh frame can be followed by a static occluded image, for
-    // which capture withholds further frames. Its uncertainty still expires.
-    const auto active = m_locks.find(m_command.identity);
-    if (m_command.enabled && active != m_locks.end() && active->second.uncertaintyDeadline &&
-        now >= *active->second.uncertaintyDeadline) {
-        outcome.lostLock = m_command.identity;
-    }
+    expireReading(decision.activeIdentity, now);
     if (outcome.lostLock) {
         removeLock(*outcome.lostLock);
     }
     return outcome;
+}
+
+void FaceLockController::expireReading(uint64_t identity, double now)
+{
+    // Capture may withhold further frames of a static occluder. Request one
+    // resolver tick at the existing deadline without changing the selection.
+    const auto active = m_locks.find(identity);
+    if (active == m_locks.end()) {
+        return;
+    }
+    const auto deadline = active->second.uncertaintyDeadline;
+    if (deadline && now >= *deadline) {
+        auto& lock = active->second;
+        lock.searching = true;
+        const auto refresh = std::pair{m_revision, *deadline};
+        if (m_command.enabled && lock.refreshedDeadline != refresh) {
+            m_worker.requestRegionRefresh(m_revision);
+            lock.refreshedDeadline = refresh;
+        }
+    }
 }
 
 FaceLockOutcome FaceLockController::update(const AttachDecision& decision,
@@ -308,6 +325,22 @@ bool FaceLockController::contains(uint64_t identity) const
 bool FaceLockController::locked() const
 {
     return !m_locks.empty();
+}
+
+std::optional<FaceReadingState> FaceLockController::readingState(uint64_t identity) const
+{
+    const auto found = m_locks.find(identity);
+    if (found == m_locks.end()) {
+        return {};
+    }
+    const auto& lock = found->second;
+    return FaceReadingState{lock.generation,
+                            lock.readingGeneration,
+                            m_revision,
+                            m_command.captureEpoch,
+                            m_command.displayId,
+                            lock.searching,
+                            m_command.enabled && m_command.identity == identity};
 }
 
 }  // namespace sidescopes

@@ -2,6 +2,7 @@
 
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "core/frame.h"
@@ -34,6 +35,9 @@ struct PaneRenderInput
     /// The fixed-width companion font the picker aligns hex codes with; null
     /// when the system had none.
     ImFont* monospaceFont;
+    /// Selected intent may remain while a recoverable source loss hides readings.
+    bool readingVisible = true;
+    std::string_view persistentStatus = {};
 };
 
 /// A scope a toolbar chip chose, and whether it joins the scopes on screen or

@@ -434,10 +434,11 @@ void PaneArea::drawScopeById(std::string_view id, Pass& pass)
     } else if (id == HistogramScopeId) {
         const ScopeInstance* instance = projectionFor(id);
         if (instance != nullptr) {
-            drawHistogram(textureForId(id), pass.input.regionSelected, outlineFor(id), *instance, histogramStyle(),
-                          graticuleStyle(DefaultLineWidth),
-                          m_view.cursorMarkersVisible() ? pass.input.vectorscopeColor : std::nullopt,
-                          m_histogramScratch);
+            drawHistogram(
+                textureForId(id), (pass.input.regionSelected && pass.input.readingVisible), outlineFor(id), *instance,
+                histogramStyle(), graticuleStyle(DefaultLineWidth),
+                m_view.cursorMarkersVisible() && pass.input.readingVisible ? pass.input.vectorscopeColor : std::nullopt,
+                m_histogramScratch);
         }
     } else if (id == ColorPickerScopeId) {
         drawColorPicker(pass.input.readoutColor, m_pins, pass.input.monospaceFont);
@@ -448,8 +449,9 @@ void PaneArea::drawScopeById(std::string_view id, Pass& pass)
 
 void PaneArea::drawVectorscopePane(Pass& pass)
 {
-    const DrawnScope scope = drawScopeImage(textureForId(VectorscopeScopeId), pass.input.regionSelected, true,
-                                            static_cast<float>(m_view.zoom()));
+    const DrawnScope scope =
+        drawScopeImage(textureForId(VectorscopeScopeId), (pass.input.regionSelected && pass.input.readingVisible), true,
+                       static_cast<float>(m_view.zoom()));
     const SsParamInfo* gain = firstParamOfKind(descriptorFor(VectorscopeScopeId), SS_PARAM_INTENSITY);
     TraceParams& traces = m_view.traces();
     if (gain != nullptr) {
@@ -472,7 +474,7 @@ void PaneArea::drawVectorscopePane(Pass& pass)
         for (const FloatColor& pinned : m_pins.colors()) {
             drawMarkers(scope, instance->markers(toSsColor(pinned)), PinnedPointColor);
         }
-        if (m_view.cursorMarkersVisible() && pass.input.vectorscopeColor) {
+        if (m_view.cursorMarkersVisible() && pass.input.readingVisible && pass.input.vectorscopeColor) {
             drawMarkers(scope, instance->markers(toSsColor(*pass.input.vectorscopeColor)));
         }
     }
@@ -489,7 +491,8 @@ void PaneArea::drawWaveformPane(std::string_view id, Pass& pass)
     // waveform owns its own; each pane draws its own instance's scale and
     // cursor markers, and the module's marker layout already follows what it
     // plots, so the host needs no branch for that.
-    const DrawnScope scope = drawScopeImage(textureForId(id), pass.input.regionSelected, false);
+    const DrawnScope scope =
+        drawScopeImage(textureForId(id), (pass.input.regionSelected && pass.input.readingVisible), false);
     const std::string_view owner = traceControlOwner(id);
     const SsParamInfo* gain = firstParamOfKind(descriptorFor(owner), SS_PARAM_INTENSITY);
     TraceParams& traces = m_view.traces();
@@ -505,7 +508,7 @@ void PaneArea::drawWaveformPane(std::string_view id, Pass& pass)
     const ScopeInstance* instance = projectionFor(id);
     if (instance != nullptr) {
         drawGraticule(scope, instance->graticule(), graticuleStyle(DefaultLineWidth));
-        if (m_view.cursorMarkersVisible() && pass.input.waveformColor) {
+        if (m_view.cursorMarkersVisible() && pass.input.readingVisible && pass.input.waveformColor) {
             drawMarkers(scope, instance->markers(toSsColor(*pass.input.waveformColor)));
         }
     }

@@ -1,5 +1,7 @@
 #include "app/region_coordinator.h"
 
+#include <utility>
+
 #include "app/attach_controller.h"
 #include "app/border_label.h"
 #include "app/capture_controller.h"
@@ -102,9 +104,11 @@ void RegionCoordinator::syncBorder(const RegionBorderState& state)
     // into the analysis region: the attached region on the focused attached
     // window (label and warm dress), else the plain global one. Called every
     // frame; the platform side makes the unchanged case free.
-    if (m_picker.active() || !m_region || applicationHidden() || state.windowMoving || state.windowMinimized) {
+    if (m_picker.active() || !m_region || !state.readingVisible || applicationHidden() || state.windowMoving ||
+        state.windowMinimized) {
         m_borderMotion.reset();
         m_presentedRegion.reset();
+        m_restoredRegion.reset();
         hideRegionBorder();
     } else {
         const RegionBinding binding =
@@ -117,7 +121,8 @@ void RegionCoordinator::syncBorder(const RegionBorderState& state)
                                         state.activeWindowIdentity, m_faceLock.selectionRevision(), binding);
         const bool animate = binding == RegionBinding::Face && !m_borderEditing && context == m_motionContext;
         m_motionContext = context;
-        const auto presented = m_borderMotion.update(*m_region, m_clock(), animate);
+        const auto restored = std::exchange(m_restoredRegion, {});
+        const auto presented = m_borderMotion.update(restored.value_or(*m_region), m_clock(), animate && !restored);
         m_presentedRegion = presented;
         showRegionBorder(m_capture.capturedDisplay(), presented,
                          binding == RegionBinding::Global ? m_displayLabel : state.windowLabel, binding);
@@ -127,6 +132,12 @@ void RegionCoordinator::syncBorder(const RegionBorderState& state)
 bool RegionCoordinator::borderAnimating() const
 {
     return m_borderMotion.active();
+}
+
+void RegionCoordinator::restoreReading(const RegionOfInterest& region)
+{
+    m_borderMotion.reset();
+    m_restoredRegion = region;
 }
 
 RegionBorderEditOutcome RegionCoordinator::pollBorderEdit(uint64_t activeWindowIdentity)

@@ -41,7 +41,7 @@ PaneRenderOutcome ScopePaneRenderer::drawScopePanes(const PaneRenderInput& input
 
 void ScopePaneRenderer::drawStatusBar(const PaneRenderInput& input)
 {
-    m_statusBar.draw(input.pinsAvailable, input.readoutColor);
+    m_statusBar.draw(input.pinsAvailable, input.readoutColor, input.persistentStatus);
 }
 
 void ScopePaneRenderer::configureProjections()

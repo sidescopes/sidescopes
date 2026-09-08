@@ -93,19 +93,43 @@ TEST_CASE("A brief failed detection holds the crop and can resume following")
     const auto resumed = observe(policy, 3, 10.10, {face(520.0)});
     CHECK(resumed.action == Action::Accepted);
     checkCrop(resumed, {470.0, 380.0, 570.0, 440.0});
+    CHECK(resumed.readingGeneration == missing.readingGeneration + 1);
+    const auto next = observe(policy, 4, 10.15, {face(525.0)});
+    CHECK(next.readingGeneration == resumed.readingGeneration);
 }
 
-TEST_CASE("A lost face becomes an ordinary crop and is never automatically selected again")
+TEST_CASE("One live grace deadline does not widen geometric recovery", "[face-search]")
+{
+    auto policy = selected();
+    const auto missing = observe(policy, 2, 20.0, {});
+    REQUIRE(missing.uncertaintyDeadline == 21.0);
+    CHECK(policy.tick(Source, 20.999).action == Action::Held);
+    const auto hidden = policy.tick(Source, 21.0);
+    CHECK(hidden.action == Action::Searching);
+    CHECK(hidden.following);
+    CHECK(hidden.readingGeneration == missing.readingGeneration);
+    CHECK(hidden.uncertaintyDeadline == missing.uncertaintyDeadline);
+    // Fresh observations are examined after expiry, but elapsed presentation
+    // grace is no authority to adopt a box as the selected person.
+    const auto candidate = observe(policy, 3, 21.01, {face(500.0)});
+    CHECK(candidate.action == Action::Searching);
+    CHECK(candidate.uncertaintyDeadline == 21.0);
+    CHECK_FALSE(candidate.selectedBox);
+    CHECK(candidate.evidenceSourceSeconds == 10.0);
+    CHECK(observe(policy, 3, 21.02, {}).reason == Reason::DuplicateOrOlderFrame);
+}
+
+TEST_CASE("A lost face keeps searching without guessing a returning identity")
 {
     auto policy = selected();
     REQUIRE(observe(policy, 2, 10.05, {face(520.0)}).action == Action::Accepted);
     REQUIRE(observe(policy, 3, 20.0, {}).action == Action::Held);
-    const auto lost = policy.tick(Source, 20.41);
-    CHECK(lost.action == Action::OrdinaryAttached);
-    CHECK_FALSE(lost.following);
+    const auto lost = policy.tick(Source, 21.01);
+    CHECK(lost.action == Action::Searching);
+    CHECK(lost.following);
     checkCrop(lost, {470.0, 380.0, 570.0, 440.0});
-    const auto returned = observe(policy, 4, 20.45, {face(540.0)});
-    CHECK(returned.action == Action::OrdinaryAttached);
+    const auto returned = observe(policy, 4, 21.05, {face(540.0)});
+    CHECK(returned.action == Action::Searching);
     checkCrop(returned, lost.crop);
 }
 
@@ -118,7 +142,7 @@ TEST_CASE("A crossing stays uncertain when only one rival is visible again")
     CHECK(oneLeft.action == Action::Held);
     CHECK(oneLeft.reason == Reason::Ambiguous);
     checkCrop(oneLeft, Crop);
-    CHECK(policy.tick(Source, 10.46).action == Action::OrdinaryAttached);
+    CHECK(policy.tick(Source, 11.06).action == Action::Searching);
 }
 
 TEST_CASE("Late or foreign detections cannot replace a newer selection")
@@ -162,10 +186,10 @@ TEST_CASE("Native failures and invalid boxes cannot become face positions")
     const auto invalid = observe(policy, 3, 10.1, {{0.0, 0.0, std::numeric_limits<double>::infinity(), 100.0}});
     CHECK(invalid.reason == Reason::InvalidDetection);
     checkCrop(invalid, Crop);
-    CHECK(policy.tick(Source, 10.46).action == Action::OrdinaryAttached);
+    CHECK(policy.tick(Source, 11.06).action == Action::Searching);
 }
 
-TEST_CASE("Control remapping preserves uncertain and retired association state")
+TEST_CASE("Control remapping preserves uncertainty and searching")
 {
     auto policy = selected();
     REQUIRE(observe(policy, 2, 10.05, {face(490.0), face(520.0)}).reason == Reason::Ambiguous);
@@ -174,12 +198,11 @@ TEST_CASE("Control remapping preserves uncertain and retired association state")
     CHECK(policy.remap(moved, shifted, Bounds, 0, 0).action == Action::Held);
     CHECK(policy.current().anchor.centerX == 510);
     CHECK(policy.tick(moved, 10.10).reason == Reason::Ambiguous);
-    CHECK(policy.tick(moved, 10.46).action == Action::OrdinaryAttached);
+    CHECK(policy.tick(moved, 11.06).action == Action::Searching);
     const Context edited{3, Source.epoch, Source.display};
-    CHECK_FALSE(policy.remap(edited, shifted, Bounds, 0, 0).following);
+    CHECK(policy.remap(edited, shifted, Bounds, 0, 0).following);
     const std::array boxes{face(520.0)};
-    CHECK(policy.advance({edited, 3, 10.50}, 10.50, DetectionStatus::Completed, boxes).action ==
-          Action::OrdinaryAttached);
+    CHECK(policy.advance({edited, 3, 11.10}, 11.10, DetectionStatus::Completed, boxes).action == Action::Searching);
 }
 
 TEST_CASE("A control snapshot keeps its normalized crop despite a newer worker anchor")
@@ -282,7 +305,7 @@ TEST_CASE("A recent rival cannot become the selected face as a miss widens the g
     checkCrop(guarded, last.crop);
     CHECK(guarded.evidenceSourceSeconds == 94.0 / 25);
     CHECK(observe(policy, 100, 99.0 / 25, {xywh(294, 148, 89, 118)}).reason == Reason::Ambiguous);
-    CHECK(policy.tick(Source, 4.21).action == Action::OrdinaryAttached);
+    CHECK(policy.tick(Source, 4.81).action == Action::Searching);
 }
 
 TEST_CASE("Single-face acceleration stop reversal and zoom retain immediate acceptance", "[recent-rival]")
@@ -317,7 +340,7 @@ TEST_CASE("Brief selected misses keep negative evidence without renewing positiv
     CHECK(decision.action == Action::Held);
     CHECK(decision.evidenceSourceSeconds == 10.04);
     checkCrop(decision, Crop);
-    CHECK(policy.tick(Source, 10.49).action == Action::OrdinaryAttached);
+    CHECK(policy.tick(Source, 11.09).action == Action::Searching);
 }
 
 TEST_CASE("A returning selected face can recover beside the same distant rival", "[recent-rival]")

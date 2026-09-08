@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <functional>
 #include <memory>
+#include <new>
 #include <stdexcept>
 #include <thread>
 #include <vector>
@@ -29,6 +30,8 @@ struct Probe
     uint64_t sourceSequence = 0;
     IntRect region;
     int configurations = 0;
+    bool accumulateFails = false;
+    bool invalidImage = false;
     std::function<void()> onAccumulate;
 };
 
@@ -58,11 +61,11 @@ SsScopeInstance* createProbe(const char*, const SsHost*)
         if (state.onAccumulate) {
             state.onAccumulate();
         }
-        return true;
+        return !state.accumulateFails;
     };
     scope.api.image = [](const SsScopeInstance* instance) {
         const auto& state = probe(instance);
-        return SsImageView{state.pixel.data(), 1, 1, state.accumulations};
+        return SsImageView{state.invalidImage ? nullptr : state.pixel.data(), 1, 1, state.accumulations};
     };
     scope.api.graticule = [](const SsScopeInstance*, SsGraticulePrimitive*, uint32_t) { return 0u; };
     scope.api.markers = [](const SsScopeInstance*, SsColor, SsMarker*, uint32_t) { return 0u; };
@@ -519,6 +522,444 @@ TEST_CASE("Resolver factory callable and destruction belong to the pass thread")
         fixture.worker.pump();
         CHECK(fixture.worker.consumedFrameSequence() == 1u);
     }
+}
+
+TEST_CASE("Suppression withdraws once and invalidates identical content reuse")
+{
+    Fixture fixture;
+    Mode mode = Mode::Override;
+    uint64_t generation = 7;
+    int notifications = 0;
+    fixture.worker.setOutputCallback([&] { ++notifications; });
+    fixture.install([&](const FrameRegionRequest& request) {
+        return FrameRegionResolution{mode, Right, request.selectionRevision, generation};
+    });
+    fixture.publish(splitFrame(1));
+    REQUIRE(fixture.fetch());
+    CHECK(fixture.output.readingGeneration == 7u);
+    CHECK_FALSE(fixture.output.suppressed);
+    mode = Mode::Suppress;
+    fixture.publish(splitFrame(2));
+    REQUIRE(fixture.fetch());
+    CHECK(fixture.output.suppressed);
+    CHECK(fixture.output.images.empty());
+    CHECK(fixture.output.outlines.empty());
+    CHECK_FALSE(fixture.output.region);
+    CHECK(fixture.output.readingGeneration == 7u);
+    CHECK(fixture.output.selectionRevision == 1u);
+    CHECK(fixture.output.frameSequence == 2u);
+    CHECK(fixture.output.frameStamp.captureEpoch == 3u);
+    CHECK(fixture.output.frameStamp.displayId == 17u);
+    CHECK(fixture.output.framesProcessed == 1u);
+    CHECK(fixture.output.accumulateMilliseconds == 0.0);
+    fixture.publish(splitFrame(3, {0, 191, 0}));
+    fixture.worker.updateSettings(fixture.settings);
+    fixture.worker.pump();
+    CHECK_FALSE(fixture.fetch());
+    CHECK(notifications == 2);
+    CHECK(fixture.scope.accumulations == 1u);
+    ++generation;
+    fixture.publish(splitFrame(4));
+    REQUIRE(fixture.fetch());
+    CHECK(fixture.output.suppressed);
+    CHECK(fixture.output.readingGeneration == 8u);
+    CHECK(notifications == 3);
+    mode = Mode::Override;
+    fixture.publish(splitFrame(5));
+    REQUIRE(fixture.fetch());
+    CHECK_FALSE(fixture.output.suppressed);
+    CHECK(fixture.output.readingGeneration == 8u);
+    CHECK(fixture.output.region == Right);
+    CHECK(fixture.output.images.at(ScopeId).rgba == std::vector<uint8_t>{0, 0, 191, 255});
+    CHECK(fixture.scope.accumulations == 2u);
+    fixture.publish(splitFrame(6));
+    CHECK_FALSE(fixture.fetch());
+    CHECK(notifications == 4);
+}
+
+TEST_CASE("A new reading generation completes even without an intervening suppression")
+{
+    for (const auto mode : {Mode::Configured, Mode::Override}) {
+        Fixture fixture;
+        uint64_t generation = 3;
+        fixture.install([&](const FrameRegionRequest& request) {
+            return FrameRegionResolution{mode, Right, request.selectionRevision, generation};
+        });
+        fixture.publish(splitFrame(1));
+        REQUIRE(fixture.fetch());
+        ++generation;
+        fixture.publish(splitFrame(2));
+        REQUIRE(fixture.fetch());
+        CHECK(fixture.output.readingGeneration == 4u);
+        CHECK(fixture.output.frameSequence == 2u);
+        CHECK(fixture.scope.accumulations == 2u);
+        CHECK(fixture.scope.configurations == 1);
+    }
+}
+
+TEST_CASE("A stale suppression cannot displace a retained reading while newer completion is pending")
+{
+    Fixture fixture;
+    Mode mode = Mode::Override;
+    uint64_t generation = 7;
+    fixture.install([&](const FrameRegionRequest& request) {
+        return FrameRegionResolution{mode, Right, request.selectionRevision, generation};
+    });
+    fixture.publish(splitFrame(1));
+    REQUIRE(fixture.fetch());
+    const auto previous = fixture.output;
+    mode = Mode::Suppress;
+    fixture.publish(splitFrame(2));
+    CHECK_FALSE(fixture.worker.fetchOutput(fixture.seen, fixture.output, 1, 8));
+    CHECK(fixture.seen == previous.version);
+    CHECK(fixture.output.version == previous.version);
+    CHECK(fixture.output.readingGeneration == previous.readingGeneration);
+    CHECK(fixture.output.region == previous.region);
+    CHECK(fixture.output.frameSequence == previous.frameSequence);
+    CHECK(fixture.output.images.at(ScopeId).rgba == previous.images.at(ScopeId).rgba);
+    CHECK(fixture.output.outlines == previous.outlines);
+    CHECK_FALSE(fixture.output.suppressed);
+    mode = Mode::Override;
+    generation = 8;
+    fixture.publish(splitFrame(3));
+    REQUIRE(fixture.worker.fetchOutput(fixture.seen, fixture.output, 1, 8));
+    CHECK(fixture.output.readingGeneration == 8u);
+    CHECK(fixture.output.frameSequence == 3u);
+    CHECK(fixture.output.region == Right);
+    CHECK_FALSE(fixture.output.images.at(ScopeId).rgba.empty());
+    mode = Mode::Suppress;
+    fixture.publish(splitFrame(4));
+    REQUIRE(fixture.worker.fetchOutput(fixture.seen, fixture.output, 1, 8));
+    CHECK(fixture.output.suppressed);
+    CHECK(fixture.output.images.empty());
+}
+
+TEST_CASE("A suppressed source transition publishes its own withdrawal metadata")
+{
+    Fixture fixture;
+    fixture.install([](const FrameRegionRequest& request) {
+        return FrameRegionResolution{Mode::Suppress, {}, request.selectionRevision, 3};
+    });
+    fixture.publish(splitFrame(1));
+    REQUIRE(fixture.fetch());
+    auto restarted = splitFrame(1);
+    restarted.stamp.captureEpoch = 4;
+    fixture.publish(std::move(restarted));
+    REQUIRE(fixture.fetch());
+    CHECK(fixture.output.suppressed);
+    CHECK(fixture.output.frameStamp.captureEpoch == 4u);
+    auto moved = splitFrame(1);
+    moved.stamp.captureEpoch = 4;
+    moved.stamp.displayId = 18;
+    fixture.publish(std::move(moved));
+    REQUIRE(fixture.fetch());
+    CHECK(fixture.output.frameStamp.displayId == 18u);
+    CHECK(fixture.scope.accumulations == 0u);
+}
+
+TEST_CASE("A region refresh coalesces and resolves old pixels once without reconfiguring")
+{
+    Fixture fixture;
+    std::vector<bool> fresh;
+    Mode mode = Mode::Override;
+    fixture.install([&](const FrameRegionRequest& request) {
+        fresh.push_back(request.freshFrame);
+        return FrameRegionResolution{mode, Right, request.selectionRevision, 7};
+    });
+    fixture.publish(splitFrame(1));
+    REQUIRE(fixture.fetch());
+    mode = Mode::Suppress;
+    fixture.worker.requestRegionRefresh(1);
+    fixture.worker.requestRegionRefresh(1);
+    fixture.worker.pump();
+    REQUIRE(fixture.fetch());
+    CHECK(fixture.output.suppressed);
+    CHECK(fixture.output.frameSequence == 1u);
+    CHECK(fixture.output.readingGeneration == 7u);
+    CHECK(fixture.output.selectionRevision == 1u);
+    CHECK(fixture.scope.configurations == 1);
+    fixture.worker.pump();
+    CHECK_FALSE(fixture.fetch());
+    CHECK(fresh == std::vector<bool>{true, false});
+    mode = Mode::Override;
+    fixture.worker.requestRegionRefresh(1);
+    fixture.worker.pump();
+    REQUIRE(fixture.fetch());
+    CHECK_FALSE(fixture.output.suppressed);
+    CHECK(fixture.output.framesProcessed == 1u);
+    CHECK(fixture.scope.accumulations == 2u);
+    CHECK(fresh == std::vector<bool>{true, false, false});
+}
+
+TEST_CASE("A refresh preserves a coincident fresh frame as one new observation")
+{
+    Fixture fixture;
+    std::vector<bool> fresh;
+    fixture.install([&](const FrameRegionRequest& request) {
+        fresh.push_back(request.freshFrame);
+        return FrameRegionResolution{Mode::Override, Right, request.selectionRevision, request.frame.sequence};
+    });
+    fixture.publish(splitFrame(1));
+    REQUIRE(fixture.fetch());
+    fixture.worker.requestRegionRefresh(1);
+    fixture.publish(splitFrame(2));
+    REQUIRE(fixture.fetch());
+    fixture.worker.pump();
+    CHECK_FALSE(fixture.fetch());
+    CHECK(fresh == std::vector<bool>{true, true});
+    CHECK(fixture.output.readingGeneration == 2u);
+    CHECK(fixture.scope.accumulations == 2u);
+}
+
+TEST_CASE("A stale refresh cannot revisit the current selection")
+{
+    Fixture fixture;
+    int calls = 0;
+    fixture.install([&](const FrameRegionRequest& request) {
+        ++calls;
+        return FrameRegionResolution{Mode::Override, Right, request.selectionRevision, 7};
+    });
+    fixture.publish(splitFrame(1));
+    REQUIRE(fixture.fetch());
+    fixture.worker.requestRegionRefresh(1);
+    fixture.settings.selectionRevision = 2;
+    fixture.worker.updateSettings(fixture.settings);
+    fixture.worker.pump();
+    REQUIRE(fixture.fetch());
+    CHECK(fixture.output.selectionRevision == 2u);
+    fixture.worker.requestRegionRefresh(1);
+    fixture.worker.pump();
+    CHECK_FALSE(fixture.fetch());
+    CHECK(calls == 2);
+}
+
+TEST_CASE("A refresh requested inside a resolver remains pending for the next pass")
+{
+    Fixture fixture;
+    int calls = 0;
+    std::vector<bool> fresh;
+    fixture.install([&](const FrameRegionRequest& request) {
+        fresh.push_back(request.freshFrame);
+        ++calls;
+        if (calls == 2) {
+            fixture.worker.requestRegionRefresh(request.selectionRevision);
+        }
+        return FrameRegionResolution{calls >= 3 ? Mode::Suppress : Mode::Override, Right, request.selectionRevision, 7};
+    });
+    fixture.publish(splitFrame(1));
+    REQUIRE(fixture.fetch());
+    fixture.worker.requestRegionRefresh(1);
+    fixture.worker.pump();
+    CHECK_FALSE(fixture.fetch());
+    fixture.worker.pump();
+    REQUIRE(fixture.fetch());
+    CHECK(fixture.output.suppressed);
+    CHECK(fresh == std::vector<bool>{true, false, false});
+    fixture.worker.pump();
+    CHECK(calls == 3);
+}
+
+TEST_CASE("A held refresh remains pending until the owned frame can be resolved")
+{
+    Fixture fixture;
+    std::vector<bool> fresh;
+    fixture.install([&](const FrameRegionRequest& request) {
+        fresh.push_back(request.freshFrame);
+        return FrameRegionResolution{request.freshFrame ? Mode::Override : Mode::Suppress, Right,
+                                     request.selectionRevision, 7};
+    });
+    fixture.publish(splitFrame(1));
+    REQUIRE(fixture.fetch());
+    fixture.worker.hold(true);
+    fixture.worker.requestRegionRefresh(1);
+    fixture.worker.pump();
+    CHECK(fresh == std::vector<bool>{true});
+    CHECK_FALSE(fixture.fetch());
+    fixture.worker.hold(false);
+    fixture.worker.pump();
+    REQUIRE(fixture.fetch());
+    CHECK(fixture.output.suppressed);
+    CHECK(fresh == std::vector<bool>{true, false});
+}
+
+TEST_CASE("A stale suppression returned by a refresh cannot withdraw the prior reading")
+{
+    Fixture fixture;
+    fixture.install([&](const FrameRegionRequest& request) {
+        if (!request.freshFrame && request.selectionRevision == 1) {
+            fixture.settings.selectionRevision = 2;
+            fixture.worker.updateSettings(fixture.settings);
+            return FrameRegionResolution{Mode::Suppress, {}, request.selectionRevision, 7};
+        }
+        return FrameRegionResolution{Mode::Override, Right, request.selectionRevision, 7};
+    });
+    fixture.publish(splitFrame(1));
+    REQUIRE(fixture.fetch());
+    fixture.worker.requestRegionRefresh(1);
+    fixture.worker.pump();
+    CHECK_FALSE(fixture.fetch());
+    CHECK_FALSE(fixture.output.suppressed);
+    CHECK(fixture.scope.accumulations == 1u);
+    fixture.worker.pump();
+    REQUIRE(fixture.fetch());
+    CHECK(fixture.output.selectionRevision == 2u);
+    CHECK_FALSE(fixture.output.suppressed);
+}
+
+TEST_CASE("A color picker only recovery publishes completed region metadata without scopes")
+{
+    Fixture fixture;
+    fixture.settings.enabledScopes.clear();
+    fixture.worker.updateSettings(fixture.settings);
+    Mode mode = Mode::Suppress;
+    uint64_t generation = 7;
+    fixture.install([&](const FrameRegionRequest& request) {
+        return FrameRegionResolution{mode, Right, request.selectionRevision, generation};
+    });
+    fixture.publish(splitFrame(1));
+    REQUIRE(fixture.fetch());
+    CHECK(fixture.output.suppressed);
+    mode = Mode::Override;
+    ++generation;
+    fixture.publish(splitFrame(2));
+    REQUIRE(fixture.fetch());
+    CHECK_FALSE(fixture.output.suppressed);
+    CHECK(fixture.output.region == Right);
+    CHECK(fixture.output.readingGeneration == 8u);
+    CHECK(fixture.output.selectionRevision == 1u);
+    CHECK(fixture.output.frameStamp.captureEpoch == 3u);
+    CHECK(fixture.output.frameStamp.displayId == 17u);
+    CHECK(fixture.output.frameSequence == 2u);
+    CHECK(fixture.output.images.empty());
+    CHECK(fixture.scope.accumulations == 0u);
+    CHECK(fixture.scope.configurations == 0);
+}
+
+TEST_CASE("An unsuccessful scope cannot publish a completed recovery generation")
+{
+    for (const bool invalidImage : {false, true}) {
+        Fixture fixture;
+        Mode mode = Mode::Override;
+        uint64_t generation = 7;
+        fixture.install([&](const FrameRegionRequest& request) {
+            return FrameRegionResolution{mode, Right, request.selectionRevision, generation};
+        });
+        fixture.publish(splitFrame(1));
+        REQUIRE(fixture.fetch());
+        mode = Mode::Suppress;
+        fixture.publish(splitFrame(2));
+        REQUIRE(fixture.fetch());
+        mode = Mode::Override;
+        ++generation;
+        fixture.scope.invalidImage = invalidImage;
+        fixture.scope.accumulateFails = !invalidImage;
+        fixture.publish(splitFrame(3));
+        REQUIRE(fixture.fetch());
+        CHECK_FALSE(fixture.output.suppressed);
+        CHECK_FALSE(fixture.output.region);
+        CHECK(fixture.output.readingGeneration == 0u);
+        CHECK(fixture.output.frameSequence == 0u);
+        CHECK(fixture.output.selectionRevision == 1u);
+        CHECK(fixture.output.images.at(ScopeId).rgba.empty());
+        fixture.scope.invalidImage = false;
+        fixture.scope.accumulateFails = false;
+        fixture.publish(splitFrame(4));
+        REQUIRE(fixture.fetch());
+        CHECK(fixture.output.region == Right);
+        CHECK(fixture.output.readingGeneration == 8u);
+        CHECK_FALSE(fixture.output.images.at(ScopeId).rgba.empty());
+    }
+}
+
+TEST_CASE("Disabled scope images cannot inherit a later reading generation")
+{
+    Fixture fixture;
+    uint64_t generation = 7;
+    fixture.install([&](const FrameRegionRequest& request) {
+        return FrameRegionResolution{Mode::Override, Right, request.selectionRevision, generation};
+    });
+    fixture.publish(splitFrame(1));
+    REQUIRE(fixture.fetch());
+    fixture.settings.enabledScopes.clear();
+    fixture.worker.updateSettings(fixture.settings);
+    fixture.worker.pump();
+    REQUIRE(fixture.fetch());
+    CHECK(fixture.output.images.contains(ScopeId));
+    ++generation;
+    fixture.worker.requestRegionRefresh(1);
+    fixture.worker.pump();
+    REQUIRE(fixture.fetch());
+    CHECK(fixture.output.images.empty());
+    CHECK(fixture.output.region == Right);
+    CHECK(fixture.output.readingGeneration == 8u);
+    CHECK(fixture.output.frameSequence == 1u);
+    CHECK(fixture.scope.accumulations == 1u);
+}
+
+TEST_CASE("A failed resolver cannot replace suppression with completed recovery metadata")
+{
+    for (const bool allocation : {false, true}) {
+        Fixture fixture;
+        int failedCalls = 0;
+        fixture.install([&](const FrameRegionRequest& request) {
+            if (request.frame.sequence == 2) {
+                ++failedCalls;
+                if (allocation) {
+                    throw std::bad_alloc{};
+                }
+                throw std::runtime_error("resolution failure");
+            }
+            return FrameRegionResolution{request.frame.sequence == 1 ? Mode::Suppress : Mode::Override, Right,
+                                         request.selectionRevision, request.frame.sequence == 1 ? 7u : 8u};
+        });
+        fixture.publish(splitFrame(1));
+        REQUIRE(fixture.fetch());
+        fixture.publish(splitFrame(2));
+        CHECK_FALSE(fixture.fetch());
+        fixture.worker.updateSettings(fixture.settings);
+        fixture.worker.pump();
+        CHECK_FALSE(fixture.fetch());
+        CHECK(failedCalls == 1);
+        CHECK(fixture.output.suppressed);
+        CHECK(fixture.output.readingGeneration == 7u);
+        fixture.publish(splitFrame(3));
+        REQUIRE(fixture.fetch());
+        CHECK_FALSE(fixture.output.suppressed);
+        CHECK(fixture.output.region == Right);
+        CHECK(fixture.output.readingGeneration == 8u);
+    }
+}
+
+TEST_CASE("The analysis thread processes a resolver refresh without another captured frame")
+{
+    Fixture fixture;
+    std::vector<bool> fresh;
+    fixture.worker.setFrameRegionResolverFactory([&] {
+        return [&](const FrameRegionRequest& request) {
+            fresh.push_back(request.freshFrame);
+            return FrameRegionResolution{request.freshFrame ? Mode::Override : Mode::Suppress, Right,
+                                         request.selectionRevision, 7};
+        };
+    });
+    fixture.worker.start();
+    fixture.mailbox.publish(splitFrame(1));
+    REQUIRE(consumed(fixture.worker, 1));
+    REQUIRE(fixture.fetch());
+    fixture.worker.requestRegionRefresh(1);
+    bool refreshed = false;
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (!refreshed && std::chrono::steady_clock::now() < deadline) {
+        refreshed = fixture.fetch();
+        if (!refreshed) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+    }
+    fixture.worker.stop();
+    REQUIRE(refreshed);
+    CHECK(fixture.output.suppressed);
+    CHECK(fixture.output.frameSequence == 1u);
+    CHECK(fixture.worker.consumedFrameSequence() == 1u);
+    CHECK(fresh == std::vector<bool>{true, false});
 }
 
 }  // namespace sidescopes

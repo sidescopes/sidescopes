@@ -254,6 +254,140 @@ TEST_CASE("Only a marker that moves counts as interaction")
     CHECK(fix.sampler.update(FrameSize, WholeDisplay, Instant, 1.3, 1.0f / 60.0f).changed);
 }
 
+TEST_CASE("An idle readout notices changed pixels while scope output is suppressed")
+{
+    SamplerFixture fix;
+    fix.worker.stop();
+    fix.worker.setFrameRegionResolverFactory([] {
+        return [](const FrameRegionRequest& request) {
+            return FrameRegionResolution{FrameRegionResolution::Mode::Suppress, {}, request.selectionRevision, 7};
+        };
+    });
+    AnalysisSettings settings;
+    settings.region = WholeDisplay;
+    settings.selectionRevision = 1;
+    fix.worker.updateSettings(settings);
+    fix.worker.start();
+    publishAndAwait(fix, makeSolidFrameBuffer(64, 64, Color{200, 50, 30}, 2));
+    AnalysisWorker::Output output;
+    uint64_t seen = 0;
+    REQUIRE(fix.worker.fetchOutput(seen, output));
+    REQUIRE(output.suppressed);
+    desktopStubs().cursor = DesktopPoint{32.0, 32.0};
+    desktopStubs().cursorDisplay = StreamedDisplay;
+
+    const auto first = fix.sampler.updateReadoutIfDue(Instant, 10.0);
+    REQUIRE(first);
+    REQUIRE(first->readoutChanged);
+    FrameClocks clocks;
+    clocks.noteReadoutActivity(10.0);
+    clocks.noteFrameBegun(10.0);
+    clocks.noteFrameShown(0, 0, "");
+    const auto settled = fix.sampler.updateReadoutIfDue(Instant, 12.0);
+    REQUIRE(settled);
+    REQUIRE_FALSE(settled->readoutChanged);
+    CHECK_FALSE(frameWorthDrawing(clocks.redrawInputs({}, 12.0)));
+
+    publishAndAwait(fix, makeSolidFrameBuffer(64, 64, Color{20, 200, 90}, 3));
+    REQUIRE_FALSE(fix.worker.fetchOutput(seen, output));
+    const double changedAt = 12.0 + ReadoutSampleSeconds;
+    CHECK_FALSE(frameWorthDrawing(clocks.redrawInputs({}, changedAt)));
+    const auto changed = fix.sampler.updateReadoutIfDue(Instant, changedAt);
+    REQUIRE(changed);
+    REQUIRE(changed->readoutChanged);
+    REQUIRE(changed->readoutColor);
+    CHECK_THAT(changed->readoutColor->g, WithinAbs(200.0f, 1e-3f));
+    clocks.noteReadoutActivity(changedAt);
+    CHECK(frameWorthDrawing(clocks.redrawInputs({}, changedAt)));
+    clocks.noteFrameBegun(changedAt);
+    CHECK_FALSE(fix.sampler.updateReadoutIfDue(Instant, changedAt));
+
+    const auto quiet = fix.sampler.updateReadoutIfDue(Instant, 14.0);
+    REQUIRE(quiet);
+    CHECK_FALSE(quiet->readoutChanged);
+    CHECK_FALSE(frameWorthDrawing(clocks.redrawInputs({}, 14.0)));
+}
+
+TEST_CASE("A due readout settles with elapsed time and does not update twice")
+{
+    SamplerFixture fix;
+    desktopStubs().cursor = DesktopPoint{32.0, 32.0};
+    desktopStubs().cursorDisplay = StreamedDisplay;
+    CursorSampler reference{fix.capture, fix.worker};
+    constexpr CursorSmoothing Slow{10000.0f, 10000.0f};
+    const auto initial = fix.sampler.update(FrameSize, std::nullopt, Instant, 1.0, 0.0f);
+    (void)reference.update(FrameSize, std::nullopt, Instant, 1.0, 0.0f);
+    REQUIRE(initial.readoutColor);
+    REQUIRE_THAT(initial.readoutColor->r, WithinAbs(200.0f, 1e-3f));
+    publishAndAwait(fix, makeSolidFrameBuffer(64, 64, Color{20, 200, 90}, 2));
+    CHECK_FALSE(fix.sampler.updateReadoutIfDue(Slow, 1.1));
+
+    const auto due = fix.sampler.updateReadoutIfDue(Slow, 1.5);
+    const auto expected = reference.update(FrameSize, std::nullopt, Slow, 1.5, 0.5f);
+    REQUIRE(due);
+    REQUIRE(due->readoutColor);
+    REQUIRE(expected.readoutColor);
+    CHECK(due->readoutColor->r < initial.readoutColor->r);
+    CHECK(due->readoutColor->r > 20.0f);
+    CHECK(due->readoutColor->g > initial.readoutColor->g);
+    CHECK(due->readoutColor->g < 200.0f);
+    CHECK_THAT(due->readoutColor->r, WithinAbs(expected.readoutColor->r, 1e-4f));
+    CHECK_THAT(due->readoutColor->g, WithinAbs(expected.readoutColor->g, 1e-4f));
+    CHECK_THAT(due->readoutColor->b, WithinAbs(expected.readoutColor->b, 1e-4f));
+    CHECK_FALSE(fix.sampler.updateReadoutIfDue(Slow, 1.5));
+    CHECK_FALSE(fix.sampler.updateReadoutIfDue(Slow, 1.6));
+    const auto next = fix.sampler.updateReadoutIfDue(Slow, 1.625);
+    const auto expectedNext = reference.update(FrameSize, std::nullopt, Slow, 1.625, 0.125f);
+    REQUIRE(next);
+    REQUIRE(next->readoutColor);
+    REQUIRE(expectedNext.readoutColor);
+    CHECK(next->readoutColor->r < due->readoutColor->r);
+    CHECK(next->readoutColor->r > 20.0f);
+    CHECK(next->readoutColor->g > due->readoutColor->g);
+    CHECK(next->readoutColor->g < 200.0f);
+    CHECK_THAT(next->readoutColor->r, WithinAbs(expectedNext.readoutColor->r, 1e-4f));
+    CHECK_THAT(next->readoutColor->g, WithinAbs(expectedNext.readoutColor->g, 1e-4f));
+    CHECK_THAT(next->readoutColor->b, WithinAbs(expectedNext.readoutColor->b, 1e-4f));
+}
+
+TEST_CASE("Unavailable idle readouts are attempted only at the readout cadence")
+{
+    SamplerFixture fix;
+    desktopStubs().cursor.reset();
+    const auto unavailable = fix.sampler.updateReadoutIfDue(Instant, 1.0);
+    REQUIRE(unavailable);
+    CHECK_FALSE(unavailable->readoutColor);
+    CHECK_FALSE(fix.sampler.updateReadoutIfDue(Instant, 1.01));
+
+    desktopStubs().cursor = DesktopPoint{32.0, 32.0};
+    desktopStubs().cursorDisplay = StreamedDisplay;
+    CHECK_FALSE(fix.sampler.updateReadoutIfDue(Instant, 1.1));
+    const auto available = fix.sampler.updateReadoutIfDue(Instant, 1.0 + ReadoutSampleSeconds);
+    REQUIRE(available);
+    REQUIRE(available->readoutColor);
+    CHECK_THAT(available->readoutColor->r, WithinAbs(200.0f, 1e-3f));
+}
+
+TEST_CASE("An idle readout maps the cursor using the latest capture extents")
+{
+    SamplerFixture fix;
+    desktopStubs().cursor = DesktopPoint{16.0, 16.0};
+    desktopStubs().cursorDisplay = StreamedDisplay;
+    REQUIRE(fix.sampler.updateReadoutIfDue(Instant, 1.0));
+
+    auto frame = makeRampFrameBuffer(2);
+    frame.sourceWidth = 128;
+    frame.sourceHeight = 64;
+    publishAndAwait(fix, std::move(frame));
+    const auto remapped = fix.sampler.updateReadoutIfDue(Instant, 1.0 + ReadoutSampleSeconds);
+    REQUIRE(remapped);
+    REQUIRE(remapped->readoutColor);
+    // The cursor is now over display pixel 32. The last drawn frame's width
+    // would still map it to pixel 16, whose colour is 64 rather than 129.
+    CHECK_THAT(remapped->readoutColor->r, WithinAbs(129.0f, 1e-3f));
+    CHECK(desktopStubs().screenSampleRequests == 0);
+}
+
 TEST_CASE("A marker still easing towards its colour keeps redrawing")
 {
     // With smoothing on, the marker travels for several frames after the colour

@@ -31,6 +31,8 @@ void clearOutput(AnalysisWorker::Output& output, uint64_t framesProcessed, uint6
     output.selectionRevision = 0;
     output.frameStamp = {};
     output.frameSequence = 0;
+    output.readingGeneration = 0;
+    output.suppressed = false;
 }
 }  // namespace
 
@@ -116,6 +118,9 @@ void AnalysisWorker::updateSettings(const AnalysisSettings& settings)
     AnalysisSettings pending = settings;
     {
         std::lock_guard lock(m_settingsMutex);
+        if (pending.selectionRevision != m_settings.selectionRevision) {
+            m_regionRefreshRevision.reset();
+        }
         m_settings = std::move(pending);
         ++m_settingsVersion;
     }
@@ -125,12 +130,28 @@ void AnalysisWorker::updateSettings(const AnalysisSettings& settings)
     m_mailbox.nudge();
 }
 
+void AnalysisWorker::requestRegionRefresh(uint64_t expectedSelectionRevision)
+{
+    {
+        std::lock_guard lock(m_settingsMutex);
+        if (m_settings.selectionRevision != expectedSelectionRevision) {
+            return;
+        }
+        m_regionRefreshRevision = expectedSelectionRevision;
+        ++m_regionRefreshVersion;
+    }
+    m_mailbox.nudge();
+}
+
 bool AnalysisWorker::fetchOutput(uint64_t& lastSeenVersion, Output& output,
-                                 std::optional<uint64_t> expectedSelectionRevision) const
+                                 std::optional<uint64_t> expectedSelectionRevision,
+                                 std::optional<uint64_t> minimumReadingGeneration) const
 {
     std::lock_guard lock(m_outputMutex);
     if (m_output.version == lastSeenVersion ||
-        (expectedSelectionRevision && m_output.selectionRevision != *expectedSelectionRevision)) {
+        (expectedSelectionRevision && m_output.selectionRevision != *expectedSelectionRevision) ||
+        (minimumReadingGeneration && m_output.readingGeneration != 0 &&
+         m_output.readingGeneration < *minimumReadingGeneration)) {
         return false;
     }
     try {
@@ -410,9 +431,10 @@ double accumulateScopes(std::vector<WorkerScope>& scopes, const SsFrameView& fra
 // by id, plus the outline of whichever scope exports one. The image map is
 // never cleared: an existing entry reuses its rgba buffer, so the steady
 // state allocates nothing. The caller holds the output lock.
-void writeOutput(AnalysisWorker::Output& output, std::vector<WorkerScope>& scopes, const std::set<std::string>& enabled,
+bool writeOutput(AnalysisWorker::Output& output, std::vector<WorkerScope>& scopes, const std::set<std::string>& enabled,
                  double elapsedMs, uint64_t framesProcessed)
 {
+    bool complete = true;
     for (WorkerScope& scope : scopes) {
         if (enabled.count(scope.id) == 0) {
             continue;
@@ -423,6 +445,7 @@ void writeOutput(AnalysisWorker::Output& output, std::vector<WorkerScope>& scope
             image = {};
             output.outlines.erase(scope.id);
             scope.accumulated = false;
+            complete = false;
             continue;
         }
         if (scope.outline) {
@@ -435,6 +458,7 @@ void writeOutput(AnalysisWorker::Output& output, std::vector<WorkerScope>& scope
     output.accumulateMilliseconds = elapsedMs;
     output.framesProcessed = framesProcessed;
     ++output.version;
+    return complete;
 }
 
 }  // namespace
@@ -527,20 +551,20 @@ bool AnalysisWorker::syncSettings(AnalysisSettings& settings, uint64_t& seenSett
 }
 
 // A pass needs a frame to read and a reason to run: a new frame, or settings
-// that changed. The region it reads is the caller's own test, stated beside
-// this one - a pass without a region computes nothing and publishes nothing,
+// that changed, or an explicit resolver refresh. The region it reads is the
+// caller's own test beside this one: without a region it publishes nothing,
 // so the scopes stay as empty as they started, while the frame is still taken
 // because the colour under the pointer is read from it. A hold is the same
 // shape of answer for a different reason: the region is in transit, so there
 // is nothing worth reading off it until it lands.
-bool AnalysisWorker::hasWork(bool newFrame, bool settingsChanged) const
+bool AnalysisWorker::hasWork(bool requested) const
 {
     if (m_held.load(std::memory_order_relaxed)) {
         return false;
     }
     std::lock_guard lock(m_frameMutex);
 
-    return m_hasFrame && (newFrame || settingsChanged);
+    return m_hasFrame && requested;
 }
 
 // The state one pass hands to the next. Its owner is whichever thread runs
@@ -552,6 +576,7 @@ struct AnalysisWorker::Pass
     std::set<std::string> enabledScopes;
     AnalysisSettings settings;
     uint64_t seenSettingsVersion = 0;
+    uint64_t seenRegionRefreshVersion = 0;
     std::optional<uint64_t> lastContentHash;
     uint64_t framesProcessed = 0;
     FrameRegionResolver regionResolver;
@@ -562,6 +587,7 @@ struct AnalysisWorker::Pass
     std::optional<RegionOfInterest> analyzedRegion;
     FrameStamp analyzedStamp;
     uint64_t analyzedSequence = 0;
+    uint64_t analyzedGeneration = 0;
 };
 
 void AnalysisWorker::setFrameRegionResolverFactory(FrameRegionResolverFactory factory)
@@ -578,7 +604,14 @@ bool AnalysisWorker::selectionCurrent(uint64_t revision) const
     return m_settings.selectionRevision == revision;
 }
 
-std::optional<RegionOfInterest> AnalysisWorker::resolveFrameRegion(Pass& pass, const FrameView& view, bool newFrame)
+uint64_t AnalysisWorker::requestedRegionRefresh(uint64_t revision) const
+{
+    std::lock_guard lock(m_settingsMutex);
+    return m_settings.selectionRevision == revision && m_regionRefreshRevision == revision ? m_regionRefreshVersion : 0;
+}
+
+std::optional<RegionOfInterest> AnalysisWorker::resolveFrameRegion(Pass& pass, const FrameView& view, bool newFrame,
+                                                                   bool refreshRequested)
 {
     if (!m_regionResolverFactory) {
         return pass.settings.region;
@@ -587,7 +620,7 @@ std::optional<RegionOfInterest> AnalysisWorker::resolveFrameRegion(Pass& pass, c
     const bool sameFrame = pass.resolution && pass.resolvedSequence == view.sequence &&
                            pass.resolvedStamp.captureEpoch == view.stamp.captureEpoch &&
                            pass.resolvedStamp.displayId == view.stamp.displayId;
-    if (!sameFrame || pass.resolvedRevision != revision) {
+    if (!sameFrame || pass.resolvedRevision != revision || refreshRequested) {
         refreshFrameResolution(pass, {view, pass.settings.region, revision, newFrame && !sameFrame});
     }
     if (!pass.resolution || pass.resolution->selectionRevision != revision) {
@@ -600,6 +633,7 @@ std::optional<RegionOfInterest> AnalysisWorker::resolveFrameRegion(Pass& pass, c
     case FrameRegionResolution::Mode::Override:
         return resolution.region;
     case FrameRegionResolution::Mode::Skip:
+    case FrameRegionResolution::Mode::Suppress:
         return std::nullopt;
     }
     return std::nullopt;
@@ -717,21 +751,43 @@ void AnalysisWorker::analyzeLatestFrame(Pass& pass, bool newFrame)
         // consume this version, so a failed partial application is retried.
         pass.seenSettingsVersion = candidateSettingsVersion;
     }
-    if (!settings.region || !hasWork(newFrame, settingsChanged)) {
+    const uint64_t refreshVersion = requestedRegionRefresh(settings.selectionRevision);
+    const bool refreshRequested = refreshVersion != 0 && refreshVersion != pass.seenRegionRefreshVersion;
+    if (!settings.region || !hasWork(newFrame || settingsChanged || refreshRequested) ||
+        !selectionCurrent(settings.selectionRevision)) {
         return;
     }
+    pass.seenRegionRefreshVersion = refreshVersion;
 
     // Reading the frame without the lock is safe: this thread is the
     // only writer, and readers on other threads take the mutex only for
     // the brief sampling reads that tolerate the previous frame.
     const FrameView view = m_latestFrame.view();
     // The last images stand while the frame cannot answer for the region.
-    const auto resolved = resolveFrameRegion(pass, view, newFrame);
-    if (!resolved || !selectionCurrent(settings.selectionRevision) || m_held.load(std::memory_order_relaxed) ||
+    const auto resolved = resolveFrameRegion(pass, view, newFrame, refreshRequested);
+    if (!selectionCurrent(settings.selectionRevision) || m_held.load(std::memory_order_relaxed) ||
         m_releaseFrame.load(std::memory_order_relaxed)) {
         return;
     }
-    const std::optional<IntRect> region = regionInFrame(view, *resolved);
+    if (pass.resolution && pass.resolution->selectionRevision == settings.selectionRevision &&
+        pass.resolution->mode == FrameRegionResolution::Mode::Suppress) {
+        pass.lastContentHash.reset();
+        publishSuppression(pass, view, pass.resolution->readingGeneration);
+        return;
+    }
+    if (!resolved) {
+        return;
+    }
+    accumulateFrameRegion(pass, view, *resolved, settingsChanged, newFrame);
+}
+
+void AnalysisWorker::accumulateFrameRegion(Pass& pass, const FrameView& view, const RegionOfInterest& resolved,
+                                           bool settingsChanged, bool newFrame)
+{
+    auto& scopes = pass.scopes;
+    const auto& settings = pass.settings;
+    const auto& enabledScopes = pass.enabledScopes;
+    const std::optional<IntRect> region = regionInFrame(view, resolved);
     if (!region) {
         return;
     }
@@ -741,7 +797,9 @@ void AnalysisWorker::analyzeLatestFrame(Pass& pass, bool newFrame)
     // it on any path leaves a stale value that defeats the next
     // unchanged-content comparison.
     const uint64_t contentHash = hashRegion(view, *region, view.fromDisplay(settings.maskedWindow));
-    if (!settingsChanged && resolved == pass.analyzedRegion && contentHash == pass.lastContentHash) {
+    const uint64_t generation = pass.resolution ? pass.resolution->readingGeneration : 0;
+    if (!settingsChanged && resolved == pass.analyzedRegion && generation == pass.analyzedGeneration &&
+        contentHash == pass.lastContentHash) {
         return;
     }
     pass.lastContentHash = contentHash;
@@ -756,6 +814,7 @@ void AnalysisWorker::analyzeLatestFrame(Pass& pass, bool newFrame)
     pass.analyzedRegion = resolved;
     pass.analyzedStamp = view.stamp;
     pass.analyzedSequence = view.sequence;
+    pass.analyzedGeneration = generation;
     publishOutput(pass, elapsedMs);
 }
 
@@ -774,11 +833,19 @@ void AnalysisWorker::publishOutput(Pass& pass, double elapsedMs)
     {
         std::lock_guard lock(m_outputMutex);
         try {
-            writeOutput(m_output, scopes, enabledScopes, elapsedMs, pass.framesProcessed);
-            m_output.region = pass.analyzedRegion;
+            if (m_output.readingGeneration != pass.analyzedGeneration) {
+                // Disabled scopes may retain older images within a reading,
+                // but none can inherit another generation's completion.
+                m_output.images.clear();
+                m_output.outlines.clear();
+            }
+            const bool complete = writeOutput(m_output, scopes, enabledScopes, elapsedMs, pass.framesProcessed);
+            m_output.region = complete ? pass.analyzedRegion : std::nullopt;
             m_output.selectionRevision = pass.settings.selectionRevision;
-            m_output.frameStamp = pass.analyzedStamp;
-            m_output.frameSequence = pass.analyzedSequence;
+            m_output.frameStamp = complete ? pass.analyzedStamp : FrameStamp{};
+            m_output.frameSequence = complete ? pass.analyzedSequence : 0;
+            m_output.readingGeneration = complete ? pass.analyzedGeneration : 0;
+            m_output.suppressed = false;
         } catch (const std::bad_alloc&) {
             // Some images may already have been copied. Withdraw the whole
             // partial result before releasing the lock, then retry next frame.
@@ -792,6 +859,29 @@ void AnalysisWorker::publishOutput(Pass& pass, double elapsedMs)
             return enabledScopes.count(scope.id) != 0 && (!scope.instance.valid() || !scope.accumulated);
         })) {
         pass.lastContentHash.reset();
+    }
+    notifyOutput();
+}
+
+void AnalysisWorker::publishSuppression(Pass& pass, const FrameView& view, uint64_t generation)
+{
+    if (!selectionCurrent(pass.settings.selectionRevision) || m_held.load(std::memory_order_relaxed) ||
+        m_releaseFrame.load(std::memory_order_relaxed)) {
+        return;
+    }
+    {
+        std::lock_guard lock(m_outputMutex);
+        if (m_output.suppressed && m_output.selectionRevision == pass.settings.selectionRevision &&
+            m_output.readingGeneration == generation && m_output.frameStamp.captureEpoch == view.stamp.captureEpoch &&
+            m_output.frameStamp.displayId == view.stamp.displayId) {
+            return;
+        }
+        clearOutput(m_output, pass.framesProcessed, m_output.version + 1);
+        m_output.selectionRevision = pass.settings.selectionRevision;
+        m_output.frameStamp = view.stamp;
+        m_output.frameSequence = view.sequence;
+        m_output.readingGeneration = generation;
+        m_output.suppressed = true;
     }
     notifyOutput();
 }

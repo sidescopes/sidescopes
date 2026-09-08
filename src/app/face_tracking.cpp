@@ -31,12 +31,19 @@ bool validContext(Context context)
 
 bool validParameters(const Parameters& p)
 {
-    const double positive[] = {p.maximumResultAge,        p.holdSeconds,
-                               p.shortRecoverySeconds,    p.maximumSpeedWidthsPerSecond,
-                               p.displacementSlackWidths, p.maximumDisplacementWidths,
-                               p.predictionScoreWeight,   p.maximumLogScaleStep,
-                               p.logScaleGrowthPerSecond, p.scaleScoreWeight,
-                               p.minimumScoreMargin,      p.maximumWinnerScoreRatio,
+    const double positive[] = {p.maximumResultAge,
+                               p.holdSeconds,
+                               p.rivalMemorySeconds,
+                               p.shortRecoverySeconds,
+                               p.maximumSpeedWidthsPerSecond,
+                               p.displacementSlackWidths,
+                               p.maximumDisplacementWidths,
+                               p.predictionScoreWeight,
+                               p.maximumLogScaleStep,
+                               p.logScaleGrowthPerSecond,
+                               p.scaleScoreWeight,
+                               p.minimumScoreMargin,
+                               p.maximumWinnerScoreRatio,
                                p.crossingSeparationWidths};
     return std::all_of(std::begin(positive), std::end(positive),
                        [](double value) { return std::isfinite(value) && value > 0.0 && value <= 1000000.0; }) &&
@@ -102,13 +109,25 @@ Association::Association(Context context, const FaceLockState& crop, LockRect bo
 
 Decision Association::result(Action action, Reason reason, std::optional<std::size_t> selected) const
 {
+    if (following_ && action == Action::Held && expired(observedSeconds_)) {
+        action = Action::Searching;
+    }
     const auto deadline = uncertainSince_ ? std::optional(*uncertainSince_ + parameters_.holdSeconds) : std::nullopt;
-    return {action, reason, crop_, cropState_.lastAnchor, selected, acceptedSourceSeconds_, following_, deadline};
+    return {action,
+            reason,
+            crop_,
+            cropState_.lastAnchor,
+            selected,
+            acceptedSourceSeconds_,
+            following_,
+            deadline,
+            readingGeneration_};
 }
 
 Decision Association::current() const
 {
-    return result(following_ ? Action::Held : Action::OrdinaryAttached,
+    const auto active = expired(observedSeconds_) ? Action::Searching : Action::Held;
+    return result(following_ ? active : Action::OrdinaryAttached,
                   following_ ? (uncertainSince_ ? uncertainReason_ : Reason::Waiting) : Reason::AlreadyAttached);
 }
 
@@ -124,8 +143,7 @@ Decision Association::uncertain(Reason reason, double observedSeconds)
         uncertainSince_ = observedSeconds;
     }
     if (expired(observedSeconds)) {
-        following_ = false;
-        return result(Action::OrdinaryAttached, Reason::EvidenceExpired);
+        return result(Action::Searching, Reason::EvidenceExpired);
     }
     return result(Action::Held, reason);
 }
@@ -151,9 +169,6 @@ std::optional<Decision> Association::beginObservation(Stamp stamp, double observ
     lastSeen_ = stamp;
     sourceTimeKnown_ = true;
     observedSeconds_ = observedSeconds;
-    if (expired(observedSeconds)) {
-        return uncertain(Reason::EvidenceExpired, observedSeconds);
-    }
     if (observedSeconds - stamp.sourceSeconds > parameters_.maximumResultAge) {
         return uncertain(Reason::ExpiredResult, observedSeconds);
     }
@@ -181,8 +196,8 @@ std::optional<Decision> Association::checkDetection(DetectionStatus status, std:
     if (boxes.empty()) {
         return uncertain(Reason::SuccessfulEmpty, observedSeconds);
     }
-    // A geometric crossing cannot establish who emerged afterwards. Retire
-    // after the hold; never erase this latch because one box is left again.
+    // A geometric crossing cannot establish who emerged afterwards. Keep
+    // searching; one remaining box must not erase the ambiguity latch.
     if (ambiguous_) {
         return uncertain(Reason::Ambiguous, observedSeconds);
     }
@@ -249,7 +264,7 @@ bool Association::hasRival(std::span<const LockRect> boxes, const Ranking& ranki
 void Association::forgetOldRivals(double sourceSeconds)
 {
     for (auto& rival : rivals_) {
-        if (rival && sourceSeconds - rival->sourceSeconds > parameters_.holdSeconds) {
+        if (rival && sourceSeconds - rival->sourceSeconds > parameters_.rivalMemorySeconds) {
             rival.reset();
         }
     }
@@ -375,6 +390,9 @@ Decision Association::accept(Stamp stamp, const LockRect& box, std::size_t index
     crop_ = mapped;
     acceptedSourceSeconds_ = stamp.sourceSeconds;
     nominationPending_ = false;
+    if (uncertainSince_) {
+        ++readingGeneration_;
+    }
     uncertainSince_.reset();
     return result(Action::Accepted, Reason::Followed, index);
 }
@@ -487,6 +505,8 @@ std::string_view name(Action value)
         return "ordinary_attached";
     case Action::Ignored:
         return "ignored";
+    case Action::Searching:
+        return "searching";
     }
     return "invalid_action";
 }

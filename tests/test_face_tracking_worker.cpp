@@ -206,14 +206,14 @@ TEST_CASE("Analysis allocation recovery preserves ambiguous tracking and consume
     CHECK(held.decision.action == Action::Held);
     CHECK(held.decision.reason == Reason::Ambiguous);
     CHECK(factories == 1);
-    fix.next(10.41);
+    fix.next(11.01);
     publish();
-    CHECK(fix.update().decision.action == Action::OrdinaryAttached);
+    CHECK(fix.update().decision.action == Action::Searching);
     const int calls = fix.detector.calls;
-    fix.next(10.45);
+    fix.next(11.05);
     publish();
-    CHECK(fix.update().decision.action == Action::OrdinaryAttached);
-    CHECK(fix.detector.calls == calls);
+    CHECK(fix.update().decision.action == Action::Searching);
+    CHECK(fix.detector.calls == calls + 1);
 }
 
 TEST_CASE("Tracking detects the current frame ROI with its native format and padded stride")
@@ -321,14 +321,14 @@ TEST_CASE("Lost-face resolution keeps the last stabilized crop and recovery disc
     const auto held = fix.update();
     CHECK(held.decision.action == Action::Held);
     CHECK(held.region == moved.region);
-    SECTION("retirement")
+    SECTION("searching")
     {
-        fix.now = 10.53;
+        fix.now = 11.13;
         const auto resolution = fix.run(false);
         REQUIRE(resolution.region);
         CHECK(*resolution.region == moved.region);
         const auto retired = fix.update();
-        CHECK(retired.decision.action == Action::OrdinaryAttached);
+        CHECK(retired.decision.action == Action::Searching);
         CHECK(retired.region == moved.region);
     }
     SECTION("brief recovery")
@@ -372,7 +372,7 @@ TEST_CASE("In-flight command changes cannot publish stale tracking updates")
     CHECK(fix.notified == 0);
 }
 
-TEST_CASE("Native failure holds briefly then retires without detecting or selecting again")
+TEST_CASE("Native failure hides readings after grace and keeps examining fresh frames")
 {
     Fixture fix;
     SECTION("Failed status")
@@ -388,14 +388,14 @@ TEST_CASE("Native failure holds briefly then retires without detecting or select
     fix.now = 10.2;
     CHECK(fix.run(false).mode == Mode::Override);
     CHECK(fix.update().decision.reason == Reason::NativeFailure);
-    fix.now = 10.41;
-    CHECK(fix.run(false).mode == Mode::Override);
-    CHECK(fix.update().decision.action == Action::OrdinaryAttached);
+    fix.now = 11.01;
+    CHECK(fix.run(false).mode == Mode::Suppress);
+    CHECK(fix.update().decision.action == Action::Searching);
     fix.detector.inspect = {};
-    fix.next(10.45);
-    CHECK(fix.run().mode == Mode::Override);
-    CHECK_FALSE(fix.update().decision.following);
-    CHECK(fix.detector.calls == 1);
+    fix.next(11.05);
+    CHECK(fix.run().mode == Mode::Suppress);
+    CHECK(fix.update().decision.following);
+    CHECK(fix.detector.calls == 2);
 }
 
 TEST_CASE("Unsupported detection retires the lock immediately")
@@ -539,7 +539,7 @@ TEST_CASE("Exchange notification runs outside its lock and can invalidate the co
     CHECK_FALSE(exchange->fetch(seen));
 }
 
-TEST_CASE("Crop revisions and temporary disabling preserve uncertainty and retirement")
+TEST_CASE("Crop revisions and temporary disabling preserve uncertainty and searching")
 {
     Fixture fix;
     fix.detector.result.faces.push_back({46, 38, 20, 20});
@@ -556,20 +556,20 @@ TEST_CASE("Crop revisions and temporary disabling preserve uncertainty and retir
     fix.now = 10.1;
     CHECK(fix.run(false).mode == Mode::Override);
     CHECK(fix.update().decision.reason == Reason::Ambiguous);
-    fix.now = 10.41;
-    CHECK(fix.run(false).mode == Mode::Override);
-    CHECK_FALSE(fix.update().decision.following);
+    fix.now = 11.01;
+    CHECK(fix.run(false).mode == Mode::Suppress);
+    CHECK(fix.update().decision.following);
     ++fix.command.revision;
     fix.exchange->select(fix.command);
-    fix.next(10.45);
-    CHECK(fix.run().mode == Mode::Override);
-    CHECK_FALSE(fix.update().decision.following);
-    CHECK(fix.detector.calls == 1);
+    fix.next(11.05);
+    CHECK(fix.run().mode == Mode::Suppress);
+    CHECK(fix.update().decision.following);
+    CHECK(fix.detector.calls == 2);
     ++fix.command.lockGeneration;
     ++fix.command.revision;
     fix.exchange->select(fix.command);
     fix.detector.result.faces.resize(1);
-    fix.next(10.5);
+    fix.next(11.1);
     CHECK(fix.run().mode == Mode::Override);
     CHECK(fix.update().decision.action == Action::Accepted);
 }
@@ -589,9 +589,9 @@ TEST_CASE("Returning to another saved window does not reset its ambiguous identi
     ++fix.command.revision;
     ++fix.command.revision;
     fix.exchange->select(fix.command);
-    fix.now = 10.41;
-    CHECK(fix.run(false).mode == Mode::Override);
-    CHECK_FALSE(fix.update().decision.following);
+    fix.now = 11.01;
+    CHECK(fix.run(false).mode == Mode::Suppress);
+    CHECK(fix.update().decision.following);
     CHECK(fix.detector.calls == 1);
 }
 
@@ -718,7 +718,7 @@ TEST_CASE("Resume continuity never permits a foreign display or pixel grid")
     CHECK(fix.detector.calls == 1);
 }
 
-TEST_CASE("Source resume does not revive a retired face")
+TEST_CASE("Source resume preserves searching and its identity constraint")
 {
     Fixture fix;
     fix.command.captureContinuity = 7;
@@ -729,18 +729,18 @@ TEST_CASE("Source resume does not revive a retired face")
     fix.next(10.05);
     REQUIRE(fix.run().mode == Mode::Override);
     (void)fix.update();
-    fix.now = 10.5;
-    REQUIRE(fix.run(false).mode == Mode::Override);
-    CHECK_FALSE(fix.update().decision.following);
+    fix.now = 11.06;
+    REQUIRE(fix.run(false).mode == Mode::Suppress);
+    CHECK(fix.update().decision.following);
     const int calls = fix.detector.calls;
     ++fix.command.revision;
     ++fix.command.captureEpoch;
     fix.frame.stamp.captureEpoch = fix.command.captureEpoch;
     fix.exchange->select(fix.command);
-    fix.next(10.55);
-    REQUIRE(fix.run().mode == Mode::Override);
-    CHECK_FALSE(fix.update().decision.following);
-    CHECK(fix.detector.calls == calls);
+    fix.next(11.10);
+    REQUIRE(fix.run().mode == Mode::Suppress);
+    CHECK(fix.update().decision.following);
+    CHECK(fix.detector.calls == calls + 1);
 }
 
 TEST_CASE("Removed locks cannot be revived by an enabled stale command")

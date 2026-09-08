@@ -41,7 +41,8 @@ enum class Action
     Accepted,
     Held,
     OrdinaryAttached,
-    Ignored
+    Ignored,
+    Searching
 };
 enum class Reason
 {
@@ -68,11 +69,12 @@ enum class Reason
 };
 
 // Bounded geometric association: brief misses retain the crop, while a long
-// absence or an ambiguous crossing ends following without picking a new face.
+// absence hides readings while retaining the selection and looking for evidence.
 struct Parameters
 {
     double maximumResultAge = 0.20;
-    double holdSeconds = 0.40;
+    double holdSeconds = 1.0;
+    double rivalMemorySeconds = 0.40;
     double shortRecoverySeconds = 0.16;
     double maximumSpeedWidthsPerSecond = 6.0;
     double displacementSlackWidths = 0.10;
@@ -97,6 +99,7 @@ struct Decision
     bool following = true;
     // One worker-owned deadline also governs capture-silent UI expiry.
     std::optional<double> uncertaintyDeadline;
+    uint64_t readingGeneration = 1;
 };
 
 // Coordinates stay in one fixed display-pixel space for this context. The
@@ -182,6 +185,7 @@ private:
     bool ambiguous_ = false;
     bool following_ = true;
     bool nominationPending_ = false;
+    uint64_t readingGeneration_ = 1;
 };
 
 [[nodiscard]] std::string_view name(Action value);

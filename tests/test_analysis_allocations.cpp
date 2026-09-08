@@ -546,4 +546,98 @@ TEST_CASE("Allocation failure in a recovery notification cannot escape the worke
     fixture.checkStopped();
 }
 
+TEST_CASE("Every recovery output allocation failure withholds completed generation metadata")
+{
+    using Mode = FrameRegionResolution::Mode;
+    const auto prepare = [](Fixture& fixture, Mode& mode, uint64_t& generation) {
+        fixture.worker.setFrameRegionResolverFactory([&mode, &generation] {
+            return [&mode, &generation](const FrameRegionRequest& request) {
+                return FrameRegionResolution{mode, request.configuredRegion, request.selectionRevision, generation};
+            };
+        });
+        fixture.warm();
+        REQUIRE(fixture.output.readingGeneration == 7u);
+        mode = Mode::Suppress;
+        fixture.worker.requestRegionRefresh(fixture.settings.selectionRevision);
+        fixture.worker.pump();
+        REQUIRE(fixture.worker.fetchOutput(fixture.seen, fixture.output));
+        REQUIRE(fixture.output.suppressed);
+        mode = Mode::Override;
+        ++generation;
+        fixture.worker.requestRegionRefresh(fixture.settings.selectionRevision);
+    };
+    std::size_t count = 0;
+    {
+        Fixture fixture;
+        Mode mode = Mode::Override;
+        uint64_t generation = 7;
+        prepare(fixture, mode, generation);
+        const auto measured = observe(AllocationFailure::CountOnly, [&] { fixture.worker.pump(); });
+        checkCount(measured);
+        count = measured.attempts;
+    }
+    for (std::size_t index = 0; index < count; ++index) {
+        CAPTURE(index, count);
+        Fixture fixture;
+        Mode mode = Mode::Override;
+        uint64_t generation = 7;
+        prepare(fixture, mode, generation);
+        const auto failed = observe(index, [&] { fixture.worker.pump(); });
+        REQUIRE(failed.failures == 1);
+        CHECK_FALSE(failed.threw);
+        REQUIRE(fixture.worker.fetchOutput(fixture.seen, fixture.output, fixture.settings.selectionRevision, 9));
+        CHECK(fixture.output.images.empty());
+        CHECK(fixture.output.outlines.empty());
+        CHECK_FALSE(fixture.output.region);
+        CHECK_FALSE(fixture.output.suppressed);
+        CHECK(fixture.output.readingGeneration == 0u);
+        CHECK(fixture.output.frameSequence == 0u);
+        CHECK(fixture.output.selectionRevision == fixture.settings.selectionRevision);
+        fixture.worker.requestRegionRefresh(fixture.settings.selectionRevision);
+        fixture.worker.pump();
+        REQUIRE(fixture.worker.fetchOutput(fixture.seen, fixture.output, fixture.settings.selectionRevision, 8));
+        CHECK(fixture.output.readingGeneration == 8u);
+        CHECK(fixture.output.region == fixture.settings.region);
+        CHECK(fixture.output.frameSequence == 1u);
+        CHECK_FALSE(fixture.output.suppressed);
+        fixture.checkValue(7);
+    }
+}
+
+TEST_CASE("A failed recovery fetch clears old completion metadata and retries the same output")
+{
+    Fixture fixture;
+    uint64_t generation = 7;
+    fixture.worker.setFrameRegionResolverFactory([&] {
+        return [&](const FrameRegionRequest& request) {
+            return FrameRegionResolution{FrameRegionResolution::Mode::Override, request.configuredRegion,
+                                         request.selectionRevision, generation};
+        };
+    });
+    fixture.warm();
+    REQUIRE(fixture.output.readingGeneration == 7u);
+    ++generation;
+    fixture.publishFrame();
+    fixture.worker.pump();
+    const uint64_t previous = fixture.seen;
+    fixture.output.images.clear();
+    bool changed = false;
+    const auto failed = observe(0, [&] {
+        changed = fixture.worker.fetchOutput(fixture.seen, fixture.output, fixture.settings.selectionRevision, 8);
+    });
+    REQUIRE(failed.failures == 1);
+    CHECK_FALSE(failed.threw);
+    CHECK(changed);
+    CHECK(fixture.seen == previous);
+    CHECK_FALSE(fixture.output.region);
+    CHECK_FALSE(fixture.output.suppressed);
+    CHECK(fixture.output.readingGeneration == 0u);
+    CHECK(fixture.output.frameSequence == 0u);
+    REQUIRE(fixture.worker.fetchOutput(fixture.seen, fixture.output, fixture.settings.selectionRevision, 8));
+    CHECK(fixture.output.readingGeneration == 8u);
+    CHECK(fixture.output.region == fixture.settings.region);
+    CHECK(fixture.output.frameSequence == 2u);
+    fixture.checkValue(7);
+}
+
 }  // namespace sidescopes

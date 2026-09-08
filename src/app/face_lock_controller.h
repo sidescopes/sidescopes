@@ -22,6 +22,17 @@ struct FaceLockOutcome
     std::optional<uint64_t> lostLock;
 };
 
+struct FaceReadingState
+{
+    uint64_t lockGeneration = 0;
+    uint64_t readingGeneration = 0;
+    uint64_t selectionRevision = 0;
+    uint64_t captureEpoch = 0;
+    uint32_t displayId = 0;
+    bool searching = false;
+    bool enabled = false;
+};
+
 /// Main-thread owner of face selections and their window transforms. Native
 /// detection and geometric association belong to the worker; only stamped
 /// decisions cross back to update the attachment and border.
@@ -45,6 +56,7 @@ public:
                                          double now);
     [[nodiscard]] bool contains(uint64_t identity) const;
     [[nodiscard]] bool locked() const;
+    [[nodiscard]] std::optional<FaceReadingState> readingState(uint64_t identity) const;
 
 private:
     struct Lock
@@ -54,6 +66,9 @@ private:
         uint64_t generation = 0;
         std::optional<double> uncertaintyDeadline;
         std::optional<std::pair<int, int>> coordinateSize;
+        uint64_t readingGeneration = 0;
+        bool searching = false;
+        std::optional<std::pair<uint64_t, double>> refreshedDeadline;
     };
 
     void carryLockWithWindow(Lock& lock, const AttachWindowRect& rect,
@@ -63,10 +78,12 @@ private:
                                                   std::optional<AnalysisWorker::FrameSize> frameSize,
                                                   bool gestureActive) const;
     [[nodiscard]] FaceLockOutcome consume(const AttachDecision& decision, double now);
+    void expireReading(uint64_t identity, double now);
     [[nodiscard]] std::optional<RegionOfInterest> acceptRegion(const FaceTrackingUpdate& update,
                                                                const AttachDecision& decision);
 
     AttachController& m_attach;
+    AnalysisWorker& m_worker;
     CaptureController& m_capture;
     std::shared_ptr<FaceTrackingExchange> m_exchange;
     std::map<uint64_t, Lock> m_locks;

@@ -66,6 +66,7 @@ struct RegionBorderState
     uint64_t activeWindowIdentity;
     bool windowMoving;
     bool windowMinimized;
+    bool readingVisible = true;
 };
 
 /// Owns the region truth the whole shell shares: the global region the
@@ -113,6 +114,8 @@ public:
     /// its presentation; analysis keeps the latest accepted crop immediately.
     void syncBorder(const RegionBorderState& state);
     [[nodiscard]] bool borderAnimating() const;
+    /// The first restored border outlines the just-completed scope output.
+    void restoreReading(const RegionOfInterest& region);
 
     /// One poll of the live region border, whose edges, corners, and move tab
     /// adjust the region it outlines. @p activeWindowIdentity is the focused
@@ -136,6 +139,7 @@ private:
     std::function<double()> m_clock;
     RegionBorderMotion m_borderMotion;
     std::optional<RegionOfInterest> m_presentedRegion;
+    std::optional<RegionOfInterest> m_restoredRegion;
     // Display, physical stream, window and selection: never interpolate
     // across a different coordinate system or a manual selection.
     std::tuple<uint32_t, uint64_t, uint64_t, uint64_t, RegionBinding> m_motionContext{};
