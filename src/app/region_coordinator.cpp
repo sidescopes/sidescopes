@@ -143,9 +143,10 @@ RegionBorderEditOutcome RegionCoordinator::pollBorderEdit(uint64_t activeWindowI
         m_borderMotion.reset();
         return {true, false, {}};
     }
-    if (edit.editing && !m_borderEditing) {
+    if ((edit.editing || edit.region) && !m_borderEditing) {
         // Latch what the border showed when the drag began: no focus race
-        // can reroute the edit to the other region kind.
+        // can reroute the edit to the other region kind. A short completed
+        // gesture can arrive with geometry after its editing flag cleared.
         m_borderEditIdentity = activeWindowIdentity;
         // The native grab starts at the visible rectangle, which may still
         // be approaching the detected crop. Adopt exactly that selection

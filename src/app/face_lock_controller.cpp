@@ -150,7 +150,11 @@ void FaceLockController::rebindCrop(uint64_t identity, const RegionOfInterest& r
     lock->second.coordinateSize = {frameSize.displayWidth, frameSize.displayHeight};
     face_lock::rebindCrop(lock->second.state,
                           lockRectFromPercent(region, frameSize.displayWidth, frameSize.displayHeight));
-    invalidate();
+    // Disabled tracking does not read this prior. Keep the current drag's
+    // readings valid; resuming publishes the taught crop with a new revision.
+    if (m_command.enabled) {
+        invalidate();
+    }
 }
 
 void FaceLockController::carryLockWithWindow(Lock& lock, const AttachWindowRect& rect,

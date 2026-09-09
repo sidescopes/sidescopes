@@ -25,6 +25,9 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Scope readings continue updating while a region is dragged or resized,
+  including pointer movements between drawn frames. Very short drags retain
+  the region's window attachment.
 - Windows face detection handles images with a very narrow dimension without
   producing invalid coordinates in intermediate calculations.
 - Face tracking retains nearby-face evidence during brief losses and uses

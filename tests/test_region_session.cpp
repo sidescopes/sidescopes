@@ -1,9 +1,12 @@
+#include <algorithm>
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 #include <chrono>
 #include <functional>
 #include <thread>
 #include <utility>
+#include <vector>
 
 #include "app/capture_controller.h"
 #include "app/region_session.h"
@@ -151,7 +154,238 @@ struct FaceSessionFixture : SessionFixture
     }
 };
 
+struct DragSessionFixture : SessionFixture
+{
+    static constexpr auto Histogram = "org.sidescopes.histogram";
+    const AnalysisWorker::FrameSize frameSize{1000, 500, 1000, 500};
+    AnalysisSettings settings;
+    AnalysisWorker::Output output;
+    uint64_t seen = 0;
+    std::vector<std::vector<uint8_t>> drawnImages;
+
+    DragSessionFixture()
+    {
+        desktopStubs().faceDetectionSupported = true;
+        desktopStubs().faces = {{200, 100, 100, 100}};
+        settings.region = RegionOfInterest{};
+        settings.enabledScopes = {Histogram};
+        worker.updateSettings(settings);
+        worker.startInline();
+        publishStaticFrame(1);
+    }
+
+    void publishStaticFrame(uint64_t sequence)
+    {
+        auto frame = test::makeSolidFrameBuffer(1000, 500, {}, sequence);
+        frame.stamp = {capture.streamEpoch(), capture.capturedDisplay(), trackingSeconds};
+        for (int y = 0; y < frame.height; ++y) {
+            for (int x = 0; x < frame.width; ++x) {
+                auto* pixel = frame.data.data() + static_cast<std::size_t>(y) * frame.strideBytes +
+                              static_cast<std::size_t>(x) * 4;
+                pixel[0] = static_cast<uint8_t>(y / 2);
+                pixel[1] = static_cast<uint8_t>(200 - x / 5);
+                pixel[2] = static_cast<uint8_t>(x / 4);
+            }
+        }
+        mailbox.publish(std::move(frame));
+        worker.pump();
+    }
+
+    void apply(const RegionSessionOutcome& outcome)
+    {
+        settings.selectionRevision = outcome.selectionRevision;
+        if (outcome.regionChanged) {
+            settings.region = outcome.region;
+        }
+    }
+
+    void select(RegionBinding binding)
+    {
+        if (binding == RegionBinding::Global) {
+            apply(session.initializeGlobalRegion({20, 20, 30, 40}));
+        } else if (binding == RegionBinding::Window) {
+            apply(pickWindow());
+        } else {
+            session.picker().request(RegionPickerMode::AttachFace);
+            (void)session.picker().openIfRequested(false);
+            REQUIRE(regionOverlayStubs().lastDisplays.at(0).faces.size() == 1);
+            regionOverlayStubs().poll.finished = true;
+            regionOverlayStubs().poll.displayId = Display;
+            regionOverlayStubs().poll.confirmed = regionOverlayStubs().lastDisplays[0].faces[0].region;
+            apply(session.poll(false, frameSize, {}));
+            regionOverlayStubs().poll = {};
+            REQUIRE(session.faceLocked());
+        }
+        apply(session.follow(false, frameSize));
+        worker.updateSettings(settings);
+        worker.pump();
+        REQUIRE(worker.fetchOutput(seen, output, settings.selectionRevision, session.minimumReadingGeneration()));
+        REQUIRE(output.frameSequence == 1);
+        REQUIRE_FALSE(output.images.at(Histogram).rgba.empty());
+    }
+
+    bool step(std::optional<RegionOfInterest> region, bool editing, bool drawing)
+    {
+        regionOverlayStubs().borderEdit.editing = editing;
+        regionOverlayStubs().borderEdit.region = region;
+        const auto early = session.pollBorder();
+        apply(early);
+        if (early.regionChanged) {
+            // Native polling consumes a pending geometry delta; this stub
+            // deliberately retains it until the test models that consumption.
+            regionOverlayStubs().borderEdit.region.reset();
+        }
+        apply(session.follow(false, frameSize));
+        session.syncBorder(false);
+        bool accepted = false;
+        if (drawing) {
+            accepted = worker.fetchOutput(seen, output, settings.selectionRevision, session.minimumReadingGeneration());
+            if (accepted) {
+                REQUIRE_FALSE(output.suppressed);
+                const auto& image = output.images.at(Histogram).rgba;
+                if (std::find(drawnImages.begin(), drawnImages.end(), image) == drawnImages.end()) {
+                    drawnImages.push_back(image);
+                }
+            }
+            // App follows once more after presenting, before its late poll.
+            apply(session.follow(false, frameSize));
+        }
+        apply(session.poll(false, frameSize, {}));
+        regionOverlayStubs().borderEdit.region.reset();
+        if (drawing) {
+            worker.updateSettings(settings);
+            worker.pump();
+        }
+        return accepted;
+    }
+};
+
 }  // namespace
+
+TEST_CASE("Border dragging publishes changing static-image scopes before release", "[live-border-drag]")
+{
+    const auto binding = GENERATE(RegionBinding::Global, RegionBinding::Window, RegionBinding::Face);
+    CAPTURE(static_cast<int>(binding));
+    DragSessionFixture fix;
+    fix.select(binding);
+    (void)fix.step({}, true, true);
+    fix.drawnImages.clear();
+    const auto detectionCalls = desktopStubs().detectorCall().calls;
+    for (int move = 0; move < 4; ++move) {
+        const double left = 14.0 + move * 6.0;
+        // A pointer-only iteration changes the hand's rectangle but defers
+        // settings submission. The next drawn iteration fetches a completed
+        // earlier pass BEFORE submitting its latest geometry, just like App.
+        CHECK_FALSE(fix.step(RegionOfInterest{left, 20, left + 6, 40}, true, false));
+        (void)fix.step(RegionOfInterest{left + 2, 20, left + 8, 40}, true, true);
+        CHECK(fix.worker.consumedFrameSequence() == 1);
+        CHECK(fix.output.frameSequence == 1);
+        CHECK_FALSE(fix.worker.held());
+    }
+    CHECK(fix.drawnImages.size() >= 2);
+    CHECK(desktopStubs().detectorCall().calls == detectionCalls);
+    REQUIRE(fix.session.interacting());
+    const RegionOfInterest finalCrop{39, 20, 45, 40};
+    (void)fix.step(finalCrop, false, true);
+    REQUIRE(fix.step({}, false, true));
+    REQUIRE(fix.output.region);
+    CHECK(fix.output.region->toPixels(1000, 500) == finalCrop.toPixels(1000, 500));
+    CHECK(fix.output.frameSequence == 1);
+    CHECK_FALSE(fix.session.interacting());
+    if (binding == RegionBinding::Face) {
+        desktopStubs().sessionDetection = [](const FrameView& crop, double) {
+            return FaceDetectionResult{FaceDetectionStatus::Completed,
+                                       {{200 - crop.sourceX, 100 - crop.sourceY, 100, 100}}};
+        };
+        const auto callsBeforeResume = desktopStubs().detectorCall().calls;
+        fix.trackingSeconds += 0.04;
+        fix.publishStaticFrame(2);
+        const auto resumed = fix.session.follow(false, fix.frameSize);
+        REQUIRE(resumed.region);
+        CHECK(resumed.region->toPixels(1000, 500) == finalCrop.toPixels(1000, 500));
+        CHECK(desktopStubs().detectorCall().calls > callsBeforeResume);
+        CHECK(fix.session.faceLocked());
+    }
+}
+
+TEST_CASE("Ending a border selection rejects its already completed scope output", "[live-border-drag]")
+{
+    const auto binding = GENERATE(RegionBinding::Global, RegionBinding::Window, RegionBinding::Face);
+    CAPTURE(static_cast<int>(binding));
+    DragSessionFixture fix;
+    fix.select(binding);
+    (void)fix.step({}, true, true);
+    (void)fix.step(RegionOfInterest{24, 20, 30, 40}, true, true);
+    AnalysisWorker::Output completed;
+    uint64_t checked = fix.seen;
+    REQUIRE(fix.worker.fetchOutput(checked, completed, fix.settings.selectionRevision));
+    const auto priorRevision = fix.settings.selectionRevision;
+    const auto priorSeen = fix.seen;
+    SECTION("Explicit clear during the gesture")
+    {
+        fix.apply(fix.session.clear());
+    }
+    SECTION("Explicit close during the gesture")
+    {
+        regionOverlayStubs().borderEdit.closed = true;
+        fix.apply(fix.session.pollBorder());
+        regionOverlayStubs().borderEdit = {};
+    }
+    SECTION("A new explicit global selection")
+    {
+        fix.apply(fix.session.clear());
+        fix.apply(fix.session.initializeGlobalRegion({60, 20, 75, 40}));
+    }
+    REQUIRE(fix.settings.selectionRevision > priorRevision);
+    CHECK_FALSE(fix.worker.fetchOutput(fix.seen, fix.output, fix.settings.selectionRevision));
+    CHECK(fix.seen == priorSeen);
+    fix.worker.updateSettings(fix.settings);
+    fix.worker.pump();
+    if (fix.settings.region) {
+        REQUIRE(fix.worker.fetchOutput(fix.seen, fix.output, fix.settings.selectionRevision));
+        CHECK(fix.output.region == fix.settings.region);
+        CHECK(fix.output.selectionRevision > priorRevision);
+    } else {
+        CHECK_FALSE(fix.worker.fetchOutput(fix.seen, fix.output, fix.settings.selectionRevision));
+    }
+}
+
+TEST_CASE("A face border gesture suppresses detector work even on a fresh identical capture", "[live-border-drag]")
+{
+    DragSessionFixture fix;
+    fix.select(RegionBinding::Face);
+    (void)fix.step({}, true, true);
+    const auto calls = desktopStubs().detectorCall().calls;
+    fix.trackingSeconds += 0.04;
+    fix.publishStaticFrame(2);
+    (void)fix.step(RegionOfInterest{24, 20, 30, 40}, true, true);
+    CHECK(fix.worker.consumedFrameSequence() == 2);
+    CHECK(desktopStubs().detectorCall().calls == calls);
+    CHECK(fix.session.faceLocked());
+    CHECK(fix.session.interacting());
+}
+
+TEST_CASE("A border drag completed between polls keeps its attached routing", "[live-border-drag]")
+{
+    const auto binding = GENERATE(RegionBinding::Window, RegionBinding::Face);
+    CAPTURE(static_cast<int>(binding));
+    DragSessionFixture fix;
+    fix.select(binding);
+    const RegionOfInterest edited{24, 20, 30, 40};
+    // A short down/move/up arrives as geometry with editing already false.
+    (void)fix.step(edited, false, true);
+    REQUIRE(fix.settings.region);
+    CHECK(fix.settings.region->toPixels(1000, 500) == edited.toPixels(1000, 500));
+    CHECK(fix.session.attachments().isAttached(Window));
+    CHECK(fix.session.faceLocked() == (binding == RegionBinding::Face));
+    desktopStubs().windowGeometry->x += 100.0;
+    const auto carried = fix.session.follow(false, fix.frameSize);
+    REQUIRE(carried.region);
+    CHECK(carried.region->leftPercent == Catch::Approx(edited.leftPercent + 10.0));
+    CHECK(carried.region->rightPercent == Catch::Approx(edited.rightPercent + 10.0));
+    CHECK(carried.region->topPercent == Catch::Approx(edited.topPercent));
+    CHECK(carried.region->bottomPercent == Catch::Approx(edited.bottomPercent));
+}
 
 TEST_CASE("Face loss samples live through grace then removes the region and stops tracking", "[face-loss-reading]")
 {

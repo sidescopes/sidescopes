@@ -559,6 +559,18 @@ void RegionSession::applyBorderEditOutcome(const RegionBorderEditOutcome& outcom
     }
 }
 
+void RegionSession::pollBorderEdits()
+{
+    const bool wasEditing = m_regions.borderEditing();
+    const auto outcome = m_regions.pollBorderEdit(m_activeWindowIdentity);
+    if (!wasEditing && m_regions.borderEditing()) {
+        // A grab replaces tracking authority once. Later pointer deltas are
+        // the same selection, so its completed readings stay displayable.
+        m_pendingSelectionChange = true;
+    }
+    applyBorderEditOutcome(outcome);
+}
+
 // The border's binding control progressively loosens what the region follows.
 // A face-tracked region first freezes at its CURRENT rectangle inside the
 // window; a second click lets go of the window and makes it global. A global
@@ -672,6 +684,8 @@ void RegionSession::applyBorderEdit(const RegionOfInterest& edited)
     // The analysis-dirty path syncs the border this same iteration.
     m_pending.regionChanged = true;
     m_pending.trackedRegion = false;
+    // A complete short gesture may arrive between two native polls.
+    m_pendingSelectionChange |= !m_regions.borderEditing();
     m_pending.activity = true;
 }
 
@@ -754,6 +768,7 @@ void RegionSession::applyRegionOutcome(const RegionOutcome& outcome)
         }
         m_pending.regionChanged = true;
         m_pending.trackedRegion = false;
+        m_pendingSelectionChange = true;
     }
     if (outcome.activity) {
         m_pending.activity = true;
@@ -829,7 +844,7 @@ bool RegionSession::backgroundWorkRunning() const
 
 RegionSessionOutcome RegionSession::takeOutcome()
 {
-    if (m_pending.regionChanged && !m_pending.trackedRegion) {
+    if (std::exchange(m_pendingSelectionChange, false)) {
         m_faceLock.invalidate();
     }
     m_pending.selectionRevision = m_faceLock.selectionRevision();
@@ -870,14 +885,14 @@ RegionSessionOutcome RegionSession::poll(bool windowMinimized, std::optional<Ana
     if (m_regionPicker.active() && !pickerWasActive) {
         m_faceLock.invalidate();
     }
-    applyBorderEditOutcome(m_regions.pollBorderEdit(m_activeWindowIdentity));
+    pollBorderEdits();
     applyRegionPickOutcome(m_regionPicker.poll(frameSize, screenSampleColor));
     return takeOutcome();
 }
 
 RegionSessionOutcome RegionSession::pollBorder()
 {
-    applyBorderEditOutcome(m_regions.pollBorderEdit(m_activeWindowIdentity));
+    pollBorderEdits();
     return takeOutcome();
 }
 

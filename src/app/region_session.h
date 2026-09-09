@@ -100,6 +100,7 @@ private:
     static void logAttachMapping(const RegionPicker::WindowCandidate& picked, const RegionOfInterest& start);
     void applyRegionPickOutcome(const RegionPickOutcome& outcome);
     void applyBorderEditOutcome(const RegionBorderEditOutcome& outcome);
+    void pollBorderEdits();
 
     CaptureController& m_capture;
     std::function<double()> m_trackingClock;
@@ -119,6 +120,7 @@ private:
     bool m_windowMinimized = false;
     std::optional<AnalysisWorker::FrameSize> m_frameSize;
     RegionSessionOutcome m_pending;
+    bool m_pendingSelectionChange = false;
     bool m_stopped = false;
 
     bool m_faceTrackingStopped = false;
