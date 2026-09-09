@@ -104,6 +104,8 @@ private:
     [[nodiscard]] FaceDetectionResult runDetector(const FrameView& crop, double minimumPixels);
     [[nodiscard]] face_tracking::Decision detect(const FrameView& frame, const FaceTrackingCommand& command,
                                                  PolicyState& state);
+    [[nodiscard]] face_tracking::Decision observe(const FrameRegionRequest& request, const FaceTrackingCommand& command,
+                                                  PolicyState& state, double now);
     [[nodiscard]] static bool matchesSource(const FrameView& frame, const FaceTrackingCommand& command);
 
     std::shared_ptr<FaceTrackingExchange> m_exchange;

@@ -315,7 +315,7 @@ void App::refreshActivatedScope(std::string_view id)
         if (m_worker.fetchOutput(m_outputVersion, m_output, m_analysis.selectionRevision,
                                  m_regionSession.minimumReadingGeneration())) {
             syncRegionReading();
-            if (!m_regionSession.traceLive()) {
+            if (m_output.suppressed || !m_regionSession.traceLive()) {
                 return;
             }
             if (m_panes->imageFor(id).sequence != staleSequence && m_panes->imageFor(id).width > 0) {
@@ -374,24 +374,16 @@ void App::applyRegionSessionOutcome(const RegionSessionOutcome& outcome)
     if (outcome.activity) {
         m_clocks.noteActivity(glfwGetTime());
     }
-    syncRegionReading();
 }
 
 void App::syncRegionReading()
 {
-    const bool restored = m_regionSession.acceptReading(m_output, m_analysis.enabledScopes);
-    const bool visible = m_regionSession.traceLive();
-    if (visible != m_readingVisible || restored) {
-        m_readingVisible = visible;
-        if (m_panes) {
-            if (restored) {
-                m_panes->uploadVisibleScopes(visible);
-            } else if (!visible) {
-                m_panes->releaseTraces();
-            }
-        }
-        m_regionSession.syncBorder(glfwGetWindowAttrib(m_window, GLFW_ICONIFIED) != 0);
-        m_clocks.noteActivity(glfwGetTime());
+    if (m_output.suppressed) {
+        // The worker can finish after the loop's initial follow. Consume its
+        // terminal result now so the border and scopes disappear together.
+        const bool minimized = glfwGetWindowAttrib(m_window, GLFW_ICONIFIED) != 0;
+        applyRegionSessionOutcome(m_regionSession.follow(minimized, m_frameSize));
+        m_regionSession.syncBorder(minimized);
     }
 }
 
@@ -443,7 +435,7 @@ void App::runFrame()
     if (nothingToDrawInto) {
         return;
     }
-    m_cursorSampledBeforeDraw = sampleSearchingReadout();
+    m_cursorSampledBeforeDraw = sampleEmptyRegionReadout();
     // The redraw decision is taken before any of the frame is built: everything
     // it rests on is either a clock the loop already keeps or a cheap read, and
     // the expensive part of a frame is the frame.
@@ -482,7 +474,7 @@ void App::drawFrame(int framebufferWidth, int framebufferHeight)
     if (m_worker.fetchOutput(m_outputVersion, m_output, m_analysis.selectionRevision,
                              m_regionSession.minimumReadingGeneration())) {
         syncRegionReading();
-        m_panes->uploadVisibleScopes(m_regionSession.traceLive());
+        m_panes->uploadVisibleScopes(m_regionSession.traceLive() && !m_output.suppressed);
         // This observes upload submission, not compositor presentation.
         SS_DIAG(Perf,
                 "pass analysis_ms=%.1f frame=%llu epoch=%llu display=%u revision=%llu received=%.9f observed=%.9f",
@@ -609,15 +601,15 @@ void App::drainAsyncSignals()
         m_clocks.noteActivity(glfwGetTime());
     }
     if (m_orphanEscape.exchange(false)) {
-        applyRegionSessionOutcome(m_regionSession.cancel());
+        cancelOrClearRegion();
         m_clocks.noteActivity(glfwGetTime());
     }
     // Keys the border panel took while it held the keyboard: Escape and the
-    // shortcuts keep working right after a border interaction. Escape cancels
-    // an active picker and otherwise leaves the committed region alone.
+    // shortcuts keep working right after a border interaction. Escape uses
+    // the same settings, picker and region precedence as the main window.
     for (const BorderKeyPress& press : drainBorderKeyPresses()) {
         if (press.escape) {
-            applyRegionSessionOutcome(m_regionSession.cancel());
+            cancelOrClearRegion();
         } else {
             applyShortcutAction(m_shortcuts.resolveNamed(press.key, press.shift, shortcutContext()));
         }
@@ -677,12 +669,13 @@ void App::notePointerMovement()
     m_pointerAt = pointer;
 }
 
-// Searching produces no scope output to wake drawing. A visible independent
-// readout still follows changing pixels, but unchanged probes leave it idle.
-bool App::sampleSearchingReadout()
+// An empty region produces no scope output to wake drawing. A visible
+// independent readout still follows pixels; unchanged probes leave it idle.
+bool App::sampleEmptyRegionReadout()
 {
-    if (!m_regionSession.searchingForFace() || !m_view.stack().shows(ColorPickerScopeId) || m_sessionAsleep.load() ||
-        applicationHidden() || glfwGetWindowAttrib(m_window, GLFW_ICONIFIED) != 0 ||
+    if (m_regionSession.traceLive() ||
+        (m_regionSession.faceTrackingStopped() && !m_view.stack().shows(ColorPickerScopeId)) ||
+        m_sessionAsleep.load() || applicationHidden() || glfwGetWindowAttrib(m_window, GLFW_ICONIFIED) != 0 ||
         glfwGetWindowAttrib(m_window, GLFW_VISIBLE) == 0) {
         return false;
     }
@@ -714,11 +707,11 @@ void App::applyCursorSample(const CursorSample& sample, double now)
     m_vectorscopeColor = sample.vectorscopeColor;
     m_waveformColor = sample.waveformColor;
     m_readoutColor = sample.readoutColor;
-    const bool searching = m_regionSession.searchingForFace();
-    if (sample.changed && !searching) {
+    const bool visible = m_regionSession.traceLive();
+    if (sample.changed && visible) {
         m_clocks.noteActivity(now);
     }
-    if (sample.readoutChanged && (!searching || m_view.stack().shows(ColorPickerScopeId))) {
+    if (sample.readoutChanged && (!m_regionSession.faceTrackingStopped() || m_view.stack().shows(ColorPickerScopeId))) {
         m_clocks.noteReadoutActivity(now);
     }
 }
@@ -765,7 +758,7 @@ void App::drawFrameUi()
                                 m_readoutColor,
                                 m_callbackState.monospaceFont,
                                 m_regionSession.traceLive(),
-                                m_regionSession.searchingForFace() ? "Searching for face" : ""};
+                                m_regionSession.faceTrackingStopped() ? "Face tracking stopped" : ""};
     applyPaneRenderOutcome(m_panes->drawRegionToolIcons(input));
     applyPaneRenderOutcome(m_panes->drawScopePanes(input));
     m_panes->drawStatusBar(input);
@@ -841,7 +834,7 @@ void App::applyShortcutAction(const ShortcutAction& action)
         m_showSettings = false;
         break;
     case ShortcutAction::Kind::CancelInteraction:
-        applyRegionSessionOutcome(m_regionSession.cancel());
+        cancelOrClearRegion();
         break;
     case ShortcutAction::Kind::DetachAllWindows:
         applyRegionSessionOutcome(m_regionSession.detachAll());
@@ -869,6 +862,17 @@ void App::applyShortcutAction(const ShortcutAction& action)
         break;
     case ShortcutAction::Kind::None:
         break;
+    }
+}
+
+void App::cancelOrClearRegion()
+{
+    if (m_showSettings) {
+        m_showSettings = false;
+    } else if (m_regionSession.picker().active() || m_regionSession.picker().pendingRequest()) {
+        applyRegionSessionOutcome(m_regionSession.cancel());
+    } else {
+        applyRegionSessionOutcome(m_regionSession.clear());
     }
 }
 

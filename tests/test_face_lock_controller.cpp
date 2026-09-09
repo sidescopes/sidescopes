@@ -275,7 +275,7 @@ TEST_CASE("A transient uncertain frame keeps the last accepted crop and can reco
     CHECK_FALSE(recovered.lostLock);
 }
 
-TEST_CASE("Capture silence suppresses expired face readings while retaining the selection")
+TEST_CASE("Capture silence removes an expired face lock at its original deadline")
 {
     ControllerFixture fixture;
     fixture.select();
@@ -287,46 +287,34 @@ TEST_CASE("Capture silence suppresses expired face readings while retaining the 
     (void)fixture.advance(2);
     REQUIRE(fixture.fetch());
     CHECK_FALSE(fixture.output.suppressed);
-    const auto generation = fixture.output.readingGeneration;
+    const auto revision = fixture.controller.selectionRevision();
     const double loss = fixture.clock;
     fixture.clock = loss + 0.999;
     CHECK_FALSE(fixture.tick().lostLock);
     REQUIRE(fixture.controller.readingState(1));
-    CHECK_FALSE(fixture.controller.readingState(1)->searching);
 
     fixture.clock = loss + 1.0;
-    const auto searching = fixture.tick();
-    CHECK_FALSE(searching.lostLock);
-    CHECK_FALSE(searching.applyRegion);
-    REQUIRE(fixture.controller.readingState(1));
-    CHECK(fixture.controller.readingState(1)->searching);
-    CHECK(fixture.controller.contains(1));
+    const auto stopped = fixture.tick();
+    CHECK(stopped.lostLock == 1u);
+    CHECK_FALSE(stopped.applyRegion);
+    CHECK_FALSE(fixture.controller.readingState(1));
+    CHECK_FALSE(fixture.controller.contains(1));
+    CHECK(fixture.controller.selectionRevision() > revision);
+    // The session consumes lostLock to remove this attachment and its region.
     CHECK(fixture.attach.isAttached(1));
     CHECK(fixture.region == last);
-    fixture.worker.pump();
-    REQUIRE(fixture.fetch());
-    CHECK(fixture.output.suppressed);
-    CHECK_FALSE(fixture.output.region);
-    CHECK(fixture.output.images.empty());
-    CHECK(fixture.output.readingGeneration == generation);
-    CHECK(fixture.output.selectionRevision == fixture.controller.selectionRevision());
-    CHECK(fixture.output.frameStamp.captureEpoch == fixture.capture.streamEpoch());
-    CHECK(fixture.output.frameStamp.displayId == StreamedDisplay);
+    CHECK_FALSE(fixture.fetch());
     CHECK(desktopStubs().detectorCall().calls == 2);
     CHECK(fixture.worker.consumedFrameSequence() == 2);
 
-    // Repeated presentation ticks neither renew the deadline nor keep
-    // reprocessing the unchanged, suppressed capture.
-    (void)fixture.tick();
-    fixture.worker.pump();
-    CHECK_FALSE(fixture.fetch());
+    CHECK_FALSE(fixture.tick().lostLock);
     fixture.setFace({530, 250, 100});
     (void)fixture.advance(3);
-    CHECK(desktopStubs().detectorCall().calls == 3);
-    CHECK(fixture.controller.readingState(1)->searching);
+    CHECK(desktopStubs().detectorCall().calls == 2);
+    CHECK_FALSE(fixture.controller.readingState(1));
 }
 
-TEST_CASE("A held crop reaches the interface before capture silence suppresses its reading")
+TEST_CASE("A held crop reaches the interface before capture silence ends its lock")
 {
     ControllerFixture fixture;
     fixture.select();
@@ -371,29 +359,24 @@ TEST_CASE("A held crop reaches the interface before capture silence suppresses i
     checkSameCrop(*remapped.applyRegion, accepted, 1000, 500);
 
     // No new source image arrives, so the controller must expire the held
-    // evidence itself while preserving the actual worker crop.
+    // evidence itself without offering a terminal crop to the session.
     fixture.clock += 1.0;
-    const auto searching = fixture.tick();
-    CHECK_FALSE(searching.lostLock);
-    CHECK_FALSE(searching.applyRegion);
+    const auto stopped = fixture.tick();
+    CHECK(stopped.lostLock == 1u);
+    CHECK_FALSE(stopped.applyRegion);
     REQUIRE(fixture.region);
     checkSameCrop(*fixture.region, accepted, 1000, 500);
-    CHECK(fixture.controller.contains(1));
-    REQUIRE(fixture.controller.readingState(1));
-    CHECK(fixture.controller.readingState(1)->searching);
+    CHECK_FALSE(fixture.controller.contains(1));
+    CHECK_FALSE(fixture.controller.readingState(1));
     CHECK(fixture.attach.isAttached(1));
     CHECK(desktopStubs().detectorCall().calls == 2);
 
     fixture.setFace({530, 250, 100});
     (void)fixture.advance(3);
-    CHECK(desktopStubs().detectorCall().calls == 3);
-    REQUIRE(fixture.fetch());
-    CHECK(fixture.output.suppressed);
-    CHECK_FALSE(fixture.output.region);
-    CHECK(fixture.output.images.empty());
+    CHECK(desktopStubs().detectorCall().calls == 2);
 }
 
-TEST_CASE("An unsupported native detector returns to the ordinary attachment immediately")
+TEST_CASE("An unsupported native detector ends the face lock immediately")
 {
     ControllerFixture fixture;
     fixture.select();
@@ -404,12 +387,13 @@ TEST_CASE("An unsupported native detector returns to the ordinary attachment imm
     const auto unsupported = fixture.advance(2);
     REQUIRE(unsupported.lostLock);
     CHECK(*unsupported.lostLock == 1u);
+    CHECK_FALSE(unsupported.applyRegion);
     CHECK(fixture.attach.isAttached(1));
     CHECK(fixture.region == last);
     CHECK_FALSE(fixture.controller.contains(1));
 }
 
-TEST_CASE("Retirement preserves a face crop whose accepted update the interface has not consumed")
+TEST_CASE("Retirement suppresses an unconsumed accepted crop without offering it to the interface")
 {
     ControllerFixture fixture;
     fixture.select();
@@ -428,16 +412,14 @@ TEST_CASE("Retirement preserves a face crop whose accepted update the interface 
     desktopStubs().detectionStatus = FaceDetectionStatus::Unsupported;
     fixture.submit(fixture.frame(2, {200, 100, 50}));
     REQUIRE(fixture.fetch());
-    REQUIRE(fixture.output.region);
-    checkSameCrop(*fixture.output.region, accepted, 1000, 500);
-    REQUIRE(fixture.output.images.contains("org.sidescopes.histogram"));
-    CHECK_FALSE(fixture.output.images.at("org.sidescopes.histogram").rgba.empty());
+    CHECK(fixture.output.suppressed);
+    CHECK_FALSE(fixture.output.region);
+    CHECK(fixture.output.images.empty());
 
     const auto retired = fixture.tick();
     REQUIRE(retired.lostLock);
     CHECK(*retired.lostLock == 1u);
-    REQUIRE(retired.applyRegion);
-    checkSameCrop(*retired.applyRegion, accepted, 1000, 500);
+    CHECK_FALSE(retired.applyRegion);
     CHECK_FALSE(fixture.controller.contains(1));
     CHECK(fixture.attach.isAttached(1));
 
@@ -445,12 +427,9 @@ TEST_CASE("Retirement preserves a face crop whose accepted update the interface 
     fixture.setFace({530, 250, 100});
     (void)fixture.advance(4);
     CHECK(desktopStubs().detectorCall().calls == detections);
-    REQUIRE(fixture.fetch());
-    REQUIRE(fixture.output.region);
-    checkSameCrop(*fixture.output.region, accepted, 1000, 500);
 }
 
-TEST_CASE("Searching preserves the crop from an unconsumed accepted update", "[face-loss-reading]")
+TEST_CASE("Expiry discards the crop from an unconsumed accepted update", "[face-loss-reading]")
 {
     ControllerFixture fixture;
     fixture.select();
@@ -471,13 +450,11 @@ TEST_CASE("Searching preserves the crop from an unconsumed accepted update", "[f
     CHECK(fixture.output.suppressed);
     CHECK_FALSE(fixture.output.region);
     CHECK(fixture.output.images.empty());
-    const auto searching = fixture.tick();
-    CHECK_FALSE(searching.lostLock);
-    REQUIRE(searching.applyRegion);
-    checkSameCrop(*searching.applyRegion, accepted, 1000, 500);
-    REQUIRE(fixture.controller.readingState(1));
-    CHECK(fixture.controller.readingState(1)->searching);
-    CHECK(fixture.controller.contains(1));
+    const auto stopped = fixture.tick();
+    CHECK(stopped.lostLock == 1u);
+    CHECK_FALSE(stopped.applyRegion);
+    CHECK_FALSE(fixture.controller.readingState(1));
+    CHECK_FALSE(fixture.controller.contains(1));
     CHECK(fixture.attach.isAttached(1));
 }
 
@@ -577,12 +554,11 @@ TEST_CASE("One face's uncertainty survives focus changes without expiring anothe
     fixture.decision.activeIdentity = 1;
     fixture.controller.activationChanged();
     const auto expired = fixture.tick(later);
-    CHECK_FALSE(expired.lostLock);
-    REQUIRE(fixture.controller.readingState(1));
+    CHECK(expired.lostLock == 1u);
+    CHECK_FALSE(expired.applyRegion);
+    CHECK_FALSE(fixture.controller.readingState(1));
     REQUIRE(fixture.controller.readingState(2));
-    CHECK(fixture.controller.readingState(1)->searching);
-    CHECK_FALSE(fixture.controller.readingState(2)->searching);
-    CHECK(fixture.controller.contains(1));
+    CHECK_FALSE(fixture.controller.contains(1));
     CHECK(fixture.controller.contains(2));
     CHECK(fixture.attach.isAttached(1));
 }
@@ -797,11 +773,10 @@ TEST_CASE("Delayed interface consumption keeps the worker loss deadline", "[face
     REQUIRE(held.applyRegion);
     CHECK_FALSE(held.lostLock);
     REQUIRE(fixture.controller.readingState(1));
-    CHECK_FALSE(fixture.controller.readingState(1)->searching);
     const auto expired = fixture.tick(loss + 1.001);
-    CHECK_FALSE(expired.lostLock);
-    REQUIRE(fixture.controller.readingState(1));
-    CHECK(fixture.controller.readingState(1)->searching);
+    CHECK(expired.lostLock == 1u);
+    CHECK_FALSE(expired.applyRegion);
+    CHECK_FALSE(fixture.controller.readingState(1));
     CHECK(fixture.attach.isAttached(1));
 }
 
@@ -826,11 +801,10 @@ TEST_CASE("An overwritten recovery replaces the interface loss episode", "[face-
     CHECK_FALSE(held.lostLock);
     CHECK(fixture.controller.contains(1));
     REQUIRE(fixture.controller.readingState(1));
-    CHECK_FALSE(fixture.controller.readingState(1)->searching);
     const auto expired = fixture.tick(secondLoss + 1.001);
-    CHECK_FALSE(expired.lostLock);
-    REQUIRE(fixture.controller.readingState(1));
-    CHECK(fixture.controller.readingState(1)->searching);
+    CHECK(expired.lostLock == 1u);
+    CHECK_FALSE(expired.applyRegion);
+    CHECK_FALSE(fixture.controller.readingState(1));
     CHECK(fixture.attach.isAttached(1));
 }
 
@@ -875,9 +849,9 @@ TEST_CASE("A clipped parent move preserves recent rival recovery protection", "[
     REQUIRE(held);
     CHECK(guarded.applyRegion == held);
     const auto expired = fixture.tick(loss + 1.001);
-    CHECK_FALSE(expired.lostLock);
-    REQUIRE(fixture.controller.readingState(1));
-    CHECK(fixture.controller.readingState(1)->searching);
+    CHECK(expired.lostLock == 1u);
+    CHECK_FALSE(expired.applyRegion);
+    CHECK_FALSE(fixture.controller.readingState(1));
     CHECK(fixture.attach.isAttached(1));
 }
 

@@ -87,6 +87,28 @@ TEST_CASE("A selection drag that never moved is empty")
     CHECK(rect.height == Approx(0.0));
 }
 
+TEST_CASE("The close control leaves narrow regions to their corner handles")
+{
+    for (const double scale : {1.0, 1.25, 1.5, 2.0}) {
+        CHECK_FALSE(regionCloseAvailable(47.0 * scale, scale));
+        CHECK(regionCloseAvailable(48.0 * scale, scale));
+        CHECK(regionCloseAvailable(96.0 * scale, scale));
+    }
+}
+
+TEST_CASE("The close control remains available through moves and fitting resizes")
+{
+    const LocalRect start{100.0, 100.0, 120.0, 80.0};
+    const LocalRect moved = draggedRegionRect(ZoneMove, start, 200.0, -50.0, 24.0);
+    CHECK(regionCloseAvailable(moved.width));
+    const LocalRect narrowed = draggedRegionRect(ZoneRight, moved, -72.0, 0.0, 24.0);
+    CHECK(regionCloseAvailable(narrowed.width));
+    const LocalRect tiny = draggedRegionRect(ZoneRight, narrowed, -24.0, 0.0, 24.0);
+    CHECK_FALSE(regionCloseAvailable(tiny.width));
+    const LocalRect widened = draggedRegionRect(ZoneRight, tiny, 24.0, 0.0, 24.0);
+    CHECK(regionCloseAvailable(widened.width));
+}
+
 // ---------------------------------------------------------------------------
 // Corner grab zones
 // ---------------------------------------------------------------------------

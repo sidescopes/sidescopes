@@ -118,28 +118,12 @@ void AnalysisWorker::updateSettings(const AnalysisSettings& settings)
     AnalysisSettings pending = settings;
     {
         std::lock_guard lock(m_settingsMutex);
-        if (pending.selectionRevision != m_settings.selectionRevision) {
-            m_regionRefreshRevision.reset();
-        }
         m_settings = std::move(pending);
         ++m_settingsVersion;
     }
     // Without the nudge a settings change waits out the frame take's
     // timeout on a static screen - up to 100 ms of stale scope images
     // after a settings or visibility change.
-    m_mailbox.nudge();
-}
-
-void AnalysisWorker::requestRegionRefresh(uint64_t expectedSelectionRevision)
-{
-    {
-        std::lock_guard lock(m_settingsMutex);
-        if (m_settings.selectionRevision != expectedSelectionRevision) {
-            return;
-        }
-        m_regionRefreshRevision = expectedSelectionRevision;
-        ++m_regionRefreshVersion;
-    }
     m_mailbox.nudge();
 }
 
@@ -551,8 +535,8 @@ bool AnalysisWorker::syncSettings(AnalysisSettings& settings, uint64_t& seenSett
 }
 
 // A pass needs a frame to read and a reason to run: a new frame, or settings
-// that changed, or an explicit resolver refresh. The region it reads is the
-// caller's own test beside this one: without a region it publishes nothing,
+// that changed. The region it reads is the caller's own test beside this
+// one: without a region it publishes nothing,
 // so the scopes stay as empty as they started, while the frame is still taken
 // because the colour under the pointer is read from it. A hold is the same
 // shape of answer for a different reason: the region is in transit, so there
@@ -576,7 +560,6 @@ struct AnalysisWorker::Pass
     std::set<std::string> enabledScopes;
     AnalysisSettings settings;
     uint64_t seenSettingsVersion = 0;
-    uint64_t seenRegionRefreshVersion = 0;
     std::optional<uint64_t> lastContentHash;
     uint64_t framesProcessed = 0;
     FrameRegionResolver regionResolver;
@@ -604,14 +587,7 @@ bool AnalysisWorker::selectionCurrent(uint64_t revision) const
     return m_settings.selectionRevision == revision;
 }
 
-uint64_t AnalysisWorker::requestedRegionRefresh(uint64_t revision) const
-{
-    std::lock_guard lock(m_settingsMutex);
-    return m_settings.selectionRevision == revision && m_regionRefreshRevision == revision ? m_regionRefreshVersion : 0;
-}
-
-std::optional<RegionOfInterest> AnalysisWorker::resolveFrameRegion(Pass& pass, const FrameView& view, bool newFrame,
-                                                                   bool refreshRequested)
+std::optional<RegionOfInterest> AnalysisWorker::resolveFrameRegion(Pass& pass, const FrameView& view, bool newFrame)
 {
     if (!m_regionResolverFactory) {
         return pass.settings.region;
@@ -620,7 +596,7 @@ std::optional<RegionOfInterest> AnalysisWorker::resolveFrameRegion(Pass& pass, c
     const bool sameFrame = pass.resolution && pass.resolvedSequence == view.sequence &&
                            pass.resolvedStamp.captureEpoch == view.stamp.captureEpoch &&
                            pass.resolvedStamp.displayId == view.stamp.displayId;
-    if (!sameFrame || pass.resolvedRevision != revision || refreshRequested) {
+    if (!sameFrame || pass.resolvedRevision != revision) {
         refreshFrameResolution(pass, {view, pass.settings.region, revision, newFrame && !sameFrame});
     }
     if (!pass.resolution || pass.resolution->selectionRevision != revision) {
@@ -751,20 +727,16 @@ void AnalysisWorker::analyzeLatestFrame(Pass& pass, bool newFrame)
         // consume this version, so a failed partial application is retried.
         pass.seenSettingsVersion = candidateSettingsVersion;
     }
-    const uint64_t refreshVersion = requestedRegionRefresh(settings.selectionRevision);
-    const bool refreshRequested = refreshVersion != 0 && refreshVersion != pass.seenRegionRefreshVersion;
-    if (!settings.region || !hasWork(newFrame || settingsChanged || refreshRequested) ||
-        !selectionCurrent(settings.selectionRevision)) {
+    if (!settings.region || !hasWork(newFrame || settingsChanged) || !selectionCurrent(settings.selectionRevision)) {
         return;
     }
-    pass.seenRegionRefreshVersion = refreshVersion;
 
     // Reading the frame without the lock is safe: this thread is the
     // only writer, and readers on other threads take the mutex only for
     // the brief sampling reads that tolerate the previous frame.
     const FrameView view = m_latestFrame.view();
     // The last images stand while the frame cannot answer for the region.
-    const auto resolved = resolveFrameRegion(pass, view, newFrame, refreshRequested);
+    const auto resolved = resolveFrameRegion(pass, view, newFrame);
     if (!selectionCurrent(settings.selectionRevision) || m_held.load(std::memory_order_relaxed) ||
         m_releaseFrame.load(std::memory_order_relaxed)) {
         return;

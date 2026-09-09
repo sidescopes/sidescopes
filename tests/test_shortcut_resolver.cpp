@@ -459,10 +459,29 @@ TEST_CASE("The cancel key closes the settings window first")
     CHECK(sole(resolver.resolvePressed(context, ModifierState{}, pressing("Escape"))).kind ==
           ShortcutAction::Kind::CloseSettings);
 
-    // With nothing stacked above them, the regions are what the key drops.
+    // The shell checks whether this cancels a picker or clears idle regions.
     context.settingsOpen = false;
     CHECK(sole(resolver.resolvePressed(context, ModifierState{}, pressing("Escape"))).kind ==
           ShortcutAction::Kind::CancelInteraction);
+}
+
+TEST_CASE("A remapped cancel key keeps settings precedence")
+{
+    ShortcutResolver resolver{registry()};
+    ShortcutBindings bindings;
+    bindings.cancelInteraction = "Q";
+    resolver.restore(bindings, {});
+    ShortcutContext context = readyContext();
+
+    CHECK(resolver.resolveNamed("Q", false, context).kind == ShortcutAction::Kind::CancelInteraction);
+    CHECK(sole(resolver.resolvePressed(context, ModifierState{}, pressing("Q"))).kind ==
+          ShortcutAction::Kind::CancelInteraction);
+    CHECK(resolver.resolveNamed("Escape", false, context).kind == ShortcutAction::Kind::None);
+
+    context.settingsOpen = true;
+    CHECK(resolver.resolveNamed("Q", false, context).kind == ShortcutAction::Kind::CloseSettings);
+    CHECK(sole(resolver.resolvePressed(context, ModifierState{}, pressing("Q"))).kind ==
+          ShortcutAction::Kind::CloseSettings);
 }
 
 TEST_CASE("A preset digit loads its slot and Shift saves into it")

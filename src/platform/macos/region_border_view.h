@@ -28,6 +28,9 @@ constexpr double MinimumRegionSize = 24.0;
 // Extra window height above the band when the attached label is worn, so
 // the name tab clears the handles instead of crowding the top-center one.
 constexpr double LabelBand = 20.0;
+constexpr double CloseRadius = 6.5;
+constexpr double CloseHitRadius = 11.0;
+constexpr double CloseCornerInset = 2.0;
 constexpr double BindingHitRadius = 11.0;
 constexpr double TabBindingZone = 18.0;
 
@@ -35,6 +38,7 @@ constexpr double TabBindingZone = 18.0;
 extern std::vector<BorderKeyPress> g_borderKeyPresses;
 extern bool g_borderEditing;
 extern bool g_borderEditChanged;
+extern bool g_borderClosed;
 extern bool g_borderBindingToggled;
 extern RegionOfInterest g_borderEditRegion;
 
@@ -57,6 +61,7 @@ extern RegionOfInterest g_borderEditRegion;
 @property(nonatomic, assign) unsigned dragZone;       // a mask of sidescopes::ZoneBits
 @property(nonatomic, assign) NSPoint dragStartMouse;  // global screen coords
 @property(nonatomic, assign) NSRect dragStartRegion;  // global screen coords
+@property(nonatomic, assign) BOOL closePressed;
 @property(nonatomic, assign) BOOL bindingPressed;
 // How the outlined region is bound: picks the control's face, pin, or pin-off
 // glyph without putting mode text into the title.

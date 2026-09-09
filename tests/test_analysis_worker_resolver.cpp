@@ -657,136 +657,12 @@ TEST_CASE("A suppressed source transition publishes its own withdrawal metadata"
     CHECK(fixture.scope.accumulations == 0u);
 }
 
-TEST_CASE("A region refresh coalesces and resolves old pixels once without reconfiguring")
-{
-    Fixture fixture;
-    std::vector<bool> fresh;
-    Mode mode = Mode::Override;
-    fixture.install([&](const FrameRegionRequest& request) {
-        fresh.push_back(request.freshFrame);
-        return FrameRegionResolution{mode, Right, request.selectionRevision, 7};
-    });
-    fixture.publish(splitFrame(1));
-    REQUIRE(fixture.fetch());
-    mode = Mode::Suppress;
-    fixture.worker.requestRegionRefresh(1);
-    fixture.worker.requestRegionRefresh(1);
-    fixture.worker.pump();
-    REQUIRE(fixture.fetch());
-    CHECK(fixture.output.suppressed);
-    CHECK(fixture.output.frameSequence == 1u);
-    CHECK(fixture.output.readingGeneration == 7u);
-    CHECK(fixture.output.selectionRevision == 1u);
-    CHECK(fixture.scope.configurations == 1);
-    fixture.worker.pump();
-    CHECK_FALSE(fixture.fetch());
-    CHECK(fresh == std::vector<bool>{true, false});
-    mode = Mode::Override;
-    fixture.worker.requestRegionRefresh(1);
-    fixture.worker.pump();
-    REQUIRE(fixture.fetch());
-    CHECK_FALSE(fixture.output.suppressed);
-    CHECK(fixture.output.framesProcessed == 1u);
-    CHECK(fixture.scope.accumulations == 2u);
-    CHECK(fresh == std::vector<bool>{true, false, false});
-}
-
-TEST_CASE("A refresh preserves a coincident fresh frame as one new observation")
-{
-    Fixture fixture;
-    std::vector<bool> fresh;
-    fixture.install([&](const FrameRegionRequest& request) {
-        fresh.push_back(request.freshFrame);
-        return FrameRegionResolution{Mode::Override, Right, request.selectionRevision, request.frame.sequence};
-    });
-    fixture.publish(splitFrame(1));
-    REQUIRE(fixture.fetch());
-    fixture.worker.requestRegionRefresh(1);
-    fixture.publish(splitFrame(2));
-    REQUIRE(fixture.fetch());
-    fixture.worker.pump();
-    CHECK_FALSE(fixture.fetch());
-    CHECK(fresh == std::vector<bool>{true, true});
-    CHECK(fixture.output.readingGeneration == 2u);
-    CHECK(fixture.scope.accumulations == 2u);
-}
-
-TEST_CASE("A stale refresh cannot revisit the current selection")
-{
-    Fixture fixture;
-    int calls = 0;
-    fixture.install([&](const FrameRegionRequest& request) {
-        ++calls;
-        return FrameRegionResolution{Mode::Override, Right, request.selectionRevision, 7};
-    });
-    fixture.publish(splitFrame(1));
-    REQUIRE(fixture.fetch());
-    fixture.worker.requestRegionRefresh(1);
-    fixture.settings.selectionRevision = 2;
-    fixture.worker.updateSettings(fixture.settings);
-    fixture.worker.pump();
-    REQUIRE(fixture.fetch());
-    CHECK(fixture.output.selectionRevision == 2u);
-    fixture.worker.requestRegionRefresh(1);
-    fixture.worker.pump();
-    CHECK_FALSE(fixture.fetch());
-    CHECK(calls == 2);
-}
-
-TEST_CASE("A refresh requested inside a resolver remains pending for the next pass")
-{
-    Fixture fixture;
-    int calls = 0;
-    std::vector<bool> fresh;
-    fixture.install([&](const FrameRegionRequest& request) {
-        fresh.push_back(request.freshFrame);
-        ++calls;
-        if (calls == 2) {
-            fixture.worker.requestRegionRefresh(request.selectionRevision);
-        }
-        return FrameRegionResolution{calls >= 3 ? Mode::Suppress : Mode::Override, Right, request.selectionRevision, 7};
-    });
-    fixture.publish(splitFrame(1));
-    REQUIRE(fixture.fetch());
-    fixture.worker.requestRegionRefresh(1);
-    fixture.worker.pump();
-    CHECK_FALSE(fixture.fetch());
-    fixture.worker.pump();
-    REQUIRE(fixture.fetch());
-    CHECK(fixture.output.suppressed);
-    CHECK(fresh == std::vector<bool>{true, false, false});
-    fixture.worker.pump();
-    CHECK(calls == 3);
-}
-
-TEST_CASE("A held refresh remains pending until the owned frame can be resolved")
-{
-    Fixture fixture;
-    std::vector<bool> fresh;
-    fixture.install([&](const FrameRegionRequest& request) {
-        fresh.push_back(request.freshFrame);
-        return FrameRegionResolution{request.freshFrame ? Mode::Override : Mode::Suppress, Right,
-                                     request.selectionRevision, 7};
-    });
-    fixture.publish(splitFrame(1));
-    REQUIRE(fixture.fetch());
-    fixture.worker.hold(true);
-    fixture.worker.requestRegionRefresh(1);
-    fixture.worker.pump();
-    CHECK(fresh == std::vector<bool>{true});
-    CHECK_FALSE(fixture.fetch());
-    fixture.worker.hold(false);
-    fixture.worker.pump();
-    REQUIRE(fixture.fetch());
-    CHECK(fixture.output.suppressed);
-    CHECK(fresh == std::vector<bool>{true, false});
-}
-
-TEST_CASE("A stale suppression returned by a refresh cannot withdraw the prior reading")
+TEST_CASE("A selection changed during suppression cannot withdraw the prior reading")
 {
     Fixture fixture;
     fixture.install([&](const FrameRegionRequest& request) {
-        if (!request.freshFrame && request.selectionRevision == 1) {
+        if (request.frame.sequence == 2u && request.selectionRevision == 1u) {
+            CHECK(request.freshFrame);
             fixture.settings.selectionRevision = 2;
             fixture.worker.updateSettings(fixture.settings);
             return FrameRegionResolution{Mode::Suppress, {}, request.selectionRevision, 7};
@@ -795,14 +671,14 @@ TEST_CASE("A stale suppression returned by a refresh cannot withdraw the prior r
     });
     fixture.publish(splitFrame(1));
     REQUIRE(fixture.fetch());
-    fixture.worker.requestRegionRefresh(1);
-    fixture.worker.pump();
+    fixture.publish(splitFrame(2));
     CHECK_FALSE(fixture.fetch());
     CHECK_FALSE(fixture.output.suppressed);
     CHECK(fixture.scope.accumulations == 1u);
     fixture.worker.pump();
     REQUIRE(fixture.fetch());
     CHECK(fixture.output.selectionRevision == 2u);
+    CHECK(fixture.output.frameSequence == 2u);
     CHECK_FALSE(fixture.output.suppressed);
 }
 
@@ -886,13 +762,12 @@ TEST_CASE("Disabled scope images cannot inherit a later reading generation")
     REQUIRE(fixture.fetch());
     CHECK(fixture.output.images.contains(ScopeId));
     ++generation;
-    fixture.worker.requestRegionRefresh(1);
-    fixture.worker.pump();
+    fixture.publish(splitFrame(2));
     REQUIRE(fixture.fetch());
     CHECK(fixture.output.images.empty());
     CHECK(fixture.output.region == Right);
     CHECK(fixture.output.readingGeneration == 8u);
-    CHECK(fixture.output.frameSequence == 1u);
+    CHECK(fixture.output.frameSequence == 2u);
     CHECK(fixture.scope.accumulations == 1u);
 }
 
@@ -928,38 +803,6 @@ TEST_CASE("A failed resolver cannot replace suppression with completed recovery 
         CHECK(fixture.output.region == Right);
         CHECK(fixture.output.readingGeneration == 8u);
     }
-}
-
-TEST_CASE("The analysis thread processes a resolver refresh without another captured frame")
-{
-    Fixture fixture;
-    std::vector<bool> fresh;
-    fixture.worker.setFrameRegionResolverFactory([&] {
-        return [&](const FrameRegionRequest& request) {
-            fresh.push_back(request.freshFrame);
-            return FrameRegionResolution{request.freshFrame ? Mode::Override : Mode::Suppress, Right,
-                                         request.selectionRevision, 7};
-        };
-    });
-    fixture.worker.start();
-    fixture.mailbox.publish(splitFrame(1));
-    REQUIRE(consumed(fixture.worker, 1));
-    REQUIRE(fixture.fetch());
-    fixture.worker.requestRegionRefresh(1);
-    bool refreshed = false;
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
-    while (!refreshed && std::chrono::steady_clock::now() < deadline) {
-        refreshed = fixture.fetch();
-        if (!refreshed) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(1));
-        }
-    }
-    fixture.worker.stop();
-    REQUIRE(refreshed);
-    CHECK(fixture.output.suppressed);
-    CHECK(fixture.output.frameSequence == 1u);
-    CHECK(fixture.worker.consumedFrameSequence() == 1u);
-    CHECK(fresh == std::vector<bool>{true, false});
 }
 
 }  // namespace sidescopes

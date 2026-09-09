@@ -73,18 +73,14 @@ RegionOutcome RegionCoordinator::clearRegion()
     m_faceLock.clear();
     m_borderMotion.reset();
     m_presentedRegion.reset();
-    if (m_borderEditing) {
-        hideAttachedEditDim();
-    }
-    m_borderEditing = false;
-    m_borderEditIdentity = 0;
+    endBorderEdit();
     RegionOutcome outcome;
     if (m_attach.attached()) {
         m_attach.detachAll();
         outcome.detachedAll = true;
     }
     m_globalRegion.reset();
-    // Repeating the emergency reset does not dirty an already empty state.
+    // Repeating clear does not dirty an already empty state.
     outcome.regionChanged = m_region.has_value();
 
     return outcome;
@@ -104,11 +100,9 @@ void RegionCoordinator::syncBorder(const RegionBorderState& state)
     // into the analysis region: the attached region on the focused attached
     // window (label and warm dress), else the plain global one. Called every
     // frame; the platform side makes the unchanged case free.
-    if (m_picker.active() || !m_region || !state.readingVisible || applicationHidden() || state.windowMoving ||
-        state.windowMinimized) {
+    if (m_picker.active() || !m_region || applicationHidden() || state.windowMoving || state.windowMinimized) {
         m_borderMotion.reset();
         m_presentedRegion.reset();
-        m_restoredRegion.reset();
         hideRegionBorder();
     } else {
         const RegionBinding binding =
@@ -121,8 +115,7 @@ void RegionCoordinator::syncBorder(const RegionBorderState& state)
                                         state.activeWindowIdentity, m_faceLock.selectionRevision(), binding);
         const bool animate = binding == RegionBinding::Face && !m_borderEditing && context == m_motionContext;
         m_motionContext = context;
-        const auto restored = std::exchange(m_restoredRegion, {});
-        const auto presented = m_borderMotion.update(restored.value_or(*m_region), m_clock(), animate && !restored);
+        const auto presented = m_borderMotion.update(*m_region, m_clock(), animate);
         m_presentedRegion = presented;
         showRegionBorder(m_capture.capturedDisplay(), presented,
                          binding == RegionBinding::Global ? m_displayLabel : state.windowLabel, binding);
@@ -134,26 +127,22 @@ bool RegionCoordinator::borderAnimating() const
     return m_borderMotion.active();
 }
 
-void RegionCoordinator::restoreReading(const RegionOfInterest& region)
-{
-    m_borderMotion.reset();
-    m_restoredRegion = region;
-}
-
 RegionBorderEditOutcome RegionCoordinator::pollBorderEdit(uint64_t activeWindowIdentity)
 {
     // The region border is live: dragging its edges, corners, or move tab
     // adjusts the region it currently outlines - the attached region of the
     // focused attached window, or the global one - with the scopes following.
     if (m_picker.active()) {
-        if (m_borderEditing) {
-            hideAttachedEditDim();
-        }
-        m_borderEditing = false;
+        endBorderEdit();
 
         return {};
     }
     RegionBorderEdit edit = pollRegionBorderEdit();
+    if (edit.closed) {
+        endBorderEdit();
+        m_borderMotion.reset();
+        return {true, false, {}};
+    }
     if (edit.editing && !m_borderEditing) {
         // Latch what the border showed when the drag began: no focus race
         // can reroute the edit to the other region kind.
@@ -179,7 +168,16 @@ RegionBorderEditOutcome RegionCoordinator::pollBorderEdit(uint64_t activeWindowI
     }
     m_borderEditing = edit.editing;
 
-    return RegionBorderEditOutcome{edit.bindingToggled, edit.region};
+    return RegionBorderEditOutcome{false, edit.bindingToggled, edit.region};
+}
+
+void RegionCoordinator::endBorderEdit()
+{
+    if (m_borderEditing) {
+        hideAttachedEditDim();
+    }
+    m_borderEditing = false;
+    m_borderEditIdentity = 0;
 }
 
 bool RegionCoordinator::borderEditing() const

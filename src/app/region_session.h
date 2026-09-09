@@ -2,9 +2,7 @@
 
 #include <cstdint>
 #include <functional>
-#include <map>
 #include <optional>
-#include <span>
 #include <string>
 #include <vector>
 
@@ -55,11 +53,8 @@ public:
     [[nodiscard]] bool borderAnimating() const;
     [[nodiscard]] bool backgroundWorkRunning() const;
     [[nodiscard]] bool traceLive() const;
-    [[nodiscard]] bool searchingForFace() const;
+    [[nodiscard]] bool faceTrackingStopped() const;
     [[nodiscard]] std::optional<uint64_t> minimumReadingGeneration() const;
-    /// Restore hidden readings only when their complete matching scope pass
-    /// is available. The caller uploads that same output in this transition.
-    [[nodiscard]] bool acceptReading(const AnalysisWorker::Output& output, std::span<const std::string> enabledScopes);
 
     [[nodiscard]] RegionSessionOutcome initializeGlobalRegion(const RegionOfInterest& region);
     [[nodiscard]] RegionSessionOutcome follow(bool windowMinimized, std::optional<AnalysisWorker::FrameSize> frameSize);
@@ -100,8 +95,7 @@ private:
     [[nodiscard]] std::optional<WindowGeometry> editableWindowGeometry() const;
     void applyBorderEdit(const RegionOfInterest& edited);
     void applyFaceLockOutcome(const FaceLockOutcome& outcome);
-    void updateReadingVisibility();
-    void hideReading(const FaceReadingState& state, uint64_t generation);
+    void dismissEditedBorder();
     bool adoptFacePick(uint32_t displayId, const RegionOfInterest& confirmed);
     static void logAttachMapping(const RegionPicker::WindowCandidate& picked, const RegionOfInterest& start);
     void applyRegionPickOutcome(const RegionPickOutcome& outcome);
@@ -127,19 +121,13 @@ private:
     RegionSessionOutcome m_pending;
     bool m_stopped = false;
 
-    struct HiddenReading
-    {
-        uint64_t lockGeneration = 0;
-        uint64_t readingGeneration = 0;
-    };
-
-    std::map<uint64_t, HiddenReading> m_hiddenFaceReadings;
-    bool m_pickerPreviewVisible = false;
+    bool m_faceTrackingStopped = false;
 
     struct SavedRegion
     {
         std::optional<RegionOfInterest> region;
         uint32_t displayId = 0;
+        bool faceTrackingStopped = false;
     };
 
     std::optional<SavedRegion> m_pickerRestore;

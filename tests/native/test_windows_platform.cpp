@@ -1,12 +1,14 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <chrono>
+#include <cmath>
 #include <cstddef>
 #include <fstream>
 #include <iterator>
 #include <limits>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #include "core/diagnostics.h"
@@ -36,6 +38,75 @@ public:
 
     PickersScope(const PickersScope&) = delete;
     PickersScope& operator=(const PickersScope&) = delete;
+};
+
+class BorderEventsScope
+{
+public:
+    BorderEventsScope()
+    {
+        g_border = {};
+        WNDCLASSW windowClass{};
+        windowClass.lpfnWndProc = borderProc;
+        windowClass.hInstance = m_instance;
+        windowClass.lpszClassName = ClassName;
+        m_class = RegisterClassW(&windowClass);
+        if (m_class != 0) {
+            // A message-only window cannot be displayed or activated.
+            m_window = CreateWindowExW(0, ClassName, L"", 0, 0, 0, 0, 0, HWND_MESSAGE, nullptr, m_instance, nullptr);
+        }
+        g_border.window = m_window;
+        g_border.region = {0, 0, 200, 100};
+    }
+
+    ~BorderEventsScope()
+    {
+        if (m_window) {
+            if (GetCapture() == m_window) {
+                ReleaseCapture();
+            }
+            DestroyWindow(m_window);
+        }
+        if (m_class != 0) {
+            UnregisterClassW(ClassName, m_instance);
+        }
+        g_border = std::move(m_previous);
+        g_borderEditing = m_editing;
+        g_borderEditChanged = m_changed;
+        g_borderClosed = m_closed;
+        g_borderBindingToggled = m_binding;
+    }
+
+    BorderEventsScope(const BorderEventsScope&) = delete;
+    BorderEventsScope& operator=(const BorderEventsScope&) = delete;
+
+    [[nodiscard]] HWND window() const
+    {
+        return m_window;
+    }
+
+    [[nodiscard]] LPARAM closePoint() const
+    {
+        const double scale = uiScale(m_window);
+        return point((WindowPad + BorderPad - CloseCornerInset) * scale + g_border.region.right,
+                     (WindowPad + LabelBand - BorderPad + CloseCornerInset - EdgeRing) * scale);
+    }
+
+    static LPARAM point(double x, double y)
+    {
+        return MAKELPARAM(static_cast<WORD>(std::lround(x)), static_cast<WORD>(std::lround(y)));
+    }
+
+private:
+    static constexpr const wchar_t* ClassName = L"SideScopesBorderEventTest";
+    BorderState m_previous = std::move(g_border);
+    bool m_editing = std::exchange(g_borderEditing, false);
+    bool m_changed = std::exchange(g_borderEditChanged, false);
+    bool m_closed = std::exchange(g_borderClosed, false);
+    bool m_binding = std::exchange(g_borderBindingToggled, false);
+    HINSTANCE m_instance = GetModuleHandleW(nullptr);
+    ATOM m_class = 0;
+    HWND m_window = nullptr;
 };
 
 }  // namespace
@@ -75,15 +146,103 @@ TEST_CASE("An attached drag owns the preview across displays", "[native]")
 
 TEST_CASE("Losing border mouse capture cancels pending interactions", "[native]")
 {
+    REQUIRE(GetCapture() == nullptr);
+    const BorderEventsScope events;
+    REQUIRE(events.window() != nullptr);
     g_border.dragZone = ZoneLeft;
+    g_border.closePressed = true;
     g_border.bindingPressed = true;
     g_borderEditing = true;
 
     borderProc(nullptr, WM_CAPTURECHANGED, 0, 0);
 
     CHECK(g_border.dragZone == ZoneNone);
+    CHECK_FALSE(g_border.closePressed);
     CHECK_FALSE(g_border.bindingPressed);
     CHECK_FALSE(g_borderEditing);
+}
+
+TEST_CASE("A border close requires a matching release and is consumed once", "[native][border-close]")
+{
+    REQUIRE(GetCapture() == nullptr);
+    const BorderEventsScope events;
+    REQUIRE(events.window() != nullptr);
+    const HWND foreground = GetForegroundWindow();
+    const LPARAM close = events.closePoint();
+    SendMessageW(events.window(), WM_LBUTTONDOWN, MK_LBUTTON, close);
+    REQUIRE(g_border.closePressed);
+    REQUIRE(GetCapture() == events.window());
+    CHECK_FALSE(pollRegionBorderEdit().closed);
+
+    SECTION("Releasing inside closes exactly once")
+    {
+        SendMessageW(events.window(), WM_LBUTTONUP, 0, close);
+        CHECK(pollRegionBorderEdit().closed);
+    }
+    SECTION("Releasing outside cancels the press")
+    {
+        SendMessageW(events.window(), WM_LBUTTONUP, 0, BorderEventsScope::point(0, 0));
+        CHECK_FALSE(pollRegionBorderEdit().closed);
+    }
+    CHECK_FALSE(g_border.closePressed);
+    CHECK(GetCapture() == nullptr);
+    CHECK_FALSE(pollRegionBorderEdit().closed);
+    SendMessageW(events.window(), WM_LBUTTONUP, 0, close);
+    CHECK_FALSE(pollRegionBorderEdit().closed);
+    CHECK_FALSE(g_borderBindingToggled);
+    CHECK_FALSE(g_borderEditing);
+    CHECK_FALSE(IsWindowVisible(events.window()));
+    CHECK(GetForegroundWindow() == foreground);
+}
+
+TEST_CASE("Hiding a border or losing capture cancels a close press", "[native][border-close]")
+{
+    REQUIRE(GetCapture() == nullptr);
+    const BorderEventsScope events;
+    REQUIRE(events.window() != nullptr);
+    const LPARAM close = events.closePoint();
+    SendMessageW(events.window(), WM_LBUTTONDOWN, MK_LBUTTON, close);
+    REQUIRE(g_border.closePressed);
+    REQUIRE(GetCapture() == events.window());
+
+    SECTION("Hiding resets the owned window interaction")
+    {
+        hideRegionBorder();
+    }
+    SECTION("Releasing capture dispatches the real cancellation callback")
+    {
+        REQUIRE(ReleaseCapture());
+    }
+    CHECK(GetCapture() == nullptr);
+    CHECK_FALSE(g_border.closePressed);
+    CHECK_FALSE(g_borderEditing);
+    SendMessageW(events.window(), WM_LBUTTONUP, 0, close);
+    CHECK_FALSE(pollRegionBorderEdit().closed);
+    CHECK_FALSE(IsWindowVisible(events.window()));
+}
+
+TEST_CASE("Border corner presses keep resizing narrow regions", "[native][border-close]")
+{
+    REQUIRE(GetCapture() == nullptr);
+    const BorderEventsScope events;
+    REQUIRE(events.window() != nullptr);
+    const double scale = uiScale(events.window());
+    for (const double width : {MinimumRegionSize, MinimumRegionWidthForClose}) {
+        CAPTURE(width, scale);
+        g_border.region.right = static_cast<LONG>(std::lround(width * scale));
+        const LPARAM corner = BorderEventsScope::point(WindowPad * scale + g_border.region.right + scale,
+                                                       (WindowPad + LabelBand - 1) * scale);
+        SendMessageW(events.window(), WM_LBUTTONDOWN, MK_LBUTTON, corner);
+        CHECK(g_border.dragZone == (ZoneTop | ZoneRight));
+        CHECK(g_borderEditing);
+        CHECK_FALSE(g_border.closePressed);
+        REQUIRE(GetCapture() == events.window());
+        REQUIRE(ReleaseCapture());
+        CHECK(g_border.dragZone == ZoneNone);
+        CHECK_FALSE(g_borderEditing);
+        CHECK_FALSE(pollRegionBorderEdit().closed);
+    }
+    CHECK_FALSE(IsWindowVisible(events.window()));
 }
 
 TEST_CASE("Decoded face boxes cannot overflow pairwise integer NMS areas", "[native]")

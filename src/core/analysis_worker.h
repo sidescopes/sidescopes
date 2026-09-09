@@ -134,7 +134,7 @@ using FrameRegionResolverFactory = std::function<FrameRegionResolver()>;
 /// them on the caller's thread, one per pump(), for a host with no threads to
 /// give. The passes themselves are identical either way.
 ///
-/// Threading: start, startInline, stop, updateSettings, requestRegionRefresh, hold, held,
+/// Threading: start, startInline, stop, updateSettings, hold, held,
 /// fetchOutput, sampleDisplayColor, latestFrameSize, withLatestFrame, and
 /// consumedFrameSequence make up the caller-thread surface and are safe to
 /// call while the worker runs. run() exclusively owns the worker thread and is
@@ -211,13 +211,6 @@ public:
     /// Submits a complete settings snapshot. A caller-side allocation failure
     /// propagates without changing the accepted settings or their version.
     void updateSettings(const AnalysisSettings& settings);
-
-    /// Refreshes the resolver once on the owned frame without changing the
-    /// selection or repeating a detector observation. A capture-silent pass
-    /// carries freshFrame=false; a coincident new frame is resolved normally.
-    /// Requests coalesce, survive a hold, and are discarded if the selection
-    /// changes. Safe to call from any thread, including a resolver callback.
-    void requestRegionRefresh(uint64_t expectedSelectionRevision);
 
     /// Holds analysis without holding the pipeline behind it. Frames are still
     /// taken from the mailbox, so the colour readout and the pickers go on
@@ -346,11 +339,9 @@ private:
     void accumulateFrameRegion(Pass& pass, const FrameView& view, const RegionOfInterest& resolved,
                                bool settingsChanged, bool newFrame);
 
-    [[nodiscard]] std::optional<RegionOfInterest> resolveFrameRegion(Pass& pass, const FrameView& view, bool newFrame,
-                                                                     bool refreshRequested);
+    [[nodiscard]] std::optional<RegionOfInterest> resolveFrameRegion(Pass& pass, const FrameView& view, bool newFrame);
     void refreshFrameResolution(Pass& pass, const FrameRegionRequest& request);
     [[nodiscard]] bool selectionCurrent(uint64_t revision) const;
-    [[nodiscard]] uint64_t requestedRegionRefresh(uint64_t revision) const;
 
     /// Publishes a completed pass, withdrawing partial copies on allocation
     /// failure and allowing failed scopes to retry unchanged content.
@@ -390,8 +381,6 @@ private:
     mutable std::mutex m_settingsMutex;
     AnalysisSettings m_settings;
     uint64_t m_settingsVersion = 1;
-    uint64_t m_regionRefreshVersion = 0;
-    std::optional<uint64_t> m_regionRefreshRevision;
     std::atomic<bool> m_held{false};
 
     std::function<void()> m_outputCallback;

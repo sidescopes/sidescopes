@@ -50,6 +50,9 @@ constexpr double LabelBand = 20.0;
 constexpr double BorderAppearSeconds = 0.12;
 constexpr double BorderSettlePoints = 16.0;
 constexpr UINT_PTR BorderAppearTimer = 1;
+constexpr double CloseRadius = 6.5;
+constexpr double CloseHitRadius = 11.0;
+constexpr double CloseCornerInset = 2.0;
 constexpr double BindingHitRadius = 11.0;
 constexpr double TabBindingZone = 18.0;
 
@@ -66,6 +69,7 @@ struct BorderState
     unsigned dragZone = ZoneNone;
     POINT dragStartMouse{};
     RECT dragStartRegion{};
+    bool closePressed = false;
     bool bindingPressed = false;
     // How the outlined region is bound: picks the face, pin, or pin-off glyph.
     RegionBinding binding = RegionBinding::Global;
@@ -95,6 +99,7 @@ extern BorderState g_border;
 
 extern bool g_borderEditing;
 extern bool g_borderEditChanged;
+extern bool g_borderClosed;
 extern bool g_borderBindingToggled;
 extern RegionOfInterest g_borderEditRegion;
 

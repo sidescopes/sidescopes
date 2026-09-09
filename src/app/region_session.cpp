@@ -22,24 +22,6 @@ extern "C" void glfwWaitEventsTimeout(double timeout);
 namespace sidescopes {
 namespace {
 
-bool matchingReadingSource(const AnalysisWorker::Output& output, const FaceReadingState& state)
-{
-    return state.enabled && output.selectionRevision == state.selectionRevision &&
-           output.frameStamp.captureEpoch == state.captureEpoch && output.frameStamp.displayId == state.displayId;
-}
-
-bool matchingFaceReading(const AnalysisWorker::Output& output, const FaceReadingState& state)
-{
-    return matchingReadingSource(output, state) && !state.searching && !output.suppressed && output.version != 0 &&
-           state.readingGeneration != 0 && output.readingGeneration == state.readingGeneration;
-}
-
-bool suppressingFaceReading(const AnalysisWorker::Output& output, const FaceReadingState& state)
-{
-    return output.suppressed && matchingReadingSource(output, state) && output.readingGeneration != 0 &&
-           output.readingGeneration >= state.readingGeneration;
-}
-
 // The border returns this long after the active window last moved and the
 // grip released - what keeps a slow drag's sparse updates from flickering it.
 constexpr double AttachMotionSettleSeconds = 0.2;
@@ -276,7 +258,6 @@ void RegionSession::followAttachedWindow()
         m_faceLock.update(decision, m_frameSize,
                           m_regions.borderEditing() || m_attachedWindowMoving || m_attachGripActive, m_trackingClock());
     applyFaceLockOutcome(faceLockOutcome);
-    updateReadingVisibility();
     if (decision.closedCount > 0) {
         m_pending.activity = true;
     }
@@ -289,8 +270,8 @@ void RegionSession::followAttachedWindow()
     m_regions.syncBorder(borderState());
 }
 
-// Explicit source retirement keeps the ordinary attachment. Recoverable loss
-// instead retains the lock and suppresses its presentation after grace.
+// Automatic loss ends this selection. A fresh explicit pick is required
+// to start following again; other windows retain their own regions.
 void RegionSession::applyFaceLockOutcome(const FaceLockOutcome& outcome)
 {
     if (outcome.applyRegion) {
@@ -301,10 +282,9 @@ void RegionSession::applyFaceLockOutcome(const FaceLockOutcome& outcome)
         rememberAttachedRegion(m_activeWindowIdentity, m_capture.desiredDisplay(), *m_region);
         m_pending.regionChanged = true;
     }
-    if (outcome.lostLock) {
-        setStatus("face tracking unavailable - region follows the window");
-        m_regions.syncBorder(borderState());
-        m_pending.activity = true;
+    if (outcome.lostLock && *outcome.lostLock == m_activeWindowIdentity) {
+        dismissEditedBorder();
+        m_faceTrackingStopped = true;
     }
 }
 
@@ -517,15 +497,15 @@ void RegionSession::confirmPickerSelection(const ConfirmedPick& pick)
         m_capture.start();
     }
     confirmPickedRegion(pick);
+    m_faceTrackingStopped = false;
     m_pickerRestore.reset();
 }
 
 void RegionSession::applyRegionPickOutcome(const RegionPickOutcome& outcome)
 {
     if (outcome.previewRegion) {
-        m_pickerPreviewVisible = true;
         if (!m_pickerRestore) {
-            m_pickerRestore = SavedRegion{m_region, m_capture.desiredDisplay()};
+            m_pickerRestore = SavedRegion{m_region, m_capture.desiredDisplay(), m_faceTrackingStopped};
         }
         // The coordinator's no-op check keeps a hover that indicates the same
         // region from nudging the worker or the activity clock every frame.
@@ -538,7 +518,6 @@ void RegionSession::applyRegionPickOutcome(const RegionPickOutcome& outcome)
         confirmPickerSelection(*outcome.confirmed);
     }
     if (outcome.ended) {
-        m_pickerPreviewVisible = false;
         if (!outcome.confirmed) {
             restorePickerRegion();
             followAttachedWindow();
@@ -552,7 +531,6 @@ void RegionSession::applyRegionPickOutcome(const RegionPickOutcome& outcome)
 
 void RegionSession::restorePickerRegion()
 {
-    m_pickerPreviewVisible = false;
     if (!m_pickerRestore) {
         return;
     }
@@ -563,6 +541,7 @@ void RegionSession::restorePickerRegion()
         m_capture.start();
     }
     applyRegionOutcome(m_regions.useRegion(saved.region));
+    m_faceTrackingStopped = saved.faceTrackingStopped;
 }
 
 // Carries out what the border's live edit decided. The coordinator has
@@ -570,7 +549,10 @@ void RegionSession::restorePickerRegion()
 // it; what is left is the region work only the host can do.
 void RegionSession::applyBorderEditOutcome(const RegionBorderEditOutcome& outcome)
 {
-    if (outcome.bindingToggled) {
+    if (outcome.closed) {
+        dismissEditedBorder();
+        m_faceTrackingStopped = false;
+    } else if (outcome.bindingToggled) {
         toggleRegionBinding();
     } else if (outcome.edited) {
         applyBorderEdit(*outcome.edited);
@@ -710,74 +692,43 @@ void RegionSession::adoptAttachedPick(uint64_t identity, int64_t ownerPid, const
 
 RegionBorderState RegionSession::borderState() const
 {
-    return RegionBorderState{m_attachActiveLabel, m_activeWindowIdentity, m_attachedWindowMoving, m_windowMinimized,
-                             traceLive()};
-}
-
-void RegionSession::updateReadingVisibility()
-{
-    std::erase_if(m_hiddenFaceReadings, [this](const auto& entry) {
-        const auto state = m_faceLock.readingState(entry.first);
-        return !state || state->lockGeneration != entry.second.lockGeneration;
-    });
-    const auto state = m_faceLock.readingState(m_activeWindowIdentity);
-    if (state && state->searching) {
-        hideReading(*state, state->readingGeneration);
-    }
-}
-
-void RegionSession::hideReading(const FaceReadingState& state, uint64_t generation)
-{
-    auto& hidden = m_hiddenFaceReadings[m_activeWindowIdentity];
-    if (hidden.lockGeneration != state.lockGeneration) {
-        hidden = {state.lockGeneration, generation};
-    } else {
-        hidden.readingGeneration = std::max(hidden.readingGeneration, generation);
-    }
+    return RegionBorderState{m_attachActiveLabel, m_activeWindowIdentity, m_attachedWindowMoving, m_windowMinimized};
 }
 
 bool RegionSession::traceLive() const
 {
-    return m_region.has_value() && !searchingForFace();
+    return m_region.has_value();
 }
 
-bool RegionSession::searchingForFace() const
+bool RegionSession::faceTrackingStopped() const
 {
-    return m_hiddenFaceReadings.contains(m_activeWindowIdentity) &&
-           !(m_regionPicker.active() && m_pickerPreviewVisible);
+    return m_faceTrackingStopped && !m_region;
 }
 
 std::optional<uint64_t> RegionSession::minimumReadingGeneration() const
 {
     const auto state = m_faceLock.readingState(m_activeWindowIdentity);
-    return state && state->enabled && !m_regionPicker.active() ? std::optional(state->readingGeneration) : std::nullopt;
+    if (!state || !state->enabled || m_regionPicker.active()) {
+        return {};
+    }
+    return state->readingGeneration;
 }
 
-bool RegionSession::acceptReading(const AnalysisWorker::Output& output, std::span<const std::string> enabledScopes)
+// Closing a border removes only that window's selection. A global region
+// disappears entirely; other attached windows remain available on focus.
+void RegionSession::dismissEditedBorder()
 {
-    updateReadingVisibility();
-    const auto state = m_faceLock.readingState(m_activeWindowIdentity);
-    if (state && suppressingFaceReading(output, *state)) {
-        // Completed suppression can reach the UI before its tracking update.
-        // It carries the same authority to hide this reading, never a newer one.
-        hideReading(*state, output.readingGeneration);
-        return false;
+    if (m_activeWindowIdentity != 0) {
+        m_faceLock.removeLock(m_activeWindowIdentity);
+        m_attach.remove(m_activeWindowIdentity);
+        m_lastAttachedSelection.reset();
+        releaseActiveWindow();
+    } else {
+        m_regions.setGlobalRegion(std::nullopt);
     }
-    if (!searchingForFace() || !state || !output.region || !matchingFaceReading(output, *state) ||
-        output.readingGeneration <= m_hiddenFaceReadings.at(m_activeWindowIdentity).readingGeneration) {
-        return false;
-    }
-    const bool complete = std::all_of(enabledScopes.begin(), enabledScopes.end(), [&output](const std::string& id) {
-        const auto found = output.images.find(id);
-        return found != output.images.end() && found->second.width > 0 && found->second.height > 0 &&
-               !found->second.rgba.empty();
-    });
-    if (!complete) {
-        return false;
-    }
-    m_hiddenFaceReadings.erase(m_activeWindowIdentity);
-    m_regions.restoreReading(*output.region);
-    return true;
+    applyRegionOutcome(m_regions.useRegion(m_regions.globalRegion()));
+    m_pending.activity = true;
+    m_regions.syncBorder(borderState());
 }
 
 void RegionSession::releaseActiveWindow()
@@ -798,6 +749,9 @@ void RegionSession::applyRegionOutcome(const RegionOutcome& outcome)
     }
     if (outcome.regionChanged) {
         m_region = outcome.region;
+        if (m_region) {
+            m_faceTrackingStopped = false;
+        }
         m_pending.regionChanged = true;
         m_pending.trackedRegion = false;
     }
@@ -879,7 +833,6 @@ RegionSessionOutcome RegionSession::takeOutcome()
         m_faceLock.invalidate();
     }
     m_pending.selectionRevision = m_faceLock.selectionRevision();
-    updateReadingVisibility();
     m_pending.region = m_region;
     return std::exchange(m_pending, {});
 }
@@ -915,7 +868,6 @@ RegionSessionOutcome RegionSession::poll(bool windowMinimized, std::optional<Ana
     const bool pickerWasActive = m_regionPicker.active();
     applyRegionPickOutcome(m_regionPicker.openIfRequested(m_region.has_value()));
     if (m_regionPicker.active() && !pickerWasActive) {
-        m_pickerPreviewVisible = false;
         m_faceLock.invalidate();
     }
     applyBorderEditOutcome(m_regions.pollBorderEdit(m_activeWindowIdentity));
@@ -940,9 +892,11 @@ RegionSessionOutcome RegionSession::cancel()
 
 RegionSessionOutcome RegionSession::clear()
 {
+    m_faceTrackingStopped = false;
     m_pickerRestore.reset();
     m_lastAttachedSelection.reset();
     applyRegionOutcome(m_regions.clearRegion());
+    m_regions.syncBorder(borderState());
     return takeOutcome();
 }
 

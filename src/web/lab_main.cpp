@@ -389,13 +389,25 @@ void applyPreset(const LayoutPresetOutcome& outcome)
 
 void cancelRegionInteraction()
 {
+    const bool requested = g_lab.picker->pendingRequest().has_value();
+    g_lab.picker->clearRequest();
     if (g_lab.pinArmed) {
         g_lab.pinArmed = false;
         g_lab.pinning = false;
         g_lab.panes->setStatus("Pinning cancelled");
         return;
     }
-    g_lab.settingsDirty = g_lab.region.cancelDraw() || g_lab.settingsDirty;
+    if (g_lab.region.cancelDraw()) {
+        g_lab.settingsDirty = true;
+        return;
+    }
+    if (requested) {
+        return;
+    }
+    g_lab.settingsDirty = g_lab.region.hasRegion() || g_lab.settingsDirty;
+    g_lab.region.clear();
+    g_lab.traceColour.reset();
+    g_lab.panes->releaseTraces();
 }
 
 void savePresetShortcut(const ShortcutAction& action)

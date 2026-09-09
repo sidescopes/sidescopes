@@ -144,6 +144,7 @@ private:
     /// graphics driver's per-process render arena resident, and it releases
     /// most of it about a second after the last one.
     void drawFrame(int framebufferWidth, int framebufferHeight);
+    /// Consume a terminal face result before drawing its withdrawn scopes.
     void syncRegionReading();
     /// Whether the user is drawing or dragging the region itself, which takes
     /// the loop off its frame period so the border can follow their hand.
@@ -167,7 +168,7 @@ private:
     /// still picture in another application's window without changing the
     /// screen or sending this window an event.
     void notePointerMovement();
-    [[nodiscard]] bool sampleSearchingReadout();
+    [[nodiscard]] bool sampleEmptyRegionReadout();
     void sampleCursorColor();
     void applyCursorSample(const CursorSample& sample, double now);
     /// Puts the resolutions the adaptive detail settled on in force, so the
@@ -193,6 +194,8 @@ private:
     /// Carries out a resolved shortcut: the resolver has already decided what
     /// the key means. Shared with the menu entries driving the same actions.
     void applyShortcutAction(const ShortcutAction& action);
+    /// Close settings, cancel a pending or active picker, or clear the region.
+    void cancelOrClearRegion();
     /// Applies a preset outcome to host state: the strip carries what the
     /// action has to say, and the worker and the preferences file catch up
     /// with the layout it put on screen.
@@ -290,7 +293,6 @@ private:
     /// frame on screen was drawn from; the loop asks it how long to block and
     /// whether to draw.
     FrameClocks m_clocks;
-    bool m_readingVisible = false;
     /// The region the worker was last told about: a region that differs from it
     /// is a region something is moving, and what is moving it decides whether
     /// the scopes go coarse or stop altogether.

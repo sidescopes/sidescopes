@@ -7,7 +7,7 @@
 #include "platform/macos/region_selection_geometry.h"
 #include "platform/region_geometry.h"
 
-// The drag-zone bits (ZoneLeft/Right/Top/Bottom/Move/Binding) come from the
+// The drag-zone bits (ZoneLeft/Right/Top/Bottom/Move/Close/Binding) come from the
 // shared region geometry; the overlay speaks them directly.
 
 namespace sidescopes {
@@ -15,6 +15,7 @@ namespace sidescopes {
 std::vector<BorderKeyPress> g_borderKeyPresses;
 bool g_borderEditing = false;
 bool g_borderEditChanged = false;
+bool g_borderClosed = false;
 bool g_borderBindingToggled = false;
 RegionOfInterest g_borderEditRegion;
 
@@ -87,6 +88,23 @@ void drawHandleDot(CGFloat x, CGFloat y)
     // anchor and every zone stays put.
     rect.size.height -= self.labelBand;
     return rect;
+}
+
+// Visible throughout a drag so it travels with the border. A narrow region
+// still yields its corner to the resize zones.
+- (BOOL)closeVisible
+{
+    const NSRect region = [self regionRect];
+    return sidescopes::regionCloseAvailable(region.size.width);
+}
+
+// On the band's outer corner, at forty-five degrees off the top-right
+// handle dot - anchored to the corner rather than parked beside it.
+- (NSPoint)closeCenter
+{
+    const NSRect region = [self regionRect];
+    return NSMakePoint(NSMaxX(region) + sidescopes::BorderPad - sidescopes::CloseCornerInset,
+                       NSMaxY(region) + sidescopes::BorderPad - sidescopes::CloseCornerInset + sidescopes::EdgeRing);
 }
 
 // The attach toggle lives at the label tab's fixed left end: the same
@@ -218,6 +236,31 @@ void drawHandleDot(CGFloat x, CGFloat y)
     drawHandleDot(NSMaxX(lane), NSMaxY(lane));
 }
 
+// The close button, in the handles' own visual language: a dark
+// disc where the dots are light, so it reads as an action rather than a grip,
+// with the same bright ring and an x.
+- (void)drawCloseButton
+{
+    const NSPoint center = [self closeCenter];
+    const NSRect disc = NSMakeRect(center.x - sidescopes::CloseRadius, center.y - sidescopes::CloseRadius,
+                                   sidescopes::CloseRadius * 2, sidescopes::CloseRadius * 2);
+    NSBezierPath* button = [NSBezierPath bezierPathWithOvalInRect:disc];
+    [[NSColor colorWithWhite:0.1 alpha:0.85] setFill];
+    [button fill];
+    [[NSColor colorWithWhite:0.97 alpha:0.95] setStroke];
+    button.lineWidth = 1.0;
+    [button stroke];
+    const CGFloat arm = sidescopes::CloseRadius - 3.7;
+    NSBezierPath* cross = [NSBezierPath bezierPath];
+    cross.lineWidth = 1.3;
+    cross.lineCapStyle = NSLineCapStyleRound;
+    [cross moveToPoint:NSMakePoint(center.x - arm, center.y - arm)];
+    [cross lineToPoint:NSMakePoint(center.x + arm, center.y + arm)];
+    [cross moveToPoint:NSMakePoint(center.x - arm, center.y + arm)];
+    [cross lineToPoint:NSMakePoint(center.x + arm, center.y - arm)];
+    [cross stroke];
+}
+
 // The binding state at the tab's fixed left end: face tracking, window pin,
 // or global pin-off. Rasterized once from the shared vector sources, so every
 // native platform draws the identical icons.
@@ -259,6 +302,9 @@ void drawHandleDot(CGFloat x, CGFloat y)
     [self drawMeasuredEdge:region];
     [self drawBorderLabel:region];
     [self drawHandles:region];
+    if ([self closeVisible]) {
+        [self drawCloseButton];
+    }
 
     [self drawBindingButton];
 }
@@ -273,6 +319,14 @@ void drawHandleDot(CGFloat x, CGFloat y)
         return sidescopes::ZoneNone;  // click-through anyway
     }
 
+    if ([self closeVisible]) {
+        const NSPoint center = [self closeCenter];
+        const CGFloat dx = point.x - center.x;
+        const CGFloat dy = point.y - center.y;
+        if (dx * dx + dy * dy <= sidescopes::CloseHitRadius * sidescopes::CloseHitRadius) {
+            return sidescopes::ZoneClose;
+        }
+    }
     {
         const NSPoint center = [self bindingButtonCenter];
         const CGFloat dx = point.x - center.x;
@@ -318,7 +372,7 @@ void drawHandleDot(CGFloat x, CGFloat y)
         [NSCursor.arrowCursor set];
         return;
     }
-    if (zone & sidescopes::ZoneBinding) {
+    if (zone & (sidescopes::ZoneClose | sidescopes::ZoneBinding)) {
         [NSCursor.pointingHandCursor set];
         return;
     }
@@ -378,6 +432,12 @@ void drawHandleDot(CGFloat x, CGFloat y)
         }
     }
 
+    self.closePressed = NO;
+    self.bindingPressed = NO;
+    if (zone & sidescopes::ZoneClose) {
+        self.closePressed = YES;
+        return;
+    }
     if (zone & sidescopes::ZoneBinding) {
         self.bindingPressed = YES;
         return;
@@ -434,6 +494,14 @@ void drawHandleDot(CGFloat x, CGFloat y)
 {
     const NSPoint local = [self convertPoint:event.locationInWindow fromView:nil];
 
+    if (self.closePressed) {
+        self.closePressed = NO;
+        if ([self zoneAtPoint:local] & sidescopes::ZoneClose) {
+            sidescopes::g_borderClosed = true;
+        }
+        [self applyCursorForZone:[self zoneAtPoint:local]];
+        return;
+    }
     if (self.bindingPressed) {
         self.bindingPressed = NO;
         if ([self zoneAtPoint:local] & sidescopes::ZoneBinding) {

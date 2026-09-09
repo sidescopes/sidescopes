@@ -109,9 +109,6 @@ Association::Association(Context context, const FaceLockState& crop, LockRect bo
 
 Decision Association::result(Action action, Reason reason, std::optional<std::size_t> selected) const
 {
-    if (following_ && action == Action::Held && expired(observedSeconds_)) {
-        action = Action::Searching;
-    }
     const auto deadline = uncertainSince_ ? std::optional(*uncertainSince_ + parameters_.holdSeconds) : std::nullopt;
     return {action,
             reason,
@@ -119,16 +116,18 @@ Decision Association::result(Action action, Reason reason, std::optional<std::si
             cropState_.lastAnchor,
             selected,
             acceptedSourceSeconds_,
-            following_,
+            state_ == Action::Held,
             deadline,
             readingGeneration_};
 }
 
 Decision Association::current() const
 {
-    const auto active = expired(observedSeconds_) ? Action::Searching : Action::Held;
-    return result(following_ ? active : Action::OrdinaryAttached,
-                  following_ ? (uncertainSince_ ? uncertainReason_ : Reason::Waiting) : Reason::AlreadyAttached);
+    if (state_ == Action::Stopped) {
+        return result(state_, Reason::EvidenceExpired);
+    }
+    return result(state_, state_ == Action::Held ? (uncertainSince_ ? uncertainReason_ : Reason::Waiting)
+                                                 : Reason::AlreadyRetired);
 }
 
 bool Association::expired(double observedSeconds) const
@@ -143,7 +142,8 @@ Decision Association::uncertain(Reason reason, double observedSeconds)
         uncertainSince_ = observedSeconds;
     }
     if (expired(observedSeconds)) {
-        return result(Action::Searching, Reason::EvidenceExpired);
+        state_ = Action::Stopped;
+        return result(state_, Reason::EvidenceExpired);
     }
     return result(Action::Held, reason);
 }
@@ -153,8 +153,8 @@ std::optional<Decision> Association::beginObservation(Stamp stamp, double observ
     if (!(stamp.context == lastSeen_.context)) {
         return result(Action::Ignored, Reason::StaleContext);
     }
-    if (!following_) {
-        return result(Action::OrdinaryAttached, Reason::AlreadyAttached);
+    if (state_ != Action::Held) {
+        return current();
     }
     if (!std::isfinite(stamp.sourceSeconds) || !std::isfinite(observedSeconds) ||
         observedSeconds < stamp.sourceSeconds || observedSeconds < observedSeconds_) {
@@ -169,6 +169,9 @@ std::optional<Decision> Association::beginObservation(Stamp stamp, double observ
     lastSeen_ = stamp;
     sourceTimeKnown_ = true;
     observedSeconds_ = observedSeconds;
+    if (expired(observedSeconds)) {
+        return uncertain(Reason::EvidenceExpired, observedSeconds);
+    }
     if (observedSeconds - stamp.sourceSeconds > parameters_.maximumResultAge) {
         return uncertain(Reason::ExpiredResult, observedSeconds);
     }
@@ -179,8 +182,8 @@ std::optional<Decision> Association::checkDetection(DetectionStatus status, std:
                                                     double observedSeconds)
 {
     if (status == DetectionStatus::Unsupported) {
-        following_ = false;
-        return result(Action::OrdinaryAttached, Reason::Unsupported);
+        state_ = Action::Retired;
+        return result(Action::Retired, Reason::Unsupported);
     }
     if (status == DetectionStatus::Failed) {
         return uncertain(Reason::NativeFailure, observedSeconds);
@@ -197,7 +200,7 @@ std::optional<Decision> Association::checkDetection(DetectionStatus status, std:
         return uncertain(Reason::SuccessfulEmpty, observedSeconds);
     }
     // A geometric crossing cannot establish who emerged afterwards. Keep
-    // searching; one remaining box must not erase the ambiguity latch.
+    // the crop until expiry; one remaining box must not erase the ambiguity latch.
     if (ambiguous_) {
         return uncertain(Reason::Ambiguous, observedSeconds);
     }
@@ -431,8 +434,8 @@ Decision Association::tick(Context context, double observedSeconds)
     if (!(context == lastSeen_.context)) {
         return result(Action::Ignored, Reason::StaleContext);
     }
-    if (!following_) {
-        return result(Action::OrdinaryAttached, Reason::AlreadyAttached);
+    if (state_ != Action::Held) {
+        return current();
     }
     if (!std::isfinite(observedSeconds) || observedSeconds < observedSeconds_) {
         return result(Action::Ignored, Reason::InvalidClock);
@@ -455,7 +458,7 @@ Decision Association::rebindCrop(Context nextContext, const LockRect& crop)
     crop_ = crop;
     // Editing the crop does not verify a face, erase ambiguity, or restart a
     // retired follower. Retain sequence and evidence time to reject late work.
-    return result(following_ ? Action::Held : Action::OrdinaryAttached, Reason::ManualCrop);
+    return state_ == Action::Held ? result(state_, Reason::ManualCrop) : current();
 }
 
 Decision Association::remap(Context nextContext, const FaceLockState& crop, LockRect bounds, double parentDx,
@@ -478,7 +481,7 @@ Decision Association::remap(Context nextContext, const FaceLockState& crop, Lock
     if (resumedStream) {
         lastSeen_.sequence = 0;
     }
-    return result(following_ ? Action::Held : Action::OrdinaryAttached, Reason::ManualCrop);
+    return state_ == Action::Held ? result(state_, Reason::ManualCrop) : current();
 }
 
 Decision Association::retire(Context context, const FaceLockState& crop, LockRect bounds)
@@ -490,8 +493,11 @@ Decision Association::retire(Context context, const FaceLockState& crop, LockRec
     cropState_ = crop;
     bounds_ = bounds;
     crop_ = face_lock::mapRegion(crop, crop.lastAnchor);
-    following_ = false;
-    return result(Action::OrdinaryAttached, Reason::StaleContext);
+    if (state_ != Action::Stopped) {
+        state_ = Action::Retired;
+        return result(state_, Reason::StaleContext);
+    }
+    return current();
 }
 
 std::string_view name(Action value)
@@ -501,12 +507,12 @@ std::string_view name(Action value)
         return "accepted";
     case Action::Held:
         return "held";
-    case Action::OrdinaryAttached:
-        return "ordinary_attached";
+    case Action::Retired:
+        return "retired";
     case Action::Ignored:
         return "ignored";
-    case Action::Searching:
-        return "searching";
+    case Action::Stopped:
+        return "stopped";
     }
     return "invalid_action";
 }
@@ -531,7 +537,7 @@ std::string_view name(Reason value)
         "invalid_clock",
         "expired_result",
         "evidence_expired",
-        "already_attached",
+        "already_retired",
         "manual_crop",
         "waiting",
     };

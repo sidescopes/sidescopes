@@ -208,12 +208,12 @@ TEST_CASE("Analysis allocation recovery preserves ambiguous tracking and consume
     CHECK(factories == 1);
     fix.next(11.01);
     publish();
-    CHECK(fix.update().decision.action == Action::Searching);
+    CHECK(fix.update().decision.action == Action::Stopped);
     const int calls = fix.detector.calls;
     fix.next(11.05);
     publish();
-    CHECK(fix.update().decision.action == Action::Searching);
-    CHECK(fix.detector.calls == calls + 1);
+    CHECK(fix.update().decision.action == Action::Stopped);
+    CHECK(fix.detector.calls == calls);
 }
 
 TEST_CASE("Tracking detects the current frame ROI with its native format and padded stride")
@@ -321,14 +321,14 @@ TEST_CASE("Lost-face resolution keeps the last stabilized crop and recovery disc
     const auto held = fix.update();
     CHECK(held.decision.action == Action::Held);
     CHECK(held.region == moved.region);
-    SECTION("searching")
+    SECTION("stopped")
     {
         fix.now = 11.13;
         const auto resolution = fix.run(false);
         REQUIRE(resolution.region);
         CHECK(*resolution.region == moved.region);
         const auto retired = fix.update();
-        CHECK(retired.decision.action == Action::Searching);
+        CHECK(retired.decision.action == Action::Stopped);
         CHECK(retired.region == moved.region);
     }
     SECTION("brief recovery")
@@ -372,7 +372,7 @@ TEST_CASE("In-flight command changes cannot publish stale tracking updates")
     CHECK(fix.notified == 0);
 }
 
-TEST_CASE("Native failure hides readings after grace and keeps examining fresh frames")
+TEST_CASE("Native failure stops tracking after grace without more detector calls")
 {
     Fixture fix;
     SECTION("Failed status")
@@ -390,24 +390,87 @@ TEST_CASE("Native failure hides readings after grace and keeps examining fresh f
     CHECK(fix.update().decision.reason == Reason::NativeFailure);
     fix.now = 11.01;
     CHECK(fix.run(false).mode == Mode::Suppress);
-    CHECK(fix.update().decision.action == Action::Searching);
+    CHECK(fix.update().decision.action == Action::Stopped);
     fix.detector.inspect = {};
     fix.next(11.05);
     CHECK(fix.run().mode == Mode::Suppress);
-    CHECK(fix.update().decision.following);
-    CHECK(fix.detector.calls == 2);
+    CHECK_FALSE(fix.update().decision.following);
+    CHECK(fix.detector.calls == 1);
 }
 
 TEST_CASE("Unsupported detection retires the lock immediately")
 {
     Fixture fix;
     fix.detector.result = {FaceDetectionStatus::Unsupported, {}};
-    REQUIRE(fix.run().mode == Mode::Override);
+    REQUIRE(fix.run().mode == Mode::Suppress);
     CHECK(fix.update().decision.reason == Reason::Unsupported);
     fix.next(10.05);
-    CHECK(fix.run().mode == Mode::Override);
+    CHECK(fix.run().mode == Mode::Suppress);
     CHECK_FALSE(fix.update().decision.following);
     CHECK(fix.detector.calls == 1);
+}
+
+TEST_CASE("The tracking deadline stops fresh frames before native work")
+{
+    Fixture fix;
+    fix.detector.result.faces.clear();
+    REQUIRE(fix.run().mode == Mode::Override);
+    const auto missing = fix.update();
+    REQUIRE(missing.decision.uncertaintyDeadline == 11.0);
+    fix.detector.result.faces = {{40, 38, 20, 20}};
+    fix.next(10.999);
+    REQUIRE(fix.run().mode == Mode::Override);
+    CHECK(fix.update().decision.action == Action::Held);
+    REQUIRE(fix.detector.calls == 2);
+    fix.next(11.0);
+    REQUIRE(fix.run().mode == Mode::Suppress);
+    const auto stopped = fix.update();
+    CHECK(stopped.decision.action == Action::Stopped);
+    CHECK_FALSE(stopped.decision.following);
+    CHECK(stopped.decision.uncertaintyDeadline == missing.decision.uncertaintyDeadline);
+    CHECK(fix.detector.calls == 2);
+    fix.next(30.0);
+    CHECK(fix.run().mode == Mode::Suppress);
+    CHECK(fix.detector.calls == 2);
+}
+
+TEST_CASE("A native result completing at the tracking deadline cannot restore readings")
+{
+    Fixture fix;
+    fix.detector.result.faces.clear();
+    REQUIRE(fix.run().mode == Mode::Override);
+    const auto missing = fix.update();
+    fix.next(10.99);
+    fix.detector.result.faces = {{40, 38, 20, 20}};
+    fix.detector.inspect = [&](const FrameView&) { fix.now = 11.0; };
+    SECTION("Completed face")
+    {
+    }
+    SECTION("Unsupported result")
+    {
+        fix.detector.result = {FaceDetectionStatus::Unsupported, {}};
+    }
+    SECTION("Removed selection while native work is in flight")
+    {
+        fix.detector.inspect = [&](const FrameView&) {
+            fix.now = 11.0;
+            fix.command.enabled = false;
+            ++fix.command.revision;
+            fix.exchange->select(fix.command);
+        };
+        CHECK(fix.run().mode == Mode::Skip);
+        CHECK_FALSE(fix.exchange->fetch(fix.seen));
+        CHECK(fix.detector.calls == 2);
+        return;
+    }
+    REQUIRE(fix.run().mode == Mode::Suppress);
+    const auto stopped = fix.update();
+    CHECK(stopped.decision.action == Action::Stopped);
+    CHECK_FALSE(stopped.decision.following);
+    CHECK_FALSE(stopped.decision.selectedBox);
+    CHECK(stopped.decision.evidenceSourceSeconds == missing.decision.evidenceSourceSeconds);
+    CHECK(stopped.decision.uncertaintyDeadline == missing.decision.uncertaintyDeadline);
+    CHECK(fix.detector.calls == 2);
 }
 
 TEST_CASE("Invalid frames and commands are rejected before native pixel access")
@@ -539,7 +602,7 @@ TEST_CASE("Exchange notification runs outside its lock and can invalidate the co
     CHECK_FALSE(exchange->fetch(seen));
 }
 
-TEST_CASE("Crop revisions and temporary disabling preserve uncertainty and searching")
+TEST_CASE("Crop revisions and temporary disabling cannot restart stopped tracking")
 {
     Fixture fix;
     fix.detector.result.faces.push_back({46, 38, 20, 20});
@@ -558,13 +621,13 @@ TEST_CASE("Crop revisions and temporary disabling preserve uncertainty and searc
     CHECK(fix.update().decision.reason == Reason::Ambiguous);
     fix.now = 11.01;
     CHECK(fix.run(false).mode == Mode::Suppress);
-    CHECK(fix.update().decision.following);
+    CHECK_FALSE(fix.update().decision.following);
     ++fix.command.revision;
     fix.exchange->select(fix.command);
     fix.next(11.05);
     CHECK(fix.run().mode == Mode::Suppress);
-    CHECK(fix.update().decision.following);
-    CHECK(fix.detector.calls == 2);
+    CHECK_FALSE(fix.update().decision.following);
+    CHECK(fix.detector.calls == 1);
     ++fix.command.lockGeneration;
     ++fix.command.revision;
     fix.exchange->select(fix.command);
@@ -591,7 +654,7 @@ TEST_CASE("Returning to another saved window does not reset its ambiguous identi
     fix.exchange->select(fix.command);
     fix.now = 11.01;
     CHECK(fix.run(false).mode == Mode::Suppress);
-    CHECK(fix.update().decision.following);
+    CHECK_FALSE(fix.update().decision.following);
     CHECK(fix.detector.calls == 1);
 }
 
@@ -614,7 +677,7 @@ TEST_CASE("Mechanical window translation moves the crop without observing new fa
     CHECK(fix.detector.calls == 1);
 }
 
-TEST_CASE("Source replacement retires the same explicit lock at its valid ordinary crop")
+TEST_CASE("Source replacement retires the same explicit lock and suppresses readings")
 {
     Fixture fix;
     REQUIRE(fix.run().mode == Mode::Override);
@@ -624,7 +687,7 @@ TEST_CASE("Source replacement retires the same explicit lock at its valid ordina
     fix.frame.stamp.captureEpoch = fix.command.captureEpoch;
     fix.exchange->select(fix.command);
     fix.next(10.05);
-    CHECK(fix.run().mode == Mode::Override);
+    CHECK(fix.run().mode == Mode::Suppress);
     CHECK_FALSE(fix.update().decision.following);
     CHECK(fix.detector.calls == 1);
 }
@@ -713,12 +776,12 @@ TEST_CASE("Resume continuity never permits a foreign display or pixel grid")
     }
     fix.exchange->select(fix.command);
     fix.next(10.05);
-    REQUIRE(fix.run().mode == Mode::Override);
+    REQUIRE(fix.run().mode == Mode::Suppress);
     CHECK_FALSE(fix.update().decision.following);
     CHECK(fix.detector.calls == 1);
 }
 
-TEST_CASE("Source resume preserves searching and its identity constraint")
+TEST_CASE("Source resume cannot restart stopped tracking")
 {
     Fixture fix;
     fix.command.captureContinuity = 7;
@@ -731,7 +794,7 @@ TEST_CASE("Source resume preserves searching and its identity constraint")
     (void)fix.update();
     fix.now = 11.06;
     REQUIRE(fix.run(false).mode == Mode::Suppress);
-    CHECK(fix.update().decision.following);
+    CHECK_FALSE(fix.update().decision.following);
     const int calls = fix.detector.calls;
     ++fix.command.revision;
     ++fix.command.captureEpoch;
@@ -739,8 +802,8 @@ TEST_CASE("Source resume preserves searching and its identity constraint")
     fix.exchange->select(fix.command);
     fix.next(11.10);
     REQUIRE(fix.run().mode == Mode::Suppress);
-    CHECK(fix.update().decision.following);
-    CHECK(fix.detector.calls == calls + 1);
+    CHECK_FALSE(fix.update().decision.following);
+    CHECK(fix.detector.calls == calls);
 }
 
 TEST_CASE("Removed locks cannot be revived by an enabled stale command")
@@ -809,7 +872,8 @@ TEST_CASE("Missing and failing detector factories are explicit native outcomes")
         expected = Reason::NativeFailure;
     }
     FaceTrackingWorker worker{fix.exchange, factory, [&] { return fix.now; }};
-    REQUIRE(worker.resolve({fix.frame, {}, fix.command.revision, true}).mode == Mode::Override);
+    const auto mode = expected == Reason::Unsupported ? Mode::Suppress : Mode::Override;
+    REQUIRE(worker.resolve({fix.frame, {}, fix.command.revision, true}).mode == mode);
     CHECK(fix.update().decision.reason == expected);
 }
 

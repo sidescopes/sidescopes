@@ -157,6 +157,9 @@ struct RegionBorderEdit
     /// becomes global; a global one attaches to the frontmost window under it.
     bool bindingToggled = false;
     std::optional<RegionOfInterest> region;
+    /// The close control was clicked. A close event takes precedence over
+    /// binding and geometry edits and is reported only once.
+    bool closed = false;
 };
 
 RegionBorderEdit pollRegionBorderEdit();

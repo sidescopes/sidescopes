@@ -136,6 +136,7 @@ struct ReadingHarness
     PinBoard pins;
     std::unique_ptr<ScopePaneRenderer> renderer;
     bool visible = true;
+    bool regionSelected = true;
     std::optional<FloatColor> marker;
     const std::optional<FloatColor> readout = FloatColor{25.5f, 51.0f, 76.5f};
     std::string persistentStatus;
@@ -174,6 +175,7 @@ struct ReadingHarness
         view.stack().restore("[" + std::string(id) + "]");
         renderer->uploadVisibleScopes(true);
         visible = true;
+        regionSelected = true;
         marker.reset();
     }
 };
@@ -216,8 +218,8 @@ void readingGui(ImGuiTestContext*)
     ImGui::SetNextWindowSize(ImVec2(600, 600), ImGuiCond_Always);
     ImGui::Begin("Reading", nullptr, ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoScrollbar);
     const auto* parent = ImGui::GetCurrentWindow();
-    const PaneRenderInput input{1.0f,      true,    true,      h.marker,          h.marker,
-                                h.readout, nullptr, h.visible, h.persistentStatus};
+    const PaneRenderInput input{1.0f,      h.regionSelected, true,      h.marker,          h.marker,
+                                h.readout, nullptr,          h.visible, h.persistentStatus};
     (void)h.renderer->drawScopePanes(input);
     h.drawn = readPaneCommands(parent);
     ImGui::LogToBuffer();
@@ -280,32 +282,34 @@ void hiddenUploadsCannotRecreateReleasedTraces(ImGuiTestContext* ctx)
     IM_CHECK_GT(h.drawn.imageIndices, 0u);
 }
 
-void searchingStatusReturnsAfterTemporaryMessages(ImGuiTestContext* ctx)
+void stoppedTrackingStatusReturnsAfterTemporaryMessages(ImGuiTestContext* ctx)
 {
     auto& h = harness();
     h.show(VectorscopeScopeId);
     h.visible = false;
-    h.persistentStatus = "Searching for face";
+    h.regionSelected = false;
+    h.persistentStatus = "Face tracking stopped";
     ctx->Yield(2);
-    IM_CHECK(h.statusText.find("Searching for face") != std::string::npos);
+    IM_CHECK(h.statusText.find("Face tracking stopped") != std::string::npos);
     IM_CHECK(h.statusText.find("10%") == std::string::npos);
+    IM_CHECK_EQ(h.drawn.imageIndices, 0u);
     h.seconds += 60;
     ctx->Yield(2);
-    IM_CHECK(h.statusText.find("Searching for face") != std::string::npos);
+    IM_CHECK(h.statusText.find("Face tracking stopped") != std::string::npos);
     h.renderer->setStatus("Selection changed");
     const double until = h.renderer->redrawDueSeconds();
     h.seconds = until - 0.001;
     ctx->Yield(2);
     IM_CHECK(h.statusText.find("Selection changed") != std::string::npos);
-    IM_CHECK(h.statusText.find("Searching for face") == std::string::npos);
+    IM_CHECK(h.statusText.find("Face tracking stopped") == std::string::npos);
     h.seconds = until + 0.001;
     ctx->Yield(2);
-    IM_CHECK(h.statusText.find("Searching for face") != std::string::npos);
+    IM_CHECK(h.statusText.find("Face tracking stopped") != std::string::npos);
     IM_CHECK(h.statusText.find("Selection changed") == std::string::npos);
     h.persistentStatus.clear();
-    h.visible = true;
     ctx->Yield(2);
-    IM_CHECK(h.statusText.find("Searching for face") == std::string::npos);
+    IM_CHECK(h.statusText.find("Face tracking stopped") == std::string::npos);
+    IM_CHECK_EQ(h.drawn.imageIndices, 0u);
     IM_CHECK(h.statusText.find("10%") != std::string::npos);
     IM_CHECK(h.statusText.find("20%") != std::string::npos);
     IM_CHECK(h.statusText.find("30%") != std::string::npos);
@@ -319,9 +323,9 @@ void registerReadingTests(ImGuiTestEngine* engine)
     auto* upload = IM_REGISTER_TEST(engine, "reading", "hidden_uploads_cannot_recreate_released_traces");
     upload->GuiFunc = readingGui;
     upload->TestFunc = hiddenUploadsCannotRecreateReleasedTraces;
-    auto* status = IM_REGISTER_TEST(engine, "reading", "searching_status_returns_after_temporary_messages");
+    auto* status = IM_REGISTER_TEST(engine, "reading", "stopped_tracking_status_returns_after_temporary_messages");
     status->GuiFunc = readingGui;
-    status->TestFunc = searchingStatusReturnsAfterTemporaryMessages;
+    status->TestFunc = stoppedTrackingStatusReturnsAfterTemporaryMessages;
 }
 
 }  // namespace

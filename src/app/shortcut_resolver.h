@@ -43,7 +43,8 @@ struct ShortcutAction
         /// The zoom key steps around its cycle; the level it landed on rides
         /// in @c zoomLevel. The menu sets its levels outright.
         SetZoom,
-        /// Escape closes settings first, then cancels an active picker.
+        /// Escape closes settings first, then cancels an active picker or
+        /// clears the region. The shell checks interaction state on dispatch.
         CloseSettings,
         CancelInteraction,
         DetachAllWindows,
@@ -116,7 +117,7 @@ struct ShortcutContext
 using ShortcutKeyPressed = std::function<bool(std::string_view)>;
 
 /// Owns the keyboard bindings and maps a key to the action it means: the
-/// per-scope letters, the region tools, the zoom cycle, the picker cancellation,
+/// per-scope letters, the region tools, the zoom cycle, cancellation and clearing,
 /// the layout-preset digits, and the platform window chords. It carries
 /// nothing out itself - the shell applies the ShortcutAction it returns - and
 /// reads only the registry it is constructed with and the context each call

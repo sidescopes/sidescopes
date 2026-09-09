@@ -40,9 +40,9 @@ enum class Action
 {
     Accepted,
     Held,
-    OrdinaryAttached,
+    Retired,
     Ignored,
-    Searching
+    Stopped
 };
 enum class Reason
 {
@@ -63,13 +63,13 @@ enum class Reason
     InvalidClock,
     ExpiredResult,
     EvidenceExpired,
-    AlreadyAttached,
+    AlreadyRetired,
     ManualCrop,
     Waiting
 };
 
 // Bounded geometric association: brief misses retain the crop, while a long
-// absence hides readings while retaining the selection and looking for evidence.
+// absence ends the selection. Only an explicit new selection starts following.
 struct Parameters
 {
     double maximumResultAge = 0.20;
@@ -183,7 +183,8 @@ private:
     double velocityX_ = 0.0;
     double velocityY_ = 0.0;
     bool ambiguous_ = false;
-    bool following_ = true;
+    // Held is active; Stopped and Retired are terminal for this selection.
+    Action state_ = Action::Held;
     bool nominationPending_ = false;
     uint64_t readingGeneration_ = 1;
 };

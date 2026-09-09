@@ -701,6 +701,14 @@ void hideRegionBorder()
     // hidden border every frame, and an unconditional hand-back would pull the
     // keyboard off an open picker overlay thirty times a second.
     const BOOL borderHeldKeyboard = g_borderWindow.keyWindow;
+    SidescopesBorderView* view = (SidescopesBorderView*)g_borderWindow.contentView;
+    view.dragZone = ZoneNone;
+    view.closePressed = NO;
+    view.bindingPressed = NO;
+    g_borderEditing = false;
+    g_borderEditChanged = false;
+    g_borderClosed = false;
+    g_borderBindingToggled = false;
     [g_borderWindow orderOut:nil];
     if (borderHeldKeyboard) {
         handKeyboardToOwnWindow();
@@ -764,6 +772,13 @@ void hideAttachedEditDim()
 RegionBorderEdit pollRegionBorderEdit()
 {
     RegionBorderEdit edit;
+    edit.closed = g_borderClosed;
+    g_borderClosed = false;
+    if (edit.closed) {
+        g_borderEditChanged = false;
+        g_borderBindingToggled = false;
+        return edit;
+    }
     edit.editing = g_borderEditing;
     edit.bindingToggled = g_borderBindingToggled;
     g_borderBindingToggled = false;

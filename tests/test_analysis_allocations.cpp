@@ -546,7 +546,7 @@ TEST_CASE("Allocation failure in a recovery notification cannot escape the worke
     fixture.checkStopped();
 }
 
-TEST_CASE("Every recovery output allocation failure withholds completed generation metadata")
+TEST_CASE("Every new reading output allocation failure withholds completed generation metadata")
 {
     using Mode = FrameRegionResolution::Mode;
     const auto prepare = [](Fixture& fixture, Mode& mode, uint64_t& generation) {
@@ -558,13 +558,13 @@ TEST_CASE("Every recovery output allocation failure withholds completed generati
         fixture.warm();
         REQUIRE(fixture.output.readingGeneration == 7u);
         mode = Mode::Suppress;
-        fixture.worker.requestRegionRefresh(fixture.settings.selectionRevision);
+        fixture.publishFrame();
         fixture.worker.pump();
         REQUIRE(fixture.worker.fetchOutput(fixture.seen, fixture.output));
         REQUIRE(fixture.output.suppressed);
         mode = Mode::Override;
         ++generation;
-        fixture.worker.requestRegionRefresh(fixture.settings.selectionRevision);
+        fixture.publishFrame();
     };
     std::size_t count = 0;
     {
@@ -593,12 +593,12 @@ TEST_CASE("Every recovery output allocation failure withholds completed generati
         CHECK(fixture.output.readingGeneration == 0u);
         CHECK(fixture.output.frameSequence == 0u);
         CHECK(fixture.output.selectionRevision == fixture.settings.selectionRevision);
-        fixture.worker.requestRegionRefresh(fixture.settings.selectionRevision);
+        fixture.publishFrame();
         fixture.worker.pump();
         REQUIRE(fixture.worker.fetchOutput(fixture.seen, fixture.output, fixture.settings.selectionRevision, 8));
         CHECK(fixture.output.readingGeneration == 8u);
         CHECK(fixture.output.region == fixture.settings.region);
-        CHECK(fixture.output.frameSequence == 1u);
+        CHECK(fixture.output.frameSequence == 4u);
         CHECK_FALSE(fixture.output.suppressed);
         fixture.checkValue(7);
     }

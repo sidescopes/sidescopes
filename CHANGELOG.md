@@ -9,12 +9,14 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Changed
 
 - Cancelling a region picker keeps the committed selection. Closed parent
-  windows retain the last rectangle on its display;
-  region tools no longer offer an action that clears the selection.
+  windows retain the last rectangle on its display. The border close button
+  removes its region, and Escape clears selections after dismissing settings
+  or cancelling an active picker. The default startup region remains.
 - Face regions follow position and size changes without waiting for video to
   settle or hiding the border. Lost or ambiguous faces keep their last region
-  monitored for one second, then hide the border and scope traces together
-  while showing a searching status.
+  monitored for one second, then remove the region and scope traces together.
+  “Face tracking stopped” explains the empty state; a fresh face selection
+  starts tracking again, without background reacquisition.
 - Mac downloads contain both Apple silicon and Intel code and require macOS
   14 or later, matching the screen-capture APIs used by the application.
 - Desktop builds embed their complete license notices in an offline

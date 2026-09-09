@@ -6,13 +6,14 @@ saved window placement, the compact application window opens at the left of the
 primary display and the region is centered there. The square provides a neutral
 starting area for landscape and portrait content. This is an ordinary region:
 drag or resize its border, replace it with another selection, attach it to a
-window, or select a face.
+window, select a face, or close it.
 
 Opening a region tool dims the desktop and previews the candidate region on the
 scopes before you confirm it. Cancelling restores the previous committed
 selection, including when no face is found.
 
-The toolbar and keyboard provide three selection modes. You can switch among
+The toolbar and keyboard provide three selection modes. The keys below are the
+defaults; all three selection shortcuts can be changed in Settings. You can switch among
 them while the picker is open. Window and face suggestions are offered only
 when the platform reports or detects them; otherwise you can draw the region
 directly.
@@ -55,15 +56,18 @@ Where face detection is available, SideScopes presents detected faces as
 suggestions. Selecting one creates a region that follows the face within its
 window. If no face is detected, the picker reports that result instead of
 creating an estimated region. Cancelling keeps the prior selection.
-If following later loses the face, its last accepted rectangle remains attached
-to the window.
-
 Tracking follows changes in position and size as new video frames arrive. A
-brief missed detection keeps the last rectangle visible while tracking tries
-to recover. Persistent loss, an ambiguous crossing, or a changed capture source
-ends following and keeps an ordinary attached region. Select the face again
-with F to resume following; another face entering the area does not restart it.
-Fast cuts, occlusion, and large changes in pose can end tracking.
+brief missed detection keeps monitoring the last accepted rectangle live for
+up to one second. If tracking cannot confidently resume during that grace
+period, the region and its scope traces disappear together. SideScopes shows
+“Face tracking stopped” and ends detection for that selection. Select a face
+again using the toolbar or your configured shortcut to restart tracking.
+Another face entering the area does not restart it automatically.
+
+Fast cuts, occlusion, large changes in pose, and ambiguous crossings can end
+tracking. An unsupported detector or incompatible capture source also removes
+the face region. Closing its parent window keeps the last valid rectangle as
+a global region, just as it does for an ordinary window-attached region.
 
 A face-tracked border uses the same face icon as the selection tool. Its label
 remains the window title; tracking state is not added to the title text. Click
@@ -83,7 +87,10 @@ applicable. The border is interactive:
 - drag the striped band to move the region;
 - drag a corner handle to resize both axes;
 - drag the midpoint of an edge to move that edge;
-- use the binding control to change what the region follows.
+- use the binding control to change what the region follows;
+- click the close button to remove this region. Other windows keep their regions.
+
+The close button appears when the region is wide enough to fit its controls.
 
 The binding control shows the current state. The face icon identifies a
 face-tracked region, the pin identifies a region fixed inside a window, and the
@@ -96,15 +103,18 @@ The scopes update while the border is edited. The border hides while a picker
 is open, while SideScopes is hidden or minimized, and while an attached window
 is being moved. Face motion keeps the border visible.
 
-## Keeping a region
+## Clearing a region
 
-Escape cancels an active picker and restores the committed selection. It does
-not erase a selected region. Stop Following Window and Stop Following All
-Windows keep the last-used rectangle as a global region on its display.
+Escape closes Settings first or cancels an active picker, restoring the
+committed selection. Otherwise, Escape clears every selected region, including
+saved regions on other windows. The border's close button removes only the
+region it outlines. Clearing a region leaves the scope graticules visible and
+stops analyzing that selection. The startup region returns at the next launch;
+it is not recreated while you are working.
 
-If no valid source is available, the scopes pause while their graticules remain
-visible. The application keeps an internal empty fallback for unavailable
-displays and capture failures; it does not invent a region on another display.
+Stop Following Window and Stop Following All Windows keep the last-used
+rectangle as a global region on its display. A capture interruption pauses the
+scopes; it does not invent a region on another display.
 
 ## Multiple displays
 

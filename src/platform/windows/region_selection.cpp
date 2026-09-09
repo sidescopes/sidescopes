@@ -582,9 +582,19 @@ void hideRegionBorder()
         if (g_border.appearing) {
             snapBorderAppear();
         }
+        if (GetCapture() == g_border.window) {
+            ReleaseCapture();
+        }
         ShowWindow(g_border.window, SW_HIDE);
         g_border.appearTarget = RECT{};
     }
+    g_border.dragZone = ZoneNone;
+    g_border.closePressed = false;
+    g_border.bindingPressed = false;
+    g_borderEditing = false;
+    g_borderEditChanged = false;
+    g_borderClosed = false;
+    g_borderBindingToggled = false;
 }
 
 namespace {
@@ -678,6 +688,13 @@ std::vector<BorderKeyPress> drainBorderKeyPresses()
 RegionBorderEdit pollRegionBorderEdit()
 {
     RegionBorderEdit edit;
+    edit.closed = g_borderClosed;
+    g_borderClosed = false;
+    if (edit.closed) {
+        g_borderEditChanged = false;
+        g_borderBindingToggled = false;
+        return edit;
+    }
     edit.editing = g_borderEditing;
     edit.bindingToggled = g_borderBindingToggled;
     g_borderBindingToggled = false;

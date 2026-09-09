@@ -20,7 +20,7 @@ struct PaneRenderInput
     /// measured in.
     float uiScale;
     /// Whether a region has been selected at all. Without one the scopes read
-    /// nothing, so no trace is drawn and the clear tool stands down.
+    /// nothing, so no trace is drawn.
     bool regionSelected;
     /// Whether a scope that takes pins is on screen; without one the pin tool
     /// stands down.
@@ -35,7 +35,7 @@ struct PaneRenderInput
     /// The fixed-width companion font the picker aligns hex codes with; null
     /// when the system had none.
     ImFont* monospaceFont;
-    /// Selected intent may remain while a recoverable source loss hides readings.
+    /// Whether the current reading can be presented.
     bool readingVisible = true;
     std::string_view persistentStatus = {};
 };
@@ -57,7 +57,6 @@ struct PaneRenderOutcome
     /// A chip chose a scope: the host shows it, which may wait briefly for the
     /// worker to fill its image.
     std::optional<ScopeChoice> chosenScope;
-    /// The clear tool: the host drops every region and attachment.
     /// A scope parameter changed: the host pushes the settings to the worker.
     bool analysisDirty = false;
     /// Interaction happened worth marking: the host stamps its activity clock.

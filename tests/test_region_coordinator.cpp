@@ -264,10 +264,6 @@ TEST_CASE("The border stays off screen while anything says it must")
     {
         fix.coordinator.syncBorder(RegionBorderState{"", 0, false, true});
     }
-    SECTION("the selected reading is temporarily hidden")
-    {
-        fix.coordinator.syncBorder(RegionBorderState{"", 0, false, false, false});
-    }
 
     CHECK_FALSE(regionOverlayStubs().border.has_value());
     CHECK(regionOverlayStubs().borderShows == shownBefore);
@@ -315,13 +311,13 @@ TEST_CASE("Video and transient face loss keep the visible border at the last acc
     }
     CHECK(desktopStubs().detectorCall().calls == 3);
     const auto lost = fix.faceLock.update(decision, size, false, frameClockSeconds() + 1.01);
-    CHECK_FALSE(lost.lostLock);
-    const auto reading = fix.faceLock.readingState(42);
-    REQUIRE(reading);
-    CHECK(reading->searching);
-    fix.coordinator.syncBorder(RegionBorderState{"Editor", 42, false, false, false});
+    CHECK(lost.lostLock == 42);
+    CHECK_FALSE(fix.faceLock.readingState(42));
+    // The session applies termination by removing the selected region.
+    fix.region.reset();
+    fix.coordinator.syncBorder(RegionBorderState{"Editor", 42, false, false});
     CHECK_FALSE(regionOverlayStubs().border);
-    CHECK(fix.faceLock.contains(42));
+    CHECK_FALSE(fix.faceLock.contains(42));
     CHECK(regionOverlayStubs().borderHides == 1);
 }
 
@@ -401,10 +397,27 @@ TEST_CASE("The border's binding control travels back to the host")
     CHECK(fix.coordinator.pollBorderEdit(0).bindingToggled);
 }
 
+TEST_CASE("Closing a border takes priority over binding and drag and clears its veil")
+{
+    CoordinatorFixture fix;
+    desktopStubs().displayGeometry = DisplayGeometry{0, 0, 1000, 500};
+    desktopStubs().windowGeometry = WindowGeometry{100, 50, 400, 200, false, "Picture"};
+    regionOverlayStubs().borderEdit = RegionBorderEdit{true, false, PartialRegion};
+    (void)fix.coordinator.pollBorderEdit(42);
+    REQUIRE(regionOverlayStubs().editDim);
+    regionOverlayStubs().borderEdit = RegionBorderEdit{true, true, PartialRegion, true};
+    const auto closed = fix.coordinator.pollBorderEdit(42);
+    CHECK(closed.closed);
+    CHECK_FALSE(closed.bindingToggled);
+    CHECK_FALSE(closed.edited);
+    CHECK_FALSE(fix.coordinator.borderEditing());
+    CHECK_FALSE(regionOverlayStubs().editDim);
+}
+
 TEST_CASE("The border is not read while a pick is in flight")
 {
     CoordinatorFixture fix;
-    regionOverlayStubs().borderEdit = RegionBorderEdit{true, true, PartialRegion};
+    regionOverlayStubs().borderEdit = RegionBorderEdit{true, true, PartialRegion, true};
     fix.picker.request(RegionPickerMode::DrawGlobal);
     (void)fix.picker.openIfRequested(/*regionSelected=*/false);
     REQUIRE(fix.picker.active());
@@ -413,6 +426,7 @@ TEST_CASE("The border is not read while a pick is in flight")
     // still reports about it must not reach the host.
     const RegionBorderEditOutcome outcome = fix.coordinator.pollBorderEdit(42);
 
+    CHECK_FALSE(outcome.closed);
     CHECK_FALSE(outcome.bindingToggled);
     CHECK_FALSE(outcome.edited.has_value());
     CHECK_FALSE(fix.coordinator.borderEditing());

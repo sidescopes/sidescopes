@@ -153,7 +153,7 @@ struct FaceSessionFixture : SessionFixture
 
 }  // namespace
 
-TEST_CASE("Face loss keeps sampling during grace and hides the border and scopes together", "[face-loss-reading]")
+TEST_CASE("Face loss samples live through grace then removes the region and stops tracking", "[face-loss-reading]")
 {
     FaceSessionFixture fix;
     fix.selectFace();
@@ -173,7 +173,7 @@ TEST_CASE("Face loss keeps sampling during grace and hides the border and scopes
     CHECK(output.frameSequence == 3);
     CHECK(output.images.at("org.sidescopes.histogram").rgba != acceptedPixels);
     CHECK(fix.session.traceLive());
-    CHECK_FALSE(fix.session.searchingForFace());
+    CHECK_FALSE(fix.session.faceTrackingStopped());
     REQUIRE(regionOverlayStubs().border);
     CHECK(regionOverlayStubs().border->binding == RegionBinding::Face);
 
@@ -182,23 +182,29 @@ TEST_CASE("Face loss keeps sampling during grace and hides the border and scopes
     CHECK(fix.session.traceLive());
     REQUIRE(regionOverlayStubs().border);
     fix.trackingSeconds = loss + 1.0;
-    (void)fix.follow();
+    const auto expired = fix.follow();
+    CHECK(expired.regionChanged);
+    CHECK_FALSE(expired.trackedRegion);
+    CHECK_FALSE(expired.region);
     CHECK_FALSE(fix.session.traceLive());
-    CHECK(fix.session.searchingForFace());
-    CHECK(fix.session.faceLocked());
-    CHECK(fix.session.attachments().isAttached(Window));
+    CHECK(fix.session.faceTrackingStopped());
+    CHECK_FALSE(fix.session.faceLocked());
+    CHECK_FALSE(fix.session.attachments().isAttached(Window));
     CHECK_FALSE(regionOverlayStubs().border);
-    fix.worker.pump();
-    REQUIRE(fix.worker.fetchOutput(seen, output, fix.settings.selectionRevision));
-    CHECK(output.suppressed);
-    CHECK_FALSE(output.region);
-    CHECK(output.images.empty());
-    CHECK_FALSE(fix.session.acceptReading(output, fix.settings.enabledScopes));
+    CHECK_FALSE(fix.worker.fetchOutput(seen, output, fix.settings.selectionRevision));
+
+    const int calls = desktopStubs().detectorCall().calls;
+    desktopStubs().faces = {{200, 100, 100, 100}};
+    fix.publish(4);
+    CHECK_FALSE(fix.follow().region);
+    CHECK(desktopStubs().detectorCall().calls == calls);
     CHECK_FALSE(fix.session.traceLive());
+    CHECK(fix.session.faceTrackingStopped());
+    (void)fix.session.clear();
+    CHECK_FALSE(fix.session.faceTrackingStopped());
 }
 
-TEST_CASE("A delayed admissible face reading restores visibility only after complete scope output",
-          "[face-loss-reading]")
+TEST_CASE("A detection finishing after interface expiry cannot revive its selection", "[face-loss-reading]")
 {
     FaceSessionFixture fix;
     fix.selectFace();
@@ -207,186 +213,97 @@ TEST_CASE("A delayed admissible face reading restores visibility only after comp
     fix.publish(3);
     (void)fix.follow();
     const double loss = fix.trackingSeconds;
-    bool sampledRecovery = false;
+    const auto oldRevision = fix.settings.selectionRevision;
+    bool expiredDuringDetection = false;
     desktopStubs().sessionDetection = [&](const FrameView& crop, double) {
-        // The worker samples an admissible short recovery time, then is
-        // descheduled while the interface expires the old held update.
-        // Resuming the same observation does not admit a later return.
-        fix.afterTrackingClockSample = [&] {
-            sampledRecovery = true;
-            fix.trackingSeconds = loss + 1.0;
-            (void)fix.follow();
-            REQUIRE(fix.session.searchingForFace());
-            REQUIRE_FALSE(fix.session.traceLive());
-            REQUIRE_FALSE(regionOverlayStubs().border);
-        };
+        expiredDuringDetection = true;
+        fix.trackingSeconds = loss + 1.0;
+        const auto expired = fix.follow();
+        REQUIRE_FALSE(expired.region);
+        REQUIRE(fix.session.faceTrackingStopped());
         return FaceDetectionResult{FaceDetectionStatus::Completed,
                                    {{205 - crop.sourceX, 100 - crop.sourceY, 100, 100}}};
     };
     fix.publish(4);
-    REQUIRE(sampledRecovery);
+    REQUIRE(expiredDuringDetection);
+    CHECK(fix.settings.selectionRevision > oldRevision);
     AnalysisWorker::Output output;
     uint64_t seen = 0;
-    REQUIRE(fix.worker.fetchOutput(seen, output, fix.settings.selectionRevision));
-    REQUIRE_FALSE(output.suppressed);
-    REQUIRE(output.region);
-    REQUIRE(output.frameSequence == 4);
-    REQUIRE(output.readingGeneration != 0);
-    // A completed image cannot restore an unconsumed tracking decision.
-    CHECK_FALSE(fix.session.acceptReading(output, fix.settings.enabledScopes));
-    (void)fix.follow();
-    REQUIRE(fix.session.searchingForFace());
-    REQUIRE_FALSE(fix.session.traceLive());
-    REQUIRE_FALSE(regionOverlayStubs().border);
-
-    auto stale = output;
-    SECTION("Older suppressed output")
-    {
-        REQUIRE(stale.readingGeneration > 1);
-        --stale.readingGeneration;
-        stale.suppressed = true;
-    }
-    SECTION("Wrong selection revision")
-    {
-        ++stale.selectionRevision;
-    }
-    SECTION("Wrong reading generation")
-    {
-        ++stale.readingGeneration;
-    }
-    SECTION("Wrong capture epoch")
-    {
-        ++stale.frameStamp.captureEpoch;
-    }
-    SECTION("Wrong display")
-    {
-        ++stale.frameStamp.displayId;
-    }
-    SECTION("Missing region")
-    {
-        stale.region.reset();
-    }
-    SECTION("Unpublished output")
-    {
-        stale.version = 0;
-    }
-    SECTION("Missing enabled scope")
-    {
-        stale.images.clear();
-    }
-    SECTION("Incomplete enabled scope")
-    {
-        stale.images.at("org.sidescopes.histogram").rgba.clear();
-    }
-    CHECK_FALSE(fix.session.acceptReading(stale, fix.settings.enabledScopes));
-    CHECK(fix.session.searchingForFace());
-    CHECK_FALSE(fix.session.traceLive());
+    CHECK_FALSE(fix.worker.fetchOutput(seen, output, fix.settings.selectionRevision));
+    CHECK_FALSE(fix.follow().region);
+    CHECK_FALSE(fix.session.faceLocked());
     CHECK_FALSE(regionOverlayStubs().border);
-    REQUIRE(fix.session.acceptReading(output, fix.settings.enabledScopes));
-    CHECK_FALSE(fix.session.searchingForFace());
-    CHECK(fix.session.traceLive());
-    fix.session.syncBorder(false);
-    REQUIRE(regionOverlayStubs().border);
-    CHECK(regionOverlayStubs().border->binding == RegionBinding::Face);
-    CHECK(regionOverlayStubs().border->region == output.region);
-    CHECK_FALSE(fix.session.acceptReading(output, fix.settings.enabledScopes));
 }
 
-TEST_CASE("Suppressed scope output hides the border before its tracking update is consumed", "[face-loss-reading]")
+TEST_CASE("Worker suppression and its consumed terminal update clear the same reading", "[face-loss-reading]")
 {
     FaceSessionFixture fix;
     fix.selectFace();
-    AnalysisWorker::Output accepted;
-    uint64_t acceptedVersion = 0;
-    REQUIRE(fix.worker.fetchOutput(acceptedVersion, accepted, fix.settings.selectionRevision));
-    REQUIRE_FALSE(accepted.suppressed);
-    REQUIRE(accepted.region);
     desktopStubs().sessionDetection = {};
     desktopStubs().faces.clear();
     fix.publish(3);
     (void)fix.follow();
     REQUIRE(fix.session.traceLive());
-    REQUIRE(regionOverlayStubs().border);
     fix.trackingSeconds += 1.0;
     fix.publish(4);
     AnalysisWorker::Output output;
     uint64_t seen = 0;
     REQUIRE(fix.worker.fetchOutput(seen, output, fix.settings.selectionRevision));
     REQUIRE(output.suppressed);
-    REQUIRE(output.readingGeneration == accepted.readingGeneration);
-    // The scope slot and tracking slot are consumed independently. The
-    // application checks reading visibility as soon as it gets scope output.
-    REQUIRE(fix.session.traceLive());
-    (void)fix.session.acceptReading(output, fix.settings.enabledScopes);
+    CHECK_FALSE(output.region);
+    CHECK(output.images.empty());
+    // The app reconciles the tracking slot as soon as suppression arrives,
+    // before drawing the frame that clears the scopes.
+    const auto ended = fix.follow();
+    CHECK(ended.regionChanged);
+    CHECK_FALSE(ended.region);
     CHECK_FALSE(fix.session.traceLive());
-    CHECK(fix.session.searchingForFace());
-    fix.session.syncBorder(false);
+    CHECK_FALSE(fix.session.faceLocked());
+    CHECK_FALSE(fix.session.attachments().isAttached(Window));
     CHECK_FALSE(regionOverlayStubs().border);
-    // Progress still describes the earlier complete reading. The completed
-    // suppression itself must make that generation ineligible for restoration.
-    CHECK_FALSE(fix.session.acceptReading(accepted, fix.settings.enabledScopes));
-    CHECK_FALSE(fix.session.traceLive());
-    fix.session.syncBorder(false);
-    CHECK_FALSE(regionOverlayStubs().border);
-    (void)fix.follow();
-    CHECK_FALSE(fix.session.traceLive());
-    CHECK(fix.session.faceLocked());
-    CHECK(fix.session.attachments().isAttached(Window));
+    CHECK_FALSE(fix.worker.fetchOutput(seen, output, fix.settings.selectionRevision));
 }
 
-TEST_CASE("A new face preview remains live while the previous face is searching", "[face-loss-reading]")
+TEST_CASE("A new face preview works after tracking stops and cancel restores the empty state", "[face-loss-reading]")
 {
     FaceSessionFixture fix;
     fix.selectFace();
     desktopStubs().sessionDetection = {};
     desktopStubs().faces.clear();
     fix.publish(3);
-    const auto held = fix.follow();
-    REQUIRE(held.region);
+    (void)fix.follow();
     fix.trackingSeconds += 1.0;
     (void)fix.follow();
-    REQUIRE(fix.session.searchingForFace());
-    REQUIRE_FALSE(fix.session.traceLive());
-    fix.worker.pump();
-    AnalysisWorker::Output output;
-    uint64_t seen = 0;
-    REQUIRE(fix.worker.fetchOutput(seen, output, fix.settings.selectionRevision));
-    REQUIRE(output.suppressed);
-
+    REQUIRE(fix.session.faceTrackingStopped());
     desktopStubs().faces = {{300, 100, 100, 100}};
     fix.open();
     REQUIRE(regionOverlayStubs().lastDisplays[0].faces.size() == 1);
     const auto preview = regionOverlayStubs().lastDisplays[0].faces[0].region;
-    REQUIRE(preview != held.region);
     regionOverlayStubs().poll.active = true;
     regionOverlayStubs().poll.displayId = Display;
     regionOverlayStubs().poll.preview = preview;
     const auto outcome = fix.session.poll(false, fix.frameSize, {});
     REQUIRE(outcome.region == preview);
-    REQUIRE(fix.session.picker().active());
     CHECK(fix.session.traceLive());
-    fix.settings.region = outcome.region;
-    fix.settings.selectionRevision = outcome.selectionRevision;
-    fix.worker.updateSettings(fix.settings);
-    fix.worker.pump();
-    REQUIRE(fix.worker.fetchOutput(seen, output, fix.settings.selectionRevision));
-    CHECK_FALSE(output.suppressed);
-    CHECK(output.region == preview);
-    REQUIRE(output.images.contains("org.sidescopes.histogram"));
-    CHECK_FALSE(output.images.at("org.sidescopes.histogram").rgba.empty());
-    (void)fix.session.acceptReading(output, fix.settings.enabledScopes);
-    CHECK(fix.session.traceLive());
-
-    regionOverlayStubs().poll = {};
-    const auto cancelled = fix.session.cancel();
-    CHECK(cancelled.region == held.region);
-    CHECK(fix.session.faceLocked());
-    CHECK(fix.session.attachments().isAttached(Window));
-    CHECK(fix.session.searchingForFace());
-    CHECK_FALSE(fix.session.traceLive());
-    CHECK_FALSE(regionOverlayStubs().border);
-    CHECK_FALSE(fix.session.acceptReading(output, fix.settings.enabledScopes));
-    CHECK_FALSE(fix.session.traceLive());
+    CHECK_FALSE(fix.session.faceTrackingStopped());
+    SECTION("Cancel")
+    {
+        regionOverlayStubs().poll = {};
+        const auto cancelled = fix.session.cancel();
+        CHECK_FALSE(cancelled.region);
+        CHECK_FALSE(fix.session.faceLocked());
+        CHECK_FALSE(fix.session.attachments().isAttached(Window));
+        CHECK(fix.session.faceTrackingStopped());
+        CHECK_FALSE(fix.session.traceLive());
+        CHECK_FALSE(regionOverlayStubs().border);
+    }
+    SECTION("Confirm")
+    {
+        REQUIRE(fix.confirm(Display, preview).region == preview);
+        CHECK_FALSE(fix.session.faceTrackingStopped());
+        CHECK(fix.session.faceLocked());
+        CHECK(fix.session.attachments().isAttached(Window));
+    }
 }
 
 TEST_CASE("A stale face confirmation restores the committed crop before replacing capture")
@@ -507,7 +424,7 @@ TEST_CASE("Snapshot face selection is mapped to live pixels and automatic motion
     CHECK(output.frameStamp.captureEpoch == selectedEpoch);
 }
 
-TEST_CASE("An impossible face nomination retires to the ordinary mapped attachment")
+TEST_CASE("An impossible face nomination removes the unusable face region")
 {
     FaceSessionFixture fix;
     desktopStubs().windowGeometry = WindowGeometry{240, 50, 20, 200, false, "Narrow window"};
@@ -522,10 +439,9 @@ TEST_CASE("An impossible face nomination retires to the ordinary mapped attachme
     fix.publish(2);
     const auto ordinary = fix.follow();
     CHECK_FALSE(fix.session.faceLocked());
-    CHECK(fix.session.attachments().isAttached(Window));
-    CHECK(ordinary.region == picked.region);
-    CHECK(ordinary.region->leftPercent >= 24.0);
-    CHECK(ordinary.region->rightPercent <= 26.0);
+    CHECK_FALSE(fix.session.attachments().isAttached(Window));
+    CHECK_FALSE(ordinary.region);
+    CHECK(fix.session.faceTrackingStopped());
 }
 
 TEST_CASE("A face selection survives animated minimization and an empty cancelled picker")
@@ -867,6 +783,85 @@ TEST_CASE("A region session releases native callbacks when destroyed")
     }
     CHECK(desktopStubs().watchedWindow == 0);
     CHECK_FALSE(desktopStubs().windowMotion);
+}
+
+TEST_CASE("Closing a region removes its selection without recreating the startup region")
+{
+    SessionFixture fix;
+    SECTION("Global startup region")
+    {
+        (void)fix.session.initializeGlobalRegion({20, 20, 60, 60});
+    }
+    SECTION("Attached region")
+    {
+        REQUIRE(fix.pickWindow().region);
+        (void)fix.session.follow(false, {});
+    }
+    regionOverlayStubs().borderEdit.closed = true;
+    const auto closed = fix.session.pollBorder();
+    regionOverlayStubs().borderEdit = {};
+    CHECK(closed.regionChanged);
+    CHECK_FALSE(closed.region);
+    CHECK_FALSE(fix.session.attachments().attached());
+    CHECK_FALSE(fix.session.faceTrackingStopped());
+    CHECK_FALSE(regionOverlayStubs().border);
+    CHECK_FALSE(fix.session.follow(false, {}).region);
+    CHECK_FALSE(fix.session.poll(false, {}, {}).region);
+}
+
+TEST_CASE("Closing one region preserves other windows while explicit clear removes them all")
+{
+    SessionFixture fix;
+    const auto first = fix.pickWindow();
+    REQUIRE(first.region);
+    constexpr uint64_t SecondWindow = Window + 1;
+    desktopStubs().onScreenWindows.front().windowIdentity = SecondWindow;
+    desktopStubs().focusedWindow = SecondWindow;
+    REQUIRE(fix.pickWindow().region);
+    (void)fix.session.follow(false, {});
+    REQUIRE(fix.session.attachments().attachedCount() == 2);
+    SECTION("Close the current border")
+    {
+        regionOverlayStubs().borderEdit.closed = true;
+        CHECK_FALSE(fix.session.pollBorder().region);
+        regionOverlayStubs().borderEdit = {};
+        CHECK(fix.session.attachments().isAttached(Window));
+        CHECK_FALSE(fix.session.attachments().isAttached(SecondWindow));
+        desktopStubs().focusedWindow = Window;
+        CHECK(fix.session.follow(false, {}).region == first.region);
+    }
+    SECTION("Clear all selections")
+    {
+        const auto cleared = fix.session.clear();
+        CHECK(cleared.regionChanged);
+        CHECK_FALSE(cleared.region);
+        CHECK_FALSE(fix.session.attachments().attached());
+        CHECK_FALSE(fix.session.follow(false, {}).region);
+    }
+}
+
+TEST_CASE("Closing a face region invalidates an in-flight detection immediately")
+{
+    FaceSessionFixture fix;
+    fix.selectFace();
+    const auto revision = fix.settings.selectionRevision;
+    desktopStubs().beforeDetection = [&] {
+        regionOverlayStubs().borderEdit.closed = true;
+        const auto closed = fix.session.pollBorder();
+        regionOverlayStubs().borderEdit = {};
+        REQUIRE_FALSE(closed.region);
+        (void)fix.follow();
+    };
+    fix.publish(3);
+    desktopStubs().beforeDetection = {};
+    CHECK(fix.settings.selectionRevision > revision);
+    CHECK_FALSE(fix.session.faceLocked());
+    CHECK_FALSE(fix.session.faceTrackingStopped());
+    CHECK_FALSE(fix.session.attachments().attached());
+    AnalysisWorker::Output output;
+    uint64_t seen = 0;
+    CHECK_FALSE(fix.worker.fetchOutput(seen, output, fix.settings.selectionRevision));
+    CHECK_FALSE(fix.follow().region);
 }
 
 TEST_CASE("Cancellation with no picker keeps the committed attachment")

@@ -29,12 +29,13 @@ the shortcuts were pressed.
 | A | Select or draw a window-attached region |
 | D | Draw or replace the global region |
 | F | Select a detected face |
-| Escape | Cancel the picker or close Settings |
+| Escape | Close Settings, cancel the picker, or clear regions |
 
 While a region picker is open, A, D, and F switch its mode without closing it.
 Escape closes the Settings window first when that window is open; otherwise it
-cancels the active picker and restores the committed selection. Outside a
-picker it leaves the region unchanged.
+cancels the active picker and restores the committed selection. With neither
+open, it clears the global region and all saved window-attached regions.
+The browser Lab follows the same cancel-then-clear behavior for its region.
 
 On the desktop border, drag the striped band to move the region, drag a corner
 to resize it, or drag an edge midpoint to move one edge.

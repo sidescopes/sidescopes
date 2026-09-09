@@ -350,6 +350,21 @@ face_tracking::Decision FaceTrackingWorker::detect(const FrameView& frame, const
     return policy.advance(stamp, m_clock(), statusOf(detected.status), boxes);
 }
 
+face_tracking::Decision FaceTrackingWorker::observe(const FrameRegionRequest& request,
+                                                    const FaceTrackingCommand& command, PolicyState& state, double now)
+{
+    // Expiry precedes costly native work even when capture supplies a fresh
+    // frame. advance() checks the same deadline again after detection returns.
+    if (!state.policy) {
+        return {};
+    }
+    const auto decision = state.policy->tick(contextOf(command), now);
+    if (request.freshFrame && decision.following && decision.action != Action::Ignored) {
+        return detect(request.frame, command, state);
+    }
+    return decision;
+}
+
 FrameRegionResolution FaceTrackingWorker::resolve(const FrameRegionRequest& request)
 {
     using Mode = FrameRegionResolution::Mode;
@@ -380,13 +395,7 @@ FrameRegionResolution FaceTrackingWorker::resolve(const FrameRegionRequest& requ
     if (!std::isfinite(now) || now < request.frame.stamp.receivedSeconds) {
         return {Mode::Skip, {}, request.selectionRevision};
     }
-    auto& policy = *candidate.policy;
-    auto decision = policy.current();
-    if (request.freshFrame) {
-        decision = detect(request.frame, command, candidate);
-    } else {
-        decision = policy.tick(contextOf(command), now);
-    }
+    const auto decision = observe(request, command, candidate, now);
     const auto resolution = publishResolution(request, command, stabilize(command, decision, candidate));
     if (resolution.mode == Mode::Override || resolution.mode == Mode::Suppress) {
         current = std::move(candidate);
@@ -438,7 +447,7 @@ FrameRegionResolution FaceTrackingWorker::publishResolution(const FrameRegionReq
             static_cast<unsigned long long>(command.revision), request.frame.stamp.receivedSeconds, m_clock(),
             request.freshFrame ? 1 : 0, region.leftPercent, region.topPercent, region.rightPercent,
             region.bottomPercent);
-    return {decision.action == Action::Searching ? Mode::Suppress : Mode::Override, region, request.selectionRevision,
+    return {!decision.following ? Mode::Suppress : Mode::Override, region, request.selectionRevision,
             decision.readingGeneration};
 }
 
