@@ -254,25 +254,12 @@ TEST_CASE("Only a marker that moves counts as interaction")
     CHECK(fix.sampler.update(FrameSize, WholeDisplay, Instant, 1.3, 1.0f / 60.0f).changed);
 }
 
-TEST_CASE("An idle readout notices changed pixels while scope output is suppressed")
+TEST_CASE("An idle readout notices changed pixels without an analysis region")
 {
     SamplerFixture fix;
-    fix.worker.stop();
-    fix.worker.setFrameRegionResolverFactory([] {
-        return [](const FrameRegionRequest& request) {
-            return FrameRegionResolution{FrameRegionResolution::Mode::Suppress, {}, request.selectionRevision, 7};
-        };
-    });
-    AnalysisSettings settings;
-    settings.region = WholeDisplay;
-    settings.selectionRevision = 1;
-    fix.worker.updateSettings(settings);
-    fix.worker.start();
-    publishAndAwait(fix, makeSolidFrameBuffer(64, 64, Color{200, 50, 30}, 2));
     AnalysisWorker::Output output;
     uint64_t seen = 0;
-    REQUIRE(fix.worker.fetchOutput(seen, output));
-    REQUIRE(output.suppressed);
+    REQUIRE_FALSE(fix.worker.fetchOutput(seen, output));
     desktopStubs().cursor = DesktopPoint{32.0, 32.0};
     desktopStubs().cursorDisplay = StreamedDisplay;
 

@@ -12,8 +12,10 @@ plugin or a supported-application list.
 ## Application
 
 Select a rectangle anywhere on screen, attach a region to a window, or use face
-selection where the platform supports it. The desktop border can move and
-resize the active region while the scopes update.
+selection to place a window-attached region over a detected face. Face selection
+sets the initial rectangle; it stays fixed within the window as the image or
+video changes. The desktop border can move and resize the active region while
+the scopes update.
 
 Any combination of instruments can share the application window. Layouts can
 be reordered, divided horizontally or vertically, and saved in nine preset
@@ -93,9 +95,8 @@ by that license and may not identify a modified version; see
 [assets/brand](assets/brand).
 
 Bundled components include Dear ImGui (MIT), GLFW (zlib), NanoSVG (zlib),
-and Lucide icons (ISC). Windows face detection includes OpenCV (Apache 2.0),
-YuNet (MIT), protobuf (BSD), and zlib. The Lab also includes Inter and Roboto
-Mono (OFL).
+and Lucide icons (ISC). Face selection uses the operating system's built-in
+detector on macOS and Windows. The Lab also includes Inter and Roboto Mono (OFL).
 Desktop builds embed the complete notices, available offline under
 **About → Licenses**. The Windows download contains a single executable;
 the Mac download contains one application bundle. The Lab includes its

@@ -10,11 +10,6 @@ FrameWaitDecision frameWaitFor(const FramePacingInputs& inputs)
         return FrameWaitDecision{FrameWait::FollowInteraction, 0.0};
     }
 
-    if (inputs.borderAnimating) {
-        const double due = inputs.lastFrameStart + BorderAnimationSeconds;
-        return FrameWaitDecision{FrameWait::None, due > inputs.now ? due - inputs.now : 0.0};
-    }
-
     const bool moving = inputs.now - inputs.lastActivity <= IdleAfterSeconds;
     const bool following = inputs.now - inputs.lastReadoutActivity <= IdleAfterSeconds ||
                            inputs.now - inputs.lastPointerMove <= IdleAfterSeconds;
@@ -37,7 +32,7 @@ bool frameWorthDrawing(const RedrawInputs& inputs)
     // hand is followed at the pointer's rate, which would otherwise redraw the
     // window a hundred times a second. What the hand is watching is the border,
     // and no frame of this window draws that.
-    if ((inputs.regionInteracting || inputs.borderAnimating) && inputs.now - inputs.lastDrawn < ContentRedrawSeconds) {
+    if (inputs.regionInteracting && inputs.now - inputs.lastDrawn < ContentRedrawSeconds) {
         return false;
     }
     // The picture is already different from the one on screen.
@@ -106,10 +101,9 @@ void FrameClocks::notePointerMove(double now)
     m_lastPointerMove = now;
 }
 
-void FrameClocks::notePumpReturned(double now, bool borderAnimationTick)
+void FrameClocks::notePumpReturned(double now)
 {
     m_lastFrameStart = now;
-    m_borderAnimationTick = borderAnimationTick;
 }
 
 void FrameClocks::noteFrameBegun(double now)
@@ -130,11 +124,10 @@ void FrameClocks::noteOutputPublished()
     m_outputPending.store(true);
 }
 
-FramePacingInputs FrameClocks::pacingInputs(double now, bool attached, bool pickerActive, bool regionInteracting,
-                                            bool borderAnimating) const
+FramePacingInputs FrameClocks::pacingInputs(double now, bool attached, bool pickerActive, bool regionInteracting) const
 {
     return FramePacingInputs{now,      m_lastActivity, m_lastReadoutActivity, m_lastPointerMove, m_lastFrameStart,
-                             attached, pickerActive,   regionInteracting,     borderAnimating};
+                             attached, pickerActive,   regionInteracting};
 }
 
 RedrawInputs FrameClocks::redrawInputs(const RedrawSignals& signals, double now) const
@@ -154,7 +147,6 @@ RedrawInputs FrameClocks::redrawInputs(const RedrawSignals& signals, double now)
         signals.framebufferWidth != m_drawnFramebufferWidth || signals.framebufferHeight != m_drawnFramebufferHeight;
     inputs.statusChanged = signals.captureStatus != m_drawnCaptureStatus;
     inputs.regionInteracting = signals.regionInteracting;
-    inputs.borderAnimating = signals.borderAnimating || m_borderAnimationTick;
 
     return inputs;
 }

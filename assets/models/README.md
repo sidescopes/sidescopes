@@ -6,7 +6,7 @@
 Its SHA-256 is
 `8f2383e4dd3cfbb4553ea8718107fc0423210dc964f9f4280604804ed2552fa4`.
 
-The Windows build verifies these bytes and embeds them in the executable.
-Detection runs locally; the application does not download models or send
-captured images elsewhere. The MIT license is in
-[licenses/YuNet.txt](../../licenses/YuNet.txt).
+The optional Linux face-network test backend verifies these bytes and embeds
+them in its test binary. Detection runs locally. The macOS and Windows
+applications use native detectors and do not bundle this model. The
+[MIT license](../../licenses/YuNet.txt) accompanies the model.

@@ -5,8 +5,9 @@ the window, one pane per instrument. Use the scope selector to choose and order
 them, or use the keyboard shortcuts.
 
 The plots analyze only the selected screen region. With no region selected,
-their graticules remain visible but their traces are empty. The pointer readout
-and markers can still sample a color anywhere on screen.
+their graticules and pinned markers remain visible, while traces and live
+pointer markers are hidden. The pointer readout and Color Picker can still
+sample a color anywhere on screen.
 
 All levels are derived from the captured desktop pixels. SideScopes does not
 have access to a source file, timeline, document profile, or signal before the
@@ -179,8 +180,9 @@ colors, sample area, viewing conditions, and task.
 
 The color under the pointer is marked on every visible compatible scope: its
 chroma position in Vectorscope, channel or luma level in Waveform, Luma
-Waveform, and RGB Parade, and bin in Histogram. Markers work with or without
-an analysis region.
+Waveform, and RGB Parade, and bin in Histogram. Live markers appear while a
+region is selected and can follow colors anywhere on screen. Pinned markers
+remain visible without an analysis region.
 
 ![The same live pointer sample marked on Vectorscope and Waveform.](https://media.sidescopes.org/shots/markers-live.png)
 

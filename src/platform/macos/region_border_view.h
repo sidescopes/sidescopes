@@ -63,9 +63,9 @@ extern RegionOfInterest g_borderEditRegion;
 @property(nonatomic, assign) NSRect dragStartRegion;  // global screen coords
 @property(nonatomic, assign) BOOL closePressed;
 @property(nonatomic, assign) BOOL bindingPressed;
-// How the outlined region is bound: picks the control's face, pin, or pin-off
-// glyph without putting mode text into the title.
-@property(nonatomic, assign) sidescopes::RegionBinding regionBinding;
+// The outlined region's kind selects the pin or pin-off glyph without
+// putting mode text into the title.
+@property(nonatomic, assign) sidescopes::RegionKind regionKind;
 // The active window or display name, worn as a small tab above the band.
 @property(nonatomic, copy) NSString* borderLabel;
 // Extra top strip carrying the attached label, zero when unattached; the

@@ -61,11 +61,7 @@ void everyNoticeCanBeReadAndCopied(ImGuiTestContext* ctx)
 {
     openReader(ctx);
     const auto notices = licenseNotices();
-#ifdef _WIN32
-    IM_CHECK_EQ(notices.size(), 15U);
-#else
     IM_CHECK_EQ(notices.size(), 10U);
-#endif
     IM_CHECK(std::string_view(notices.front().name) == "SideScopes");
     IM_CHECK_GT(notices.front().text.size(), 30000U);
     IM_CHECK(notices.front().text.find("How to Apply These Terms to Your New Programs") != std::string_view::npos);

@@ -1,4 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <chrono>
 #include <cstddef>
@@ -171,21 +172,22 @@ TEST_CASE("A preview on another display is not fed to the scopes")
 TEST_CASE("A confirmed draw poll returns the confirmed region and mode")
 {
     PickerFixture fix;
+    const auto mode =
+        GENERATE(RegionPickerMode::DrawGlobal, RegionPickerMode::AttachWindow, RegionPickerMode::AttachFace);
 
     RegionPickPoll poll;
     poll.finished = true;
     poll.displayId = StreamedDisplay;
     poll.confirmed = RegionOfInterest{5.0, 6.0, 55.0, 66.0};
-    poll.attachesToWindow = true;
+    poll.mode = mode;
     const RegionPickOutcome outcome = fix.picker.processPoll(poll, std::nullopt, std::nullopt);
 
     REQUIRE(outcome.confirmed.has_value());
     CHECK_THAT(outcome.confirmed->region.leftPercent, WithinAbs(5.0, 1e-9));
     CHECK_THAT(outcome.confirmed->region.rightPercent, WithinAbs(55.0, 1e-9));
     CHECK(outcome.confirmed->displayId == StreamedDisplay);
-    // The in-attach-mode flag rides through so the host knows a rectangle may
-    // bind to the window under it.
-    CHECK(outcome.confirmed->attachesToWindow);
+    // The finishing mode identifies the intended tool to the host.
+    CHECK(outcome.confirmed->mode == mode);
     CHECK(outcome.ended);
     CHECK_FALSE(outcome.cancelled);
     CHECK_FALSE(fix.picker.active());
@@ -307,7 +309,7 @@ TEST_CASE("A pin poll returns the sampled colour for the host to pin")
 
     RegionPickPoll poll;
     poll.active = true;
-    poll.pinMode = true;
+    poll.mode = RegionPickerMode::PinColor;
     poll.displayId = StreamedDisplay;
     poll.pinnedPoint = DisplayPoint{50.0, 50.0};  // the frame centre
     const RegionPickOutcome outcome = fix.picker.processPoll(poll, frameSize, std::nullopt);
@@ -335,7 +337,7 @@ TEST_CASE("A dragged pin averages only the rectangle it covered")
 
     RegionPickPoll poll;
     poll.active = true;
-    poll.pinMode = true;
+    poll.mode = RegionPickerMode::PinColor;
     poll.displayId = StreamedDisplay;
     poll.pinnedSample = RegionOfInterest{50.0, 0.0, 100.0, 100.0};
     const RegionPickOutcome white = fix.picker.processPoll(poll, frameSize, std::nullopt);
@@ -366,7 +368,7 @@ TEST_CASE("A pin drag that covers no pixels pins nothing")
 
     RegionPickPoll poll;
     poll.active = true;
-    poll.pinMode = true;
+    poll.mode = RegionPickerMode::PinColor;
     poll.displayId = StreamedDisplay;
     poll.pinnedSample = RegionOfInterest{40.0, 40.0, 40.0, 60.0};  // no width
     const RegionPickOutcome outcome = fix.picker.processPoll(poll, frameSize, std::nullopt);
@@ -390,7 +392,7 @@ TEST_CASE("A pin on another display takes the cross-display sample")
 
     RegionPickPoll poll;
     poll.active = true;
-    poll.pinMode = true;
+    poll.mode = RegionPickerMode::PinColor;
     poll.displayId = StreamedDisplay + 1;
     poll.pinnedPoint = DisplayPoint{50.0, 50.0};
     const FloatColor elsewhere{11.0f, 22.0f, 33.0f};
@@ -413,7 +415,7 @@ TEST_CASE("A plain pin ends the errand and a kept-open one does not")
 
     RegionPickPoll poll;
     poll.active = true;
-    poll.pinMode = true;
+    poll.mode = RegionPickerMode::PinColor;
     poll.displayId = StreamedDisplay;
     poll.pinnedPoint = DisplayPoint{50.0, 50.0};
     poll.pinnedKeepOpen = true;
@@ -438,7 +440,7 @@ TEST_CASE("The pin tool closing ends the pick without touching the region")
     // Escape on the pin overlay: the errand is over, and the region the scopes
     // were reading is left exactly as it was.
     RegionPickPoll poll;
-    poll.pinMode = true;
+    poll.mode = RegionPickerMode::PinColor;
     poll.finished = true;
     poll.displayId = StreamedDisplay;
     const RegionPickOutcome outcome = fix.picker.processPoll(poll, frameSize, std::nullopt);
@@ -531,13 +533,11 @@ TEST_CASE("The streamed display's faces open with the picker as candidates")
     CHECK(regionOverlayStubs().lastDisplays[0].facesScanned);
     CHECK_THAT(regionOverlayStubs().lastDisplays[0].faces[0].region.leftPercent, WithinAbs(26.25, 1e-9));
 
-    // Confirming that suggestion resolves back to the detector's own box, which
-    // is what a face lock anchors on.
+    // Confirmation resolves the selected crop and its source display.
     const FaceCandidate* candidate =
         fix.picker.matchFaceCandidate(StreamedDisplay, regionOverlayStubs().lastDisplays[0].faces[0].region);
     REQUIRE(candidate != nullptr);
-    CHECK(candidate->box.x == 160);
-    CHECK(candidate->box.width == 80);
+    CHECK(candidate->region == regionOverlayStubs().lastDisplays[0].faces[0].region);
     CHECK(candidate->frameWidth == 640);
 
     // A rectangle nowhere near a face resolves to none.
@@ -783,7 +783,7 @@ TEST_CASE("The pin chip previews the colour under the cursor")
 
     RegionPickPoll poll;
     poll.active = true;
-    poll.pinMode = true;
+    poll.mode = RegionPickerMode::PinColor;
     poll.displayId = StreamedDisplay;
 
     // On the captured display the chip is the frame's own pixel under the

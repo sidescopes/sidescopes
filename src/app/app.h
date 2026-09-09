@@ -144,8 +144,6 @@ private:
     /// graphics driver's per-process render arena resident, and it releases
     /// most of it about a second after the last one.
     void drawFrame(int framebufferWidth, int framebufferHeight);
-    /// Consume a terminal face result before drawing its withdrawn scopes.
-    void syncRegionReading();
     /// Whether the user is drawing or dragging the region itself, which takes
     /// the loop off its frame period so the border can follow their hand.
     [[nodiscard]] bool regionInteracting() const;

@@ -1,12 +1,9 @@
 #pragma once
 
 #include <cstdint>
-#include <functional>
 #include <optional>
 #include <string>
-#include <tuple>
 
-#include "app/region_border_motion.h"
 #include "core/analysis_worker.h"
 #include "core/region_kind.h"
 
@@ -14,7 +11,6 @@ namespace sidescopes {
 
 class AttachController;
 class CaptureController;
-class FaceLockController;
 class RegionPicker;
 
 /// @return The kind of the region the scopes are reading right now: the
@@ -23,11 +19,6 @@ class RegionPicker;
 ///         whether ANY window holds a region - an attached window that is
 ///         not focused leaves the global kind in effect.
 [[nodiscard]] RegionKind regionKind(uint64_t activeWindowIdentity);
-
-/// @return The binding state the active border should communicate. A face
-///         lock refines an attached region; with no active attached window,
-///         the global state wins even if another window retains a lock.
-[[nodiscard]] RegionBinding regionBinding(uint64_t activeWindowIdentity, bool faceLocked);
 
 /// What a region decision asks of the host. The coordinator owns the global
 /// region, but neither the analysis settings the worker reads nor the clock
@@ -74,8 +65,8 @@ struct RegionBorderState
 /// the global border wears, and which region a border drag in flight began
 /// on. It keeps the region border in step with what the scopes read. Regions
 /// are host-wide rather than per-surface state, which is why this sits beside
-/// the scope view rather than inside it. It reads the attach, capture, picker
-/// and face-lock controllers it is constructed with and drives the platform
+/// the scope view rather than inside it. It reads the attach, capture and
+/// picker controllers it is constructed with and drives the platform
 /// border seams directly; what it cannot carry out itself travels back as a
 /// RegionOutcome the host applies.
 class RegionCoordinator
@@ -83,13 +74,11 @@ class RegionCoordinator
 public:
     /// @p attach holds the attached windows and lets them go, @p capture
     /// names the captured display the border is drawn on, @p picker says
-    /// whether a pick is in flight, @p faceLock whether a locked face is
-    /// unverified or its content unsettled, and @p region is the region the
+    /// whether a pick is in flight, and @p region is the region the
     /// scopes are reading right now, empty for none. All must outlive the
     /// coordinator.
     RegionCoordinator(AttachController& attach, const CaptureController& capture, RegionPicker& picker,
-                      FaceLockController& faceLock, const std::optional<RegionOfInterest>& region,
-                      std::function<double()> clock = frameClockSeconds);
+                      const std::optional<RegionOfInterest>& region);
 
     /// @return The global region - the one bound to no window, which the
     ///         analysis falls back to whenever no attached window is active -
@@ -110,10 +99,8 @@ public:
     /// global region alike - leaving the scopes reading nothing.
     [[nodiscard]] RegionOutcome clearRegion();
 
-    /// Reconciles the border with the selection. Face motion animates only
-    /// its presentation; analysis keeps the latest accepted crop immediately.
+    /// Reconciles the border with the selection the scopes are reading.
     void syncBorder(const RegionBorderState& state);
-    [[nodiscard]] bool borderAnimating() const;
 
     /// One poll of the live region border, whose edges, corners, and move tab
     /// adjust the region it outlines. @p activeWindowIdentity is the focused
@@ -133,14 +120,7 @@ private:
     AttachController& m_attach;
     const CaptureController& m_capture;
     RegionPicker& m_picker;
-    FaceLockController& m_faceLock;
     const std::optional<RegionOfInterest>& m_region;
-    std::function<double()> m_clock;
-    RegionBorderMotion m_borderMotion;
-    std::optional<RegionOfInterest> m_presentedRegion;
-    // Display, physical stream, window and selection: never interpolate
-    // across a different coordinate system or a manual selection.
-    std::tuple<uint32_t, uint64_t, uint64_t, uint64_t, RegionBinding> m_motionContext{};
 
     std::optional<RegionOfInterest> m_globalRegion;
 

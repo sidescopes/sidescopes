@@ -36,15 +36,10 @@ TEST_CASE("A settled region narrows the capture to itself")
 TEST_CASE("Anything that reads outside the region keeps the whole display")
 {
     // The picker scans displays for windows and faces, and averages a dragged
-    // pin's area, all of which can land anywhere; a face lock's probe reads the
-    // active window's rectangle, which is not the analysis region.
+    // pin's area, all of which can land anywhere.
     CropInputs picker = settledCanvas();
     picker.pickerActive = true;
     CHECK_FALSE(cropFor(picker).has_value());
-
-    CropInputs faces = settledCanvas();
-    faces.faceLockActive = true;
-    CHECK_FALSE(cropFor(faces).has_value());
 }
 
 TEST_CASE("A region still moving is not narrowed to")

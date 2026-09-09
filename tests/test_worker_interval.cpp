@@ -1,13 +1,16 @@
+#include <array>
 #include <catch2/catch_test_macros.hpp>
 #include <chrono>
 #include <condition_variable>
 #include <cstdint>
 #include <exception>
+#include <functional>
 #include <mutex>
 #include <thread>
 
 #include "../bench/worker_interval.h"
 #include "core/analysis_worker.h"
+#include "modules/module_registry.h"
 #include "test_frame.h"
 
 namespace sidescopes {
@@ -15,7 +18,40 @@ namespace {
 
 using Clock = std::chrono::steady_clock;
 using namespace std::chrono_literals;
-constexpr char ScopeId[] = "org.sidescopes.vectorscope";
+constexpr char ScopeId[] = "com.example.worker.interval";
+constexpr SsScopeDescriptor Descriptor{ScopeId, "Interval", 'X', 0, 0, 0, nullptr, 0, 1.0f};
+
+struct BlockingScope
+{
+    SsScopeInstance api{};
+    std::array<uint8_t, 4> pixel{100, 50, 20, 255};
+    std::function<void()> onAccumulate;
+};
+
+BlockingScope* g_scope = nullptr;
+
+SsScopeInstance* createScope(const char*, const SsHost*)
+{
+    auto& scope = *g_scope;
+    scope.api.instance_data = &scope;
+    scope.api.configure = [](SsScopeInstance*, const SsParamValue*, uint32_t) { return true; };
+    scope.api.accumulate = [](SsScopeInstance* instance, const SsFrameView*, SsRect) {
+        static_cast<BlockingScope*>(instance->instance_data)->onAccumulate();
+        return true;
+    };
+    scope.api.image = [](const SsScopeInstance* instance) {
+        return SsImageView{static_cast<const BlockingScope*>(instance->instance_data)->pixel.data(), 1, 1, 1};
+    };
+    scope.api.graticule = [](const SsScopeInstance*, SsGraticulePrimitive*, uint32_t) { return 0u; };
+    scope.api.markers = [](const SsScopeInstance*, SsColor, SsMarker*, uint32_t) { return 0u; };
+    scope.api.get_extension = [](const SsScopeInstance*, const char*) -> const void* { return nullptr; };
+    scope.api.destroy = [](SsScopeInstance*) {};
+    return &scope.api;
+}
+
+const SsModuleEntry Entry{SS_ABI_MAJOR, SS_ABI_MINOR,      [] { return true; },
+                          [] {},        [] { return 1u; }, [](uint32_t) { return &Descriptor; },
+                          createScope};
 
 struct HeldFrame
 {
@@ -30,9 +66,17 @@ struct HeldFrame
     Clock::time_point publishedAt;
     Clock::time_point endpoint;
     std::exception_ptr stopError;
+    BlockingScope scope;
+    ModuleRegistry registry;
     FrameMailbox mailbox;
-    AnalysisWorker worker{mailbox};
+    AnalysisWorker worker{mailbox, registry};
     std::thread stopper;
+
+    HeldFrame()
+    {
+        g_scope = &scope;
+        REQUIRE(registry.registerModule(Entry));
+    }
 
     ~HeldFrame()
     {
@@ -41,6 +85,7 @@ struct HeldFrame
             stopper.join();
         }
         worker.stop();
+        g_scope = nullptr;
     }
 
     void release()
@@ -56,17 +101,14 @@ struct HeldFrame
         settings.region = RegionOfInterest{};
         settings.enabledScopes = {ScopeId};
         worker.updateSettings(settings);
-        // Hold the real worker before hashing, built-in accumulation and
-        // publication, without replacing any scope or output implementation.
-        worker.setFrameRegionResolverFactory([this] {
-            return [this](const FrameRegionRequest& request) {
-                std::unique_lock lock(mutex);
-                entered = true;
-                changed.notify_all();
-                timedOut = !changed.wait_for(lock, 5s, [this] { return released; });
-                return FrameRegionResolution{FrameRegionResolution::Mode::Configured, {}, request.selectionRevision};
-            };
-        });
+        // Block one module's accumulation so the real worker publication is
+        // still in flight when shutdown begins.
+        scope.onAccumulate = [this] {
+            std::unique_lock lock(mutex);
+            entered = true;
+            changed.notify_all();
+            timedOut = !changed.wait_for(lock, 5s, [this] { return released; });
+        };
         worker.setOutputCallback([this] {
             std::lock_guard lock(mutex);
             ++publications;

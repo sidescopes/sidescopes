@@ -372,13 +372,14 @@ RegionPickPoll pollRegionPick()
         return poll;
     }
     poll.active = true;
-    // Mode flags come first: the finishing poll returns early below, and
-    // the caller needs them to know a pin-mode finish never means a
-    // region change. The pickers switch modes in lockstep; the front one
-    // speaks for all.
-    poll.pinMode = g_pickers.front()->pinMode;
-    poll.attachesToWindow =
-        !g_pickers.front()->pinMode && !g_pickers.front()->drawMode && !g_pickers.front()->facesMode;
+    // The mode comes first: the finishing poll returns early below, and the
+    // caller needs the confirmed tool even after its overlays are gone.
+    // The pickers switch modes in lockstep; the front one speaks for all.
+    const auto* front = g_pickers.front();
+    poll.mode = front->pinMode     ? RegionPickerMode::PinColor
+                : front->drawMode  ? RegionPickerMode::DrawGlobal
+                : front->facesMode ? RegionPickerMode::AttachFace
+                                   : RegionPickerMode::AttachWindow;
     collectPinnedSample(poll);
     refreshBannerExclusions();
     if (finishRegionPick(poll)) {
@@ -507,7 +508,7 @@ void presentBorderWindow(double scale, const std::wstring& label)
     // settles z-order and visibility.
     const bool repaint = width != g_border.paintedWidth || height != g_border.paintedHeight ||
                          scale != g_border.paintedScale || label != g_border.paintedLabel ||
-                         g_border.binding != g_border.paintedBinding || g_border.alpha != 255;
+                         g_border.kind != g_border.paintedKind || g_border.alpha != 255;
     SS_DIAG(Border, "present pos=%ld,%ld size=%dx%d repaint=%d alpha=%d", g_border.region.left - pad,
             g_border.region.top - pad - strip, width, height, repaint ? 1 : 0, static_cast<int>(g_border.alpha));
     if (repaint) {
@@ -518,7 +519,7 @@ void presentBorderWindow(double scale, const std::wstring& label)
 }
 
 void showRegionBorder(uint32_t displayId, const RegionOfInterest& region, const std::string& borderLabel,
-                      RegionBinding binding)
+                      RegionKind kind)
 {
     const auto geometry = geometryOfDisplay(displayId);
     if (!geometry) {
@@ -544,7 +545,7 @@ void showRegionBorder(uint32_t displayId, const RegionOfInterest& region, const 
     // lags the target, so the comparison is against the target.
     const bool visible = IsWindowVisible(g_border.window) != FALSE;
     if (visible && EqualRect(&wanted, &g_border.appearTarget) && label == g_border.borderLabel &&
-        binding == g_border.binding) {
+        kind == g_border.kind) {
         // Nothing to move or repaint, but the place in the z-order still
         // has to be claimed: it is the only thing another window can take
         // while the region itself stands still.
@@ -562,7 +563,7 @@ void showRegionBorder(uint32_t displayId, const RegionOfInterest& region, const 
     g_border.region = wanted;
     g_border.appearTarget = wanted;
     g_border.borderLabel = label;
-    g_border.binding = binding;
+    g_border.kind = kind;
 
     const double scale = uiScale(g_border.window);
     if (!visible) {

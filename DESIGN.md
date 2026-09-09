@@ -45,7 +45,7 @@ than answered from the wrong rectangle; but correctness never depends on the
 narrowing — the least capable backend defines the contract.
 
 The main application owns startup, the event loop, and shutdown. `RegionSession`
-owns region picking, window attachments, face tracking, and border state; it
+owns region picking, window attachments, and border state; it
 returns changes for the application to apply to capture and analysis. Scope
 layout, presets, color pins, and rendering have separate owners. Platform
 interfaces supply capture and desktop operations to these controllers.
@@ -86,16 +86,20 @@ Compatible scopes in one module share accumulated bins when their frame,
 region, sampling, and bin geometry agree. Each still composes its own image;
 shared state belongs to one host and owning thread.
 
-The density scopes accumulate samples into integer bins and build a display
-image per frame, normalized to the densest bin so sparse traces stay visible
-while dominant content dominates. Trace intensity is a single 0–100% control
-that is exponential in the underlying gain, so every step feels the same size;
-bin counts are normalized by sample count, which keeps intensity stable when
-the sampling stride changes. The histogram maps bar heights with a
-square-root curve instead, the way photo editors draw it. Display images are
-interpolated up from the accumulation grid rather than accumulated at display
-resolution, which keeps a large pane smooth without inventing detail the data
-does not contain.
+The density scopes accumulate samples into integer bins and map those counts
+to trace brightness. Waveform, Luma Waveform, and RGB Parade use a fixed
+density response: bright or dark content entering the region does not reset
+the brightness ceiling for the whole frame. Their banding correction still
+depends on region-wide statistics. Vectorscope normalizes its logarithmic
+response to the densest bin, then applies its configurable trace gamma.
+
+Trace intensity is a 0–100% control that is exponential in the underlying
+gain, so every step feels the same size. Sample-count normalization keeps
+intensity stable when the sampling stride changes. The histogram maps bar
+heights with a square-root curve instead, the way photo editors draw it.
+Display images are interpolated up from the accumulation grid rather than
+accumulated at display resolution, which keeps a large pane smooth without
+inventing detail the data does not contain.
 
 Every scope exposes one projection function mapping a color to scope
 coordinates. Graticule targets, the cursor marker, and pinned colors all go
@@ -120,14 +124,23 @@ region carries a live border on the desktop, drawn like a macOS screenshot
 selection, that moves and resizes in place without reopening the picker.
 
 Each launch creates a moderate square global region near the application.
-Escape clears it rather than restoring the starter selection: with nothing selected the scopes are empty by design,
-keeping their graticules while the marker and the color readout go on
-following the pointer, and the application captures and analyzes nothing at
-all. An empty scope is a state, not a fault.
+Escape clears it rather than restoring the starter selection. With nothing
+selected, the plots keep their graticules and pinned markers, but hide their
+traces and live pointer markers. The color readout and Color Picker keep
+following the pointer through off-stream sampling while continuous capture
+and scope analysis are suspended. An empty scope is a state, not a fault.
 
 The picker suggests only exact information — real window rectangles and
 detected faces — and leaves everything else to a manual draw, on the principle
 that an unreliable guess is worse than an honest selection.
+
+Face detection runs only for picker suggestions, using Vision on macOS and
+Windows Media FaceAnalysis `FaceDetector` on Windows. Choosing a face creates
+an ordinary window-attached region at the suggested rectangle. The region
+follows its parent window, while its position and size within that window stay
+fixed as the content changes. There is no separate face-region state or
+analysis-time detector. This keeps selection predictable and avoids a bundled
+inference library in desktop releases.
 
 Reference colors can be pinned on the vectorscope and the color picker for
 matching tones across photos. A dedicated pin tool turns the cursor into a

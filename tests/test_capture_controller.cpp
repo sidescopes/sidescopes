@@ -85,7 +85,7 @@ TEST_CASE("Replacement streams cannot reuse a previous frame's identity")
     CHECK(source.lastStartedDisplay == 9);
 }
 
-TEST_CASE("Healthy visibility pauses preserve source continuity across fresh stream epochs")
+TEST_CASE("Resuming after a visibility pause starts a fresh stream epoch")
 {
     FakeCaptureSource source;
     source.targets = {makeTarget(7, "primary")};
@@ -93,22 +93,19 @@ TEST_CASE("Healthy visibility pauses preserve source continuity across fresh str
     CaptureController controller(source, mailbox);
     REQUIRE(controller.requestPermission());
     REQUIRE(controller.start());
-    const auto continuity = controller.continuityGeneration();
-    REQUIRE(continuity != 0);
     auto epoch = controller.streamEpoch();
     for (int pause = 0; pause != 2; ++pause) {
         controller.suspend("waiting for the attached window");
         controller.resume();
         REQUIRE_FALSE(controller.dead());
         CHECK(controller.streamEpoch() > epoch);
-        CHECK(controller.continuityGeneration() == continuity);
         epoch = controller.streamEpoch();
     }
     REQUIRE(controller.start());
-    CHECK(controller.continuityGeneration() != continuity);
+    CHECK(controller.streamEpoch() > epoch);
 }
 
-TEST_CASE("A changed or failed source cannot inherit suspended continuity")
+TEST_CASE("A changed or failed source resumes with a fresh stream epoch")
 {
     FakeCaptureSource source;
     source.targets = {makeTarget(7, "primary")};
@@ -116,7 +113,7 @@ TEST_CASE("A changed or failed source cannot inherit suspended continuity")
     CaptureController controller(source, mailbox);
     REQUIRE(controller.requestPermission());
     REQUIRE(controller.start());
-    const auto continuity = controller.continuityGeneration();
+    const auto epoch = controller.streamEpoch();
     SECTION("The stream was already unhealthy when suspended")
     {
         source.fireStatus("lost source");
@@ -145,12 +142,12 @@ TEST_CASE("A changed or failed source cannot inherit suspended continuity")
     }
     controller.suspend("paused");
     controller.resume();
-    CHECK(controller.continuityGeneration() != continuity);
+    CHECK(controller.streamEpoch() > epoch);
     if (controller.dead()) {
         source.startSucceeds = true;
         controller.service(1.0);
         REQUIRE_FALSE(controller.dead());
-        CHECK(controller.continuityGeneration() != continuity);
+        CHECK(controller.streamEpoch() > epoch);
     }
 }
 

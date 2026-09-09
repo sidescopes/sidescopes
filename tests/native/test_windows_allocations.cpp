@@ -58,19 +58,15 @@ std::string readLog(const test::TempFile& log)
 
 void exerciseFaceStartup(const test::TempFile& log)
 {
-    REQUIRE(supportsFaceDetection());
+    REQUIRE(waitUntil(supportsFaceDetection));
 
     constexpr int Edge = 128;
     const std::vector<uint8_t> pixels(static_cast<std::size_t>(Edge) * Edge * 4, 0);
     const FrameView frame{pixels.data(), Edge * 4, Edge, Edge};
-    CHECK(withFailedAllocation([&] { return detectFaces(frame, 1.0f).empty(); }));
+    CHECK(withFailedAllocation([&] { return detectFaces(frame, 1.0f).status == FaceDetectionStatus::Failed; }));
     CHECK(readLog(log).find("face_detection failed") != std::string::npos);
-    CHECK(detectFaces(frame, 1.0f).empty());
+    CHECK(detectFaces(frame, 1.0f).status == FaceDetectionStatus::Completed);
     CHECK(readLog(log).find("face_detection completed faces=0") != std::string::npos);
-
-    auto session = createFaceDetectionSession();
-    CHECK(withFailedAllocation([&] { return session->detect(frame, 36).status == FaceDetectionStatus::Failed; }));
-    CHECK(session->detect(frame, 36).status == FaceDetectionStatus::Completed);
 }
 
 void exerciseCaptureStartup()
@@ -109,7 +105,7 @@ TEST_CASE("Native Windows workers recover from startup allocation failures", "[n
         }
     } recording;
 
-    diagConfigure({"facelock,perf", log.path().string(), DiagFlush::EveryLine});
+    diagConfigure({"faces,perf", log.path().string(), DiagFlush::EveryLine});
     exerciseFaceStartup(log);
     exerciseCaptureStartup();
 }

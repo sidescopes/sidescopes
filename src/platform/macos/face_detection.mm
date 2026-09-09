@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <exception>
 #include <memory>
 #include <optional>
 #include <type_traits>
@@ -20,7 +21,8 @@ constexpr double MinimumFacePoints = 72.0;
 // eight-bit frame is wrapped directly; a deeper frame is converted below.
 bool readableByVision(const FrameView& frame)
 {
-    return frame.pixels != nullptr && frame.width > 0 && frame.height > 0 && frame.width <= frame.strideBytes / 4;
+    return frame.pixels != nullptr && frame.width > 0 && frame.height > 0 && frame.width <= frame.strideBytes / 4 &&
+           (frame.format == PixelFormat::Bgra8 || frame.format == PixelFormat::Argb2101010);
 }
 
 // Vision reports normalized rectangles from the bottom left. Convert one to
@@ -121,35 +123,23 @@ std::vector<IntRect> detectWithRequest(const FrameView& frame, double minimumSiz
     return faces;
 }
 
-class VisionFaceSession final : public FaceDetectionSession
-{
-public:
-    FaceDetectionResult detect(const FrameView& frame, double minimumPixels) override
-    {
-        @autoreleasepool {
-            if (!m_request) {
-                m_request = [[VNDetectFaceRectanglesRequest alloc] init];
-            }
-            bool completed = false;
-            auto faces = detectWithRequest(frame, minimumPixels, m_request, completed);
-            return {completed ? FaceDetectionStatus::Completed : FaceDetectionStatus::Failed, std::move(faces)};
-        }
-    }
-
-private:
-    VNDetectFaceRectanglesRequest* m_request = nil;
-};
-
 }  // namespace
 
-std::unique_ptr<FaceDetectionSession> createFaceDetectionSession()
+FaceDetectionResult detectFaces(const FrameView& frame, float pixelsPerPoint)
 {
-    return std::make_unique<VisionFaceSession>();
-}
-
-std::vector<IntRect> detectFaces(const FrameView& frame, float pixelsPerPoint)
-{
-    return createFaceDetectionSession()->detect(frame, MinimumFacePoints * pixelsPerPoint).faces;
+    if (!std::isfinite(pixelsPerPoint) || pixelsPerPoint <= 0.0f || !readableByVision(frame)) {
+        return {};
+    }
+    try {
+        @autoreleasepool {
+            VNDetectFaceRectanglesRequest* request = [[VNDetectFaceRectanglesRequest alloc] init];
+            bool completed = false;
+            auto faces = detectWithRequest(frame, MinimumFacePoints * pixelsPerPoint, request, completed);
+            return {completed ? FaceDetectionStatus::Completed : FaceDetectionStatus::Failed, std::move(faces)};
+        }
+    } catch (const std::exception&) {
+        return {};
+    }
 }
 
 }  // namespace sidescopes

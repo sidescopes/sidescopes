@@ -42,8 +42,8 @@ RegionPickPoll pollRegionPick()
     if (g_overlays.pickCancelled) {
         poll = {};
         poll.finished = true;
-        poll.pinMode = g_overlays.lastMode == RegionPickerMode::PinColor;
     }
+    poll.mode = g_overlays.lastMode.value_or(RegionPickerMode::DrawGlobal);
     if (poll.finished || !poll.active) {
         g_overlays.pickActive = false;
         g_overlays.pickCancelled = false;
@@ -75,11 +75,10 @@ void updatePickerFaces(uint32_t displayId, const std::vector<SuggestedRegion>& f
     g_overlays.deliveredFaces[displayId] = faces;
 }
 
-void showRegionBorder(uint32_t displayId, const RegionOfInterest& region, const std::string& label,
-                      RegionBinding binding)
+void showRegionBorder(uint32_t displayId, const RegionOfInterest& region, const std::string& label, RegionKind kind)
 {
     ++g_overlays.borderShows;
-    g_overlays.border = test::ShownBorder{displayId, region, label, binding};
+    g_overlays.border = test::ShownBorder{displayId, region, label, kind};
 }
 
 void hideRegionBorder()

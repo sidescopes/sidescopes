@@ -66,7 +66,7 @@ void setRegionPickChipColor(const std::optional<FloatColor>&)
 
 // --- the region border -------------------------------------------------
 
-void showRegionBorder(uint32_t, const RegionOfInterest&, const std::string&, RegionBinding)
+void showRegionBorder(uint32_t, const RegionOfInterest&, const std::string&, RegionKind)
 {
 }
 

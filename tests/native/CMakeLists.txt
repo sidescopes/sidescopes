@@ -22,6 +22,8 @@ else()
     return()
 endif()
 
+target_sources(sidescopes_native_tests PRIVATE test_face_detection.cpp)
+
 target_include_directories(sidescopes_native_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../support")
 target_link_libraries(sidescopes_native_tests PRIVATE sidescopes_platform Catch2::Catch2WithMain)
 sidescopes_target_defaults(sidescopes_native_tests)

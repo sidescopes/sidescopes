@@ -12,11 +12,12 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   windows retain the last rectangle on its display. The border close button
   removes its region, and Escape clears selections after dismissing settings
   or cancelling an active picker. The default startup region remains.
-- Face regions follow position and size changes without waiting for video to
-  settle or hiding the border. Lost or ambiguous faces keep their last region
-  monitored for one second, then remove the region and scope traces together.
-  “Face tracking stopped” explains the empty state; a fresh face selection
-  starts tracking again, without background reacquisition.
+- Selecting a face creates a normal window-attached region with a pin icon.
+  Its rectangle stays fixed inside the window as image or video content
+  changes. Face detection runs only when selecting; live tracking is removed.
+- Windows face selection uses the operating system's built-in FaceDetector.
+  Windows builds no longer bundle OpenCV, YuNet, or their runtime dependencies.
+  The optional OpenCV backend remains available for Linux tests.
 - Mac downloads contain both Apple silicon and Intel code and require macOS
   14 or later, matching the screen-capture APIs used by the application.
 - Desktop builds embed their complete license notices in an offline
@@ -28,21 +29,17 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Scope readings continue updating while a region is dragged or resized,
   including pointer movements between drawn frames. Very short drags retain
   the region's window attachment.
-- Windows face detection handles images with a very narrow dimension without
-  producing invalid coordinates in intermediate calculations.
-- Face tracking retains nearby-face evidence during brief losses and uses
-  the same loss deadline in analysis and the interface. Nearby-face positions
-  remain correct when a parent window moves partly off-screen.
 - Saved settings retain fractional values and negative monitor coordinates,
   reject malformed numbers, and preserve the previous file if saving fails.
 - Cancelling a region pick allows another pick immediately. Delayed native
   callbacks cannot access a session after it closes, and stale face selections
   cannot attach to a window whose source geometry has changed.
+- Picker confirmations preserve the selected tool even when a drawn rectangle
+  matches a face or window suggestion.
 - Scope analysis retries failed module operations without displaying stale or
   partially copied results. Changes to narrow regions and pixel formats now
   invalidate the content cache correctly.
-- Windows capture reads the acquired texture's pixel format. Face detection
-  reuses its model while following video and releases it on the owning thread.
+- Windows capture reads the acquired texture's pixel format.
 - Converting an attached region between window and display coordinates no
   longer loses a boundary pixel to floating-point rounding.
 - Diagnostic recording can be changed safely while capture and analysis emit

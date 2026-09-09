@@ -87,7 +87,7 @@ channels, or for `all`:
 | `attach` | Window-focus routing |
 | `border` | Region-border drawing |
 | `suggestions` | Window suggestions and picker mapping |
-| `facelock` | Face-tracking decisions |
+| `faces` | Face detection for picker suggestions |
 | `perf` | Frame, analysis, and capture-cadence timing |
 | `modules` | Scope-module discovery and loading |
 | `interface` | Interface-toolkit validation errors |

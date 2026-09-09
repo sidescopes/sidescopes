@@ -318,24 +318,23 @@ void paintBorderCloseButton(Gdiplus::Graphics& canvas, double scale)
     canvas.DrawLine(&cross, center.X - arm, center.Y + arm, center.X + arm, center.Y - arm);
 }
 
-// The binding state at the tab's fixed left end: face tracking, window pin,
-// or global pin-off. Rasterized once from the shared vector sources, so every
-// native platform draws the identical icons.
+// The region kind at the tab's fixed left end: window pin or global pin-off.
+// Rasterized once from the shared vector sources, so every native platform
+// draws the identical icons.
 void paintBorderBindingButton(Gdiplus::Graphics& canvas, double scale)
 {
     const Gdiplus::PointF center = bindingButtonCenter(scale);
-    static std::unique_ptr<Gdiplus::Bitmap> icons[3];
+    static std::unique_ptr<Gdiplus::Bitmap> icons[2];
     static int iconSize = 0;
-    const int which = static_cast<int>(g_border.binding);
+    const int which = static_cast<int>(g_border.kind);
     const int pixels = std::max(8, static_cast<int>(std::lround(11.0 * scale)));
     if (!icons[which] || iconSize != pixels) {
         if (iconSize != pixels) {
             icons[0].reset();
             icons[1].reset();
-            icons[2].reset();
         }
         // GDI+'s 32bppARGB is BGRA in memory: swap channels on the copy.
-        const std::vector<uint8_t> rgba = rasterizeIcon(iconForRegionBinding(g_border.binding), pixels);
+        const std::vector<uint8_t> rgba = rasterizeIcon(iconForRegionKind(g_border.kind), pixels);
         auto bitmap = std::make_unique<Gdiplus::Bitmap>(pixels, pixels, PixelFormat32bppARGB);
         Gdiplus::BitmapData data{};
         const Gdiplus::Rect lock(0, 0, pixels, pixels);
@@ -399,7 +398,7 @@ void paintBorder()
     paintBorderCloseButton(canvas, scale);
     paintBorderBindingButton(canvas, scale);
     g_border.paintedLabel = g_border.borderLabel;
-    g_border.paintedBinding = g_border.binding;
+    g_border.paintedKind = g_border.kind;
 
     surface.push(g_border.window, g_border.region.left - static_cast<int>(WindowPad * scale),
                  g_border.region.top - static_cast<int>(WindowPad * scale) - strip, g_border.alpha);

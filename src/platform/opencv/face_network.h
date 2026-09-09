@@ -17,7 +17,7 @@ public:
     FaceNetwork& operator=(const FaceNetwork&) = delete;
 
     /// Returns bounded face boxes in source pixels. Throws on invalid native
-    /// output or an allocation failure; the platform session supplies status.
+    /// output or an allocation failure; the caller handles detection failures.
     [[nodiscard]] std::vector<IntRect> detect(const FrameView& frame, double minimumPixels, int maximumInputEdge);
 
 private:

@@ -1,13 +1,11 @@
 #pragma once
 
 #include <cstdint>
-#include <functional>
 #include <optional>
 #include <string>
 #include <vector>
 
 #include "app/attach_controller.h"
-#include "app/face_lock_controller.h"
 #include "app/region_coordinator.h"
 #include "app/region_picker.h"
 #include "platform/desktop.h"
@@ -19,8 +17,6 @@ namespace sidescopes {
 struct RegionSessionOutcome
 {
     bool regionChanged = false;
-    /// A worker-confirmed face movement already applied to that frame's scopes.
-    bool trackedRegion = false;
     uint64_t selectionRevision = 0;
     std::optional<RegionOfInterest> region;
     std::optional<FloatColor> pinColor;
@@ -29,14 +25,13 @@ struct RegionSessionOutcome
 };
 
 /// Owns the selected region's lifecycle: window attachment and focus routing,
-/// face tracking, picker confirmation, border editing and motion observation.
+/// picker confirmation, border editing and motion observation.
 /// The shell publishes the resulting selection to analysis and owns the UI
 /// status and pin board. Capture and worker dependencies must outlive this.
 class RegionSession
 {
 public:
-    RegionSession(CaptureController& capture, AnalysisWorker& worker, ScreenCaptureSource& source,
-                  std::function<double()> trackingClock = frameClockSeconds);
+    RegionSession(CaptureController& capture, AnalysisWorker& worker, ScreenCaptureSource& source);
     ~RegionSession();
     RegionSession(const RegionSession&) = delete;
     RegionSession& operator=(const RegionSession&) = delete;
@@ -49,18 +44,14 @@ public:
     [[nodiscard]] const AttachController& attachments() const;
     [[nodiscard]] bool interacting() const;
     [[nodiscard]] bool carried() const;
-    [[nodiscard]] bool faceLocked() const;
-    [[nodiscard]] bool borderAnimating() const;
     [[nodiscard]] bool backgroundWorkRunning() const;
     [[nodiscard]] bool traceLive() const;
-    [[nodiscard]] bool faceTrackingStopped() const;
-    [[nodiscard]] std::optional<uint64_t> minimumReadingGeneration() const;
 
     [[nodiscard]] RegionSessionOutcome initializeGlobalRegion(const RegionOfInterest& region);
-    [[nodiscard]] RegionSessionOutcome follow(bool windowMinimized, std::optional<AnalysisWorker::FrameSize> frameSize);
+    [[nodiscard]] RegionSessionOutcome follow(bool windowMinimized);
     [[nodiscard]] RegionSessionOutcome poll(bool windowMinimized, std::optional<AnalysisWorker::FrameSize> frameSize,
                                             std::optional<FloatColor> screenSampleColor);
-    /// Consume native grabs before following a face can move its border again.
+    /// Consume native grabs before window focus routing can change their target.
     [[nodiscard]] RegionSessionOutcome pollBorder();
     [[nodiscard]] RegionSessionOutcome clear();
     [[nodiscard]] RegionSessionOutcome cancel();
@@ -94,19 +85,15 @@ private:
     void attachGlobalRegionToWindow();
     [[nodiscard]] std::optional<WindowGeometry> editableWindowGeometry() const;
     void applyBorderEdit(const RegionOfInterest& edited);
-    void applyFaceLockOutcome(const FaceLockOutcome& outcome);
     void dismissEditedBorder();
-    bool adoptFacePick(uint32_t displayId, const RegionOfInterest& confirmed);
     static void logAttachMapping(const RegionPicker::WindowCandidate& picked, const RegionOfInterest& start);
     void applyRegionPickOutcome(const RegionPickOutcome& outcome);
     void applyBorderEditOutcome(const RegionBorderEditOutcome& outcome);
     void pollBorderEdits();
 
     CaptureController& m_capture;
-    std::function<double()> m_trackingClock;
     std::optional<RegionOfInterest> m_region;
     AttachController m_attach;
-    FaceLockController m_faceLock;
     RegionPicker m_regionPicker;
     RegionCoordinator m_regions;
     int64_t m_ownPid;
@@ -118,18 +105,15 @@ private:
     std::optional<AttachWindowRect> m_attachLastSeenRect;
     std::string m_attachActiveLabel;
     bool m_windowMinimized = false;
-    std::optional<AnalysisWorker::FrameSize> m_frameSize;
     RegionSessionOutcome m_pending;
     bool m_pendingSelectionChange = false;
+    uint64_t m_selectionRevision = 0;
     bool m_stopped = false;
-
-    bool m_faceTrackingStopped = false;
 
     struct SavedRegion
     {
         std::optional<RegionOfInterest> region;
         uint32_t displayId = 0;
-        bool faceTrackingStopped = false;
     };
 
     std::optional<SavedRegion> m_pickerRestore;

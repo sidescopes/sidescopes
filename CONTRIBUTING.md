@@ -64,14 +64,25 @@ into `build-ide/` with both Debug and Release configurations. Pick
 configuration dropdown ever comes up empty, Project > Delete Cache and
 Reconfigure clears the IDE's stale state.
 
-### Face detection dependency
+### Face detection
 
-Windows face detection uses the embedded YuNet model and a pinned static build
-of OpenCV 4.13.0. CMake fetches the verified source archive and builds only
-`core`, `imgproc`, and `dnn`, with bundled protobuf and zlib. The first Windows
-build therefore takes longer; later builds reuse the dependency. GUI, video,
-image codecs, GPU backends and runtime plugins are disabled. macOS uses Vision
-and does not build OpenCV by default.
+Face selection uses Vision on macOS and Windows Media FaceAnalysis
+`FaceDetector` on Windows. Detection runs for picker suggestions and the chosen
+rectangle becomes an ordinary window-attached region. The application does not
+track faces after selection. These native builds require no bundled model or
+OpenCV runtime.
+
+An optional Linux test backend retains YuNet and a pinned static build of
+OpenCV 4.13.0. To compile and exercise it, configure with
+`-DSIDESCOPES_FACE_NETWORK_TESTS=ON`, build, and run
+`ctest --test-dir build -L face-network --no-tests=error`. This checks model
+loading and inference with procedural inputs; it does not provide a Linux
+desktop application or measure detection accuracy.
+
+CMake fetches the verified OpenCV source archive and builds only `core`,
+`imgproc`, and `dnn`, with bundled protobuf and zlib. Later builds reuse the
+dependency. GUI, video, image codecs, GPU backends and runtime plugins are
+disabled.
 
 OpenCV is compiled without source patches or a custom layer registry. To
 upgrade it, update the archive URL and SHA-256 in `cmake/FaceDetection.cmake`,
@@ -86,23 +97,11 @@ model through OpenCV's public shape API and exercise narrow images. Only
 resized axes of 32 pixels or less receive additional padding; these inputs
 can produce different detections because of the additional black context.
 
-To compile and exercise the same YuNet backend on Linux or macOS, configure
-with `-DSIDESCOPES_FACE_NETWORK_TESTS=ON`, build, and run
-`ctest --test-dir build -L face-network --no-tests=error`. Windows includes
-these tests by default. This tests model loading and inference with procedural
-inputs; it does not provide a Linux desktop application or measure accuracy.
-
 On x86, the dependency retains an SSE2 baseline and selects newer CPU
-instructions at runtime; other architectures use OpenCV's defaults. Its C
-runtime follows `CMAKE_MSVC_RUNTIME_LIBRARY`, including the
-static runtime used by release builds. Face detection is the sole OpenCV
-consumer and configures its CPU work to one thread once; the scope analysis
-workers retain their own scheduling.
-
-The full-display face picker preserves up to 1280 pixels on the longer image
-edge. Live tracking searches a smaller crop with a 320-pixel limit. Both retain
-aspect ratio and filter face sizes in original capture pixels. The model and
-its source/license are documented in [assets/models](assets/models).
+instructions at runtime; other architectures use OpenCV's defaults. The test
+backend configures its CPU work to one thread once. Its input resizing retains
+aspect ratio and face-size filtering uses original capture pixels. The model
+and its source/license are documented in [assets/models](assets/models).
 
 ## Screen-recording permission for development builds (macOS)
 

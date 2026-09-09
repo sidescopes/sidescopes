@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <atomic>
 #include <cstdint>
 #include <functional>
 #include <mutex>
@@ -23,15 +24,14 @@ namespace sidescopes::test {
 /// What one detector call was handed, so a caller that hands the detector a
 /// cropped region can be judged on the crop itself: its size, its density, and
 /// its first pixel, which over a frame whose pixels encode their coordinates
-/// says where in that frame the crop was taken from. Written by both picker
-/// and analysis threads, so it is read back under the same lock.
+/// says where in that frame the crop was taken from. Written by the picker
+/// thread and read back under the same lock.
 struct DetectorCall
 {
     int calls = 0;
     int width = 0;
     int height = 0;
     float pixelsPerPoint = 0.0f;
-    double minimumPixels = 0.0;
     uint64_t frameSequence = 0;
     FrameStamp stamp;
     PixelFormat format = PixelFormat::Bgra8;
@@ -58,10 +58,10 @@ public:
     bool faceDetectionSupported = false;
     std::vector<IntRect> faces;
     FaceDetectionStatus detectionStatus = FaceDetectionStatus::Completed;
-    /// Optional synchronous session behavior. Configure before starting work
+    std::atomic<int> faceDetectionCalls{0};
+    /// Optional synchronous one-shot behavior. Configure before starting work
     /// or between inline passes; never mutate while a detector call is active.
-    std::function<FaceDetectionResult(const FrameView&, double)> sessionDetection;
-    std::function<void()> beforeSessionCreation;
+    std::function<FaceDetectionResult(const FrameView&, float)> faceDetection;
     /// Optional stress-test gates, configured before work starts and kept
     /// unchanged until every background operation has drained.
     std::function<void()> beforeDetection;
@@ -93,7 +93,7 @@ public:
     void reset();
 
     /// Records one detector call; safe from a detector thread.
-    void recordDetection(const FrameView& view, float pixelsPerPoint, double minimumPixels = 0.0);
+    void recordDetection(const FrameView& view, float pixelsPerPoint);
 
     /// What the detector was handed last, and how often it was called.
     [[nodiscard]] DetectorCall detectorCall() const;

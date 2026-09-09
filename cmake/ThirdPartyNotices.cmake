@@ -6,17 +6,12 @@ function(sidescopes_add_notices target)
     if(EMSCRIPTEN)
         set(output "$<TARGET_FILE_DIR:${target}>/licenses")
     endif()
-    set(opencv "")
-    if(WIN32)
-        set(opencv "${SIDESCOPES_OPENCV_SOURCE}")
-    endif()
     set(arguments
         "-DNOTICE_OUTPUT=${output}"
         "-DNOTICE_SOURCE=${CMAKE_SOURCE_DIR}"
         "-DNOTICE_IMGUI=${imgui_SOURCE_DIR}"
         "-DNOTICE_NANOSVG=${nanosvg_SOURCE_DIR}"
         "-DNOTICE_GLFW=${glfw_SOURCE_DIR}"
-        "-DNOTICE_OPENCV=${opencv}"
         "-DNOTICE_EMSCRIPTEN=${EMSCRIPTEN_ROOT_PATH}"
         "-DNOTICE_PORTS=${EMSCRIPTEN_SYSROOT}/../ports")
     file(GLOB notices CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/licenses/*.txt")
@@ -36,13 +31,6 @@ function(sidescopes_add_notices target)
             "${CMAKE_SOURCE_DIR}/src/web/fonts/RobotoMono-OFL.txt")
     else()
         list(APPEND inputs "${glfw_SOURCE_DIR}/LICENSE.md")
-    endif()
-    if(opencv)
-        list(APPEND inputs
-            "${opencv}/LICENSE"
-            "${opencv}/3rdparty/protobuf/LICENSE"
-            "${opencv}/3rdparty/zlib/LICENSE"
-            "${opencv}/modules/core/src/softfloat.cpp")
     endif()
     if(EMSCRIPTEN)
         add_custom_command(TARGET ${target} POST_BUILD

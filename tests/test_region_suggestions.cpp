@@ -78,8 +78,6 @@ TEST_CASE("Face candidates carry the display and the frame they were measured on
     CHECK(candidates[0].frameWidth == 1000);
     CHECK(candidates[0].frameHeight == 500);
     // The raw detector box is kept unshrunk for the lock to anchor on.
-    CHECK(candidates[0].box.x == 100);
-    CHECK(candidates[0].box.width == 200);
 }
 
 TEST_CASE("Face candidates agree with the overlay's suggestion regions")

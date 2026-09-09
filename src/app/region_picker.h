@@ -22,14 +22,13 @@ class ScreenCaptureSource;
 
 /// A region the user confirmed in the picker, distilled for the host to apply:
 /// the region in its display's percentages, which display it belongs to, and
-/// whether it was confirmed in a window-attach mode. The overlays switch modes
-/// on their own keys, so only the picker knows whether a rectangle confirmed
-/// right now may attach to the window under it.
+/// which tool confirmed it. The overlays switch modes on their own keys, so
+/// only the finishing poll knows how that rectangle should be interpreted.
 struct ConfirmedPick
 {
     RegionOfInterest region;
     uint32_t displayId = 0;
-    bool attachesToWindow = false;
+    RegionPickerMode mode = RegionPickerMode::DrawGlobal;
 };
 
 /// What one RegionPicker step decided that the host must apply. The picker owns
@@ -146,8 +145,7 @@ public:
     [[nodiscard]] const FaceCandidate* matchFaceCandidate(uint32_t displayId, const RegionOfInterest& region) const;
 
     /// Checks source and parent geometry before a face confirmation changes
-    /// capture or attachment. Elapsed picker time is not fresh face evidence;
-    /// following still begins with a new detector observation.
+    /// capture or attachment, so a stale overlay cannot select a moved source.
     [[nodiscard]] bool faceSourceCurrent(const FaceCandidate& face, const WindowCandidate& host) const;
 
 private:

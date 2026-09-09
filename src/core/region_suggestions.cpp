@@ -91,8 +91,7 @@ std::vector<FaceCandidate> buildFaceCandidates(const std::vector<IntRect>& faces
     }
     candidates.reserve(faces.size());
     for (const IntRect& face : faces) {
-        candidates.push_back(
-            {faceSuggestionRegion(face, frameWidth, frameHeight), face, displayId, frameWidth, frameHeight});
+        candidates.push_back({faceSuggestionRegion(face, frameWidth, frameHeight), displayId, frameWidth, frameHeight});
     }
     return candidates;
 }

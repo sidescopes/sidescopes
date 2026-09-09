@@ -35,8 +35,8 @@ constexpr std::size_t IconCount = 11;
 /// rules out.
 [[nodiscard]] std::vector<uint8_t> rasterizeIcon(Icon icon, int sizePixels);
 
-/// The border control communicates the region's current binding with the same
-/// face glyph as the picker, followed by the window pin and the global pin-off.
-[[nodiscard]] Icon iconForRegionBinding(RegionBinding binding);
+/// The border control communicates whether the region is attached to a window
+/// or global, using the pin and pin-off glyphs.
+[[nodiscard]] Icon iconForRegionKind(RegionKind kind);
 
 }  // namespace sidescopes

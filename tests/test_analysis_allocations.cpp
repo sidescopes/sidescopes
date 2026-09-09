@@ -170,7 +170,11 @@ struct Fixture
 
     void publishFrame()
     {
-        mailbox.publish(test::makeSolidFrameBuffer(4, 4, Color{100, 50, 20}, ++frame));
+        auto pixels = test::makeSolidFrameBuffer(4, 4, Color{100, 50, 20}, ++frame);
+        if (settings.source) {
+            pixels.stamp = {settings.source->captureEpoch, settings.source->displayId, 1.0};
+        }
+        mailbox.publish(std::move(pixels));
     }
 
     void warm()
@@ -546,32 +550,20 @@ TEST_CASE("Allocation failure in a recovery notification cannot escape the worke
     fixture.checkStopped();
 }
 
-TEST_CASE("Every new reading output allocation failure withholds completed generation metadata")
+TEST_CASE("Every changed reading allocation failure withholds completed metadata")
 {
-    using Mode = FrameRegionResolution::Mode;
-    const auto prepare = [](Fixture& fixture, Mode& mode, uint64_t& generation) {
-        fixture.worker.setFrameRegionResolverFactory([&mode, &generation] {
-            return [&mode, &generation](const FrameRegionRequest& request) {
-                return FrameRegionResolution{mode, request.configuredRegion, request.selectionRevision, generation};
-            };
-        });
+    const auto prepare = [](Fixture& fixture) {
         fixture.warm();
-        REQUIRE(fixture.output.readingGeneration == 7u);
-        mode = Mode::Suppress;
-        fixture.publishFrame();
-        fixture.worker.pump();
-        REQUIRE(fixture.worker.fetchOutput(fixture.seen, fixture.output));
-        REQUIRE(fixture.output.suppressed);
-        mode = Mode::Override;
-        ++generation;
+        fixture.changeSettings();
+        fixture.settings.source = AnalysisSettings::Source{9, 7};
+        ++fixture.settings.selectionRevision;
+        fixture.worker.updateSettings(fixture.settings);
         fixture.publishFrame();
     };
     std::size_t count = 0;
     {
         Fixture fixture;
-        Mode mode = Mode::Override;
-        uint64_t generation = 7;
-        prepare(fixture, mode, generation);
+        prepare(fixture);
         const auto measured = observe(AllocationFailure::CountOnly, [&] { fixture.worker.pump(); });
         checkCount(measured);
         count = measured.attempts;
@@ -579,62 +571,53 @@ TEST_CASE("Every new reading output allocation failure withholds completed gener
     for (std::size_t index = 0; index < count; ++index) {
         CAPTURE(index, count);
         Fixture fixture;
-        Mode mode = Mode::Override;
-        uint64_t generation = 7;
-        prepare(fixture, mode, generation);
+        prepare(fixture);
         const auto failed = observe(index, [&] { fixture.worker.pump(); });
         REQUIRE(failed.failures == 1);
         CHECK_FALSE(failed.threw);
-        REQUIRE(fixture.worker.fetchOutput(fixture.seen, fixture.output, fixture.settings.selectionRevision, 9));
+        REQUIRE(fixture.worker.fetchOutput(fixture.seen, fixture.output, fixture.settings.selectionRevision,
+                                           fixture.settings.source));
         CHECK(fixture.output.images.empty());
         CHECK(fixture.output.outlines.empty());
         CHECK_FALSE(fixture.output.region);
-        CHECK_FALSE(fixture.output.suppressed);
-        CHECK(fixture.output.readingGeneration == 0u);
         CHECK(fixture.output.frameSequence == 0u);
         CHECK(fixture.output.selectionRevision == fixture.settings.selectionRevision);
+        CHECK(fixture.output.frameStamp.captureEpoch == 9u);
+        CHECK(fixture.output.frameStamp.displayId == 7u);
+        CHECK(fixture.output.frameStamp.receivedSeconds == 0.0);
         fixture.publishFrame();
         fixture.worker.pump();
-        REQUIRE(fixture.worker.fetchOutput(fixture.seen, fixture.output, fixture.settings.selectionRevision, 8));
-        CHECK(fixture.output.readingGeneration == 8u);
+        REQUIRE(fixture.worker.fetchOutput(fixture.seen, fixture.output, fixture.settings.selectionRevision,
+                                           fixture.settings.source));
         CHECK(fixture.output.region == fixture.settings.region);
-        CHECK(fixture.output.frameSequence == 4u);
-        CHECK_FALSE(fixture.output.suppressed);
-        fixture.checkValue(7);
+        CHECK(fixture.output.frameSequence == 3u);
+        fixture.checkValue(42);
     }
 }
 
-TEST_CASE("A failed recovery fetch clears old completion metadata and retries the same output")
+TEST_CASE("A failed output fetch clears old completion metadata and retries the same output")
 {
     Fixture fixture;
-    uint64_t generation = 7;
-    fixture.worker.setFrameRegionResolverFactory([&] {
-        return [&](const FrameRegionRequest& request) {
-            return FrameRegionResolution{FrameRegionResolution::Mode::Override, request.configuredRegion,
-                                         request.selectionRevision, generation};
-        };
-    });
     fixture.warm();
-    REQUIRE(fixture.output.readingGeneration == 7u);
-    ++generation;
+    ++fixture.settings.selectionRevision;
+    fixture.worker.updateSettings(fixture.settings);
     fixture.publishFrame();
     fixture.worker.pump();
     const uint64_t previous = fixture.seen;
     fixture.output.images.clear();
     bool changed = false;
     const auto failed = observe(0, [&] {
-        changed = fixture.worker.fetchOutput(fixture.seen, fixture.output, fixture.settings.selectionRevision, 8);
+        changed = fixture.worker.fetchOutput(fixture.seen, fixture.output, fixture.settings.selectionRevision,
+                                             fixture.settings.source);
     });
     REQUIRE(failed.failures == 1);
     CHECK_FALSE(failed.threw);
     CHECK(changed);
     CHECK(fixture.seen == previous);
     CHECK_FALSE(fixture.output.region);
-    CHECK_FALSE(fixture.output.suppressed);
-    CHECK(fixture.output.readingGeneration == 0u);
     CHECK(fixture.output.frameSequence == 0u);
-    REQUIRE(fixture.worker.fetchOutput(fixture.seen, fixture.output, fixture.settings.selectionRevision, 8));
-    CHECK(fixture.output.readingGeneration == 8u);
+    REQUIRE(fixture.worker.fetchOutput(fixture.seen, fixture.output, fixture.settings.selectionRevision,
+                                       fixture.settings.source));
     CHECK(fixture.output.region == fixture.settings.region);
     CHECK(fixture.output.frameSequence == 2u);
     fixture.checkValue(7);

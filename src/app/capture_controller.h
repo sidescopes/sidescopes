@@ -64,10 +64,6 @@ public:
     /// Identity of the most recent stream attempt, including failed starts.
     [[nodiscard]] uint64_t streamEpoch() const;
 
-    /// Logical source identity retained only by a healthy same-target
-    /// suspend/resume. Physical frame epochs still change on every start.
-    [[nodiscard]] uint64_t continuityGeneration() const;
-
     /// @return The display the user chose to scope, held across restarts;
     /// 0 means whichever the backend lists first.
     [[nodiscard]] uint32_t desiredDisplay() const;
@@ -155,9 +151,6 @@ private:
 
     uint32_t m_capturedDisplay = 0;
     uint64_t m_streamEpoch = 0;
-    uint64_t m_continuityGeneration = 0;
-    uint64_t m_suspendedContinuity = 0;
-    std::optional<CaptureTarget> m_lastTarget;
     uint32_t m_desiredDisplay = 0;
     int m_frameRate = DefaultCaptureFramesPerSecond;
     bool m_permissionGranted = false;

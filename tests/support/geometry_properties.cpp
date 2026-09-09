@@ -4,7 +4,6 @@
 #include <limits>
 #include <vector>
 
-#include "app/region_geometry.h"
 #include "boundary_input.h"
 #include "boundary_properties.h"
 #include "core/frame.h"
@@ -66,12 +65,6 @@ void checkConversions(BoundaryInput& input)
                         std::abs(original.width - restored.width) <= tolerance &&
                         std::abs(original.height - restored.height) <= tolerance,
                     "geometry: local/percent roundtrip drifts");
-    const auto lock = lockRectFromPercent(region, width, height);
-    const auto percent = percentFromLockRect(lock, width, height);
-    requireBoundary(near(region.leftPercent, percent.leftPercent) && near(region.topPercent, percent.topPercent) &&
-                        near(region.rightPercent, percent.rightPercent) &&
-                        near(region.bottomPercent, percent.bottomPercent),
-                    "geometry: lock/percent roundtrip drifts");
     const auto fitted = rectClampedWithin(original, width, height);
     requireBoundary(
         fitted.x >= 0 && fitted.y >= 0 && fitted.x + fitted.width <= width && fitted.y + fitted.height <= height,

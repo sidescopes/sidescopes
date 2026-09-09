@@ -4,7 +4,7 @@
   "images": [
     {
       "name": "face-portrait.jpg",
-      "purpose": "a real face for the face-lock path, and skin tones for the vectorscope's skin line",
+      "purpose": "a real face for face selection, and skin tones for the vectorscope's skin line",
       "url": "https://upload.wikimedia.org/wikipedia/commons/f/fe/Ellen_Ochoa%2C_official_portrait.jpg",
       "sha256": "7f8a4d485ca5f7dfb09f40684fb309fbc0a4bcc65cb06e33e2bb0363ee22884a",
       "bytes": 949678,
@@ -18,7 +18,7 @@
     },
     {
       "name": "historic-face.jpg",
-      "purpose": "an unambiguous face for public documentation of face-attached regions, using a historical subject rather than a living person",
+      "purpose": "an unambiguous face for public documentation of face selection, using a historical subject rather than a living person",
       "url": "https://cdn.loc.gov/service/pnp/ppmsca/19200/19200v.jpg",
       "sha256": "034793edff522169458601a8bf8a68968cd6b99038b2194df3c62232f0ed07c9",
       "bytes": 126492,

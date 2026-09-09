@@ -38,7 +38,6 @@
 #include "app/pin_board.h"
 #include "app/preferences_binding.h"
 #include "app/region_coordinator.h"
-#include "app/region_geometry.h"
 #include "app/row_layout.h"
 #include "app/scope_layout.h"
 #include "app/scope_pane_renderer.h"
@@ -312,10 +311,8 @@ void App::refreshActivatedScope(std::string_view id)
     m_worker.updateSettings(m_analysis);
     const double deadline = glfwGetTime() + 0.08;
     while (glfwGetTime() < deadline) {
-        if (m_worker.fetchOutput(m_outputVersion, m_output, m_analysis.selectionRevision,
-                                 m_regionSession.minimumReadingGeneration())) {
-            syncRegionReading();
-            if (m_output.suppressed || !m_regionSession.traceLive()) {
+        if (m_worker.fetchOutput(m_outputVersion, m_output, m_analysis.selectionRevision, m_analysis.source)) {
+            if (!m_regionSession.traceLive()) {
                 return;
             }
             if (m_panes->imageFor(id).sequence != staleSequence && m_panes->imageFor(id).width > 0) {
@@ -350,17 +347,18 @@ void App::chooseScope(std::string_view id, bool stack)
 
 void App::applyRegionSessionOutcome(const RegionSessionOutcome& outcome)
 {
+    const AnalysisSettings::Source source{m_captureController.streamEpoch(), m_captureController.capturedDisplay()};
+    if (m_analysis.source != source) {
+        m_analysis.source = source;
+        m_analysisDirty = true;
+    }
     if (m_analysis.selectionRevision != outcome.selectionRevision) {
         m_analysis.selectionRevision = outcome.selectionRevision;
         m_analysisDirty = true;
     }
     if (outcome.regionChanged) {
         m_analysis.region = outcome.region;
-        if (outcome.trackedRegion) {
-            m_lastSentRegion = outcome.region;
-        } else {
-            m_analysisDirty = true;
-        }
+        m_analysisDirty = true;
         if (!m_analysis.region && m_panes) {
             m_panes->releaseTraces();
         }
@@ -373,17 +371,6 @@ void App::applyRegionSessionOutcome(const RegionSessionOutcome& outcome)
     }
     if (outcome.activity) {
         m_clocks.noteActivity(glfwGetTime());
-    }
-}
-
-void App::syncRegionReading()
-{
-    if (m_output.suppressed) {
-        // The worker can finish after the loop's initial follow. Consume its
-        // terminal result now so the border and scopes disappear together.
-        const bool minimized = glfwGetWindowAttrib(m_window, GLFW_ICONIFIED) != 0;
-        applyRegionSessionOutcome(m_regionSession.follow(minimized, m_frameSize));
-        m_regionSession.syncBorder(minimized);
     }
 }
 
@@ -426,7 +413,7 @@ void App::runFrame()
     // Attached regions: observe the attached windows and route the analysis by
     // the focused window. The border reconciles here every frame in both
     // regimes, so no missed edge can strand it on screen.
-    applyRegionSessionOutcome(m_regionSession.follow(glfwGetWindowAttrib(m_window, GLFW_ICONIFIED) != 0, m_frameSize));
+    applyRegionSessionOutcome(m_regionSession.follow(glfwGetWindowAttrib(m_window, GLFW_ICONIFIED) != 0));
     m_regionSession.syncBorder(glfwGetWindowAttrib(m_window, GLFW_ICONIFIED) != 0);
     followWindowDisplay();
     syncUiScaleToMonitor();
@@ -447,8 +434,7 @@ void App::runFrame()
                                 regionInteracting(),
                                 framebufferWidth,
                                 framebufferHeight,
-                                captureStatus,
-                                m_regionSession.borderAnimating()};
+                                captureStatus};
     const bool drawing = frameWorthDrawing(m_clocks.redrawInputs(signals, glfwGetTime()));
     if (drawing) {
         drawFrame(framebufferWidth, framebufferHeight);
@@ -471,10 +457,8 @@ void App::drawFrame(int framebufferWidth, int framebufferHeight)
     }
 
     m_clocks.noteFrameBegun(glfwGetTime());
-    if (m_worker.fetchOutput(m_outputVersion, m_output, m_analysis.selectionRevision,
-                             m_regionSession.minimumReadingGeneration())) {
-        syncRegionReading();
-        m_panes->uploadVisibleScopes(m_regionSession.traceLive() && !m_output.suppressed);
+    if (m_worker.fetchOutput(m_outputVersion, m_output, m_analysis.selectionRevision, m_analysis.source)) {
+        m_panes->uploadVisibleScopes(m_regionSession.traceLive());
         // This observes upload submission, not compositor presentation.
         SS_DIAG(Perf,
                 "pass analysis_ms=%.1f frame=%llu epoch=%llu display=%u revision=%llu received=%.9f observed=%.9f",
@@ -499,7 +483,7 @@ void App::drawFrame(int framebufferWidth, int framebufferHeight)
     // Second follow step, right after the vsync wait: the pre-frame geometry
     // is a frame stale by now, and a border moved from it would trail a
     // fast-dragged window visibly.
-    applyRegionSessionOutcome(m_regionSession.follow(glfwGetWindowAttrib(m_window, GLFW_ICONIFIED) != 0, m_frameSize));
+    applyRegionSessionOutcome(m_regionSession.follow(glfwGetWindowAttrib(m_window, GLFW_ICONIFIED) != 0));
 
     m_clocks.noteFrameShown(framebufferWidth, framebufferHeight, m_captureController.status());
 }
@@ -526,7 +510,6 @@ void App::serviceCapture(bool framebufferEmpty, double now)
     conditions.suspended = m_captureController.suspended();
     conditions.frameSize = m_frameSize;
     conditions.region = m_analysis.region;
-    conditions.faceLocked = m_regionSession.faceLocked();
 
     const CaptureDecision decision = m_captureSupervisor.update(conditions, now);
     switch (decision.pipeline) {
@@ -551,10 +534,8 @@ void App::serviceCapture(bool framebufferEmpty, double now)
 void App::pumpEvents()
 {
     const double now = glfwGetTime();
-    const bool borderAnimationTick = m_regionSession.borderAnimating();
-    const FrameWaitDecision wait = frameWaitFor(m_clocks.pacingInputs(now, m_regionSession.attachments().attached(),
-                                                                      m_regionSession.picker().active(),
-                                                                      regionInteracting(), borderAnimationTick));
+    const FrameWaitDecision wait = frameWaitFor(m_clocks.pacingInputs(
+        now, m_regionSession.attachments().attached(), m_regionSession.picker().active(), regionInteracting()));
     switch (wait.kind) {
     case FrameWait::FollowInteraction:
         // Ends on the pointer event that moved the region, so the border is
@@ -575,21 +556,19 @@ void App::pumpEvents()
     // Whatever ended that wait, the frame period is a floor: a wait that ends
     // on the first event redraws at the event rate otherwise.
     waitOutFramePeriod(now + wait.redrawFloorSeconds);
-    m_clocks.notePumpReturned(glfwGetTime(), borderAnimationTick);
+    m_clocks.notePumpReturned(glfwGetTime());
 }
 
 void App::drainAsyncSignals()
 {
-    // A native mouse-down latches the presented rectangle. Apply it before
-    // any follow/sync can advance an in-flight face animation underneath it.
+    // Latch native border grabs before window focus routing can change their target.
     applyRegionSessionOutcome(m_regionSession.pollBorder());
     // First of the drains, and ahead of the capture service below: the focus
     // routing is what takes a stale border down, and everything after this
     // point can stall the tick - a capture restart most of all.
     if (m_callbackState.foregroundChanged.exchange(false)) {
         SS_DIAG(Attach, "fg-event wake");
-        applyRegionSessionOutcome(
-            m_regionSession.follow(glfwGetWindowAttrib(m_window, GLFW_ICONIFIED) != 0, m_frameSize));
+        applyRegionSessionOutcome(m_regionSession.follow(glfwGetWindowAttrib(m_window, GLFW_ICONIFIED) != 0));
         m_clocks.noteActivity(glfwGetTime());
     }
     if (m_callbackState.displaysChanged.exchange(false)) {
@@ -673,10 +652,8 @@ void App::notePointerMovement()
 // independent readout still follows pixels; unchanged probes leave it idle.
 bool App::sampleEmptyRegionReadout()
 {
-    if (m_regionSession.traceLive() ||
-        (m_regionSession.faceTrackingStopped() && !m_view.stack().shows(ColorPickerScopeId)) ||
-        m_sessionAsleep.load() || applicationHidden() || glfwGetWindowAttrib(m_window, GLFW_ICONIFIED) != 0 ||
-        glfwGetWindowAttrib(m_window, GLFW_VISIBLE) == 0) {
+    if (m_regionSession.traceLive() || m_sessionAsleep.load() || applicationHidden() ||
+        glfwGetWindowAttrib(m_window, GLFW_ICONIFIED) != 0 || glfwGetWindowAttrib(m_window, GLFW_VISIBLE) == 0) {
         return false;
     }
     const CursorSmoothing smoothing{m_view.traces().smoothing(VectorscopeScopeId),
@@ -711,7 +688,7 @@ void App::applyCursorSample(const CursorSample& sample, double now)
     if (sample.changed && visible) {
         m_clocks.noteActivity(now);
     }
-    if (sample.readoutChanged && (!m_regionSession.faceTrackingStopped() || m_view.stack().shows(ColorPickerScopeId))) {
+    if (sample.readoutChanged) {
         m_clocks.noteReadoutActivity(now);
     }
 }
@@ -756,9 +733,7 @@ void App::drawFrameUi()
                                 m_vectorscopeColor,
                                 m_waveformColor,
                                 m_readoutColor,
-                                m_callbackState.monospaceFont,
-                                m_regionSession.traceLive(),
-                                m_regionSession.faceTrackingStopped() ? "Face tracking stopped" : ""};
+                                m_callbackState.monospaceFont};
     applyPaneRenderOutcome(m_panes->drawRegionToolIcons(input));
     applyPaneRenderOutcome(m_panes->drawScopePanes(input));
     m_panes->drawStatusBar(input);

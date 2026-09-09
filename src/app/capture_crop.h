@@ -30,9 +30,6 @@ struct CropInputs
     /// The region picker is open: its display scans and its dragged-pin colour
     /// sample both read pixels anywhere on the display.
     bool pickerActive = false;
-    /// A face lock is live: its content-stability grid and its probe crop both
-    /// read the active window's rectangle, which is not the analysis region.
-    bool faceLockActive = false;
     /// When the region last changed, and the current time, on the frame clock.
     double regionChangedAt = 0.0;
     double now = 0.0;
@@ -43,8 +40,8 @@ struct CropInputs
 ///
 /// Narrowing is only safe while the analysis worker is the sole reader of a
 /// frame. Everything else that reads one - the picker's scans, a dragged pin's
-/// average, the face probe - needs pixels the region does not contain, so any of
-/// those being live keeps the whole display coming. They are not starved by the
+/// average - needs pixels the region does not contain, so a live picker keeps
+/// the whole display coming. They are not starved by the
 /// wait: a frame says whether it is narrowed, so a reader that needs the whole
 /// display can skip frames until an un-narrowed one arrives.
 [[nodiscard]] std::optional<IntRect> cropFor(const CropInputs& inputs);
@@ -67,7 +64,7 @@ public:
     /// The sub-rectangle the capture should deliver now, given the region in
     /// display pixels and who else is reading frames.
     [[nodiscard]] std::optional<IntRect> decide(IntRect regionPixels, int displayWidth, int displayHeight,
-                                                bool pickerActive, bool faceLockActive, double now);
+                                                bool pickerActive, double now);
 
 private:
     IntRect m_region;

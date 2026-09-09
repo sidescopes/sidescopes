@@ -78,14 +78,8 @@ TEST_CASE("The supervisor narrows a settled region to itself")
     CHECK(settled.crop->height < 1080);
 }
 
-TEST_CASE("A face lock and another frame reader both keep the whole display")
+TEST_CASE("An additional frame reader keeps the whole display")
 {
-    CaptureSupervisor locked;
-    CaptureConditions faceLocked = watching();
-    faceLocked.faceLocked = true;
-    REQUIRE(locked.update(faceLocked, 0.0).cropKnown);
-    CHECK_FALSE(locked.update(faceLocked, 10.0).crop);
-
     CaptureSupervisor reading;
     CaptureConditions picking = watching();
     picking.visibility.needsFrames = true;

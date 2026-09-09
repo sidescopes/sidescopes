@@ -77,18 +77,15 @@ struct RegionPickPoll
     /// the user was reading. @c pinnedSample is a dragged rectangle to
     /// average - the explicit way to ask for a swatch over textured pixels.
     /// @c pinnedKeepOpen carries the click's Shift state: the user's
-    /// per-pin choice to keep picking. While @c pinMode is set the caller
-    /// must not treat previews or a finish as region changes.
+    /// per-pin choice to keep picking. In PinColor mode the caller must not
+    /// treat previews or a finish as region changes.
     std::optional<DisplayPoint> pinnedPoint;
     std::optional<RegionOfInterest> pinnedSample;
     bool pinnedKeepOpen = false;
-    bool pinMode = false;
-    /// Whether a rectangle confirmed RIGHT NOW may attach to the window under
-    /// it - set exactly while the picker sits in its window-attach mode. The
-    /// overlays switch modes on their own keys, so the mode that opened the
-    /// pick can be stale by the confirm and only the picker knows this; one
-    /// confirmed in draw or face mode stays global.
-    bool attachesToWindow = false;
+    /// The current tool, including on the finishing poll. Overlays switch
+    /// modes on their own keys, so the opening mode cannot identify whether
+    /// a confirmed rectangle is a global draw, a window selection or a face.
+    RegionPickerMode mode = RegionPickerMode::DrawGlobal;
 };
 
 /// Screenshot-style selection spanning every display at once: each gets
@@ -139,21 +136,18 @@ void setRegionPickChipColor(const std::optional<FloatColor>& color);
 /// @p label is always worn on the strip row above the band - the attached
 /// window's title for an attached region, the display's name for the
 /// global one - with the attach toggle at the label's fixed left end.
-/// @p binding picks the control's glyph: the face used by the face-selection
-/// tool while tracking, the pin while fixed in a window, and the struck-through
-/// pin while global. Idempotent and cheap to repeat: an unchanged rectangle,
-/// label, binding, and visibility is a no-op, so the host may reconcile every
+/// @p kind picks the control's glyph: the pin while fixed in a window, and the
+/// struck-through pin while global. Idempotent and cheap to repeat: an unchanged
+/// rectangle, label, kind, and visibility is a no-op, so the host may reconcile every
 /// frame instead of chasing edges.
-void showRegionBorder(uint32_t displayId, const RegionOfInterest& region, const std::string& label,
-                      RegionBinding binding);
+void showRegionBorder(uint32_t displayId, const RegionOfInterest& region, const std::string& label, RegionKind kind);
 void hideRegionBorder();
 
 /// The border's in-progress or just-finished adjustment, if any.
 struct RegionBorderEdit
 {
     bool editing = false;
-    /// The border's binding control was clicked: a face-tracked region becomes
-    /// window-attached at its current rectangle; a window-attached region
+    /// The border's binding control was clicked: a window-attached region
     /// becomes global; a global one attaches to the frontmost window under it.
     bool bindingToggled = false;
     std::optional<RegionOfInterest> region;

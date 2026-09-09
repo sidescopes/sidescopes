@@ -25,9 +25,6 @@ struct CaptureConditions
     std::optional<AnalysisWorker::FrameSize> frameSize;
     /// The part of the screen the scopes read, or nothing at all.
     std::optional<RegionOfInterest> region;
-    /// A face lock searches the window it is bound to, which is outside the
-    /// region, so a narrowed capture would take its search away.
-    bool faceLocked = false;
 };
 
 /// What the shell should do about the capture now.

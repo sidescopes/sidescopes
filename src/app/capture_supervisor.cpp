@@ -47,8 +47,7 @@ void CaptureSupervisor::decideCrop(const CaptureConditions& conditions, double n
     const IntRect regionPixels = conditions.region ? conditions.region->toPixels(displayWidth, displayHeight)
                                                    : IntRect{0, 0, displayWidth, displayHeight};
     decision.cropKnown = true;
-    decision.crop = m_crop.decide(regionPixels, displayWidth, displayHeight, conditions.visibility.needsFrames,
-                                  conditions.faceLocked, now);
+    decision.crop = m_crop.decide(regionPixels, displayWidth, displayHeight, conditions.visibility.needsFrames, now);
     if (m_loggedCrop.shouldLog(decision.crop)) {
         if (decision.crop) {
             SS_DIAG(Perf, "capture narrowed to %dx%d at %d,%d", decision.crop->width, decision.crop->height,

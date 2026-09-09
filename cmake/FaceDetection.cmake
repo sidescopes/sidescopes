@@ -51,14 +51,11 @@ function(sidescopes_add_face_network)
     set(ENABLE_PRECOMPILED_HEADERS OFF)
     set(ENABLE_FAST_MATH OFF)
     set(ENABLE_LTO OFF)
-    # Preserve the application's runtime choice, including the static CRT
-    # used by portable release archives. Do not let OpenCV override it.
-    set(BUILD_WITH_STATIC_CRT OFF)
     # Query the compiler's target, not the host running a cross build. Other
     # architectures retain OpenCV's own baseline and dispatch defaults.
     include(CheckCXXSourceCompiles)
     check_cxx_source_compiles("
-        #if defined(_M_ARM64EC) || (!defined(_M_IX86) && !defined(_M_X64) && !defined(__i386__) && !defined(__x86_64__))
+        #if !defined(__i386__) && !defined(__x86_64__)
         #error Not an x86 target
         #endif
         int main() { return 0; }
@@ -115,7 +112,7 @@ function(sidescopes_add_face_network)
         COMMENT "Embedding the face detection model"
         VERBATIM)
     add_library(sidescopes_face_network STATIC
-        "${CMAKE_SOURCE_DIR}/src/platform/windows/face_network.cpp"
+        "${CMAKE_SOURCE_DIR}/src/platform/opencv/face_network.cpp"
         "${model_source}")
     target_include_directories(sidescopes_face_network PRIVATE "${CMAKE_SOURCE_DIR}/src")
     # OpenCV's in-tree targets use directory includes, without exporting a
@@ -127,7 +124,7 @@ function(sidescopes_add_face_network)
         "${OPENCV_CONFIG_FILE_INCLUDE_DIR}")
     target_link_libraries(sidescopes_face_network PRIVATE sidescopes_core opencv_core opencv_imgproc opencv_dnn)
     sidescopes_target_defaults(sidescopes_face_network)
-    # Distribution notices come from the same pinned source as the binary.
+    # Backend tests use headers from this same pinned source.
     set(SIDESCOPES_OPENCV_SOURCE "${opencv_SOURCE_DIR}" PARENT_SCOPE)
 endfunction()
 

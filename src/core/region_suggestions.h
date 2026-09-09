@@ -17,13 +17,10 @@ struct SuggestedRegion
 };
 
 /// What the application keeps for one detected face so a confirmed pick
-/// resolves back to its source: the suggested crop the overlay drew, the raw
-/// detector box the lock anchors on, and the display and frame the box was
-/// measured on so a pick on any display maps back to the right pixels.
+/// resolves back to the suggested crop and its capture source.
 struct FaceCandidate
 {
     RegionOfInterest region;
-    IntRect box;
     uint32_t displayId = 0;
     int frameWidth = 0;
     int frameHeight = 0;
@@ -57,7 +54,7 @@ struct WindowRegion
                                                                 int frameHeight);
 
 /// One face candidate per detector box, tagged with @p displayId and the
-/// frame dimensions, so a confirmed pick on any display recovers its box.
+/// frame dimensions, so a confirmed pick can validate its source.
 /// Each candidate's region is faceSuggestionRegion of the same box, matching
 /// the overlay list buildFaceSuggestions produces for the display.
 [[nodiscard]] std::vector<FaceCandidate> buildFaceCandidates(const std::vector<IntRect>& faces, uint32_t displayId,

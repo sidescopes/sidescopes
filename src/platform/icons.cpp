@@ -124,15 +124,13 @@ std::vector<uint8_t> rasterizeIcon(Icon icon, int sizePixels)
     return pixels;
 }
 
-Icon iconForRegionBinding(RegionBinding binding)
+Icon iconForRegionKind(RegionKind kind)
 {
-    switch (binding) {
-    case RegionBinding::Global:
+    switch (kind) {
+    case RegionKind::Global:
         return Icon::PinOff;
-    case RegionBinding::Window:
+    case RegionKind::Attached:
         return Icon::Pin;
-    case RegionBinding::Face:
-        return Icon::User;
     }
 
     return Icon::PinOff;

@@ -33,7 +33,7 @@ if(NOT CMAKE_BUILD_TYPE)
 endif()
 
 option(SIDESCOPES_BUILD_TESTS "Build the test suite" ON)
-option(SIDESCOPES_FACE_NETWORK_TESTS "Build the YuNet backend for portable testing" OFF)
+option(SIDESCOPES_FACE_NETWORK_TESTS "Build Linux YuNet backend tests" OFF)
 option(SIDESCOPES_BENCH "Build the opt-in benchmark suite" OFF)
 option(SIDESCOPES_WERROR "Treat compiler warnings as errors" OFF)
 option(SIDESCOPES_MODULES_DYNAMIC "Load built-in scope modules dynamically" OFF)
@@ -44,8 +44,8 @@ option(SIDESCOPES_WEB_SINGLE_FILE "Emit the browser lab as one self-contained fi
 if(EMSCRIPTEN AND SIDESCOPES_MODULES_DYNAMIC)
     message(FATAL_ERROR "The browser build requires statically linked scope modules")
 endif()
-if(SIDESCOPES_FACE_NETWORK_TESTS AND (NOT SIDESCOPES_BUILD_TESTS OR EMSCRIPTEN))
-    message(FATAL_ERROR "Face network tests require native SIDESCOPES_BUILD_TESTS")
+if(SIDESCOPES_FACE_NETWORK_TESTS AND (NOT SIDESCOPES_BUILD_TESTS OR NOT CMAKE_SYSTEM_NAME STREQUAL "Linux"))
+    message(FATAL_ERROR "Face network tests require Linux with SIDESCOPES_BUILD_TESTS")
 endif()
 set(SIDESCOPES_SANITIZE "" CACHE STRING
     "Comma-separated sanitizers to build and link with (e.g. address,undefined or thread)")
@@ -242,7 +242,7 @@ if(APPLE)
     sidescopes_target_defaults(sidescopes_platform)
 endif()
 
-if(WIN32 OR SIDESCOPES_FACE_NETWORK_TESTS)
+if(SIDESCOPES_FACE_NETWORK_TESTS)
     include(cmake/FaceDetection.cmake)
 endif()
 
@@ -277,7 +277,7 @@ if(WIN32)
         gdiplus
         shell32  # ShellExecuteW for opening URLs
         PRIVATE
-        sidescopes_face_network
+        windowsapp
     )
     sidescopes_target_defaults(sidescopes_platform)
 endif()
@@ -323,12 +323,6 @@ add_library(sidescopes_app STATIC
     src/app/capture_supervisor.cpp
     src/app/context_menu.cpp
     src/app/cursor_sampler.cpp
-    src/app/face_lock.cpp
-    src/app/face_motion.cpp
-    src/app/region_border_motion.cpp
-    src/app/face_tracking.cpp
-    src/app/face_tracking_worker.cpp
-    src/app/face_lock_controller.cpp
     src/app/frame_pacing.cpp
     src/app/guided_tour.cpp
     src/app/interface_diagnostics.cpp
@@ -341,7 +335,6 @@ add_library(sidescopes_app STATIC
     src/app/preferences_binding.cpp
     src/app/quality.cpp
     src/app/region_coordinator.cpp
-    src/app/region_geometry.cpp
     src/app/region_motion.cpp
     src/app/region_picker.cpp
     src/app/region_session.cpp

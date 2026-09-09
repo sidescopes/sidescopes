@@ -15,14 +15,14 @@ namespace sidescopes {
 /// every channel is off and logging costs one branch per site.
 enum class DiagChannel
 {
-    Attach,       ///< Window-attach focus routing: one line per follow tick.
-    Border,       ///< Region-border presentation: hide/show/present events.
-    Suggestions,  ///< Region-picker suggestions and the pick's rectangle chain.
-    FaceLock,     ///< Face-lock probe verdicts, for grading the gates.
-    Perf,         ///< Frame, analysis-pass, and capture-cadence timings.
-    Modules,      ///< Scope modules: what registered, what was refused, what they log.
-    Interface,    ///< Errors the interface toolkit reports about its own use.
-    Count         ///< Sentinel; keep last.
+    Attach,         ///< Window-attach focus routing: one line per follow tick.
+    Border,         ///< Region-border presentation: hide/show/present events.
+    Suggestions,    ///< Region-picker suggestions and the pick's rectangle chain.
+    FaceDetection,  ///< One-time face selection results.
+    Perf,           ///< Frame, analysis-pass, and capture-cadence timings.
+    Modules,        ///< Scope modules: what registered, what was refused, what they log.
+    Interface,      ///< Errors the interface toolkit reports about its own use.
+    Count           ///< Sentinel; keep last.
 };
 
 /// How often logged lines are pushed to disk. The default flushes on a

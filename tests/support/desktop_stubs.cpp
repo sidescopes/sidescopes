@@ -35,22 +35,6 @@ namespace {
 
 test::DesktopStubs g_stubs;
 
-class StubFaceDetectionSession final : public FaceDetectionSession
-{
-public:
-    FaceDetectionResult detect(const FrameView& view, double minimumPixels) override
-    {
-        g_stubs.recordDetection(view, 0.0f, minimumPixels);
-        if (g_stubs.beforeDetection) {
-            g_stubs.beforeDetection();
-        }
-        if (g_stubs.sessionDetection) {
-            return g_stubs.sessionDetection(view, minimumPixels);
-        }
-        return {g_stubs.detectionStatus, g_stubs.faces};
-    }
-};
-
 }  // namespace
 
 bool supportsWindowAttach()
@@ -158,14 +142,6 @@ bool supportsFaceDetection()
     return g_stubs.faceDetectionSupported;
 }
 
-std::unique_ptr<FaceDetectionSession> createFaceDetectionSession()
-{
-    if (g_stubs.beforeSessionCreation) {
-        g_stubs.beforeSessionCreation();
-    }
-    return std::make_unique<StubFaceDetectionSession>();
-}
-
 // The context menu reads and writes the capture's own visibility, and offers
 // the diagnostic log folder. Nothing under test asserts on them, so they are
 // the plainest stubs that link: a flag and a discarded url.
@@ -207,14 +183,18 @@ void unobserveSystemEvents()
 {
 }
 
-std::vector<IntRect> detectFaces(const FrameView& view, float pixelsPerPoint)
+FaceDetectionResult detectFaces(const FrameView& view, float pixelsPerPoint)
 {
+    ++g_stubs.faceDetectionCalls;
     g_stubs.recordDetection(view, pixelsPerPoint);
     if (g_stubs.beforeDetection) {
         g_stubs.beforeDetection();
     }
 
-    return g_stubs.faces;
+    if (g_stubs.faceDetection) {
+        return g_stubs.faceDetection(view, pixelsPerPoint);
+    }
+    return {g_stubs.detectionStatus, g_stubs.faces};
 }
 
 namespace test {
@@ -232,8 +212,8 @@ void DesktopStubs::reset()
     faceDetectionSupported = false;
     faces.clear();
     detectionStatus = FaceDetectionStatus::Completed;
-    sessionDetection = {};
-    beforeSessionCreation = {};
+    faceDetectionCalls.store(0);
+    faceDetection = {};
     beforeDetection = {};
     clock = {};
     applicationHidden = false;
@@ -254,14 +234,13 @@ void DesktopStubs::reset()
     m_detected = DetectorCall{};
 }
 
-void DesktopStubs::recordDetection(const FrameView& view, float pixelsPerPoint, double minimumPixels)
+void DesktopStubs::recordDetection(const FrameView& view, float pixelsPerPoint)
 {
     const std::lock_guard lock(m_mutex);
     ++m_detected.calls;
     m_detected.width = view.width;
     m_detected.height = view.height;
     m_detected.pixelsPerPoint = pixelsPerPoint;
-    m_detected.minimumPixels = minimumPixels;
     m_detected.frameSequence = view.sequence;
     m_detected.stamp = view.stamp;
     m_detected.format = view.format;

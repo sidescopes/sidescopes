@@ -84,8 +84,7 @@ StatusBar::StatusBar(const ShortcutResolver& shortcuts, RegionPicker& picker, Ic
 {
 }
 
-void StatusBar::draw(bool pinsAvailable, const std::optional<FloatColor>& cursorColor,
-                     std::string_view persistentStatus)
+void StatusBar::draw(bool pinsAvailable, const std::optional<FloatColor>& cursorColor)
 {
     // The reserved strip under the panes. Output owns its own row - it never
     // paints over the scopes' pixels. Idle, the row spans corner to corner:
@@ -99,13 +98,11 @@ void StatusBar::draw(bool pinsAvailable, const std::optional<FloatColor>& cursor
     // first element to be placed sets the origin, and a message - shorter than
     // the tool - dragged everything after it down.
     ImGui::Dummy(ImVec2(0.0f, iconButtonHeight()));
-    const auto message =
-        !m_message.empty() && glfwGetTime() <= m_until ? std::string_view(m_message) : persistentStatus;
-    if (!message.empty()) {
+    if (!m_message.empty() && glfwGetTime() <= m_until) {
         // Indented to the tool's glyph rather than to the content edge: the
         // row keeps one left edge whichever of the two is standing on it.
         ImGui::SameLine(0.0f, iconButtonInset());
-        statusRowText(message);
+        statusRowText(m_message);
 
         return;
     }

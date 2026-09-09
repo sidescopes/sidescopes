@@ -25,6 +25,13 @@ using test::regionOverlayStubs;
 constexpr uint32_t Display = 7;
 constexpr uint64_t Window = 42;
 
+enum class SelectionSource
+{
+    Global,
+    Window,
+    Face
+};
+
 struct ResetDesktop
 {
     ResetDesktop()
@@ -36,19 +43,12 @@ struct ResetDesktop
 
 struct SessionFixture : ResetDesktop
 {
-    double trackingSeconds = 1000.0;
-    std::function<void()> afterTrackingClockSample;
+    double captureSeconds = 1000.0;
     test::FakeCaptureSource source;
     FrameMailbox mailbox;
     AnalysisWorker worker{mailbox};
     CaptureController capture{source, mailbox};
-    RegionSession session{capture, worker, source, [this] {
-                              const double sampled = trackingSeconds;
-                              if (auto callback = std::exchange(afterTrackingClockSample, {})) {
-                                  callback();
-                              }
-                              return sampled;
-                          }};
+    RegionSession session{capture, worker, source};
 
     SessionFixture()
     {
@@ -105,9 +105,9 @@ struct FaceSessionFixture : SessionFixture
 
     void publish(uint64_t sequence, Color color = {40, 80, 120})
     {
-        trackingSeconds += 0.04;
+        captureSeconds += 0.04;
         auto frame = test::makeSolidFrameBuffer(1000, 500, color, sequence);
-        frame.stamp = {capture.streamEpoch(), capture.capturedDisplay(), trackingSeconds};
+        frame.stamp = {capture.streamEpoch(), capture.capturedDisplay(), captureSeconds};
         mailbox.publish(std::move(frame));
         worker.pump();
     }
@@ -131,26 +131,22 @@ struct FaceSessionFixture : SessionFixture
 
     RegionSessionOutcome follow()
     {
-        const auto result = session.follow(false, frameSize);
+        const auto result = session.follow(false);
         settings.region = result.region;
         settings.selectionRevision = result.selectionRevision;
+        settings.source = AnalysisSettings::Source{capture.streamEpoch(), capture.capturedDisplay()};
         worker.updateSettings(settings);
         return result;
     }
 
     void selectFace()
     {
-        desktopStubs().sessionDetection = [](const FrameView& crop, double) {
-            return FaceDetectionResult{FaceDetectionStatus::Completed,
-                                       {{200 - crop.sourceX, 100 - crop.sourceY, 100, 100}}};
-        };
         open();
         REQUIRE(regionOverlayStubs().lastDisplays[0].faces.size() == 1);
         REQUIRE(confirm(Display, regionOverlayStubs().lastDisplays[0].faces[0].region).region);
         (void)follow();
         publish(2);
         REQUIRE(follow().region);
-        REQUIRE(session.faceLocked());
     }
 };
 
@@ -177,7 +173,7 @@ struct DragSessionFixture : SessionFixture
     void publishStaticFrame(uint64_t sequence)
     {
         auto frame = test::makeSolidFrameBuffer(1000, 500, {}, sequence);
-        frame.stamp = {capture.streamEpoch(), capture.capturedDisplay(), trackingSeconds};
+        frame.stamp = {capture.streamEpoch(), capture.capturedDisplay(), captureSeconds};
         for (int y = 0; y < frame.height; ++y) {
             for (int x = 0; x < frame.width; ++x) {
                 auto* pixel = frame.data.data() + static_cast<std::size_t>(y) * frame.strideBytes +
@@ -194,16 +190,17 @@ struct DragSessionFixture : SessionFixture
     void apply(const RegionSessionOutcome& outcome)
     {
         settings.selectionRevision = outcome.selectionRevision;
+        settings.source = AnalysisSettings::Source{capture.streamEpoch(), capture.capturedDisplay()};
         if (outcome.regionChanged) {
             settings.region = outcome.region;
         }
     }
 
-    void select(RegionBinding binding)
+    void select(SelectionSource binding)
     {
-        if (binding == RegionBinding::Global) {
+        if (binding == SelectionSource::Global) {
             apply(session.initializeGlobalRegion({20, 20, 30, 40}));
-        } else if (binding == RegionBinding::Window) {
+        } else if (binding == SelectionSource::Window) {
             apply(pickWindow());
         } else {
             session.picker().request(RegionPickerMode::AttachFace);
@@ -214,12 +211,11 @@ struct DragSessionFixture : SessionFixture
             regionOverlayStubs().poll.confirmed = regionOverlayStubs().lastDisplays[0].faces[0].region;
             apply(session.poll(false, frameSize, {}));
             regionOverlayStubs().poll = {};
-            REQUIRE(session.faceLocked());
         }
-        apply(session.follow(false, frameSize));
+        apply(session.follow(false));
         worker.updateSettings(settings);
         worker.pump();
-        REQUIRE(worker.fetchOutput(seen, output, settings.selectionRevision, session.minimumReadingGeneration()));
+        REQUIRE(worker.fetchOutput(seen, output, settings.selectionRevision, settings.source));
         REQUIRE(output.frameSequence == 1);
         REQUIRE_FALSE(output.images.at(Histogram).rgba.empty());
     }
@@ -235,20 +231,19 @@ struct DragSessionFixture : SessionFixture
             // deliberately retains it until the test models that consumption.
             regionOverlayStubs().borderEdit.region.reset();
         }
-        apply(session.follow(false, frameSize));
+        apply(session.follow(false));
         session.syncBorder(false);
         bool accepted = false;
         if (drawing) {
-            accepted = worker.fetchOutput(seen, output, settings.selectionRevision, session.minimumReadingGeneration());
+            accepted = worker.fetchOutput(seen, output, settings.selectionRevision, settings.source);
             if (accepted) {
-                REQUIRE_FALSE(output.suppressed);
                 const auto& image = output.images.at(Histogram).rgba;
                 if (std::find(drawnImages.begin(), drawnImages.end(), image) == drawnImages.end()) {
                     drawnImages.push_back(image);
                 }
             }
             // App follows once more after presenting, before its late poll.
-            apply(session.follow(false, frameSize));
+            apply(session.follow(false));
         }
         apply(session.poll(false, frameSize, {}));
         regionOverlayStubs().borderEdit.region.reset();
@@ -264,13 +259,13 @@ struct DragSessionFixture : SessionFixture
 
 TEST_CASE("Border dragging publishes changing static-image scopes before release", "[live-border-drag]")
 {
-    const auto binding = GENERATE(RegionBinding::Global, RegionBinding::Window, RegionBinding::Face);
+    const auto binding = GENERATE(SelectionSource::Global, SelectionSource::Window, SelectionSource::Face);
     CAPTURE(static_cast<int>(binding));
     DragSessionFixture fix;
     fix.select(binding);
     (void)fix.step({}, true, true);
     fix.drawnImages.clear();
-    const auto detectionCalls = desktopStubs().detectorCall().calls;
+    const auto detectionCalls = desktopStubs().faceDetectionCalls.load();
     for (int move = 0; move < 4; ++move) {
         const double left = 14.0 + move * 6.0;
         // A pointer-only iteration changes the hand's rectangle but defers
@@ -283,7 +278,7 @@ TEST_CASE("Border dragging publishes changing static-image scopes before release
         CHECK_FALSE(fix.worker.held());
     }
     CHECK(fix.drawnImages.size() >= 2);
-    CHECK(desktopStubs().detectorCall().calls == detectionCalls);
+    CHECK(desktopStubs().faceDetectionCalls.load() == detectionCalls);
     REQUIRE(fix.session.interacting());
     const RegionOfInterest finalCrop{39, 20, 45, 40};
     (void)fix.step(finalCrop, false, true);
@@ -292,25 +287,20 @@ TEST_CASE("Border dragging publishes changing static-image scopes before release
     CHECK(fix.output.region->toPixels(1000, 500) == finalCrop.toPixels(1000, 500));
     CHECK(fix.output.frameSequence == 1);
     CHECK_FALSE(fix.session.interacting());
-    if (binding == RegionBinding::Face) {
-        desktopStubs().sessionDetection = [](const FrameView& crop, double) {
-            return FaceDetectionResult{FaceDetectionStatus::Completed,
-                                       {{200 - crop.sourceX, 100 - crop.sourceY, 100, 100}}};
-        };
-        const auto callsBeforeResume = desktopStubs().detectorCall().calls;
-        fix.trackingSeconds += 0.04;
+    if (binding == SelectionSource::Face) {
+        const auto callsBeforeResume = desktopStubs().faceDetectionCalls.load();
+        fix.captureSeconds += 0.04;
         fix.publishStaticFrame(2);
-        const auto resumed = fix.session.follow(false, fix.frameSize);
+        const auto resumed = fix.session.follow(false);
         REQUIRE(resumed.region);
         CHECK(resumed.region->toPixels(1000, 500) == finalCrop.toPixels(1000, 500));
-        CHECK(desktopStubs().detectorCall().calls > callsBeforeResume);
-        CHECK(fix.session.faceLocked());
+        CHECK(desktopStubs().faceDetectionCalls.load() == callsBeforeResume);
     }
 }
 
 TEST_CASE("Ending a border selection rejects its already completed scope output", "[live-border-drag]")
 {
-    const auto binding = GENERATE(RegionBinding::Global, RegionBinding::Window, RegionBinding::Face);
+    const auto binding = GENERATE(SelectionSource::Global, SelectionSource::Window, SelectionSource::Face);
     CAPTURE(static_cast<int>(binding));
     DragSessionFixture fix;
     fix.select(binding);
@@ -350,24 +340,23 @@ TEST_CASE("Ending a border selection rejects its already completed scope output"
     }
 }
 
-TEST_CASE("A face border gesture suppresses detector work even on a fresh identical capture", "[live-border-drag]")
+TEST_CASE("A face-selected border drag performs no further detection", "[live-border-drag]")
 {
     DragSessionFixture fix;
-    fix.select(RegionBinding::Face);
+    fix.select(SelectionSource::Face);
     (void)fix.step({}, true, true);
-    const auto calls = desktopStubs().detectorCall().calls;
-    fix.trackingSeconds += 0.04;
+    const auto calls = desktopStubs().faceDetectionCalls.load();
+    fix.captureSeconds += 0.04;
     fix.publishStaticFrame(2);
     (void)fix.step(RegionOfInterest{24, 20, 30, 40}, true, true);
     CHECK(fix.worker.consumedFrameSequence() == 2);
-    CHECK(desktopStubs().detectorCall().calls == calls);
-    CHECK(fix.session.faceLocked());
+    CHECK(desktopStubs().faceDetectionCalls.load() == calls);
     CHECK(fix.session.interacting());
 }
 
 TEST_CASE("A border drag completed between polls keeps its attached routing", "[live-border-drag]")
 {
-    const auto binding = GENERATE(RegionBinding::Window, RegionBinding::Face);
+    const auto binding = GENERATE(SelectionSource::Window, SelectionSource::Face);
     CAPTURE(static_cast<int>(binding));
     DragSessionFixture fix;
     fix.select(binding);
@@ -377,9 +366,8 @@ TEST_CASE("A border drag completed between polls keeps its attached routing", "[
     REQUIRE(fix.settings.region);
     CHECK(fix.settings.region->toPixels(1000, 500) == edited.toPixels(1000, 500));
     CHECK(fix.session.attachments().isAttached(Window));
-    CHECK(fix.session.faceLocked() == (binding == RegionBinding::Face));
     desktopStubs().windowGeometry->x += 100.0;
-    const auto carried = fix.session.follow(false, fix.frameSize);
+    const auto carried = fix.session.follow(false);
     REQUIRE(carried.region);
     CHECK(carried.region->leftPercent == Catch::Approx(edited.leftPercent + 10.0));
     CHECK(carried.region->rightPercent == Catch::Approx(edited.rightPercent + 10.0));
@@ -387,157 +375,105 @@ TEST_CASE("A border drag completed between polls keeps its attached routing", "[
     CHECK(carried.region->bottomPercent == Catch::Approx(edited.bottomPercent));
 }
 
-TEST_CASE("Face loss samples live through grace then removes the region and stops tracking", "[face-loss-reading]")
+TEST_CASE("A global draw keeps its mode when it matches a picker suggestion", "[picker-mode]")
 {
     FaceSessionFixture fix;
-    fix.selectFace();
-    AnalysisWorker::Output output;
-    uint64_t seen = 0;
-    REQUIRE(fix.worker.fetchOutput(seen, output, fix.settings.selectionRevision));
-    const auto acceptedPixels = output.images.at("org.sidescopes.histogram").rgba;
-    const auto acceptedRegion = output.region;
-    desktopStubs().sessionDetection = {};
-    desktopStubs().faces.clear();
-    fix.publish(3, {210, 20, 30});
-    (void)fix.follow();
-    const double loss = fix.trackingSeconds;
-    REQUIRE(fix.worker.fetchOutput(seen, output, fix.settings.selectionRevision));
-    CHECK_FALSE(output.suppressed);
-    CHECK(output.region == acceptedRegion);
-    CHECK(output.frameSequence == 3);
-    CHECK(output.images.at("org.sidescopes.histogram").rgba != acceptedPixels);
-    CHECK(fix.session.traceLive());
-    CHECK_FALSE(fix.session.faceTrackingStopped());
-    REQUIRE(regionOverlayStubs().border);
-    CHECK(regionOverlayStubs().border->binding == RegionBinding::Face);
-
-    fix.trackingSeconds = loss + 0.999;
-    (void)fix.follow();
-    CHECK(fix.session.traceLive());
-    REQUIRE(regionOverlayStubs().border);
-    fix.trackingSeconds = loss + 1.0;
-    const auto expired = fix.follow();
-    CHECK(expired.regionChanged);
-    CHECK_FALSE(expired.trackedRegion);
-    CHECK_FALSE(expired.region);
-    CHECK_FALSE(fix.session.traceLive());
-    CHECK(fix.session.faceTrackingStopped());
-    CHECK_FALSE(fix.session.faceLocked());
-    CHECK_FALSE(fix.session.attachments().isAttached(Window));
-    CHECK_FALSE(regionOverlayStubs().border);
-    CHECK_FALSE(fix.worker.fetchOutput(seen, output, fix.settings.selectionRevision));
-
-    const int calls = desktopStubs().detectorCall().calls;
-    desktopStubs().faces = {{200, 100, 100, 100}};
-    fix.publish(4);
-    CHECK_FALSE(fix.follow().region);
-    CHECK(desktopStubs().detectorCall().calls == calls);
-    CHECK_FALSE(fix.session.traceLive());
-    CHECK(fix.session.faceTrackingStopped());
-    (void)fix.session.clear();
-    CHECK_FALSE(fix.session.faceTrackingStopped());
-}
-
-TEST_CASE("A detection finishing after interface expiry cannot revive its selection", "[face-loss-reading]")
-{
-    FaceSessionFixture fix;
-    fix.selectFace();
-    desktopStubs().sessionDetection = {};
-    desktopStubs().faces.clear();
-    fix.publish(3);
-    (void)fix.follow();
-    const double loss = fix.trackingSeconds;
-    const auto oldRevision = fix.settings.selectionRevision;
-    bool expiredDuringDetection = false;
-    desktopStubs().sessionDetection = [&](const FrameView& crop, double) {
-        expiredDuringDetection = true;
-        fix.trackingSeconds = loss + 1.0;
-        const auto expired = fix.follow();
-        REQUIRE_FALSE(expired.region);
-        REQUIRE(fix.session.faceTrackingStopped());
-        return FaceDetectionResult{FaceDetectionStatus::Completed,
-                                   {{205 - crop.sourceX, 100 - crop.sourceY, 100, 100}}};
-    };
-    fix.publish(4);
-    REQUIRE(expiredDuringDetection);
-    CHECK(fix.settings.selectionRevision > oldRevision);
-    AnalysisWorker::Output output;
-    uint64_t seen = 0;
-    CHECK_FALSE(fix.worker.fetchOutput(seen, output, fix.settings.selectionRevision));
-    CHECK_FALSE(fix.follow().region);
-    CHECK_FALSE(fix.session.faceLocked());
-    CHECK_FALSE(regionOverlayStubs().border);
-}
-
-TEST_CASE("Worker suppression and its consumed terminal update clear the same reading", "[face-loss-reading]")
-{
-    FaceSessionFixture fix;
-    fix.selectFace();
-    desktopStubs().sessionDetection = {};
-    desktopStubs().faces.clear();
-    fix.publish(3);
-    (void)fix.follow();
-    REQUIRE(fix.session.traceLive());
-    fix.trackingSeconds += 1.0;
-    fix.publish(4);
-    AnalysisWorker::Output output;
-    uint64_t seen = 0;
-    REQUIRE(fix.worker.fetchOutput(seen, output, fix.settings.selectionRevision));
-    REQUIRE(output.suppressed);
-    CHECK_FALSE(output.region);
-    CHECK(output.images.empty());
-    // The app reconciles the tracking slot as soon as suppression arrives,
-    // before drawing the frame that clears the scopes.
-    const auto ended = fix.follow();
-    CHECK(ended.regionChanged);
-    CHECK_FALSE(ended.region);
-    CHECK_FALSE(fix.session.traceLive());
-    CHECK_FALSE(fix.session.faceLocked());
-    CHECK_FALSE(fix.session.attachments().isAttached(Window));
-    CHECK_FALSE(regionOverlayStubs().border);
-    CHECK_FALSE(fix.worker.fetchOutput(seen, output, fix.settings.selectionRevision));
-}
-
-TEST_CASE("A new face preview works after tracking stops and cancel restores the empty state", "[face-loss-reading]")
-{
-    FaceSessionFixture fix;
-    fix.selectFace();
-    desktopStubs().sessionDetection = {};
-    desktopStubs().faces.clear();
-    fix.publish(3);
-    (void)fix.follow();
-    fix.trackingSeconds += 1.0;
-    (void)fix.follow();
-    REQUIRE(fix.session.faceTrackingStopped());
-    desktopStubs().faces = {{300, 100, 100, 100}};
+    const bool face = GENERATE(false, true);
+    const bool sourceMoved = GENERATE(false, true);
     fix.open();
     REQUIRE(regionOverlayStubs().lastDisplays[0].faces.size() == 1);
-    const auto preview = regionOverlayStubs().lastDisplays[0].faces[0].region;
-    regionOverlayStubs().poll.active = true;
-    regionOverlayStubs().poll.displayId = Display;
-    regionOverlayStubs().poll.preview = preview;
-    const auto outcome = fix.session.poll(false, fix.frameSize, {});
-    REQUIRE(outcome.region == preview);
-    CHECK(fix.session.traceLive());
-    CHECK_FALSE(fix.session.faceTrackingStopped());
-    SECTION("Cancel")
-    {
-        regionOverlayStubs().poll = {};
-        const auto cancelled = fix.session.cancel();
-        CHECK_FALSE(cancelled.region);
-        CHECK_FALSE(fix.session.faceLocked());
-        CHECK_FALSE(fix.session.attachments().isAttached(Window));
-        CHECK(fix.session.faceTrackingStopped());
-        CHECK_FALSE(fix.session.traceLive());
-        CHECK_FALSE(regionOverlayStubs().border);
+    const RegionOfInterest drawn =
+        face ? regionOverlayStubs().lastDisplays[0].faces[0].region : RegionOfInterest{10, 10, 50, 50};
+    // The finishing tool is authoritative even when the picker opened in
+    // face mode and retained suggestions with the same coordinates.
+    fix.session.picker().request(RegionPickerMode::DrawGlobal);
+    (void)fix.session.picker().openIfRequested(false);
+    if (sourceMoved) {
+        desktopStubs().windowGeometry->x += 100;
     }
-    SECTION("Confirm")
-    {
-        REQUIRE(fix.confirm(Display, preview).region == preview);
-        CHECK_FALSE(fix.session.faceTrackingStopped());
-        CHECK(fix.session.faceLocked());
+    const auto picked = fix.confirm(Display, drawn);
+    REQUIRE(picked.region);
+    CHECK(*picked.region == drawn);
+    CHECK_FALSE(picked.status);
+    CHECK_FALSE(fix.session.attachments().attached());
+    REQUIRE(regionOverlayStubs().border);
+    CHECK(regionOverlayStubs().border->kind == RegionKind::Global);
+}
+
+TEST_CASE("A face suggestion matching its window keeps the suggested crop", "[picker-mode]")
+{
+    FaceSessionFixture fix;
+    desktopStubs().windowGeometry = WindowGeometry{210, 110, 80, 80, false, "Picture"};
+    auto& window = desktopStubs().onScreenWindows.front();
+    window.x = 210;
+    window.y = 110;
+    window.width = 80;
+    window.height = 80;
+    fix.open();
+    REQUIRE(regionOverlayStubs().lastDisplays[0].faces.size() == 1);
+    const auto suggested = regionOverlayStubs().lastDisplays[0].faces[0].region;
+    REQUIRE(fix.session.picker().matchWindowCandidate(Display, suggested));
+    const auto picked = fix.confirm(Display, suggested);
+    REQUIRE(picked.region);
+    CHECK(picked.region->toPixels(1000, 500) == suggested.toPixels(1000, 500));
+    CHECK(fix.session.attachments().isAttached(Window));
+    (void)fix.follow();
+    REQUIRE(regionOverlayStubs().border);
+    CHECK(regionOverlayStubs().border->kind == RegionKind::Attached);
+}
+
+TEST_CASE("A non-face draw in face mode remains global even when it matches a window", "[picker-mode]")
+{
+    FaceSessionFixture fix;
+    fix.open();
+    const RegionOfInterest drawn{10, 10, 50, 50};
+    REQUIRE(fix.session.picker().matchWindowCandidate(Display, drawn));
+    REQUIRE_FALSE(fix.session.picker().matchFaceCandidate(Display, drawn));
+    const auto picked = fix.confirm(Display, drawn);
+    REQUIRE(picked.region);
+    CHECK(*picked.region == drawn);
+    CHECK_FALSE(fix.session.attachments().attached());
+}
+
+TEST_CASE("A window-mode draw matching a face suggestion keeps its attachment", "[picker-mode]")
+{
+    FaceSessionFixture fix;
+    fix.open();
+    const auto drawn = regionOverlayStubs().lastDisplays[0].faces[0].region;
+    fix.session.picker().request(RegionPickerMode::AttachWindow);
+    (void)fix.session.picker().openIfRequested(false);
+    const auto picked = fix.confirm(Display, drawn);
+    REQUIRE(picked.region);
+    CHECK(picked.region->toPixels(1000, 500) == drawn.toPixels(1000, 500));
+    CHECK(fix.session.attachments().isAttached(Window));
+}
+
+TEST_CASE("A face selection stays fixed as content changes and needs no further detection")
+{
+    FaceSessionFixture fix;
+    fix.selectFace();
+    const auto selected = fix.follow();
+    REQUIRE(selected.region);
+    const auto calls = desktopStubs().faceDetectionCalls.load();
+    REQUIRE(calls > 0);
+    AnalysisWorker::Output output;
+    uint64_t seen = 0;
+    for (uint64_t sequence = 3; sequence < 10; ++sequence) {
+        desktopStubs().faces = sequence % 2 == 0 ? std::vector<IntRect>{{400, 200, 80, 80}} : std::vector<IntRect>{};
+        fix.captureSeconds += 10.0;
+        fix.publish(sequence, Color{static_cast<uint8_t>(sequence * 20), 80, 120});
+        const auto current = fix.follow();
+        CHECK(current.region == selected.region);
+        CHECK(current.selectionRevision == selected.selectionRevision);
         CHECK(fix.session.attachments().isAttached(Window));
+        REQUIRE(regionOverlayStubs().border);
+        CHECK(regionOverlayStubs().border->kind == RegionKind::Attached);
+        CHECK(regionOverlayStubs().border->region == selected.region);
+        REQUIRE(fix.worker.fetchOutput(seen, output, current.selectionRevision, fix.settings.source));
+        CHECK(output.frameSequence == sequence);
+        CHECK(output.region == selected.region);
     }
+    CHECK(desktopStubs().faceDetectionCalls.load() == calls);
 }
 
 TEST_CASE("A stale face confirmation restores the committed crop before replacing capture")
@@ -573,7 +509,6 @@ TEST_CASE("A stale face confirmation restores the committed crop before replacin
     CHECK(result.region == committed);
     REQUIRE(result.status);
     CHECK(*result.status == "selection source changed - previous region kept");
-    CHECK_FALSE(fix.session.faceLocked());
     CHECK_FALSE(fix.session.attachments().attached());
     CHECK(fix.capture.streamEpoch() == epochBeforeConfirm);
     CHECK(fix.capture.desiredDisplay() == Display);
@@ -581,7 +516,7 @@ TEST_CASE("A stale face confirmation restores the committed crop before replacin
     CHECK(regionOverlayStubs().border->region == committed);
 }
 
-TEST_CASE("Snapshot face selection is mapped to live pixels and automatic motion keeps its revision")
+TEST_CASE("Snapshot face selection creates a fixed attached crop at either capture scale")
 {
     FaceSessionFixture fix;
     constexpr uint32_t SecondDisplay = Display + 1;
@@ -611,40 +546,28 @@ TEST_CASE("Snapshot face selection is mapped to live pixels and automatic motion
     // parent is on the second display, not the fixture's original display.
     desktopStubs().cursorDisplay = SecondDisplay;
     const auto picked = fix.confirm(SecondDisplay, suggestions[0].region);
-    REQUIRE(fix.session.faceLocked());
     REQUIRE(picked.region);
     REQUIRE(fix.capture.capturedDisplay() == SecondDisplay);
     const auto selectedEpoch = fix.capture.streamEpoch();
-    // The snapshot anchor (125, 0.3 * height), width 50, maps to (250,150), width100.
-    desktopStubs().sessionDetection = [](const FrameView& crop, double) {
-        CHECK(crop.stamp.displayId == SecondDisplay);
-        return FaceDetectionResult{FaceDetectionStatus::Completed,
-                                   {{200 - crop.sourceX, 100 - crop.sourceY, 100, 100}}};
-    };
     (void)fix.follow();
+    fix.worker.pump();
+    AnalysisWorker::Output stale;
+    uint64_t oldVersion = 0;
+    CHECK_FALSE(fix.worker.fetchOutput(oldVersion, stale, fix.settings.selectionRevision, fix.settings.source));
     REQUIRE(desktopStubs().lastDisplayPoint);
     CHECK(desktopStubs().lastDisplayPoint->x == 300.0);
     CHECK(desktopStubs().lastDisplayPoint->y == 150.0);
     CHECK(fix.capture.streamEpoch() == selectedEpoch);
     fix.publish(2);
     const auto first = fix.follow();
-    REQUIRE(fix.session.faceLocked());
     CHECK(first.region == picked.region);
     const auto revision = first.selectionRevision;
-    desktopStubs().sessionDetection = [](const FrameView& crop, double) {
-        CHECK(crop.stamp.displayId == SecondDisplay);
-        return FaceDetectionResult{FaceDetectionStatus::Completed,
-                                   {{205 - crop.sourceX, 100 - crop.sourceY, 100, 100}}};
-    };
     fix.publish(3);
     const auto moved = fix.follow();
-    REQUIRE(moved.regionChanged);
-    CHECK(moved.trackedRegion);
+    CHECK_FALSE(moved.regionChanged);
     CHECK(moved.selectionRevision == revision);
     REQUIRE(moved.region);
-    CHECK(moved.region->leftPercent > picked.region->leftPercent);
-    CHECK(moved.region->leftPercent <= picked.region->leftPercent + 0.5);
-    CHECK(moved.region->leftPercent >= picked.region->leftPercent + 0.3 - 1e-9);
+    CHECK(moved.region == picked.region);
     AnalysisWorker::Output output;
     uint64_t seen = 0;
     REQUIRE(fix.worker.fetchOutput(seen, output, revision));
@@ -658,7 +581,7 @@ TEST_CASE("Snapshot face selection is mapped to live pixels and automatic motion
     CHECK(output.frameStamp.captureEpoch == selectedEpoch);
 }
 
-TEST_CASE("An impossible face nomination removes the unusable face region")
+TEST_CASE("A face pick is clamped to its parent window like any attached crop")
 {
     FaceSessionFixture fix;
     desktopStubs().windowGeometry = WindowGeometry{240, 50, 20, 200, false, "Narrow window"};
@@ -672,10 +595,10 @@ TEST_CASE("An impossible face nomination removes the unusable face region")
     (void)fix.follow();
     fix.publish(2);
     const auto ordinary = fix.follow();
-    CHECK_FALSE(fix.session.faceLocked());
-    CHECK_FALSE(fix.session.attachments().isAttached(Window));
-    CHECK_FALSE(ordinary.region);
-    CHECK(fix.session.faceTrackingStopped());
+    CHECK(fix.session.attachments().isAttached(Window));
+    REQUIRE(ordinary.region);
+    CHECK(ordinary.region->leftPercent >= 24.0);
+    CHECK(ordinary.region->rightPercent <= 26.0);
 }
 
 TEST_CASE("A face selection survives animated minimization and an empty cancelled picker")
@@ -683,10 +606,6 @@ TEST_CASE("A face selection survives animated minimization and an empty cancelle
     FaceSessionFixture fix;
     double now = 1.0;
     desktopStubs().clock = [&] { return now; };
-    desktopStubs().sessionDetection = [](const FrameView& crop, double) {
-        return FaceDetectionResult{FaceDetectionStatus::Completed,
-                                   {{200 - crop.sourceX, 100 - crop.sourceY, 100, 100}}};
-    };
     fix.open();
     REQUIRE(regionOverlayStubs().lastDisplays[0].faces.size() == 1);
     const auto picked = fix.confirm(Display, regionOverlayStubs().lastDisplays[0].faces[0].region);
@@ -700,7 +619,6 @@ TEST_CASE("A face selection survives animated minimization and an empty cancelle
     now = 2.0;
     desktopStubs().windowGeometry = WindowGeometry{700, 400, 100, 50, false, "Picture"};
     (void)fix.follow();
-    CHECK(fix.session.faceLocked());
     now = 2.05;
     desktopStubs().windowGeometry->minimized = true;
     CHECK_FALSE(fix.follow().region);
@@ -710,7 +628,6 @@ TEST_CASE("A face selection survives animated minimization and an empty cancelle
     fix.open();
     REQUIRE(regionOverlayStubs().lastDisplays[0].faces.empty());
     (void)fix.session.cancel();
-    CHECK(fix.session.faceLocked());
     CHECK(fix.session.attachments().isAttached(Window));
     CHECK_FALSE(regionOverlayStubs().border);
 
@@ -718,7 +635,6 @@ TEST_CASE("A face selection survives animated minimization and an empty cancelle
     desktopStubs().windowGeometry->minimized = false;
     CHECK_FALSE(fix.follow().region);
     CHECK_FALSE(fix.follow().region);  // same UI frame is not a settled window
-    CHECK(fix.session.faceLocked());
     now = 5.05;
     desktopStubs().windowGeometry = original;
     CHECK_FALSE(fix.follow().region);
@@ -727,16 +643,15 @@ TEST_CASE("A face selection survives animated minimization and an empty cancelle
     REQUIRE(restored.region);
     CHECK(restored.region->toPixels(1000, 500) == accepted.region->toPixels(1000, 500));
     REQUIRE(regionOverlayStubs().border);
-    CHECK(regionOverlayStubs().border->binding == RegionBinding::Face);
+    CHECK(regionOverlayStubs().border->kind == RegionKind::Attached);
     fix.publish(3);
     const auto resumed = fix.follow();
     REQUIRE(resumed.region);
     CHECK(resumed.region->toPixels(1000, 500) == accepted.region->toPixels(1000, 500));
-    CHECK(fix.session.faceLocked());
     desktopStubs().clock = {};
 }
 
-TEST_CASE("Cancelling an empty face picker resumes tracking across paused capture streams")
+TEST_CASE("Cancelling an empty face picker preserves attachment across paused capture streams")
 {
     FaceSessionFixture fix;
     double now = 1.0;
@@ -749,10 +664,6 @@ TEST_CASE("Cancelling an empty face picker resumes tracking across paused captur
         }
         return now;
     };
-    desktopStubs().sessionDetection = [](const FrameView& crop, double) {
-        return FaceDetectionResult{FaceDetectionStatus::Completed,
-                                   {{200 - crop.sourceX, 100 - crop.sourceY, 100, 100}}};
-    };
     fix.open();
     const auto picked = fix.confirm(Display, regionOverlayStubs().lastDisplays[0].faces[0].region);
     REQUIRE(picked.region);
@@ -761,8 +672,7 @@ TEST_CASE("Cancelling an empty face picker resumes tracking across paused captur
     const auto accepted = fix.follow();
     REQUIRE(accepted.region);
     const auto firstEpoch = fix.capture.streamEpoch();
-    const auto continuity = fix.capture.continuityGeneration();
-    const int calls = desktopStubs().detectorCall().calls;
+    const int calls = desktopStubs().faceDetectionCalls.load();
 
     desktopStubs().windowGeometry->minimized = true;
     desktopStubs().onScreenWindows.clear();
@@ -778,11 +688,9 @@ TEST_CASE("Cancelling an empty face picker resumes tracking across paused captur
     REQUIRE(fix.session.picker().active());
     CHECK(regionOverlayStubs().lastDisplays[0].faces.empty());
     CHECK(fix.capture.streamEpoch() > firstEpoch);
-    CHECK(fix.capture.continuityGeneration() == continuity);
     const auto pickerEpoch = fix.capture.streamEpoch();
     regionOverlayStubs().poll = {};
     (void)fix.session.cancel();
-    CHECK(fix.session.faceLocked());
     fix.capture.suspend("waiting for a region source");
     fix.worker.releaseFrame();
 
@@ -793,22 +701,19 @@ TEST_CASE("Cancelling an empty face picker resumes tracking across paused captur
     REQUIRE(fix.follow().region);
     fix.capture.resume();
     REQUIRE(fix.capture.streamEpoch() > pickerEpoch);
-    REQUIRE(fix.capture.continuityGeneration() == continuity);
     (void)fix.follow();
     auto late = test::makeSolidFrameBuffer(1000, 500, Color{40, 80, 120}, 3);
     late.stamp = {firstEpoch, Display, frameClockSeconds()};
     fix.mailbox.publish(std::move(late));
     fix.worker.pump();
-    CHECK(desktopStubs().detectorCall().calls == calls);
-    CHECK(fix.session.faceLocked());
+    CHECK(desktopStubs().faceDetectionCalls.load() == calls);
     fix.publish(1);  // fresh stream numbering may restart
     const auto resumed = fix.follow();
     REQUIRE(resumed.region);
     CHECK(resumed.region->toPixels(1000, 500) == accepted.region->toPixels(1000, 500));
-    CHECK(fix.session.faceLocked());
-    CHECK(desktopStubs().detectorCall().calls == calls + 1);
+    CHECK(desktopStubs().faceDetectionCalls.load() == calls);
     REQUIRE(regionOverlayStubs().border);
-    CHECK(regionOverlayStubs().border->binding == RegionBinding::Face);
+    CHECK(regionOverlayStubs().border->kind == RegionKind::Attached);
     desktopStubs().clock = {};
 }
 
@@ -819,17 +724,17 @@ TEST_CASE("Closure during a minimize animation keeps the last settled attached c
     desktopStubs().clock = [&] { return now; };
     const auto picked = fix.pickWindow();
     REQUIRE(picked.region);
-    (void)fix.session.follow(false, {});
+    (void)fix.session.follow(false);
     now = 2.0;
     desktopStubs().windowGeometry = WindowGeometry{700, 400, 100, 50, false, "Picture"};
-    (void)fix.session.follow(false, {});
+    (void)fix.session.follow(false);
     desktopStubs().windowGeometry.reset();
     desktopStubs().windowPresence = WindowPresence::Closed;
-    const auto closed = fix.session.follow(false, {});
+    const auto closed = fix.session.follow(false);
     CHECK(closed.region == picked.region);
     CHECK_FALSE(fix.session.attachments().attached());
     REQUIRE(regionOverlayStubs().border);
-    CHECK(regionOverlayStubs().border->binding == RegionBinding::Global);
+    CHECK(regionOverlayStubs().border->kind == RegionKind::Global);
     desktopStubs().clock = {};
 }
 
@@ -871,10 +776,8 @@ TEST_CASE("Stale border actions cannot replace a face crop during parent motion"
     regionOverlayStubs().borderEdit.bindingToggled = true;
     (void)fix.session.poll(false, fix.frameSize, {});
     regionOverlayStubs().borderEdit = {};
-    CHECK(fix.session.faceLocked());
     CHECK(fix.session.attachments().isAttached(Window));
-    // Hiding aborts the animation; neither queued edit may have replaced
-    // the rollback origin, last accepted crop or face binding.
+    // Neither queued edit may replace the last settled attached crop.
     desktopStubs().windowGeometry = original;
     desktopStubs().windowGeometry->minimized = true;
     now = 2.05;
@@ -886,11 +789,10 @@ TEST_CASE("Stale border actions cannot replace a face crop during parent motion"
     const auto restored = fix.follow();
     REQUIRE(restored.region);
     CHECK(restored.region->toPixels(1000, 500) == picked.region->toPixels(1000, 500));
-    CHECK(fix.session.faceLocked());
     desktopStubs().clock = {};
 }
 
-TEST_CASE("Stable border edits and face release still apply to the selected parent")
+TEST_CASE("Editing a face-selected region and detaching preserves its current rectangle")
 {
     FaceSessionFixture fix;
     fix.open();
@@ -903,16 +805,14 @@ TEST_CASE("Stable border edits and face release still apply to the selected pare
     const auto changed = fix.session.poll(false, fix.frameSize, {});
     REQUIRE(changed.region);
     CHECK(changed.region->toPixels(1000, 500) == edited.toPixels(1000, 500));
-    CHECK(fix.session.faceLocked());
     regionOverlayStubs().borderEdit = {};
     regionOverlayStubs().borderEdit.bindingToggled = true;
     const auto released = fix.session.poll(false, fix.frameSize, {});
     REQUIRE(released.region);
     CHECK(released.region->toPixels(1000, 500) == edited.toPixels(1000, 500));
-    CHECK_FALSE(fix.session.faceLocked());
-    CHECK(fix.session.attachments().isAttached(Window));
+    CHECK_FALSE(fix.session.attachments().isAttached(Window));
     REQUIRE(regionOverlayStubs().border);
-    CHECK(regionOverlayStubs().border->binding == RegionBinding::Window);
+    CHECK(regionOverlayStubs().border->kind == RegionKind::Global);
     regionOverlayStubs().borderEdit = {};
 }
 
@@ -927,21 +827,21 @@ TEST_CASE("A confirmed attachment owns its focus watch and moves the published r
     CHECK(desktopStubs().raisedWindow == Window);
     CHECK(fix.session.attachments().isAttached(Window));
 
-    (void)fix.session.follow(false, std::nullopt);
+    (void)fix.session.follow(false);
     CHECK(desktopStubs().watchedWindow == Window);
     REQUIRE(regionOverlayStubs().border);
-    CHECK(regionOverlayStubs().border->binding == RegionBinding::Window);
+    CHECK(regionOverlayStubs().border->kind == RegionKind::Attached);
     CHECK(regionOverlayStubs().border->label == "Picture");
 
     desktopStubs().foregroundPid = desktopStubs().ownPid;
     desktopStubs().focusedWindow.reset();
-    (void)fix.session.follow(false, std::nullopt);
+    (void)fix.session.follow(false);
     CHECK(desktopStubs().watchedWindow == Window);
     REQUIRE(regionOverlayStubs().border);
-    CHECK(regionOverlayStubs().border->binding == RegionBinding::Window);
+    CHECK(regionOverlayStubs().border->kind == RegionKind::Attached);
 
     desktopStubs().windowGeometry->x += 100.0;
-    const auto moved = fix.session.follow(false, std::nullopt);
+    const auto moved = fix.session.follow(false);
     REQUIRE(moved.regionChanged);
     REQUIRE(moved.region);
     CHECK(moved.region->leftPercent == Catch::Approx(picked.region->leftPercent + 10.0));
@@ -953,7 +853,7 @@ TEST_CASE("Removing a moving attachment releases all motion state")
 {
     SessionFixture fix;
     const auto picked = fix.pickWindow();
-    (void)fix.session.follow(false, std::nullopt);
+    (void)fix.session.follow(false);
     REQUIRE(desktopStubs().windowMotion);
     desktopStubs().windowMotion(WindowMotionSignal::Moved);
     REQUIRE(fix.session.carried());
@@ -980,7 +880,7 @@ TEST_CASE("Removing a moving attachment releases all motion state")
     CHECK(fresh.region == next);
     fix.session.syncBorder(false);
     REQUIRE(regionOverlayStubs().border);
-    CHECK(regionOverlayStubs().border->binding == RegionBinding::Global);
+    CHECK(regionOverlayStubs().border->kind == RegionKind::Global);
     CHECK(regionOverlayStubs().border->region == next);
 }
 
@@ -993,9 +893,9 @@ TEST_CASE("Binding a global region and releasing it preserves the chosen rectang
     (void)fix.session.poll(false, std::nullopt, std::nullopt);
     regionOverlayStubs().borderEdit = {};
     CHECK(fix.session.attachments().isAttached(Window));
-    (void)fix.session.follow(false, std::nullopt);
+    (void)fix.session.follow(false);
     REQUIRE(regionOverlayStubs().border);
-    CHECK(regionOverlayStubs().border->binding == RegionBinding::Window);
+    CHECK(regionOverlayStubs().border->kind == RegionKind::Attached);
     CHECK(regionOverlayStubs().border->region == selected);
 
     regionOverlayStubs().borderEdit.bindingToggled = true;
@@ -1003,7 +903,7 @@ TEST_CASE("Binding a global region and releasing it preserves the chosen rectang
     CHECK_FALSE(fix.session.attachments().attached());
     CHECK(desktopStubs().watchedWindow == 0);
     REQUIRE(regionOverlayStubs().border);
-    CHECK(regionOverlayStubs().border->binding == RegionBinding::Global);
+    CHECK(regionOverlayStubs().border->kind == RegionKind::Global);
     CHECK(regionOverlayStubs().border->region == selected);
 }
 
@@ -1012,7 +912,7 @@ TEST_CASE("A region session releases native callbacks when destroyed")
     {
         SessionFixture fix;
         (void)fix.pickWindow();
-        (void)fix.session.follow(false, std::nullopt);
+        (void)fix.session.follow(false);
         REQUIRE(desktopStubs().windowMotion);
     }
     CHECK(desktopStubs().watchedWindow == 0);
@@ -1029,7 +929,7 @@ TEST_CASE("Closing a region removes its selection without recreating the startup
     SECTION("Attached region")
     {
         REQUIRE(fix.pickWindow().region);
-        (void)fix.session.follow(false, {});
+        (void)fix.session.follow(false);
     }
     regionOverlayStubs().borderEdit.closed = true;
     const auto closed = fix.session.pollBorder();
@@ -1037,9 +937,8 @@ TEST_CASE("Closing a region removes its selection without recreating the startup
     CHECK(closed.regionChanged);
     CHECK_FALSE(closed.region);
     CHECK_FALSE(fix.session.attachments().attached());
-    CHECK_FALSE(fix.session.faceTrackingStopped());
     CHECK_FALSE(regionOverlayStubs().border);
-    CHECK_FALSE(fix.session.follow(false, {}).region);
+    CHECK_FALSE(fix.session.follow(false).region);
     CHECK_FALSE(fix.session.poll(false, {}, {}).region);
 }
 
@@ -1052,7 +951,7 @@ TEST_CASE("Closing one region preserves other windows while explicit clear remov
     desktopStubs().onScreenWindows.front().windowIdentity = SecondWindow;
     desktopStubs().focusedWindow = SecondWindow;
     REQUIRE(fix.pickWindow().region);
-    (void)fix.session.follow(false, {});
+    (void)fix.session.follow(false);
     REQUIRE(fix.session.attachments().attachedCount() == 2);
     SECTION("Close the current border")
     {
@@ -1062,7 +961,7 @@ TEST_CASE("Closing one region preserves other windows while explicit clear remov
         CHECK(fix.session.attachments().isAttached(Window));
         CHECK_FALSE(fix.session.attachments().isAttached(SecondWindow));
         desktopStubs().focusedWindow = Window;
-        CHECK(fix.session.follow(false, {}).region == first.region);
+        CHECK(fix.session.follow(false).region == first.region);
     }
     SECTION("Clear all selections")
     {
@@ -1070,46 +969,22 @@ TEST_CASE("Closing one region preserves other windows while explicit clear remov
         CHECK(cleared.regionChanged);
         CHECK_FALSE(cleared.region);
         CHECK_FALSE(fix.session.attachments().attached());
-        CHECK_FALSE(fix.session.follow(false, {}).region);
+        CHECK_FALSE(fix.session.follow(false).region);
     }
-}
-
-TEST_CASE("Closing a face region invalidates an in-flight detection immediately")
-{
-    FaceSessionFixture fix;
-    fix.selectFace();
-    const auto revision = fix.settings.selectionRevision;
-    desktopStubs().beforeDetection = [&] {
-        regionOverlayStubs().borderEdit.closed = true;
-        const auto closed = fix.session.pollBorder();
-        regionOverlayStubs().borderEdit = {};
-        REQUIRE_FALSE(closed.region);
-        (void)fix.follow();
-    };
-    fix.publish(3);
-    desktopStubs().beforeDetection = {};
-    CHECK(fix.settings.selectionRevision > revision);
-    CHECK_FALSE(fix.session.faceLocked());
-    CHECK_FALSE(fix.session.faceTrackingStopped());
-    CHECK_FALSE(fix.session.attachments().attached());
-    AnalysisWorker::Output output;
-    uint64_t seen = 0;
-    CHECK_FALSE(fix.worker.fetchOutput(seen, output, fix.settings.selectionRevision));
-    CHECK_FALSE(fix.follow().region);
 }
 
 TEST_CASE("Cancellation with no picker keeps the committed attachment")
 {
     SessionFixture fix;
     const auto picked = fix.pickWindow();
-    (void)fix.session.follow(false, std::nullopt);
+    (void)fix.session.follow(false);
     REQUIRE_FALSE(fix.session.picker().active());
     (void)fix.session.cancel();
     CHECK(fix.session.attachments().isAttached(Window));
     fix.session.syncBorder(false);
     REQUIRE(regionOverlayStubs().border);
     CHECK(regionOverlayStubs().border->region == picked.region);
-    CHECK(regionOverlayStubs().border->binding == RegionBinding::Window);
+    CHECK(regionOverlayStubs().border->kind == RegionKind::Attached);
 }
 
 TEST_CASE("Cancelling a picker restores the committed region rather than its preview")
@@ -1150,18 +1025,18 @@ TEST_CASE("Unavailable attachment geometry pauses until recovery without detachi
 {
     SessionFixture fix;
     const auto picked = fix.pickWindow();
-    (void)fix.session.follow(false, std::nullopt);
+    (void)fix.session.follow(false);
     const auto geometry = desktopStubs().windowGeometry;
     desktopStubs().windowGeometry.reset();
     desktopStubs().windowPresence = WindowPresence::Unknown;
-    const auto waiting = fix.session.follow(false, std::nullopt);
+    const auto waiting = fix.session.follow(false);
     CHECK_FALSE(waiting.region);
     CHECK(fix.session.attachments().isAttached(Window));
     CHECK_FALSE(regionOverlayStubs().border);
     desktopStubs().windowGeometry = geometry;
     desktopStubs().foregroundPid = desktopStubs().ownPid;
     desktopStubs().focusedWindow.reset();
-    const auto recovered = fix.session.follow(false, std::nullopt);
+    const auto recovered = fix.session.follow(false);
     CHECK(recovered.region == picked.region);
     CHECK(fix.session.attachments().isAttached(Window));
 }
@@ -1170,18 +1045,18 @@ TEST_CASE("Confirmed parent closure preserves the last valid rectangle on its di
 {
     SessionFixture fix;
     const auto picked = fix.pickWindow();
-    (void)fix.session.follow(false, std::nullopt);
+    (void)fix.session.follow(false);
     desktopStubs().windowGeometry.reset();
     desktopStubs().windowPresence = WindowPresence::Closed;
     desktopStubs().cursorDisplay = 99;
-    const auto closed = fix.session.follow(false, std::nullopt);
+    const auto closed = fix.session.follow(false);
     CHECK_FALSE(fix.session.attachments().attached());
     CHECK(fix.capture.desiredDisplay() == Display);
     fix.session.syncBorder(false);
     REQUIRE(regionOverlayStubs().border);
     CHECK(regionOverlayStubs().border->region == picked.region);
     CHECK(regionOverlayStubs().border->displayId == Display);
-    CHECK(regionOverlayStubs().border->binding == RegionBinding::Global);
+    CHECK(regionOverlayStubs().border->kind == RegionKind::Global);
     CHECK(desktopStubs().watchedWindow == 0);
     CHECK(closed.status == "window closed - region kept on its display");
 }
@@ -1190,13 +1065,13 @@ TEST_CASE("Stopping all following preserves the latest attachment as a global re
 {
     SessionFixture fix;
     const auto picked = fix.pickWindow();
-    (void)fix.session.follow(false, std::nullopt);
+    (void)fix.session.follow(false);
     (void)fix.session.detachAll();
     CHECK_FALSE(fix.session.attachments().attached());
     fix.session.syncBorder(false);
     REQUIRE(regionOverlayStubs().border);
     CHECK(regionOverlayStubs().border->region == picked.region);
-    CHECK(regionOverlayStubs().border->binding == RegionBinding::Global);
+    CHECK(regionOverlayStubs().border->kind == RegionKind::Global);
 }
 
 TEST_CASE("An empty face picker keeps the previously committed attachment")
@@ -1230,57 +1105,6 @@ TEST_CASE("An explicit cancel restores a preview even before the overlay finishe
     CHECK_FALSE(fix.session.picker().active());
     REQUIRE(regionOverlayStubs().border);
     CHECK(regionOverlayStubs().border->region == committed);
-}
-
-TEST_CASE("An animated face border grab is applied before tracking follows again")
-{
-    FaceSessionFixture fix;
-    double now = 1.0;
-    int faceX = 200;
-    desktopStubs().clock = [&] { return now; };
-    desktopStubs().sessionDetection = [&](const FrameView& crop, double) {
-        return FaceDetectionResult{FaceDetectionStatus::Completed,
-                                   {{faceX - crop.sourceX, 100 - crop.sourceY, 100, 100}}};
-    };
-    fix.open();
-    const auto picked = fix.confirm(Display, regionOverlayStubs().lastDisplays[0].faces[0].region);
-    REQUIRE(picked.region);
-    (void)fix.follow();
-    fix.publish(2);
-    (void)fix.follow();
-    now += 0.1;
-    // Capture evidence uses its own steady clock. Keep this deterministic
-    // displacement within its short-interval identity gate; only UI time is advanced.
-    faceX = 205;
-    fix.publish(3);
-    const auto target = fix.follow();
-    REQUIRE(target.region);
-    INFO("picked=" << picked.region->leftPercent << " target=" << target.region->leftPercent
-                   << " revision=" << target.selectionRevision << " changed=" << target.regionChanged
-                   << " tracked=" << target.trackedRegion << " locked=" << fix.session.faceLocked()
-                   << " shown=" << regionOverlayStubs().border->region.leftPercent);
-    REQUIRE(fix.session.borderAnimating());
-    const auto calls = desktopStubs().detectorCall().calls;
-    now += 1.0 / 60.0;
-    fix.session.syncBorder(false);
-    const auto grabbed = regionOverlayStubs().border->region;
-    REQUIRE(grabbed.toPixels(1000, 500) != target.region->toPixels(1000, 500));
-    regionOverlayStubs().borderEdit.editing = true;
-    const auto edit = fix.session.pollBorder();
-    REQUIRE(edit.regionChanged);
-    REQUIRE(edit.region);
-    CHECK(edit.region->toPixels(1000, 500) == grabbed.toPixels(1000, 500));
-    CHECK(edit.selectionRevision > target.selectionRevision);
-    CHECK_FALSE(edit.trackedRegion);
-    const auto held = fix.follow();
-    REQUIRE(held.region);
-    CHECK(held.region->toPixels(1000, 500) == grabbed.toPixels(1000, 500));
-    CHECK(regionOverlayStubs().border->region.toPixels(1000, 500) == grabbed.toPixels(1000, 500));
-    CHECK_FALSE(fix.session.borderAnimating());
-    fix.worker.pump();
-    CHECK(desktopStubs().detectorCall().calls == calls);
-    CHECK(fix.worker.consumedFrameSequence() == 3);
-    desktopStubs().clock = {};
 }
 
 }  // namespace sidescopes

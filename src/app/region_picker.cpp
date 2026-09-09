@@ -81,7 +81,7 @@ ScanResult scanDisplayForFaces(uint32_t displayId, double widthPoints)
         view.width = image->width;
         view.height = image->height;
         const float pixelsPerPoint = widthPoints > 0.0 ? static_cast<float>(image->width / widthPoints) : 1.0f;
-        result.faces = detectFaces(view, pixelsPerPoint);
+        result.faces = detectFaces(view, pixelsPerPoint).faces;
         result.width = image->width;
         result.height = image->height;
     }
@@ -303,10 +303,9 @@ std::vector<SuggestedRegion> RegionPicker::scanStreamedDisplayFaces(const FrameV
         return {};
     }
     const float pixelsPerPoint = static_cast<float>(view.width / geometry->widthPoints);
-    const std::vector<IntRect> faces = detectFaces(view, pixelsPerPoint);
+    const std::vector<IntRect> faces = detectFaces(view, pixelsPerPoint).faces;
     std::vector<SuggestedRegion> faceSuggestions = buildFaceSuggestions(faces, view.width, view.height);
-    // The raw boxes are remembered too, one candidate each: a confirmed
-    // face pick anchors its lock on the detector's box, not the inset.
+    // Remember the suggested crops and their source for confirmation.
     auto candidates = buildFaceCandidates(faces, streamed, view.width, view.height);
     for (auto& candidate : candidates) {
         candidate.sourceStamp = view.stamp;
@@ -320,8 +319,8 @@ std::vector<SuggestedRegion> RegionPicker::scanStreamedDisplayFaces(const FrameV
     return faceSuggestions;
 }
 
-// One detached scan per non-streamed display, following the face-lock probe's
-// discipline: a per-scan record the thread fills under a mutex, a ready flag,
+// One detached scan per non-streamed display: a record filled under a mutex,
+// a ready flag,
 // a wake, and a running flag the shutdown drain waits on. Opening the picker
 // never blocks on these - only the streamed display's instant scan gates the
 // open.
@@ -531,8 +530,7 @@ bool RegionPicker::faceSourceCurrent(const FaceCandidate& face, const WindowCand
         return false;
     }
     if (!face.sourceStamp) {
-        // A snapshot has real pixel dimensions but no stream stamp. Its
-        // nomination must be scaled to the eventual stream before following.
+        // A snapshot has no live stream identity to validate.
         return true;
     }
     return streamedFaceSourceCurrent(face);
@@ -585,7 +583,7 @@ RegionPickOutcome RegionPicker::processPoll(const RegionPickPoll& poll,
                                             std::optional<AnalysisWorker::FrameSize> frameSize,
                                             std::optional<FloatColor> screenSampleColor)
 {
-    if (poll.pinMode) {
+    if (poll.mode == RegionPickerMode::PinColor) {
         return processPinPoll(poll, frameSize, screenSampleColor);
     }
 
@@ -671,7 +669,7 @@ RegionPickOutcome RegionPicker::processRegionPoll(const RegionPickPoll& poll)
     if (poll.finished || !poll.active) {
         m_picking = false;
         if (poll.confirmed) {
-            outcome.confirmed = ConfirmedPick{*poll.confirmed, poll.displayId, poll.attachesToWindow};
+            outcome.confirmed = ConfirmedPick{*poll.confirmed, poll.displayId, poll.mode};
         } else if (!m_swallowCancel) {
             // The host restores the previously committed selection.
             outcome.cancelled = true;

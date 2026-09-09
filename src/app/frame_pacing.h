@@ -24,9 +24,6 @@ namespace sidescopes {
 /// one frame a sample and steps, and at twenty-five the two rates beat.
 inline constexpr double ContentRedrawSeconds = 1.0 / 20.0;
 
-/// A face border can glide between capture updates without redrawing scopes.
-inline constexpr double BorderAnimationSeconds = 1.0 / 60.0;
-
 /// The frame period the loop aims at when the colour readout is the only thing
 /// following the pointer. A swatch and a percentage carry no motion, so they
 /// read the same at a fraction of the rate a marker easing across a trace
@@ -115,7 +112,6 @@ struct FramePacingInputs
     /// border being dragged. See frameWaitFor for why it outranks everything
     /// else here.
     bool regionInteracting = false;
-    bool borderAnimating = false;
 };
 
 /// The wait to take before the next frame.
@@ -177,7 +173,6 @@ struct RedrawInputs
     /// The user's hand is on the region. The wait no longer paces the loop
     /// while this holds, so the frame period is enforced here instead.
     bool regionInteracting = false;
-    bool borderAnimating = false;
 };
 
 /// Whether a frame is worth drawing at all.
@@ -208,7 +203,6 @@ struct RedrawSignals
     int framebufferHeight = 0;
     /// The line the capture would put in the status bar now.
     std::string_view captureStatus;
-    bool borderAnimating = false;
 };
 
 /// When each thing that can change the picture last happened, and what the
@@ -238,7 +232,7 @@ public:
     void notePointerMove(double now);
 
     /// The event pump returned, which is what a frame period is counted from.
-    void notePumpReturned(double now, bool borderAnimationTick = false);
+    void notePumpReturned(double now);
 
     /// A frame is being built. Stamped where the frame begins rather than
     /// where it ends, because it is what the frame period is counted from: a
@@ -257,8 +251,8 @@ public:
     /// worker's own thread, so it touches nothing else.
     void noteOutputPublished();
 
-    [[nodiscard]] FramePacingInputs pacingInputs(double now, bool attached, bool pickerActive, bool regionInteracting,
-                                                 bool borderAnimating = false) const;
+    [[nodiscard]] FramePacingInputs pacingInputs(double now, bool attached, bool pickerActive,
+                                                 bool regionInteracting) const;
 
     [[nodiscard]] RedrawInputs redrawInputs(const RedrawSignals& signals, double now) const;
 
@@ -284,8 +278,6 @@ private:
     int m_drawnFramebufferHeight = 0;
     std::string m_drawnCaptureStatus;
     std::atomic<bool> m_outputPending{false};
-    // Finishing an animation during a fast tick cannot lift its draw budget.
-    bool m_borderAnimationTick = false;
 };
 
 /// What the loop knows about whether anything is worth computing.
@@ -305,7 +297,7 @@ struct VisibilityInputs
     /// has an off-stream sample of its own, the one the second display and
     /// Windows already use.
     bool nothingSelected = false;
-    /// The picker or a face probe is reading frames on its own, so the stream
+    /// The picker is reading frames on its own, so the stream
     /// must not be pulled out from under it.
     bool needsFrames = false;
 };

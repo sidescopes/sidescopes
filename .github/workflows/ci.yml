@@ -78,7 +78,7 @@ jobs:
         # the test files, whose Catch2/test-engine macros use __COUNTER__ (a no-op
         # for the non-test sources).
         run: |
-          files=$(git ls-files 'src/app/*.cpp' 'src/platform/macos/*.mm' 'tests/native/*.mm' 'tests/stress/*.mm' 'tests/ui/*.cpp')
+          files=$(git ls-files 'src/app/*.cpp' 'src/platform/macos/*.mm' 'tests/native/*.mm' 'tests/native/test_face_detection.cpp' 'tests/stress/*.mm' 'tests/ui/*.cpp')
           "$(brew --prefix llvm@22)/bin/clang-tidy" -p build --quiet \
             --extra-arg=-isysroot --extra-arg="$(xcrun --show-sdk-path)" \
             --extra-arg=-Wno-c2y-extensions $files
@@ -105,7 +105,7 @@ jobs:
         # -Wno-unused-command-line-argument drops MSVC's /MP, which the compile
         # database carries but clang-tidy's clang-cl parse ignores.
         run: |
-          files=$(git ls-files 'src/platform/windows/*.cpp' 'tests/test_windows_platform.cpp' 'tests/native/*.cpp')
+          files=$(git ls-files 'src/platform/windows/*.cpp' 'tests/test_windows_platform.cpp' 'tests/native/*.cpp' ':(exclude)tests/native/test_face_network.cpp')
           clang-tidy -p build --checks='-clang-analyzer-*' \
             --extra-arg=-Wno-unused-command-line-argument $files
 
@@ -139,6 +139,16 @@ jobs:
       - name: Verify Linux face inference
         if: matrix.os == 'ubuntu-latest'
         run: ctest --test-dir build -C Release -L face-network --no-tests=error --output-on-failure
+      - name: Install Linux face backend analyzer
+        if: matrix.os == 'ubuntu-latest'
+        run: sudo apt-get update && sudo apt-get install -y clang-tidy-18
+      - name: Analyze Linux face backend
+        if: matrix.os == 'ubuntu-latest'
+        # The optional backend needs the OpenCV headers and compile database
+        # from this Linux build; desktop native detectors do not use it.
+        run: >-
+          clang-tidy-18 -p build --quiet
+          src/platform/opencv/face_network.cpp tests/native/test_face_network.cpp
       # Compiling the performance harness is not the same as knowing it still
       # runs: it drives a real analysis worker across threads and reports the
       # process's own CPU time, which is platform code that only fails when

@@ -2,12 +2,14 @@
 #include <catch2/catch_test_macros.hpp>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <opencv2/dnn.hpp>
+#include <stdexcept>
 #include <vector>
 
-#include "platform/windows/face_model_data.h"
-#include "platform/windows/face_network.h"
-#include "platform/windows/face_network_geometry.h"
+#include "platform/opencv/face_model_data.h"
+#include "platform/opencv/face_network.h"
+#include "platform/opencv/face_network_geometry.h"
 
 namespace sidescopes {
 namespace {
@@ -52,6 +54,27 @@ void checkBounded(const std::vector<IntRect>& faces, const FrameView& frame)
 
 // These procedural frames exercise the real importer and inference path on
 // every supported build host; they are not a face-recognition accuracy corpus.
+TEST_CASE("Face inference rejects malformed input before reaching OpenCV", "[face-network]")
+{
+    FaceNetwork network;
+    CHECK_THROWS_AS(network.detect({}, 72, 1280), std::invalid_argument);
+    constexpr int Edge = 128;
+    const std::vector<uint8_t> pixels(std::size_t{Edge} * Edge * 4, 0);
+    FrameView frame{pixels.data(), Edge * 4, Edge, Edge};
+    for (const double minimum :
+         {-1.0, std::numeric_limits<double>::infinity(), std::numeric_limits<double>::quiet_NaN()}) {
+        CHECK_THROWS_AS(network.detect(frame, minimum, 1280), std::invalid_argument);
+    }
+    for (const int cap : {-1, 0, std::numeric_limits<int>::max()}) {
+        CHECK_THROWS_AS(network.detect(frame, 72, cap), std::invalid_argument);
+    }
+    frame.strideBytes = Edge * 4 - 1;
+    CHECK_THROWS_AS(network.detect(frame, 72, 1280), std::invalid_argument);
+    frame.strideBytes = Edge * 4;
+    frame.format = static_cast<PixelFormat>(-1);
+    CHECK_THROWS_AS(network.detect(frame, 72, 1280), std::invalid_argument);
+}
+
 TEST_CASE("The embedded face model runs at both input caps", "[face-network]")
 {
     FaceNetwork network;
@@ -149,6 +172,21 @@ TEST_CASE("Face inference preserves padded and ten-bit input", "[face-network]")
             CHECK(pixels == original);
         }
     }
+}
+
+TEST_CASE("Decoded face boxes cannot overflow pairwise integer NMS areas", "[face-network]")
+{
+    // Each 40000-square box fits an int area by itself, but NMS adds the
+    // two areas in int. Reject both before that native overlap operation.
+    CHECK_FALSE(face_network::validNmsBounds(0, 0, 40000, 40000));
+    CHECK_FALSE(face_network::validNmsBounds(1, 1, 40000, 40000));
+    CHECK(face_network::validNmsBounds(0, 0, 32767, 32767));
+    CHECK(face_network::validNmsBounds(0, 0, 1280, 1280));
+    CHECK(face_network::validNmsBounds(-20, -20, 80, 80));
+    CHECK_FALSE(face_network::validNmsBounds(0, 0, 0, 100));
+    CHECK_FALSE(face_network::validNmsBounds(0, 0, 100, -1));
+    CHECK_FALSE(face_network::validNmsBounds(std::numeric_limits<double>::quiet_NaN(), 0, 100, 100));
+    CHECK_FALSE(face_network::validNmsBounds(0, 0, std::numeric_limits<double>::infinity(), 100));
 }
 
 }  // namespace sidescopes

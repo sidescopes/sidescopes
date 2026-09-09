@@ -24,7 +24,7 @@ std::optional<IntRect> cropFor(const CropInputs& inputs)
         return std::nullopt;
     }
     // Anything that reads outside the region keeps the whole display coming.
-    if (inputs.pickerActive || inputs.faceLockActive) {
+    if (inputs.pickerActive) {
         return std::nullopt;
     }
     if (inputs.now - inputs.regionChangedAt < CropSettleSeconds) {
@@ -46,7 +46,7 @@ std::optional<IntRect> cropFor(const CropInputs& inputs)
 }
 
 std::optional<IntRect> CropTracker::decide(IntRect regionPixels, int displayWidth, int displayHeight, bool pickerActive,
-                                           bool faceLockActive, double now)
+                                           double now)
 {
     if (!m_seenRegion || !(m_region == regionPixels)) {
         m_region = regionPixels;
@@ -54,7 +54,7 @@ std::optional<IntRect> CropTracker::decide(IntRect regionPixels, int displayWidt
         m_seenRegion = true;
     }
 
-    const CropInputs inputs{regionPixels, displayWidth, displayHeight, pickerActive, faceLockActive, m_changedAt, now};
+    const CropInputs inputs{regionPixels, displayWidth, displayHeight, pickerActive, m_changedAt, now};
 
     return cropFor(inputs);
 }

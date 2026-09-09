@@ -1,4 +1,4 @@
-#include "platform/windows/face_network.h"
+#include "platform/opencv/face_network.h"
 
 #include <algorithm>
 #include <array>
@@ -13,8 +13,8 @@
 #include <stdexcept>
 #include <utility>
 
-#include "platform/windows/face_model_data.h"
-#include "platform/windows/face_network_geometry.h"
+#include "platform/opencv/face_model_data.h"
+#include "platform/opencv/face_network_geometry.h"
 
 namespace sidescopes {
 namespace {
@@ -166,7 +166,7 @@ FaceNetwork::FaceNetwork()
     : m_implementation(std::make_unique<Implementation>())
 {
     // Face detection is the only OpenCV consumer. Configure its global pool
-    // once before any session loads a Net; application analysis threads keep
+    // once before loading a Net; application analysis threads keep
     // their own scheduling. OpenCV provides no per-Net CPU thread-count API.
     static std::once_flag configured;
     std::call_once(configured, [] { cv::setNumThreads(1); });
@@ -183,6 +183,12 @@ FaceNetwork::~FaceNetwork() = default;
 
 std::vector<IntRect> FaceNetwork::detect(const FrameView& frame, double minimumPixels, int maximumInputEdge)
 {
+    if (!frame.pixels || frame.width <= 0 || frame.height <= 0 || frame.width > frame.strideBytes / 4 ||
+        (frame.format != PixelFormat::Bgra8 && frame.format != PixelFormat::Argb2101010) ||
+        !std::isfinite(minimumPixels) || minimumPixels < 0.0 || maximumInputEdge <= 0 ||
+        maximumInputEdge > std::numeric_limits<int>::max() - 31) {
+        throw std::invalid_argument("Invalid face detection input");
+    }
     auto& state = *m_implementation;
     const double scale = std::min(1.0, static_cast<double>(maximumInputEdge) / std::max(frame.width, frame.height));
     const cv::Size inputSize{std::max(1, static_cast<int>(std::lround(frame.width * scale))),

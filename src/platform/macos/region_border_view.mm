@@ -261,17 +261,17 @@ void drawHandleDot(CGFloat x, CGFloat y)
     [cross stroke];
 }
 
-// The binding state at the tab's fixed left end: face tracking, window pin,
-// or global pin-off. Rasterized once from the shared vector sources, so every
-// native platform draws the identical icons.
+// The region kind at the tab's fixed left end: window pin or global pin-off.
+// Rasterized once from the shared vector sources, so every native platform
+// draws the identical icons.
 - (void)drawBindingButton
 {
-    static NSImage* icons[3] = {nil, nil, nil};
-    const int which = static_cast<int>(self.regionBinding);
+    static NSImage* icons[2] = {nil, nil};
+    const int which = static_cast<int>(self.regionKind);
     if (!icons[which]) {
         const int pixels = 22;  // 11 points at the retina scale
         const std::vector<uint8_t> rgba =
-            sidescopes::rasterizeIcon(sidescopes::iconForRegionBinding(self.regionBinding), pixels);
+            sidescopes::rasterizeIcon(sidescopes::iconForRegionKind(self.regionKind), pixels);
         NSBitmapImageRep* rep = [[NSBitmapImageRep alloc] initWithBitmapDataPlanes:nullptr
                                                                         pixelsWide:pixels
                                                                         pixelsHigh:pixels

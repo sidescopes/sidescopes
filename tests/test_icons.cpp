@@ -69,20 +69,16 @@ TEST_CASE("Icons are distinct images")
     CHECK(save != penLine);
 }
 
-TEST_CASE("Each region binding has the icon that communicates its state")
+TEST_CASE("Each region kind has the icon that communicates its state")
 {
-    CHECK(iconForRegionBinding(RegionBinding::Global) == Icon::PinOff);
-    CHECK(iconForRegionBinding(RegionBinding::Window) == Icon::Pin);
-    CHECK(iconForRegionBinding(RegionBinding::Face) == Icon::User);
+    CHECK(iconForRegionKind(RegionKind::Global) == Icon::PinOff);
+    CHECK(iconForRegionKind(RegionKind::Attached) == Icon::Pin);
 
     // The border draws these at 11 points (22 Retina pixels on macOS). They
     // must remain distinct at the actual chrome size, not only as source SVGs.
-    const auto global = rasterizeIcon(iconForRegionBinding(RegionBinding::Global), 22);
-    const auto window = rasterizeIcon(iconForRegionBinding(RegionBinding::Window), 22);
-    const auto face = rasterizeIcon(iconForRegionBinding(RegionBinding::Face), 22);
+    const auto global = rasterizeIcon(iconForRegionKind(RegionKind::Global), 22);
+    const auto window = rasterizeIcon(iconForRegionKind(RegionKind::Attached), 22);
     CHECK(global != window);
-    CHECK(global != face);
-    CHECK(window != face);
 }
 
 TEST_CASE("The preset glyph is a frame divided into panes")

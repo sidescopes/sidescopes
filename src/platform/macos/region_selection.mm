@@ -501,12 +501,14 @@ RegionPickPoll pollRegionPick()
         return poll;
     }
     poll.active = true;
-    // Mode flags come first: the finishing poll returns early below, and the
-    // caller needs them to know a pin-mode finish never means a region change.
+    // The mode comes first: the finishing poll returns early below, and the
+    // caller needs the confirmed tool even after its overlays are gone.
     // The overlays switch modes in lockstep; the front one speaks for all.
-    poll.pinMode = g_pickerOverlays.front().view.pinMode;
     SidescopesPickerView* front = g_pickerOverlays.front().view;
-    poll.attachesToWindow = !front.pinMode && !front.drawMode && !front.facesMode;
+    poll.mode = front.pinMode     ? RegionPickerMode::PinColor
+                : front.drawMode  ? RegionPickerMode::DrawGlobal
+                : front.facesMode ? RegionPickerMode::AttachFace
+                                  : RegionPickerMode::AttachWindow;
 
     refreshPickerExclusions();
     if (pollPickerFinish(poll)) {
@@ -626,8 +628,7 @@ NSWindow* makeBorderWindow(NSRect rect)
     return window;
 }
 
-void showRegionBorder(uint32_t displayId, const RegionOfInterest& region, const std::string& label,
-                      RegionBinding binding)
+void showRegionBorder(uint32_t displayId, const RegionOfInterest& region, const std::string& label, RegionKind kind)
 {
     NSScreen* screen = screenForDisplay(displayId);
     const NSRect frame = screen.frame;
@@ -651,11 +652,11 @@ void showRegionBorder(uint32_t displayId, const RegionOfInterest& region, const 
     if (g_borderWindow && g_borderWindow.visible && NSEqualRects(g_borderTarget, labelled)) {
         SidescopesBorderView* view = (SidescopesBorderView*)g_borderWindow.contentView;
         NSString* current = view.borderLabel ? view.borderLabel : @"";
-        if ([current isEqualToString:borderLabel] && view.regionBinding == binding) {
+        if ([current isEqualToString:borderLabel] && view.regionKind == kind) {
             return;
         }
         view.borderLabel = borderLabel;
-        view.regionBinding = binding;
+        view.regionKind = kind;
         view.needsDisplay = YES;
 
         return;
@@ -676,7 +677,7 @@ void showRegionBorder(uint32_t displayId, const RegionOfInterest& region, const 
         view.needsDisplay = YES;
     }
     view.labelBand = LabelBand;
-    view.regionBinding = binding;
+    view.regionKind = kind;
     if (g_borderWindow.visible) {
         // Already shown at another place: snap, never tween position.
         snapBorderFrame(labelled);

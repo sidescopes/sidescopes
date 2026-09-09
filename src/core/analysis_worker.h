@@ -51,6 +51,19 @@ struct RegionOfInterest
 /// into this map and back.
 struct AnalysisSettings
 {
+    /// A particular capture stream on a display. A restart produces a new
+    /// epoch even when the display and pixels have not changed.
+    struct Source
+    {
+        uint64_t captureEpoch = 0;
+        uint32_t displayId = 0;
+
+        [[nodiscard]] bool operator==(const Source&) const = default;
+    };
+
+    /// Restricts readings to this capture source. Unset for hosts supplying
+    /// unstamped frames, such as the browser Lab.
+    std::optional<Source> source;
     /// Per-scope parameter values: scope id -> parameter key -> value. Keys
     /// that a scope's descriptor does not declare are ignored.
     std::map<std::string, std::map<std::string, double>> scopeParams;
@@ -66,8 +79,8 @@ struct AnalysisSettings
     /// instance.
     std::optional<RegionOfInterest> region;
     /// Identifies the selected source/region independently of scope settings.
-    /// Automatic per-frame region motion keeps this revision; user selection
-    /// and source/geometry invalidation advance it before accepting results.
+    /// A continuous region drag keeps this revision; changing the selected
+    /// source or region advances it before accepting results.
     uint64_t selectionRevision = 0;
     /// How thinly scopes that offer the sample-thinning extension may sample,
     /// as a divisor on the samples per bin they would otherwise take. One is
@@ -80,41 +93,6 @@ struct AnalysisSettings
     /// FrameView::fromDisplay does that mapping.
     IntRect maskedWindow;
 };
-
-/// The current worker-owned frame, borrowed only for the resolver call. A
-/// settings-only pass may expose a new selection revision with freshFrame
-/// false; it must not perform another detection on those old pixels.
-struct FrameRegionRequest
-{
-    const FrameView& frame;
-    std::optional<RegionOfInterest> configuredRegion;
-    uint64_t selectionRevision = 0;
-    bool freshFrame = false;
-};
-
-struct FrameRegionResolution
-{
-    /// Configured uses the submitted selection. Override supplies display
-    /// percentages for these pixels. Skip keeps the last published reading;
-    /// an Override without a region has the same explicit hold behavior.
-    /// Suppress withdraws the reading without accumulating any scopes.
-    enum class Mode
-    {
-        Configured,
-        Override,
-        Skip,
-        Suppress
-    };
-    Mode mode = Mode::Configured;
-    std::optional<RegionOfInterest> region;
-    uint64_t selectionRevision = 0;
-    /// Opaque identity of the reading this resolution permits. A change
-    /// requires a completed pass even when the region's pixels are unchanged.
-    uint64_t readingGeneration = 0;
-};
-
-using FrameRegionResolver = std::function<FrameRegionResolution(const FrameRegionRequest&)>;
-using FrameRegionResolverFactory = std::function<FrameRegionResolver()>;
 
 /// @return @p settings' value for @p key on the scope @p id, or @p fallback
 ///         when the scope or the key has none. The map is deliberately sparse -
@@ -146,8 +124,8 @@ public:
     struct Output
     {
         /// Each computed scope's image, keyed by scope id. The map is kept
-        /// stable within a reading generation: a disabled scope's entry
-        /// simply stops advancing rather than being cleared.
+        /// stable: a disabled scope's entry simply stops advancing rather
+        /// than being cleared.
         std::map<std::string, ScopeImage> images;
         /// Each outline-carrying scope's curve, keyed by scope id and stroked
         /// by the interface at display resolution (three channels of
@@ -158,19 +136,15 @@ public:
         double accumulateMilliseconds = 0.0;
         uint64_t framesProcessed = 0;
         uint64_t version = 0;
-        /// Provenance of a completed reading (including a resolved color
-        /// picker only pass), or an explicit suppression. Never advanced
-        /// merely because a newer frame had identical content and was skipped.
+        /// Provenance of a completed reading (including a color-picker-only
+        /// pass). Never advanced merely because a newer frame had identical
+        /// content and was skipped.
         std::optional<RegionOfInterest> region;
         uint64_t selectionRevision = 0;
+        /// Source and capture time of the analyzed frame. An allocation
+        /// withdrawal identifies its selected source with zero capture time.
         FrameStamp frameStamp;
         uint64_t frameSequence = 0;
-        /// The resolver's generation, published only with a complete reading
-        /// or an explicit suppression. Without a resolver this remains zero.
-        uint64_t readingGeneration = 0;
-        /// Explicit withdrawal by a current resolution, distinct from an
-        /// allocation/error withdrawal. Suppressed output has no region/images.
-        bool suppressed = false;
     };
 
     explicit AnalysisWorker(FrameMailbox& mailbox);
@@ -233,13 +207,12 @@ public:
     /// another worker publication, until that copy succeeds.
     /// An expected selection rejects stale output without modifying the
     /// caller's output or version; a later matching publication remains
-    /// available to fetch. A minimum reading generation likewise rejects an
-    /// older nonzero generation before copying. Generation-zero withdrawals
-    /// remain observable, including allocation failures; they are not completed
-    /// readings and must not restore a caller's presentation gate.
+    /// available to fetch. An expected source likewise rejects completed
+    /// readings from another stream; allocation withdrawals identify their
+    /// selected source and remain observable for that source.
     [[nodiscard]] bool fetchOutput(uint64_t& lastSeenVersion, Output& output,
                                    std::optional<uint64_t> expectedSelectionRevision = std::nullopt,
-                                   std::optional<uint64_t> minimumReadingGeneration = std::nullopt) const;
+                                   std::optional<AnalysisSettings::Source> expectedSource = std::nullopt) const;
 
     /// Averaged color around a point of the most recent frame, if any. The
     /// point is in DISPLAY pixels: a capture narrowed to part of its display
@@ -288,23 +261,6 @@ public:
     /// stop or destroy the worker from its own analysis thread.
     void setOutputCallback(std::function<void()> callback);
 
-    /// Configured before start. The factory and its returned callable run on
-    /// the analysis thread; the callable also dies there when the pass ends.
-    /// In inline mode these operations, including stop, belong to the pumping
-    /// thread. Calls borrow the current owned frame outside frame/settings/
-    /// output locks and may use the ordinary worker accessors or submit new
-    /// settings, but must not stop, destroy, or recursively pump this worker.
-    ///
-    /// No factory keeps the ordinary configured-region path. A resolver can
-    /// use that region, override it for this frame, skip analysis, or suppress
-    /// the reading explicitly.
-    /// Results are cached for the same source frame and selection revision, so
-    /// scope-settings changes do not repeat detection. Allocation exceptions
-    /// skip that frame and retain the resolver's identity evidence; resolvers
-    /// must preserve valid state when allocation fails. Other exceptions
-    /// rebuild the resolver on later fresh work.
-    void setFrameRegionResolverFactory(FrameRegionResolverFactory factory);
-
     /// Runs @p reader on the most recent frame under the frame lock; returns
     /// false when no frame has arrived yet. Intended for occasional,
     /// interactive work (the picker's photo detection), not per-frame use.
@@ -336,17 +292,14 @@ private:
     void runPass(Pass& pass, std::chrono::milliseconds wait);
 
     void analyzeLatestFrame(Pass& pass, bool newFrame);
-    void accumulateFrameRegion(Pass& pass, const FrameView& view, const RegionOfInterest& resolved,
-                               bool settingsChanged, bool newFrame);
+    void accumulateFrameRegion(Pass& pass, const FrameView& view, const RegionOfInterest& region, bool settingsChanged,
+                               bool newFrame);
 
-    [[nodiscard]] std::optional<RegionOfInterest> resolveFrameRegion(Pass& pass, const FrameView& view, bool newFrame);
-    void refreshFrameResolution(Pass& pass, const FrameRegionRequest& request);
-    [[nodiscard]] bool selectionCurrent(uint64_t revision) const;
+    [[nodiscard]] bool selectionCurrent(const AnalysisSettings& settings) const;
 
     /// Publishes a completed pass, withdrawing partial copies on allocation
     /// failure and allowing failed scopes to retry unchanged content.
     void publishOutput(Pass& pass, double elapsedMs);
-    void publishSuppression(Pass& pass, const FrameView& view, uint64_t generation);
 
     /// Announces a publication without letting a callback's allocation failure
     /// escape the worker or discard a result that is already available.
@@ -384,7 +337,6 @@ private:
     std::atomic<bool> m_held{false};
 
     std::function<void()> m_outputCallback;
-    FrameRegionResolverFactory m_regionResolverFactory;
     mutable std::mutex m_frameMutex;
     FrameBuffer m_latestFrame;
     bool m_hasFrame = false;

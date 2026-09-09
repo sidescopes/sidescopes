@@ -171,7 +171,7 @@ void exerciseAttachment(SessionFixture& fix, std::mt19937& random)
     SessionFixture::restoreWindow();
     fix.open(RegionPickerMode::AttachWindow);
     fix.confirm({10, 10, 50, 50});
-    fix.apply(fix.session.follow(false, fix.worker.latestFrameSize()));
+    fix.apply(fix.session.follow(false));
     REQUIRE(fix.session.attachments().isAttached(Window));
     REQUIRE(desktop.windowMotion);
     REQUIRE(desktop.watchedWindow == Window);
@@ -180,19 +180,19 @@ void exerciseAttachment(SessionFixture& fix, std::mt19937& random)
     desktop.windowMotion(WindowMotionSignal::MotionImminent);
     desktop.windowGeometry->x += static_cast<double>(random() % 150);
     desktop.windowGeometry->width += static_cast<double>(random() % 150);
-    fix.apply(fix.session.follow(false, fix.worker.latestFrameSize()));
+    fix.apply(fix.session.follow(false));
     REQUIRE(fix.session.carried());
     REQUIRE_FALSE(test::regionOverlayStubs().border);
     desktop.windowMotion(WindowMotionSignal::GripUp);
     desktop.foregroundPid = desktop.ownPid;
     desktop.focusedWindow.reset();
-    fix.apply(fix.session.follow(false, fix.worker.latestFrameSize()));
+    fix.apply(fix.session.follow(false));
     REQUIRE(desktop.watchedWindow == Window);
 
     if (random() % 2 == 0) {
         desktop.windowGeometry.reset();
         desktop.windowPresence = WindowPresence::Closed;
-        fix.apply(fix.session.follow(false, fix.worker.latestFrameSize()));
+        fix.apply(fix.session.follow(false));
     } else {
         fix.apply(fix.session.detach());
     }

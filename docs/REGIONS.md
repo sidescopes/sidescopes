@@ -53,30 +53,21 @@ region that is still active.
 ## Select a face (F)
 
 Where face detection is available, SideScopes presents detected faces as
-suggestions. Selecting one creates a region that follows the face within its
-window. If no face is detected, the picker reports that result instead of
-creating an estimated region. Cancelling keeps the prior selection.
-Tracking follows changes in position and size as new video frames arrive. A
-brief missed detection keeps monitoring the last accepted rectangle live for
-up to one second. If tracking cannot confidently resume during that grace
-period, the region and its scope traces disappear together. SideScopes shows
-“Face tracking stopped” and ends detection for that selection. Select a face
-again using the toolbar or your configured shortcut to restart tracking.
-Another face entering the area does not restart it automatically.
+suggestions. Selecting one places an ordinary window-attached region over the
+face. Its border shows the window title and pin icon, just like a region drawn
+inside that window.
 
-Fast cuts, occlusion, large changes in pose, and ambiguous crossings can end
-tracking. An unsupported detector or incompatible capture source also removes
-the face region. Closing its parent window keeps the last valid rectangle as
-a global region, just as it does for an ordinary window-attached region.
+Detection sets the initial rectangle once. The region follows the window when
+it moves, but stays at the same position and size within it while a photograph
+is panned or zoomed, or a video plays. The scopes keep measuring that rectangle
+even if the face moves away. Drag or resize the border to adjust it, or select
+a face again using the toolbar or your configured shortcut.
 
-A face-tracked border uses the same face icon as the selection tool. Its label
-remains the window title; tracking state is not added to the title text. Click
-the face icon to stop following the face while keeping the current rectangle
-attached to its window. The region does not return to the face's original
-position. Click the resulting pin icon to make the region global.
+If no face is detected, the picker reports that result. Cancelling keeps the
+prior selection. Closing the parent window keeps the rectangle as a global
+region, following the same rules as any other window-attached region.
 
-Face selection follows nearby geometry rather than recognizing a person's
-identity. It does not classify complexion,
+Face selection does not recognize a person's identity, classify complexion,
 evaluate skin color, or change how the scopes analyze the enclosed pixels.
 
 ## Editing the border
@@ -92,16 +83,14 @@ applicable. The border is interactive:
 
 The close button appears when the region is wide enough to fit its controls.
 
-The binding control shows the current state. The face icon identifies a
-face-tracked region, the pin identifies a region fixed inside a window, and the
-struck-through pin identifies a global region fixed to the display. Clicking
-the face icon stops face tracking and leaves the current rectangle attached to
-its window; clicking the resulting pin makes the region global. On a global
-region, the control attaches to the frontmost window under the region's center.
+The binding control shows the current state. The pin identifies a region fixed
+inside a window, and the struck-through pin identifies a global region fixed
+to the display. Clicking the pin makes the region global. On a global region,
+the control attaches to the frontmost window under the region's center.
 
 The scopes update while the border is edited. The border hides while a picker
 is open, while SideScopes is hidden or minimized, and while an attached window
-is being moved. Face motion keeps the border visible.
+is being moved.
 
 ## Clearing a region
 

@@ -71,8 +71,8 @@ struct BorderState
     RECT dragStartRegion{};
     bool closePressed = false;
     bool bindingPressed = false;
-    // How the outlined region is bound: picks the face, pin, or pin-off glyph.
-    RegionBinding binding = RegionBinding::Global;
+    // The outlined region's kind selects the pin or pin-off glyph.
+    RegionKind kind = RegionKind::Global;
     // The cached backing store and the geometry it was painted for. The
     // band's look depends on the window's size and scale, never on its
     // position, so a move needs no repaint at all - the common case when
@@ -86,7 +86,7 @@ struct BorderState
     // window.
     std::wstring borderLabel;
     std::wstring paintedLabel;
-    RegionBinding paintedBinding = RegionBinding::Global;
+    RegionKind paintedKind = RegionKind::Global;
     // The entrance animation: the rect the border is heading to (region
     // lags it mid-flight), the start tick, and the whole-surface alpha.
     RECT appearTarget{};
