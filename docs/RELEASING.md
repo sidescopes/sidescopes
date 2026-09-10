@@ -2,14 +2,17 @@
 
 ## Cutting a release
 
-1. Update `CHANGELOG.md`: move the `Unreleased` entries under a new version
-   heading with today's date.
+1. Update `CHANGELOG.md` with the final changes since the previous release,
+   under a new version heading with today's date. Omit experiments that did
+   not ship and leave an empty `Unreleased` section above it.
 2. Bump the version in `CMakeLists.txt` (`project(sidescopes VERSION ...)`).
-3. Commit, tag, and push:
+3. Run the local checks, commit the release changes, and push `main`.
+4. Wait for every CI job to pass for that exact commit, then tag it and push
+   the tag. For example, when releasing 0.8.0:
 
    ```sh
-   git tag v0.1.0
-   git push origin main v0.1.0
+   git tag v0.8.0
+   git push origin v0.8.0
    ```
 
 The `Release` workflow creates a draft release first, then the macOS and

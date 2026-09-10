@@ -158,7 +158,7 @@ Color Picker places the live sample beside pinned references. It reports
 captured RGB values and, when a reference is selected, an assumed-sRGB color
 difference.
 
-Click to pin the pixel under the pointer. Drag to pin the average of a
+Click to pin the color under the pointer. Drag to pin the average of a
 rectangle, which is generally more repeatable for textured or noisy material.
 Hold Shift to keep the pin tool active for additional samples.
 

@@ -75,8 +75,8 @@ jobs:
 
       # With a Developer ID certificate in the secrets, the bundle is
       # signed with the hardened runtime, notarized, and stapled. Without
-      # one, the ad-hoc build ships as-is and Gatekeeper asks users to
-      # right-click and open; see docs/RELEASING.md.
+      # one, the ad-hoc build ships as-is; see the download approval steps
+      # linked from docs/RELEASING.md.
       - name: Sign with Developer ID
         if: ${{ env.HAS_SIGNING_CERTIFICATE == 'true' }}
         env:

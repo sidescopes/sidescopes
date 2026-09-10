@@ -7,7 +7,7 @@ if(CMAKE_HOST_APPLE AND NOT CMAKE_OSX_DEPLOYMENT_TARGET)
     set(CMAKE_OSX_DEPLOYMENT_TARGET "14.0" CACHE STRING "Minimum supported macOS version" FORCE)
 endif()
 
-project(sidescopes VERSION 0.7.0 LANGUAGES CXX)
+project(sidescopes VERSION 0.8.0 LANGUAGES CXX)
 
 if(APPLE AND CMAKE_OSX_DEPLOYMENT_TARGET VERSION_LESS "14.0")
     message(FATAL_ERROR "SideScopes requires macOS 14.0 or later")

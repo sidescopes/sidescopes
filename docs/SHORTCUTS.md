@@ -46,7 +46,7 @@ to resize it, or drag an edge midpoint to move one edge.
 | --- | --- |
 | P | Open the color-pin tool |
 
-Click to pin the pixel under the pointer. Drag to pin the average of a
+Click to pin the color under the pointer. Drag to pin the average of a
 rectangle. Hold Shift while clicking or dragging to keep the tool open for
 additional pins. P has no effect when no visible scope accepts color pins.
 

@@ -6,59 +6,45 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-09-10
+
+### Added
+
+- An offline license reader under About → Licenses.
+
 ### Changed
 
-- Cancelling a region picker keeps the committed selection. Closed parent
-  windows retain the last rectangle on its display. The border close button
-  removes its region, and Escape clears selections after dismissing settings
-  or cancelling an active picker. The default startup region remains.
-- Selecting a face creates a normal window-attached region with a pin icon.
-  Its rectangle stays fixed inside the window as image or video content
-  changes. Face detection runs only when selecting; live tracking is removed.
-- Windows face selection uses the operating system's built-in FaceDetector.
-  Windows builds no longer bundle OpenCV, YuNet, or their runtime dependencies.
-  The optional OpenCV backend remains available for Linux tests.
-- Mac downloads contain both Apple silicon and Intel code and require macOS
-  14 or later, matching the screen-capture APIs used by the application.
-- Desktop builds embed their complete license notices in an offline
-  About → Licenses reader. Windows archives contain only `SideScopes.exe`.
-  Both Lab distributions include notices for their bundled libraries and fonts.
+- Waveform, Luma Waveform, and RGB Parade use a consistent brightness
+  reference as bright or dark content enters the monitored region.
+- Selecting a face creates an ordinary window-attached region. Its crop
+  stays fixed as a photograph is panned or zoomed, or a video plays.
+- Cancelling a region picker restores the previous selection. Closing
+  the monitored window preserves its last region as a global region.
+- Mac downloads include Apple silicon and Intel support and require
+  macOS 14 or later.
 
 ### Fixed
 
-- The default region remains usable when the saved application window fills
-  the display.
-- Closing a Windows picker across multiple displays retires every overlay
-  before releasing its state. Failed picker construction, screen-image copies,
-  icon rendering, and Mac observer registration release their resources.
-- Restoring an attached window at a disjoint position brings its region back
-  inside the window. Overlapping restores keep their existing crop behavior.
-- Dragged color pins average the selected rectangle on every display. Frame
-  samples reject retired capture sources, and delayed pointer samples cannot
-  overwrite newer completed readings.
-- Scope readings continue updating while a region is dragged or resized,
-  including pointer movements between drawn frames. Very short drags retain
-  the region's window attachment.
-- Saved settings retain fractional values and negative monitor coordinates,
-  reject malformed numbers, and preserve the previous file if saving fails.
-- Cancelling a region pick allows another pick immediately. Delayed native
-  callbacks cannot access a session after it closes, and stale face selections
-  cannot attach to a window whose source geometry has changed.
-- Picker confirmations preserve the selected tool even when a drawn rectangle
-  matches a face or window suggestion.
-- Scope analysis retries failed module operations without displaying stale or
-  partially copied results. Changes to narrow regions and pixel formats now
-  invalidate the content cache correctly.
-- Windows capture reads the acquired texture's pixel format.
-- Converting an attached region between window and display coordinates no
-  longer loses a boundary pixel to floating-point rounding.
-- Diagnostic recording can be changed safely while capture and analysis emit
-  messages, including when a reporting subsystem is shutting down.
-- The Lab keeps the latest image selection during overlapping loads, measures
-  transparent images against the displayed black background, saves preset
-  selections, and refreshes its engine when a newer build is available.
-- The Lab refreshes readings when resizing moves the image beneath a region,
-  and its region close button clears the selection like Escape.
+- Scope updates remain live during fast region drags and resizes.
+  Brief drags also preserve window attachment.
+- Attached regions recover correctly after minimizing and restoring
+  windows, including when a window returns at a different position.
+- Dragged color pins average the selected area on every display.
+  Capture changes and delayed samples no longer produce stale readings.
+- Saved settings preserve fractional values and window positions on
+  displays left of or above the primary display. Failed saves preserve
+  the previous settings file.
+- Improved capture recovery and shutdown reliability, including recovery
+  from failed analysis operations.
+- The Lab region stays fixed when images change and measures the visible
+  black background outside the image. Embedded touch interaction, image
+  loading, preset persistence, and resizing behave more reliably.
+
+### Upgrade notes
+
+- If you customized the shortcut for clearing regions, use
+  `shortcut_cancel_interaction` in the preferences file. The previous
+  `shortcut_clear_region` key is no longer read; the default remains Escape.
 
 ## [0.7.0] - 2026-08-17
 
