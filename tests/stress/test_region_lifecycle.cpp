@@ -415,7 +415,7 @@ TEST_CASE("Reopened picker rejects a cancelled scan after its replacement scan c
         // delivery record makes any later stale update observable.
         delivered.clear();
         releaseFirstOnExit.open();
-        REQUIRE(waitUntil([&] { return !picker.scansRunning(); }));
+        REQUIRE(waitUntil([&] { return !picker.backgroundWorkRunning(); }));
         picker.drainFaceScans();
         REQUIRE(delivered.empty());
         REQUIRE(picker.active());

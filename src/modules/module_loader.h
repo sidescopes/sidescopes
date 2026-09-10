@@ -14,7 +14,7 @@ class ModuleRegistry;
 /// Scans @p directory for the platform's module files (.dylib / .dll / .so),
 /// loads each, resolves the "ss_module_entry" symbol, and registers it.
 /// Failures (missing symbol, ABI mismatch, dlopen error) are logged and
-/// skipped; the scan never aborts and never throws. Loaded handles stay open
+/// skipped; allocation failures propagate to the caller. Loaded handles stay open
 /// for the process lifetime: scope instances may outlive any point at which
 /// unloading would be safe, so the modules are never unloaded.
 ///

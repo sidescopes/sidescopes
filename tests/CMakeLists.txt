@@ -177,6 +177,7 @@ add_executable(sidescopes_allocation_tests
     test_allocation_failure.cpp
     test_analysis_allocations.cpp
     test_detection_allocations.cpp
+    test_module_allocations.cpp
     support/allocation_failure.cpp
     support/desktop_stubs.cpp
     support/region_overlay_stubs.cpp
@@ -201,3 +202,10 @@ endif()
 if(SIDESCOPES_FUZZ_TESTS)
     add_subdirectory(fuzz)
 endif()
+
+add_test(NAME sidescopes_test_metadata COMMAND "${CMAKE_COMMAND}"
+    "-DTEST_CTEST_COMMAND=${CMAKE_CTEST_COMMAND}"
+    "-DTEST_BUILD_DIR=${PROJECT_BINARY_DIR}"
+    "-DTEST_CONFIGURATION=$<CONFIG>"
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/check_metadata.cmake")
+set_tests_properties(sidescopes_test_metadata PROPERTIES TIMEOUT 30)

@@ -100,6 +100,10 @@ def compare(baseline, current, threshold, condition_reason=""):
         note = ""
         if condition_reason:
             note = "   NOT COMPARABLE: " + condition_reason
+        elif before.get("machine") != after.get("machine"):
+            note = "   NOT COMPARABLE: machine differs"
+        elif before.get("os") != after.get("os"):
+            note = "   NOT COMPARABLE: os differs"
         elif (before.get("measurement_method", "legacy-unspecified")
               != after.get("measurement_method", "legacy-unspecified")):
             note = "   NOT COMPARABLE: measurement methods differ"

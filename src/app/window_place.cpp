@@ -126,6 +126,9 @@ RegionOfInterest openStarterRegion(const StarterSize& size, double windowLeft, d
     RegionOfInterest best = centeredStarterRegion(size);
     double bestScore = -std::numeric_limits<double>::infinity();
     for (const StarterArea& area : areas) {
+        if (area.right <= area.left || area.bottom <= area.top) {
+            continue;
+        }
         const double score = starterAreaScore(area, size);
         if (score > bestScore) {
             best = starterRegionInArea(area, size, centreX, centreY);

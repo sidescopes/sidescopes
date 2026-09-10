@@ -10,6 +10,8 @@
 #include <cstdlib>
 #include <memory>
 
+#include "platform/macos/system_observation.h"
+
 namespace sidescopes {
 
 namespace {
@@ -536,21 +538,24 @@ struct SystemObserver
 std::vector<SystemObserver> g_systemObservers;
 id g_escapeMonitor = nil;
 
-void addSystemObserver(NSNotificationCenter* center, NSNotificationName name,
-                       std::shared_ptr<std::function<void()>> callback)
-{
-    id token = [center addObserverForName:name
-                                   object:nil
-                                    queue:[NSOperationQueue mainQueue]
-                               usingBlock:^(NSNotification*) {
-                                 if (*callback) {
-                                     (*callback)();
-                                 }
-                               }];
-    g_systemObservers.push_back({center, token, std::move(callback)});
-}
-
 }  // namespace
+
+void observeSystemNotification(NSNotificationCenter* center, NSNotificationName name,
+                               std::shared_ptr<std::function<void()>> callback)
+{
+    // Reserve ownership before registration: a throwing vector insertion
+    // must never leave a live callback without a token to retire it.
+    g_systemObservers.push_back({center, nil, std::move(callback)});
+    const auto handler = g_systemObservers.back().callback;
+    g_systemObservers.back().token = [center addObserverForName:name
+                                                         object:nil
+                                                          queue:[NSOperationQueue mainQueue]
+                                                     usingBlock:^(NSNotification*) {
+                                                       if (*handler) {
+                                                           (*handler)();
+                                                       }
+                                                     }];
+}
 
 void observeSystemWake(std::function<void()> callback)
 {
@@ -562,13 +567,14 @@ void observeSystemWake(std::function<void()> callback)
     // black.
     auto shared = std::make_shared<std::function<void()>>(std::move(callback));
     NSNotificationCenter* workspace = [[NSWorkspace sharedWorkspace] notificationCenter];
-    addSystemObserver(workspace, NSWorkspaceScreensDidWakeNotification, shared);
-    addSystemObserver(workspace, NSWorkspaceSessionDidBecomeActiveNotification, shared);
-    addSystemObserver([NSDistributedNotificationCenter defaultCenter], @"com.apple.screenIsUnlocked", shared);
+    observeSystemNotification(workspace, NSWorkspaceScreensDidWakeNotification, shared);
+    observeSystemNotification(workspace, NSWorkspaceSessionDidBecomeActiveNotification, shared);
+    observeSystemNotification([NSDistributedNotificationCenter defaultCenter], @"com.apple.screenIsUnlocked", shared);
     // Display topology changes (a monitor connected, removed, or given a
     // new resolution) can leave the stream running against a stale
     // configuration; a restart is cheap and re-resolves the display.
-    addSystemObserver([NSNotificationCenter defaultCenter], NSApplicationDidChangeScreenParametersNotification, shared);
+    observeSystemNotification([NSNotificationCenter defaultCenter], NSApplicationDidChangeScreenParametersNotification,
+                              shared);
 }
 
 void observeSystemSleep(std::function<void()> callback)
@@ -580,9 +586,9 @@ void observeSystemSleep(std::function<void()> callback)
     // wrong session in the first place.
     auto shared = std::make_shared<std::function<void()>>(std::move(callback));
     NSNotificationCenter* workspace = [[NSWorkspace sharedWorkspace] notificationCenter];
-    addSystemObserver(workspace, NSWorkspaceScreensDidSleepNotification, shared);
-    addSystemObserver(workspace, NSWorkspaceSessionDidResignActiveNotification, shared);
-    addSystemObserver([NSDistributedNotificationCenter defaultCenter], @"com.apple.screenIsLocked", shared);
+    observeSystemNotification(workspace, NSWorkspaceScreensDidSleepNotification, shared);
+    observeSystemNotification(workspace, NSWorkspaceSessionDidResignActiveNotification, shared);
+    observeSystemNotification([NSDistributedNotificationCenter defaultCenter], @"com.apple.screenIsLocked", shared);
 }
 
 namespace {
@@ -648,13 +654,16 @@ void observeEscapeWithoutKeyWindow(std::function<void()> callback)
 
 void unobserveSystemEvents()
 {
-    for (const SystemObserver& observer : g_systemObservers) {
+    std::vector<SystemObserver> retired;
+    retired.swap(g_systemObservers);
+    for (const SystemObserver& observer : retired) {
         // A notification already queued for the main thread must also lose
         // access to the application before its state is destroyed.
         *observer.callback = {};
-        [observer.center removeObserver:observer.token];
+        if (observer.token) {
+            [observer.center removeObserver:observer.token];
+        }
     }
-    g_systemObservers.clear();
     if (g_escapeMonitor) {
         [NSEvent removeMonitor:g_escapeMonitor];
         g_escapeMonitor = nil;

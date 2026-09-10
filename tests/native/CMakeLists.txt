@@ -37,7 +37,7 @@ if(APPLE)
     target_link_libraries(sidescopes_capture_completion_tests PRIVATE sidescopes_platform Catch2::Catch2WithMain)
     sidescopes_target_defaults(sidescopes_capture_completion_tests)
     catch_discover_tests(sidescopes_capture_completion_tests
-        TEST_PREFIX "Capture completion: " PROPERTIES LABELS "native;allocation" TIMEOUT 30)
+        TEST_PREFIX "Capture completion: " PROPERTIES LABELS native TIMEOUT 30)
 endif()
 
 if(WIN32)
@@ -50,5 +50,10 @@ if(WIN32)
         sidescopes_platform Catch2::Catch2WithMain)
     sidescopes_target_defaults(sidescopes_native_allocation_tests)
     catch_discover_tests(sidescopes_native_allocation_tests
-        TEST_PREFIX "Native allocation: " PROPERTIES LABELS "native;allocation" TIMEOUT 30)
+        TEST_PREFIX "Native allocation: " PROPERTIES LABELS native TIMEOUT 30)
 endif()
+
+# Catch 3.7 flattens list-valued PROPERTIES across discovery. Add the second
+# label only after its generated test lists have reached CTest.
+set_property(DIRECTORY APPEND PROPERTY TEST_INCLUDE_FILES
+    "${CMAKE_CURRENT_SOURCE_DIR}/allocation_labels.cmake")

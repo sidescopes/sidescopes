@@ -26,7 +26,8 @@ struct PaneRenderInput
     /// stands down.
     bool pinsAvailable;
     /// The smoothed color each trace marks, empty until a sample lands and
-    /// whenever the pointer is outside the region the scopes read.
+    /// when the cursor sampler cannot provide a live pointer reading. The pane
+    /// draws markers only while regionSelected is true.
     const std::optional<FloatColor>& vectorscopeColor;
     const std::optional<FloatColor>& waveformColor;
     /// The smoothed color under the cursor wherever it is, which the readout

@@ -168,9 +168,8 @@ const char* Toolbar::scopeName(std::string_view id) const
     return scope != nullptr ? scopeDisplayName(*scope) : "";
 }
 
-PaneRenderOutcome Toolbar::drawRegionToolIcons()
+void Toolbar::drawRegionToolIcons()
 {
-    PaneRenderOutcome outcome;
     char tooltip[96];
     std::snprintf(tooltip, sizeof(tooltip), "Draw a region (%s)", m_shortcuts.bindings().drawRegion.c_str());
     const int iconPx = iconPixelSize();
@@ -208,8 +207,6 @@ PaneRenderOutcome Toolbar::drawRegionToolIcons()
                                 ImGui::GetItemRectMax().y};
     ImGui::SameLine(0.0f, 2.0f);
     ImGui::NewLine();
-
-    return outcome;
 }
 
 }  // namespace sidescopes

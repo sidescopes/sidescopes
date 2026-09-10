@@ -59,7 +59,7 @@ struct Fixture
     {
         // A regression must fail its subprocess within a bound, not hang the
         // suite or free storage a real detached thread might still be using.
-        if (!waitUntil([&] { return !picker.scansRunning(); })) {
+        if (!waitUntil([&] { return !picker.backgroundWorkRunning(); })) {
             std::fputs("detached detection did not finish within the cleanup deadline\n", stderr);
             std::abort();
         }
@@ -84,7 +84,7 @@ struct Fixture
 
     static void drainPicker(RegionPicker& target)
     {
-        REQUIRE(waitUntil([&] { return !target.scansRunning(); }));
+        REQUIRE(waitUntil([&] { return !target.backgroundWorkRunning(); }));
         target.drainFaceScans();
         REQUIRE(test::regionOverlayStubs().deliveredFaces.contains(Scanned));
     }
@@ -154,7 +154,7 @@ TEST_CASE("A picker thread launch allocation failure leaves no phantom running s
     const bool threw = failLaunch(count, [&] { Fixture::open(fixture.picker); });
     CHECK_FALSE(threw);
     CHECK(test::desktopStubs().detectorCall().calls == 0);
-    REQUIRE_FALSE(fixture.picker.scansRunning());
+    REQUIRE_FALSE(fixture.picker.backgroundWorkRunning());
     fixture.picker.drainFaceScans();
     REQUIRE(test::regionOverlayStubs().deliveredFaces.contains(Scanned));
     CHECK(test::regionOverlayStubs().deliveredFaces.at(Scanned).empty());

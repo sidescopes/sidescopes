@@ -1,6 +1,8 @@
 #include "platform/icons.h"
 
 #include <cstring>
+#include <limits>
+#include <memory>
 #include <string>
 
 // NanoSVG ships as headers whose implementation lands in exactly this
@@ -100,26 +102,24 @@ const char* sourceFor(Icon icon)
 std::vector<uint8_t> rasterizeIcon(Icon icon, int sizePixels)
 {
     std::vector<uint8_t> pixels;
-    if (sizePixels <= 0) {
+    if (sizePixels <= 0 || sizePixels > std::numeric_limits<int>::max() / 4) {
         return pixels;
     }
     // nsvgParse mutates its input, so the embedded literal is copied.
     std::string source = sourceFor(icon);
-    NSVGimage* image = nsvgParse(source.data(), "px", 96.0f);
+    const std::unique_ptr<NSVGimage, decltype(&nsvgDelete)> image(nsvgParse(source.data(), "px", 96.0f), nsvgDelete);
     if (image == nullptr) {
         return pixels;
     }
-    NSVGrasterizer* rasterizer = nsvgCreateRasterizer();
+    const std::unique_ptr<NSVGrasterizer, decltype(&nsvgDeleteRasterizer)> rasterizer(nsvgCreateRasterizer(),
+                                                                                      nsvgDeleteRasterizer);
     if (rasterizer == nullptr) {
-        nsvgDelete(image);
-
         return pixels;
     }
     pixels.resize(static_cast<std::size_t>(sizePixels) * sizePixels * 4);
     const float scale = static_cast<float>(sizePixels) / (image->width > 0 ? image->width : 24.0f);
-    nsvgRasterize(rasterizer, image, 0.0f, 0.0f, scale, pixels.data(), sizePixels, sizePixels, sizePixels * 4);
-    nsvgDeleteRasterizer(rasterizer);
-    nsvgDelete(image);
+    nsvgRasterize(rasterizer.get(), image.get(), 0.0f, 0.0f, scale, pixels.data(), sizePixels, sizePixels,
+                  sizePixels * 4);
 
     return pixels;
 }

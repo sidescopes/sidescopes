@@ -50,7 +50,9 @@ struct SamplerFixture
         capture.requestDisplay(StreamedDisplay);
         REQUIRE(capture.start());
         worker.start();
-        mailbox.publish(makeSolidFrameBuffer(64, 64, Color{200, 50, 30}, 1));
+        auto frame = makeSolidFrameBuffer(64, 64, Color{200, 50, 30}, 1);
+        frame.stamp = {capture.streamEpoch(), StreamedDisplay, 0.0};
+        mailbox.publish(std::move(frame));
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
         while (worker.consumedFrameSequence() != 1 && std::chrono::steady_clock::now() < deadline) {
             std::this_thread::sleep_for(std::chrono::milliseconds(2));
@@ -110,6 +112,7 @@ FrameBuffer makeRampFrameBuffer(uint64_t sequence)
 void publishAndAwait(SamplerFixture& fix, FrameBuffer frame)
 {
     const uint64_t sequence = frame.sequence;
+    frame.stamp = {fix.capture.streamEpoch(), fix.capture.capturedDisplay(), 0.0};
     fix.mailbox.publish(std::move(frame));
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
     while (fix.worker.consumedFrameSequence() != sequence && std::chrono::steady_clock::now() < deadline) {
@@ -622,7 +625,8 @@ TEST_CASE("Markers follow the pointer wherever it goes")
 {
     // The region and the pointer are separate inputs: the region decides what
     // the traces are built from, and a marker is a live probe of what is under
-    // the pointer - worth having with no region drawn at all.
+    // the pointer. The pane renderer decides whether live traces exist to
+    // draw those marker positions; the readout remains independent.
     SamplerFixture fix;
     desktopStubs().cursorDisplay = StreamedDisplay;
     desktopStubs().cursor = DesktopPoint{48.0, 48.0};
@@ -764,6 +768,69 @@ TEST_CASE("A marker follows a moving pointer at an even speed")
         CHECK(step > mean * 0.5f);
         CHECK(step < mean * 1.5f);
     }
+}
+
+TEST_CASE("Cursor readout rejects a frame from the previous capture attempt")
+{
+    SamplerFixture fix;
+    desktopStubs().cursor = DesktopPoint{20, 20};
+    desktopStubs().cursorDisplay = StreamedDisplay;
+    desktopStubs().screenSample = FloatColor{11, 22, 33};
+    fix.capture.suspend("Test restart");
+    fix.capture.resume();
+    REQUIRE_FALSE(fix.capture.dead());
+    const auto sampled = fix.sampler.update(FrameSize, WholeDisplay, Instant, 1.0, MovingFrame);
+    REQUIRE(sampled.readoutColor);
+    CHECK_THAT(sampled.readoutColor->r, WithinAbs(11, 0.001));
+    CHECK(desktopStubs().screenSampleRequests == 1);
+}
+
+TEST_CASE("A late screen sample cannot overwrite a newer completion")
+{
+    SamplerFixture fix;
+    desktopStubs().cursor = DesktopPoint{80, 20};
+    desktopStubs().cursorDisplay = StreamedDisplay + 1;
+    std::vector<std::function<void(std::optional<FloatColor>)>> completions;
+    desktopStubs().screenSampler = [&](DesktopPoint, auto completion) { completions.push_back(std::move(completion)); };
+    (void)fix.sampler.update(FrameSize, WholeDisplay, Instant, 1.0, MovingFrame);
+    (void)fix.sampler.update(FrameSize, WholeDisplay, Instant, 1.1, MovingFrame);
+    (void)fix.sampler.update(FrameSize, WholeDisplay, Instant, 1.2, MovingFrame);
+    REQUIRE(completions.size() == 3);
+    // The first request may still complete while the second is in flight;
+    // accepting it keeps slow samplers progressing instead of starving them.
+    completions[0](FloatColor{10, 20, 30});
+    REQUIRE(fix.sampler.screenSampleColor());
+    CHECK_THAT(fix.sampler.screenSampleColor()->r, WithinAbs(10, 0.001));
+    completions[2](FloatColor{40, 50, 60});
+    completions[1](FloatColor{10, 20, 30});
+    CHECK_THAT(fix.sampler.screenSampleColor()->r, WithinAbs(40, 0.001));
+}
+
+TEST_CASE("An independent readout samples the screen while capture is suspended")
+{
+    SamplerFixture fix;
+    desktopStubs().cursor = DesktopPoint{20, 20};
+    desktopStubs().cursorDisplay = StreamedDisplay;
+    desktopStubs().screenSample = FloatColor{11, 22, 33};
+    fix.capture.suspend("No region selected");
+    const auto sampled = fix.sampler.updateReadoutIfDue(Instant, 1.0);
+    REQUIRE(sampled);
+    REQUIRE(sampled->readoutColor);
+    CHECK_THAT(sampled->readoutColor->r, WithinAbs(11, 0.001));
+    CHECK(desktopStubs().screenSampleRequests == 1);
+}
+
+TEST_CASE("Cursor mapping uses the sampled frame's current display dimensions")
+{
+    SamplerFixture fix;
+    desktopStubs().cursor = DesktopPoint{48, 20};
+    desktopStubs().cursorDisplay = StreamedDisplay;
+    publishAndAwait(fix, makeRampFrameBuffer(2));
+    const auto sampled =
+        fix.sampler.update(AnalysisWorker::FrameSize{128, 128, 128, 128}, WholeDisplay, Instant, 1.0, MovingFrame);
+    REQUIRE(sampled.readoutColor);
+    CHECK_THAT(sampled.readoutColor->r, WithinAbs(194, 1));
+    CHECK(desktopStubs().screenSampleRequests == 0);
 }
 
 }  // namespace sidescopes

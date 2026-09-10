@@ -216,8 +216,14 @@ private:
     /// position just enough to keep it inside (permanently), per axis.
     static void bindStoredToWindow(AttachedWindow& window, const AttachWindowRect& windowRect);
 
+    /// Keeps the stored size while pushing its position inside the window.
+    static void pushStoredIntoWindow(AttachedWindow& window, const AttachWindowRect& windowRect);
+
     /// Hiding aborts an uncommitted animation and begins reappearance settling.
     static void suspendWindow(AttachedWindow& window);
+
+    /// Commits settled restore geometry, recovering only a wholly displaced crop.
+    static void finishRestore(AttachedWindow& window, const AttachWindowRect& restored);
 
     /// Advances every attached window's stored rectangle from this frame's
     /// observations; minimized and closed windows are left untouched.

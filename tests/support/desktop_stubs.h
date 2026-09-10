@@ -54,6 +54,7 @@ public:
     /// arithmetic is visible to a test that stubs the answer.
     std::optional<DesktopPoint> lastDisplayPoint;
     std::optional<CapturedImage> displayImage;
+    std::function<std::optional<CapturedImage>(uint32_t)> displayCapture;
 
     bool faceDetectionSupported = false;
     std::vector<IntRect> faces;
@@ -87,6 +88,7 @@ public:
     /// caller owns the pacing, so the count is the throttle made visible.
     std::optional<FloatColor> screenSample;
     int screenSampleRequests = 0;
+    std::function<void(DesktopPoint, std::function<void(std::optional<FloatColor>)>)> screenSampler;
 
     /// Puts every answer back to its empty default and forgets what the
     /// detector was handed.

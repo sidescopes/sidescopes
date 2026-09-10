@@ -75,9 +75,8 @@ public:
     /// The scope selector, whose menu toggles scopes and reorders their panes.
     [[nodiscard]] PaneRenderOutcome drawScopeToggles();
 
-    /// The region toolbox: draw, attach to a window, attach to a face, and the
-    /// clear.
-    [[nodiscard]] PaneRenderOutcome drawRegionToolIcons(const PaneRenderInput& input);
+    /// The region toolbox: draw a region, select a window, or select a face.
+    void drawRegionToolIcons();
 
     /// The pane area: the capture help pages, or the scopes on screen stacked
     /// along the chosen axis with a grab strip between each neighboring pair.

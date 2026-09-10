@@ -119,7 +119,7 @@ asymptotic tail of the average decisively.
 The analyzed region is chosen the way a screenshot tool works. A toolbar — and
 keyboard shortcuts — opens a picker over the dimmed screen: click a window to
 scope it, draw an arbitrary region by hand, or, where the platform can
-detect faces, click a face to scope the skin around it. Once confirmed, the
+detect faces, click a face to create a region around it. Once confirmed, the
 region carries a live border on the desktop, drawn like a macOS screenshot
 selection, that moves and resizes in place without reopening the picker.
 
@@ -151,7 +151,7 @@ rectangle. Holding Shift keeps the tool open for more samples.
 
 The picker opens on the display under the cursor, and confirming a region
 there switches capture to that display. A global region belongs to one
-display and is cleared when that display's configuration changes. A region
+display and is retained while capture restarts after configuration changes. A region
 attached to a window follows it across displays. If a display disconnects,
 capture pauses and the scopes say so; it resumes automatically when the
 display returns.

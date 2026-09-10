@@ -80,8 +80,6 @@ struct ContextMenuModel
     float userUiScaleFactor;
     /// How much of the machine the analysis may spend.
     QualityLevel quality;
-    /// Whether the current source provides a region.
-    bool regionSelected;
     /// Whether this shell offers application settings, quality and diagnostics.
     bool applicationControlsAvailable = true;
 };

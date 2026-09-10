@@ -39,6 +39,8 @@ def _parse_arguments(argv):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--app", type=pathlib.Path, default=REPOSITORY / "build" / "SideScopes.app",
                         help="the application bundle to measure")
+    parser.add_argument("--profile", choices=[profile.name for profile in catalog.PROFILES],
+                        help="explicitly select verified behavior when binary markers are ambiguous")
     parser.add_argument("--out", type=pathlib.Path, help="where to write the results (default under bench-results/)")
     parser.add_argument("--scenarios", default="", help="comma list of scenario names; default every one")
     parser.add_argument("--stacks", default=",".join(catalog.DEFAULT_STACKS),
@@ -320,7 +322,7 @@ def _tracking_readings(tracking):
     )
 
 
-def _complaint_about(bundle, executable):
+def _complaint_about(bundle, executable, profile_override=None):
     """Why this run must not start, or an empty string if it may.
 
     All of it is about not measuring the wrong thing: an application somebody
@@ -336,7 +338,7 @@ def _complaint_about(bundle, executable):
     if not quartz.pointer_works():
         return ("synthesised pointer events are being dropped. Grant Accessibility to the application running "
                 "this script in System Settings > Privacy & Security > Accessibility.")
-    if catalog.detect_profile(executable) is None:
+    if catalog.detect_profile(executable, profile_override) is None:
         return "cannot tell what this build does; it matches no known behaviour profile"
 
     return ""
@@ -404,7 +406,7 @@ def main(argv=None):
 
     bundle = arguments.app.resolve()
     executable = bundle / "Contents" / "MacOS" / "SideScopes"
-    complaint = _complaint_about(bundle, executable)
+    complaint = _complaint_about(bundle, executable, arguments.profile)
     if complaint:
         print(f"app-scenarios: {complaint}", file=sys.stderr)
 
@@ -427,7 +429,7 @@ def main(argv=None):
     if diagnostics_path is not None:
         diagnostics_path.unlink(missing_ok=True)
 
-    profile = catalog.detect_profile(executable)
+    profile = catalog.detect_profile(executable, arguments.profile)
     setup = {
         "bundle": bundle,
         "plan": plan,
@@ -455,6 +457,7 @@ def main(argv=None):
         "conditions": facts,
         "layout": plan.describe(),
         "profile": {"name": profile.name, "behaviour": profile.summary, "scopes": setup["scopes"],
+                    "selection": "explicit" if arguments.profile else "binary-marker",
                     "honours_prefs_override": b"SIDESCOPES_PREFS_FILE" in catalog.strings_in(executable)},
         "results": results,
         "absent": absent,

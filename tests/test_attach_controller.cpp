@@ -465,6 +465,40 @@ TEST_CASE("A window moved while hidden leaves the region screen-glued")
     checkRegion(*landed.region, 40.0, 15.0, 45.0, 35.0);
 }
 
+TEST_CASE("A disjoint restored window recovers its crop and follows later movement")
+{
+    AttachController controller;
+    const AttachWindowRect original{100, 100, 400, 400};
+    const AttachWindowRect restored{600, 500, 400, 400};
+    controller.attach(1, 100, "Editor", original, PrimaryDisplay, {20, 20, 30, 30});
+    (void)controller.observe({minimizedWindow(1, original)}, 1, 1.0);
+    CHECK_FALSE(controller.observe({visibleWindow(1, restored)}, 1, 2.0).region);
+    const auto landed = controller.observe({visibleWindow(1, restored)}, 1, 2.3);
+    REQUIRE(landed.region);
+    checkRegion(*landed.region, 60, 50, 70, 60);
+    CHECK_FALSE(landed.windowMoving);
+    const auto moved = controller.observe({visibleWindow(1, {550, 450, 400, 400})}, 1, 3.0);
+    REQUIRE(moved.region);
+    checkRegion(*moved.region, 55, 45, 65, 55);
+    CHECK(moved.windowMoving);
+}
+
+TEST_CASE("A disjoint restore to a smaller window preserves the crop's stored size")
+{
+    AttachController controller;
+    const AttachWindowRect original{100, 100, 400, 400};
+    const AttachWindowRect tiny{600, 500, 40, 30};
+    controller.attach(1, 100, "Editor", original, PrimaryDisplay, {20, 20, 30, 30});
+    (void)controller.observe({minimizedWindow(1, original)}, 1, 1.0);
+    (void)controller.observe({visibleWindow(1, tiny)}, 1, 2.0);
+    const auto landed = controller.observe({visibleWindow(1, tiny)}, 1, 2.3);
+    REQUIRE(landed.region);
+    checkRegion(*landed.region, 60, 50, 64, 53);
+    const auto grown = controller.observe({visibleWindow(1, {600, 500, 400, 400})}, 1, 3.0);
+    REQUIRE(grown.region);
+    checkRegion(*grown.region, 60, 50, 70, 60);
+}
+
 TEST_CASE("Minimization rolls back animation pushes and waits for a timed restore")
 {
     AttachController controller;

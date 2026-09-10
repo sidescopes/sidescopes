@@ -217,8 +217,11 @@ public:
     /// Averaged color around a point of the most recent frame, if any. The
     /// point is in DISPLAY pixels: a capture narrowed to part of its display
     /// still answers for the same place on screen, and returns nothing for a
-    /// point its pixels do not reach.
-    [[nodiscard]] std::optional<FloatColor> sampleDisplayColor(int displayX, int displayY, int radius = 1) const;
+    /// point its pixels do not reach. An expected source rejects pixels retained
+    /// from a previous capture stream or display.
+    [[nodiscard]] std::optional<FloatColor> sampleDisplayColor(
+        int displayX, int displayY, int radius = 1,
+        std::optional<AnalysisSettings::Source> expectedSource = std::nullopt) const;
 
     /// Asks the worker to let go of the frame it is holding, which is a whole
     /// display's worth of pixels kept warm for passes that are not coming.
@@ -269,7 +272,9 @@ public:
     /// latestFrameSize, withLatestFrame) - that would self-deadlock on the
     /// non-recursive mutex - and it must return promptly, since it blocks the
     /// worker's next frame swap.
-    [[nodiscard]] bool withLatestFrame(const std::function<void(const FrameView&)>& reader) const;
+    /// An expected source rejects a previous stream without invoking the reader.
+    [[nodiscard]] bool withLatestFrame(const std::function<void(const FrameView&)>& reader,
+                                       std::optional<AnalysisSettings::Source> expectedSource = std::nullopt) const;
 
     /// The sequence number of the most recent frame the worker has taken from
     /// the mailbox and finished processing (including a skipped pass). Lets tests

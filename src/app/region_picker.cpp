@@ -18,6 +18,7 @@
 #include "app/capture_crop.h"
 #include "app/window_suggestions.h"
 #include "core/diagnostics.h"
+#include "core/marker_smoother.h"
 #include "core/region_suggestions.h"
 #include "platform/desktop.h"
 #include "platform/face_detection.h"
@@ -137,6 +138,20 @@ void RegionPicker::cancel()
     (void)pollRegionPick();
     m_picking = false;
     m_swallowCancel = false;
+}
+
+void RegionPicker::shutdown()
+{
+    {
+        const std::lock_guard lock(m_pinSamples->mutex);
+        // Quit does not save pending pin results. Only the current native
+        // capture needs to finish; queued clicks must not each delay shutdown.
+        m_pinSamples->pending.clear();
+    }
+    cancel();
+    while (backgroundWorkRunning()) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
 }
 
 std::optional<RegionPickerMode> RegionPicker::pendingRequest() const
@@ -570,6 +585,16 @@ void RegionPicker::logPickerSuggestions(const std::vector<PickerDisplay>& picker
 RegionPickOutcome RegionPicker::poll(std::optional<AnalysisWorker::FrameSize> frameSize,
                                      std::optional<FloatColor> screenSampleColor)
 {
+    {
+        const std::lock_guard lock(m_pinSamples->mutex);
+        if (!m_pinSamples->completed.empty()) {
+            RegionPickOutcome outcome;
+            outcome.pinColor = m_pinSamples->completed.front();
+            m_pinSamples->completed.pop_front();
+            outcome.activity = true;
+            return outcome;
+        }
+    }
     // While the picker is up, whatever the user indicates previews on the scopes
     // immediately; confirmation keeps it, Esc restores.
     if (!m_picking) {
@@ -599,26 +624,30 @@ RegionPickOutcome RegionPicker::processPinPoll(const RegionPickPoll& poll,
     // to average, and a finish just puts things back.
     std::optional<FloatColor> chip;
     if (const auto cursor = globalCursorPosition()) {
-        if (displayAtPoint(*cursor).value_or(0) == m_capture.capturedDisplay() && !m_capture.dead() && frameSize) {
-            if (const auto geometry = geometryOfDisplay(m_capture.capturedDisplay())) {
+        if (displayAtPoint(*cursor).value_or(0) == m_capture.capturedDisplay() && !m_capture.dead() &&
+            !m_capture.suspended() && frameSize) {
+            if (const auto geometry = geometryOfDisplay(m_capture.capturedDisplay());
+                geometry && std::isfinite(geometry->widthPoints) && std::isfinite(geometry->heightPoints) &&
+                geometry->widthPoints > 0.0 && geometry->heightPoints > 0.0) {
                 // The chip previews exactly what a click will pin: the same point
                 // sample the live cursor readout takes, not an averaged patch.
-                const int pixelX =
-                    static_cast<int>((cursor->x - geometry->originX) * frameSize->displayWidth / geometry->widthPoints);
-                const int pixelY = static_cast<int>((cursor->y - geometry->originY) * frameSize->displayHeight /
-                                                    geometry->heightPoints);
-                chip = m_worker.sampleDisplayColor(pixelX, pixelY);
+                RegionPickPoll preview;
+                preview.pinnedPoint = DisplayPoint{(cursor->x - geometry->originX) / geometry->widthPoints * 100.0,
+                                                   (cursor->y - geometry->originY) / geometry->heightPoints * 100.0};
+                (void)m_worker.withLatestFrame(
+                    [&](const FrameView& view) { chip = pinnedFrameColor(view, preview); },
+                    AnalysisSettings::Source{m_capture.streamEpoch(), m_capture.capturedDisplay()});
             }
         } else {
-            // Another display: the throttled one-shot sampler already tracks the
-            // cursor there.
+            // The throttled screen sampler also works when capture is paused
+            // or serving another display.
             chip = screenSampleColor;
         }
     }
     setRegionPickChipColor(chip);
 
     if (poll.pinnedPoint || poll.pinnedSample) {
-        applyPinnedColor(poll, frameSize, screenSampleColor, outcome);
+        applyPinnedColor(poll, outcome);
     }
     if (poll.finished || !poll.active) {
         m_picking = false;
@@ -630,22 +659,15 @@ RegionPickOutcome RegionPicker::processPinPoll(const RegionPickPoll& poll,
     return outcome;
 }
 
-void RegionPicker::applyPinnedColor(const RegionPickPoll& poll, std::optional<AnalysisWorker::FrameSize> frameSize,
-                                    std::optional<FloatColor> screenSampleColor, RegionPickOutcome& outcome)
+void RegionPicker::applyPinnedColor(const RegionPickPoll& poll, RegionPickOutcome& outcome)
 {
     std::optional<FloatColor> pinned;
-    if (poll.displayId == m_capture.capturedDisplay() && !m_capture.dead()) {
-        if (poll.pinnedPoint && frameSize) {
-            // A plain pin samples the frame exactly like the live readout; only a
-            // dragged rectangle averages, the explicit way to ask for a swatch.
-            const int pixelX = static_cast<int>(poll.pinnedPoint->xPercent / 100.0 * frameSize->displayWidth);
-            const int pixelY = static_cast<int>(poll.pinnedPoint->yPercent / 100.0 * frameSize->displayHeight);
-            pinned = m_worker.sampleDisplayColor(pixelX, pixelY);
-        } else if (poll.pinnedSample) {
-            pinned = averageFrameColor(*poll.pinnedSample);
-        }
-    } else {
-        pinned = screenSampleColor;
+    if (poll.displayId == m_capture.capturedDisplay() && !m_capture.dead() && !m_capture.suspended()) {
+        (void)m_worker.withLatestFrame([&](const FrameView& view) { pinned = pinnedFrameColor(view, poll); },
+                                       AnalysisSettings::Source{m_capture.streamEpoch(), poll.displayId});
+    }
+    if (!pinned && poll.displayId != 0) {
+        queuePinSample(poll);
     }
     // The host adds it to the pin board; a sample that came back empty pins
     // nothing.
@@ -656,6 +678,77 @@ void RegionPicker::applyPinnedColor(const RegionPickPoll& poll, std::optional<An
         cancelRegionPick();
     }
     outcome.activity = true;
+}
+
+void RegionPicker::queuePinSample(const RegionPickPoll& poll)
+{
+    const auto samples = m_pinSamples;
+    {
+        const std::lock_guard lock(samples->mutex);
+        samples->pending.push_back(poll);
+        if (samples->running.exchange(true)) {
+            return;
+        }
+    }
+    std::thread thread;
+    try {
+        thread = std::thread([samples] { runPinSamples(samples); });
+        thread.detach();
+    } catch (const std::exception&) {
+        if (thread.joinable()) {
+            thread.join();
+        } else {
+            const std::lock_guard lock(samples->mutex);
+            samples->pending.clear();
+            samples->running.store(false);
+        }
+        diagEmit(DiagChannel::Suggestions, "pin sample launch failed");
+    }
+}
+
+void RegionPicker::runPinSamples(const std::shared_ptr<PinSamples>& samples)
+{
+    for (;;) {
+        RegionPickPoll selection;
+        {
+            const std::lock_guard lock(samples->mutex);
+            if (samples->pending.empty()) {
+                // Shutdown waits for running, so no event-loop access may
+                // follow this flag. The lock also closes the enqueue race.
+                glfwPostEmptyEvent();
+                samples->running.store(false);
+                return;
+            }
+            selection = samples->pending.front();
+            samples->pending.pop_front();
+        }
+        try {
+            if (const auto color = snapshotPinColor(selection)) {
+                const std::lock_guard lock(samples->mutex);
+                samples->completed.push_back(*color);
+            }
+        } catch (const std::exception&) {
+            diagEmit(DiagChannel::Suggestions, "pin sample failed");
+        }
+        glfwPostEmptyEvent();
+    }
+}
+
+std::optional<FloatColor> RegionPicker::snapshotPinColor(const RegionPickPoll& poll)
+{
+    // A committed pin keeps the selected display and coordinates. A throttled
+    // pointer preview can belong to an earlier point and cannot average a drag.
+    const auto image = captureDisplayImage(poll.displayId);
+    if (!image || image->width <= 0 || image->height <= 0 ||
+        image->bgra.size() / 4 / static_cast<std::size_t>(image->width) < static_cast<std::size_t>(image->height)) {
+        return std::nullopt;
+    }
+    FrameView view;
+    view.width = image->width;
+    view.height = image->height;
+    view.pixels = image->bgra.data();
+    view.strideBytes = static_cast<std::size_t>(image->width) * 4;
+    return pinnedFrameColor(view, poll);
 }
 
 RegionPickOutcome RegionPicker::processRegionPoll(const RegionPickPoll& poll)
@@ -721,21 +814,21 @@ std::optional<FloatColor> RegionPicker::averageRegionColor(const FrameView& view
                       static_cast<float>(sumB / samples)};
 }
 
-std::optional<FloatColor> RegionPicker::averageFrameColor(const RegionOfInterest& region) const
+std::optional<FloatColor> RegionPicker::pinnedFrameColor(const FrameView& view, const RegionPickPoll& poll)
 {
-    // Averages a display-percent region of the latest frame: a dragged pin's
-    // sample. A drag is the explicit request to average textured pixels; a
-    // plain click samples a point instead, matching the live readout.
-    std::optional<FloatColor> color;
-    const bool sampled = m_worker.withLatestFrame([&](const FrameView& view) {
-        // The rectangle is a share of the display, which a narrowed frame does
-        // not measure; the caller falls back to the one-shot screen read.
-        if (coversWholeDisplay(view)) {
-            color = averageRegionColor(view, region);
+    if (poll.pinnedPoint) {
+        // Match the live cursor's 3x3 read, using the sampled frame's own
+        // dimensions so a display change cannot reuse an earlier mapping.
+        const int x = static_cast<int>(poll.pinnedPoint->xPercent / 100.0 * view.displayWidth());
+        const int y = static_cast<int>(poll.pinnedPoint->yPercent / 100.0 * view.displayHeight());
+        const IntRect point = view.fromDisplay({x, y, 1, 1});
+        if (point.x >= 0 && point.y >= 0 && point.x < view.width && point.y < view.height) {
+            return averageNeighborhood(view, point.x, point.y);
         }
-    });
-
-    return sampled ? color : std::nullopt;
+    } else if (poll.pinnedSample && coversWholeDisplay(view)) {
+        return averageRegionColor(view, *poll.pinnedSample);
+    }
+    return std::nullopt;
 }
 
 bool RegionPicker::active() const
@@ -743,8 +836,11 @@ bool RegionPicker::active() const
     return m_picking;
 }
 
-bool RegionPicker::scansRunning() const
+bool RegionPicker::backgroundWorkRunning() const
 {
+    if (m_pinSamples->running.load()) {
+        return true;
+    }
     for (const std::unique_ptr<DisplayFaceScan>& scan : m_displayFaceScans) {
         if (scan->running.load()) {
             return true;

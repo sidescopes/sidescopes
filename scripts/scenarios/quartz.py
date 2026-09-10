@@ -292,8 +292,10 @@ def click(point, settle=0.08):
     _post_mouse(_MOUSE_MOVED, point)
     time.sleep(settle)
     _post_mouse(_LEFT_DOWN, point)
-    time.sleep(settle)
-    _post_mouse(_LEFT_UP, point)
+    try:
+        time.sleep(settle)
+    finally:
+        _post_mouse(_LEFT_UP, point)
 
 
 def press_mouse(point):
@@ -313,14 +315,18 @@ def drag(start, end, steps=30, step_seconds=0.016, settle=0.12):
     _post_mouse(_MOUSE_MOVED, start)
     time.sleep(settle)
     _post_mouse(_LEFT_DOWN, start)
-    time.sleep(settle)
-    for step in range(1, steps + 1):
-        fraction = step / steps
-        _post_mouse(_LEFT_DRAGGED, (start[0] + ((end[0] - start[0]) * fraction),
-                                    start[1] + ((end[1] - start[1]) * fraction)))
-        time.sleep(step_seconds)
-    time.sleep(settle)
-    _post_mouse(_LEFT_UP, end)
+    point = start
+    try:
+        time.sleep(settle)
+        for step in range(1, steps + 1):
+            fraction = step / steps
+            point = (start[0] + ((end[0] - start[0]) * fraction),
+                     start[1] + ((end[1] - start[1]) * fraction))
+            _post_mouse(_LEFT_DRAGGED, point)
+            time.sleep(step_seconds)
+        time.sleep(settle)
+    finally:
+        _post_mouse(_LEFT_UP, point)
 
 
 def _post_key(code, pressed, flags):

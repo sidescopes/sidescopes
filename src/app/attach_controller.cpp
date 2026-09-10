@@ -188,18 +188,23 @@ void AttachController::bindStoredToWindow(AttachedWindow& window, const AttachWi
         // pushes it just enough to stay inside, per axis, permanently. The
         // push never changes the stored size - a window smaller than the
         // region only clips the emitted mapping, elastically.
-        const double width = window.right - window.left;
-        const double height = window.bottom - window.top;
-        const double pushableWidth = std::min(width, windowRect.width);
-        const double pushableHeight = std::min(height, windowRect.height);
-        const double newLeft = std::clamp(window.left, windowRect.x, windowRect.x + windowRect.width - pushableWidth);
-        const double newTop = std::clamp(window.top, windowRect.y, windowRect.y + windowRect.height - pushableHeight);
-        window.left = newLeft;
-        window.right = newLeft + width;
-        window.top = newTop;
-        window.bottom = newTop + height;
+        pushStoredIntoWindow(window, windowRect);
     }
     window.lastWindowRect = windowRect;
+}
+
+void AttachController::pushStoredIntoWindow(AttachedWindow& window, const AttachWindowRect& windowRect)
+{
+    const double width = window.right - window.left;
+    const double height = window.bottom - window.top;
+    const double pushableWidth = std::min(width, windowRect.width);
+    const double pushableHeight = std::min(height, windowRect.height);
+    const double newLeft = std::clamp(window.left, windowRect.x, windowRect.x + windowRect.width - pushableWidth);
+    const double newTop = std::clamp(window.top, windowRect.y, windowRect.y + windowRect.height - pushableHeight);
+    window.left = newLeft;
+    window.right = newLeft + width;
+    window.top = newTop;
+    window.bottom = newTop + height;
 }
 
 namespace {
@@ -230,6 +235,20 @@ void AttachController::suspendWindow(AttachedWindow& window)
     window.motionChangedAt.reset();
 }
 
+void AttachController::finishRestore(AttachedWindow& window, const AttachWindowRect& restored)
+{
+    // Keep overlapping crops screen-glued, as on an ordinary
+    // restore. A wholly displaced window needs the smallest push
+    // back inside so its selected region does not vanish forever.
+    if (window.right <= restored.x || window.left >= restored.x + restored.width || window.bottom <= restored.y ||
+        window.top >= restored.y + restored.height) {
+        pushStoredIntoWindow(window, restored);
+    }
+    window.lastWindowRect = restored;
+    window.settlingRect.reset();
+    window.settling = false;
+}
+
 void AttachController::updateAttached(const std::vector<AttachedWindowObservation>& windows, double now)
 {
     for (const AttachedWindowObservation& observation : windows) {
@@ -257,9 +276,7 @@ void AttachController::updateAttached(const std::vector<AttachedWindowObservatio
                 window->settlingRect = *observation.windowRect;
                 window->motionChangedAt = now;
             } else if (now - *window->motionChangedAt >= GeometrySettleSeconds) {
-                window->lastWindowRect = *window->settlingRect;
-                window->settlingRect.reset();
-                window->settling = false;
+                finishRestore(*window, *window->settlingRect);
             }
 
             continue;

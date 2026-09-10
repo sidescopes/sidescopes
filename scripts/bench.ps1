@@ -9,7 +9,7 @@ if ($LASTEXITCODE -ne 0) { throw "Cannot identify the measured revision" }
 $os = "$([System.Environment]::OSVersion.Platform) $([System.Environment]::OSVersion.Version)"
 
 cmake -S $repoRoot -B $buildDir -G Ninja `
-    -DSIDESCOPES_BENCH=ON -DSIDESCOPES_BUILD_TESTS=OFF | Out-Null
+    -DCMAKE_BUILD_TYPE=Release -DSIDESCOPES_BENCH=ON -DSIDESCOPES_BUILD_TESTS=OFF | Out-Null
 if ($LASTEXITCODE -ne 0) { throw "Benchmark configuration failed" }
 cmake --build $buildDir --target sidescopes_bench | Out-Null
 if ($LASTEXITCODE -ne 0) { throw "Benchmark build failed" }
@@ -21,7 +21,7 @@ $xmlOut = Join-Path $buildDir "bench.xml"
 if ($LASTEXITCODE -ne 0) { throw "Benchmark run failed" }
 
 $outJson = Join-Path $resultsDir "$machine-$commit.json"
-python3 - $xmlOut $machine $os $commit $outJson @'
+@'
 import json, sys, xml.etree.ElementTree as ET
 
 xml_path, machine, os_name, commit, out_path = sys.argv[1:6]
@@ -41,7 +41,7 @@ for result in ET.parse(xml_path).iter("BenchmarkResults"):
 with open(out_path, "w") as handle:
     json.dump(rows, handle, indent=2)
     handle.write("\n")
-'@
+'@ | python3 - $xmlOut $machine $os $commit $outJson
 if ($LASTEXITCODE -ne 0) { throw "Benchmark result conversion failed" }
 
 Write-Output $outJson

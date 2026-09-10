@@ -155,8 +155,7 @@ void LayoutPresetPicker::drawSlotRow(int slot, float width, IconTextures& icons,
 
 void LayoutPresetPicker::drawSaveButton(IconTextures& icons, LayoutPresetOutcome& outcome)
 {
-    // Dark and inert while the slot already holds what is on screen, the way
-    // the region toolbox stands its clear tool down with nothing to clear.
+    // Dark and inert while the slot already holds what is on screen.
     // This is also the ONLY drift indicator: the preset button carried a star
     // for the same fact, and two marks for one thing is the clutter the list
     // was cleared of.

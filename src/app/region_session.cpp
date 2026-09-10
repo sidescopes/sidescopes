@@ -1,10 +1,8 @@
 #include "app/region_session.h"
 
 #include <algorithm>
-#include <chrono>
 #include <cmath>
 #include <cstdio>
-#include <thread>
 #include <utility>
 
 #include "app/border_label.h"
@@ -697,12 +695,7 @@ void RegionSession::shutdown()
     }
     m_stopped = true;
     unwatchWindowMotion();
-    if (m_regionPicker.active()) {
-        m_regionPicker.cancel();
-    }
-    while (backgroundWorkRunning()) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
-    }
+    m_regionPicker.shutdown();
 }
 
 RegionPicker& RegionSession::picker()
@@ -727,7 +720,7 @@ bool RegionSession::carried() const
 
 bool RegionSession::backgroundWorkRunning() const
 {
-    return m_regionPicker.scansRunning();
+    return m_regionPicker.backgroundWorkRunning();
 }
 
 RegionSessionOutcome RegionSession::takeOutcome()

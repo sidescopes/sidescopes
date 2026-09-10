@@ -335,22 +335,26 @@ void paintBorderBindingButton(Gdiplus::Graphics& canvas, double scale)
         }
         // GDI+'s 32bppARGB is BGRA in memory: swap channels on the copy.
         const std::vector<uint8_t> rgba = rasterizeIcon(iconForRegionKind(g_border.kind), pixels);
+        if (rgba.size() != static_cast<std::size_t>(pixels) * pixels * 4) {
+            return;
+        }
         auto bitmap = std::make_unique<Gdiplus::Bitmap>(pixels, pixels, PixelFormat32bppARGB);
         Gdiplus::BitmapData data{};
         const Gdiplus::Rect lock(0, 0, pixels, pixels);
-        if (bitmap->LockBits(&lock, Gdiplus::ImageLockModeWrite, PixelFormat32bppARGB, &data) == Gdiplus::Ok) {
-            for (int y = 0; y < pixels; ++y) {
-                auto* row = static_cast<uint8_t*>(data.Scan0) + static_cast<std::size_t>(y) * data.Stride;
-                const uint8_t* source = rgba.data() + static_cast<std::size_t>(y) * pixels * 4;
-                for (int x = 0; x < pixels; ++x) {
-                    row[x * 4 + 0] = source[x * 4 + 2];
-                    row[x * 4 + 1] = source[x * 4 + 1];
-                    row[x * 4 + 2] = source[x * 4 + 0];
-                    row[x * 4 + 3] = source[x * 4 + 3];
-                }
-            }
-            bitmap->UnlockBits(&data);
+        if (bitmap->LockBits(&lock, Gdiplus::ImageLockModeWrite, PixelFormat32bppARGB, &data) != Gdiplus::Ok) {
+            return;
         }
+        for (int y = 0; y < pixels; ++y) {
+            auto* row = static_cast<uint8_t*>(data.Scan0) + static_cast<std::size_t>(y) * data.Stride;
+            const uint8_t* source = rgba.data() + static_cast<std::size_t>(y) * pixels * 4;
+            for (int x = 0; x < pixels; ++x) {
+                row[x * 4 + 0] = source[x * 4 + 2];
+                row[x * 4 + 1] = source[x * 4 + 1];
+                row[x * 4 + 2] = source[x * 4 + 0];
+                row[x * 4 + 3] = source[x * 4 + 3];
+            }
+        }
+        bitmap->UnlockBits(&data);
         icons[which] = std::move(bitmap);
         iconSize = pixels;
     }

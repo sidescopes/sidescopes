@@ -197,4 +197,15 @@ TEST_CASE("Extreme desktop placement cannot wrap around the coordinate range")
     CHECK(placed.height == 500);
 }
 
+TEST_CASE("A startup window covering the display keeps a usable square region")
+{
+    const DisplayGeometry display{0, 0, 1600, 900};
+    const auto region = starterGlobalRegion({0, 0, 1600, 900}, display);
+    CHECK(region.rightPercent > region.leftPercent);
+    CHECK(region.bottomPercent > region.topPercent);
+    CHECK(region.bottomPercent - region.topPercent == Catch::Approx(34.0));
+    CHECK((region.rightPercent - region.leftPercent) * 1600 ==
+          Catch::Approx((region.bottomPercent - region.topPercent) * 900));
+}
+
 }  // namespace sidescopes

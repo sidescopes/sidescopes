@@ -59,12 +59,17 @@ struct MenuUnderTest
     // Builds the background menu (no pane clicked), which carries every list.
     void build(bool applicationControlsAvailable = true)
     {
-        const ContextMenuModel model{view,      registry(),
-                                     shortcuts, scopeParams,
-                                     attach,    presets,
-                                     true,      0,
-                                     1.0f,      QualityLevel::Standard,
-                                     false,     applicationControlsAvailable};
+        const ContextMenuModel model{view,
+                                     registry(),
+                                     shortcuts,
+                                     scopeParams,
+                                     attach,
+                                     presets,
+                                     true,
+                                     0,
+                                     1.0f,
+                                     QualityLevel::Standard,
+                                     applicationControlsAvailable};
         items.clear();
         paramActions.clear();
         buildContextMenu(model, -1, items, paramActions);

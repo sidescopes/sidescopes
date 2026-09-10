@@ -272,6 +272,9 @@ void drawHandleDot(CGFloat x, CGFloat y)
         const int pixels = 22;  // 11 points at the retina scale
         const std::vector<uint8_t> rgba =
             sidescopes::rasterizeIcon(sidescopes::iconForRegionKind(self.regionKind), pixels);
+        if (rgba.size() != static_cast<std::size_t>(pixels) * pixels * 4) {
+            return;
+        }
         NSBitmapImageRep* rep = [[NSBitmapImageRep alloc] initWithBitmapDataPlanes:nullptr
                                                                         pixelsWide:pixels
                                                                         pixelsHigh:pixels
@@ -283,6 +286,9 @@ void drawHandleDot(CGFloat x, CGFloat y)
                                                                       bitmapFormat:NSBitmapFormatAlphaNonpremultiplied
                                                                        bytesPerRow:static_cast<NSInteger>(pixels) * 4
                                                                       bitsPerPixel:32];
+        if (!rep.bitmapData) {
+            return;
+        }
         std::memcpy(rep.bitmapData, rgba.data(), rgba.size());
         icons[which] = [[NSImage alloc] initWithSize:NSMakeSize(11, 11)];
         [icons[which] addRepresentation:rep];

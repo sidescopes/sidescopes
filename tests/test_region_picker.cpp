@@ -61,7 +61,7 @@ struct PickerFixture
     {
         // The background display scans hold a pointer into the picker, so
         // none may outlive it.
-        while (picker.scansRunning()) {
+        while (picker.backgroundWorkRunning()) {
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
     }
@@ -380,29 +380,165 @@ TEST_CASE("A pin drag that covers no pixels pins nothing")
     fix.worker.stop();
 }
 
-TEST_CASE("A pin on another display takes the cross-display sample")
+RegionPickOutcome awaitPinSample(PickerFixture& fix)
+{
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (fix.picker.backgroundWorkRunning() && std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    REQUIRE_FALSE(fix.picker.backgroundWorkRunning());
+    return fix.picker.poll(std::nullopt, std::nullopt);
+}
+
+TEST_CASE("Pins on another display sample their committed point or rectangle")
 {
     PickerFixture fix;
-    fix.worker.start();
-
-    // The capture stream holds a frame of its own display; a pin somewhere
-    // else must not read it.
-    const AnalysisWorker::FrameSize frameSize{64, 64, 64, 64};
-    publishAndAwait(fix, makeSolidFrameBuffer(64, 64, Color{200, 50, 30}, 1), 1);
-
+    const auto split = makeSplitFrameBuffer(64, 64, Color{0, 0, 0}, Color{200, 100, 60}, 1);
+    desktopStubs().displayImage = CapturedImage{split.data, 64, 64};
     RegionPickPoll poll;
     poll.active = true;
     poll.mode = RegionPickerMode::PinColor;
     poll.displayId = StreamedDisplay + 1;
-    poll.pinnedPoint = DisplayPoint{50.0, 50.0};
-    const FloatColor elsewhere{11.0f, 22.0f, 33.0f};
-    const RegionPickOutcome outcome = fix.picker.processPoll(poll, frameSize, elsewhere);
+    const FloatColor earlierCursor{11, 22, 33};
+    SECTION("point reads the selected position")
+    {
+        poll.pinnedPoint = DisplayPoint{75, 50};
+        CHECK_FALSE(fix.picker.processPoll(poll, std::nullopt, earlierCursor).pinColor);
+        const auto completed = awaitPinSample(fix);
+        REQUIRE(completed.pinColor);
+        CHECK_THAT(completed.pinColor->r, WithinAbs(200, 0.001));
+    }
+    SECTION("drag averages the whole rectangle")
+    {
+        poll.pinnedSample = RegionOfInterest{0, 0, 100, 100};
+        CHECK_FALSE(fix.picker.processPoll(poll, std::nullopt, earlierCursor).pinColor);
+        const auto completed = awaitPinSample(fix);
+        REQUIRE(completed.pinColor);
+        CHECK_THAT(completed.pinColor->r, WithinAbs(100, 0.001));
+        CHECK_THAT(completed.pinColor->g, WithinAbs(50, 0.001));
+    }
+    SECTION("unavailable screenshot never pins the preview cache")
+    {
+        desktopStubs().displayImage.reset();
+        poll.pinnedPoint = DisplayPoint{75, 50};
+        (void)fix.picker.processPoll(poll, std::nullopt, earlierCursor);
+        CHECK_FALSE(awaitPinSample(fix).pinColor);
+    }
+}
 
-    REQUIRE(outcome.pinColor.has_value());
-    CHECK_THAT(outcome.pinColor->r, WithinAbs(11.0f, 1e-3f));
-    CHECK_THAT(outcome.pinColor->b, WithinAbs(33.0f, 1e-3f));
-
+TEST_CASE("A pin after capture restart rejects previous-source pixels")
+{
+    PickerFixture fix;
+    fix.worker.start();
+    publishAndAwait(fix, makeSolidFrameBuffer(64, 64, Color{200, 50, 30}, 1), 1);
+    fix.capture.suspend("Test restart");
+    fix.capture.resume();
+    REQUIRE_FALSE(fix.capture.dead());
+    const auto fresh = makeSolidFrameBuffer(32, 32, Color{11, 22, 33}, 1);
+    desktopStubs().displayImage = CapturedImage{fresh.data, 32, 32};
+    RegionPickPoll poll;
+    poll.active = true;
+    poll.mode = RegionPickerMode::PinColor;
+    poll.displayId = StreamedDisplay;
+    poll.pinnedPoint = DisplayPoint{50, 50};
+    CHECK_FALSE(fix.picker.processPoll(poll, AnalysisWorker::FrameSize{64, 64, 64, 64}, std::nullopt).pinColor);
+    const auto completed = awaitPinSample(fix);
+    REQUIRE(completed.pinColor);
+    CHECK_THAT(completed.pinColor->r, WithinAbs(11, 0.001));
     fix.worker.stop();
+}
+
+TEST_CASE("Committed pin samples finish in order after their picker closes")
+{
+    PickerFixture fix;
+    const auto split = makeSplitFrameBuffer(64, 64, Color{0, 0, 0}, Color{200, 100, 60}, 1);
+    std::atomic<bool> release{false};
+    std::atomic<int> calls{0};
+    desktopStubs().displayCapture = [&](uint32_t displayId) -> std::optional<CapturedImage> {
+        ++calls;
+        while (!release.load()) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        return displayId == StreamedDisplay + 1 ? std::optional{CapturedImage{split.data, 64, 64}} : std::nullopt;
+    };
+    RegionPickPoll poll;
+    poll.active = true;
+    poll.mode = RegionPickerMode::PinColor;
+    poll.displayId = StreamedDisplay + 1;
+    poll.pinnedKeepOpen = true;
+    poll.pinnedPoint = DisplayPoint{25, 50};
+    const auto first = fix.picker.processPoll(poll, std::nullopt, std::nullopt);
+    poll.pinnedPoint = DisplayPoint{75, 50};
+    const auto second = fix.picker.processPoll(poll, std::nullopt, std::nullopt);
+    fix.picker.cancel();
+    // Polling returns while the native snapshot is still waiting. Closing
+    // the tool preserves committed pins and does not spawn a thread per pin.
+    CHECK_FALSE(first.pinColor);
+    CHECK_FALSE(second.pinColor);
+    CHECK(fix.picker.backgroundWorkRunning());
+    CHECK(calls.load() <= 1);
+    release.store(true);
+    const auto black = awaitPinSample(fix);
+    const auto white = fix.picker.poll(std::nullopt, std::nullopt);
+    REQUIRE(black.pinColor);
+    REQUIRE(white.pinColor);
+    CHECK_THAT(black.pinColor->r, WithinAbs(0, 0.001));
+    CHECK_THAT(white.pinColor->r, WithinAbs(200, 0.001));
+    CHECK_FALSE(fix.picker.poll(std::nullopt, std::nullopt).pinColor);
+    CHECK(calls.load() == 2);
+}
+
+TEST_CASE("Picker shutdown retires queued snapshots after the current read")
+{
+    PickerFixture fix;
+    std::atomic<bool> entered{false};
+    std::atomic<bool> release{false};
+    std::atomic<int> calls{0};
+    desktopStubs().displayCapture = [&](uint32_t) -> std::optional<CapturedImage> {
+        ++calls;
+        entered.store(true);
+        while (!release.load()) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        return std::nullopt;
+    };
+    RegionPickPoll poll;
+    poll.active = true;
+    poll.mode = RegionPickerMode::PinColor;
+    poll.displayId = StreamedDisplay + 1;
+    poll.pinnedPoint = DisplayPoint{50, 50};
+    poll.pinnedKeepOpen = true;
+    (void)fix.picker.processPoll(poll, std::nullopt, std::nullopt);
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (!entered.load() && std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    if (!entered.load()) {
+        release.store(true);
+    }
+    REQUIRE(entered.load());
+    (void)fix.picker.processPoll(poll, std::nullopt, std::nullopt);
+    (void)fix.picker.processPoll(poll, std::nullopt, std::nullopt);
+    // The first capture is already in flight when shutdown begins. Its
+    // completion must not trigger either queued capture.
+    regionOverlayStubs().onCancel = [&] { release.store(true); };
+    fix.picker.shutdown();
+    CHECK(calls.load() == 1);
+    CHECK_FALSE(fix.picker.backgroundWorkRunning());
+}
+
+TEST_CASE("A failed asynchronous pin read clears its running state")
+{
+    PickerFixture fix;
+    desktopStubs().displayCapture = [](uint32_t) -> std::optional<CapturedImage> { throw std::bad_alloc{}; };
+    RegionPickPoll poll;
+    poll.active = true;
+    poll.mode = RegionPickerMode::PinColor;
+    poll.displayId = StreamedDisplay + 1;
+    poll.pinnedSample = RegionOfInterest{0, 0, 100, 100};
+    (void)fix.picker.processPoll(poll, std::nullopt, FloatColor{1, 2, 3});
+    CHECK_FALSE(awaitPinSample(fix).pinColor);
+    fix.picker.shutdown();
 }
 
 TEST_CASE("A plain pin ends the errand and a kept-open one does not")
@@ -682,7 +818,7 @@ TEST_CASE("A picker opened without face detection scans nothing")
     CHECK(desktopStubs().detectorCall().calls == 0);
     REQUIRE(regionOverlayStubs().lastDisplays.size() == 1);
     CHECK(regionOverlayStubs().lastDisplays[0].faces.empty());
-    CHECK_FALSE(fix.picker.scansRunning());
+    CHECK_FALSE(fix.picker.backgroundWorkRunning());
 
     fix.worker.stop();
 }
@@ -707,7 +843,7 @@ TEST_CASE("A display off the capture stream is scanned in the background")
     CHECK_FALSE(regionOverlayStubs().lastDisplays[1].facesScanned);
     CHECK(regionOverlayStubs().deliveredFaces.empty());
 
-    while (fix.picker.scansRunning()) {
+    while (fix.picker.backgroundWorkRunning()) {
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
     fix.picker.drainFaceScans();
@@ -760,7 +896,7 @@ TEST_CASE("A scan that lands after its picker closed is dropped")
     (void)fix.picker.processPoll(poll, std::nullopt, std::nullopt);
     REQUIRE_FALSE(fix.picker.active());
 
-    while (fix.picker.scansRunning()) {
+    while (fix.picker.backgroundWorkRunning()) {
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
     fix.picker.drainFaceScans();
@@ -768,7 +904,7 @@ TEST_CASE("A scan that lands after its picker closed is dropped")
     // The overlay is gone; the boxes must not be pushed into whatever opens
     // next, and the finished scan's record is retired.
     CHECK(regionOverlayStubs().deliveredFaces.empty());
-    CHECK_FALSE(fix.picker.scansRunning());
+    CHECK_FALSE(fix.picker.backgroundWorkRunning());
 
     fix.worker.stop();
 }
@@ -811,6 +947,40 @@ TEST_CASE("The pin chip previews the colour under the cursor")
     (void)fix.picker.processPoll(poll, frameSize, std::nullopt);
     CHECK_FALSE(regionOverlayStubs().chipColor.has_value());
 
+    fix.worker.stop();
+}
+
+TEST_CASE("Pin previews reject unavailable stream geometry and suspended pixels")
+{
+    PickerFixture fix;
+    fix.worker.start();
+    publishAndAwait(fix, makeSplitFrameBuffer(64, 64, Color{0, 0, 0}, Color{255, 255, 255}, 1), 1);
+    desktopStubs().displayGeometry = DisplayGeometry{0, 0, 64, 64};
+    desktopStubs().cursor = DesktopPoint{48, 32};
+    desktopStubs().cursorDisplay = StreamedDisplay;
+    RegionPickPoll poll;
+    poll.active = true;
+    poll.mode = RegionPickerMode::PinColor;
+    poll.displayId = StreamedDisplay;
+    SECTION("a stale cached frame size does not change the sampled position")
+    {
+        (void)fix.picker.processPoll(poll, AnalysisWorker::FrameSize{128, 128, 128, 128}, std::nullopt);
+        REQUIRE(regionOverlayStubs().chipColor);
+        CHECK_THAT(regionOverlayStubs().chipColor->r, WithinAbs(255, 0.001));
+    }
+    SECTION("suspended capture uses the screen preview")
+    {
+        fix.capture.suspend("No live source");
+        (void)fix.picker.processPoll(poll, AnalysisWorker::FrameSize{64, 64, 64, 64}, FloatColor{11, 22, 33});
+        REQUIRE(regionOverlayStubs().chipColor);
+        CHECK_THAT(regionOverlayStubs().chipColor->r, WithinAbs(11, 0.001));
+    }
+    SECTION("unavailable display extents have no frame mapping")
+    {
+        desktopStubs().displayGeometry->widthPoints = 0;
+        (void)fix.picker.processPoll(poll, AnalysisWorker::FrameSize{64, 64, 64, 64}, std::nullopt);
+        CHECK_FALSE(regionOverlayStubs().chipColor);
+    }
     fix.worker.stop();
 }
 

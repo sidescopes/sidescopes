@@ -1,4 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
+#include <limits>
 
 #include "platform/icons.h"
 
@@ -34,6 +35,13 @@ TEST_CASE("Every icon rasterizes with plausible stroke coverage")
             CHECK(coverage < 0.6);
         }
     }
+}
+
+TEST_CASE("Invalid icon dimensions return no pixels")
+{
+    CHECK(rasterizeIcon(Icon::Pin, 0).empty());
+    CHECK(rasterizeIcon(Icon::Pin, -1).empty());
+    CHECK(rasterizeIcon(Icon::Pin, std::numeric_limits<int>::max()).empty());
 }
 
 TEST_CASE("Icons are distinct images")

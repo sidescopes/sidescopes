@@ -88,6 +88,8 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: ilammy/msvc-dev-cmd@v1
+      - name: Test Windows benchmark wrappers
+        run: python3 -m unittest discover -s tests/scripts -p test_benchmark_wrappers.py -v
       - name: Configure with Ninja for a compile database
         # The Visual Studio generator emits no compile_commands.json; Ninja with
         # the MSVC toolchain does, and clang-tidy reads the cl-style entries.
@@ -123,7 +125,7 @@ jobs:
       - name: Test embedded license notices
         env:
           PYTHONPATH: tests/scripts
-        run: python3 -m unittest test_tools.NoticeCollectionTests -v
+        run: python3 -m unittest test_packaging.NoticeCollectionTests -v
       # The benchmark and performance-harness targets are opt-in, so nothing
       # compiled them and a Windows-only break in either went unseen until
       # someone tried to measure. Two small translation units; the suites
@@ -246,6 +248,8 @@ jobs:
   # Address+UB and thread sanitizers exercise the test suite; the analysis
   # worker's cross-thread frame handoff is exactly what TSan exists to audit.
   sanitize:
+    env:
+      UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
     strategy:
       fail-fast: false
       matrix:

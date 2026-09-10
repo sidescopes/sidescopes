@@ -268,6 +268,78 @@ async function pressLabKey(page, key) {
   await frame();
 }
 
+test.describe('desktop virtual display', () => {
+  test.use({ viewport: { width: 1600, height: 900 }, isMobile: false, hasTouch: false });
+
+  test('closing the region clears the same readings as Escape', async ({ page }) => {
+    await openSettledLab(page);
+    const canvas = page.locator('#canvas');
+    await canvas.focus();
+    await pressLabKey(page, 'w');
+    const box = await canvas.boundingBox();
+    const side = Math.min(box.width - 400, box.height) * 0.34;
+    const close = {
+      x: box.x + Math.round((box.width - 400 - side) / 2) + Math.round(side) + 10,
+      y: box.y + Math.round((box.height - side) / 2) - 11,
+    };
+    const scope = () => page.screenshot({
+      clip: { x: box.x + box.width - 370, y: box.y + 80, width: 330, height: box.height - 140 },
+    });
+    await page.mouse.move(1, 1);
+    await page.waitForTimeout(400);
+    const selected = await scope();
+    // Cancelling a replacement preserves the original selection.
+    await pressLabKey(page, 'd');
+    await pressLabKey(page, 'Escape');
+    await expect.poll(async () => (await scope()).equals(selected)).toBe(true);
+    await page.mouse.move(close.x, close.y);
+    await expect(canvas).toHaveCSS('cursor', 'pointer');
+    await page.mouse.click(close.x, close.y, { delay: 40 });
+    await page.mouse.move(1, 1);
+    await expect.poll(async () => (await scope()).equals(selected)).toBe(false);
+    const closed = await scope();
+    // Reload restores the starter region; Escape must produce the same
+    // empty scope as the close control, including removal of stale traces.
+    await page.reload();
+    await expect(page.locator('#credit')).toContainText('Public domain.');
+    await canvas.focus();
+    await pressLabKey(page, 'Escape');
+    await expect.poll(async () => (await scope()).equals(closed)).toBe(true);
+  });
+
+  test('resizing refreshes pixels beneath an unchanged global region', async ({ page }) => {
+    await openSettledLab(page);
+    const image = await page.evaluate(() => {
+      const canvas = document.createElement('canvas');
+      canvas.width = 1400; canvas.height = 800;
+      const pen = canvas.getContext('2d');
+      const ramp = pen.createLinearGradient(0, 0, 1400, 0);
+      ramp.addColorStop(0, '#000'); ramp.addColorStop(1, '#fff');
+      pen.fillStyle = ramp; pen.fillRect(0, 0, 1400, 800);
+      return canvas.toDataURL('image/png').split(',')[1];
+    });
+    await page.locator('#file').setInputFiles({
+      name: 'ramp.png', mimeType: 'image/png', buffer: Buffer.from(image, 'base64'),
+    });
+    await expect(page.locator('#credit')).toContainText('Your image.');
+    await page.locator('#canvas').focus();
+    await pressLabKey(page, 'w');
+    await page.mouse.move(1, 1);
+    const scope = async () => {
+      const box = await page.locator('#canvas').boundingBox();
+      return page.screenshot({ clip: { x: box.x + box.width - 370, y: box.y + 110, width: 330, height: 250 } });
+    };
+    // Settling removes transient inputs from the screenshot. The simulated
+    // scope window keeps its size; only the photograph's fitted placement
+    // changes beneath the same unclipped region when the page grows wider.
+    await page.waitForTimeout(400);
+    const before = await scope();
+    expect((await scope()).equals(before)).toBe(true);
+    await page.setViewportSize({ width: 1700, height: 900 });
+    await expect.poll(async () => (await scope()).equals(before)).toBe(false);
+  });
+});
+
 test('zoom and saved scope presets survive a browser reload', async ({ page }) => {
   await openSettledLab(page);
   const canvas = page.locator('#canvas');

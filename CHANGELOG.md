@@ -26,6 +26,16 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- The default region remains usable when the saved application window fills
+  the display.
+- Closing a Windows picker across multiple displays retires every overlay
+  before releasing its state. Failed picker construction, screen-image copies,
+  icon rendering, and Mac observer registration release their resources.
+- Restoring an attached window at a disjoint position brings its region back
+  inside the window. Overlapping restores keep their existing crop behavior.
+- Dragged color pins average the selected rectangle on every display. Frame
+  samples reject retired capture sources, and delayed pointer samples cannot
+  overwrite newer completed readings.
 - Scope readings continue updating while a region is dragged or resized,
   including pointer movements between drawn frames. Very short drags retain
   the region's window attachment.
@@ -47,6 +57,8 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The Lab keeps the latest image selection during overlapping loads, measures
   transparent images against the displayed black background, saves preset
   selections, and refreshes its engine when a newer build is available.
+- The Lab refreshes readings when resizing moves the image beneath a region,
+  and its region close button clears the selection like Escape.
 
 ## [0.7.0] - 2026-08-17
 

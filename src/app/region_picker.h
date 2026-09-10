@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <deque>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -94,6 +95,9 @@ public:
     /// Cancels the active overlay and every requested replacement tool.
     void cancel();
 
+    /// Retires queued snapshots and waits for in-flight work before the event loop ends.
+    void shutdown();
+
     /// The pending request, if one was raised this frame. The desktop host
     /// answers it through openIfRequested; a host with no desktop to open a
     /// picker over - the browser lab - reads it here and answers in its
@@ -107,10 +111,9 @@ public:
     /// @return activity when a picker opened.
     [[nodiscard]] RegionPickOutcome openIfRequested(bool regionSelected);
 
-    /// One poll of an open picker: reads the platform poll and processes it, or
-    /// returns an empty outcome when no pick is active. @p frameSize is the
-    /// streamed frame's size and @p screenSampleColor the throttled
-    /// cross-display cursor sample, both for the pin tool.
+    /// Delivers a completed pin sample, or processes an active platform picker.
+    /// Committed pin samples can finish after their overlay closes. The pin
+    /// preview uses @p frameSize and the throttled @p screenSampleColor.
     [[nodiscard]] RegionPickOutcome poll(std::optional<AnalysisWorker::FrameSize> frameSize,
                                          std::optional<FloatColor> screenSampleColor);
 
@@ -126,10 +129,9 @@ public:
     /// @return Whether a pick is active.
     [[nodiscard]] bool active() const;
 
-    /// @return Whether a background display scan's detached thread is still
-    ///         running; the shutdown drain waits on this before the threads'
-    ///         targets leave scope.
-    [[nodiscard]] bool scansRunning() const;
+    /// @return Whether background face or pin sampling is still running.
+    /// Shutdown waits for this before the event loop and thread targets end.
+    [[nodiscard]] bool backgroundWorkRunning() const;
 
     /// Recovers which window candidate a confirmed region names. The picker
     /// passes a window's exact rectangle through unchanged, so the match is a
@@ -149,6 +151,15 @@ public:
     [[nodiscard]] bool faceSourceCurrent(const FaceCandidate& face, const WindowCandidate& host) const;
 
 private:
+    /// One serial snapshot worker keeps committed pins in request order.
+    struct PinSamples
+    {
+        std::mutex mutex;
+        std::deque<RegionPickPoll> pending;
+        std::deque<FloatColor> completed;
+        std::atomic<bool> running{false};
+    };
+
     /// One non-streamed display's background face scan for an open picker: a
     /// detached thread grabs that display off the capture stream, detects, and
     /// fills this; the main loop drains it and pushes the boxes into the picker
@@ -181,12 +192,16 @@ private:
     [[nodiscard]] RegionPickOutcome processPinPoll(const RegionPickPoll& poll,
                                                    std::optional<AnalysisWorker::FrameSize> frameSize,
                                                    std::optional<FloatColor> screenSampleColor);
-    void applyPinnedColor(const RegionPickPoll& poll, std::optional<AnalysisWorker::FrameSize> frameSize,
-                          std::optional<FloatColor> screenSampleColor, RegionPickOutcome& outcome);
+    void queuePinSample(const RegionPickPoll& poll);
+    static void runPinSamples(const std::shared_ptr<PinSamples>& samples);
+    [[nodiscard]] static std::optional<FloatColor> snapshotPinColor(const RegionPickPoll& poll);
+    void applyPinnedColor(const RegionPickPoll& poll, RegionPickOutcome& outcome);
     [[nodiscard]] RegionPickOutcome processRegionPoll(const RegionPickPoll& poll);
     [[nodiscard]] static std::optional<FloatColor> averageRegionColor(const FrameView& view,
                                                                       const RegionOfInterest& region);
-    [[nodiscard]] std::optional<FloatColor> averageFrameColor(const RegionOfInterest& region) const;
+    [[nodiscard]] static std::optional<FloatColor> pinnedFrameColor(const FrameView& view, const RegionPickPoll& poll);
+
+    std::shared_ptr<PinSamples> m_pinSamples = std::make_shared<PinSamples>();
 
     CaptureController& m_capture;
     AnalysisWorker& m_worker;

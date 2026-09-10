@@ -310,14 +310,18 @@ void analyse()
                      ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoScrollbar);
     if (g_lab.displayTexture != nullptr && g_lab.picture.display().width > 0) {
         g_lab.displayPlacement = RegionEditor::Placement{position, 1.0f};
+        const RegionEditor::Placement previous = g_lab.picturePlacement;
         g_lab.picturePlacement = placePicture(ImVec2{layout.screenPos.x, layout.screenPos.y},
                                               ImVec2{layout.screenSize.x, layout.screenSize.y});
+        // A resize moves the photograph beneath a fixed global region.
+        moved = previous.origin.x != g_lab.picturePlacement.origin.x ||
+                previous.origin.y != g_lab.picturePlacement.origin.y || previous.scale != g_lab.picturePlacement.scale;
         const ImVec2 size{static_cast<float>(g_lab.picture.display().width) * g_lab.picturePlacement.scale,
                           static_cast<float>(g_lab.picture.display().height) * g_lab.picturePlacement.scale};
         ImGui::GetWindowDrawList()->AddImage(
             g_lab.displayTexture->textureId(), g_lab.picturePlacement.origin,
             ImVec2{g_lab.picturePlacement.origin.x + size.x, g_lab.picturePlacement.origin.y + size.y});
-        moved = initializeStarterRegion(position, area, layout);
+        moved = initializeStarterRegion(position, area, layout) || moved;
         if (!runPinTool(g_lab.picturePlacement)) {
             moved = g_lab.region.update(g_lab.displayPlacement, static_cast<int>(std::lround(area.x)),
                                         static_cast<int>(std::lround(area.y))) ||
@@ -495,7 +499,6 @@ void drawContextMenu(int clickedPane, bool overApplication)
             g_lab.presetController->activeSlot(),
             1.0f,
             QualityLevel::Standard,
-            g_lab.region.hasRegion(),
             /*applicationControlsAvailable=*/false,
         };
         std::vector<NativeMenuItem> items;
@@ -586,7 +589,7 @@ void drawAppWindow(const ShellLayout& layout, const PaneRenderInput& input)
     // as it does on the desktop.
     applyPreset(g_lab.presetPicker->draw(g_lab.panes->icons()));
     ImGui::SameLine();
-    applyOutcome(g_lab.panes->drawRegionToolIcons(input));
+    g_lab.panes->drawRegionToolIcons();
 
     ImGui::BeginGroup();
     applyOutcome(g_lab.panes->drawScopePanes(input));

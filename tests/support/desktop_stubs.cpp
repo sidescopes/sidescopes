@@ -111,18 +111,25 @@ std::optional<uint32_t> displayAtPoint(DesktopPoint point)
     return g_stubs.cursorDisplay;
 }
 
-std::optional<CapturedImage> captureDisplayImage(uint32_t)
+std::optional<CapturedImage> captureDisplayImage(uint32_t displayId)
 {
+    if (g_stubs.displayCapture) {
+        return g_stubs.displayCapture(displayId);
+    }
     return g_stubs.displayImage;
 }
 
-void sampleScreenColorAsync(DesktopPoint, std::function<void(std::optional<FloatColor>)> callback)
+void sampleScreenColorAsync(DesktopPoint point, std::function<void(std::optional<FloatColor>)> callback)
 {
     // The seam takes the callback by value because a real implementation hands
     // it to whatever reads the screen; taking ownership here mirrors that. It
     // allows a synchronous answer where the read is immediate, which is what
     // the tests use.
     ++g_stubs.screenSampleRequests;
+    if (g_stubs.screenSampler) {
+        g_stubs.screenSampler(point, std::move(callback));
+        return;
+    }
     const std::function<void(std::optional<FloatColor>)> reader = std::move(callback);
     reader(g_stubs.screenSample);
 }
@@ -209,6 +216,7 @@ void DesktopStubs::reset()
     cursorDisplay.reset();
     lastDisplayPoint.reset();
     displayImage.reset();
+    displayCapture = {};
     faceDetectionSupported = false;
     faces.clear();
     detectionStatus = FaceDetectionStatus::Completed;
@@ -230,6 +238,7 @@ void DesktopStubs::reset()
     windowMotion = {};
     screenSample.reset();
     screenSampleRequests = 0;
+    screenSampler = {};
     const std::lock_guard lock(m_mutex);
     m_detected = DetectorCall{};
 }

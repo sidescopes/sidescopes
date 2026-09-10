@@ -31,14 +31,14 @@ when testing a release artifact independently of the source checkout.
 
 Each release's tag identifies its matching application source, available in
 GitHub's source archives on the release page. `CONTRIBUTING.md` describes how
-to build it; CMake fetches the pinned dependency sources and applies the
-included patches.
+to build it; CMake fetches the pinned, unmodified dependency sources.
 
 ## Signing and notarization
 
 The workflow signs and notarizes automatically when these repository
-secrets exist; without them it ships an ad-hoc build, which Gatekeeper
-only opens via right-click - Open.
+secrets exist; without them it ships an ad-hoc build. Follow the
+[download warning instructions](TROUBLESHOOTING.md#macos-blocks-the-download)
+when testing that archive.
 
 | Secret | Content |
 | ------ | ------- |

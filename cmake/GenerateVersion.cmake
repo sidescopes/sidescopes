@@ -9,11 +9,25 @@ set(gitDescribe "")
 find_package(Git QUIET)
 if(GIT_FOUND)
     execute_process(
-        COMMAND ${GIT_EXECUTABLE} describe --tags --always --dirty
+        COMMAND ${GIT_EXECUTABLE} rev-parse --show-toplevel
         WORKING_DIRECTORY ${SIDESCOPES_SOURCE_DIR}
-        OUTPUT_VARIABLE gitDescribe
+        OUTPUT_VARIABLE gitRoot
         OUTPUT_STRIP_TRAILING_WHITESPACE
         ERROR_QUIET)
+    file(REAL_PATH "${SIDESCOPES_SOURCE_DIR}" sourceRoot)
+    if(gitRoot)
+        file(REAL_PATH "${gitRoot}" gitRoot)
+    endif()
+    # Git walks up into parent checkouts, including when these sources were
+    # extracted from an archive. Only the application's own checkout counts.
+    if(gitRoot STREQUAL sourceRoot)
+        execute_process(
+            COMMAND ${GIT_EXECUTABLE} describe --tags --always --dirty
+            WORKING_DIRECTORY ${SIDESCOPES_SOURCE_DIR}
+            OUTPUT_VARIABLE gitDescribe
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+            ERROR_QUIET)
+    endif()
 endif()
 
 set(content "#pragma once

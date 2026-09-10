@@ -17,6 +17,10 @@ constexpr float BorderPad = 12.0f;     // the grab band outside the region
 constexpr float HandleRadius = 3.5f;   // one handle dot
 constexpr float EdgeRing = 1.0f;       // the measured edge's thickness
 constexpr int MinimumRegionSize = 24;  // per side, in display units
+constexpr float CrossThickness = 1.3f;
+constexpr float CloseRadius = 6.5f;
+constexpr float CloseHitRadius = 11.0f;
+constexpr float CloseCornerInset = 2.0f;
 
 // Dear ImGui picks a circle's segment count from its radius in ITS units and
 // knows nothing of the device scale, so a 6.5-point disc is tessellated for
@@ -317,7 +321,43 @@ void RegionEditor::drawBorder(const Placement& placement, int displayWidth, int 
         draw->AddCircle(point, HandleRadius, grey(0.97f, 0.95f), CircleSegments, 1.0f);
     }
 
+    if (closeVisible(placement)) {
+        drawCloseBadge(closeCentre(topLeft, bottomRight));
+    }
     draw->PopClipRect();
+}
+
+bool RegionEditor::closeVisible(const Placement& placement) const
+{
+    return !m_arming && regionCloseAvailable(static_cast<float>(m_rect.width) * placement.scale);
+}
+
+ImVec2 RegionEditor::closeCentre(const ImVec2& topLeft, const ImVec2& bottomRight)
+{
+    return ImVec2{bottomRight.x + BorderPad - CloseCornerInset, topLeft.y - BorderPad + CloseCornerInset - EdgeRing};
+}
+
+void RegionEditor::drawCloseBadge(const ImVec2& centre)
+{
+    ImDrawList* draw = ImGui::GetWindowDrawList();
+    draw->AddCircleFilled(centre, CloseRadius, grey(0.1f, 0.85f), CircleSegments);
+    draw->AddCircle(centre, CloseRadius, grey(0.97f, 0.95f), CircleSegments, 1.0f);
+    const float arm = CloseRadius - 3.7f;
+    const ImU32 ink = grey(0.97f, 0.95f);
+    const ImVec2 tips[] = {{centre.x - arm, centre.y - arm},
+                           {centre.x + arm, centre.y + arm},
+                           {centre.x - arm, centre.y + arm},
+                           {centre.x + arm, centre.y - arm}};
+    // Paths keep the cross centred; AddLine offsets its endpoints by half
+    // a pixel. Small circles supply the native control's rounded caps.
+    for (int line = 0; line < 2; ++line) {
+        draw->PathLineTo(tips[line * 2]);
+        draw->PathLineTo(tips[line * 2 + 1]);
+        draw->PathStroke(ink, 0, CrossThickness);
+    }
+    for (const ImVec2& tip : tips) {
+        draw->AddCircleFilled(tip, CrossThickness * 0.5f, ink, CircleSegments);
+    }
 }
 
 /// A rectangle in the live drag's own language: a solid dark line under a
@@ -455,6 +495,21 @@ void RegionEditor::announceCursor(const Placement& placement) const
 
 bool RegionEditor::updateEditing(const Placement& placement, int displayWidth, int displayHeight)
 {
+    if (ImGui::IsWindowHovered() && closeVisible(placement) && m_grab == ZoneNone) {
+        const auto [topLeft, bottomRight] = screenRect(placement);
+        const ImVec2 centre = closeCentre(topLeft, bottomRight);
+        const ImVec2 mouse = ImGui::GetMousePos();
+        const float dx = mouse.x - centre.x;
+        const float dy = mouse.y - centre.y;
+        if (dx * dx + dy * dy <= CloseHitRadius * CloseHitRadius) {
+            ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
+            if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+                clear();
+                return true;
+            }
+            return false;
+        }
+    }
     bool changed = false;
     if (ImGui::IsMouseClicked(ImGuiMouseButton_Left) && ImGui::IsWindowHovered()) {
         m_grab = grabAt(ImGui::GetMousePos(), placement);

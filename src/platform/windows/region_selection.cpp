@@ -25,6 +25,8 @@ using std::min;
 #include <gdiplus.h>
 
 #include <cmath>
+#include <exception>
+#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
@@ -143,18 +145,42 @@ HWND createOverlayWindow(const wchar_t* className, WNDPROC procedure, DWORD exSt
     return window;
 }
 
-// Builds one display's picker overlay: its geometry, the window and face
-// suggestions in overlay-local pixels, the initial mode, and a shown
-// layered window. Returns nullptr when the display vanished between
-// enumeration and now, or the window could not be created.
-PickerState* createPicker(const PickerDisplay& entry, bool draw, bool faces, bool pin)
+void destroyPicker(PickerState* picker)
+{
+    if (picker->window) {
+        DestroyWindow(picker->window);
+    }
+    delete picker;
+}
+
+using PickerOwner = std::unique_ptr<PickerState, decltype(&destroyPicker)>;
+
+void clearPickers()
+{
+    // DestroyWindow dispatches messages synchronously. Retire every lookup
+    // before any state is deleted, including when opening a later overlay
+    // failed and we are rolling back a partially constructed picker.
+    std::vector<PickerState*> retired;
+    retired.swap(g_pickers);
+    for (PickerState* picker : retired) {
+        destroyPicker(picker);
+    }
+    if (g_pinCursor) {
+        DestroyIcon(g_pinCursor);
+        g_pinCursor = nullptr;
+    }
+}
+
+// Builds one display's picker overlay: its geometry, suggestions, initial
+// mode and shown native window. A missing display or window returns no owner.
+PickerOwner createPicker(const PickerDisplay& entry, bool draw, bool faces, bool pin)
 {
     const auto geometry = geometryOfDisplay(entry.displayId);
     if (!geometry) {
-        return nullptr;  // gone between enumeration and now
+        return {nullptr, destroyPicker};  // gone between enumeration and now
     }
 
-    auto* picker = new PickerState;
+    PickerOwner picker(new PickerState, destroyPicker);
     picker->displayId = entry.displayId;
     picker->originX = static_cast<int>(geometry->originX);
     picker->originY = static_cast<int>(geometry->originY);
@@ -179,8 +205,7 @@ PickerState* createPicker(const PickerDisplay& entry, bool draw, bool faces, boo
     picker->window = createOverlayWindow(L"SidescopesPickerOverlay", pickerProc,
                                          WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TOOLWINDOW, 0);
     if (!picker->window) {
-        delete picker;
-        return nullptr;
+        return {nullptr, destroyPicker};
     }
     SetWindowPos(picker->window, HWND_TOPMOST, picker->originX, picker->originY, picker->width, picker->height,
                  SWP_SHOWWINDOW | SWP_NOACTIVATE);
@@ -283,15 +308,7 @@ bool finishRegionPick(RegionPickPoll& poll)
         poll.confirmed = regionFromLocalRect(toLocalRect(finishedPicker->confirmedRect), finishedPicker->width,
                                              finishedPicker->height);
     }
-    for (PickerState* picker : g_pickers) {
-        DestroyWindow(picker->window);
-        delete picker;
-    }
-    g_pickers.clear();
-    if (g_pinCursor) {
-        DestroyIcon(g_pinCursor);
-        g_pinCursor = nullptr;
-    }
+    clearPickers();
     return true;
 }
 
@@ -352,17 +369,24 @@ bool beginRegionPick(const std::vector<PickerDisplay>& displays, RegionPickerMod
                                (initialMode == RegionPickerMode::AttachWindow && !anyWindows));
     const bool faces = initialMode == RegionPickerMode::AttachFace;
 
-    for (const PickerDisplay& entry : displays) {
-        if (PickerState* picker = createPicker(entry, draw, faces, pin)) {
-            g_pickers.push_back(picker);
+    try {
+        // No allocation may separate registration from ownership transfer.
+        g_pickers.reserve(displays.size());
+        for (const PickerDisplay& entry : displays) {
+            if (auto picker = createPicker(entry, draw, faces, pin)) {
+                g_pickers.push_back(nullptr);
+                g_pickers.back() = picker.release();
+            }
         }
-    }
-    if (g_pickers.empty()) {
+        if (g_pickers.empty()) {
+            return false;
+        }
+        presentPickers();
+        return true;
+    } catch (const std::exception&) {
+        clearPickers();
         return false;
     }
-
-    presentPickers();
-    return true;
 }
 
 RegionPickPoll pollRegionPick()

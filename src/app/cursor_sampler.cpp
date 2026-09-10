@@ -70,9 +70,28 @@ std::optional<CursorSampler::DisplayPixel> CursorSampler::displayPixelOf(Desktop
         static_cast<int>((cursor.y - geometry->originY) * frameSize.displayHeight / geometry->heightPoints)};
 }
 
-std::optional<FloatColor> CursorSampler::sampleCapturedFrame(DisplayPixel pixel) const
+std::optional<FloatColor> CursorSampler::sampleCapturedFrame(DesktopPoint cursor) const
 {
-    return m_worker.sampleDisplayColor(pixel.x, pixel.y);
+    const auto geometry = geometryOfDisplay(m_capture.capturedDisplay());
+    if (!geometry || geometry->widthPoints <= 0 || geometry->heightPoints <= 0) {
+        return std::nullopt;
+    }
+    std::optional<FloatColor> color;
+    (void)m_worker.withLatestFrame(
+        [&](const FrameView& view) {
+            // Source identity and dimensions come from the same locked frame.
+            // The loop's cached size can still describe the previous display.
+            const int x =
+                static_cast<int>((cursor.x - geometry->originX) * view.displayWidth() / geometry->widthPoints);
+            const int y =
+                static_cast<int>((cursor.y - geometry->originY) * view.displayHeight() / geometry->heightPoints);
+            const IntRect point = view.fromDisplay({x, y, 1, 1});
+            if (point.x >= 0 && point.y >= 0 && point.x < view.width && point.y < view.height) {
+                color = averageNeighborhood(view, point.x, point.y);
+            }
+        },
+        AnalysisSettings::Source{m_capture.streamEpoch(), m_capture.capturedDisplay()});
+    return color;
 }
 
 std::optional<FloatColor> CursorSampler::sampleOtherDisplay(DesktopPoint cursor, double now)
@@ -80,12 +99,16 @@ std::optional<FloatColor> CursorSampler::sampleOtherDisplay(DesktopPoint cursor,
     if (now > m_nextScreenSample) {
         m_nextScreenSample = now + 0.05;
         auto screenSample = m_screenSample;
-        sampleScreenColorAsync(cursor, [screenSample](std::optional<FloatColor> color) {
+        const uint64_t request = ++m_screenSampleRequest;
+        sampleScreenColorAsync(cursor, [screenSample, request](std::optional<FloatColor> color) {
             if (!color) {
                 return;
             }
             std::lock_guard lock(screenSample->mutex);
-            screenSample->color = color;
+            if (request > screenSample->completedRequest) {
+                screenSample->completedRequest = request;
+                screenSample->color = color;
+            }
         });
     }
 
@@ -145,8 +168,8 @@ std::optional<CursorSample> CursorSampler::updateReadoutIfDue(CursorSmoothing sm
 std::optional<FloatColor> CursorSampler::probeColor(DesktopPoint cursor, const std::optional<DisplayPixel>& pixel,
                                                     double now)
 {
-    if (pixel && !m_capture.dead()) {
-        if (const std::optional<FloatColor> onDisplay = sampleCapturedFrame(*pixel)) {
+    if (pixel && !m_capture.dead() && !m_capture.suspended()) {
+        if (const std::optional<FloatColor> onDisplay = sampleCapturedFrame(cursor)) {
             return onDisplay;
         }
     }

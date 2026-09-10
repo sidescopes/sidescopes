@@ -9,7 +9,7 @@ commit=$(git -C "$repo_root" rev-parse --short HEAD)
 os=$(uname -sr)
 
 cmake -S "$repo_root" -B "$build_dir" -G Ninja \
-    -DSIDESCOPES_BENCH=ON -DSIDESCOPES_BUILD_TESTS=OFF >/dev/null
+    -DCMAKE_BUILD_TYPE=Release -DSIDESCOPES_BENCH=ON -DSIDESCOPES_BUILD_TESTS=OFF >/dev/null
 cmake --build "$build_dir" --target sidescopes_bench >/dev/null
 
 results_dir="$repo_root/bench-results"

@@ -42,7 +42,7 @@ public:
     /// Sets a display-relative region and clamps it to the virtual display.
     void reset(const RegionOfInterest& region, int displayWidth, int displayHeight);
 
-    /// Internal fallback when no valid display region is available.
+    /// Removes the selected region, including any unfinished gesture.
     void clear();
 
     /// Arms the draw gesture, as the desktop's picker does: the next drag on
@@ -90,6 +90,9 @@ private:
     /// Says what a press would do, as the desktop border's zones do.
     void announceCursor(const Placement& placement) const;
     void drawBorder(const Placement& placement, int displayWidth, int displayHeight) const;
+    [[nodiscard]] bool closeVisible(const Placement& placement) const;
+    [[nodiscard]] static ImVec2 closeCentre(const ImVec2& topLeft, const ImVec2& bottomRight);
+    static void drawCloseBadge(const ImVec2& centre);
     /// The region's rectangle on screen, SNAPPED to whole points.
     ///
     /// Everything the border draws is built from this - the measured ring, the

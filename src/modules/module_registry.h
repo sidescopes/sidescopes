@@ -140,6 +140,8 @@ public:
     ModuleRegistry& operator=(const ModuleRegistry&) = delete;
 
     /// Registers a module; false for an incompatible ABI, missing entry points, or failed initialization.
+    /// An allocation interruption deinitializes the module and removes its
+    /// partial registration before propagating, so the same entry can be retried.
     [[nodiscard]] bool registerModule(const SsModuleEntry& entry);
 
     /// Notes @p message as a reason a scope is missing - a file that would not

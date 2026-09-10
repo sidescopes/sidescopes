@@ -157,10 +157,11 @@ bool AnalysisWorker::fetchOutput(uint64_t& lastSeenVersion, Output& output,
     return true;
 }
 
-std::optional<FloatColor> AnalysisWorker::sampleDisplayColor(int displayX, int displayY, int radius) const
+std::optional<FloatColor> AnalysisWorker::sampleDisplayColor(
+    int displayX, int displayY, int radius, std::optional<AnalysisSettings::Source> expectedSource) const
 {
     std::lock_guard lock(m_frameMutex);
-    if (!m_hasFrame) {
+    if (!m_hasFrame || !matchesSource(m_latestFrame.stamp, expectedSource)) {
         return std::nullopt;
     }
     const FrameView view = m_latestFrame.view();
@@ -171,10 +172,11 @@ std::optional<FloatColor> AnalysisWorker::sampleDisplayColor(int displayX, int d
     return averageNeighborhood(view, point.x, point.y, radius);
 }
 
-bool AnalysisWorker::withLatestFrame(const std::function<void(const FrameView&)>& reader) const
+bool AnalysisWorker::withLatestFrame(const std::function<void(const FrameView&)>& reader,
+                                     std::optional<AnalysisSettings::Source> expectedSource) const
 {
     std::lock_guard lock(m_frameMutex);
-    if (!m_hasFrame) {
+    if (!m_hasFrame || !matchesSource(m_latestFrame.stamp, expectedSource)) {
         return false;
     }
     reader(m_latestFrame.view());

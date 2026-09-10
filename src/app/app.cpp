@@ -734,7 +734,7 @@ void App::drawFrameUi()
                                 m_waveformColor,
                                 m_readoutColor,
                                 m_callbackState.monospaceFont};
-    applyPaneRenderOutcome(m_panes->drawRegionToolIcons(input));
+    m_panes->drawRegionToolIcons();
     applyPaneRenderOutcome(m_panes->drawScopePanes(input));
     m_panes->drawStatusBar(input);
     handleContextMenu();
@@ -893,8 +893,7 @@ void App::handleContextMenu()
                                  m_pins.empty(),
                                  m_presets.activeSlot(),
                                  m_uiScale.userFactor(),
-                                 m_quality,
-                                 m_analysis.region.has_value()};
+                                 m_quality};
     buildContextMenu(model, clickedPane, menu, paramActions);
     const int chosen = showNativeContextMenu(menu);
     dispatchMenuChoice(chosen, paramActions);

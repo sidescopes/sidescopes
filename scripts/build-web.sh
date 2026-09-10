@@ -110,21 +110,13 @@ rm -f "$OUT/licenses/"*.txt
 cp "$BUILD/licenses/"*.txt "$OUT/licenses/"
 
 mkdir -p "$OUT/samples"
-# Anything the set no longer names goes, because the whole directory is what
-# gets uploaded: a sample dropped from the list would otherwise linger here
-# and be published for as long as nobody noticed.
-for stale in "$OUT/samples"/*.jpg; do
-    [ -e "$stale" ] || continue
-    case " $SAMPLES " in
-        *" $(basename "$stale" .jpg) "*) ;;
-        *) rm -f "$stale" ;;
-    esac
-done
+# Rebuild from the verified inputs, including after a source replacement or
+# failed download. An old same-named derivative is not a verified input.
+rm -f "$OUT/samples/"*.jpg
 
 made=0
 for name in $SAMPLES; do
     [ -f "$CACHE/$name.jpg" ] || continue
-    [ -f "$OUT/samples/$name.jpg" ] && { made=$((made + 1)); continue; }
     magick "$CACHE/$name.jpg" -resize 1100x1100\> -quality 82 -strip "$OUT/samples/$name.jpg"
     made=$((made + 1))
 done

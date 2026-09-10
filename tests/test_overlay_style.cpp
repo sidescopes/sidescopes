@@ -125,7 +125,7 @@ TEST_CASE("The loudest graticule keeps its hierarchy")
 
 TEST_CASE("Every strength has one name, and the ladder climbs")
 {
-    // The words are a ladder of weight - Faint below Normal below Strong below
+    // The words are a ladder of weight - Faint below Soft below Normal below
     // Bold - so they only tell the truth while the values climb in the same
     // order. Reordering or inserting a step without touching the words would
     // leave the menu describing the wrong ink, which nothing else would catch.

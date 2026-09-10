@@ -20,6 +20,7 @@
 
 #include "core/preferences.h"
 #include "platform/shell_windows.h"
+#include "platform/windows/capture_bitmap.h"
 #include "platform/windows/capture_visibility.h"
 #include "platform/windows/display_identity.h"
 #include "platform/windows/wide_strings.h"
@@ -704,26 +705,11 @@ void sampleScreenColorAsync(DesktopPoint point, std::function<void(std::optional
     const int left = static_cast<int>(point.x) - Side / 2;
     const int top = static_cast<int>(point.y) - Side / 2;
 
-    HDC screen = GetDC(nullptr);
-    if (!screen) {
-        callback(std::nullopt);
-        return;
-    }
     std::optional<FloatColor> color;
-    HDC memory = CreateCompatibleDC(screen);
-    BITMAPINFO info{};
-    info.bmiHeader.biSize = sizeof(info.bmiHeader);
-    info.bmiHeader.biWidth = Side;
-    info.bmiHeader.biHeight = -Side;  // top-down rows
-    info.bmiHeader.biPlanes = 1;
-    info.bmiHeader.biBitCount = 32;
-    info.bmiHeader.biCompression = BI_RGB;
-    void* bits = nullptr;
-    HBITMAP bitmap = memory ? CreateDIBSection(memory, &info, DIB_RGB_COLORS, &bits, nullptr, 0) : nullptr;
-    if (bitmap) {
-        HGDIOBJ previous = SelectObject(memory, bitmap);
-        if (BitBlt(memory, 0, 0, Side, Side, screen, left, top, SRCCOPY | CAPTUREBLT)) {
-            const auto* pixels = static_cast<const uint8_t*>(bits);
+    {
+        const CaptureBitmap bitmap(Side, Side);
+        if (bitmap.capture(left, top, Side, Side)) {
+            const auto* pixels = static_cast<const uint8_t*>(bitmap.pixels());
             double sumR = 0;
             double sumG = 0;
             double sumB = 0;
@@ -736,13 +722,7 @@ void sampleScreenColorAsync(DesktopPoint point, std::function<void(std::optional
             color = FloatColor{static_cast<float>(sumR / Count), static_cast<float>(sumG / Count),
                                static_cast<float>(sumB / Count)};
         }
-        SelectObject(memory, previous);
-        DeleteObject(bitmap);
     }
-    if (memory) {
-        DeleteDC(memory);
-    }
-    ReleaseDC(nullptr, screen);
     callback(color);
 }
 
@@ -763,41 +743,17 @@ std::optional<CapturedImage> captureDisplayImage(uint32_t displayId)
     if (width <= 0 || height <= 0) {
         return std::nullopt;
     }
-    HDC screen = GetDC(nullptr);
-    if (!screen) {
+    const CaptureBitmap bitmap(width, height);
+    if (!bitmap.capture(left, top, width, height)) {
         return std::nullopt;
     }
-    std::optional<CapturedImage> result;
-    HDC memory = CreateCompatibleDC(screen);
-    BITMAPINFO info{};
-    info.bmiHeader.biSize = sizeof(info.bmiHeader);
-    info.bmiHeader.biWidth = width;
-    info.bmiHeader.biHeight = -height;  // top-down rows
-    info.bmiHeader.biPlanes = 1;
-    info.bmiHeader.biBitCount = 32;
-    info.bmiHeader.biCompression = BI_RGB;
-    void* bits = nullptr;
-    HBITMAP bitmap = memory ? CreateDIBSection(memory, &info, DIB_RGB_COLORS, &bits, nullptr, 0) : nullptr;
-    if (bitmap) {
-        HGDIOBJ previous = SelectObject(memory, bitmap);
-        if (BitBlt(memory, 0, 0, width, height, screen, left, top, SRCCOPY | CAPTUREBLT)) {
-            CapturedImage captured;
-            captured.width = width;
-            captured.height = height;
-            const std::size_t bytes = static_cast<std::size_t>(width) * static_cast<std::size_t>(height) * 4;
-            captured.bgra.resize(bytes);
-            std::memcpy(captured.bgra.data(), bits, bytes);
-            result = std::move(captured);
-        }
-        SelectObject(memory, previous);
-        DeleteObject(bitmap);
-    }
-    if (memory) {
-        DeleteDC(memory);
-    }
-    ReleaseDC(nullptr, screen);
-
-    return result;
+    CapturedImage captured;
+    captured.width = width;
+    captured.height = height;
+    const std::size_t bytes = static_cast<std::size_t>(width) * static_cast<std::size_t>(height) * 4;
+    captured.bgra.resize(bytes);
+    std::memcpy(captured.bgra.data(), bitmap.pixels(), bytes);
+    return captured;
 }
 
 }  // namespace sidescopes

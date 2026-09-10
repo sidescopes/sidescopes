@@ -33,12 +33,9 @@ inline constexpr double ReadoutSampleSeconds = 1.0 / 8.0;
 /// Whether a marker stands only for a colour taken inside the region the scopes
 /// are reading.
 ///
-/// It does not: the region and the pointer are separate inputs. The region
-/// decides what the traces are BUILT from, and a marker is a live probe of what
-/// is under the pointer, which is worth having with no region drawn at all -
-/// hovering over a face to see whether it sits on the skin-tone line is a
-/// reading in itself. The readout and the colour picker's swatch follow the same
-/// rule, so all three agree about what the pointer means.
+/// The pointer samples anywhere on the screen by default. The pane renderer
+/// draws those samples as markers only while a region supplies live traces;
+/// the independent readout can remain visible with no selected region.
 inline constexpr bool MarkersFollowRegion = false;
 
 /// How fast each trace's marker follows the pointer, in milliseconds: the
@@ -127,13 +124,15 @@ public:
     }
 
 private:
-    // The freshest cross-display sample: the async sampler's callback may land
+    // Completions advance in request order, so a late callback cannot replace
+    // a newer sample. A callback may land
     // on any thread, and may still be in flight at shutdown, so the state it
     // writes is shared ownership.
     struct ScreenSample
     {
         std::mutex mutex;
         std::optional<FloatColor> color;
+        uint64_t completedRequest = 0;
     };
 
     /// A point on the captured display, in that display's own pixels - the
@@ -151,7 +150,7 @@ private:
 
     /// The sample under the pointer on the captured display, read out of the
     /// capture stream's own newest frame.
-    [[nodiscard]] std::optional<FloatColor> sampleCapturedFrame(DisplayPixel pixel) const;
+    [[nodiscard]] std::optional<FloatColor> sampleCapturedFrame(DesktopPoint cursor) const;
 
     /// The colour under the pointer, from the capture stream where it reaches
     /// and from a one-shot screen read where it does not.
@@ -204,6 +203,7 @@ private:
 
     std::shared_ptr<ScreenSample> m_screenSample = std::make_shared<ScreenSample>();
     double m_nextScreenSample = 0.0;
+    uint64_t m_screenSampleRequest = 0;
     /// The colours the markers and the readout are travelling towards, and when
     /// each is due a new one: what makes them readings taken a dozen times a
     /// second rather than points chasing every frame's pixel.

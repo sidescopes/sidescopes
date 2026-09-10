@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <map>
 #include <optional>
 #include <string>
@@ -42,6 +43,7 @@ struct RegionOverlayStubs
 
     /// What the picker overlay was told.
     int pickCancels = 0;
+    std::function<void()> onCancel;
     int pickPolls = 0;
     /// The pin tool's cursor chip, pushed every poll: empty when the sample
     /// could not be taken.

@@ -55,6 +55,9 @@ RegionPickPoll pollRegionPick()
 void cancelRegionPick()
 {
     ++g_overlays.pickCancels;
+    if (g_overlays.onCancel) {
+        g_overlays.onCancel();
+    }
     if (g_overlays.pickActive) {
         g_overlays.pickCancelled = true;
     }

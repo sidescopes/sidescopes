@@ -4,10 +4,10 @@
 
 namespace sidescopes {
 
-/// The ceiling on one accumulate pass, whatever its bins would justify. It
-/// sits just above half a 4K frame, so a display up to 1440p is sampled row
-/// for row. Every scope here derives its budget from its own bin count and
-/// stays under this; it bounds one whose bins grow faster than that.
+/// Reference budget retained for sampling comparisons in tests and benchmarks.
+/// It sits just above half a 4K frame, so a display up to 1440p is sampled row
+/// for row. Engines derive their live budgets from their own bin counts;
+/// this reference does not cap those budgets.
 ///
 /// Measured over a whole 3456x2234 display against sampling every row, on
 /// gradient-plus-grain content: the vectorscope image moves by at most 7 of

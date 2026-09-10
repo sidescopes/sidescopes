@@ -29,9 +29,9 @@ PaneRenderOutcome ScopePaneRenderer::drawScopeToggles()
     return m_toolbar.drawScopeToggles();
 }
 
-PaneRenderOutcome ScopePaneRenderer::drawRegionToolIcons(const PaneRenderInput&)
+void ScopePaneRenderer::drawRegionToolIcons()
 {
-    return m_toolbar.drawRegionToolIcons();
+    m_toolbar.drawRegionToolIcons();
 }
 
 PaneRenderOutcome ScopePaneRenderer::drawScopePanes(const PaneRenderInput& input)

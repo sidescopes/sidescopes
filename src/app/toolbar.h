@@ -35,7 +35,7 @@ public:
     [[nodiscard]] PaneRenderOutcome drawScopeToggles();
 
     /// The region toolbox: draw, select a window, or select a face.
-    [[nodiscard]] PaneRenderOutcome drawRegionToolIcons();
+    void drawRegionToolIcons();
 
     /// Where the region tools were last drawn, in screen coordinates, or
     /// nothing before the first draw.

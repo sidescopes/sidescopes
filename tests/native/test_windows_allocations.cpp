@@ -13,6 +13,7 @@
 #include "core/diagnostics.h"
 #include "platform/face_detection.h"
 #include "platform/screen_capture.h"
+#include "platform/windows/capture_bitmap.h"
 #include "temp_file.h"
 
 namespace sidescopes {
@@ -108,6 +109,35 @@ TEST_CASE("Native Windows workers recover from startup allocation failures", "[n
     diagConfigure({"faces,perf", log.path().string(), DiagFlush::EveryLine});
     exerciseFaceStartup(log);
     exerciseCaptureStartup();
+}
+
+TEST_CASE("Screenshot storage releases GDI objects after a failed copy allocation", "[native][allocation]")
+{
+    const DWORD baseline = GetGuiResources(GetCurrentProcess(), GR_GDIOBJECTS);
+    bool prepared = false;
+    bool threw = false;
+    test::AllocationFailure failure(0);
+    try {
+        // Creating this offscreen bitmap does not capture any screen pixels.
+        // The following allocation fails at the same ownership boundary as
+        // the screenshot's copy into PixelStorage.
+        const CaptureBitmap bitmap(16, 16);
+        prepared = bitmap.valid();
+        void* copy = ::operator new(static_cast<std::size_t>(16) * 16 * 4);
+        ::operator delete(copy);
+    } catch (const std::bad_alloc&) {
+        threw = true;
+    }
+    failure.disarm();
+    REQUIRE(prepared);
+    CHECK(threw);
+    CHECK(failure.failures() == 1);
+    CHECK(GetGuiResources(GetCurrentProcess(), GR_GDIOBJECTS) == baseline);
+    {
+        const CaptureBitmap retry(16, 16);
+        CHECK(retry.valid());
+    }
+    CHECK(GetGuiResources(GetCurrentProcess(), GR_GDIOBJECTS) == baseline);
 }
 
 }  // namespace sidescopes

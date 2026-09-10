@@ -24,8 +24,8 @@ float cleanedUiScaleFactor(float requested)
     if (!(requested > 0.0f)) {
         return 1.0f;
     }
-    // Seed with Default so a value far from every step lands there, not on the
-    // nearest end of the range.
+    // Seed with Default for nonfinite input; finite values choose the nearest
+    // step, including the ends of the range.
     float best = 1.0f;
     float bestDelta = std::fabs(requested - best);
     for (const float step : UiScaleSteps) {

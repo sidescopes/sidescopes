@@ -727,7 +727,6 @@ TEST_CASE("A worker told to thin really thins the waveform's samples")
         settings.region = WholeFrame;
         settings.enabledScopes = {WaveformId};
         settings.imageSizes[WaveformId] = {Columns, WaveformLevels};
-        settings.scopeParams[WaveformId]["mode"] = 1.0;  // luma
         settings.sampleThinning = divisor;
         worker.updateSettings(settings);
         worker.start();

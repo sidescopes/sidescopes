@@ -550,19 +550,22 @@ class BorderFlick(Action):
         quartz.move_pointer(grab)
         time.sleep(0.08)
         quartz.press_mouse(grab)
-        time.sleep(0.08)
-        origin = border_window(self._pid, self._size)
-        if origin is None:
-            quartz.release_mouse(grab)
-            self._missed += 1
+        point = grab
+        try:
+            time.sleep(0.08)
+            origin = border_window(self._pid, self._size)
+            if origin is None:
+                self._missed += 1
 
-            return
-        started = time.monotonic()
-        for step in range(1, self._steps + 1):
-            due = started + (self._seconds * step / self._steps)
-            quartz.drag_mouse((grab[0] + (distance * step / self._steps), grab[1]))
-            self._sample(origin, grab, distance / self._seconds, due)
-        quartz.release_mouse((grab[0] + distance, grab[1]))
+                return
+            started = time.monotonic()
+            for step in range(1, self._steps + 1):
+                due = started + (self._seconds * step / self._steps)
+                point = (grab[0] + (distance * step / self._steps), grab[1])
+                quartz.drag_mouse(point)
+                self._sample(origin, grab, distance / self._seconds, due)
+        finally:
+            quartz.release_mouse(point)
         self._settles.append(self._settle(origin, grab, distance))
 
     def _sample(self, origin, grab, velocity, until):

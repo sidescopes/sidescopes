@@ -296,6 +296,39 @@ TEST_CASE("A capture source changed during accumulation prevents its old publica
     CHECK(fixture.output.frameStamp.captureEpoch == 4u);
 }
 
+TEST_CASE("Frame sampling rejects pixels from an earlier stream or another display")
+{
+    Fixture fixture;
+    const AnalysisSettings::Source expected{4, 18};
+    fixture.settings.source = expected;
+    fixture.worker.updateSettings(fixture.settings);
+    int reads = 0;
+    const auto reader = [&](const FrameView&) { ++reads; };
+    CHECK_FALSE(fixture.worker.sampleDisplayColor(10, 10, 0, expected));
+    CHECK_FALSE(fixture.worker.withLatestFrame(reader, expected));
+
+    for (const FrameStamp stamp : std::array{FrameStamp{3, 17, 0.1}, FrameStamp{3, 18, 0.2}, FrameStamp{4, 17, 0.3}}) {
+        auto frame = splitFrame(1);
+        frame.stamp = stamp;
+        fixture.publish(std::move(frame));
+        CHECK_FALSE(fixture.worker.sampleDisplayColor(10, 10, 0, expected));
+        CHECK_FALSE(fixture.worker.withLatestFrame(reader, expected));
+        CHECK(reads == 0);
+    }
+
+    // Unstamped hosts retain access when they do not request a source check.
+    CHECK(fixture.worker.sampleDisplayColor(10, 10, 0));
+    CHECK(fixture.worker.withLatestFrame(reader));
+    CHECK(reads == 1);
+
+    auto current = splitFrame(2);
+    current.stamp = {expected.captureEpoch, expected.displayId, 0.4};
+    fixture.publish(std::move(current));
+    CHECK(fixture.worker.sampleDisplayColor(10, 10, 0, expected));
+    CHECK(fixture.worker.withLatestFrame(reader, expected));
+    CHECK(reads == 2);
+}
+
 TEST_CASE("An incomplete scope reading cannot cross a capture source change")
 {
     Fixture fixture;

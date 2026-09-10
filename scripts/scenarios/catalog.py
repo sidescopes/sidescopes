@@ -53,13 +53,21 @@ class Profile:
         self.summary = summary
 
 
-# Probed in order; the first marker found in the binary wins.
+# Probed in order; the first marker found in the binary wins. The cancellation
+# shortcut spans builds both with and without clearing, so that family needs
+# an explicit profile to enable empty-state measurements after verification.
 PROFILES = (
+    Profile(
+        "region-clearable",
+        None,
+        {"clear-region", "draw-region", "attach-window", "retain-region"},
+        "starts with a default region; Escape cancels a picker or clears committed regions",
+    ),
     Profile(
         "region-continuity",
         "shortcut_cancel_interaction",
         {"draw-region", "attach-window", "retain-region"},
-        "starts with a default region; Escape cancels an interaction and keeps the previous region",
+        "has a cancellation shortcut; empty-state support needs an explicit region-clearable profile",
     ),
     Profile(
         "region-optional",
@@ -186,20 +194,18 @@ def scenario_named(identifier):
 
 
 def strings_in(path):
-    """Every printable run of bytes in a file, as one lowercase blob.
-
-    Reading the binary is how a build is identified: what it can do is decided
-    by the code in it, and unlike a version string that cannot be stale.
-    """
+    """Read binary bytes for capability markers without changing their case."""
     with open(path, "rb") as handle:
         return handle.read()
 
 
-def detect_profile(executable):
+def detect_profile(executable, override=None):
     """Which behaviour profile a built application follows."""
+    if override is not None:
+        return next((profile for profile in PROFILES if profile.name == override), None)
     blob = strings_in(executable)
     for profile in PROFILES:
-        if profile.marker.encode() in blob:
+        if profile.marker is not None and profile.marker.encode() in blob:
             return profile
 
     return None
@@ -216,7 +222,7 @@ def unavailable(scenario, stack, profile, scopes):
     """Why this build cannot run this scenario, or an empty string if it can."""
     missing = scenario.needs - profile.capabilities
     if missing:
-        return f"this build has no {', '.join(sorted(missing))} ({profile.summary})"
+        return f"cannot establish support for {', '.join(sorted(missing))} ({profile.summary})"
     absent = [letter for letter in stack if letter not in scopes]
     if absent:
         return f"this build has no scope {', '.join(absent)}"

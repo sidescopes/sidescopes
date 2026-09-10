@@ -26,4 +26,8 @@ $outJson = Join-Path $resultsDir "perf-$machine-$commit.json"
     --machine $machine --os $os --commit $commit --out $outJson @args
 if ($LASTEXITCODE -ne 0) { throw "Performance harness run failed" }
 
+# The harness accepts the last --out argument; report the file it wrote.
+for ($index = 0; $index -lt $args.Count - 1; ++$index) {
+    if ($args[$index] -eq '--out') { $outJson = $args[$index + 1] }
+}
 Write-Output $outJson

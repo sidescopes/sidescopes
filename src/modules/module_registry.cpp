@@ -180,20 +180,28 @@ bool ModuleRegistry::registerModule(const SsModuleEntry& entry)
         return false;
     }
 
-    m_modules.push_back(&entry);
-    const uint32_t count = entry.scope_count();
-    for (uint32_t index = 0; index < count; ++index) {
-        registerScope(entry, index, count);
-    }
+    try {
+        const uint32_t count = entry.scope_count();
+        for (uint32_t index = 0; index < count; ++index) {
+            registerScope(entry, index, count);
+        }
 
-    // Keep the scopes in one canonical order regardless of registration order:
-    // built-ins first in their toolbar order, then any third-party scopes in
-    // the order they registered. A stable sort preserves that trailing order,
-    // which is what the letter-collision rule (earlier registration keeps the
-    // letter) depends on.
-    std::stable_sort(m_scopes.begin(), m_scopes.end(), [](const RegisteredScope& a, const RegisteredScope& b) {
-        return canonicalRank(a.descriptor->id) < canonicalRank(b.descriptor->id);
-    });
+        // Keep the scopes in one canonical order regardless of registration order:
+        // built-ins first in their toolbar order, then any third-party scopes in
+        // the order they registered. A stable sort preserves that trailing order,
+        // which is what the letter-collision rule (earlier registration keeps the
+        // letter) depends on.
+        std::stable_sort(m_scopes.begin(), m_scopes.end(), [](const RegisteredScope& a, const RegisteredScope& b) {
+            return canonicalRank(a.descriptor->id) < canonicalRank(b.descriptor->id);
+        });
+    } catch (...) {
+        // A retry must register every descriptor afresh. Retaining even one
+        // partial module would hide its missing scopes behind duplicate checks.
+        std::erase_if(m_scopes, [&entry](const RegisteredScope& scope) { return scope.module == &entry; });
+        entry.deinit();
+        throw;
+    }
+    m_modules.push_back(&entry);
 
     return true;
 }

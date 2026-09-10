@@ -4,6 +4,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <cmath>
 #include <cstddef>
+#include <memory>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -103,6 +104,76 @@ private:
     HWND m_window = nullptr;
 };
 
+struct PickerTeardownEvents
+{
+    int destroyed = 0;
+    bool retiredBeforeCallbacks = true;
+};
+
+LRESULT CALLBACK teardownPickerProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam)
+{
+    if (message == WM_NCCREATE) {
+        const auto* create = reinterpret_cast<const CREATESTRUCTW*>(lParam);
+        SetWindowLongPtrW(window, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(create->lpCreateParams));
+    }
+    if (message == WM_DESTROY) {
+        auto* events = reinterpret_cast<PickerTeardownEvents*>(GetWindowLongPtrW(window, GWLP_USERDATA));
+        ++events->destroyed;
+        events->retiredBeforeCallbacks &= g_pickers.empty();
+    }
+    // Exercise the production lookup during real synchronous close messages.
+    return pickerProc(window, message, wParam, lParam);
+}
+
+class PickerTeardownScope
+{
+public:
+    explicit PickerTeardownScope(PickerTeardownEvents& events)
+    {
+        WNDCLASSW windowClass{};
+        windowClass.lpfnWndProc = teardownPickerProc;
+        windowClass.hInstance = m_instance;
+        windowClass.lpszClassName = ClassName;
+        m_class = RegisterClassW(&windowClass);
+        if (!m_class) {
+            return;
+        }
+        g_pickers.reserve(2);
+        for (int index = 0; index < 2; ++index) {
+            auto picker = std::make_unique<PickerState>();
+            picker->window =
+                CreateWindowExW(0, ClassName, L"", 0, 0, 0, 0, 0, HWND_MESSAGE, nullptr, m_instance, &events);
+            if (!picker->window) {
+                return;
+            }
+            g_pickers.push_back(picker.release());
+        }
+    }
+
+    ~PickerTeardownScope()
+    {
+        // The successful poll already emptied this list. Clean up partial
+        // setup as well if a native window could not be created.
+        std::vector<PickerState*> remaining;
+        remaining.swap(g_pickers);
+        for (PickerState* picker : remaining) {
+            DestroyWindow(picker->window);
+            delete picker;
+        }
+        if (m_class) {
+            UnregisterClassW(ClassName, m_instance);
+        }
+    }
+
+    PickerTeardownScope(const PickerTeardownScope&) = delete;
+    PickerTeardownScope& operator=(const PickerTeardownScope&) = delete;
+
+private:
+    static constexpr const wchar_t* ClassName = L"SideScopesPickerTeardownTest";
+    HINSTANCE m_instance = GetModuleHandleW(nullptr);
+    ATOM m_class = 0;
+};
+
 }  // namespace
 
 TEST_CASE("An attached drag owns the preview across displays", "[native]")
@@ -150,6 +221,26 @@ TEST_CASE("Native picker polls report the active tool", "[native][picker-mode]")
         const PickersScope pickers(first, second);
         CHECK(pollRegionPick().mode == mode);
     }
+}
+
+TEST_CASE("Closing several picker windows retires their callbacks before deletion", "[native][picker-lifecycle]")
+{
+    REQUIRE(g_pickers.empty());
+    PickerTeardownEvents events;
+    const PickerTeardownScope pickers(events);
+    REQUIRE(g_pickers.size() == 2);
+    const HWND foreground = GetForegroundWindow();
+    g_pickers.front()->finished = true;
+
+    const auto poll = pollRegionPick();
+
+    CHECK(poll.finished);
+    CHECK_FALSE(poll.confirmed);
+    CHECK(g_pickers.empty());
+    CHECK(events.destroyed == 2);
+    CHECK(events.retiredBeforeCallbacks);
+    CHECK(GetForegroundWindow() == foreground);
+    CHECK_FALSE(pollRegionPick().active);
 }
 
 TEST_CASE("Losing border mouse capture cancels pending interactions", "[native]")

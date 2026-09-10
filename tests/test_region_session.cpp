@@ -535,10 +535,10 @@ TEST_CASE("Snapshot face selection creates a fixed attached crop at either captu
         PixelStorage(static_cast<std::size_t>(SnapshotWidth) * snapshotHeight * 4, 40), SnapshotWidth, snapshotHeight};
     fix.open();
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
-    while (fix.session.picker().scansRunning() && std::chrono::steady_clock::now() < deadline) {
+    while (fix.session.picker().backgroundWorkRunning() && std::chrono::steady_clock::now() < deadline) {
         std::this_thread::yield();
     }
-    REQUIRE_FALSE(fix.session.picker().scansRunning());
+    REQUIRE_FALSE(fix.session.picker().backgroundWorkRunning());
     fix.session.picker().drainFaceScans();
     const auto& suggestions = regionOverlayStubs().deliveredFaces.at(SecondDisplay);
     REQUIRE(suggestions.size() == 1);

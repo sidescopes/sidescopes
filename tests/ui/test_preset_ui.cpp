@@ -183,6 +183,21 @@ void renamingKeepsTheListOpen(ImGuiTestContext* ctx)
     IM_CHECK(h.popupOpen);
 }
 
+void clickingAwayCommitsTheRename(ImGuiTestContext* ctx)
+{
+    PresetHarness& h = harness();
+    openList(ctx);
+    ctx->ItemClick("**/##rename");
+    ctx->Yield(2);
+    ctx->KeyCharsReplace("Portrait references");
+    ctx->Yield(2);
+    ctx->MouseMoveToPos(ImVec2(10, 10));
+    ctx->MouseClick();
+    ctx->Yield(2);
+    IM_CHECK(!h.popupOpen);
+    IM_CHECK_EQ(h.controller.at(1).name, "Portrait references");
+}
+
 void registerPresetTests(ImGuiTestEngine* engine)
 {
     ImGuiTest* closes = IM_REGISTER_TEST(engine, "preset", "loading_a_slot_closes_the_list");
@@ -192,6 +207,10 @@ void registerPresetTests(ImGuiTestEngine* engine)
     ImGuiTest* rename = IM_REGISTER_TEST(engine, "preset", "renaming_keeps_the_list_open");
     rename->GuiFunc = presetBarGui;
     rename->TestFunc = renamingKeepsTheListOpen;
+
+    ImGuiTest* away = IM_REGISTER_TEST(engine, "preset", "clicking_away_commits_the_rename");
+    away->GuiFunc = presetBarGui;
+    away->TestFunc = clickingAwayCommitsTheRename;
 }
 
 }  // namespace
@@ -201,5 +220,5 @@ int main()
 {
     using namespace sidescopes;
 
-    return uitest::runSuite("preset", registerPresetTests, /*expectedTests=*/2);
+    return uitest::runSuite("preset", registerPresetTests, /*expectedTests=*/3);
 }

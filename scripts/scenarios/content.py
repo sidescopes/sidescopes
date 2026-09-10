@@ -24,6 +24,7 @@ import selectors
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.error
 import urllib.request
@@ -144,18 +145,23 @@ def build_helper(cache_dir):
     entering the project's own build.
     """
     cache_dir.mkdir(parents=True, exist_ok=True)
-    binary = cache_dir / "content_window"
-    if binary.exists() and binary.stat().st_mtime >= HELPER_SOURCE.stat().st_mtime:
-        return binary
     compiler = shutil.which("cc")
     if compiler is None:
         raise RuntimeError("no C compiler found; install the Xcode command line tools")
-    finished = subprocess.run(
-        [compiler, "-fobjc-arc", "-O2", "-Wall", "-Wextra", "-framework", "Cocoa", "-framework", "QuartzCore",
-         "-o", str(binary), str(HELPER_SOURCE)],
-        capture_output=True, text=True, check=False)
-    if finished.returncode != 0:
-        raise RuntimeError(f"cannot build the content window:\n{finished.stderr}")
+    command = [compiler, "-fobjc-arc", "-O2", "-Wall", "-Wextra", "-framework", "Cocoa", "-framework", "QuartzCore"]
+    identity = hashlib.sha256(HELPER_SOURCE.read_bytes() + json.dumps(command).encode()).hexdigest()
+    binary = cache_dir / f"content_window-{identity}"
+    if binary.exists():
+        return binary
+    # Different checkouts can have older source timestamps. A content key
+    # also preserves a helper already running for another measurement.
+    with tempfile.TemporaryDirectory(prefix='content-build-', dir=cache_dir) as directory:
+        pending = pathlib.Path(directory) / 'content_window'
+        finished = subprocess.run(command + ['-o', str(pending), str(HELPER_SOURCE)],
+                                  capture_output=True, text=True, check=False)
+        if finished.returncode != 0:
+            raise RuntimeError(f"cannot build the content window:\n{finished.stderr}")
+        pending.replace(binary)
 
     return binary
 

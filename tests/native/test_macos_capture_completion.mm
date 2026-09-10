@@ -13,8 +13,10 @@
 
 #include "allocation_failure.h"
 #include "core/frame_mailbox.h"
+#include "platform/desktop.h"
 #include "platform/macos/capture_completion.h"
 #include "platform/macos/capture_frame.h"
+#include "platform/macos/system_observation.h"
 
 namespace {
 // PixelStorage bypasses operator new. This executable alone substitutes the
@@ -430,6 +432,49 @@ TEST_CASE("Completion state allocation failure still cancels start and stop", "[
         CHECK(stopFailure.failures() == 1);
         CHECK_FALSE(stopped);
         CHECK(stream.stops == 2);
+    }
+}
+
+TEST_CASE("Observer registration failure leaves no unowned callback", "[native][allocation]")
+{
+    @autoreleasepool {
+        unobserveSystemEvents();
+        NSNotificationCenter* center = [[NSNotificationCenter alloc] init];
+        NSNotificationName name = @"SideScopesObservationTest";
+        // Warm Foundation without registering a desktop event or changing the
+        // production token list. Only its first vector allocation is failed.
+        id token = [center addObserverForName:name
+                                       object:nil
+                                        queue:[NSOperationQueue mainQueue]
+                                   usingBlock:^(NSNotification*){
+                                   }];
+        [center removeObserver:token];
+        auto calls = std::make_shared<int>(0);
+        const std::weak_ptr<int> retained = calls;
+        auto callback = std::make_shared<std::function<void()>>([calls] { ++*calls; });
+        bool threw = false;
+        test::AllocationFailure failure(0);
+        try {
+            observeSystemNotification(center, name, callback);
+        } catch (const std::bad_alloc&) {
+            threw = true;
+        }
+        failure.disarm();
+        unobserveSystemEvents();
+        [center postNotificationName:name object:nil];
+        CHECK(threw);
+        CHECK(failure.failures() == 1);
+        CHECK(*calls == 0);
+
+        observeSystemNotification(center, name, callback);
+        [center postNotificationName:name object:nil];
+        CHECK(*calls == 1);
+        unobserveSystemEvents();
+        [center postNotificationName:name object:nil];
+        CHECK(*calls == 1);
+        callback.reset();
+        calls.reset();
+        CHECK(retained.expired());
     }
 }
 

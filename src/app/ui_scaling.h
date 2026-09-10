@@ -23,9 +23,8 @@ inline constexpr float InterfaceFontSize = 13.0f;
 /// glyphs on half pixels - the defect the row-seating invariants exist to catch.
 inline constexpr std::array<float, 7> UiScaleSteps = {0.5f, 0.75f, 1.0f, 1.25f, 1.5f, 1.75f, 2.0f};
 
-/// Snaps a stored or requested factor to the nearest offered step, and to 1.0
-/// (match system) for anything out of range or unparseable - the file may be
-/// hand-edited.
+/// Snaps a positive finite factor to the nearest offered step, clamping at
+/// either end. Nonpositive or nonfinite values use 1.0 (match system).
 [[nodiscard]] float cleanedUiScaleFactor(float requested);
 
 /// The interface density the offered steps are calibrated against, in interface
