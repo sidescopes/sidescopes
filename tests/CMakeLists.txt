@@ -86,6 +86,7 @@ add_executable(sidescopes_tests
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/web/lab_layout.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/web/lab_picture.cpp
     test_region_geometry.cpp
+    test_software_crop.cpp
     test_icons.cpp
     test_focus_resolution.cpp
     test_shell_windows.cpp

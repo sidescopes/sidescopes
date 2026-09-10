@@ -69,8 +69,9 @@ public:
     /// Best-effort by design: a backend that cannot narrow keeps delivering the
     /// whole display, which is correct rather than merely tolerable - the region
     /// is still resolved against the display, so only the cost is unimproved. That
-    /// is the default, and it is what Windows does, DXGI having no source
-    /// rectangle.
+    /// is the default. macOS narrows the stream itself; Windows, whose duplication
+    /// has no source rectangle, duplicates the whole display and copies only the
+    /// rectangle out of it.
     virtual void narrowTo(const std::optional<IntRect>& rect)
     {
         (void)rect;

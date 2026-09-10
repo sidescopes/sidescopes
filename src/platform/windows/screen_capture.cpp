@@ -20,7 +20,9 @@
 #include <chrono>
 #include <cmath>
 #include <cstring>
+#include <mutex>
 #include <new>
+#include <optional>
 #include <system_error>
 #include <thread>
 #include <utility>
@@ -28,6 +30,7 @@
 #include "core/diagnostics.h"
 #include "core/parallel_for.h"
 #include "core/scrgb.h"
+#include "platform/software_crop.h"
 #include "platform/windows/advanced_color.h"
 #include "platform/windows/display_identity.h"
 
@@ -234,7 +237,24 @@ public:
         m_statusCallback = std::move(callback);
     }
 
+    // Takes effect on the next frame. The copy reads the crop once per frame
+    // and stamps exactly the rectangle it copied, so a change lands on a whole
+    // frame and never straddles one; the whole display keeps being duplicated,
+    // only the copy out of it narrows.
+    void narrowTo(const std::optional<IntRect>& rect) override
+    {
+        const std::lock_guard lock(m_cropMutex);
+        m_crop = rect;
+    }
+
 private:
+    std::optional<IntRect> currentCrop()
+    {
+        const std::lock_guard lock(m_cropMutex);
+
+        return m_crop;
+    }
+
     void reportStatus(const char* message)
     {
         // An empty message still withdraws the stream if memory is too scarce
@@ -458,14 +478,15 @@ private:
             reportStatus("unsupported capture format");
             return FrameOutcome::Fatal;
         }
-        if (!ensureStaging(setup.device.Get(), description, state.staging)) {
+        // Only the rows and columns the region needs leave the GPU; the frame
+        // says which part of the display it carries.
+        const IntRect rect =
+            softwareCropRect(currentCrop(), static_cast<int>(description.Width), static_cast<int>(description.Height));
+        if (!stageRegion(setup, texture, description, rect, state.staging)) {
             return FrameOutcome::Fatal;
         }
-        setup.context->CopyResource(state.staging.Get(), texture);
 
-        const int width = static_cast<int>(description.Width);
-        const int height = static_cast<int>(description.Height);
-        const int stride = width * 4;  // both layouts the scopes read are four bytes per pixel
+        const int stride = rect.width * 4;  // both layouts the scopes read are four bytes per pixel
         double whiteNits = ScrgbWhiteNits;
         {
             D3D11_MAPPED_SUBRESOURCE mapped{};
@@ -474,39 +495,63 @@ private:
                 return FrameOutcome::Fatal;
             }
             const MappedTexture mappedTexture{*setup.context.Get(), *state.staging.Get()};
-            state.buffer.sizeTo(static_cast<std::size_t>(stride) * height);
+            state.buffer.sizeTo(static_cast<std::size_t>(stride) * rect.height);
             if (scrgb) {
                 // Read per frame: the user can move the SDR brightness slider
                 // at any time, and nothing in the stream announces it.
                 whiteNits = sdrWhiteNits(setup.colorTarget);
                 state.scrgb.setSdrWhiteNits(whiteNits);
-                convertScrgbRows(state, mapped, width, height);
+                convertScrgbRows(state, mapped, rect.width, rect.height);
             } else {
-                copyBgra8Rows(state.buffer, mapped, stride, height);
+                copyBgra8Rows(state.buffer, mapped, stride, rect.height);
             }
         }
 
-        stampFrame(state, width, height, scrgb ? PixelFormat::Argb2101010 : PixelFormat::Bgra8);
+        stampFrame(state, rect, description, scrgb ? PixelFormat::Argb2101010 : PixelFormat::Bgra8);
         logDelivery(state.buffer.format, whiteNits);
         state.buffer = mailbox.publish(std::move(state.buffer));
         return FrameOutcome::Published;
     }
 
-    // Describes the delivery in the recycled buffer. Every field is written on
-    // every frame, never only on the ones that changed: the buffer comes back
-    // from the mailbox holding the previous delivery's answers, and one left
-    // alone mislabels these pixels.
-    void stampFrame(FrameCopyState& state, int width, int height, PixelFormat format)
+    // Copies @p rect of the acquired texture into a CPU-readable staging
+    // texture of that size, recreating the staging texture when the shape or
+    // format changes. Reports and returns false only when it cannot be made.
+    bool stageRegion(const DuplicationSetup& setup, ID3D11Texture2D* texture, const D3D11_TEXTURE2D_DESC& description,
+                     const IntRect& rect, ComPtr<ID3D11Texture2D>& staging)
     {
-        state.buffer.strideBytes = width * 4;
-        state.buffer.width = width;
-        state.buffer.height = height;
+        D3D11_TEXTURE2D_DESC shape = description;
+        shape.Width = static_cast<UINT>(rect.width);
+        shape.Height = static_cast<UINT>(rect.height);
+        if (!ensureStaging(setup.device.Get(), shape, staging)) {
+            return false;
+        }
+        const D3D11_BOX box{static_cast<UINT>(rect.x),
+                            static_cast<UINT>(rect.y),
+                            0,
+                            static_cast<UINT>(rect.x + rect.width),
+                            static_cast<UINT>(rect.y + rect.height),
+                            1};
+        setup.context->CopySubresourceRegion(staging.Get(), 0, 0, 0, 0, texture, 0, &box);
+
+        return true;
+    }
+
+    // Describes the delivery in the recycled buffer: @p rect of a display with
+    // @p display's extents. Every field is written on every frame, never only
+    // on the ones that changed: the buffer comes back from the mailbox holding
+    // the previous delivery's answers, and one left alone mislabels these
+    // pixels.
+    void stampFrame(FrameCopyState& state, const IntRect& rect, const D3D11_TEXTURE2D_DESC& display, PixelFormat format)
+    {
+        state.buffer.strideBytes = rect.width * 4;
+        state.buffer.width = rect.width;
+        state.buffer.height = rect.height;
         state.buffer.colorSpace = ColorSpaceHint::Srgb;
         state.buffer.format = format;
-        state.buffer.sourceX = 0;
-        state.buffer.sourceY = 0;
-        state.buffer.sourceWidth = width;
-        state.buffer.sourceHeight = height;
+        state.buffer.sourceX = rect.x;
+        state.buffer.sourceY = rect.y;
+        state.buffer.sourceWidth = static_cast<int>(display.Width);
+        state.buffer.sourceHeight = static_cast<int>(display.Height);
         state.buffer.stamp = state.stamp;
         // Reusing a sequence after restart can collide with a module's cached
         // pixel pointer and return bins from the previous display. The producer
@@ -537,6 +582,10 @@ private:
     // The delivery this recording has been told about, read on the capture
     // thread and forgotten whenever a recording opens.
     DiagOnChange<DeliveryDescription> m_loggedDelivery{DiagChannel::Perf};
+    // The part of the display the copy is narrowed to, written by the
+    // application thread and read once per frame by the capture thread.
+    std::mutex m_cropMutex;
+    std::optional<IntRect> m_crop;
 };
 
 }  // namespace

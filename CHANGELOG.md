@@ -13,6 +13,11 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   10-bit codes normalized to the SDR content brightness, so scopes read the
   same values as in SDR and gain 10-bit precision from 10-bit sources.
 
+### Changed
+
+- Windows capture copies only the monitored region out of the duplicated
+  display instead of the whole display on every frame.
+
 ### Fixed
 
 - Scopes no longer read clipped highlights on Windows while HDR is on.
