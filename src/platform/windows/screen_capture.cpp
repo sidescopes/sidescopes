@@ -18,6 +18,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <cstring>
 #include <new>
 #include <system_error>
@@ -25,6 +26,9 @@
 #include <utility>
 
 #include "core/diagnostics.h"
+#include "core/parallel_for.h"
+#include "core/scrgb.h"
+#include "platform/windows/advanced_color.h"
 #include "platform/windows/display_identity.h"
 
 namespace sidescopes {
@@ -39,17 +43,69 @@ struct DuplicationSetup
     ComPtr<ID3D11Device> device;
     ComPtr<ID3D11DeviceContext> context;
     ComPtr<IDXGIOutputDuplication> duplication;
+    // Where the SDR white level of the duplicated display is read from while
+    // the desktop composes in scRGB.
+    ColorTarget colorTarget;
 };
 
 // State the capture loop carries across frames: the staging texture is
 // reused until the frame dimensions change, the buffer's storage is
-// recycled through the mailbox, and the sequence counts published frames.
+// recycled through the mailbox, the sequence counts published frames, and
+// the scRGB conversion keeps its table for the white level last seen.
 struct FrameCopyState
 {
     ComPtr<ID3D11Texture2D> staging;
     FrameBuffer buffer;
     FrameStamp stamp;
+    ScrgbToDisplayCodes scrgb;
 };
+
+// What a recording is told about a delivery: the layout the buffer carries
+// and, for an scRGB desktop, the SDR white level it was normalised to.
+struct DeliveryDescription
+{
+    PixelFormat format = PixelFormat::Bgra8;
+    int whiteTenthNits = 0;
+
+    bool operator==(const DeliveryDescription& other) const
+    {
+        return format == other.format && whiteTenthNits == other.whiteTenthNits;
+    }
+};
+
+// Copies @p height rows of four-byte pixels out of a mapped staging texture
+// into the buffer, dropping the texture's row padding.
+void copyBgra8Rows(FrameBuffer& buffer, const D3D11_MAPPED_SUBRESOURCE& mapped, int stride, int height)
+{
+    const auto* source = static_cast<const uint8_t*>(mapped.pData);
+    for (int row = 0; row < height; ++row) {
+        std::memcpy(buffer.data.data() + static_cast<std::size_t>(row) * stride,
+                    source + static_cast<std::size_t>(row) * mapped.RowPitch, static_cast<std::size_t>(stride));
+    }
+}
+
+// Rows one thread converts before the work is worth splitting: three table
+// reads per pixel are cheap enough that a small frame converts inline faster
+// than it spawns.
+constexpr int ScrgbRowsPerChunk = 128;
+
+// Converts @p height rows of scRGB half floats into the buffer's packed
+// ten-bit codes, splitting the rows across threads for a large frame. Each
+// chunk writes only its own rows.
+void convertScrgbRows(FrameCopyState& state, const D3D11_MAPPED_SUBRESOURCE& mapped, int width, int height)
+{
+    const auto* source = static_cast<const uint8_t*>(mapped.pData);
+    uint8_t* target = state.buffer.data.data();
+    const ScrgbToDisplayCodes& codes = state.scrgb;
+    const std::size_t targetStride = static_cast<std::size_t>(width) * 4;
+    runParallelChunks(parallelChunkCount(height, ScrgbRowsPerChunk), height,
+                      [&](int, int rowBegin, int rowEnd) noexcept {
+                          for (int row = rowBegin; row < rowEnd; ++row) {
+                              codes.convertRow(source + static_cast<std::size_t>(row) * mapped.RowPitch,
+                                               target + static_cast<std::size_t>(row) * targetStride, width);
+                          }
+                      });
+}
 
 struct AcquiredFrame
 {
@@ -319,13 +375,17 @@ private:
             reportStatus("could not create a capture device");
             return false;
         }
-        // Request BGRA explicitly where supported. Plain DuplicateOutput also
-        // converts to BGRA; copyFrame verifies the acquired texture either way.
+        // Ask for the desktop's own composition format: scRGB half floats
+        // while it composes in HDR or with Auto Color Management, BGRA8
+        // otherwise. Converting an scRGB desktop to BGRA8 in the duplication
+        // itself clips everything above 80 nits, so the conversion happens in
+        // copyFrame, which verifies the acquired texture either way. Plain
+        // DuplicateOutput stays the fallback and always converts to BGRA8.
         ComPtr<IDXGIOutput5> output5;
         HRESULT duplicated = E_NOINTERFACE;
         if (SUCCEEDED(output.As(&output5))) {
-            const DXGI_FORMAT formats[] = {DXGI_FORMAT_B8G8R8A8_UNORM};
-            duplicated = output5->DuplicateOutput1(setup.device.Get(), 0, 1, formats, &setup.duplication);
+            const DXGI_FORMAT formats[] = {DXGI_FORMAT_R16G16B16A16_FLOAT, DXGI_FORMAT_B8G8R8A8_UNORM};
+            duplicated = output5->DuplicateOutput1(setup.device.Get(), 0, 2, formats, &setup.duplication);
         }
         if (FAILED(duplicated)) {
             duplicated = output1->DuplicateOutput(setup.device.Get(), &setup.duplication);
@@ -333,6 +393,10 @@ private:
         if (FAILED(duplicated)) {
             reportStatus("could not duplicate the display");
             return false;
+        }
+        DXGI_OUTPUT_DESC outputDescription{};
+        if (SUCCEEDED(output->GetDesc(&outputDescription))) {
+            setup.colorTarget = findColorTarget(outputDescription.DeviceName);
         }
         DXGI_OUTDUPL_DESC duplicationDescription{};
         setup.duplication->GetDesc(&duplicationDescription);
@@ -377,14 +441,20 @@ private:
         return true;
     }
 
-    // Copies one acquired frame into a CPU buffer and publishes it. Returns
-    // Fatal when the frame cannot be copied (the loop must end), Published otherwise.
+    // Copies one acquired frame into a CPU buffer and publishes it. A BGRA8
+    // desktop is copied as it is. An scRGB desktop - what duplication delivers
+    // while Windows composes in HDR or with Auto Color Management - is
+    // normalised to the display's SDR white level and packed as ten-bit codes,
+    // so SDR content reads the same codes in every composition mode and
+    // nothing brighter than 80 nits clips. Returns Fatal when the frame cannot
+    // be copied (the loop must end), Published otherwise.
     FrameOutcome copyFrame(const DuplicationSetup& setup, ID3D11Texture2D* texture, FrameCopyState& state,
                            FrameMailbox& mailbox)
     {
         D3D11_TEXTURE2D_DESC description{};
         texture->GetDesc(&description);
-        if (description.Format != DXGI_FORMAT_B8G8R8A8_UNORM) {
+        const bool scrgb = description.Format == DXGI_FORMAT_R16G16B16A16_FLOAT;
+        if (description.Format != DXGI_FORMAT_B8G8R8A8_UNORM && !scrgb) {
             reportStatus("unsupported capture format");
             return FrameOutcome::Fatal;
         }
@@ -395,7 +465,8 @@ private:
 
         const int width = static_cast<int>(description.Width);
         const int height = static_cast<int>(description.Height);
-        const int stride = width * 4;
+        const int stride = width * 4;  // both layouts the scopes read are four bytes per pixel
+        double whiteNits = ScrgbWhiteNits;
         {
             D3D11_MAPPED_SUBRESOURCE mapped{};
             if (FAILED(setup.context->Map(state.staging.Get(), 0, D3D11_MAP_READ, 0, &mapped))) {
@@ -404,18 +475,34 @@ private:
             }
             const MappedTexture mappedTexture{*setup.context.Get(), *state.staging.Get()};
             state.buffer.sizeTo(static_cast<std::size_t>(stride) * height);
-            const auto* source = static_cast<const uint8_t*>(mapped.pData);
-            for (int row = 0; row < height; ++row) {
-                std::memcpy(state.buffer.data.data() + static_cast<std::size_t>(row) * stride,
-                            source + static_cast<std::size_t>(row) * mapped.RowPitch, static_cast<std::size_t>(stride));
+            if (scrgb) {
+                // Read per frame: the user can move the SDR brightness slider
+                // at any time, and nothing in the stream announces it.
+                whiteNits = sdrWhiteNits(setup.colorTarget);
+                state.scrgb.setSdrWhiteNits(whiteNits);
+                convertScrgbRows(state, mapped, width, height);
+            } else {
+                copyBgra8Rows(state.buffer, mapped, stride, height);
             }
         }
 
-        state.buffer.strideBytes = stride;
+        stampFrame(state, width, height, scrgb ? PixelFormat::Argb2101010 : PixelFormat::Bgra8);
+        logDelivery(state.buffer.format, whiteNits);
+        state.buffer = mailbox.publish(std::move(state.buffer));
+        return FrameOutcome::Published;
+    }
+
+    // Describes the delivery in the recycled buffer. Every field is written on
+    // every frame, never only on the ones that changed: the buffer comes back
+    // from the mailbox holding the previous delivery's answers, and one left
+    // alone mislabels these pixels.
+    void stampFrame(FrameCopyState& state, int width, int height, PixelFormat format)
+    {
+        state.buffer.strideBytes = width * 4;
         state.buffer.width = width;
         state.buffer.height = height;
         state.buffer.colorSpace = ColorSpaceHint::Srgb;
-        state.buffer.format = PixelFormat::Bgra8;
+        state.buffer.format = format;
         state.buffer.sourceX = 0;
         state.buffer.sourceY = 0;
         state.buffer.sourceWidth = width;
@@ -425,14 +512,31 @@ private:
         // pixel pointer and return bins from the previous display. The producer
         // counter spans every stream owned by this source.
         state.buffer.sequence = ++m_sequence;
-        state.buffer = mailbox.publish(std::move(state.buffer));
-        return FrameOutcome::Published;
+    }
+
+    // Logged when the delivery changes rather than on every frame, and stated
+    // afresh to every recording: a log switched on later still has to say what
+    // depth is being delivered and which white level it was normalised to.
+    void logDelivery(PixelFormat format, double whiteNits)
+    {
+        const DeliveryDescription delivery{format, static_cast<int>(std::lround(whiteNits * 10.0))};
+        if (!m_loggedDelivery.shouldLog(delivery)) {
+            return;
+        }
+        if (format == PixelFormat::Argb2101010) {
+            SS_DIAG(Perf, "capture format 10-bit from scRGB, sdr white %.1f nits", whiteNits);
+        } else {
+            SS_DIAG(Perf, "capture format 8-bit");
+        }
     }
 
     std::thread m_worker;
     uint64_t m_sequence = 0;  // worker-owned; stop joins before the next start
     std::atomic<bool> m_stopRequested{false};
     StatusCallback m_statusCallback;
+    // The delivery this recording has been told about, read on the capture
+    // thread and forgotten whenever a recording opens.
+    DiagOnChange<DeliveryDescription> m_loggedDelivery{DiagChannel::Perf};
 };
 
 }  // namespace

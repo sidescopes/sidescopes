@@ -14,6 +14,7 @@ add_executable(sidescopes_tests
     test_diagnostics.cpp
     test_environment.cpp
     test_color_lab.cpp
+    test_scrgb.cpp
     test_parallel_for.cpp
     test_frame_mailbox.cpp
     test_capture_crop.cpp
@@ -124,7 +125,11 @@ target_include_directories(sidescopes_tests PRIVATE ${nanosvg_SOURCE_DIR}/src)
 # The remainder of that layer (DXGI capture, GDI+ overlays, face detection,
 # enumeration) needs a live desktop and is verified by running the app.
 if(WIN32)
-    target_sources(sidescopes_tests PRIVATE test_windows_platform.cpp)
+    target_sources(sidescopes_tests PRIVATE
+        test_windows_platform.cpp
+        test_windows_advanced_color.cpp
+        ${CMAKE_SOURCE_DIR}/src/platform/windows/advanced_color.cpp
+    )
 endif()
 
 # The engine tests (test_vectorscope/waveform/histogram/graticule) are

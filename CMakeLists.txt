@@ -95,6 +95,7 @@ add_library(sidescopes_core STATIC
     src/core/diagnostics.cpp
     src/core/environment.cpp
     src/core/color_lab.cpp
+    src/core/scrgb.cpp
     src/core/region_hash.cpp
     src/core/heap.cpp
     src/core/trace_intensity.cpp
@@ -256,6 +257,7 @@ if(WIN32)
         src/platform/icons.cpp
         src/platform/region_geometry.cpp
         src/platform/shell_windows.cpp
+        src/platform/windows/advanced_color.cpp
         src/platform/windows/desktop.cpp
         src/platform/windows/face_detection.cpp
         src/platform/windows/native_menu.cpp

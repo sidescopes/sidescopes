@@ -6,6 +6,17 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Windows capture follows Advanced Color. With HDR or Automatically manage
+  color for apps enabled, the desktop is read as scRGB and delivered as
+  10-bit codes normalized to the SDR content brightness, so scopes read the
+  same values as in SDR and gain 10-bit precision from 10-bit sources.
+
+### Fixed
+
+- Scopes no longer read clipped highlights on Windows while HDR is on.
+
 ## [0.8.0] - 2026-09-10
 
 ### Added
