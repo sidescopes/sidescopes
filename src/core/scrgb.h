@@ -49,14 +49,24 @@ public:
         return m_codes[half];
     }
 
+    /// Whether one half-precision channel value lies at or above the SDR
+    /// white, where the code saturates: content the display shows brighter
+    /// than SDR white, which the scopes cannot tell from white.
+    [[nodiscard]] bool aboveWhite(uint16_t half) const
+    {
+        return m_aboveWhite[half] != 0;
+    }
+
     /// Converts @p width pixels of one R16G16B16A16_FLOAT row - eight bytes per
     /// pixel, little-endian halves in red, green, blue, alpha order - into
     /// @p width Argb2101010 pixels of four bytes each, written opaque.
-    void convertRow(const uint8_t* scrgbPixels, uint8_t* argb2101010Pixels, int width) const;
+    /// @return How many of the pixels have a channel at or above SDR white.
+    int convertRow(const uint8_t* scrgbPixels, uint8_t* argb2101010Pixels, int width) const;
 
 private:
     double m_sdrWhiteNits;
     std::vector<uint16_t> m_codes;
+    std::vector<uint8_t> m_aboveWhite;
 };
 
 }  // namespace sidescopes

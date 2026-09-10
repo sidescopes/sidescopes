@@ -137,6 +137,15 @@ TEST_CASE("At the scRGB white, 1.0 is full scale and the mid-grey lands on its s
     CHECK(codes.codeFor(0x7C00) == 1023);  // +inf
     CHECK(codes.codeFor(0x4200) == 1023);  // 3.0: brighter than SDR white saturates
     CHECK(codes.codeFor(0x0001) == 0);     // the smallest subnormal encodes below half a code
+    // At or above SDR white is where the code saturates: exactly 1.0 counts,
+    // the largest value below it does not, and nothing negative or undefined does.
+    CHECK(codes.aboveWhite(0x3C00));
+    CHECK(codes.aboveWhite(0x4200));
+    CHECK(codes.aboveWhite(0x7C00));
+    CHECK_FALSE(codes.aboveWhite(0x3BFF));
+    CHECK_FALSE(codes.aboveWhite(0x3800));
+    CHECK_FALSE(codes.aboveWhite(0xBC00));
+    CHECK_FALSE(codes.aboveWhite(0x7E00));
 }
 
 TEST_CASE("The SDR white level rescales the whole table")
@@ -144,6 +153,8 @@ TEST_CASE("The SDR white level rescales the whole table")
     ScrgbToDisplayCodes codes(240.0);
     CHECK(codes.sdrWhiteNits() == 240.0);
     CHECK(codes.codeFor(0x4200) == 1023);  // 3.0 is the SDR white at 240 nits
+    CHECK(codes.aboveWhite(0x4200));
+    CHECK_FALSE(codes.aboveWhite(0x3C00));  // 1.0 is a third of the way there
     // 1.0 at 240 nits is one third of SDR white: 1.055 * (1/3)^(1/2.4) - 0.055, times 1023.
     const auto oneThird = static_cast<uint16_t>(std::lround(encodedFromLinear(1.0 / 3.0) * 1023.0));
     CHECK(codes.codeFor(0x3C00) == oneThird);
@@ -213,7 +224,8 @@ TEST_CASE("A row converts to packed ten-bit pixels the frame reader decodes")
     std::vector<uint8_t> source(sizeof halves);
     std::memcpy(source.data(), halves, sizeof halves);
     std::vector<uint8_t> packed(12, 0xAA);
-    codes.convertRow(source.data(), packed.data(), 3);
+    const int above = codes.convertRow(source.data(), packed.data(), 3);
+    CHECK(above == 2);  // the red pixel reaches white, the last one exceeds it
 
     const Sample grey = Argb2101010Pixels::read(packed.data());
     CHECK(grey.r == 752);
@@ -232,9 +244,9 @@ TEST_CASE("A row converts to packed ten-bit pixels the frame reader decodes")
         CHECK((packed[static_cast<std::size_t>(pixel) * 4 + 3] & 0xC0u) == 0xC0u);
     }
 
-    // A zero-width row touches nothing.
+    // A zero-width row touches nothing and counts nothing.
     std::vector<uint8_t> untouched(4, 0x55);
-    codes.convertRow(source.data(), untouched.data(), 0);
+    CHECK(codes.convertRow(source.data(), untouched.data(), 0) == 0);
     CHECK(untouched == std::vector<uint8_t>(4, 0x55));
 }
 

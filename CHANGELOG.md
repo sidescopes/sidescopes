@@ -12,6 +12,8 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   color for apps enabled, the desktop is read as scRGB and delivered as
   10-bit codes normalized to the SDR content brightness, so scopes read the
   same values as in SDR and gain 10-bit precision from 10-bit sources.
+- Diagnostic recordings report the share of captured pixels brighter than
+  SDR white while Windows composes in HDR or Auto Color Management.
 
 ### Changed
 

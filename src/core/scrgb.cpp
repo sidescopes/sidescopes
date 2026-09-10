@@ -52,7 +52,8 @@ float floatFromHalf(uint16_t half)
 
 ScrgbToDisplayCodes::ScrgbToDisplayCodes(double sdrWhiteNits)
     : m_sdrWhiteNits(0.0),
-      m_codes(HalfPatterns)
+      m_codes(HalfPatterns),
+      m_aboveWhite(HalfPatterns)
 {
     setSdrWhiteNits(sdrWhiteNits);
 }
@@ -69,31 +70,40 @@ void ScrgbToDisplayCodes::setSdrWhiteNits(double nits)
         const double linear = static_cast<double>(floatFromHalf(static_cast<uint16_t>(pattern))) * scale;
         uint16_t code = 0;
         // NaN fails both comparisons and reads as black, like every negative value.
-        if (linear >= 1.0) {
+        const bool above = linear >= 1.0;
+        if (above) {
             code = MaxCode;
         } else if (linear > 0.0) {
             code = static_cast<uint16_t>(std::lround(encodedFromLinear(linear) * MaxCode));
         }
         m_codes[pattern] = code;
+        m_aboveWhite[pattern] = above ? 1 : 0;
     }
 }
 
-void ScrgbToDisplayCodes::convertRow(const uint8_t* scrgbPixels, uint8_t* argb2101010Pixels, int width) const
+int ScrgbToDisplayCodes::convertRow(const uint8_t* scrgbPixels, uint8_t* argb2101010Pixels, int width) const
 {
+    int above = 0;
     for (int x = 0; x < width; ++x) {
         const uint8_t* source = scrgbPixels + static_cast<std::size_t>(x) * 8;
         const auto half = [source](int channel) {
             const std::size_t offset = static_cast<std::size_t>(channel) * 2;
             return static_cast<uint16_t>(source[offset] | source[offset + 1] << 8);
         };
-        const uint32_t word = 0xC0000000u | static_cast<uint32_t>(codeFor(half(0))) << 20 |
-                              static_cast<uint32_t>(codeFor(half(1))) << 10 | codeFor(half(2));
+        const uint16_t red = half(0);
+        const uint16_t green = half(1);
+        const uint16_t blue = half(2);
+        const uint32_t word = 0xC0000000u | static_cast<uint32_t>(codeFor(red)) << 20 |
+                              static_cast<uint32_t>(codeFor(green)) << 10 | codeFor(blue);
         uint8_t* target = argb2101010Pixels + static_cast<std::size_t>(x) * 4;
         target[0] = static_cast<uint8_t>(word);
         target[1] = static_cast<uint8_t>(word >> 8);
         target[2] = static_cast<uint8_t>(word >> 16);
         target[3] = static_cast<uint8_t>(word >> 24);
+        above += (aboveWhite(red) || aboveWhite(green) || aboveWhite(blue)) ? 1 : 0;
     }
+
+    return above;
 }
 
 }  // namespace sidescopes

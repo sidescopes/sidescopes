@@ -16,6 +16,7 @@
 #include <windows.h>
 #include <wrl/client.h>
 
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <cmath>
@@ -94,20 +95,48 @@ constexpr int ScrgbRowsPerChunk = 128;
 
 // Converts @p height rows of scRGB half floats into the buffer's packed
 // ten-bit codes, splitting the rows across threads for a large frame. Each
-// chunk writes only its own rows.
-void convertScrgbRows(FrameCopyState& state, const D3D11_MAPPED_SUBRESOURCE& mapped, int width, int height)
+// chunk writes only its own rows and its own counter. Returns how many pixels
+// had a channel at or above SDR white, which saturate at full scale.
+int convertScrgbRows(FrameCopyState& state, const D3D11_MAPPED_SUBRESOURCE& mapped, int width, int height)
 {
     const auto* source = static_cast<const uint8_t*>(mapped.pData);
     uint8_t* target = state.buffer.data.data();
     const ScrgbToDisplayCodes& codes = state.scrgb;
     const std::size_t targetStride = static_cast<std::size_t>(width) * 4;
+    std::array<int, MaxParallelChunks> above{};
     runParallelChunks(parallelChunkCount(height, ScrgbRowsPerChunk), height,
-                      [&](int, int rowBegin, int rowEnd) noexcept {
+                      [&](int chunk, int rowBegin, int rowEnd) noexcept {
+                          int count = 0;
                           for (int row = rowBegin; row < rowEnd; ++row) {
-                              codes.convertRow(source + static_cast<std::size_t>(row) * mapped.RowPitch,
-                                               target + static_cast<std::size_t>(row) * targetStride, width);
+                              count += codes.convertRow(source + static_cast<std::size_t>(row) * mapped.RowPitch,
+                                                        target + static_cast<std::size_t>(row) * targetStride, width);
                           }
+                          above[static_cast<std::size_t>(chunk)] = count;
                       });
+    int total = 0;
+    for (const int count : above) {
+        total += count;
+    }
+
+    return total;
+}
+
+// The decade a share of pixels above SDR white falls in: none, under a tenth
+// of a percent, under one, under ten, or more. A recording learns of the
+// change of decade, not of every frame.
+int headroomBucket(int abovePixels, double sharePercent)
+{
+    if (abovePixels == 0) {
+        return 0;
+    }
+    if (sharePercent < 0.1) {
+        return 1;
+    }
+    if (sharePercent < 1.0) {
+        return 2;
+    }
+
+    return sharePercent < 10.0 ? 3 : 4;
 }
 
 struct AcquiredFrame
@@ -488,6 +517,7 @@ private:
 
         const int stride = rect.width * 4;  // both layouts the scopes read are four bytes per pixel
         double whiteNits = ScrgbWhiteNits;
+        int abovePixels = 0;
         {
             D3D11_MAPPED_SUBRESOURCE mapped{};
             if (FAILED(setup.context->Map(state.staging.Get(), 0, D3D11_MAP_READ, 0, &mapped))) {
@@ -501,7 +531,7 @@ private:
                 // at any time, and nothing in the stream announces it.
                 whiteNits = sdrWhiteNits(setup.colorTarget);
                 state.scrgb.setSdrWhiteNits(whiteNits);
-                convertScrgbRows(state, mapped, rect.width, rect.height);
+                abovePixels = convertScrgbRows(state, mapped, rect.width, rect.height);
             } else {
                 copyBgra8Rows(state.buffer, mapped, stride, rect.height);
             }
@@ -509,8 +539,22 @@ private:
 
         stampFrame(state, rect, description, scrgb ? PixelFormat::Argb2101010 : PixelFormat::Bgra8);
         logDelivery(state.buffer.format, whiteNits);
+        if (scrgb) {
+            logHeadroom(abovePixels, rect.width * rect.height);
+        }
         state.buffer = mailbox.publish(std::move(state.buffer));
         return FrameOutcome::Published;
+    }
+
+    // Content brighter than SDR white saturates at full scale, where the
+    // scopes cannot tell it from white; a recording is told what share of the
+    // frame that was, whenever the share changes decade.
+    void logHeadroom(int abovePixels, int pixels)
+    {
+        const double share = pixels > 0 ? 100.0 * abovePixels / pixels : 0.0;
+        if (m_loggedHeadroom.shouldLog(headroomBucket(abovePixels, share))) {
+            SS_DIAG(Perf, "capture pixels above sdr white %.2f%%", share);
+        }
     }
 
     // Copies @p rect of the acquired texture into a CPU-readable staging
@@ -582,6 +626,8 @@ private:
     // The delivery this recording has been told about, read on the capture
     // thread and forgotten whenever a recording opens.
     DiagOnChange<DeliveryDescription> m_loggedDelivery{DiagChannel::Perf};
+    // The decade of the above-white share this recording has been told about.
+    DiagOnChange<int> m_loggedHeadroom{DiagChannel::Perf};
     // The part of the display the copy is narrowed to, written by the
     // application thread and read once per frame by the capture thread.
     std::mutex m_cropMutex;
