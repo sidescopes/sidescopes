@@ -265,6 +265,13 @@ SideScopes receives the composited screen-capture result. The desktop capture
 is requested or labeled as sRGB where the platform API permits, and the scope
 calculations treat the received values as full-range, sRGB/Rec.709-like output.
 
+On Windows with HDR or Automatically manage color for apps enabled, the desktop
+is composited in linear scRGB. SideScopes reads it in that form, divides by the
+SDR content brightness, and encodes the result as 10-bit sRGB codes, so
+standard-range content reads the same values as with those settings off.
+Content brighter than SDR white reads as 100%, and colors outside sRGB read at
+the sRGB boundary.
+
 SideScopes does not inspect the source profile, timeline color space, display
 ICC profile, printer profile, HDR metadata, or upstream signal range. It is
 not a soft-proofing system, HDR reference monitor, gamut checker, or
