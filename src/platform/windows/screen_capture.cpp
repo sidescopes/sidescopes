@@ -58,7 +58,11 @@ struct DuplicationSetup
 // the scRGB conversion keeps its table for the white level last seen.
 struct FrameCopyState
 {
+    // Duplication's texture is invalid after ReleaseFrame. Keep our own GPU
+    // copy so a crop change can publish pixels without another desktop update.
+    ComPtr<ID3D11Texture2D> desktop;
     ComPtr<ID3D11Texture2D> staging;
+    std::optional<IntRect> publishedRect;
     FrameBuffer buffer;
     FrameStamp stamp;
     ScrgbToDisplayCodes scrgb;
@@ -96,7 +100,7 @@ constexpr int ScrgbRowsPerChunk = 128;
 // Converts @p height rows of scRGB half floats into the buffer's packed
 // ten-bit codes, splitting the rows across threads for a large frame. Each
 // chunk writes only its own rows and its own counter. Returns how many pixels
-// had a channel at or above SDR white, which saturate at full scale.
+// had a channel strictly above SDR white, which saturates at full scale.
 int convertScrgbRows(FrameCopyState& state, const D3D11_MAPPED_SUBRESOURCE& mapped, int width, int height)
 {
     const auto* source = static_cast<const uint8_t*>(mapped.pData);
@@ -178,6 +182,8 @@ enum class AcquireResult
 
 class DxgiScreenCaptureSource final : public ScreenCaptureSource
 {
+    friend struct DxgiCaptureTestAccess;
+
 public:
     ~DxgiScreenCaptureSource() override
     {
@@ -266,10 +272,8 @@ public:
         m_statusCallback = std::move(callback);
     }
 
-    // Takes effect on the next frame. The copy reads the crop once per frame
-    // and stamps exactly the rectangle it copied, so a change lands on a whole
-    // frame and never straddles one; the whole display keeps being duplicated,
-    // only the copy out of it narrows.
+    // The worker serves a changed crop from its owned desktop image even when
+    // duplication has no new frame. Each publication describes one whole crop.
     void narrowTo(const std::optional<IntRect>& rect) override
     {
         const std::lock_guard lock(m_cropMutex);
@@ -324,6 +328,11 @@ private:
         if (!openDuplication(adapterIndex, outputIndex, setup)) {
             return;
         }
+        captureFrames(setup, maxFramesPerSecond, mailbox, stamp);
+    }
+
+    void captureFrames(const DuplicationSetup& setup, int maxFramesPerSecond, FrameMailbox& mailbox, FrameStamp stamp)
+    {
         IDXGIOutputDuplication* duplication = setup.duplication.Get();
 
         FrameCopyState state;
@@ -346,36 +355,72 @@ private:
             }
 
             ComPtr<IDXGIResource> resource;
-            const AcquireResult acquired = acquireFrame(duplication, resource);
+            // A changed crop must not wait for a desktop update, but first
+            // check for one: continuous drags must not starve fresh video.
+            const AcquireResult acquired = acquireFrame(duplication, resource, cropChanged(state) ? 0 : 100);
             if (acquired == AcquireResult::Fatal) {
                 return;
             }
             if (acquired == AcquireResult::Retry) {
+                if (cropChanged(state)) {
+                    // This is a new crop of the last image. Keep that image's
+                    // receipt time rather than claiming a fresher desktop.
+                    if (copyFrame(setup, state.desktop.Get(), state, mailbox) == FrameOutcome::Fatal) {
+                        return;
+                    }
+                    lastPublish = now;
+                }
                 continue;
             }
             const AcquiredFrame acquiredFrame{*duplication};
             state.stamp.receivedSeconds = frameClockSeconds();
 
             ComPtr<ID3D11Texture2D> texture;
-            if (SUCCEEDED(resource.As(&texture))) {
-                const FrameOutcome outcome = copyFrame(setup, texture.Get(), state, mailbox);
-                if (outcome == FrameOutcome::Fatal) {
-                    return;
-                }
-                if (outcome == FrameOutcome::Published) {
-                    lastPublish = now;
-                }
+            if (FAILED(resource.As(&texture))) {
+                continue;
             }
+            if (!retainDesktop(setup, texture.Get(), state.desktop)) {
+                return;
+            }
+            if (copyFrame(setup, state.desktop.Get(), state, mailbox) == FrameOutcome::Fatal) {
+                return;
+            }
+            lastPublish = now;
         }
+    }
+
+    bool cropChanged(const FrameCopyState& state)
+    {
+        if (!state.desktop) {
+            return false;
+        }
+        D3D11_TEXTURE2D_DESC description{};
+        state.desktop->GetDesc(&description);
+        const IntRect wanted =
+            softwareCropRect(currentCrop(), static_cast<int>(description.Width), static_cast<int>(description.Height));
+
+        return state.publishedRect != wanted;
+    }
+
+    bool retainDesktop(const DuplicationSetup& setup, ID3D11Texture2D* texture, ComPtr<ID3D11Texture2D>& desktop)
+    {
+        D3D11_TEXTURE2D_DESC description{};
+        texture->GetDesc(&description);
+        if (!ensureTexture(setup.device.Get(), description, D3D11_USAGE_DEFAULT, desktop)) {
+            return false;
+        }
+        setup.context->CopyResource(desktop.Get(), texture);
+
+        return true;
     }
 
     // Acquires the next changed frame. Timeouts and metadata-only
     // deliveries ask the caller to retry; a lost stream is fatal. On
     // Frame, the caller owns the matching ReleaseFrame.
-    AcquireResult acquireFrame(IDXGIOutputDuplication* duplication, ComPtr<IDXGIResource>& resource)
+    AcquireResult acquireFrame(IDXGIOutputDuplication* duplication, ComPtr<IDXGIResource>& resource, UINT timeout)
     {
         DXGI_OUTDUPL_FRAME_INFO info{};
-        const HRESULT acquired = duplication->AcquireNextFrame(100, &info, &resource);
+        const HRESULT acquired = duplication->AcquireNextFrame(timeout, &info, &resource);
         if (acquired == DXGI_ERROR_WAIT_TIMEOUT) {
             return AcquireResult::Retry;
         }
@@ -459,12 +504,12 @@ private:
         return true;
     }
 
-    // Ensures the staging texture matches the incoming frame. A resolution
+    // Ensures an owned texture matches the incoming frame. A resolution
     // change usually kills the stream with ACCESS_LOST, but a driver may
     // also start delivering different-size frames in place; copying those
     // into the old staging texture would misbehave silently. Reports and
     // returns false only when a needed texture cannot be created.
-    bool ensureStaging(ID3D11Device* device, const D3D11_TEXTURE2D_DESC& frameDescription,
+    bool ensureTexture(ID3D11Device* device, const D3D11_TEXTURE2D_DESC& frameDescription, D3D11_USAGE usage,
                        ComPtr<ID3D11Texture2D>& staging)
     {
         if (staging) {
@@ -479,12 +524,12 @@ private:
             return true;
         }
         D3D11_TEXTURE2D_DESC stagingDescription = frameDescription;
-        stagingDescription.Usage = D3D11_USAGE_STAGING;
+        stagingDescription.Usage = usage;
         stagingDescription.BindFlags = 0;
-        stagingDescription.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+        stagingDescription.CPUAccessFlags = usage == D3D11_USAGE_STAGING ? D3D11_CPU_ACCESS_READ : 0;
         stagingDescription.MiscFlags = 0;
         if (FAILED(device->CreateTexture2D(&stagingDescription, nullptr, &staging))) {
-            reportStatus("could not create a staging texture");
+            reportStatus("could not create a capture texture");
             return false;
         }
         return true;
@@ -494,8 +539,8 @@ private:
     // desktop is copied as it is. An scRGB desktop - what duplication delivers
     // while Windows composes in HDR or with Auto Color Management - is
     // normalised to the display's SDR white level and packed as ten-bit codes,
-    // so SDR content reads the same codes in every composition mode and
-    // nothing brighter than 80 nits clips. Returns Fatal when the frame cannot
+    // so SDR content up to that white level survives in every composition mode.
+    // Returns Fatal when the frame cannot
     // be copied (the loop must end), Published otherwise.
     FrameOutcome copyFrame(const DuplicationSetup& setup, ID3D11Texture2D* texture, FrameCopyState& state,
                            FrameMailbox& mailbox)
@@ -507,6 +552,14 @@ private:
             reportStatus("unsupported capture format");
             return FrameOutcome::Fatal;
         }
+        // Missing display metadata is not an 80-nit white. End this stream so
+        // recovery resolves the current target again before showing any codes.
+        // Read every delivery because the SDR brightness slider can change.
+        const auto white = scrgb ? sdrWhiteNits(setup.colorTarget) : std::optional<double>{ScrgbWhiteNits};
+        if (!white) {
+            reportStatus("could not read the display SDR white level");
+            return FrameOutcome::Fatal;
+        }
         // Only the rows and columns the region needs leave the GPU; the frame
         // says which part of the display it carries.
         const IntRect rect =
@@ -516,7 +569,7 @@ private:
         }
 
         const int stride = rect.width * 4;  // both layouts the scopes read are four bytes per pixel
-        double whiteNits = ScrgbWhiteNits;
+        const double whiteNits = *white;
         int abovePixels = 0;
         {
             D3D11_MAPPED_SUBRESOURCE mapped{};
@@ -527,9 +580,6 @@ private:
             const MappedTexture mappedTexture{*setup.context.Get(), *state.staging.Get()};
             state.buffer.sizeTo(static_cast<std::size_t>(stride) * rect.height);
             if (scrgb) {
-                // Read per frame: the user can move the SDR brightness slider
-                // at any time, and nothing in the stream announces it.
-                whiteNits = sdrWhiteNits(setup.colorTarget);
                 state.scrgb.setSdrWhiteNits(whiteNits);
                 abovePixels = convertScrgbRows(state, mapped, rect.width, rect.height);
             } else {
@@ -543,6 +593,7 @@ private:
             logHeadroom(abovePixels, rect.width * rect.height);
         }
         state.buffer = mailbox.publish(std::move(state.buffer));
+        state.publishedRect = rect;
         return FrameOutcome::Published;
     }
 
@@ -566,7 +617,7 @@ private:
         D3D11_TEXTURE2D_DESC shape = description;
         shape.Width = static_cast<UINT>(rect.width);
         shape.Height = static_cast<UINT>(rect.height);
-        if (!ensureStaging(setup.device.Get(), shape, staging)) {
+        if (!ensureTexture(setup.device.Get(), shape, D3D11_USAGE_STAGING, staging)) {
             return false;
         }
         const D3D11_BOX box{static_cast<UINT>(rect.x),

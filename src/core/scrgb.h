@@ -49,9 +49,8 @@ public:
         return m_codes[half];
     }
 
-    /// Whether one half-precision channel value lies at or above the SDR
-    /// white, where the code saturates: content the display shows brighter
-    /// than SDR white, which the scopes cannot tell from white.
+    /// Whether one half-precision channel value exceeds the SDR white.
+    /// Exactly white still produces the maximum code but needs no headroom.
     [[nodiscard]] bool aboveWhite(uint16_t half) const
     {
         return m_aboveWhite[half] != 0;
@@ -60,7 +59,7 @@ public:
     /// Converts @p width pixels of one R16G16B16A16_FLOAT row - eight bytes per
     /// pixel, little-endian halves in red, green, blue, alpha order - into
     /// @p width Argb2101010 pixels of four bytes each, written opaque.
-    /// @return How many of the pixels have a channel at or above SDR white.
+    /// @return How many of the pixels have a channel strictly above SDR white.
     int convertRow(const uint8_t* scrgbPixels, uint8_t* argb2101010Pixels, int width) const;
 
 private:

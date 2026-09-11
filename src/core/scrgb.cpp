@@ -70,14 +70,13 @@ void ScrgbToDisplayCodes::setSdrWhiteNits(double nits)
         const double linear = static_cast<double>(floatFromHalf(static_cast<uint16_t>(pattern))) * scale;
         uint16_t code = 0;
         // NaN fails both comparisons and reads as black, like every negative value.
-        const bool above = linear >= 1.0;
-        if (above) {
+        if (linear >= 1.0) {
             code = MaxCode;
         } else if (linear > 0.0) {
             code = static_cast<uint16_t>(std::lround(encodedFromLinear(linear) * MaxCode));
         }
         m_codes[pattern] = code;
-        m_aboveWhite[pattern] = above ? 1 : 0;
+        m_aboveWhite[pattern] = linear > 1.0 ? 1 : 0;
     }
 }
 

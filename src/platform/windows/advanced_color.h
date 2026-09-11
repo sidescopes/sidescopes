@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
 
 namespace sidescopes {
 
@@ -21,13 +22,12 @@ struct ColorTarget
 [[nodiscard]] ColorTarget findColorTarget(const wchar_t* deviceName);
 
 /// The SDR white level of @p target in nits, read from the display
-/// configuration; the scRGB white of 80 nits when the target is unknown or the
-/// level cannot be read.
-[[nodiscard]] double sdrWhiteNits(const ColorTarget& target);
+/// configuration. An unknown target, failed lookup or zero level has no value;
+/// capture must recover rather than normalize with an assumed white level.
+[[nodiscard]] std::optional<double> sdrWhiteNits(const ColorTarget& target);
 
 /// Converts the fixed-point SDR white level DisplayConfig reports, where 1000
-/// is the scRGB white of 80 nits, to nits. Zero, which the API never reports
-/// for a live target, reads as the scRGB white so the conversion stays neutral.
-[[nodiscard]] double sdrWhiteNitsFromLevel(uint32_t level);
+/// is the scRGB white of 80 nits, to nits. Zero is not a usable white level.
+[[nodiscard]] std::optional<double> sdrWhiteNitsFromLevel(uint32_t level);
 
 }  // namespace sidescopes

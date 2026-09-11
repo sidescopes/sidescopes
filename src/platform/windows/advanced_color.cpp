@@ -11,12 +11,12 @@
 
 namespace sidescopes {
 
-double sdrWhiteNitsFromLevel(uint32_t level)
+std::optional<double> sdrWhiteNitsFromLevel(uint32_t level)
 {
     // DisplayConfig states the level in thousandths of the scRGB white.
     constexpr double LevelsPerScrgbWhite = 1000.0;
     if (level == 0) {
-        return ScrgbWhiteNits;
+        return std::nullopt;
     }
 
     return static_cast<double>(level) / LevelsPerScrgbWhite * ScrgbWhiteNits;
@@ -25,15 +25,22 @@ double sdrWhiteNitsFromLevel(uint32_t level)
 ColorTarget findColorTarget(const wchar_t* deviceName)
 {
     ColorTarget target;
+    std::vector<DISPLAYCONFIG_PATH_INFO> paths;
+    std::vector<DISPLAYCONFIG_MODE_INFO> modes;
     UINT32 pathCount = 0;
-    UINT32 modeCount = 0;
-    if (GetDisplayConfigBufferSizes(QDC_ONLY_ACTIVE_PATHS, &pathCount, &modeCount) != ERROR_SUCCESS) {
-        return target;
+    LONG result = ERROR_INSUFFICIENT_BUFFER;
+    // The topology can grow between sizing and querying. Bound retries so a
+    // repeatedly changing desktop still returns control to capture recovery.
+    for (int attempt = 0; attempt < 3 && result == ERROR_INSUFFICIENT_BUFFER; ++attempt) {
+        UINT32 modeCount = 0;
+        if (GetDisplayConfigBufferSizes(QDC_ONLY_ACTIVE_PATHS, &pathCount, &modeCount) != ERROR_SUCCESS) {
+            return target;
+        }
+        paths.resize(pathCount);
+        modes.resize(modeCount);
+        result = QueryDisplayConfig(QDC_ONLY_ACTIVE_PATHS, &pathCount, paths.data(), &modeCount, modes.data(), nullptr);
     }
-    std::vector<DISPLAYCONFIG_PATH_INFO> paths(pathCount);
-    std::vector<DISPLAYCONFIG_MODE_INFO> modes(modeCount);
-    if (QueryDisplayConfig(QDC_ONLY_ACTIVE_PATHS, &pathCount, paths.data(), &modeCount, modes.data(), nullptr) !=
-        ERROR_SUCCESS) {
+    if (result != ERROR_SUCCESS) {
         return target;
     }
     for (UINT32 index = 0; index < pathCount; ++index) {
@@ -56,10 +63,10 @@ ColorTarget findColorTarget(const wchar_t* deviceName)
     return target;
 }
 
-double sdrWhiteNits(const ColorTarget& target)
+std::optional<double> sdrWhiteNits(const ColorTarget& target)
 {
     if (!target.found) {
-        return ScrgbWhiteNits;
+        return std::nullopt;
     }
     DISPLAYCONFIG_SDR_WHITE_LEVEL level{};
     level.header.type = DISPLAYCONFIG_DEVICE_INFO_GET_SDR_WHITE_LEVEL;
@@ -68,7 +75,7 @@ double sdrWhiteNits(const ColorTarget& target)
     level.header.adapterId.HighPart = target.adapterIdHigh;
     level.header.id = target.id;
     if (DisplayConfigGetDeviceInfo(&level.header) != ERROR_SUCCESS) {
-        return ScrgbWhiteNits;
+        return std::nullopt;
     }
 
     return sdrWhiteNitsFromLevel(level.SDRWhiteLevel);

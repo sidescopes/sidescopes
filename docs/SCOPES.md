@@ -270,7 +270,9 @@ is composited in linear scRGB. SideScopes reads it in that form, divides by the
 SDR content brightness, and encodes the result as 10-bit sRGB codes, so
 standard-range content reads the same values as with those settings off.
 Content brighter than SDR white reads as 100%, and colors outside sRGB read at
-the sRGB boundary.
+the sRGB boundary. If the display's SDR brightness cannot be read, capture
+recovers before publishing normalized values. Diagnostic recordings count
+pixels with any channel strictly above SDR white; exact white is excluded.
 
 SideScopes does not inspect the source profile, timeline color space, display
 ICC profile, printer profile, HDR metadata, or upstream signal range. It is

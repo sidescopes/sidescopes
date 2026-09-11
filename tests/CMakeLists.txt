@@ -128,8 +128,6 @@ target_include_directories(sidescopes_tests PRIVATE ${nanosvg_SOURCE_DIR}/src)
 if(WIN32)
     target_sources(sidescopes_tests PRIVATE
         test_windows_platform.cpp
-        test_windows_advanced_color.cpp
-        ${CMAKE_SOURCE_DIR}/src/platform/windows/advanced_color.cpp
     )
 endif()
 

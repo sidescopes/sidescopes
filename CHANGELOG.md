@@ -17,12 +17,18 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
-- Windows capture copies only the monitored region out of the duplicated
-  display instead of the whole display on every frame.
+- Windows capture reads only the monitored region back to CPU memory and
+  retains the desktop on the GPU for region changes.
 
 ### Fixed
 
-- Scopes no longer read clipped highlights on Windows while HDR is on.
+- Windows HDR capture preserves SDR content up to the selected SDR white
+  level. Content brighter than SDR white still saturates at full scale.
+- Moving or widening the monitored region updates the capture even when
+  the Windows desktop is still.
+- Unreadable Windows SDR brightness metadata triggers capture recovery
+  instead of producing incorrectly normalized colors.
+- Diagnostic recordings exclude exact SDR white from the above-white count.
 
 ## [0.8.0] - 2026-09-10
 

@@ -16,7 +16,7 @@ if(APPLE)
     add_executable(sidescopes_native_tests test_macos_platform.mm)
     target_compile_options(sidescopes_native_tests PRIVATE -fobjc-arc)
 elseif(WIN32)
-    add_executable(sidescopes_native_tests test_windows_platform.cpp)
+    add_executable(sidescopes_native_tests test_windows_platform.cpp test_windows_advanced_color.cpp)
     target_compile_definitions(sidescopes_native_tests PRIVATE UNICODE _UNICODE)
 else()
     return()
@@ -41,6 +41,16 @@ if(APPLE)
 endif()
 
 if(WIN32)
+    # Compile the capture implementation inside this executable so a friend
+    # can supply a scripted duplication object and a real WARP device. The
+    # platform archive supplies the remaining helpers, not a second capture.
+    add_executable(sidescopes_windows_capture_tests test_windows_capture.cpp)
+    target_compile_definitions(sidescopes_windows_capture_tests PRIVATE UNICODE _UNICODE)
+    target_link_libraries(sidescopes_windows_capture_tests PRIVATE sidescopes_platform Catch2::Catch2WithMain)
+    sidescopes_target_defaults(sidescopes_windows_capture_tests)
+    catch_discover_tests(sidescopes_windows_capture_tests
+        TEST_PREFIX "Windows capture: " PROPERTIES LABELS native TIMEOUT 30)
+
     add_executable(sidescopes_native_allocation_tests
         test_windows_allocations.cpp
         ../support/allocation_failure.cpp)
