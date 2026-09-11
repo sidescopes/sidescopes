@@ -1,6 +1,6 @@
 # Scopes
 
-SideScopes provides five scopes, plus Color Picker. Any combination can share
+SideScopes provides six desktop scopes, plus Color Picker. Any combination can share
 the window, one pane per instrument. Use the scope selector to choose and order
 them, or use the keyboard shortcuts.
 
@@ -102,6 +102,47 @@ for locating and comparing level distributions in the rendered output.
 
 **Plain** draws a neutral trace. **Colored** tints the trace from the captured
 RGB contributions while keeping the same luma coordinate.
+
+## HDR Luminance
+
+<aside class="shortcut-note">
+<strong>Default shortcut:</strong> <kbd>E</kbd> shows HDR Luminance by itself.
+<kbd>Shift+E</kbd> adds it to the current layout, or removes it when another
+instrument remains. This instrument is available in development builds after
+0.8.0; it is not part of the browser Lab.
+</aside>
+
+HDR Luminance retains horizontal image position and measures linear-light
+luminance relative to SDR white. The center line, **0 stops**, is SDR white.
+**+1 stop** is twice that luminance; **+2** is four times; **-1** is half.
+The trace is white below the reference and amber above it.
+
+The plot spans -6 to +6 stops. Black and values below -6 share the bottom
+row; values above +6 share the top row. The **Peak** reading retains the
+actual maximum even beyond the plot, and **above white** reports the share
+of valid region pixels whose luminance exceeds SDR white. Both readings use
+every pixel in the selected region. Invalid samples are excluded and flagged.
+An unavailable HDR capture says so explicitly; it is not reported as black.
+
+Opening this scope enables the extra capture and processing work. Closing it
+returns to the ordinary capture path. On Apple Silicon with macOS 15 or later,
+SideScopes requests local-display HDR capture in Display P3 PQ, validates the
+delivered encoding, and decodes it using a nominal 100-nit reference. On Windows,
+HDR or Auto Color Management must provide scRGB desktop frames; their luminance
+is divided by the display's current SDR content brightness. Eight-bit fallback
+frames and older Mac capture paths do not provide this measurement.
+
+These are relative measurements of the captured desktop, not readings of
+emitted panel brightness or the source file. Display settings, application
+rendering, tone mapping, capture quantization, and desktop composition can all
+affect them. Very small excursions around white can be capture rounding.
+
+The other scopes and Color Picker retain their SDR ranges. While HDR capture
+is active, their companion sRGB codes clip channels outside 0–100%; on Mac this
+conversion can differ from ScreenCaptureKit's ordinary SDR rendition. HDR
+luminance is measured before that clipping, including contributions from colors
+outside sRGB. It is luminance, not the brightest individual RGB channel.
+SDR cursor swatches and pins have no HDR marker on this instrument.
 
 ## RGB Parade
 
@@ -262,20 +303,24 @@ size are not part of a layout preset.
 ## Measurement boundary
 
 SideScopes receives the composited screen-capture result. The desktop capture
-is requested or labeled as sRGB where the platform API permits, and the scope
-calculations treat the received values as full-range, sRGB/Rec.709-like output.
+is requested or converted to sRGB where the platform API permits. The ordinary
+scope calculations treat the resulting codes as full-range, sRGB/Rec.709-like
+output. HDR Luminance uses a separate linear-light measurement.
 
 On Windows with HDR or Automatically manage color for apps enabled, the desktop
 is composited in linear scRGB. SideScopes reads it in that form, divides by the
-SDR content brightness, and encodes the result as 10-bit sRGB codes, so
-standard-range content reads the same values as with those settings off.
-Content brighter than SDR white reads as 100%, and colors outside sRGB read at
-the sRGB boundary. If the display's SDR brightness cannot be read, capture
-recovers before publishing normalized values. Diagnostic recordings count
+SDR content brightness, and encodes the result as 10-bit sRGB codes. This
+removes the desktop's SDR white boost; it does not guarantee identical pixels
+when application rendering or desktop composition changes.
+In the ordinary scopes, content brighter than SDR white reads as 100%, and
+colors outside sRGB read at the sRGB boundary. HDR Luminance retains the
+above-white luminance separately. If the display's SDR brightness cannot be
+read, capture recovers before publishing normalized values. Diagnostic recordings count
 pixels with any channel strictly above SDR white; exact white is excluded.
+That diagnostic differs from the HDR scope's luminance-based percentage.
 
 SideScopes does not inspect the source profile, timeline color space, display
-ICC profile, printer profile, HDR metadata, or upstream signal range. It is
-not a soft-proofing system, HDR reference monitor, gamut checker, or
+ICC calibration, printer profile, source HDR mastering metadata, or upstream
+signal range. It is not a soft-proofing system, HDR reference monitor, gamut checker, or
 source-signal compliance scope. Use the source application's own configured
 scopes when those stages matter.

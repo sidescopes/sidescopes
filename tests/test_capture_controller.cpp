@@ -13,6 +13,31 @@ namespace sidescopes {
 using test::FakeCaptureSource;
 using test::makeTarget;
 
+TEST_CASE("HDR capture changes replace a running stream and survive suspension", "[hdr]")
+{
+    FakeCaptureSource source;
+    source.targets = {makeTarget(7, "primary")};
+    FrameMailbox mailbox;
+    CaptureController controller(source, mailbox);
+    REQUIRE(controller.requestPermission());
+    REQUIRE(controller.start());
+    const uint64_t firstEpoch = controller.streamEpoch();
+    controller.setHdrEnabled(true);
+    CHECK(source.hdrEnabled);
+    CHECK_FALSE(source.hdrChangedWhileRunning);
+    CHECK(source.startCount == 2);
+    CHECK(controller.streamEpoch() > firstEpoch);
+    controller.setHdrEnabled(true);
+    CHECK(source.startCount == 2);
+    controller.suspend("hidden");
+    controller.setHdrEnabled(false);
+    CHECK(source.startCount == 2);
+    controller.resume();
+    CHECK_FALSE(source.hdrEnabled);
+    CHECK_FALSE(source.hdrChangedWhileRunning);
+    CHECK(source.startCount == 3);
+}
+
 TEST_CASE("A denied permission keeps the controller from touching the source")
 {
     FakeCaptureSource source;

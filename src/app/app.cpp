@@ -408,6 +408,7 @@ void App::runFrame()
     const bool nothingToDrawInto = framebufferWidth == 0 || framebufferHeight == 0;
     // Capture is a service that dies (lock screen, display sleep); restarting
     // it is our job.
+    m_captureController.setHdrEnabled(m_view.stack().shows(HdrWaveformScopeId));
     serviceCapture(nothingToDrawInto, glfwGetTime());
     m_captureController.service(glfwGetTime());
     // Attached regions: observe the attached windows and route the analysis by

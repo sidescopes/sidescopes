@@ -14,6 +14,7 @@ actions.
 | L | Show Luma Waveform |
 | R | Show RGB Parade |
 | H | Show Histogram |
+| E | Show HDR Luminance (development builds after 0.8.0; desktop only) |
 | C | Show Color Picker |
 | Z | Cycle Vectorscope zoom: 1x, 2x, 4x |
 

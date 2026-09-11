@@ -10,7 +10,8 @@ if(SIDESCOPES_MODULES_DYNAMIC)
     add_dependencies(sidescopes_lifecycle_stress
         sidescopes_module_vectorscope
         sidescopes_module_waveform
-        sidescopes_module_histogram)
+        sidescopes_module_histogram
+        sidescopes_module_hdr)
 endif()
 sidescopes_target_defaults(sidescopes_lifecycle_stress)
 catch_discover_tests(sidescopes_lifecycle_stress

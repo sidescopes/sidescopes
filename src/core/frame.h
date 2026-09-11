@@ -204,6 +204,13 @@ struct FrameView
     /// nothing produces exactly the frame it always did.
     PixelFormat format = PixelFormat::Bgra8;
     FrameStamp stamp{};
+    /// Optional, tightly packed linear-light luminance plane, one float per
+    /// pixel in the same geometry. One is SDR reference white; values above
+    /// one retain HDR highlights. Non-finite samples are invalid readings.
+    /// Null means no HDR measurement is available, never an all-black frame.
+    const float* hdrLuminance = nullptr;
+    /// Nominal encoding reference, not measured panel brightness.
+    double hdrWhiteNits = 0.0;
 
     /// The display's pixel extents, which for an uncropped frame are its own.
     [[nodiscard]] int displayWidth() const

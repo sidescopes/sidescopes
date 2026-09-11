@@ -37,6 +37,19 @@ struct FrameBuffer
     int sourceWidth = 0;
     int sourceHeight = 0;
     FrameStamp stamp;
+    std::vector<float, PageAllocator<float>> hdrLuminance;
+    double hdrWhiteNits = 0.0;
+
+    /// Releases HDR storage when the delivery cannot measure headroom.
+    void sizeHdrTo(std::size_t pixels, double whiteNits)
+    {
+        if (hdrLuminance.capacity() != pixels) {
+            decltype(hdrLuminance){}.swap(hdrLuminance);
+            hdrLuminance.reserve(pixels);
+        }
+        hdrLuminance.resize(pixels);
+        hdrWhiteNits = pixels > 0 ? whiteNits : 0.0;
+    }
 
     /// Sizes the pixel storage to @p bytes, holding no more than that.
     ///
@@ -59,8 +72,20 @@ struct FrameBuffer
 
     [[nodiscard]] FrameView view() const
     {
-        return FrameView{data.data(), strideBytes, width,       height,       colorSpace, sequence,
-                         sourceX,     sourceY,     sourceWidth, sourceHeight, format,     stamp};
+        return FrameView{data.data(),
+                         strideBytes,
+                         width,
+                         height,
+                         colorSpace,
+                         sequence,
+                         sourceX,
+                         sourceY,
+                         sourceWidth,
+                         sourceHeight,
+                         format,
+                         stamp,
+                         hdrLuminance.empty() ? nullptr : hdrLuminance.data(),
+                         hdrWhiteNits};
     }
 
     [[nodiscard]] int displayWidth() const

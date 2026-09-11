@@ -33,6 +33,7 @@ void clearOutput(AnalysisWorker::Output& output, uint64_t framesProcessed, uint6
 {
     output.images.clear();
     output.outlines.clear();
+    output.readings.clear();
     output.accumulateMilliseconds = 0.0;
     output.framesProcessed = framesProcessed;
     output.version = version;
@@ -300,7 +301,9 @@ SsFrameView toBoundaryFrame(const FrameView& view)
                        view.height,
                        view.colorSpace == ColorSpaceHint::Srgb ? SS_COLOR_SPACE_SRGB : SS_COLOR_SPACE_UNKNOWN,
                        view.sequence,
-                       view.format == PixelFormat::Argb2101010 ? SS_PIXEL_FORMAT_ARGB2101010 : SS_PIXEL_FORMAT_BGRA8};
+                       view.format == PixelFormat::Argb2101010 ? SS_PIXEL_FORMAT_ARGB2101010 : SS_PIXEL_FORMAT_BGRA8,
+                       view.hdrLuminance,
+                       view.hdrWhiteNits};
 }
 
 bool copyImage(const SsImageView& view, ScopeImage& image)
@@ -436,6 +439,7 @@ bool writeOutput(AnalysisWorker::Output& output, std::vector<WorkerScope>& scope
         if (!scope.instance.valid() || !scope.accumulated || !copyImage(scope.instance.image(), image)) {
             image = {};
             output.outlines.erase(scope.id);
+            output.readings.erase(scope.id);
             scope.accumulated = false;
             complete = false;
             continue;
@@ -444,6 +448,17 @@ bool writeOutput(AnalysisWorker::Output& output, std::vector<WorkerScope>& scope
             std::vector<float>& outline = output.outlines[scope.id];
             outline.resize(scope.outline->heights(scope.instance.raw(), nullptr, 0));
             scope.outline->heights(scope.instance.raw(), outline.data(), static_cast<uint32_t>(outline.size()));
+        }
+        const auto* reading = static_cast<const SsReadingExtension*>(scope.instance.getExtension(ReadingExtension));
+        const char* text = reading ? reading->text(scope.instance.raw()) : nullptr;
+        if (text) {
+            std::size_t length = 0;
+            while (length < 159 && text[length] != '\0') {
+                ++length;
+            }
+            output.readings[scope.id].assign(text, length);
+        } else {
+            output.readings.erase(scope.id);
         }
     }
 

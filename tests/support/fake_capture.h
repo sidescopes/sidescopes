@@ -29,6 +29,16 @@ public:
     uint32_t lastStartedDisplay = 0;
     uint64_t lastCaptureEpoch = 0;
     int lastFramesPerSecond = 0;
+    bool hdrEnabled = false;
+    bool running = false;
+    bool hdrChangedWhileRunning = false;
+
+    void setHdrEnabled(bool enabled) override
+    {
+        hdrChangedWhileRunning |= running;
+        hdrEnabled = enabled;
+    }
+
     /// Every narrowing the controller passed through, in order, so a test can
     /// tell "asked for the whole display" from "was not asked at all".
     std::vector<std::optional<IntRect>> narrowings;
@@ -56,6 +66,7 @@ public:
         lastStartedDisplay = target.displayId;
         lastCaptureEpoch = captureEpoch;
         lastFramesPerSecond = maxFramesPerSecond;
+        running = startSucceeds;
 
         return startSucceeds;
     }
@@ -63,6 +74,7 @@ public:
     void stop() override
     {
         ++stopCount;
+        running = false;
     }
 
     void setStatusCallback(StatusCallback callback) override

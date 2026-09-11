@@ -19,6 +19,7 @@ inline constexpr char WaveformScopeId[] = "org.sidescopes.waveform";
 inline constexpr char LumaWaveformScopeId[] = "org.sidescopes.waveform.luma";
 inline constexpr char ParadeScopeId[] = "org.sidescopes.parade";
 inline constexpr char HistogramScopeId[] = "org.sidescopes.histogram";
+inline constexpr char HdrWaveformScopeId[] = "org.sidescopes.waveform.hdr";
 
 /// What a fresh window shows, and what an empty or invalid saved stack falls
 /// back to. The pair exposes both chroma distribution and spatial channel

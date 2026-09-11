@@ -61,6 +61,14 @@ public:
 
     virtual void setStatusCallback(StatusCallback callback) = 0;
 
+    /// Selects whether the next stream should retain HDR luminance. Called
+    /// only while stopped. Unsupported sources continue SDR capture and
+    /// leave the optional luminance plane absent.
+    virtual void setHdrEnabled(bool enabled)
+    {
+        (void)enabled;
+    }
+
     /// Asks the running stream to deliver only @p rect of the display, in display
     /// pixels, or the whole display when nothing is passed. Frames report which
     /// part of the display they carry either way, so narrowing never moves what a

@@ -63,8 +63,10 @@ void drawGraticule(const DrawnScope& scope, const std::vector<SsGraticulePrimiti
             }
             case GraticuleOp::Label: {
                 const ImVec2 anchor = at(scope, command.x0, command.y0);
-                draw->AddText(ImVec2(anchor.x + command.offsetX, anchor.y + command.offsetY), command.color,
-                              command.label);
+                // A label on the bottom edge belongs inside its plot.
+                const float offsetY = command.y0 == 1.0f && scope.zoom == 1.0f ? -ImGui::GetFontSize() - command.offsetY
+                                                                               : command.offsetY;
+                draw->AddText(ImVec2(anchor.x + command.offsetX, anchor.y + offsetY), command.color, command.label);
                 break;
             }
             }

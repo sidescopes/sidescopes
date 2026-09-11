@@ -108,15 +108,19 @@ int convertScrgbRows(FrameCopyState& state, const D3D11_MAPPED_SUBRESOURCE& mapp
     const ScrgbToDisplayCodes& codes = state.scrgb;
     const std::size_t targetStride = static_cast<std::size_t>(width) * 4;
     std::array<int, MaxParallelChunks> above{};
-    runParallelChunks(parallelChunkCount(height, ScrgbRowsPerChunk), height,
-                      [&](int chunk, int rowBegin, int rowEnd) noexcept {
-                          int count = 0;
-                          for (int row = rowBegin; row < rowEnd; ++row) {
-                              count += codes.convertRow(source + static_cast<std::size_t>(row) * mapped.RowPitch,
-                                                        target + static_cast<std::size_t>(row) * targetStride, width);
-                          }
-                          above[static_cast<std::size_t>(chunk)] = count;
-                      });
+    runParallelChunks(
+        parallelChunkCount(height, ScrgbRowsPerChunk), height, [&](int chunk, int rowBegin, int rowEnd) noexcept {
+            int count = 0;
+            for (int row = rowBegin; row < rowEnd; ++row) {
+                count +=
+                    codes.convertRow(source + static_cast<std::size_t>(row) * mapped.RowPitch,
+                                     target + static_cast<std::size_t>(row) * targetStride, width,
+                                     state.buffer.hdrLuminance.empty()
+                                         ? nullptr
+                                         : state.buffer.hdrLuminance.data() + static_cast<std::size_t>(row) * width);
+            }
+            above[static_cast<std::size_t>(chunk)] = count;
+        });
     int total = 0;
     for (const int count : above) {
         total += count;
@@ -257,6 +261,11 @@ public:
         }
         m_stopRequested.store(true);
         return false;
+    }
+
+    void setHdrEnabled(bool enabled) override
+    {
+        m_hdrEnabled = enabled;
     }
 
     void stop() override
@@ -579,6 +588,8 @@ private:
             }
             const MappedTexture mappedTexture{*setup.context.Get(), *state.staging.Get()};
             state.buffer.sizeTo(static_cast<std::size_t>(stride) * rect.height);
+            state.buffer.sizeHdrTo(scrgb && m_hdrEnabled ? static_cast<std::size_t>(rect.width) * rect.height : 0,
+                                   whiteNits);
             if (scrgb) {
                 state.scrgb.setSdrWhiteNits(whiteNits);
                 abovePixels = convertScrgbRows(state, mapped, rect.width, rect.height);
@@ -671,7 +682,8 @@ private:
     }
 
     std::thread m_worker;
-    uint64_t m_sequence = 0;  // worker-owned; stop joins before the next start
+    bool m_hdrEnabled = false;  // changed only while the worker is stopped
+    uint64_t m_sequence = 0;    // worker-owned; stop joins before the next start
     std::atomic<bool> m_stopRequested{false};
     StatusCallback m_statusCallback;
     // The delivery this recording has been told about, read on the capture

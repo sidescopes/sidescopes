@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cmath>
+
 #include "core/frame.h"
 #include "sidescopes/module.h"
 
@@ -11,7 +13,8 @@ namespace sidescopes {
 {
     const bool knownFormat =
         frame.pixel_format == SS_PIXEL_FORMAT_BGRA8 || frame.pixel_format == SS_PIXEL_FORMAT_ARGB2101010;
-    return knownFormat && frame.width >= 0 && frame.height >= 0 &&
+    const bool validHdr = !frame.hdr_luminance || (std::isfinite(frame.hdr_white_nits) && frame.hdr_white_nits > 0.0);
+    return knownFormat && validHdr && frame.width >= 0 && frame.height >= 0 &&
            (frame.width == 0 || frame.height == 0 ||
             (frame.pixels && frame.stride_bytes >= static_cast<int64_t>(frame.width) * 4));
 }
@@ -32,6 +35,8 @@ namespace sidescopes {
     view.sequence = frame.sequence;
     // Callers validate the format before constructing the engine's view.
     view.format = frame.pixel_format == SS_PIXEL_FORMAT_ARGB2101010 ? PixelFormat::Argb2101010 : PixelFormat::Bgra8;
+    view.hdrLuminance = frame.hdr_luminance;
+    view.hdrWhiteNits = frame.hdr_white_nits;
 
     return view;
 }

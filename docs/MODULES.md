@@ -37,5 +37,21 @@ that is [SCOPES.md](SCOPES.md).
   version (both numbers must match before 1.0). CI builds and tests that
   configuration on all native platforms. Release builds stay
   statically registered until there is operational reason to change.
-- The ABI is at 0.5 and carries no stability promise. It freezes at 1.0,
+- The ABI is at 0.6 and carries no stability promise. It freezes at 1.0,
   which is also when the first out-of-tree module is expected to matter.
+
+## HDR frame data
+
+The four-byte SDR pixel layouts are unchanged. A frame can additionally carry
+`hdr_luminance`, a tightly packed float plane with the same dimensions and
+origin. Values are linear luminance relative to SDR white: 1 is white, and
+values above 1 retain highlights. `hdr_white_nits` records the nominal encoding
+reference, not measured panel brightness. A null plane means unavailable;
+non-finite samples are invalid. Modules must not synthesize HDR headroom from
+clipped SDR codes. Both ABI version numbers must match, so rebuild older modules.
+
+HDR Luminance is a separate module because its bins and axis differ from the
+SDR waveform family. The `sidescopes.reading/1` instance extension supplies
+bounded text from the completed analysis pass. The host copies it beside the
+image, with the same frame and region provenance; overlay instances do not
+produce measurement text.

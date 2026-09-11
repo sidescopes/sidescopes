@@ -205,8 +205,48 @@ void theFloorDropsNothing(ImGuiTestContext* ctx)
     IM_CHECK_EQ(taken.atFloor.vertices, taken.atDefault.vertices);
 }
 
+struct BottomLabelReading
+{
+    bool drawn = false;
+    bool inside = false;
+};
+
+BottomLabelReading g_bottomLabel;
+
+void bottomLabelGui(ImGuiTestContext*)
+{
+    ImGui::Begin("Bottom label");
+    const DrawnScope scope{ImGui::GetCursorScreenPos(), ImVec2(320, 120), 1.0f};
+    ImGui::Dummy(scope.size);
+    SsGraticulePrimitive label{};
+    label.kind = SS_PRIMITIVE_TEXT;
+    label.y0 = 1.0f;
+    std::snprintf(label.label, sizeof(label.label), "<=-6 stops");
+    ImDrawList* draw = ImGui::GetWindowDrawList();
+    const int before = draw->VtxBuffer.Size;
+    drawGraticule(scope, {label}, GraticuleStyle{});
+    g_bottomLabel.drawn = draw->VtxBuffer.Size > before;
+    g_bottomLabel.inside = g_bottomLabel.drawn;
+    for (int index = before; index < draw->VtxBuffer.Size; ++index) {
+        const float y = draw->VtxBuffer[index].pos.y;
+        g_bottomLabel.inside = g_bottomLabel.inside && y >= scope.origin.y && y <= scope.origin.y + scope.size.y;
+    }
+    ImGui::End();
+}
+
+void bottomLabelStaysInside(ImGuiTestContext* ctx)
+{
+    ctx->Yield();
+    IM_CHECK(g_bottomLabel.drawn);
+    IM_CHECK(g_bottomLabel.inside);
+}
+
 void registerGraticuleTests(ImGuiTestEngine* engine)
 {
+    ImGuiTest* bottom = IM_REGISTER_TEST(engine, "graticule", "bottom_label_stays_inside");
+    bottom->GuiFunc = bottomLabelGui;
+    bottom->TestFunc = bottomLabelStaysInside;
+
     ImGuiTest* strength = IM_REGISTER_TEST(engine, "graticule", "every_element_takes_the_strength");
     strength->GuiFunc = graticuleGui;
     strength->TestFunc = everyElementTakesTheStrength;
@@ -223,5 +263,5 @@ int main()
 {
     using namespace sidescopes;
 
-    return uitest::runSuite("graticule", registerGraticuleTests, /*expectedTests=*/2);
+    return uitest::runSuite("graticule", registerGraticuleTests, /*expectedTests=*/3);
 }

@@ -15,6 +15,7 @@ add_executable(sidescopes_tests
     test_environment.cpp
     test_color_lab.cpp
     test_scrgb.cpp
+    test_hdr.cpp
     test_parallel_for.cpp
     test_frame_mailbox.cpp
     test_capture_crop.cpp
@@ -167,7 +168,8 @@ if(SIDESCOPES_MODULES_DYNAMIC)
     add_dependencies(sidescopes_tests
         sidescopes_module_vectorscope
         sidescopes_module_waveform
-        sidescopes_module_histogram)
+        sidescopes_module_histogram
+        sidescopes_module_hdr)
 endif()
 sidescopes_target_defaults(sidescopes_tests)
 
@@ -193,7 +195,8 @@ if(SIDESCOPES_MODULES_DYNAMIC)
     add_dependencies(sidescopes_allocation_tests
         sidescopes_module_vectorscope
         sidescopes_module_waveform
-        sidescopes_module_histogram)
+        sidescopes_module_histogram
+        sidescopes_module_hdr)
 endif()
 sidescopes_target_defaults(sidescopes_allocation_tests)
 catch_discover_tests(sidescopes_allocation_tests

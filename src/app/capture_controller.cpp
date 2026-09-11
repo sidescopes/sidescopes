@@ -128,6 +128,7 @@ bool CaptureController::startTarget(const CaptureTarget& target)
     // survive the caller finishing startup, including its status message.
     m_streamAlive.store(true);
     try {
+        m_source.setHdrEnabled(m_hdrEnabled);
         if (!m_source.start(target, m_frameRate, m_mailbox, ++m_streamEpoch)) {
             m_streamAlive.store(false);
             return false;
@@ -181,6 +182,17 @@ void CaptureController::setFrameRate(int framesPerSecond)
     // than motion, so this is a choice about how smoothly the trace reads and
     // not about what the display can deliver. The rate is fixed when a stream
     // is created, so a running one is replaced to pick the new one up.
+    if (m_running && !m_suspended) {
+        (void)start();
+    }
+}
+
+void CaptureController::setHdrEnabled(bool enabled)
+{
+    if (m_hdrEnabled == enabled) {
+        return;
+    }
+    m_hdrEnabled = enabled;
     if (m_running && !m_suspended) {
         (void)start();
     }

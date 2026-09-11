@@ -34,6 +34,14 @@ uint64_t hashSpan(uint64_t hash, const FrameView& frame, int x0, int x1, int py)
         hash = (hash ^ pixel) * FnvPrime;
     }
 
+    if (frame.hdrLuminance) {
+        const float* luminance = frame.hdrLuminance + static_cast<std::size_t>(py) * frame.width;
+        for (int px = x0; px < x1; ++px) {
+            uint32_t bits = 0;
+            std::memcpy(&bits, luminance + px, sizeof(bits));
+            hash = (hash ^ bits) * FnvPrime;
+        }
+    }
     return hash;
 }
 
@@ -51,8 +59,14 @@ uint64_t hashRegion(const FrameView& frame, IntRect region, IntRect masked)
     for (const int component : {region.width, region.height, static_cast<int>(frame.format)}) {
         hash = (hash ^ static_cast<uint64_t>(component)) * FnvPrime;
     }
+    if (frame.hdrLuminance) {
+        uint64_t whiteBits = 0;
+        std::memcpy(&whiteBits, &frame.hdrWhiteNits, sizeof(whiteBits));
+        hash = (hash ^ whiteBits ^ 1u) * FnvPrime;
+    }
     const bool hasMask = !masked.empty();
-    for (int64_t row = region.y; row < static_cast<int64_t>(region.y) + region.height; row += 4) {
+    const int rowStep = frame.hdrLuminance ? 1 : 4;
+    for (int64_t row = region.y; row < static_cast<int64_t>(region.y) + region.height; row += rowStep) {
         const int py = static_cast<int>(row);
         if (hasMask && py >= masked.y && py < masked.y + masked.height) {
             hash = hashSpan(hash, frame, region.x, std::min(region.x + region.width, masked.x), py);

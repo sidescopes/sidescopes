@@ -42,7 +42,7 @@ extern "C" {
  * layout, so rebuild modules against the current header. From 1.0 onward,
  * equal majors are compatible; minors add only optional extensions. */
 #define SS_ABI_MAJOR 0u
-#define SS_ABI_MINOR 5u
+#define SS_ABI_MINOR 6u
 
 /* ---- core types ---------------------------------------------------- */
 
@@ -74,6 +74,17 @@ typedef struct SsFrameView
     uint32_t color_space;
     uint64_t sequence;
     uint32_t pixel_format; /* SS_PIXEL_FORMAT_* */
+    /* Optional tightly packed float luminance plane with matching geometry.
+     * Linear light, 1 = SDR white, unbounded above. NaN/Inf = invalid sample.
+     * Null = HDR measurement unavailable. Nominal white is encoding metadata,
+     * not a measurement of panel brightness. */
+#ifdef __cplusplus
+    const float* hdr_luminance = nullptr;
+    double hdr_white_nits = 0.0;
+#else
+    const float* hdr_luminance;
+    double hdr_white_nits;
+#endif
 } SsFrameView;
 
 typedef struct SsRect

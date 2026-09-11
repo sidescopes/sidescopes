@@ -198,6 +198,7 @@ ModuleRegistry& builtinModules();
 extern const SsModuleEntry VectorscopeModuleEntry;
 extern const SsModuleEntry WaveformModuleEntry;
 extern const SsModuleEntry HistogramModuleEntry;
+extern const SsModuleEntry HdrModuleEntry;
 #endif
 
 /// Instance extension: the host drives adaptive display resolution through
@@ -231,6 +232,16 @@ inline constexpr char OutlineExtension[] = "sidescopes.outline/1";
 struct SsOutlineExtension
 {
     uint32_t (*heights)(const SsScopeInstance* instance, float* out, uint32_t capacity);
+};
+
+/// Text from the same completed pass as the image, copied by the host before
+/// the next accumulate. NUL-terminated, at most 159 bytes. Projection
+/// instances have no reading; the analysis instance is its only source.
+inline constexpr char ReadingExtension[] = "sidescopes.reading/1";
+
+struct SsReadingExtension
+{
+    const char* (*text)(const SsScopeInstance* instance);
 };
 
 }  // namespace sidescopes

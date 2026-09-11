@@ -3,6 +3,8 @@
 #include <cmath>
 #include <cstring>
 
+#include "core/hdr.h"
+
 namespace sidescopes {
 namespace {
 
@@ -80,7 +82,8 @@ void ScrgbToDisplayCodes::setSdrWhiteNits(double nits)
     }
 }
 
-int ScrgbToDisplayCodes::convertRow(const uint8_t* scrgbPixels, uint8_t* argb2101010Pixels, int width) const
+int ScrgbToDisplayCodes::convertRow(const uint8_t* scrgbPixels, uint8_t* argb2101010Pixels, int width,
+                                    float* hdrLuminance) const
 {
     int above = 0;
     for (int x = 0; x < width; ++x) {
@@ -92,6 +95,11 @@ int ScrgbToDisplayCodes::convertRow(const uint8_t* scrgbPixels, uint8_t* argb210
         const uint16_t red = half(0);
         const uint16_t green = half(1);
         const uint16_t blue = half(2);
+        if (hdrLuminance) {
+            const float scale = static_cast<float>(ScrgbWhiteNits / m_sdrWhiteNits);
+            hdrLuminance[x] =
+                hdrLuminance709(floatFromHalf(red) * scale, floatFromHalf(green) * scale, floatFromHalf(blue) * scale);
+        }
         const uint32_t word = 0xC0000000u | static_cast<uint32_t>(codeFor(red)) << 20 |
                               static_cast<uint32_t>(codeFor(green)) << 10 | codeFor(blue);
         uint8_t* target = argb2101010Pixels + static_cast<std::size_t>(x) * 4;

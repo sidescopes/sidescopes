@@ -486,6 +486,10 @@ void PaneArea::drawVectorscopePane(Pass& pass)
 
 void PaneArea::drawWaveformPane(std::string_view id, Pass& pass)
 {
+    const auto reading = m_output.readings.find(std::string(id));
+    if (pass.input.regionSelected && reading != m_output.readings.end()) {
+        ImGui::TextWrapped("%s", reading->second.c_str());
+    }
     // The waveform and its parade share one intensity control and the luma
     // waveform owns its own; each pane draws its own instance's scale and
     // cursor markers, and the module's marker layout already follows what it

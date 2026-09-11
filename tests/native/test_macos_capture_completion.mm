@@ -13,6 +13,7 @@
 
 #include "allocation_failure.h"
 #include "core/frame_mailbox.h"
+#include "core/hdr.h"
 #include "platform/desktop.h"
 #include "platform/macos/capture_completion.h"
 #include "platform/macos/capture_frame.h"
@@ -325,6 +326,56 @@ TEST_CASE("Streaming allocation failure unlocks without publication and recovers
     for (std::size_t index = 0; index < 4; ++index) {
         CHECK(delivered->data[index] == pixels[index]);
     }
+}
+
+TEST_CASE("HDR capture validates PQ metadata and converts padded native rows", "[native][hdr]")
+{
+    uint16_t pixels[24] = {0x3C00, 0x3C00, 0x3C00, 0x3C00};
+    pixels[16] = pixels[17] = pixels[18] = pixels[19] = 0x3C00;
+    CVPixelBufferRef raw = nullptr;
+    REQUIRE(CVPixelBufferCreateWithBytes(kCFAllocatorDefault, 2, 2, kCVPixelFormatType_64RGBAHalf, pixels, 24, nullptr,
+                                         nullptr, nullptr, &raw) == kCVReturnSuccess);
+    const std::unique_ptr<std::remove_pointer_t<CVPixelBufferRef>, decltype(&CVPixelBufferRelease)> image(
+        raw, CVPixelBufferRelease);
+    CHECK_FALSE(capturePixelFormat(image.get(), true));
+    CVBufferSetAttachment(image.get(), kCVImageBufferCGColorSpaceKey, CFSTR("invalid"),
+                          kCVAttachmentMode_ShouldPropagate);
+    CHECK_FALSE(capturePixelFormat(image.get(), true));
+    CGColorSpaceRef space = CGColorSpaceCreateWithName(kCGColorSpaceDisplayP3_PQ);
+    CVBufferSetAttachment(image.get(), kCVImageBufferCGColorSpaceKey, space, kCVAttachmentMode_ShouldPropagate);
+    CGColorSpaceRelease(space);
+    CHECK(capturePixelFormat(image.get(), true) == PixelFormat::Argb2101010);
+    CHECK_FALSE(capturePixelFormat(image.get(), false));
+    CVBufferRemoveAttachment(image.get(), kCVImageBufferCGColorSpaceKey);
+    CVBufferSetAttachment(image.get(), kCVImageBufferColorPrimariesKey, kCVImageBufferColorPrimaries_P3_D65,
+                          kCVAttachmentMode_ShouldPropagate);
+    CHECK_FALSE(capturePixelFormat(image.get(), true));
+    CVBufferSetAttachment(image.get(), kCVImageBufferTransferFunctionKey,
+                          kCVImageBufferTransferFunction_SMPTE_ST_2084_PQ, kCVAttachmentMode_ShouldPropagate);
+    CHECK(capturePixelFormat(image.get(), true) == PixelFormat::Argb2101010);
+    CVBufferSetAttachment(image.get(), kCVImageBufferTransferFunctionKey, kCVImageBufferTransferFunction_sRGB,
+                          kCVAttachmentMode_ShouldPropagate);
+    CHECK_FALSE(capturePixelFormat(image.get(), true));
+    CVBufferSetAttachment(image.get(), kCVImageBufferTransferFunctionKey,
+                          kCVImageBufferTransferFunction_SMPTE_ST_2084_PQ, kCVAttachmentMode_ShouldPropagate);
+    FrameBuffer buffer;
+    buffer.width = buffer.height = 2;
+    buffer.strideBytes = 8;
+    buffer.format = PixelFormat::Argb2101010;
+    FrameMailbox mailbox;
+    CHECK_FALSE(deliverCapturePixels(image.get(), buffer, mailbox));
+    PqCaptureDecoder decoder;
+    REQUIRE(deliverCapturePixels(image.get(), buffer, mailbox, &decoder));
+    const auto delivered = mailbox.takeLatest(0ms);
+    REQUIRE(delivered);
+    REQUIRE(delivered->hdrLuminance.size() == 4);
+    CHECK(delivered->hdrLuminance[0] > 99.9f);
+    CHECK(delivered->hdrLuminance[1] == 0.0f);
+    CHECK(delivered->hdrLuminance[2] == 0.0f);
+    CHECK(delivered->hdrLuminance[3] > 99.9f);
+    CHECK(delivered->hdrWhiteNits == 100.0);
+    CHECK(delivered->view().sampleAt(0, 0).r == 1023);
+    CHECK(delivered->view().sampleAt(1, 1).r == 1023);
 }
 
 TEST_CASE("Start completion distinguishes success error timeout and duplicate", "[native][completion]")

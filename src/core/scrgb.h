@@ -60,7 +60,8 @@ public:
     /// pixel, little-endian halves in red, green, blue, alpha order - into
     /// @p width Argb2101010 pixels of four bytes each, written opaque.
     /// @return How many of the pixels have a channel strictly above SDR white.
-    int convertRow(const uint8_t* scrgbPixels, uint8_t* argb2101010Pixels, int width) const;
+    int convertRow(const uint8_t* scrgbPixels, uint8_t* argb2101010Pixels, int width,
+                   float* hdrLuminance = nullptr) const;
 
 private:
     double m_sdrWhiteNits;

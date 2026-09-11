@@ -127,6 +127,7 @@ public:
         /// stable: a disabled scope's entry simply stops advancing rather
         /// than being cleared.
         std::map<std::string, ScopeImage> images;
+        std::map<std::string, std::string> readings;
         /// Each outline-carrying scope's curve, keyed by scope id and stroked
         /// by the interface at display resolution (three channels of
         /// normalized heights). Only the histogram exports the outline

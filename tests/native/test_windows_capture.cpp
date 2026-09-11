@@ -2,6 +2,7 @@
 #define NOMINMAX
 #include <windows.h>
 
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <cwchar>
 #include <functional>
@@ -353,6 +354,7 @@ TEST_CASE("scRGB metadata errors publish no assumed-white pixels and can recover
         const auto setup = makeSetup(duplication);
         const auto texture = makeTexture(setup, 8, 4, true);
         DxgiScreenCaptureSource source;
+        source.setHdrEnabled(true);
         FrameMailbox mailbox;
         std::string status;
         source.setStatusCallback([&](const std::string& message) { status = message; });
@@ -364,6 +366,9 @@ TEST_CASE("scRGB metadata errors publish no assumed-white pixels and can recover
         if (result == ERROR_SUCCESS) {
             REQUIRE(frame);
             CHECK(frame->format == PixelFormat::Argb2101010);
+            REQUIRE(frame->view().hdrLuminance != nullptr);
+            CHECK(frame->hdrLuminance.front() == 0.5f);
+            CHECK(frame->hdrWhiteNits == 240.0);
             const uint32_t expected = 0xC0000000u | 752u << 20 | 752u << 10 | 752u;
             uint32_t pixel = 0;
             std::memcpy(&pixel, frame->data.data(), sizeof pixel);
@@ -373,6 +378,43 @@ TEST_CASE("scRGB metadata errors publish no assumed-white pixels and can recover
             CHECK(status == "could not read the display SDR white level");
         }
         CHECK(duplication.releases == 1);
+    }
+}
+
+TEST_CASE("Native HDR capture retains headroom only when requested and available")
+{
+    for (const bool enabled : {false, true}) {
+        for (const bool half : {false, true}) {
+            resetDisplayConfig();
+            g_whiteLevel = 1000;  // 80-nit SDR white; the texture's 1.5 exceeds it
+            ScriptedDuplication duplication;
+            const auto setup = makeSetup(duplication);
+            const auto texture = makeTexture(setup, 8, 4, half);
+            DxgiScreenCaptureSource source;
+            source.setHdrEnabled(enabled);
+            FrameMailbox mailbox;
+            source.narrowTo(IntRect{2, 1, 3, 2});
+            duplication.acquire = [&](unsigned step, auto* info, auto** resource) {
+                return step == 0 ? deliver(texture.Get(), info, resource) : DXGI_ERROR_ACCESS_LOST;
+            };
+            DxgiCaptureTestAccess::capture(source, setup, mailbox);
+            const auto frame = mailbox.takeLatest(0ms);
+            REQUIRE(frame);
+            CHECK(frame->width == 3);
+            CHECK(frame->height == 2);
+            CHECK(frame->sourceX == 2);
+            CHECK(frame->sourceY == 1);
+            if (enabled && half) {
+                REQUIRE(frame->hdrLuminance.size() == 6);
+                for (const float value : frame->hdrLuminance) {
+                    CHECK(value == Catch::Approx(1.5f).epsilon(1e-6));
+                }
+                CHECK(frame->hdrWhiteNits == 80.0);
+            } else {
+                CHECK(frame->hdrLuminance.empty());
+                CHECK(frame->hdrWhiteNits == 0.0);
+            }
+        }
     }
 }
 

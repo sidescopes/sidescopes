@@ -31,6 +31,11 @@ It does not read the source document profile, timeline color space, RAW data,
 display ICC profile, or HDR metadata. See [The scopes](docs/SCOPES.md) for the
 interpretation and measurement boundary of each instrument.
 
+Development builds after 0.8.0 add HDR Luminance (E): a waveform in stops
+relative to SDR white, with peak and above-white readings on supported capture
+paths. Windows Advanced Color capture also preserves available 10-bit
+precision. These features are not in the 0.8.0 downloads or the browser Lab.
+
 ## SideScopes Lab
 
 [SideScopes Lab](https://sidescopes.org/lab/) runs the shared C++ scope engines

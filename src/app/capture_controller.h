@@ -76,6 +76,7 @@ public:
     /// running one; a stopped, suspended or dead stream is left alone, since
     /// the next start reads the new rate anyway.
     void setFrameRate(int framesPerSecond);
+    void setHdrEnabled(bool enabled);
 
     /// Marks the stream stale so the next service() restarts it (system wake,
     /// unlock, or a monitor connected or disconnected). Safe to call from any
@@ -153,6 +154,7 @@ private:
     uint64_t m_streamEpoch = 0;
     uint32_t m_desiredDisplay = 0;
     int m_frameRate = DefaultCaptureFramesPerSecond;
+    bool m_hdrEnabled = false;
     bool m_permissionGranted = false;
     // Whether a stream is running, so start() stops the old one first only
     // when there is one; the first start has nothing to stop.

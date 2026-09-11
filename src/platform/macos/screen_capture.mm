@@ -23,6 +23,8 @@
 #import <ScreenCaptureKit/ScreenCaptureKit.h>
 
 #include "core/diagnostics.h"
+#include "core/hdr.h"
+#include "core/parallel_for.h"
 
 #include <algorithm>
 #include <atomic>
@@ -149,7 +151,7 @@ void narrowConfiguration(SCStreamConfiguration* configuration, IntRect crop, CGF
 }
 
 SCStreamConfiguration* makeStreamConfiguration(SCDisplay* display, SCContentFilter* filter, int maxFramesPerSecond,
-                                               const std::optional<IntRect>& crop)
+                                               const std::optional<IntRect>& crop, bool hdr)
 {
     SCStreamConfiguration* configuration = [[SCStreamConfiguration alloc] init];
     const CGFloat scale = pixelScaleOf(filter);
@@ -171,6 +173,17 @@ SCStreamConfiguration* makeStreamConfiguration(SCDisplay* display, SCContentFilt
     configuration.showsCursor = NO;
     configuration.queueDepth = 5;
     configuration.colorSpaceName = kCGColorSpaceSRGB;
+#if defined(__aarch64__) || defined(__arm64__)
+    if (@available(macOS 15.0, *)) {
+        if (hdr) {
+            configuration.captureDynamicRange = SCCaptureDynamicRangeHDRLocalDisplay;
+            configuration.pixelFormat = kCVPixelFormatType_64RGBAHalf;
+            configuration.colorSpaceName = kCGColorSpaceDisplayP3_PQ;
+        }
+    }
+#else
+    (void)hdr;
+#endif
 
     return configuration;
 }
@@ -179,13 +192,53 @@ SCStreamConfiguration* makeStreamConfiguration(SCDisplay* display, SCContentFilt
 // taken from what the configuration asked for: the two need not agree, and a
 // frame read in the wrong layout is a plausible-looking trace built from the
 // wrong bits.
-std::optional<PixelFormat> formatOfBuffer(CVImageBufferRef image)
+bool captureSpaceMatches(CVImageBufferRef image, CFStringRef expected)
 {
-    switch (CVPixelBufferGetPixelFormatType(image)) {
+    id attachment = CFBridgingRelease(CVBufferCopyAttachment(image, kCVImageBufferCGColorSpaceKey, nullptr));
+    CGColorSpaceRef space = attachment && CFGetTypeID((__bridge CFTypeRef)attachment) == CGColorSpaceGetTypeID()
+                                ? (__bridge CGColorSpaceRef)attachment
+                                : nullptr;
+    CFStringRef name = space ? CGColorSpaceCopyName(space) : nullptr;
+    const bool matches = name && CFEqual(name, expected);
+    if (name) {
+        CFRelease(name);
+    }
+    return matches;
+}
+
+// SCK commonly supplies transfer/primaries instead of a CGColorSpace. Both
+// describe the delivered buffer. Never fill missing identity from our request,
+// and reject contradictory metadata when both forms are present.
+bool captureEncodingMatches(CVImageBufferRef image, CFStringRef space, CFStringRef primaries, CFStringRef transfer)
+{
+    id deliveredSpace = CFBridgingRelease(CVBufferCopyAttachment(image, kCVImageBufferCGColorSpaceKey, nullptr));
+    id deliveredPrimaries = CFBridgingRelease(CVBufferCopyAttachment(image, kCVImageBufferColorPrimariesKey, nullptr));
+    id deliveredTransfer = CFBridgingRelease(CVBufferCopyAttachment(image, kCVImageBufferTransferFunctionKey, nullptr));
+    const bool identified = deliveredSpace || (deliveredPrimaries && deliveredTransfer);
+    return identified && (!deliveredSpace || captureSpaceMatches(image, space)) &&
+           (!deliveredPrimaries || CFEqual((__bridge CFTypeRef)deliveredPrimaries, primaries)) &&
+           (!deliveredTransfer || CFEqual((__bridge CFTypeRef)deliveredTransfer, transfer));
+}
+
+std::optional<PixelFormat> formatOfBuffer(CVImageBufferRef image, bool hdrRequested)
+{
+    const auto format = CVPixelBufferGetPixelFormatType(image);
+    if (hdrRequested && format != kCVPixelFormatType_64RGBAHalf &&
+        !captureEncodingMatches(image, kCGColorSpaceSRGB, kCVImageBufferColorPrimaries_ITU_R_709_2,
+                                kCVImageBufferTransferFunction_sRGB)) {
+        return std::nullopt;
+    }
+    switch (format) {
     case kCVPixelFormatType_32BGRA:
         return PixelFormat::Bgra8;
     case kCVPixelFormatType_ARGB2101010LEPacked:
         return PixelFormat::Argb2101010;
+    case kCVPixelFormatType_64RGBAHalf:
+        return hdrRequested &&
+                       captureEncodingMatches(image, kCGColorSpaceDisplayP3_PQ, kCVImageBufferColorPrimaries_P3_D65,
+                                              kCVImageBufferTransferFunction_SMPTE_ST_2084_PQ)
+                   ? std::optional<PixelFormat>{PixelFormat::Argb2101010}
+                   : std::nullopt;
     default:
         return std::nullopt;
     }
@@ -215,7 +268,13 @@ std::optional<FloatColor> averageCapturedImage(CGImageRef image)
 
 }  // namespace
 
-bool deliverCapturePixels(CVPixelBufferRef image, FrameBuffer& buffer, FrameMailbox& mailbox) noexcept
+std::optional<PixelFormat> capturePixelFormat(CVPixelBufferRef image, bool hdrRequested)
+{
+    return image ? formatOfBuffer(image, hdrRequested) : std::nullopt;
+}
+
+bool deliverCapturePixels(CVPixelBufferRef image, FrameBuffer& buffer, FrameMailbox& mailbox,
+                          const PqCaptureDecoder* decoder) noexcept
 {
     try {
         {
@@ -228,12 +287,26 @@ bool deliverCapturePixels(CVPixelBufferRef image, FrameBuffer& buffer, FrameMail
                 return false;
             }
             const auto sourceStride = CVPixelBufferGetBytesPerRow(image);
-            buffer.sizeTo(static_cast<std::size_t>(buffer.strideBytes) * buffer.height);
-            for (int py = 0; py < buffer.height; ++py) {
-                std::memcpy(buffer.data.data() + static_cast<std::size_t>(py) * buffer.strideBytes,
-                            source + static_cast<std::size_t>(py) * sourceStride,
-                            static_cast<std::size_t>(buffer.width) * 4);
+            const bool hdr = CVPixelBufferGetPixelFormatType(image) == kCVPixelFormatType_64RGBAHalf;
+            if ((hdr && !decoder) || sourceStride < static_cast<std::size_t>(buffer.width) * (hdr ? 8 : 4)) {
+                return false;
             }
+            buffer.sizeTo(static_cast<std::size_t>(buffer.strideBytes) * buffer.height);
+            buffer.sizeHdrTo(hdr ? static_cast<std::size_t>(buffer.width) * buffer.height : 0, 100.0);
+            runParallelChunks(
+                hdr ? parallelChunkCount(buffer.height, 128) : 1, buffer.height, [&](int, int begin, int end) noexcept {
+                    for (int py = begin; py < end; ++py) {
+                        const auto* row = source + static_cast<std::size_t>(py) * sourceStride;
+                        auto* target = buffer.data.data() + static_cast<std::size_t>(py) * buffer.strideBytes;
+                        if (hdr) {
+                            decoder->convertRow(
+                                row, target, buffer.hdrLuminance.data() + static_cast<std::size_t>(py) * buffer.width,
+                                buffer.width);
+                        } else {
+                            std::memcpy(target, row, static_cast<std::size_t>(buffer.width) * 4);
+                        }
+                    }
+                });
         }  // Release the native surface before publishing the owned copy.
         buffer = mailbox.publish(std::move(buffer));
         return true;
@@ -343,6 +416,7 @@ public:
         stop();
         m_mailbox = &mailbox;
         m_streamStamp = FrameStamp{captureEpoch, target.displayId, 0.0};
+        m_hdrDecoder = m_hdrEnabled ? std::make_unique<PqCaptureDecoder>() : nullptr;
 
         SCShareableContent* content = fetchShareableContent();
         if (!content) {
@@ -355,7 +429,7 @@ public:
 
         SCContentFilter* filter = buildContentFilter(content, display);
         SCStreamConfiguration* configuration =
-            makeStreamConfiguration(display, filter, maxFramesPerSecond, std::nullopt);
+            makeStreamConfiguration(display, filter, maxFramesPerSecond, std::nullopt, m_hdrEnabled);
         m_display = display;
         m_filter = filter;
         m_maxFramesPerSecond = maxFramesPerSecond;
@@ -406,7 +480,8 @@ public:
             }
             m_crop = rect;
         }
-        SCStreamConfiguration* configuration = makeStreamConfiguration(m_display, m_filter, m_maxFramesPerSecond, rect);
+        SCStreamConfiguration* configuration =
+            makeStreamConfiguration(m_display, m_filter, m_maxFramesPerSecond, rect, m_hdrEnabled);
         const auto callbacks = m_callbacks;
         // Fire and forget: frames keep arriving at the old geometry until this
         // lands, and each frame is stamped from the size actually delivered, so
@@ -423,6 +498,11 @@ public:
                           diagEmit(DiagChannel::Perf, "capture configuration callback failed");
                       }
                     }];
+    }
+
+    void setHdrEnabled(bool enabled) override
+    {
+        m_hdrEnabled = enabled;
     }
 
     void stop() override
@@ -465,8 +545,12 @@ public:
             return;
         }
         // A layout no scope can read is dropped rather than guessed at.
-        const std::optional<PixelFormat> format = formatOfBuffer(image);
+        const std::optional<PixelFormat> format = capturePixelFormat(image, m_hdrEnabled);
         if (!format) {
+            m_running.store(false);
+            if (m_status) {
+                m_status("unsupported capture color encoding");
+            }
             return;
         }
         const int width = static_cast<int>(CVPixelBufferGetWidth(image));
@@ -484,7 +568,7 @@ public:
         }
 
         stampBuffer(width, height, *format, *stamp);
-        (void)deliverCapturePixels(image, m_buffer, *m_mailbox);
+        (void)deliverCapturePixels(image, m_buffer, *m_mailbox, m_hdrDecoder.get());
     }
 
     // Describes the delivery in the recycled buffer. Every
@@ -567,6 +651,7 @@ private:
         m_handler = nil;
         m_queue = nil;
         m_mailbox = nullptr;
+        m_hdrDecoder.reset();
         // The recycled buffer is a whole display of pixels; a stopped stream
         // keeps it warm for deliveries that are not coming. All callbacks
         // have finished or lost access to this stream's state by here.
@@ -589,6 +674,8 @@ private:
     std::shared_ptr<SckCallbackState> m_callbacks;
     FrameMailbox* m_mailbox = nullptr;
     FrameBuffer m_buffer;  // recycled storage, touched only on the capture queue
+    bool m_hdrEnabled = false;
+    std::unique_ptr<PqCaptureDecoder> m_hdrDecoder;
     // Written only after the old callback owner is retired and drained.
     FrameStamp m_streamStamp;
     // The layout this recording has been told about, read on the capture queue
