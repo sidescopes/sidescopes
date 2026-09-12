@@ -94,21 +94,37 @@ std::optional<FloatColor> CursorSampler::sampleCapturedFrame(DesktopPoint cursor
     return color;
 }
 
+bool CursorSampler::shutdown(std::chrono::milliseconds timeout)
+{
+    m_closed = true;
+    std::unique_lock lock(m_screenSample->mutex);
+
+    return m_screenSample->settled.wait_for(lock, timeout, [&] { return m_screenSample->pending == 0; });
+}
+
 std::optional<FloatColor> CursorSampler::sampleOtherDisplay(DesktopPoint cursor, double now)
 {
-    if (now > m_nextScreenSample) {
-        m_nextScreenSample = now + 0.05;
+    // Compared with where the last read was asked for rather than with the
+    // pointer's last position: a pointer that stops between two reads still
+    // gets one at its resting place, and none after that.
+    const bool moved = !m_screenSamplePoint || cursor.x != m_screenSamplePoint->x || cursor.y != m_screenSamplePoint->y;
+    if (moved && !m_closed && now > m_nextScreenSample) {
+        m_nextScreenSample = now + ReadoutSampleSeconds;
+        m_screenSamplePoint = cursor;
         auto screenSample = m_screenSample;
         const uint64_t request = ++m_screenSampleRequest;
-        sampleScreenColorAsync(cursor, [screenSample, request](std::optional<FloatColor> color) {
-            if (!color) {
-                return;
-            }
+        {
             std::lock_guard lock(screenSample->mutex);
-            if (request > screenSample->completedRequest) {
+            ++screenSample->pending;
+        }
+        sampleScreenColorAsync(cursor, [screenSample, request](std::optional<FloatColor> color) {
+            std::lock_guard lock(screenSample->mutex);
+            if (color && request > screenSample->completedRequest) {
                 screenSample->completedRequest = request;
                 screenSample->color = color;
             }
+            --screenSample->pending;
+            screenSample->settled.notify_all();
         });
     }
 
@@ -125,7 +141,7 @@ CursorSample CursorSampler::update(std::optional<AnalysisWorker::FrameSize> fram
     // throttled one-shot sample keeps the readout alive even while capture is
     // paused.
     CursorSample sample;
-    if (m_capture.capturedDisplay() == 0) {
+    if (m_capture.capturedDisplay() == 0 || m_closed) {
         return sample;
     }
     const auto cursor = globalCursorPosition();
@@ -174,8 +190,9 @@ std::optional<FloatColor> CursorSampler::probeColor(DesktopPoint cursor, const s
         }
     }
 
-    // Either another display, or a point the capture no longer carries:
-    // narrowed to the analysis region, the stream holds nothing outside it.
+    // Either another display, or a point the capture does not carry: narrowed
+    // to the analysis region the stream holds nothing outside it, and paused
+    // it holds nothing at all.
     return sampleOtherDisplay(cursor, now);
 }
 

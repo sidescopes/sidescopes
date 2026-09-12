@@ -164,6 +164,45 @@ TEST_CASE("A quiet application draws nothing at all")
     }
 }
 
+TEST_CASE("An application out of sight draws nothing, whatever else is due")
+{
+    // The readings a frame refreshes are not on screen, and the colour under
+    // the pointer would be a screen read the paused capture cannot answer.
+    for (const auto& set : {&RedrawInputs::outputPending, &RedrawInputs::textInputActive, &RedrawInputs::overlayActive,
+                            &RedrawInputs::framebufferChanged, &RedrawInputs::statusChanged}) {
+        RedrawInputs inputs = quiet();
+        inputs.*set = true;
+        REQUIRE(frameWorthDrawing(inputs));
+        inputs.outOfSight = true;
+        CHECK_FALSE(frameWorthDrawing(inputs));
+    }
+    RedrawInputs moving = quiet();
+    moving.lastPointerMove = moving.now;
+    moving.lastActivity = moving.now;
+    REQUIRE(frameWorthDrawing(moving));
+    moving.outOfSight = true;
+    CHECK_FALSE(frameWorthDrawing(moving));
+}
+
+TEST_CASE("Every way of not being seen is out of sight, and nothing else is")
+{
+    CHECK_FALSE(outOfSight(VisibilityInputs{}));
+    for (const auto& set : {&VisibilityInputs::sessionAsleep, &VisibilityInputs::applicationHidden,
+                            &VisibilityInputs::iconified, &VisibilityInputs::framebufferEmpty}) {
+        VisibilityInputs inputs;
+        inputs.*set = true;
+        CHECK(outOfSight(inputs));
+    }
+    VisibilityInputs absent;
+    absent.windowVisible = false;
+    CHECK(outOfSight(absent));
+    // An empty selection pauses the pipeline, but the window is in plain view.
+    VisibilityInputs unselected;
+    unselected.nothingSelected = true;
+    CHECK_FALSE(outOfSight(unselected));
+    CHECK(nothingNeedsFrames(unselected));
+}
+
 TEST_CASE("An interaction owes frames after its last event")
 {
     // Hover highlights, tooltip delays and text cursors all advance on drawn

@@ -28,6 +28,9 @@ FrameWaitDecision frameWaitFor(const FramePacingInputs& inputs)
 
 bool frameWorthDrawing(const RedrawInputs& inputs)
 {
+    if (inputs.outOfSight) {
+        return false;
+    }
     // Everywhere else the wait holds the frame period, but a region under the
     // hand is followed at the pointer's rate, which would otherwise redraw the
     // window a hundred times a second. What the hand is watching is the border,
@@ -58,14 +61,19 @@ bool frameWorthDrawing(const RedrawInputs& inputs)
     return changed || settling || expired;
 }
 
+bool outOfSight(const VisibilityInputs& inputs)
+{
+    return inputs.sessionAsleep || inputs.applicationHidden || inputs.iconified || !inputs.windowVisible ||
+           inputs.framebufferEmpty;
+}
+
 bool nothingNeedsFrames(const VisibilityInputs& inputs)
 {
     if (inputs.needsFrames) {
         return false;
     }
 
-    return inputs.sessionAsleep || inputs.applicationHidden || inputs.iconified || !inputs.windowVisible ||
-           inputs.framebufferEmpty || inputs.nothingSelected;
+    return outOfSight(inputs) || inputs.nothingSelected;
 }
 
 PipelineAction VisibilityGate::update(const VisibilityInputs& inputs, bool suspended, double now)
@@ -143,6 +151,7 @@ RedrawInputs FrameClocks::redrawInputs(const RedrawSignals& signals, double now)
     inputs.outputPending = m_outputPending.load();
     inputs.textInputActive = signals.textInputActive;
     inputs.overlayActive = signals.overlayActive;
+    inputs.outOfSight = signals.outOfSight;
     inputs.framebufferChanged =
         signals.framebufferWidth != m_drawnFramebufferWidth || signals.framebufferHeight != m_drawnFramebufferHeight;
     inputs.statusChanged = signals.captureStatus != m_drawnCaptureStatus;

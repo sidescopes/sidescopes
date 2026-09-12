@@ -152,12 +152,14 @@ private:
     /// Whether the user is drawing or dragging the region itself, which takes
     /// the loop off its frame period so the border can follow their hand.
     [[nodiscard]] bool regionInteracting() const;
-    /// Gathers what the capture's state is decided from and carries the answer
-    /// out: suspending the whole pipeline behind the stream while the window is
-    /// out of sight, and narrowing the stream to the region.
-    /// @p framebufferEmpty is the frame's own measurement, taken once and read
-    /// here and by the draw that follows.
-    void serviceCapture(bool framebufferEmpty, double now);
+    /// Whether anyone can see the window, and what else the capture's state
+    /// is decided from. @p framebufferEmpty is the frame's own measurement,
+    /// taken once and read here and by the draw that follows.
+    [[nodiscard]] VisibilityInputs visibilityInputs(bool framebufferEmpty);
+    /// Carries the capture's decisions out: suspending the whole pipeline
+    /// behind the stream while the window is out of sight, and narrowing the
+    /// stream to the region.
+    void serviceCapture(const VisibilityInputs& visibility, double now);
     /// Builds the stream capture wants and has none of - the session's first,
     /// and every replacement for one that died - and points the analysis at
     /// it. Runs behind the frame rather than ahead of it.

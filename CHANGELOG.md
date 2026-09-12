@@ -34,6 +34,11 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Quitting no longer leaves a cursor screen read in flight for the system
+  to answer after the process is gone, which macOS reported as a request to
+  bypass the private window picker. The colour readout outside the capture
+  reads the screen only when the pointer moves, at the readout cadence, and
+  nothing is drawn or read while the window is hidden or minimized.
 - Windows HDR capture preserves SDR content up to the selected SDR white
   level. Content brighter than SDR white saturates in the ordinary SDR
   scopes; HDR Luminance measures it separately.

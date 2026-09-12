@@ -166,6 +166,11 @@ struct RedrawInputs
     /// A picker overlay is up, and the frame it draws is what keeps its
     /// colour readout current.
     bool overlayActive = false;
+    /// Nobody can see the window: hidden, minimized, the session asleep. No
+    /// frame is drawn then, whatever else says one is due - the readings a
+    /// frame would refresh are not on screen, and the colour under the
+    /// pointer is a screen read the capture cannot answer.
+    bool outOfSight = false;
     /// The window's size differs from the one last drawn into.
     bool framebufferChanged = false;
     /// The capture status differs from the one last drawn.
@@ -199,6 +204,8 @@ struct RedrawSignals
     bool overlayActive = false;
     /// The user's hand is on the region itself.
     bool regionInteracting = false;
+    /// Nobody can see the window - see outOfSight.
+    bool outOfSight = false;
     int framebufferWidth = 0;
     int framebufferHeight = 0;
     /// The line the capture would put in the status bar now.
@@ -301,6 +308,10 @@ struct VisibilityInputs
     /// must not be pulled out from under it.
     bool needsFrames = false;
 };
+
+/// Whether nobody can see the window: the session asleep, the application
+/// hidden, the window minimized, absent or without area.
+[[nodiscard]] bool outOfSight(const VisibilityInputs& inputs);
 
 /// Whether nothing is asking the capture for frames.
 [[nodiscard]] bool nothingNeedsFrames(const VisibilityInputs& inputs);

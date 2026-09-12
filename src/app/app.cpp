@@ -267,6 +267,10 @@ void App::shutdown()
     hideAttachedEditDim();
     hideRegionBorder();
     m_worker.stop();
+    // Before the stream: a screen read still in flight when this process is
+    // gone is answered for a process the system cannot find, which macOS
+    // reports to the user as a screen-access alert.
+    (void)m_cursor.shutdown(std::chrono::milliseconds(500));
     m_capture->stop();
     m_panes.reset();
     m_frameTimer.reset();
@@ -416,10 +420,11 @@ void App::runFrame()
     int framebufferHeight = 0;
     glfwGetFramebufferSize(m_window, &framebufferWidth, &framebufferHeight);
     const bool nothingToDrawInto = framebufferWidth == 0 || framebufferHeight == 0;
+    const VisibilityInputs visibility = visibilityInputs(nothingToDrawInto);
     // Capture is a service that dies (lock screen, display sleep); restarting
     // it is our job.
     m_captureController.setHdrEnabled(m_view.stack().shows(HdrWaveformScopeId));
-    serviceCapture(nothingToDrawInto, glfwGetTime());
+    serviceCapture(visibility, glfwGetTime());
     // Attached regions: observe the attached windows and route the analysis by
     // the focused window. The border reconciles here every frame in both
     // regimes, so no missed edge can strand it on screen.
@@ -443,6 +448,7 @@ void App::runFrame()
                                 ImGui::GetIO().WantTextInput,
                                 m_regionSession.picker().active(),
                                 regionInteracting(),
+                                outOfSight(visibility),
                                 framebufferWidth,
                                 framebufferHeight,
                                 captureStatus};
@@ -508,17 +514,21 @@ bool App::regionInteracting() const
     return m_regionSession.interacting();
 }
 
-void App::serviceCapture(bool framebufferEmpty, double now)
+VisibilityInputs App::visibilityInputs(bool framebufferEmpty)
+{
+    return VisibilityInputs{m_sessionAsleep.load(),
+                            applicationHidden(),
+                            glfwGetWindowAttrib(m_window, GLFW_ICONIFIED) != 0,
+                            glfwGetWindowAttrib(m_window, GLFW_VISIBLE) != 0,
+                            framebufferEmpty,
+                            !m_analysis.region.has_value(),
+                            m_regionSession.picker().active() || m_regionSession.backgroundWorkRunning()};
+}
+
+void App::serviceCapture(const VisibilityInputs& visibility, double now)
 {
     CaptureConditions conditions;
-    conditions.visibility =
-        VisibilityInputs{m_sessionAsleep.load(),
-                         applicationHidden(),
-                         glfwGetWindowAttrib(m_window, GLFW_ICONIFIED) != 0,
-                         glfwGetWindowAttrib(m_window, GLFW_VISIBLE) != 0,
-                         framebufferEmpty,
-                         !m_analysis.region.has_value(),
-                         m_regionSession.picker().active() || m_regionSession.backgroundWorkRunning()};
+    conditions.visibility = visibility;
     conditions.suspended = m_captureController.suspended();
     conditions.frameSize = m_frameSize;
     conditions.region = m_analysis.region;

@@ -201,9 +201,90 @@ TEST_CASE("A cursor on another display falls back to a throttled screen read")
     CHECK_THAT(throttled.readoutColor->g, WithinAbs(22.0f, 1e-3f));
     CHECK(desktopStubs().screenSampleRequests == 1);
 
-    // Past the throttle it asks again.
-    (void)fix.sampler.update(FrameSize, WholeDisplay, Instant, 1.2, 1.0f / 60.0f);
+    // Past the throttle - the readout's own cadence - it asks again.
+    (void)fix.sampler.update(FrameSize, WholeDisplay, Instant, 1.0 + ReadoutSampleSeconds + 0.001, 1.0f / 60.0f);
     CHECK(desktopStubs().screenSampleRequests == 2);
+}
+
+TEST_CASE("A resting pointer asks the screen once, at its resting place")
+{
+    SamplerFixture fix;
+    desktopStubs().cursor = DesktopPoint{500.0, 32.0};
+    desktopStubs().cursorDisplay = StreamedDisplay + 1;
+    desktopStubs().screenSample = FloatColor{11.0f, 22.0f, 33.0f};
+    (void)fix.sampler.update(FrameSize, WholeDisplay, Instant, 1.0, 1.0f / 60.0f);
+    REQUIRE(desktopStubs().screenSampleRequests == 1);
+
+    // Every read is a capture session of its own to the system, and the
+    // colour under a pointer that has not moved changes only with the
+    // content: however many readouts fall due, none asks again.
+    for (int step = 1; step <= 40; ++step) {
+        (void)fix.sampler.update(FrameSize, WholeDisplay, Instant, 1.0 + step * ReadoutSampleSeconds, 1.0f / 60.0f);
+    }
+    CHECK(desktopStubs().screenSampleRequests == 1);
+
+    // A pointer that stops between two reads is read where it came to rest,
+    // not left showing the colour of the last place it was passing.
+    desktopStubs().cursor = DesktopPoint{520.0, 40.0};
+    (void)fix.sampler.update(FrameSize, WholeDisplay, Instant, 6.2, 1.0f / 60.0f);
+    REQUIRE(desktopStubs().screenSampleRequests == 2);
+    desktopStubs().cursor = DesktopPoint{530.0, 40.0};
+    (void)fix.sampler.update(FrameSize, WholeDisplay, Instant, 6.2 + ReadoutSampleSeconds / 2, 1.0f / 60.0f);
+    CHECK(desktopStubs().screenSampleRequests == 2);
+    (void)fix.sampler.update(FrameSize, WholeDisplay, Instant, 6.2 + 2 * ReadoutSampleSeconds, 1.0f / 60.0f);
+    CHECK(desktopStubs().screenSampleRequests == 3);
+    (void)fix.sampler.update(FrameSize, WholeDisplay, Instant, 6.2 + 4 * ReadoutSampleSeconds, 1.0f / 60.0f);
+    CHECK(desktopStubs().screenSampleRequests == 3);
+}
+
+TEST_CASE("Shutdown waits for a screen read in flight and issues no more")
+{
+    SamplerFixture fix;
+    desktopStubs().cursor = DesktopPoint{80, 20};
+    desktopStubs().cursorDisplay = StreamedDisplay + 1;
+    std::vector<std::function<void(std::optional<FloatColor>)>> completions;
+    desktopStubs().screenSampler = [&](DesktopPoint, auto completion) { completions.push_back(std::move(completion)); };
+    (void)fix.sampler.update(FrameSize, WholeDisplay, Instant, 1.0, MovingFrame);
+    REQUIRE(completions.size() == 1);
+
+    // The read is answered from another thread while the shutdown waits, as
+    // the capture service answers on a queue of its own.
+    std::thread answer([&] {
+        std::this_thread::sleep_for(std::chrono::milliseconds(40));
+        completions[0](FloatColor{10, 20, 30});
+    });
+    const auto begin = std::chrono::steady_clock::now();
+    const bool drained = fix.sampler.shutdown(std::chrono::seconds(5));
+    const auto waited = std::chrono::steady_clock::now() - begin;
+    answer.join();
+    CHECK(drained);
+    CHECK(waited < std::chrono::seconds(2));
+    REQUIRE(fix.sampler.screenSampleColor());
+    CHECK_THAT(fix.sampler.screenSampleColor()->r, WithinAbs(10, 0.001));
+
+    // Closed: neither the pointer moving nor a due readout asks the screen.
+    desktopStubs().cursor = DesktopPoint{90, 20};
+    (void)fix.sampler.update(FrameSize, WholeDisplay, Instant, 2.0, MovingFrame);
+    (void)fix.sampler.updateReadoutIfDue(Instant, 3.0);
+    CHECK(completions.size() == 1);
+}
+
+TEST_CASE("Shutdown gives up on a screen read that never completes")
+{
+    SamplerFixture fix;
+    desktopStubs().cursor = DesktopPoint{80, 20};
+    desktopStubs().cursorDisplay = StreamedDisplay + 1;
+    std::vector<std::function<void(std::optional<FloatColor>)>> completions;
+    desktopStubs().screenSampler = [&](DesktopPoint, auto completion) { completions.push_back(std::move(completion)); };
+    (void)fix.sampler.update(FrameSize, WholeDisplay, Instant, 1.0, MovingFrame);
+    REQUIRE(completions.size() == 1);
+
+    const auto begin = std::chrono::steady_clock::now();
+    const bool drained = fix.sampler.shutdown(std::chrono::milliseconds(60));
+    const auto waited = std::chrono::steady_clock::now() - begin;
+    CHECK_FALSE(drained);
+    CHECK(waited >= std::chrono::milliseconds(60));
+    CHECK(waited < std::chrono::seconds(2));
 }
 
 TEST_CASE("A dead capture stream reads the screen instead of a stale frame")
@@ -793,8 +874,10 @@ TEST_CASE("A late screen sample cannot overwrite a newer completion")
     std::vector<std::function<void(std::optional<FloatColor>)>> completions;
     desktopStubs().screenSampler = [&](DesktopPoint, auto completion) { completions.push_back(std::move(completion)); };
     (void)fix.sampler.update(FrameSize, WholeDisplay, Instant, 1.0, MovingFrame);
-    (void)fix.sampler.update(FrameSize, WholeDisplay, Instant, 1.1, MovingFrame);
-    (void)fix.sampler.update(FrameSize, WholeDisplay, Instant, 1.2, MovingFrame);
+    desktopStubs().cursor = DesktopPoint{81, 20};
+    (void)fix.sampler.update(FrameSize, WholeDisplay, Instant, 1.0 + ReadoutSampleSeconds + 0.001, MovingFrame);
+    desktopStubs().cursor = DesktopPoint{82, 20};
+    (void)fix.sampler.update(FrameSize, WholeDisplay, Instant, 1.0 + 2 * (ReadoutSampleSeconds + 0.001), MovingFrame);
     REQUIRE(completions.size() == 3);
     // The first request may still complete while the second is in flight;
     // accepting it keeps slow samplers progressing instead of starving them.

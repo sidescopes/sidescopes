@@ -1,5 +1,7 @@
 #pragma once
 
+#include <chrono>
+#include <condition_variable>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -79,9 +81,10 @@ struct CursorSample
 };
 
 /// Reads the color under the pointer wherever it is and smooths it per trace.
-/// On the captured display it reads the capture stream's own frame; on every
-/// other display a throttled one-shot screen sample keeps the readout alive
-/// while capture is paused. It reads the capture controller and worker it is
+/// Where the capture stream reaches it reads the stream's own frame; anywhere
+/// else - another display, a point outside a narrowed capture, a paused
+/// capture - a one-shot screen read answers, taken when the pointer moves and
+/// never while it rests. It reads the capture controller and worker it is
 /// constructed with and drives the platform desktop seams directly; the
 /// smoothed colors travel back as a CursorSample the host hands to its
 /// drawing.
@@ -110,9 +113,16 @@ public:
     /// serves a frame it wakes, without another update for that same frame.
     [[nodiscard]] std::optional<CursorSample> updateReadoutIfDue(CursorSmoothing smoothing, double now);
 
-    /// The throttled cross-display sample under its lock, passed to the
+    /// The latest one-shot screen sample under its lock, passed to the
     /// picker's pin tool each poll.
     [[nodiscard]] std::optional<FloatColor> screenSampleColor() const;
+
+    /// Takes no further screen reads and waits, at most @p timeout, for any
+    /// still in flight to complete. A read the system answers after this
+    /// process has gone is one it answers for a process it cannot find, and
+    /// on macOS that ends in a screen-access alert to the user.
+    /// @return Whether every read completed within the wait.
+    bool shutdown(std::chrono::milliseconds timeout);
 
     /// Switches the marker scope - see MarkersFollowRegion, which is what this
     /// starts as. The application itself never calls it; it exists so the scope
@@ -133,6 +143,9 @@ private:
         std::mutex mutex;
         std::optional<FloatColor> color;
         uint64_t completedRequest = 0;
+        /// Reads issued and not yet answered, and the wait for the last one.
+        int pending = 0;
+        std::condition_variable settled;
     };
 
     /// A point on the captured display, in that display's own pixels - the
@@ -186,9 +199,10 @@ private:
     void advanceMarkers(const std::optional<FloatColor>& target, CursorSmoothing smoothing, double now,
                         float deltaSeconds, CursorSample& sample);
 
-    /// The sample under the pointer anywhere else: a throttled one-shot screen
-    /// read whose result lands asynchronously, so this returns the freshest
-    /// one to have arrived.
+    /// The sample under the pointer anywhere else: a one-shot screen read,
+    /// asked for when the pointer has moved since the last one and at most at
+    /// the readout's own rate. Its result lands asynchronously, so this
+    /// returns the freshest one to have arrived.
     [[nodiscard]] std::optional<FloatColor> sampleOtherDisplay(DesktopPoint cursor, double now);
 
     const CaptureController& m_capture;
@@ -204,6 +218,11 @@ private:
     std::shared_ptr<ScreenSample> m_screenSample = std::make_shared<ScreenSample>();
     double m_nextScreenSample = 0.0;
     uint64_t m_screenSampleRequest = 0;
+    /// Where the last screen read was asked for, so a resting pointer asks
+    /// for none: the colour under it changes only with the content, and every
+    /// read is a capture session of its own to the system.
+    std::optional<DesktopPoint> m_screenSamplePoint;
+    bool m_closed = false;
     /// The colours the markers and the readout are travelling towards, and when
     /// each is due a new one: what makes them readings taken a dozen times a
     /// second rather than points chasing every frame's pixel.
