@@ -8,6 +8,7 @@
 #include "core/analysis_worker.h"
 #include "core/frame_mailbox.h"
 #include "core/hdr.h"
+#include "core/marker_smoother.h"
 #include "core/region_hash.h"
 #include "core/scrgb.h"
 #include "modules/module_registry.h"
@@ -71,6 +72,88 @@ TEST_CASE("PQ capture separates unclipped luminance from SDR display codes", "[h
     source = halfPixel(0x7E00, 0, 0);
     decoder.convertRow(source.data(), codes.data(), &luminance, 1);
     CHECK(std::isnan(luminance));
+}
+
+TEST_CASE("PQ capture keeps the unclipped colour beside the clipped codes", "[hdr]")
+{
+    PqCaptureDecoder decoder;
+    // PQ 0.508 is 100 nominal nits: SDR white. A pixel four times as bright
+    // clips to full scale in the codes and reads as 4 in the plane.
+    const uint16_t white = halfFromFloat(0.508078421517399f);
+    const uint16_t fourTimes = halfFromFloat(0.6667f);
+    auto source = halfPixel(fourTimes, white, 0);
+    std::array<uint8_t, 4> codes{};
+    float luminance = 0.0f;
+    std::array<uint16_t, 3> linear{};
+    decoder.convertRow(source.data(), codes.data(), &luminance, 1, linear.data());
+    float r = 0.0f;
+    float g = 0.0f;
+    float b = 0.0f;
+    decoder.linearRgb(fourTimes, white, 0, r, g, b);
+    CHECK(floatFromHalf(linear[0]) == Catch::Approx(r).epsilon(1e-3));
+    CHECK(floatFromHalf(linear[1]) == Catch::Approx(g).epsilon(1e-3));
+    CHECK(floatFromHalf(linear[2]) == Catch::Approx(b).epsilon(1e-3));
+    CHECK(r > 4.5f);  // Display P3 red carries sRGB red past its own value
+    CHECK(b < 0.0f);  // and pushes sRGB blue negative: kept, not clamped
+    CHECK(Argb2101010Pixels::read(codes.data()).r == 1023);
+    CHECK(Argb2101010Pixels::read(codes.data()).b == 0);
+    CHECK(luminance == Catch::Approx(hdrLuminance709(r, g, b)).epsilon(1e-6));
+    // Asking for no plane leaves the rest as it was.
+    std::array<uint8_t, 4> again{};
+    float luminanceAgain = 0.0f;
+    decoder.convertRow(source.data(), again.data(), &luminanceAgain, 1);
+    CHECK(again == codes);
+    CHECK(luminanceAgain == luminance);
+}
+
+TEST_CASE("The extended sRGB encode continues the curve above white", "[hdr]")
+{
+    CHECK(extendedSrgbFromLinear(0.0) == 0.0);
+    CHECK(extendedSrgbFromLinear(-2.0) == 0.0);
+    CHECK(extendedSrgbFromLinear(std::numeric_limits<double>::quiet_NaN()) == 0.0);
+    CHECK(extendedSrgbFromLinear(0.5) == Catch::Approx(0.735357).epsilon(1e-5));
+    CHECK(extendedSrgbFromLinear(1.0) == Catch::Approx(1.0).epsilon(1e-9));
+    CHECK(extendedSrgbFromLinear(2.0) == Catch::Approx(1.353256).epsilon(1e-5));
+    CHECK(extendedSrgbFromLinear(4.0) == Catch::Approx(1.824796).epsilon(1e-5));
+    CHECK(extendedSrgbFromLinear(8.0) == Catch::Approx(2.454227).epsilon(1e-5));
+    CHECK(extendedSrgbFromLinear(0.25) == encodedFromLinear(0.25));
+}
+
+TEST_CASE("The HDR neighbourhood reads above 255 where the codes clip", "[hdr]")
+{
+    // A 3x3 frame whose codes all clip at white while the plane says twice
+    // white on the left column, white in the middle and half on the right.
+    FrameBuffer frame;
+    frame.width = 3;
+    frame.height = 3;
+    frame.strideBytes = 12;
+    frame.format = PixelFormat::Argb2101010;
+    frame.sizeTo(36);
+    frame.sizeHdrTo(9, 100.0);
+    for (int y = 0; y < 3; ++y) {
+        for (int x = 0; x < 3; ++x) {
+            const uint32_t word = 0xFFFFFFFFu;
+            std::memcpy(frame.data.data() + (static_cast<std::size_t>(y) * 3 + x) * 4, &word, 4);
+            const float value = x == 0 ? 2.0f : x == 1 ? 1.0f : 0.5f;
+            for (int channel = 0; channel < 3; ++channel) {
+                frame.hdrLinear[(static_cast<std::size_t>(y) * 3 + x) * 3 + channel] = halfFromFloat(value);
+            }
+        }
+    }
+    const FrameView view = frame.view();
+    REQUIRE(view.hdrLinear != nullptr);
+    CHECK(averageNeighborhood(view, 1, 1).r == 255.0f);
+    const auto hdr = averageHdrNeighborhood(view, 1, 1);
+    REQUIRE(hdr);
+    // The mean of 2, 1 and 0.5 is 7/6 linear, encoded past white.
+    CHECK(hdr->r == Catch::Approx(extendedSrgbFromLinear(7.0 / 6.0) * 255.0).epsilon(1e-5));
+    CHECK(hdr->g == hdr->r);
+    const auto left = averageHdrNeighborhood(view, 0, 1);
+    REQUIRE(left);
+    CHECK(left->b == Catch::Approx(extendedSrgbFromLinear(1.5) * 255.0).epsilon(1e-5));
+    CHECK(left->b > 255.0f);
+    frame.sizeHdrTo(0, 0.0);
+    CHECK_FALSE(averageHdrNeighborhood(frame.view(), 1, 1));
 }
 
 TEST_CASE("scRGB HDR luminance follows SDR white without clipping", "[hdr]")
@@ -151,13 +234,19 @@ TEST_CASE("HDR frame storage follows recycled frames and is released for SDR", "
     producer.sizeTo(8);
     producer.sizeHdrTo(2, 100.0);
     producer.hdrLuminance[1] = 4.0f;
+    REQUIRE(producer.hdrLinear.size() == 6);
+    producer.hdrLinear[5] = halfFromFloat(4.0f);
     const FrameView hdrView = producer.view();
     REQUIRE(hdrView.hdrLuminance != nullptr);
     CHECK(hdrView.hdrLuminance[1] == 4.0f);
+    REQUIRE(hdrView.hdrLinear != nullptr);
+    CHECK(floatFromHalf(hdrView.hdrLinear[5]) == 4.0f);
     CHECK(producer.view().hdrWhiteNits == 100.0);
     producer.sizeHdrTo(0, 0);
     CHECK(producer.hdrLuminance.capacity() == 0);
+    CHECK(producer.hdrLinear.capacity() == 0);
     CHECK(producer.view().hdrLuminance == nullptr);
+    CHECK(producer.view().hdrLinear == nullptr);
     CHECK(producer.view().hdrWhiteNits == 0.0);
 }
 

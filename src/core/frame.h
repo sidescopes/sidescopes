@@ -211,6 +211,10 @@ struct FrameView
     const float* hdrLuminance = nullptr;
     /// Nominal encoding reference, not measured panel brightness.
     double hdrWhiteNits = 0.0;
+    /// Optional, tightly packed unclipped linear-light sRGB colour, three
+    /// halves per pixel beside the luminance plane, signed where the source
+    /// gamut reaches outside sRGB. Null whenever hdrLuminance is.
+    const uint16_t* hdrLinear = nullptr;
 
     /// The display's pixel extents, which for an uncropped frame are its own.
     [[nodiscard]] int displayWidth() const

@@ -308,9 +308,9 @@ bool deliverCapturePixels(CVPixelBufferRef image, FrameBuffer& buffer, FrameMail
                         const auto* row = source + static_cast<std::size_t>(py) * sourceStride;
                         auto* target = buffer.data.data() + static_cast<std::size_t>(py) * buffer.strideBytes;
                         if (hdr) {
-                            decoder->convertRow(
-                                row, target, buffer.hdrLuminance.data() + static_cast<std::size_t>(py) * buffer.width,
-                                buffer.width);
+                            const std::size_t pixel = static_cast<std::size_t>(py) * buffer.width;
+                            decoder->convertRow(row, target, buffer.hdrLuminance.data() + pixel, buffer.width,
+                                                buffer.hdrLinear.data() + pixel * 3);
                         } else {
                             std::memcpy(target, row, static_cast<std::size_t>(buffer.width) * 4);
                         }

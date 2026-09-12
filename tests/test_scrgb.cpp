@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "core/frame.h"
+#include "core/hdr.h"
 #include "core/scrgb.h"
 
 using namespace sidescopes;
@@ -21,7 +22,7 @@ namespace {
 
 // IEEE half encoding of a float, round to nearest even, for finite inputs that
 // stay within the half range. Independent of the decode under test.
-uint16_t halfFromFloat(float value)
+uint16_t referenceHalfFromFloat(float value)
 {
     uint32_t bits = 0;
     std::memcpy(&bits, &value, sizeof bits);
@@ -105,10 +106,36 @@ TEST_CASE("Half decode round-trips an independent encode over every finite patte
             continue;  // infinities and NaNs
         }
         const float value = floatFromHalf(half);
-        const uint16_t back = halfFromFloat(value);
+        const uint16_t back = referenceHalfFromFloat(value);
         // -0 and +0 both decode to zero; only the sign differs.
         CHECK(((half & 0x7FFFu) == 0 ? (back & 0x7FFFu) == 0 : back == half));
     }
+}
+
+TEST_CASE("Half encode round-trips every finite half pattern and rounds to even")
+{
+    for (uint32_t pattern = 0; pattern < 0x10000u; ++pattern) {
+        const auto half = static_cast<uint16_t>(pattern);
+        if ((half & 0x7C00u) == 0x7C00u && (half & 0x03FFu) != 0) {
+            continue;  // NaN payloads have no single encoding
+        }
+        REQUIRE(sidescopes::halfFromFloat(floatFromHalf(half)) == half);
+        REQUIRE(sidescopes::halfFromFloat(floatFromHalf(half)) == referenceHalfFromFloat(floatFromHalf(half)));
+    }
+    CHECK(sidescopes::halfFromFloat(65504.0f) == 0x7BFF);
+    CHECK(sidescopes::halfFromFloat(65520.0f) == 0x7C00);  // rounds up past the range: infinity
+    CHECK(sidescopes::halfFromFloat(1.0e6f) == 0x7C00);
+    CHECK(sidescopes::halfFromFloat(-1.0e6f) == 0xFC00);
+    CHECK(sidescopes::halfFromFloat(std::numeric_limits<float>::quiet_NaN()) == 0x7E00);
+    CHECK(sidescopes::halfFromFloat(1.0e-9f) == 0);
+    CHECK(sidescopes::halfFromFloat(-0.0f) == 0x8000);
+    // Exactly halfway between two halves rounds to the even one, either way.
+    CHECK(sidescopes::halfFromFloat(1.0f + 1.0f / 2048.0f) == 0x3C00);
+    CHECK(sidescopes::halfFromFloat(1.0f + 3.0f / 2048.0f) == 0x3C02);
+    CHECK(floatFromHalf(sidescopes::halfFromFloat(2.0f)) == 2.0f);
+    CHECK(floatFromHalf(sidescopes::halfFromFloat(1.5f)) == 1.5f);
+    CHECK(floatFromHalf(sidescopes::halfFromFloat(-0.25f)) == -0.25f);
+    CHECK(std::abs(floatFromHalf(sidescopes::halfFromFloat(0.3f)) - 0.3f) < 0.3f / 1024.0f);
 }
 
 TEST_CASE("The sRGB encode inverts the decode the scopes use")
@@ -200,7 +227,7 @@ TEST_CASE("SDR content composed in scRGB comes back as its own codes")
         int offByOne = 0;
         for (int code = 0; code <= 1023; ++code) {
             const double linear = linearFromEncoded(code / 1023.0) * scale;
-            const uint16_t half = halfFromFloat(static_cast<float>(linear));
+            const uint16_t half = referenceHalfFromFloat(static_cast<float>(linear));
             const int back = codes.codeFor(half);
             REQUIRE(std::abs(back - code) <= 1);
             offByOne += back != code ? 1 : 0;
@@ -210,7 +237,7 @@ TEST_CASE("SDR content composed in scRGB comes back as its own codes")
         }
         for (int code = 0; code <= 255; ++code) {
             const double linear = linearFromEncoded(code / 255.0) * scale;
-            const uint16_t half = halfFromFloat(static_cast<float>(linear));
+            const uint16_t half = referenceHalfFromFloat(static_cast<float>(linear));
             const int expected = static_cast<int>(std::lround(code * 1023.0 / 255.0));
             REQUIRE(std::abs(static_cast<int>(codes.codeFor(half)) - expected) <= 1);
         }
@@ -251,6 +278,43 @@ TEST_CASE("A row converts to packed ten-bit pixels the frame reader decodes")
     std::vector<uint8_t> untouched(4, 0x55);
     CHECK(codes.convertRow(source.data(), untouched.data(), 0) == 0);
     CHECK(untouched == std::vector<uint8_t>(4, 0x55));
+}
+
+TEST_CASE("A row carries the unclipped linear colour beside its luminance")
+{
+    const uint16_t halves[] = {0x4200, 0x3555, 0x8000, 0x3C00,   // 3.0, 0.333, -0
+                               0x3800, 0x3C00, 0x4000, 0x3C00};  // 0.5, 1.0, 2.0
+    std::vector<uint8_t> source(sizeof halves);
+    std::memcpy(source.data(), halves, sizeof halves);
+    std::vector<uint8_t> packed(8, 0);
+    std::vector<float> luminance(2, -1.0f);
+    std::vector<uint16_t> linear(6, 0xFFFF);
+
+    // At the scRGB white the units pass through: the codes clip at white, the
+    // plane does not.
+    ScrgbToDisplayCodes codes(80.0);
+    CHECK(codes.convertRow(source.data(), packed.data(), 2, luminance.data(), linear.data()) == 2);
+    CHECK(floatFromHalf(linear[0]) == 3.0f);
+    CHECK(floatFromHalf(linear[1]) == floatFromHalf(0x3555));
+    CHECK(floatFromHalf(linear[2]) == 0.0f);
+    CHECK(floatFromHalf(linear[3]) == 0.5f);
+    CHECK(floatFromHalf(linear[4]) == 1.0f);
+    CHECK(floatFromHalf(linear[5]) == 2.0f);
+    CHECK(Argb2101010Pixels::read(packed.data()).r == 1023);
+    CHECK(luminance[1] == hdrLuminance709(0.5f, 1.0f, 2.0f));
+
+    // A brighter SDR white halves every unit, plane and luminance alike.
+    codes.setSdrWhiteNits(160.0);
+    CHECK(codes.convertRow(source.data(), packed.data(), 2, luminance.data(), linear.data()) == 1);
+    CHECK(floatFromHalf(linear[0]) == 1.5f);
+    CHECK(floatFromHalf(linear[5]) == 1.0f);
+    CHECK(luminance[1] == hdrLuminance709(0.25f, 0.5f, 1.0f));
+
+    // The plane alone is a valid ask, and so is neither.
+    std::fill(linear.begin(), linear.end(), static_cast<uint16_t>(0));
+    CHECK(codes.convertRow(source.data(), packed.data(), 2, nullptr, linear.data()) == 1);
+    CHECK(floatFromHalf(linear[3]) == 0.25f);
+    CHECK(codes.convertRow(source.data(), packed.data(), 2) == 1);
 }
 
 TEST_CASE("The converted row reads as the same colour on the 0..255 scale a frame reports")

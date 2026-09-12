@@ -34,6 +34,11 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- The colour readout reports HDR content above SDR white instead of 100%
+  on every channel: HDR capture keeps the unclipped linear colour beside
+  its luminance plane and the readout encodes it with the sRGB curve
+  continued past white. Markers stay on the SDR scopes, and a point
+  outside the captured region still reads through the SDR screen sample.
 - Quitting no longer leaves a cursor screen read in flight for the system
   to answer after the process is gone, which macOS reported as a request to
   bypass the private window picker. The colour readout outside the capture

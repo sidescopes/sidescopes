@@ -11,6 +11,12 @@ namespace sidescopes {
 /// a small neighborhood is the first half of making the cursor marker calm.
 [[nodiscard]] FloatColor averageNeighborhood(const FrameView& frame, int px, int py, int radius = 1);
 
+/// The same neighbourhood read from the frame's unclipped linear colour and
+/// encoded with the sRGB curve continued above white, on the 0..255 scale: a
+/// pixel the codes clip reads above 255 here. Nothing when the frame carries
+/// no linear plane.
+[[nodiscard]] std::optional<FloatColor> averageHdrNeighborhood(const FrameView& frame, int px, int py, int radius = 1);
+
 /// Exponential smoothing with a snap window — the second half. The smoothed
 /// value stays in floating point end to end (quantizing it makes the marker
 /// dither between adjacent scope bins while settling), and once every channel

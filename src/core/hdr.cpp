@@ -23,6 +23,11 @@ double pqNits(double encoded)
     return 10000.0 * std::pow(std::max(power - C1, 0.0) / (C2 - C3 * power), 1.0 / M1);
 }
 
+double extendedSrgbFromLinear(double linear)
+{
+    return linear > 0.0 ? encodedFromLinear(linear) : 0.0;
+}
+
 float hdrLuminance709(float red, float green, float blue)
 {
     if (!std::isfinite(red) || !std::isfinite(green) || !std::isfinite(blue)) {
@@ -51,23 +56,39 @@ uint16_t PqCaptureDecoder::displayCode(float linear) const
     return m_codes[index];
 }
 
-void PqCaptureDecoder::convertRow(const uint8_t* rgbaHalf, uint8_t* argb2101010, float* luminance, int width) const
+void PqCaptureDecoder::linearRgb(uint16_t redHalf, uint16_t greenHalf, uint16_t blueHalf, float& red, float& green,
+                                 float& blue) const
+{
+    const float r = m_linear[redHalf];
+    const float g = m_linear[greenHalf];
+    const float b = m_linear[blueHalf];
+    // D65 Display P3 -> D65 sRGB in linear light. Never clamp before
+    // measuring luminance: saturated colors can have signed components.
+    red = 1.22494018f * r - 0.22494018f * g;
+    green = -0.04205695f * r + 1.04205695f * g;
+    blue = -0.01963755f * r - 0.07863605f * g + 1.09827360f * b;
+}
+
+void PqCaptureDecoder::convertRow(const uint8_t* rgbaHalf, uint8_t* argb2101010, float* luminance, int width,
+                                  uint16_t* linear) const
 {
     for (int x = 0; x < width; ++x) {
         const uint8_t* source = rgbaHalf + static_cast<std::size_t>(x) * 8;
-        const auto channel = [this, source](int index) {
+        const auto half = [source](int index) {
             const int offset = index * 2;
-            return m_linear[static_cast<uint16_t>(source[offset] | source[offset + 1] << 8)];
+            return static_cast<uint16_t>(source[offset] | source[offset + 1] << 8);
         };
-        const float r = channel(0);
-        const float g = channel(1);
-        const float b = channel(2);
-        // D65 Display P3 -> D65 sRGB in linear light. Never clamp before
-        // measuring luminance: saturated colors can have signed components.
-        const float sr = 1.22494018f * r - 0.22494018f * g;
-        const float sg = -0.04205695f * r + 1.04205695f * g;
-        const float sb = -0.01963755f * r - 0.07863605f * g + 1.09827360f * b;
+        float sr = 0.0f;
+        float sg = 0.0f;
+        float sb = 0.0f;
+        linearRgb(half(0), half(1), half(2), sr, sg, sb);
         luminance[x] = hdrLuminance709(sr, sg, sb);
+        if (linear != nullptr) {
+            uint16_t* colour = linear + static_cast<std::size_t>(x) * 3;
+            colour[0] = halfFromFloat(sr);
+            colour[1] = halfFromFloat(sg);
+            colour[2] = halfFromFloat(sb);
+        }
         const uint32_t word = 0xC0000000u | static_cast<uint32_t>(displayCode(sr)) << 20 |
                               static_cast<uint32_t>(displayCode(sg)) << 10 | displayCode(sb);
         uint8_t* target = argb2101010 + static_cast<std::size_t>(x) * 4;

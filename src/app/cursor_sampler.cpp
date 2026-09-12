@@ -35,6 +35,18 @@ bool markerMoved(const std::optional<FloatColor>& before, const std::optional<Fl
            std::abs(before->b - after->b) > Threshold;
 }
 
+// A marker stands on an SDR scope, so a colour the readout reports above
+// white lands at white.
+std::optional<FloatColor> clampedToDisplay(const std::optional<FloatColor>& color)
+{
+    if (!color) {
+        return std::nullopt;
+    }
+
+    return FloatColor{std::clamp(color->r, 0.0f, 255.0f), std::clamp(color->g, 0.0f, 255.0f),
+                      std::clamp(color->b, 0.0f, 255.0f)};
+}
+
 FloatColor partWay(const FloatColor& from, const FloatColor& to, float fraction)
 {
     return FloatColor{from.r + (to.r - from.r) * fraction, from.g + (to.g - from.g) * fraction,
@@ -87,7 +99,12 @@ std::optional<FloatColor> CursorSampler::sampleCapturedFrame(DesktopPoint cursor
                 static_cast<int>((cursor.y - geometry->originY) * view.displayHeight() / geometry->heightPoints);
             const IntRect point = view.fromDisplay({x, y, 1, 1});
             if (point.x >= 0 && point.y >= 0 && point.x < view.width && point.y < view.height) {
-                color = averageNeighborhood(view, point.x, point.y);
+                // Above SDR white the codes clip; the linear colour an HDR
+                // capture carries beside them does not.
+                color = averageHdrNeighborhood(view, point.x, point.y);
+                if (!color) {
+                    color = averageNeighborhood(view, point.x, point.y);
+                }
             }
         },
         AnalysisSettings::Source{m_capture.streamEpoch(), m_capture.capturedDisplay()});
@@ -165,7 +182,7 @@ CursorSample CursorSampler::update(std::optional<AnalysisWorker::FrameSize> fram
         probed = probeColor(*cursor, pixel, now);
     }
     updateReadout(probed, smoothing, now, deltaSeconds, sample);
-    advanceMarkers(markerTarget(probed, markersLive, now), smoothing, now, deltaSeconds, sample);
+    advanceMarkers(markerTarget(clampedToDisplay(probed), markersLive, now), smoothing, now, deltaSeconds, sample);
 
     return sample;
 }

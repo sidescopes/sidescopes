@@ -3,6 +3,9 @@
 #include <algorithm>
 #include <cmath>
 
+#include "core/hdr.h"
+#include "core/scrgb.h"
+
 namespace sidescopes {
 
 FloatColor averageNeighborhood(const FrameView& frame, int px, int py, int radius)
@@ -31,6 +34,39 @@ FloatColor averageNeighborhood(const FrameView& frame, int px, int py, int radiu
     }
     const float scale = 1.0f / static_cast<float>(count);
     return FloatColor{sumR * scale, sumG * scale, sumB * scale};
+}
+
+std::optional<FloatColor> averageHdrNeighborhood(const FrameView& frame, int px, int py, int radius)
+{
+    if (frame.hdrLinear == nullptr) {
+        return std::nullopt;
+    }
+    double sumR = 0.0;
+    double sumG = 0.0;
+    double sumB = 0.0;
+    int count = 0;
+    for (int dy = -radius; dy <= radius; ++dy) {
+        for (int dx = -radius; dx <= radius; ++dx) {
+            const int sampleX = px + dx;
+            const int sampleY = py + dy;
+            if (sampleX < 0 || sampleX >= frame.width || sampleY < 0 || sampleY >= frame.height) {
+                continue;
+            }
+            const uint16_t* linear = frame.hdrLinear + (static_cast<std::size_t>(sampleY) * frame.width + sampleX) * 3;
+            sumR += floatFromHalf(linear[0]);
+            sumG += floatFromHalf(linear[1]);
+            sumB += floatFromHalf(linear[2]);
+            ++count;
+        }
+    }
+    if (count == 0) {
+        return FloatColor{};
+    }
+    const double scale = 1.0 / count;
+
+    return FloatColor{static_cast<float>(extendedSrgbFromLinear(sumR * scale) * 255.0),
+                      static_cast<float>(extendedSrgbFromLinear(sumG * scale) * 255.0),
+                      static_cast<float>(extendedSrgbFromLinear(sumB * scale) * 255.0)};
 }
 
 FloatColor MarkerSmoother::update(const FloatColor& target, float elapsedSeconds)

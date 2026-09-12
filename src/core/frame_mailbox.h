@@ -38,16 +38,18 @@ struct FrameBuffer
     int sourceHeight = 0;
     FrameStamp stamp;
     std::vector<float, PageAllocator<float>> hdrLuminance;
+    /// The unclipped linear-light colour beside it, three halves per pixel in
+    /// red, green, blue order: what the colour readout reports where the
+    /// ten-bit codes clip at white. Six bytes a pixel beside the luminance
+    /// plane's four, carried only while HDR capture is on.
+    std::vector<uint16_t, PageAllocator<uint16_t>> hdrLinear;
     double hdrWhiteNits = 0.0;
 
     /// Releases HDR storage when the delivery cannot measure headroom.
     void sizeHdrTo(std::size_t pixels, double whiteNits)
     {
-        if (hdrLuminance.capacity() != pixels) {
-            decltype(hdrLuminance){}.swap(hdrLuminance);
-            hdrLuminance.reserve(pixels);
-        }
-        hdrLuminance.resize(pixels);
+        sizePlane(hdrLuminance, pixels);
+        sizePlane(hdrLinear, pixels * 3);
         hdrWhiteNits = pixels > 0 ? whiteNits : 0.0;
     }
 
@@ -85,7 +87,20 @@ struct FrameBuffer
                          format,
                          stamp,
                          hdrLuminance.empty() ? nullptr : hdrLuminance.data(),
-                         hdrWhiteNits};
+                         hdrWhiteNits,
+                         hdrLinear.empty() ? nullptr : hdrLinear.data()};
+    }
+
+    /// Sizes one HDR plane to @p count elements, holding no more than that,
+    /// for the reason sizeTo gives.
+    template <typename Plane>
+    static void sizePlane(Plane& plane, std::size_t count)
+    {
+        if (plane.capacity() != count) {
+            Plane{}.swap(plane);
+            plane.reserve(count);
+        }
+        plane.resize(count);
     }
 
     [[nodiscard]] int displayWidth() const

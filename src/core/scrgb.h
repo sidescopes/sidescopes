@@ -19,6 +19,10 @@ inline constexpr double ScrgbWhiteNits = 80.0;
 /// Infinities and NaNs come through as such.
 [[nodiscard]] float floatFromHalf(uint16_t half);
 
+/// A float as the nearest half-precision pattern, ties to even. Values beyond
+/// the half range become infinities and the smallest become zero.
+[[nodiscard]] uint16_t halfFromFloat(float value);
+
 /// Converts scRGB half-float pixels - what desktop duplication delivers while
 /// the desktop composes in HDR or with Auto Color Management - into the
 /// Argb2101010 layout the scopes already read.
@@ -59,9 +63,12 @@ public:
     /// Converts @p width pixels of one R16G16B16A16_FLOAT row - eight bytes per
     /// pixel, little-endian halves in red, green, blue, alpha order - into
     /// @p width Argb2101010 pixels of four bytes each, written opaque.
+    /// @p hdrLuminance and @p hdrLinear, when given, receive the unclipped
+    /// linear-light luminance and colour relative to SDR white: one float and
+    /// three halves per pixel.
     /// @return How many of the pixels have a channel strictly above SDR white.
-    int convertRow(const uint8_t* scrgbPixels, uint8_t* argb2101010Pixels, int width,
-                   float* hdrLuminance = nullptr) const;
+    int convertRow(const uint8_t* scrgbPixels, uint8_t* argb2101010Pixels, int width, float* hdrLuminance = nullptr,
+                   uint16_t* hdrLinear = nullptr) const;
 
 private:
     double m_sdrWhiteNits;

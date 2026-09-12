@@ -14,6 +14,7 @@
 #include "allocation_failure.h"
 #include "core/frame_mailbox.h"
 #include "core/hdr.h"
+#include "core/scrgb.h"
 #include "platform/desktop.h"
 #include "platform/macos/capture_completion.h"
 #include "platform/macos/capture_frame.h"
@@ -369,6 +370,9 @@ TEST_CASE("HDR capture validates PQ metadata and converts padded native rows", "
     const auto delivered = mailbox.takeLatest(0ms);
     REQUIRE(delivered);
     REQUIRE(delivered->hdrLuminance.size() == 4);
+    REQUIRE(delivered->hdrLinear.size() == 12);
+    CHECK(floatFromHalf(delivered->hdrLinear[0]) > 99.9f);
+    CHECK(floatFromHalf(delivered->hdrLinear[3]) == 0.0f);
     CHECK(delivered->hdrLuminance[0] > 99.9f);
     CHECK(delivered->hdrLuminance[1] == 0.0f);
     CHECK(delivered->hdrLuminance[2] == 0.0f);

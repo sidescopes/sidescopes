@@ -82,8 +82,51 @@ void ScrgbToDisplayCodes::setSdrWhiteNits(double nits)
     }
 }
 
+uint16_t halfFromFloat(float value)
+{
+    uint32_t bits = 0;
+    std::memcpy(&bits, &value, sizeof bits);
+    const uint32_t sign = (bits >> 16) & 0x8000u;
+    const uint32_t floatExponent = (bits >> 23) & 0xFFu;
+    uint32_t mantissa = bits & 0x7FFFFFu;
+    if (floatExponent == 0xFFu) {
+        return static_cast<uint16_t>(sign | 0x7C00u | (mantissa != 0 ? 0x200u : 0u));
+    }
+    const int exponent = static_cast<int>(floatExponent) - 127 + 15;
+    if (exponent >= 31) {
+        return static_cast<uint16_t>(sign | 0x7C00u);
+    }
+    if (exponent <= 0) {
+        // A half subnormal, or nothing: the implicit bit joins the mantissa and
+        // the whole is shifted to the fixed 2^-24 step, rounded to even.
+        if (exponent < -10) {
+            return static_cast<uint16_t>(sign);
+        }
+        mantissa |= 0x800000u;
+        const int shift = 14 - exponent;
+        uint32_t half = mantissa >> shift;
+        const uint32_t remainder = mantissa & ((1u << shift) - 1u);
+        const uint32_t halfway = 1u << (shift - 1);
+        if (remainder > halfway || (remainder == halfway && (half & 1u) != 0)) {
+            ++half;
+        }
+
+        return static_cast<uint16_t>(sign | half);
+    }
+    // Rounding may carry into the exponent, which is the right answer there
+    // too: the value just below a power of two rounds up to it, and the value
+    // just below the range rounds up to infinity.
+    uint32_t half = (static_cast<uint32_t>(exponent) << 10) | (mantissa >> 13);
+    const uint32_t remainder = mantissa & 0x1FFFu;
+    if (remainder > 0x1000u || (remainder == 0x1000u && (half & 1u) != 0)) {
+        ++half;
+    }
+
+    return static_cast<uint16_t>(sign | half);
+}
+
 int ScrgbToDisplayCodes::convertRow(const uint8_t* scrgbPixels, uint8_t* argb2101010Pixels, int width,
-                                    float* hdrLuminance) const
+                                    float* hdrLuminance, uint16_t* hdrLinear) const
 {
     int above = 0;
     for (int x = 0; x < width; ++x) {
@@ -95,10 +138,20 @@ int ScrgbToDisplayCodes::convertRow(const uint8_t* scrgbPixels, uint8_t* argb210
         const uint16_t red = half(0);
         const uint16_t green = half(1);
         const uint16_t blue = half(2);
-        if (hdrLuminance) {
+        if (hdrLuminance != nullptr || hdrLinear != nullptr) {
             const float scale = static_cast<float>(ScrgbWhiteNits / m_sdrWhiteNits);
-            hdrLuminance[x] =
-                hdrLuminance709(floatFromHalf(red) * scale, floatFromHalf(green) * scale, floatFromHalf(blue) * scale);
+            const float r = floatFromHalf(red) * scale;
+            const float g = floatFromHalf(green) * scale;
+            const float b = floatFromHalf(blue) * scale;
+            if (hdrLuminance != nullptr) {
+                hdrLuminance[x] = hdrLuminance709(r, g, b);
+            }
+            if (hdrLinear != nullptr) {
+                uint16_t* linear = hdrLinear + static_cast<std::size_t>(x) * 3;
+                linear[0] = halfFromFloat(r);
+                linear[1] = halfFromFloat(g);
+                linear[2] = halfFromFloat(b);
+            }
         }
         const uint32_t word = 0xC0000000u | static_cast<uint32_t>(codeFor(red)) << 20 |
                               static_cast<uint32_t>(codeFor(green)) << 10 | codeFor(blue);

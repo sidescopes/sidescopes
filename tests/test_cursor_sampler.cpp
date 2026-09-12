@@ -14,6 +14,8 @@
 #include "core/analysis_worker.h"
 #include "core/frame.h"
 #include "core/frame_mailbox.h"
+#include "core/hdr.h"
+#include "core/scrgb.h"
 #include "desktop_stubs.h"
 #include "fake_capture.h"
 #include "platform/desktop.h"
@@ -179,6 +181,31 @@ TEST_CASE("A narrowed capture still reads the point the cursor is over")
     REQUIRE(outside.readoutColor.has_value());
     CHECK_THAT(outside.readoutColor->g, WithinAbs(22.0f, 1e-3f));
     CHECK(desktopStubs().screenSampleRequests == 1);
+}
+
+TEST_CASE("An HDR capture's readout reports colour above white and its markers stay on the scope")
+{
+    SamplerFixture fix;
+    desktopStubs().cursor = DesktopPoint{32.0, 32.0};
+    desktopStubs().cursorDisplay = StreamedDisplay;
+    // A white frame in the codes whose linear plane says three times white.
+    auto frame = makeSolidFrameBuffer(64, 64, Color{255, 255, 255}, 2);
+    frame.stamp = {fix.capture.streamEpoch(), StreamedDisplay, 0.0};
+    frame.sizeHdrTo(static_cast<std::size_t>(64) * 64, 100.0);
+    std::fill(frame.hdrLuminance.begin(), frame.hdrLuminance.end(), 3.0f);
+    std::fill(frame.hdrLinear.begin(), frame.hdrLinear.end(), halfFromFloat(3.0f));
+    publishAndAwait(fix, std::move(frame));
+
+    const CursorSample sample = fix.sampler.update(FrameSize, WholeDisplay, Instant, 1.0, 1.0f / 60.0f);
+    REQUIRE(sample.readoutColor.has_value());
+    CHECK_THAT(sample.readoutColor->r, WithinAbs(static_cast<float>(extendedSrgbFromLinear(3.0) * 255.0), 1e-2f));
+    CHECK(sample.readoutColor->r > 255.0f);
+    CHECK(sample.readoutColor->g == sample.readoutColor->r);
+    REQUIRE(sample.vectorscopeColor.has_value());
+    CHECK_THAT(sample.vectorscopeColor->r, WithinAbs(255.0f, 1e-3f));
+    REQUIRE(sample.waveformColor.has_value());
+    CHECK_THAT(sample.waveformColor->b, WithinAbs(255.0f, 1e-3f));
+    CHECK(desktopStubs().screenSampleRequests == 0);
 }
 
 TEST_CASE("A cursor on another display falls back to a throttled screen read")

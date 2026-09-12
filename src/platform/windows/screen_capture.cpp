@@ -112,12 +112,12 @@ int convertScrgbRows(FrameCopyState& state, const D3D11_MAPPED_SUBRESOURCE& mapp
         parallelChunkCount(height, ScrgbRowsPerChunk), height, [&](int chunk, int rowBegin, int rowEnd) noexcept {
             int count = 0;
             for (int row = rowBegin; row < rowEnd; ++row) {
-                count +=
-                    codes.convertRow(source + static_cast<std::size_t>(row) * mapped.RowPitch,
-                                     target + static_cast<std::size_t>(row) * targetStride, width,
-                                     state.buffer.hdrLuminance.empty()
-                                         ? nullptr
-                                         : state.buffer.hdrLuminance.data() + static_cast<std::size_t>(row) * width);
+                const std::size_t pixel = static_cast<std::size_t>(row) * width;
+                count += codes.convertRow(
+                    source + static_cast<std::size_t>(row) * mapped.RowPitch,
+                    target + static_cast<std::size_t>(row) * targetStride, width,
+                    state.buffer.hdrLuminance.empty() ? nullptr : state.buffer.hdrLuminance.data() + pixel,
+                    state.buffer.hdrLinear.empty() ? nullptr : state.buffer.hdrLinear.data() + pixel * 3);
             }
             above[static_cast<std::size_t>(chunk)] = count;
         });
