@@ -70,7 +70,13 @@ RegionOutcome RegionCoordinator::clearRegion()
 
 void RegionCoordinator::syncBorder(const RegionBorderState& state)
 {
-    if (m_capture.capturedDisplay() == 0) {
+    // The border draws on the display the region belongs to: the one being
+    // captured, or - until a session's first stream is up - the one capture
+    // was asked for, so the border never waits on the stream. With neither
+    // there is no display to draw on, and the platform side is left alone.
+    const uint32_t display =
+        m_capture.capturedDisplay() != 0 ? m_capture.capturedDisplay() : m_capture.desiredDisplay();
+    if (display == 0) {
         return;
     }
     // The border shows only while this application is itself visible - a
@@ -84,12 +90,11 @@ void RegionCoordinator::syncBorder(const RegionBorderState& state)
         hideRegionBorder();
     } else {
         const RegionKind kind = regionKind(state.activeWindowIdentity);
-        if (kind == RegionKind::Global && m_capture.capturedDisplay() != m_displayLabelId) {
-            m_displayLabelId = m_capture.capturedDisplay();
+        if (kind == RegionKind::Global && display != m_displayLabelId) {
+            m_displayLabelId = display;
             m_displayLabel = borderLabelFrom(displayName(m_displayLabelId), "Display");
         }
-        showRegionBorder(m_capture.capturedDisplay(), *m_region,
-                         kind == RegionKind::Global ? m_displayLabel : state.windowLabel, kind);
+        showRegionBorder(display, *m_region, kind == RegionKind::Global ? m_displayLabel : state.windowLabel, kind);
     }
 }
 

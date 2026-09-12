@@ -542,6 +542,34 @@ void presentBorderWindow(double scale, const std::wstring& label)
                  height, SWP_NOACTIVATE | SWP_SHOWWINDOW);
 }
 
+namespace {
+
+RECT regionRectOn(const DisplayGeometry& geometry, const RegionOfInterest& region)
+{
+    RECT rect{};
+    rect.left = static_cast<int>(geometry.originX + region.leftPercent / 100.0 * geometry.widthPoints);
+    rect.top = static_cast<int>(geometry.originY + region.topPercent / 100.0 * geometry.heightPoints);
+    rect.right = static_cast<int>(geometry.originX + region.rightPercent / 100.0 * geometry.widthPoints);
+    rect.bottom = static_cast<int>(geometry.originY + region.bottomPercent / 100.0 * geometry.heightPoints);
+
+    return rect;
+}
+
+// How the border comes up. The entrance animates only a border returning
+// during a session: the first appearance of a session arrives at once, beside
+// the application window it comes up with, and a target moved mid-entrance
+// snaps, never tweening position.
+void enterBorder(bool visible, bool created, double scale)
+{
+    if (!visible && !created) {
+        beginBorderAppear(scale);
+    } else if (created || g_border.appearing) {
+        snapBorderAppear();
+    }
+}
+
+}  // namespace
+
 void showRegionBorder(uint32_t displayId, const RegionOfInterest& region, const std::string& borderLabel,
                       RegionKind kind)
 {
@@ -551,7 +579,8 @@ void showRegionBorder(uint32_t displayId, const RegionOfInterest& region, const 
     }
     const std::wstring label = wideFromUtf8(borderLabel.c_str());
 
-    if (!g_border.window) {
+    const bool created = g_border.window == nullptr;
+    if (created) {
         g_border.window = createOverlayWindow(L"SidescopesRegionBorder", borderProc,
                                               WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, 0);
         if (!g_border.window) {
@@ -559,11 +588,7 @@ void showRegionBorder(uint32_t displayId, const RegionOfInterest& region, const 
         }
     }
 
-    RECT wanted{};
-    wanted.left = static_cast<int>(geometry->originX + region.leftPercent / 100.0 * geometry->widthPoints);
-    wanted.top = static_cast<int>(geometry->originY + region.topPercent / 100.0 * geometry->heightPoints);
-    wanted.right = static_cast<int>(geometry->originX + region.rightPercent / 100.0 * geometry->widthPoints);
-    wanted.bottom = static_cast<int>(geometry->originY + region.bottomPercent / 100.0 * geometry->heightPoints);
+    const RECT wanted = regionRectOn(*geometry, region);
     // The host reconciles every frame; an unchanged border costs the
     // z-order claim below and nothing else. Mid-entrance the live rect
     // lags the target, so the comparison is against the target.
@@ -590,12 +615,7 @@ void showRegionBorder(uint32_t displayId, const RegionOfInterest& region, const 
     g_border.kind = kind;
 
     const double scale = uiScale(g_border.window);
-    if (!visible) {
-        beginBorderAppear(scale);
-    } else if (g_border.appearing) {
-        // The target moved mid-entrance: snap, never tween position.
-        snapBorderAppear();
-    }
+    enterBorder(visible, created, scale);
     presentBorderWindow(scale, label);
 }
 

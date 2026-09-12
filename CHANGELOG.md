@@ -23,6 +23,11 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- The window appears complete at launch, with its region border in the same
+  instant; the capture stream starts behind the first frame instead of
+  holding the window empty until the capture service answers.
+- Capture setup on macOS 14.4 and later lists only the displays and this
+  application instead of every window on the desktop.
 - Windows capture reads only the monitored region back to CPU memory and
   retains the desktop on the GPU for region changes.
 - The module ABI is now 0.6, adding an optional linear luminance plane.

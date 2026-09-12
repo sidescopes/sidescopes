@@ -196,6 +196,9 @@ bool App::init()
     observeSystemEvents();
     rememberApplicationWindow(m_graphics->nativeWindowHandle());
 
+    // Shown last, so the window, its region border and the first frame land
+    // on screen together at the loop's first pass.
+    showMainWindow(m_window, startup);
     m_clocks.noteActivity(glfwGetTime());
     m_regionSession.syncBorder(glfwGetWindowAttrib(m_window, GLFW_ICONIFIED) != 0);
 
@@ -273,11 +276,13 @@ void App::shutdown()
 void App::setupCapture()
 {
     // The source and controller are constructed with the App; here they only
-    // start capturing. The display under this window's center: full-screen
-    // capture is a promise about the screen the user can see the scopes on.
+    // learn what to capture. The display under this window's center:
+    // full-screen capture is a promise about the screen the user can see the
+    // scopes on. The stream starts from recoverCapture, once the first frame
+    // is on screen: on macOS a start blocks on the capture service for long
+    // enough to hold an empty window on screen in the meantime.
     if (m_captureController.requestPermission()) {
         m_captureController.requestDisplay(displayOfWindow().value_or(0));
-        m_captureController.start();
     }
 }
 
@@ -345,13 +350,18 @@ void App::chooseScope(std::string_view id, bool stack)
     m_analysisDirty = true;
 }
 
-void App::applyRegionSessionOutcome(const RegionSessionOutcome& outcome)
+void App::syncAnalysisSource()
 {
     const AnalysisSettings::Source source{m_captureController.streamEpoch(), m_captureController.capturedDisplay()};
     if (m_analysis.source != source) {
         m_analysis.source = source;
         m_analysisDirty = true;
     }
+}
+
+void App::applyRegionSessionOutcome(const RegionSessionOutcome& outcome)
+{
+    syncAnalysisSource();
     if (m_analysis.selectionRevision != outcome.selectionRevision) {
         m_analysis.selectionRevision = outcome.selectionRevision;
         m_analysisDirty = true;
@@ -410,7 +420,6 @@ void App::runFrame()
     // it is our job.
     m_captureController.setHdrEnabled(m_view.stack().shows(HdrWaveformScopeId));
     serviceCapture(nothingToDrawInto, glfwGetTime());
-    m_captureController.service(glfwGetTime());
     // Attached regions: observe the attached windows and route the analysis by
     // the focused window. The border reconciles here every frame in both
     // regimes, so no missed edge can strand it on screen.
@@ -421,6 +430,7 @@ void App::runFrame()
     notePointerMovement();
 
     if (nothingToDrawInto) {
+        recoverCapture();
         return;
     }
     m_cursorSampledBeforeDraw = sampleEmptyRegionReadout();
@@ -440,6 +450,7 @@ void App::runFrame()
     if (drawing) {
         drawFrame(framebufferWidth, framebufferHeight);
     }
+    recoverCapture();
 
     // The blocking overlay runs after the frame is submitted; capture and
     // analysis keep flowing underneath. These run whether or not a frame was
@@ -530,6 +541,18 @@ void App::serviceCapture(bool framebufferEmpty, double now)
     if (decision.cropKnown) {
         m_captureController.narrowTo(decision.crop);
     }
+}
+
+void App::recoverCapture()
+{
+    // Behind the frame rather than ahead of it: the session's first stream is
+    // built here, after the first frame is presented, so the window comes up
+    // with its border and its picture instead of standing empty for as long as
+    // the capture service takes to answer. A stream that dies later is rebuilt
+    // the same way, and the analysis learns the new stream's identity in the
+    // same pass, ahead of the settings push that follows.
+    m_captureController.service(glfwGetTime());
+    syncAnalysisSource();
 }
 
 void App::pumpEvents()

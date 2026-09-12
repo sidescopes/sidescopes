@@ -136,6 +136,22 @@ void snapBorderFrame(NSRect labelled)
         completionHandler:nil];
 }
 
+// The first appearance of a session: the border arrives at once, beside the
+// application window it comes up with. The entrance below animates only a
+// border returning during a session, and its steps are paced by the frame
+// loop, which the capture's start holds right after the first frame.
+void presentBorderAtOnce(NSRect labelled)
+{
+    g_borderTarget = labelled;
+    g_borderPaintedSize = labelled.size;
+    SS_DIAG(Border, "present pos=%ld,%ld size=%ldx%ld repaint=1 alpha=255", static_cast<long>(labelled.origin.x),
+            static_cast<long>(labelled.origin.y), static_cast<long>(labelled.size.width),
+            static_cast<long>(labelled.size.height));
+    g_borderWindow.alphaValue = 1.0;
+    [g_borderWindow setFrame:labelled display:YES];
+    [g_borderWindow orderFrontRegardless];
+}
+
 void animateBorderAppear(NSRect labelled)
 {
     g_borderTarget = labelled;
@@ -617,6 +633,9 @@ NSWindow* makeBorderWindow(NSRect rect)
     window.level = NSStatusWindowLevel - 1;
     window.collectionBehavior = NSWindowCollectionBehaviorCanJoinAllSpaces |
                                 NSWindowCollectionBehaviorFullScreenAuxiliary | NSWindowCollectionBehaviorStationary;
+    // The entrance is this file's own, and the first one is immediate: the
+    // system's zoom-in would run over both.
+    window.animationBehavior = NSWindowAnimationBehaviorNone;
     window.contentView = [[SidescopesBorderView alloc] initWithFrame:NSZeroRect];
     [window makeFirstResponder:window.contentView];
     // One cursor owner only: with key status possible, AppKit's cursor-rect
@@ -627,6 +646,41 @@ NSWindow* makeBorderWindow(NSRect rect)
 
     return window;
 }
+
+namespace {
+
+// Brings the border to @p labelled: built for this appearance, moved while
+// visible, or returning during a session.
+void presentBorder(NSRect rect, NSRect labelled, NSString* borderLabel, RegionKind kind)
+{
+    const bool created = g_borderWindow == nil;
+    if (created) {
+        g_borderWindow = makeBorderWindow(rect);
+    }
+    SidescopesBorderView* view = (SidescopesBorderView*)g_borderWindow.contentView;
+    NSString* current = view.borderLabel ? view.borderLabel : @"";
+    if (![current isEqualToString:borderLabel]) {
+        view.borderLabel = borderLabel;
+        view.needsDisplay = YES;
+    }
+    view.labelBand = LabelBand;
+    view.regionKind = kind;
+    if (g_borderWindow.visible) {
+        // Already shown at another place: snap, never tween position.
+        snapBorderFrame(labelled);
+        g_borderTarget = labelled;
+
+        return;
+    }
+    if (created) {
+        presentBorderAtOnce(labelled);
+
+        return;
+    }
+    animateBorderAppear(labelled);
+}
+
+}  // namespace
 
 void showRegionBorder(uint32_t displayId, const RegionOfInterest& region, const std::string& label, RegionKind kind)
 {
@@ -666,26 +720,7 @@ void showRegionBorder(uint32_t displayId, const RegionOfInterest& region, const 
     // has no analog here.
     SS_DIAG(Border, "show wanted=%ld,%ld,%ld,%ld visible=%d", static_cast<long>(left), static_cast<long>(top),
             static_cast<long>(right), static_cast<long>(bottom), g_borderWindow.visible ? 1 : 0);
-
-    if (!g_borderWindow) {
-        g_borderWindow = makeBorderWindow(rect);
-    }
-    SidescopesBorderView* view = (SidescopesBorderView*)g_borderWindow.contentView;
-    NSString* current = view.borderLabel ? view.borderLabel : @"";
-    if (![current isEqualToString:borderLabel]) {
-        view.borderLabel = borderLabel;
-        view.needsDisplay = YES;
-    }
-    view.labelBand = LabelBand;
-    view.regionKind = kind;
-    if (g_borderWindow.visible) {
-        // Already shown at another place: snap, never tween position.
-        snapBorderFrame(labelled);
-        g_borderTarget = labelled;
-
-        return;
-    }
-    animateBorderAppear(labelled);
+    presentBorder(rect, labelled, borderLabel, kind);
 }
 
 void hideRegionBorder()

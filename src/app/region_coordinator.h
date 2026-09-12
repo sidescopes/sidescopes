@@ -73,7 +73,7 @@ class RegionCoordinator
 {
 public:
     /// @p attach holds the attached windows and lets them go, @p capture
-    /// names the captured display the border is drawn on, @p picker says
+    /// names the display the border is drawn on, @p picker says
     /// whether a pick is in flight, and @p region is the region the
     /// scopes are reading right now, empty for none. All must outlive the
     /// coordinator.

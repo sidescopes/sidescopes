@@ -342,11 +342,6 @@ MainWindow createMainWindow(const Preferences& startup, const VersionInfo& versi
     // state through this pointer.
     glfwSetWindowUserPointer(window, &callbackState);
     restoreWindowPlacement(window, startup);
-    glfwShowWindow(window);
-    // AppKit recenters a newly shown GLFW window. Reapply placement before
-    // the first frame so saved coordinates and the first-run position survive
-    // the transition from hidden to visible.
-    restoreWindowPlacement(window, startup);
     // A development build wears its version in the title bar; a release keeps
     // the plain name. Deterministic product captures ask for the release title
     // so documentation does not carry a local hash or become stale at the next
@@ -368,6 +363,15 @@ MainWindow createMainWindow(const Preferences& startup, const VersionInfo& versi
     installInputClock(window);
 
     return {window, std::move(graphics)};
+}
+
+void showMainWindow(GLFWwindow* window, const Preferences& startup)
+{
+    glfwShowWindow(window);
+    // AppKit recenters a newly shown GLFW window. Reapply placement before
+    // the first frame so saved coordinates and the first-run position survive
+    // the transition from hidden to visible.
+    restoreWindowPlacement(window, startup);
 }
 
 void seedImageSizes(AnalysisSettings& analysis)

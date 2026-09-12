@@ -112,6 +112,9 @@ public:
 
 private:
     // --- startup ---
+    /// Asks for the screen-recording permission and names the display to
+    /// capture. The stream itself is built by the frame loop, behind the first
+    /// frame, so the window never waits for it.
     void setupCapture();
 
     /// Registers the system observers the frame loop reacts to: sleep and
@@ -130,6 +133,8 @@ private:
     void chooseScope(std::string_view id, bool stack);
     /// Publishes region lifecycle changes to analysis, pins and UI status.
     void applyRegionSessionOutcome(const RegionSessionOutcome& outcome);
+    /// Tells the analysis which stream it reads, whenever that changed.
+    void syncAnalysisSource();
 
     void persistPreferences();
 
@@ -153,6 +158,10 @@ private:
     /// @p framebufferEmpty is the frame's own measurement, taken once and read
     /// here and by the draw that follows.
     void serviceCapture(bool framebufferEmpty, double now);
+    /// Builds the stream capture wants and has none of - the session's first,
+    /// and every replacement for one that died - and points the analysis at
+    /// it. Runs behind the frame rather than ahead of it.
+    void recoverCapture();
     void pumpEvents();
     void drainAsyncSignals();
     void followWindowDisplay();

@@ -116,6 +116,10 @@ public:
         m_nativeWindow.level = NSStatusWindowLevel;
         m_nativeWindow.collectionBehavior =
             NSWindowCollectionBehaviorCanJoinAllSpaces | NSWindowCollectionBehaviorFullScreenAuxiliary;
+        // No entrance animation: the window is meant to appear complete, in
+        // the same instant as its region border, and the system's zoom-in
+        // would be stepped by this application's own frame loop.
+        m_nativeWindow.animationBehavior = NSWindowAnimationBehaviorNone;
 
         if (!ImGui_ImplGlfw_InitForOther(window, true)) {
             return false;

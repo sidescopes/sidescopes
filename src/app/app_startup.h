@@ -61,13 +61,19 @@ struct MainWindow
     std::unique_ptr<GraphicsBackend> graphics;
 };
 
-/// Creates the always-on-top main window: the backend's hints first, then the
-/// saved placement clamped onto a visible monitor, and the iconify callback
-/// routed through @p callbackState. A development @p version wears itself in
-/// the title bar unless deterministic product capture requests the plain
-/// release title.
+/// Creates the always-on-top main window, still hidden: the backend's hints
+/// first, then the saved placement clamped onto a visible monitor, and the
+/// iconify callback routed through @p callbackState. A development @p version
+/// wears itself in the title bar unless deterministic product capture requests
+/// the plain release title. @ref showMainWindow puts it on screen.
 [[nodiscard]] MainWindow createMainWindow(const Preferences& startup, const VersionInfo& version,
                                           AppCallbackState& callbackState);
+
+/// Puts the main window on screen, with the saved placement applied once more
+/// over the position the toolkit gives a newly shown window. Called once
+/// everything the first frame draws with exists, so the window arrives with
+/// its picture and its region border rather than as an empty frame.
+void showMainWindow(GLFWwindow* window, const Preferences& startup);
 
 /// Seeds the image sizes the worker starts at, before adaptive detail moves
 /// them to the sizes the panes ask for. The saved parameters that go beside

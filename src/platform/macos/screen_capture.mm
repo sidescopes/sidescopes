@@ -83,13 +83,22 @@ SCShareableContent* fetchShareableContent()
 {
     try {
         const auto completion = std::make_shared<CaptureCompletion<SCShareableContent*>>();
-        [SCShareableContent getShareableContentWithCompletionHandler:^(SCShareableContent* content, NSError* error) {
+        void (^deliver)(SCShareableContent*, NSError*) = ^(SCShareableContent* content, NSError* error) {
           try {
               (void)completion->complete(error ? nil : content);
           } catch (...) {  // Keep C++ bookkeeping failures inside the framework callback.
               diagEmit(DiagChannel::Perf, "shareable content callback failed");
           }
-        }];
+        };
+        // The process-scoped listing carries every display and this
+        // application's own entry - all a filter here ever needs - without
+        // enumerating every other window on the desktop, which is most of
+        // what the full listing costs.
+        if (@available(macOS 14.4, *)) {
+            [SCShareableContent getCurrentProcessShareableContentWithCompletionHandler:deliver];
+        } else {
+            [SCShareableContent getShareableContentWithCompletionHandler:deliver];
+        }
         auto result = completion->wait(CaptureCompletionTimeout);
         if (!result) {
             diagEmit(DiagChannel::Perf, "shareable content request timed out");

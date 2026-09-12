@@ -239,7 +239,7 @@ TEST_CASE("The border stays off screen while anything says it must")
     CHECK(regionOverlayStubs().borderShows == shownBefore);
 }
 
-TEST_CASE("No border is drawn while nothing is being captured")
+TEST_CASE("No border is drawn while no display is known")
 {
     desktopStubs().reset();
     regionOverlayStubs().reset();
@@ -252,6 +252,7 @@ TEST_CASE("No border is drawn while nothing is being captured")
     const std::optional<RegionOfInterest> region = PartialRegion;
     RegionCoordinator coordinator{attach, capture, picker, region};
     REQUIRE(capture.capturedDisplay() == 0);
+    REQUIRE(capture.desiredDisplay() == 0);
 
     // There is no display to draw on, so the border is neither shown nor
     // taken down - the platform side is not touched at all.
@@ -259,6 +260,41 @@ TEST_CASE("No border is drawn while nothing is being captured")
 
     CHECK(regionOverlayStubs().borderShows == 0);
     CHECK(regionOverlayStubs().borderHides == 0);
+}
+
+TEST_CASE("The border is drawn on the requested display before capture starts")
+{
+    desktopStubs().reset();
+    regionOverlayStubs().reset();
+    FakeCaptureSource source;
+    FrameMailbox mailbox;
+    AnalysisWorker worker{mailbox};
+    CaptureController capture{source, mailbox};
+    AttachController attach;
+    RegionPicker picker{capture, worker, source};
+    const std::optional<RegionOfInterest> region = PartialRegion;
+    RegionCoordinator coordinator{attach, capture, picker, region};
+    source.targets = {makeTarget(StreamedDisplay, "Test display")};
+    REQUIRE(capture.requestPermission());
+    capture.requestDisplay(StreamedDisplay);
+    REQUIRE(capture.capturedDisplay() == 0);
+
+    // A session's region exists before its first stream does: the border
+    // goes up on the display capture was asked for, without waiting.
+    coordinator.syncBorder(RegionBorderState{"", 0, false, false});
+
+    REQUIRE(regionOverlayStubs().border.has_value());
+    CHECK(regionOverlayStubs().border->displayId == StreamedDisplay);
+    CHECK(regionOverlayStubs().border->kind == RegionKind::Global);
+    CHECK(regionOverlayStubs().border->label == "Test display");
+    CHECK(regionOverlayStubs().borderShows == 1);
+
+    // The stream coming up on that display changes nothing the border shows.
+    REQUIRE(capture.start());
+    coordinator.syncBorder(RegionBorderState{"", 0, false, false});
+
+    CHECK(regionOverlayStubs().border->displayId == StreamedDisplay);
+    CHECK(regionOverlayStubs().borderShows == 2);
 }
 
 TEST_CASE("A border drag stays on the region it began on")
