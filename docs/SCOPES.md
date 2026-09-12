@@ -125,7 +125,10 @@ every pixel in the selected region. Invalid samples are excluded and flagged.
 An unavailable HDR capture says so explicitly; it is not reported as black.
 
 Opening this scope enables the extra capture and processing work. Closing it
-returns to the ordinary capture path. On Apple Silicon with macOS 15 or later,
+returns to the ordinary capture path. While it is open, the pointer readout
+reports colour above SDR white past 100%, on the sRGB curve continued above
+white: twice white reads 135%. With it closed the readout clips at 100% like
+the ordinary scopes. On Apple Silicon with macOS 15 or later,
 SideScopes requests local-display HDR capture in Display P3 PQ, validates the
 delivered encoding, and decodes it using a nominal 100-nit reference. On Windows,
 HDR or Auto Color Management must provide scRGB desktop frames; their luminance
@@ -314,7 +317,10 @@ removes the desktop's SDR white boost; it does not guarantee identical pixels
 when application rendering or desktop composition changes.
 In the ordinary scopes, content brighter than SDR white reads as 100%, and
 colors outside sRGB read at the sRGB boundary. HDR Luminance retains the
-above-white luminance separately. If the display's SDR brightness cannot be
+above-white luminance separately, and while it is open the pointer readout
+reports the unclipped colour inside the captured region; outside it, the
+readout falls back to an SDR screen sample and clips at 100%. If the
+display's SDR brightness cannot be
 read, capture recovers before publishing normalized values. Diagnostic recordings count
 pixels with any channel strictly above SDR white; exact white is excluded.
 That diagnostic differs from the HDR scope's luminance-based percentage.
